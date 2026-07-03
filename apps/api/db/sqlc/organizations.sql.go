@@ -92,8 +92,44 @@ WHERE deleted_at IS NULL
 ORDER BY created_at
 `
 
+// Admin/system listing of all orgs; user-facing listing uses
+// ListOrganizationsForUser (membership-scoped).
 func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	rows, err := q.db.Query(ctx, listOrganizations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Organization{}
+	for rows.Next() {
+		var i Organization
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
+SELECT o.id, o.name, o.slug, o.created_at, o.updated_at, o.deleted_at FROM organizations o
+JOIN memberships m ON m.org_id = o.id
+WHERE m.user_id = $1 AND o.deleted_at IS NULL
+ORDER BY o.created_at
+`
+
+func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
+	rows, err := q.db.Query(ctx, listOrganizationsForUser, userID)
 	if err != nil {
 		return nil, err
 	}

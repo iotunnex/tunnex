@@ -52,6 +52,17 @@ func Can(role string, p Permission) bool {
 	return rolePermissions[role][p]
 }
 
+// IsMutating reports whether a permission changes state. Mutating actions are
+// gated on a verified email (S2.2); read permissions are not.
+func IsMutating(p Permission) bool {
+	switch p {
+	case PermOrgView, PermMemberList:
+		return false
+	default:
+		return true
+	}
+}
+
 // ValidRole reports whether role is a known role.
 func ValidRole(role string) bool {
 	_, ok := rolePermissions[role]

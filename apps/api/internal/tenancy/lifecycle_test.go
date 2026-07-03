@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -40,10 +41,15 @@ func TestOrgLifecycle(t *testing.T) {
 	if _, err := tx.Exec(ctx, "UPDATE organizations SET deleted_at = now() WHERE deleted_at IS NULL"); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
+	creator := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,$3)",
+		creator, "creator-"+creator.String()+"@t", "Creator"); err != nil {
+		t.Fatalf("create creator: %v", err)
+	}
 	svc := &Service{q: sqlc.New(tx)}
 
 	// Create.
-	org, err := svc.CreateOrganization(ctx, "Acme", "acme-test")
+	org, err := svc.CreateOrganization(ctx, creator, "Acme", "acme-test")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -99,7 +105,7 @@ func TestOrgLifecycle(t *testing.T) {
 
 	// Slug reuse is blocked even though the org is soft-deleted. This raises a
 	// unique violation, so it MUST be the last DB operation in this transaction.
-	if _, err := svc.CreateOrganization(ctx, "Acme2", "acme-test"); !isCode(err, "slug_taken") {
+	if _, err := svc.CreateOrganization(ctx, creator, "Acme2", "acme-test"); !isCode(err, "slug_taken") {
 		t.Fatalf("slug reuse: want slug_taken, got %v", err)
 	}
 }

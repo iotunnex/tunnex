@@ -12,9 +12,17 @@ SELECT * FROM organizations
 WHERE slug = $1 AND deleted_at IS NULL;
 
 -- name: ListOrganizations :many
+-- Admin/system listing of all orgs; user-facing listing uses
+-- ListOrganizationsForUser (membership-scoped).
 SELECT * FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at;
+
+-- name: ListOrganizationsForUser :many
+SELECT o.* FROM organizations o
+JOIN memberships m ON m.org_id = o.id
+WHERE m.user_id = $1 AND o.deleted_at IS NULL
+ORDER BY o.created_at;
 
 -- name: CountOrganizations :one
 SELECT count(*) FROM organizations

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db"
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
@@ -27,6 +28,7 @@ import (
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
+	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
@@ -102,11 +104,26 @@ func main() {
 	}
 	defer pool.Close()
 
-	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, logger)
+	// Session store (Redis) + session-backed authentication.
+	sessions, err := session.New(cfg.RedisURL, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL)
+	if err != nil {
+		logger.Error("session_store_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if !cfg.CookieSecure {
+		logger.Warn("cookie_insecure",
+			slog.String("warning", "session cookie Secure flag is OFF — development only; set TUNNEX_COOKIE_SECURE=true in production"))
+	}
 
-	// authFn is nil until S2.2 wires session-backed authentication; principal-gated
-	// endpoints therefore fail closed (401) in the meantime.
-	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool), authSvc, nil)
+	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
+
+	router, err := apphttp.NewRouter(logger, apphttp.Deps{
+		Orgs:         tenancy.NewService(pool),
+		Auth:         authSvc,
+		Sessions:     sessions,
+		CookieSecure: cfg.CookieSecure,
+		AuthFn:       apphttp.SessionAuth(sessions, sqlc.New(pool)),
+	})
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
 		os.Exit(1)

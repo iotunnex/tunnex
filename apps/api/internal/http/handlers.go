@@ -13,6 +13,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
+	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
@@ -35,15 +36,34 @@ func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (cont
 	if !rbac.Can(role, perm) {
 		return ctx, apierr.New(http.StatusForbidden, "forbidden", "you do not have permission to perform this action")
 	}
+	// Mutating actions require a verified email (S2.1 decision, enforced here).
+	if rbac.IsMutating(perm) && !p.EmailVerified {
+		return ctx, apierr.New(http.StatusForbidden, "email_not_verified", "verify your email to perform this action")
+	}
 	return authctx.WithOrg(ctx, orgID), nil
+}
+
+// requireVerifiedUser requires an authenticated, verified principal (for actions
+// not scoped to an existing org, e.g. creating one). Returns the principal.
+func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
+	}
+	if !p.EmailVerified {
+		return nil, apierr.New(http.StatusForbidden, "email_not_verified", "verify your email to perform this action")
+	}
+	return p, nil
 }
 
 // apiServer implements the generated api.StrictServerInterface. Handlers return
 // typed responses on success and plain errors on failure; the strict handler's
 // ResponseErrorHandlerFunc renders those errors as the standard envelope.
 type apiServer struct {
-	orgs *tenancy.Service
-	auth *auth.Service
+	orgs         *tenancy.Service
+	auth         *auth.Service
+	sessions     *session.Store
+	cookieSecure bool
 }
 
 // GetHealth implements GET /healthz.
@@ -59,9 +79,14 @@ func (apiServer) GetHealth(ctx context.Context, _ api.GetHealthRequestObject) (a
 	}, nil
 }
 
-// ListOrganizations implements GET /api/v1/organizations.
+// ListOrganizations implements GET /api/v1/organizations — scoped to the
+// caller's memberships (never all orgs).
 func (s apiServer) ListOrganizations(ctx context.Context, _ api.ListOrganizationsRequestObject) (api.ListOrganizationsResponseObject, error) {
-	orgs, err := s.orgs.ListOrganizations(ctx)
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
+	}
+	orgs, err := s.orgs.ListOrganizationsForUser(ctx, p.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +105,11 @@ func (s apiServer) CreateOrganization(ctx context.Context, req api.CreateOrganiz
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	org, err := s.orgs.CreateOrganization(ctx, req.Body.Name, req.Body.Slug)
+	p, err := requireVerifiedUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	org, err := s.orgs.CreateOrganization(ctx, p.UserID, req.Body.Name, req.Body.Slug)
 	if err != nil {
 		return nil, err // rendered as the envelope by the strict error handler
 	}

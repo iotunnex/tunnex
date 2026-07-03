@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -47,13 +48,19 @@ func TestOrgLimitByEdition(t *testing.T) {
 		t.Fatalf("reset orgs: %v", err)
 	}
 
+	creator := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,$3)",
+		creator, "creator-"+creator.String()+"@t", "Creator"); err != nil {
+		t.Fatalf("create creator: %v", err)
+	}
+
 	svc := &Service{q: sqlc.New(tx)}
 
-	if _, err := svc.CreateOrganization(ctx, "Edition A", "edition-test-a"); err != nil {
+	if _, err := svc.CreateOrganization(ctx, creator, "Edition A", "edition-test-a"); err != nil {
 		t.Fatalf("first org must always succeed: %v", err)
 	}
 
-	_, err = svc.CreateOrganization(ctx, "Edition B", "edition-test-b")
+	_, err = svc.CreateOrganization(ctx, creator, "Edition B", "edition-test-b")
 
 	if enterprise.Unlimited {
 		if err != nil {

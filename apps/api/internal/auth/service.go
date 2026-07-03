@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -34,18 +35,25 @@ const (
 	resetTTL  = 1 * time.Hour
 )
 
+// SessionRevoker revokes all of a user's sessions (implemented by the session
+// store). A password reset must invalidate every existing session.
+type SessionRevoker interface {
+	DeleteAllForUser(ctx context.Context, userID uuid.UUID) error
+}
+
 // Service provides local-auth operations.
 type Service struct {
 	pool    *pgxpool.Pool
 	q       *sqlc.Queries
 	mailer  mail.Mailer
 	baseURL string
+	revoker SessionRevoker
 	logger  *slog.Logger
 }
 
 // NewService builds the auth service.
-func NewService(pool *pgxpool.Pool, mailer mail.Mailer, baseURL string, logger *slog.Logger) *Service {
-	return &Service{pool: pool, q: sqlc.New(pool), mailer: mailer, baseURL: strings.TrimRight(baseURL, "/"), logger: logger}
+func NewService(pool *pgxpool.Pool, mailer mail.Mailer, baseURL string, revoker SessionRevoker, logger *slog.Logger) *Service {
+	return &Service{pool: pool, q: sqlc.New(pool), mailer: mailer, baseURL: strings.TrimRight(baseURL, "/"), revoker: revoker, logger: logger}
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
@@ -202,7 +210,8 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	if err != nil {
 		return err
 	}
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	var resetUserID uuid.UUID
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		tok, err := q.ConsumeAuthToken(ctx, sqlc.ConsumeAuthTokenParams{TokenHash: hashToken(rawToken), Purpose: purposeReset})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return apierr.BadRequest("invalid_token", "this reset link is invalid or has expired")
@@ -210,8 +219,20 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 		if err != nil {
 			return err
 		}
+		resetUserID = tok.UserID
 		return q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: tok.UserID, PasswordHash: &hash})
-	})
+	}); err != nil {
+		return err
+	}
+
+	// A reset must invalidate every existing session for the user.
+	if s.revoker != nil {
+		if err := s.revoker.DeleteAllForUser(ctx, resetUserID); err != nil {
+			s.logger.Warn("session_revoke_after_reset_failed",
+				slog.String("user_id", resetUserID.String()), slog.String("error", err.Error()))
+		}
+	}
+	return nil
 }
 
 func (s *Service) send(ctx context.Context, to, subject, body string) {

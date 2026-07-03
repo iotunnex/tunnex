@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds the process configuration resolved at startup.
@@ -23,6 +24,15 @@ type Config struct {
 	AutoMigrate bool
 	// AppBaseURL is the public base URL used to build email links (S2.1).
 	AppBaseURL string
+	// RedisURL is the session store DSN (S2.2).
+	RedisURL string
+	// CookieSecure sets the Secure flag on the session cookie. MUST be true in
+	// production; a false value is logged loudly at boot.
+	CookieSecure bool
+	// SessionIdleTTL is the sliding inactivity timeout (S2.2).
+	SessionIdleTTL time.Duration
+	// SessionAbsoluteTTL is the hard maximum session lifetime (S2.2).
+	SessionAbsoluteTTL time.Duration
 	// SMTP holds mail delivery configuration (S0.3).
 	SMTP SMTP
 }
@@ -47,9 +57,13 @@ func Load() Config {
 		Env:        getenv("TUNNEX_ENV", "development"),
 		LogLevel:    strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
 		SecretsDir:  getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
-		DatabaseURL: getenv("DATABASE_URL", ""),
-		AutoMigrate: getbool("TUNNEX_AUTO_MIGRATE", true),
-		AppBaseURL:  getenv("APP_BASE_URL", "http://localhost"),
+		DatabaseURL:        getenv("DATABASE_URL", ""),
+		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
+		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
+		RedisURL:           getenv("REDIS_URL", "redis://redis:6379/0"),
+		CookieSecure:       getbool("TUNNEX_COOKIE_SECURE", false),
+		SessionIdleTTL:     getdur("TUNNEX_SESSION_IDLE_TTL", 24*time.Hour),
+		SessionAbsoluteTTL: getdur("TUNNEX_SESSION_ABSOLUTE_TTL", 720*time.Hour),
 		SMTP: SMTP{
 			Host:     getenv("SMTP_HOST", ""),
 			Port:     getenv("SMTP_PORT", "1025"),
@@ -63,6 +77,15 @@ func Load() Config {
 func getenv(key, fallback string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getdur(key string, fallback time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return fallback
 }

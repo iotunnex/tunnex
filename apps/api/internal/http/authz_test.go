@@ -14,7 +14,22 @@ import (
 
 func principalWithRole(orgID uuid.UUID, role string) context.Context {
 	return authctx.WithPrincipal(context.Background(),
-		&authctx.Principal{UserID: uuid.New(), Roles: map[uuid.UUID]string{orgID: role}})
+		&authctx.Principal{UserID: uuid.New(), EmailVerified: true, Roles: map[uuid.UUID]string{orgID: role}})
+}
+
+func TestAuthorizeRequiresVerifiedForMutations(t *testing.T) {
+	org := uuid.New()
+	unverified := authctx.WithPrincipal(context.Background(),
+		&authctx.Principal{UserID: uuid.New(), EmailVerified: false, Roles: map[uuid.UUID]string{org: rbac.RoleOwner}})
+
+	// Reads are allowed while unverified.
+	if _, err := authorize(unverified, org, rbac.PermOrgView); err != nil {
+		t.Fatalf("unverified read: unexpected %v", err)
+	}
+	// Mutations are blocked until verified.
+	if _, err := authorize(unverified, org, rbac.PermOrgUpdate); !hasCode(err, 403, "email_not_verified") {
+		t.Fatalf("unverified mutation: want email_not_verified, got %v", err)
+	}
 }
 
 func TestAuthorizeFailClosedAndProgression(t *testing.T) {

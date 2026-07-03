@@ -10,6 +10,10 @@ servers:
   - url: /
     description: Same-origin (served behind the edge nginx)
 
+# Endpoints require a session cookie by default; public ones set `security: []`.
+security:
+  - cookieAuth: []
+
 paths:
   /healthz:
     get:
@@ -132,15 +136,25 @@ paths:
               schema: { $ref: "#/components/schemas/GenericMessage" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke the current session
+      description: Idempotent — clears the cookie and revokes the session if present.
+      tags: [auth]
+      security: []
+      responses:
+        "204":
+          description: Logged out.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations:
     get:
       operationId: listOrganizations
       summary: List organizations
-      description: |
-        Lists organizations. NOTE: authentication/tenant scoping is added in
-        S2/S1.3; this endpoint is temporarily unauthenticated.
+      description: Lists the organizations the authenticated user belongs to.
       tags: [organizations]
-      security: []
       responses:
         "200":
           description: Organizations.
@@ -163,7 +177,6 @@ paths:
         `org_limit_reached` once one organization exists; the enterprise build
         allows multiple.
       tags: [organizations]
-      security: []
       requestBody:
         required: true
         content:
@@ -195,7 +208,6 @@ paths:
       operationId: getOrganization
       summary: Get an organization
       tags: [organizations]
-      security: []
       responses:
         "200":
           description: The organization.
@@ -212,7 +224,6 @@ paths:
       operationId: updateOrganization
       summary: Update organization settings (name only; slug is immutable)
       tags: [organizations]
-      security: []
       requestBody:
         required: true
         content:
@@ -235,7 +246,6 @@ paths:
       operationId: deleteOrganization
       summary: Soft-delete an organization
       tags: [organizations]
-      security: []
       responses:
         "204":
           description: Deleted.
@@ -246,6 +256,12 @@ paths:
           $ref: "#/components/responses/Error"
 
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: tunnex_session
+
   headers:
     RequestId:
       description: Correlation ID for this request; also appears in server logs.

@@ -2,12 +2,16 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/session"
 )
 
 // Signup implements POST /api/v1/auth/signup. The response is deliberately
@@ -29,8 +33,24 @@ func (s apiServer) Signup(ctx context.Context, req api.SignupRequestObject) (api
 	}, nil
 }
 
-// Login implements POST /api/v1/auth/login. S2.1 verifies credentials; S2.2
-// will establish the session cookie here.
+// loginResponse is a custom oapi response object: its Visit sets the session
+// cookie (the strict interface hands Visit the ResponseWriter).
+type loginResponse struct {
+	body      api.AuthUser
+	sess      session.Session
+	secure    bool
+	requestID string
+}
+
+func (r loginResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	session.SetCookie(w, r.sess, r.secure)
+	w.Header().Set("X-Request-Id", r.requestID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	return json.NewEncoder(w).Encode(r.body)
+}
+
+// Login verifies credentials, then establishes a fresh session (fixation-safe).
 func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.LoginResponseObject, error) {
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
@@ -39,14 +59,41 @@ func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.L
 	if err != nil {
 		return nil, err
 	}
-	return api.Login200JSONResponse{
-		Body: api.AuthUser{
+	sess, err := s.sessions.Create(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return loginResponse{
+		body: api.AuthUser{
 			Id:            user.ID,
 			Email:         openapi_types.Email(user.Email),
 			EmailVerified: user.EmailVerifiedAt.Valid,
 		},
-		Headers: api.Login200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+		sess:      sess,
+		secure:    s.cookieSecure,
+		requestID: middleware.GetReqID(ctx),
 	}, nil
+}
+
+// logoutResponse clears the session cookie in its Visit.
+type logoutResponse struct {
+	secure    bool
+	requestID string
+}
+
+func (r logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+	session.ClearCookie(w, r.secure)
+	w.Header().Set("X-Request-Id", r.requestID)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// Logout revokes the current session and clears the cookie.
+func (s apiServer) Logout(ctx context.Context, _ api.LogoutRequestObject) (api.LogoutResponseObject, error) {
+	if p, ok := authctx.PrincipalFrom(ctx); ok && p.SessionID != "" {
+		_ = s.sessions.Delete(ctx, p.SessionID)
+	}
+	return logoutResponse{secure: s.cookieSecure, requestID: middleware.GetReqID(ctx)}, nil
 }
 
 // VerifyEmail implements POST /api/v1/auth/verify-email.

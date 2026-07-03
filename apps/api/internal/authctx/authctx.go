@@ -18,8 +18,10 @@ import (
 // It is populated by the auth layer (a session-backed AuthFunc from S2); tests
 // inject one directly.
 type Principal struct {
-	UserID uuid.UUID
-	Roles  map[uuid.UUID]string // orgID -> role
+	UserID        uuid.UUID
+	SessionID     string // the session backing this principal (for logout)
+	EmailVerified bool
+	Roles         map[uuid.UUID]string // orgID -> role
 }
 
 // RoleIn returns the principal's role in orgID and whether they are a member.

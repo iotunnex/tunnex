@@ -112,6 +112,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the current session
+         * @description Idempotent — clears the cookie and revokes the session if present.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -121,9 +141,7 @@ export interface paths {
         };
         /**
          * List organizations
-         * @description Lists organizations. NOTE: authentication/tenant scoping is added in
-         *     S2/S1.3; this endpoint is temporarily unauthenticated.
-         *
+         * @description Lists the organizations the authenticated user belongs to.
          */
         get: operations["listOrganizations"];
         put?: never;
@@ -426,6 +444,26 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GenericMessage"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logged out. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

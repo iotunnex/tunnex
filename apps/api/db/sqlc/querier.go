@@ -47,7 +47,10 @@ type Querier interface {
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	// Admin/system listing of all orgs; user-facing listing uses
+	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
+	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — revocation targets a specific invitation id (already

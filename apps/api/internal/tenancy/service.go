@@ -21,8 +21,20 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/enterprise"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
+
+// actorFromCtx returns the acting user id from the authenticated principal, or
+// nil for system callers (seed/migration).
+func actorFromCtx(ctx context.Context) *uuid.UUID {
+	if p, ok := authctx.PrincipalFrom(ctx); ok {
+		id := p.UserID
+		return &id
+	}
+	return nil
+}
 
 // Service provides organization operations.
 type Service struct {
@@ -53,9 +65,10 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 	return tx.Commit(ctx)
 }
 
-// CreateOrganization creates an organization (enforcing the edition cap) and
-// records an org.created audit event atomically.
-func (s *Service) CreateOrganization(ctx context.Context, name, slug string) (sqlc.Organization, error) {
+// CreateOrganization creates an organization (enforcing the edition cap), makes
+// the creator its first owner, and records an org.created audit event — all
+// atomically.
+func (s *Service) CreateOrganization(ctx context.Context, creator uuid.UUID, name, slug string) (sqlc.Organization, error) {
 	if !enterprise.Unlimited {
 		count, err := s.q.CountOrganizations(ctx)
 		if err != nil {
@@ -74,13 +87,21 @@ func (s *Service) CreateOrganization(ctx context.Context, name, slug string) (sq
 		if e != nil {
 			return mapDBError(e)
 		}
-		return writeAudit(ctx, q, org.ID, nil, "org.created", "organization", org.ID.String(),
+		if _, e = q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{OrgID: org.ID, UserID: creator, Role: rbac.RoleOwner}); e != nil {
+			return e
+		}
+		return writeAudit(ctx, q, org.ID, &creator, "org.created", "organization", org.ID.String(),
 			map[string]any{"name": name, "slug": slug})
 	})
 	if err != nil {
 		return sqlc.Organization{}, err
 	}
 	return org, nil
+}
+
+// ListOrganizationsForUser returns the live organizations the user belongs to.
+func (s *Service) ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]sqlc.Organization, error) {
+	return s.q.ListOrganizationsForUser(ctx, userID)
 }
 
 // GetOrganization returns a live organization or a typed not-found error.
@@ -113,7 +134,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, id uuid.UUID, name str
 		if e != nil {
 			return e
 		}
-		return writeAudit(ctx, q, id, nil, "org.updated", "organization", id.String(),
+		return writeAudit(ctx, q, id, actorFromCtx(ctx), "org.updated", "organization", id.String(),
 			map[string]any{"name": map[string]string{"from": before.Name, "to": name}})
 	})
 	if err != nil {
@@ -132,7 +153,7 @@ func (s *Service) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) erro
 		if n == 0 {
 			return orgNotFound()
 		}
-		return writeAudit(ctx, q, id, nil, "org.deleted", "organization", id.String(), map[string]any{})
+		return writeAudit(ctx, q, id, actorFromCtx(ctx), "org.deleted", "organization", id.String(), map[string]any{})
 	})
 }
 
