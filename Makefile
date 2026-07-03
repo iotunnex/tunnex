@@ -55,6 +55,32 @@ migrate-create: ## Scaffold a migration pair: make migrate-create name=add_widge
 sqlc: ## Regenerate typed query code from db/queries
 	docker run --rm -v "$(PWD)/apps/api":/src -w /src sqlc/sqlc generate
 
+# --- Code generation (OpenAPI-first: the spec is the single source of truth) ---
+OAPI_CODEGEN_VERSION := v2.4.1
+OPENAPI_TS_VERSION := 7.4.4
+
+.PHONY: generate
+generate: generate-go generate-ts sqlc ## Regenerate all code from openapi/openapi.yaml
+
+.PHONY: generate-go
+generate-go: ## Generate the Go server (types + chi strict-server) from the spec
+	@mkdir -p apps/api/internal/api
+	docker run --rm -v "$(PWD)":/repo -w /repo/apps/api -e GOFLAGS=-mod=mod golang:1.25-alpine \
+	  go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) \
+	  -config oapi-codegen.yaml ../../openapi/openapi.yaml
+
+.PHONY: generate-ts
+generate-ts: ## Generate the TypeScript API types from the spec
+	docker run --rm -v "$(PWD)":/repo -w /repo/packages/shared node:20-alpine \
+	  npx --yes openapi-typescript@$(OPENAPI_TS_VERSION) ../../openapi/openapi.yaml -o src/api.d.ts
+
+.PHONY: generate-check
+generate-check: generate ## Fail if generated code is out of date (CI drift guard)
+	@git diff --exit-code -- \
+	  apps/api/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts \
+	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
+	@echo "generated code is up to date."
+
 .PHONY: api
 api: ## Run the API locally (outside docker)
 	cd apps/api && go run ./cmd/server

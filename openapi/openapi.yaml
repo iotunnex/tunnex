@@ -1,0 +1,111 @@
+openapi: 3.0.3
+info:
+  title: Tunnex API
+  version: 0.1.0
+  description: |
+    Control-plane API for Tunnex.io. This spec is the single source of truth:
+    the Go server types/handlers and the TypeScript client are generated from it
+    (`make generate`), and drift fails the build (`make generate-check`).
+servers:
+  - url: /
+    description: Same-origin (served behind the edge nginx)
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      description: Reports process liveness. No external dependencies are checked.
+      tags: [system]
+      security: []
+      responses:
+        "200":
+          description: The service is alive.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  headers:
+    RequestId:
+      description: Correlation ID for this request; also appears in server logs.
+      schema:
+        type: string
+      required: true
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          description: Liveness status.
+        service:
+          type: string
+          description: Reporting service name.
+          example: tunnex-api
+        request_id:
+          type: string
+          description: Correlation ID for this request.
+
+    Error:
+      type: object
+      description: |
+        Standard error envelope for every non-2xx response. Chosen over bare
+        RFC 7807 so the correlation `request_id` is a first-class field the SPA
+        and CLI can surface directly; `code` is stable for programmatic handling.
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable error code.
+              example: not_found
+            message:
+              type: string
+              description: Human-readable explanation.
+            request_id:
+              type: string
+              description: Correlation ID; match against server logs.
+            details:
+              type: array
+              description: Field-level problems (e.g. validation failures).
+              items:
+                $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorDetail:
+      type: object
+      required: [message]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+          description: Dotted path to the offending field, when applicable.
+        message:
+          type: string
+          description: What is wrong with this field.
+
+  responses:
+    Error:
+      description: Error response.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

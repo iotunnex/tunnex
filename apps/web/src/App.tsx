@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { createTunnexClient } from "@tunnex/shared";
+
+const api = createTunnexClient("/");
 
 type HealthState =
   | { status: "loading" }
@@ -15,11 +18,16 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/healthz")
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as { request_id?: string };
-        if (!cancelled) setHealth({ status: "up", requestId: body.request_id });
+    // Typed client generated from the OpenAPI spec — response shape is checked.
+    api
+      .GET("/healthz")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          setHealth({ status: "down", error: "unexpected response" });
+          return;
+        }
+        setHealth({ status: "up", requestId: data.request_id });
       })
       .catch((err: unknown) => {
         if (!cancelled)

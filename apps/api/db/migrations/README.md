@@ -38,6 +38,14 @@ is defined in 0001 (native `uuidv7()` arrives in PG18).
 - Uniqueness that is per-tenant must be scoped: `UNIQUE (org_id, email)`, never
   a bare `UNIQUE (email)`.
 
+## Auto-migrate on boot — and when to turn it off (S10.1 / S11.4)
+The API auto-migrates on boot (`TUNNEX_AUTO_MIGRATE=true`) so the compose
+quickstart self-provisions. golang-migrate takes an advisory lock, so concurrent
+starts are safe. **But for multi-replica / Kubernetes deployments, the
+production pattern is migrate-as-init-job with `TUNNEX_AUTO_MIGRATE=false` on the
+API pods** — every pod racing to migrate on boot is an operational footgun even
+when it's technically race-safe. The Helm chart (S10.1) must ship it this way.
+
 ## Down migrations are not optional
 Every `up` has a `down` that has actually been run at least once (the CI/DoD runs
 `up → down → up`). A down that has never executed is a broken down waiting to be

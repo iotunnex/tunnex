@@ -90,9 +90,15 @@ func main() {
 		}
 	}
 
+	router, err := apphttp.NewRouter(logger)
+	if err != nil {
+		logger.Error("router_init_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           apphttp.NewRouter(logger),
+		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

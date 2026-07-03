@@ -1,12 +1,19 @@
-// @tunnex/shared — the single source of TypeScript types shared by the web app,
-// the Electron client, and the CLI's config schema.
-//
-// From S0.5 this file re-exports types generated from the OpenAPI spec. For the
-// foundation story it carries just the health contract so the web app and API
-// agree on the shape returned by /healthz.
+// @tunnex/shared — the single source of API types + a typed client, all derived
+// from openapi/openapi.yaml via `make generate`. Consumed by the web app, the
+// Electron client, and the CLI. Do not hand-edit api.d.ts.
 
-export interface HealthResponse {
-  status: "ok";
-  service: string;
-  request_id?: string;
+import createClient, { type Client } from "openapi-fetch";
+import type { paths, components } from "./api";
+
+export type { paths, components };
+
+// Convenience aliases for the schemas used across the apps.
+export type HealthResponse = components["schemas"]["HealthResponse"];
+export type ApiError = components["schemas"]["Error"];
+
+export type TunnexClient = Client<paths>;
+
+/** Create a typed Tunnex API client. baseUrl defaults to same-origin ("/"). */
+export function createTunnexClient(baseUrl = "/"): TunnexClient {
+  return createClient<paths>({ baseUrl });
 }
