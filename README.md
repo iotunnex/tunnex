@@ -1,0 +1,65 @@
+# Tunnex.io
+
+Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open alternative to Pritunl.
+
+- **WireGuard** management (OpenVPN later), with a control-plane / data-plane split.
+- **Auth**: local users, Google & Microsoft SSO.
+- **Clients**: CLI first, then Electron for Windows & macOS.
+- **One command up**: `docker compose up` boots the whole stack and auto-generates every secret/key on first boot.
+
+> The full product roadmap — every epic and story — lives in [`PLAN.md`](./PLAN.md). Point any session at it and name the current story (e.g. "we're on S1.3").
+
+## Quickstart
+
+```bash
+cp .env.example .env      # or just run `make up`, which does this for you
+make up                   # build + start postgres, redis, api, web, nginx, node-agent, mailpit
+```
+
+Then:
+
+- App shell → http://localhost
+- API health → http://localhost/healthz
+- Mailpit (dev email inbox) → http://localhost:8025
+
+Tear down:
+
+```bash
+make down     # stop, keep data
+make reset    # stop and wipe all volumes
+```
+
+## Repository layout
+
+```
+apps/
+  api/       Go control-plane API (chi, sqlc, Postgres, Redis)
+  node/      tunnex-node data-plane agent (owns WireGuard via wgctrl)
+  cli/       tunnex CLI client            (EPIC 5)
+  client/    Electron desktop client      (EPIC 6)
+  web/       React + Vite SPA dashboard   (reused by Electron renderer)
+packages/
+  shared/    Generated TypeScript API client (OpenAPI-first)
+deploy/
+  docker/    Dockerfiles
+  nginx/     Reverse-proxy config
+```
+
+## Architecture (why the split)
+
+The **API is the control plane**; it never touches WireGuard directly. A **`tunnex-node` agent** owns the **data plane** and reconciles desired state (from the API) against the actual `wgctrl` interface state. In the compose quickstart the agent runs on the same host; the same abstraction later powers site-to-site gateways and the Kubernetes operator.
+
+## Editions
+
+Open-core. The multi-tenant schema lives in core; the open build limits org creation. Enterprise features (SSO, Zero Trust policies, Kubernetes operator) sit behind an `internal/enterprise/**` boundary.
+
+## Development
+
+Requires Docker, Go 1.23+, Node 20+, pnpm 9+.
+
+```bash
+make api      # run API locally
+make agent    # run node agent locally
+make web      # run web dev server
+make logs     # tail compose logs
+```

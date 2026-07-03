@@ -1,0 +1,9 @@
+{
+  "name": "@tunnex/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "description": "Shared TypeScript types + generated API client (OpenAPI-first, populated in S0.5)."
+}

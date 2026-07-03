@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+apps/web/dist/
+bin/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Env & secrets (never commit)
+.env
+.env.local
+*.local
+secrets/
+data/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Turbo
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*

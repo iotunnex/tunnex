@@ -1,0 +1,103 @@
+# Tunnex.io — one-command stack.
+#   make up     -> build + start everything
+#   make down   -> stop
+#   make reset  -> stop + wipe volumes
+#
+# The build context is the repo root for every service so Dockerfiles can reach
+# the whole monorepo (shared package, per-app source).
+
+name: tunnex
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tunnex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tunnex_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-tunnex}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tunnex} -d ${POSTGRES_DB:-tunnex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      TUNNEX_ENV: ${TUNNEX_ENV:-development}
+      TUNNEX_LOG_LEVEL: ${TUNNEX_LOG_LEVEL:-info}
+      TUNNEX_API_ADDR: ${TUNNEX_API_ADDR:-:8080}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  node-agent:
+    build:
+      context: .
+      dockerfile: deploy/docker/node.Dockerfile
+    restart: unless-stopped
+    environment:
+      TUNNEX_API_URL: ${TUNNEX_API_URL:-http://api:8080}
+      TUNNEX_JOIN_TOKEN: ${TUNNEX_JOIN_TOKEN:-}
+    # Required to manage WireGuard interfaces (S3.x). Harmless for the stub.
+    cap_add:
+      - NET_ADMIN
+    ports:
+      # WireGuard data-plane UDP port, published for later stories.
+      - "51820:51820/udp"
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/docker/nginx.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # web UI
+      - "1025:1025" # SMTP
+    environment:
+      MP_MAX_MESSAGES: 500
+
+volumes:
+  postgres_data:
+  redis_data:
