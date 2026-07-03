@@ -16,16 +16,19 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
-// ProviderFactory builds a Provider for a given config (injectable for tests).
-type ProviderFactory func(ctx context.Context, name, clientID, clientSecret, redirectURL string) (Provider, error)
+// ProviderFactory builds a Provider from a decrypted Config (injectable for tests).
+type ProviderFactory func(ctx context.Context, cfg Config, redirectURL string) (Provider, error)
 
-// DefaultProviderFactory maps provider names to their OIDC issuers.
-func DefaultProviderFactory(ctx context.Context, name, clientID, clientSecret, redirectURL string) (Provider, error) {
-	switch name {
+// DefaultProviderFactory maps a config to its provider. Adding Microsoft is one
+// case: config (TenantID) + adapter (NewMicrosoft) — no change to the shared flow.
+func DefaultProviderFactory(ctx context.Context, cfg Config, redirectURL string) (Provider, error) {
+	switch cfg.Provider {
 	case "google":
-		return NewGoogle(ctx, clientID, clientSecret, redirectURL)
+		return NewGoogle(ctx, cfg.ClientID, cfg.ClientSecret, redirectURL)
+	case "microsoft":
+		return NewMicrosoft(ctx, cfg.TenantID, cfg.ClientID, cfg.ClientSecret, redirectURL)
 	default:
-		return nil, apierr.BadRequest("unknown_provider", "unknown SSO provider: "+name)
+		return nil, apierr.BadRequest("unknown_provider", "unknown SSO provider: "+cfg.Provider)
 	}
 }
 
@@ -61,7 +64,7 @@ func (s *Service) StartLogin(ctx context.Context, orgID uuid.UUID, provider stri
 	if !cfg.Enabled {
 		return "", apierr.NotFound("sso_not_configured", "SSO is not enabled for this provider")
 	}
-	prov, err := s.factory(ctx, provider, cfg.ClientID, cfg.ClientSecret, s.redirectURL(provider))
+	prov, err := s.factory(ctx, cfg, s.redirectURL(provider))
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +101,7 @@ func (s *Service) HandleCallback(ctx context.Context, provider, code, state stri
 	if err != nil {
 		return uuid.Nil, err
 	}
-	prov, err := s.factory(ctx, provider, cfg.ClientID, cfg.ClientSecret, s.redirectURL(provider))
+	prov, err := s.factory(ctx, cfg, s.redirectURL(provider))
 	if err != nil {
 		return uuid.Nil, err
 	}

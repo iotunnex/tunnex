@@ -62,7 +62,7 @@ func TestConfigSealAndDecryptAfterRestart(t *testing.T) {
 
 	// Write with one sealer instance.
 	writer := newConfigService(sqlc.New(tx), newSealer(t, masterKey))
-	if err := writer.Set(ctx, org, "google", "client-id-123", secret, true); err != nil {
+	if err := writer.Set(ctx, org, "google", "client-id-123", secret, "", true); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 

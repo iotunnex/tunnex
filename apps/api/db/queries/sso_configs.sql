@@ -1,9 +1,10 @@
 -- name: UpsertSSOConfig :one
-INSERT INTO sso_configs (org_id, provider, client_id, client_secret_sealed, enabled)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO sso_configs (org_id, provider, client_id, client_secret_sealed, tenant_id, enabled)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (org_id, provider) DO UPDATE
     SET client_id = EXCLUDED.client_id,
         client_secret_sealed = EXCLUDED.client_secret_sealed,
+        tenant_id = EXCLUDED.tenant_id,
         enabled = EXCLUDED.enabled
 RETURNING *;
 

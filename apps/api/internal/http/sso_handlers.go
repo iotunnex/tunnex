@@ -18,7 +18,7 @@ import (
 type ssoPort interface {
 	StartLogin(ctx context.Context, orgSlug, provider string) (redirectURL string, err error)
 	HandleCallback(ctx context.Context, provider, code, state string) (userID uuid.UUID, err error)
-	SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret string, enabled bool) error
+	SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
 }
 
 func editionRequired() error {
@@ -83,7 +83,11 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 	if s.sso == nil {
 		return nil, editionRequired()
 	}
-	if err := s.sso.SetConfig(ctx, req.OrgId, req.Provider, req.Body.ClientId, req.Body.ClientSecret, req.Body.Enabled); err != nil {
+	tenantID := ""
+	if req.Body.TenantId != nil {
+		tenantID = *req.Body.TenantId
+	}
+	if err := s.sso.SetConfig(ctx, req.OrgId, req.Provider, req.Body.ClientId, req.Body.ClientSecret, tenantID, req.Body.Enabled); err != nil {
 		return nil, err
 	}
 	return api.SetSsoConfig204Response{

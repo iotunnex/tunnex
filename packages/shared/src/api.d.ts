@@ -279,6 +279,8 @@ export interface components {
         SsoConfigRequest: {
             client_id: string;
             client_secret: string;
+            /** @description Required for Microsoft (the org's Entra tenant ID); unused by Google. */
+            tenant_id?: string;
             enabled: boolean;
         };
         AuthUser: {

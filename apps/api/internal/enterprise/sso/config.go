@@ -21,6 +21,7 @@ type Config struct {
 	Provider     string
 	ClientID     string
 	ClientSecret string // decrypted; never persisted in the clear
+	TenantID     string // microsoft only (pinned Entra tenant); empty otherwise
 	Enabled      bool
 }
 
@@ -42,16 +43,21 @@ func newConfigService(q *sqlc.Queries, sealer *crypto.Sealer) *ConfigService {
 }
 
 // Set upserts a provider config, sealing the client secret before storage.
-func (c *ConfigService) Set(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret string, enabled bool) error {
+func (c *ConfigService) Set(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error {
 	sealed, err := c.sealer.Seal([]byte(clientSecret))
 	if err != nil {
 		return err
+	}
+	var tid *string
+	if tenantID != "" {
+		tid = &tenantID
 	}
 	_, err = c.q.UpsertSSOConfig(ctx, sqlc.UpsertSSOConfigParams{
 		OrgID:              orgID,
 		Provider:           provider,
 		ClientID:           clientID,
 		ClientSecretSealed: []byte(sealed),
+		TenantID:           tid,
 		Enabled:            enabled,
 	})
 	return err
@@ -70,11 +76,16 @@ func (c *ConfigService) Get(ctx context.Context, orgID uuid.UUID, provider strin
 	if err != nil {
 		return Config{}, err
 	}
+	tenantID := ""
+	if row.TenantID != nil {
+		tenantID = *row.TenantID
+	}
 	return Config{
 		OrgID:        row.OrgID,
 		Provider:     row.Provider,
 		ClientID:     row.ClientID,
 		ClientSecret: string(secret),
+		TenantID:     tenantID,
 		Enabled:      row.Enabled,
 	}, nil
 }

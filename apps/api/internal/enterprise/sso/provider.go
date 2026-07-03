@@ -28,15 +28,32 @@ type Provider interface {
 	Exchange(ctx context.Context, code, pkceVerifier, expectedNonce string) (Identity, error)
 }
 
-// oidcProvider is the generic OIDC implementation used by every provider.
-type oidcProvider struct {
-	name     string
-	oauth2   *oauth2.Config
-	verifier *oidc.IDTokenVerifier
+// RawClaims are the ID-token claims we read; providers differ in which are
+// present/trustworthy, so each supplies a Normalizer.
+type RawClaims struct {
+	Sub               string `json:"sub"`
+	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
+	Name              string `json:"name"`
+	PreferredUsername string `json:"preferred_username"`
+	Tid               string `json:"tid"`
 }
 
-// NewOIDCProvider discovers the issuer (fetching JWKS) and builds a provider.
-func NewOIDCProvider(ctx context.Context, name, issuer, clientID, clientSecret, redirectURL string, scopes []string) (Provider, error) {
+// Normalizer maps a provider's raw claims into the internal Identity. This is
+// THE seam that keeps provider differences out of the shared flow (S2.3(a)).
+type Normalizer func(RawClaims) (Identity, error)
+
+// oidcProvider is the generic OIDC implementation used by every provider.
+type oidcProvider struct {
+	name       string
+	oauth2     *oauth2.Config
+	verifier   *oidc.IDTokenVerifier
+	normalize  Normalizer
+}
+
+// NewOIDCProvider discovers the issuer (fetching JWKS) and builds a provider
+// with the given claims normalizer.
+func NewOIDCProvider(ctx context.Context, name, issuer, clientID, clientSecret, redirectURL string, scopes []string, normalize Normalizer) (Provider, error) {
 	p, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("oidc discovery for %s: %w", name, err)
@@ -50,7 +67,8 @@ func NewOIDCProvider(ctx context.Context, name, issuer, clientID, clientSecret, 
 			RedirectURL:  redirectURL,
 			Scopes:       scopes,
 		},
-		verifier: p.Verifier(&oidc.Config{ClientID: clientID}),
+		verifier:  p.Verifier(&oidc.Config{ClientID: clientID}),
+		normalize: normalize,
 	}, nil
 }
 
@@ -73,35 +91,37 @@ func (p *oidcProvider) Exchange(ctx context.Context, code, verifier, expectedNon
 	if !ok {
 		return Identity{}, errors.New("no id_token in token response")
 	}
-	idt, err := p.verifier.Verify(ctx, rawID) // issuer, audience, expiry, signature
+	idt, err := p.verifier.Verify(ctx, rawID) // issuer (exact), audience, expiry, signature
 	if err != nil {
 		return Identity{}, fmt.Errorf("verify id_token: %w", err)
 	}
 	if idt.Nonce != expectedNonce {
 		return Identity{}, errors.New("id_token nonce mismatch")
 	}
-	var claims struct {
-		Sub           string `json:"sub"`
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Name          string `json:"name"`
-	}
-	if err := idt.Claims(&claims); err != nil {
+	var raw RawClaims
+	if err := idt.Claims(&raw); err != nil {
 		return Identity{}, fmt.Errorf("parse claims: %w", err)
 	}
-	return Identity{
-		Provider:      p.name,
-		Subject:       claims.Sub,
-		Email:         claims.Email,
-		EmailVerified: claims.EmailVerified,
-		Name:          claims.Name,
-	}, nil
+	id, err := p.normalize(raw)
+	if err != nil {
+		return Identity{}, err
+	}
+	id.Provider = p.name
+	return id, nil
+}
+
+// googleNormalizer trusts Google's standard email + email_verified claims.
+func googleNormalizer(r RawClaims) (Identity, error) {
+	if r.Email == "" {
+		return Identity{}, errors.New("google id_token has no email")
+	}
+	return Identity{Subject: r.Sub, Email: r.Email, EmailVerified: r.EmailVerified, Name: r.Name}, nil
 }
 
 // NewGoogle registers Google as an OIDC provider.
 func NewGoogle(ctx context.Context, clientID, clientSecret, redirectURL string) (Provider, error) {
 	return NewOIDCProvider(ctx, "google", "https://accounts.google.com",
-		clientID, clientSecret, redirectURL, []string{oidc.ScopeOpenID, "email", "profile"})
+		clientID, clientSecret, redirectURL, []string{oidc.ScopeOpenID, "email", "profile"}, googleNormalizer)
 }
 
 // PKCE returns a fresh (verifier, S256 challenge) pair.

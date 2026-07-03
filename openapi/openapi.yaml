@@ -429,6 +429,10 @@ components:
       properties:
         client_id: { type: string, minLength: 1, maxLength: 500 }
         client_secret: { type: string, minLength: 1, maxLength: 500 }
+        tenant_id:
+          type: string
+          maxLength: 200
+          description: Required for Microsoft (the org's Entra tenant ID); unused by Google.
         enabled: { type: boolean }
 
     AuthUser:
