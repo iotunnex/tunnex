@@ -61,6 +61,9 @@ func NewWithClient(rdb *redis.Client, idle, absolute time.Duration) *Store {
 	return &Store{rdb: rdb, idle: idle, absolute: absolute, now: time.Now}
 }
 
+// Client exposes the underlying Redis client (reused by the SSO flow store).
+func (s *Store) Client() *redis.Client { return s.rdb }
+
 func sessKey(id string) string          { return "sess:" + id }
 func userKey(u uuid.UUID) string        { return "usess:" + u.String() }
 

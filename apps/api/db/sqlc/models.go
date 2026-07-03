@@ -64,6 +64,17 @@ type Organization struct {
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type SsoConfig struct {
+	ID                 uuid.UUID `json:"id"`
+	OrgID              uuid.UUID `json:"org_id"`
+	Provider           string    `json:"provider"`
+	ClientID           string    `json:"client_id"`
+	ClientSecretSealed []byte    `json:"client_secret_sealed"`
+	Enabled            bool      `json:"enabled"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
 type User struct {
 	ID              uuid.UUID          `json:"id"`
 	Email           string             `json:"email"`

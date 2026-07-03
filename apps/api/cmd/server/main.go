@@ -121,7 +121,9 @@ func main() {
 		Orgs:         tenancy.NewService(pool),
 		Auth:         authSvc,
 		Sessions:     sessions,
+		SSO:          apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		CookieSecure: cfg.CookieSecure,
+		AppBaseURL:   cfg.AppBaseURL,
 		AuthFn:       apphttp.SessionAuth(sessions, sqlc.New(pool)),
 	})
 	if err != nil {

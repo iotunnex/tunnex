@@ -132,6 +132,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/sso/{provider}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Begin an SSO login (enterprise) */
+        get: operations["startSsoLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** SSO callback (enterprise) */
+        get: operations["ssoCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/sso/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "google" | "microsoft";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Configure an SSO provider for an organization (enterprise) */
+        put: operations["setSsoConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -218,6 +272,14 @@ export interface components {
         };
         GenericMessage: {
             message: string;
+        };
+        SsoRedirect: {
+            redirect_url: string;
+        };
+        SsoConfigRequest: {
+            client_id: string;
+            client_secret: string;
+            enabled: boolean;
         };
         AuthUser: {
             /** Format: uuid */
@@ -458,6 +520,85 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Logged out. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startSsoLogin: {
+        parameters: {
+            query: {
+                /** @description Organization slug whose SSO config to use. */
+                org: string;
+            };
+            header?: never;
+            path: {
+                provider: "google" | "microsoft";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The IdP redirect URL for the client to navigate to. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoRedirect"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    ssoCallback: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path: {
+                provider: "google" | "microsoft";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated — session cookie set, browser redirected to the app. */
+            302: {
+                headers: {
+                    Location: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setSsoConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "google" | "microsoft";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
             204: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];

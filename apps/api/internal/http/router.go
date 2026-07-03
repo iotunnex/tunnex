@@ -33,7 +33,9 @@ type Deps struct {
 	Orgs         *tenancy.Service
 	Auth         *auth.Service
 	Sessions     *session.Store
+	SSO          ssoPort // nil => open build (SSO endpoints return edition_required)
 	CookieSecure bool
+	AppBaseURL   string
 	AuthFn       AuthFunc
 }
 
@@ -86,7 +88,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, auth: d.Auth, sessions: d.Sessions, cookieSecure: d.CookieSecure}
+	srv := apiServer{orgs: d.Orgs, auth: d.Auth, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

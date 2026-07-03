@@ -149,6 +149,82 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/auth/sso/{provider}/start:
+    get:
+      operationId: startSsoLogin
+      summary: Begin an SSO login (enterprise)
+      tags: [sso]
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, microsoft] }
+        - name: org
+          in: query
+          required: true
+          description: Organization slug whose SSO config to use.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The IdP redirect URL for the client to navigate to.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SsoRedirect" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/sso/{provider}/callback:
+    get:
+      operationId: ssoCallback
+      summary: SSO callback (enterprise)
+      tags: [sso]
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, microsoft] }
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Authenticated — session cookie set, browser redirected to the app.
+          headers:
+            Location: { schema: { type: string }, required: true }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/sso/{provider}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [google, microsoft] }
+    put:
+      operationId: setSsoConfig
+      summary: Configure an SSO provider for an organization (enterprise)
+      tags: [sso]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SsoConfigRequest" }
+      responses:
+        "204":
+          description: Saved.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations:
     get:
       operationId: listOrganizations
@@ -338,6 +414,22 @@ components:
       additionalProperties: false
       properties:
         message: { type: string }
+
+    SsoRedirect:
+      type: object
+      required: [redirect_url]
+      additionalProperties: false
+      properties:
+        redirect_url: { type: string }
+
+    SsoConfigRequest:
+      type: object
+      required: [client_id, client_secret, enabled]
+      additionalProperties: false
+      properties:
+        client_id: { type: string, minLength: 1, maxLength: 500 }
+        client_secret: { type: string, minLength: 1, maxLength: 500 }
+        enabled: { type: boolean }
 
     AuthUser:
       type: object

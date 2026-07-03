@@ -28,12 +28,16 @@ type Querier interface {
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
+	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
+	// before an org context exists; org_id is a column on the returned row.
+	GetEnabledSSOConfigByProvider(ctx context.Context, arg GetEnabledSSOConfigByProviderParams) (SsoConfig, error)
 	// lint:cross-org — the token hash IS the authorization key; lookup is by token,
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	// audit_logs is append-only: there are intentionally NO update or delete queries
@@ -65,6 +69,7 @@ type Querier interface {
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
+	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
 	// Used by the seed with a fixed id; idempotent.
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }

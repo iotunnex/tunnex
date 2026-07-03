@@ -22,6 +22,7 @@ import (
 var walkBodies = map[string]string{
 	"createorganization": `{"name":"Walk","slug":"walk-test"}`,
 	"updateorganization": `{"name":"Walk"}`,
+	"setssoconfig":       `{"client_id":"x","client_secret":"y","enabled":true}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
@@ -49,6 +50,7 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 				continue
 			}
 			reqPath := strings.ReplaceAll(path, "{orgId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{provider}", "google")
 
 			var body io.Reader
 			if b, ok := walkBodies[strings.ToLower(op.OperationID)]; ok {

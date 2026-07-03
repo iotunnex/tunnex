@@ -32,6 +32,18 @@ const (
 	Ok HealthResponseStatus = "ok"
 )
 
+// Defines values for SsoCallbackParamsProvider.
+const (
+	SsoCallbackParamsProviderGoogle    SsoCallbackParamsProvider = "google"
+	SsoCallbackParamsProviderMicrosoft SsoCallbackParamsProvider = "microsoft"
+)
+
+// Defines values for StartSsoLoginParamsProvider.
+const (
+	StartSsoLoginParamsProviderGoogle    StartSsoLoginParamsProvider = "google"
+	StartSsoLoginParamsProviderMicrosoft StartSsoLoginParamsProvider = "microsoft"
+)
+
 // AuthUser defines model for AuthUser.
 type AuthUser struct {
 	Email         openapi_types.Email `json:"email"`
@@ -126,6 +138,18 @@ type SignupRequest struct {
 	Password string              `json:"password"`
 }
 
+// SsoConfigRequest defines model for SsoConfigRequest.
+type SsoConfigRequest struct {
+	ClientId     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// SsoRedirect defines model for SsoRedirect.
+type SsoRedirect struct {
+	RedirectUrl string `json:"redirect_url"`
+}
+
 // TokenRequest defines model for TokenRequest.
 type TokenRequest struct {
 	Token string `json:"token"`
@@ -135,6 +159,24 @@ type TokenRequest struct {
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
 }
+
+// SsoCallbackParams defines parameters for SsoCallback.
+type SsoCallbackParams struct {
+	Code  string `form:"code" json:"code"`
+	State string `form:"state" json:"state"`
+}
+
+// SsoCallbackParamsProvider defines parameters for SsoCallback.
+type SsoCallbackParamsProvider string
+
+// StartSsoLoginParams defines parameters for StartSsoLogin.
+type StartSsoLoginParams struct {
+	// Org Organization slug whose SSO config to use.
+	Org string `form:"org" json:"org"`
+}
+
+// StartSsoLoginParamsProvider defines parameters for StartSsoLogin.
+type StartSsoLoginParamsProvider string
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -157,6 +199,9 @@ type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
 // UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
 type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
+// SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
+type SetSsoConfigJSONRequestBody = SsoConfigRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Verify credentials
@@ -174,6 +219,12 @@ type ServerInterface interface {
 	// Create a local account (sends a verification email)
 	// (POST /api/v1/auth/signup)
 	Signup(w http.ResponseWriter, r *http.Request)
+	// SSO callback (enterprise)
+	// (GET /api/v1/auth/sso/{provider}/callback)
+	SsoCallback(w http.ResponseWriter, r *http.Request, provider SsoCallbackParamsProvider, params SsoCallbackParams)
+	// Begin an SSO login (enterprise)
+	// (GET /api/v1/auth/sso/{provider}/start)
+	StartSsoLogin(w http.ResponseWriter, r *http.Request, provider StartSsoLoginParamsProvider, params StartSsoLoginParams)
 	// Verify an email address with a token
 	// (POST /api/v1/auth/verify-email)
 	VerifyEmail(w http.ResponseWriter, r *http.Request)
@@ -192,6 +243,9 @@ type ServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Configure an SSO provider for an organization (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
+	SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -231,6 +285,18 @@ func (_ Unimplemented) Signup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SSO callback (enterprise)
+// (GET /api/v1/auth/sso/{provider}/callback)
+func (_ Unimplemented) SsoCallback(w http.ResponseWriter, r *http.Request, provider SsoCallbackParamsProvider, params SsoCallbackParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Begin an SSO login (enterprise)
+// (GET /api/v1/auth/sso/{provider}/start)
+func (_ Unimplemented) StartSsoLogin(w http.ResponseWriter, r *http.Request, provider StartSsoLoginParamsProvider, params StartSsoLoginParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Verify an email address with a token
 // (POST /api/v1/auth/verify-email)
 func (_ Unimplemented) VerifyEmail(w http.ResponseWriter, r *http.Request) {
@@ -264,6 +330,12 @@ func (_ Unimplemented) GetOrganization(w http.ResponseWriter, r *http.Request, o
 // Update organization settings (name only; slug is immutable)
 // (PATCH /api/v1/organizations/{orgId})
 func (_ Unimplemented) UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Configure an SSO provider for an organization (enterprise)
+// (PUT /api/v1/organizations/{orgId}/sso/{provider})
+func (_ Unimplemented) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -343,6 +415,107 @@ func (siw *ServerInterfaceWrapper) Signup(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Signup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SsoCallback operation middleware
+func (siw *ServerInterfaceWrapper) SsoCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider SsoCallbackParamsProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SsoCallbackParams
+
+	// ------------- Required query parameter "code" -------------
+
+	if paramValue := r.URL.Query().Get("code"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "code", r.URL.Query(), &params.Code)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
+		return
+	}
+
+	// ------------- Required query parameter "state" -------------
+
+	if paramValue := r.URL.Query().Get("state"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "state", r.URL.Query(), &params.State)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SsoCallback(w, r, provider, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSsoLogin operation middleware
+func (siw *ServerInterfaceWrapper) StartSsoLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider StartSsoLoginParamsProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartSsoLoginParams
+
+	// ------------- Required query parameter "org" -------------
+
+	if paramValue := r.URL.Query().Get("org"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "org"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "org", r.URL.Query(), &params.Org)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSsoLogin(w, r, provider, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -499,6 +672,46 @@ func (siw *ServerInterfaceWrapper) UpdateOrganization(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// SetSsoConfig operation middleware
+func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "provider" -------------
+	var provider string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSsoConfig(w, r, orgId, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -642,6 +855,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/auth/signup", wrapper.Signup)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/sso/{provider}/callback", wrapper.SsoCallback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/sso/{provider}/start", wrapper.StartSsoLogin)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/verify-email", wrapper.VerifyEmail)
 	})
 	r.Group(func(r chi.Router) {
@@ -658,6 +877,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.UpdateOrganization)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.SetSsoConfig)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealth)
@@ -859,6 +1081,83 @@ type SignupdefaultJSONResponse struct {
 }
 
 func (response SignupdefaultJSONResponse) VisitSignupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SsoCallbackRequestObject struct {
+	Provider SsoCallbackParamsProvider `json:"provider"`
+	Params   SsoCallbackParams
+}
+
+type SsoCallbackResponseObject interface {
+	VisitSsoCallbackResponse(w http.ResponseWriter) error
+}
+
+type SsoCallback302ResponseHeaders struct {
+	Location string
+}
+
+type SsoCallback302Response struct {
+	Headers SsoCallback302ResponseHeaders
+}
+
+func (response SsoCallback302Response) VisitSsoCallbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(302)
+	return nil
+}
+
+type SsoCallbackdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SsoCallbackdefaultJSONResponse) VisitSsoCallbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type StartSsoLoginRequestObject struct {
+	Provider StartSsoLoginParamsProvider `json:"provider"`
+	Params   StartSsoLoginParams
+}
+
+type StartSsoLoginResponseObject interface {
+	VisitStartSsoLoginResponse(w http.ResponseWriter) error
+}
+
+type StartSsoLogin200ResponseHeaders struct {
+	XRequestId string
+}
+
+type StartSsoLogin200JSONResponse struct {
+	Body    SsoRedirect
+	Headers StartSsoLogin200ResponseHeaders
+}
+
+func (response StartSsoLogin200JSONResponse) VisitStartSsoLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type StartSsoLogindefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response StartSsoLogindefaultJSONResponse) VisitStartSsoLoginResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -1097,6 +1396,44 @@ func (response UpdateOrganizationdefaultJSONResponse) VisitUpdateOrganizationRes
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type SetSsoConfigRequestObject struct {
+	OrgId    openapi_types.UUID `json:"orgId"`
+	Provider string             `json:"provider"`
+	Body     *SetSsoConfigJSONRequestBody
+}
+
+type SetSsoConfigResponseObject interface {
+	VisitSetSsoConfigResponse(w http.ResponseWriter) error
+}
+
+type SetSsoConfig204ResponseHeaders struct {
+	XRequestId string
+}
+
+type SetSsoConfig204Response struct {
+	Headers SetSsoConfig204ResponseHeaders
+}
+
+func (response SetSsoConfig204Response) VisitSetSsoConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetSsoConfigdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SetSsoConfigdefaultJSONResponse) VisitSetSsoConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type GetHealthRequestObject struct {
 }
 
@@ -1152,6 +1489,12 @@ type StrictServerInterface interface {
 	// Create a local account (sends a verification email)
 	// (POST /api/v1/auth/signup)
 	Signup(ctx context.Context, request SignupRequestObject) (SignupResponseObject, error)
+	// SSO callback (enterprise)
+	// (GET /api/v1/auth/sso/{provider}/callback)
+	SsoCallback(ctx context.Context, request SsoCallbackRequestObject) (SsoCallbackResponseObject, error)
+	// Begin an SSO login (enterprise)
+	// (GET /api/v1/auth/sso/{provider}/start)
+	StartSsoLogin(ctx context.Context, request StartSsoLoginRequestObject) (StartSsoLoginResponseObject, error)
 	// Verify an email address with a token
 	// (POST /api/v1/auth/verify-email)
 	VerifyEmail(ctx context.Context, request VerifyEmailRequestObject) (VerifyEmailResponseObject, error)
@@ -1170,6 +1513,9 @@ type StrictServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(ctx context.Context, request UpdateOrganizationRequestObject) (UpdateOrganizationResponseObject, error)
+	// Configure an SSO provider for an organization (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
+	SetSsoConfig(ctx context.Context, request SetSsoConfigRequestObject) (SetSsoConfigResponseObject, error)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -1352,6 +1698,60 @@ func (sh *strictHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SsoCallback operation middleware
+func (sh *strictHandler) SsoCallback(w http.ResponseWriter, r *http.Request, provider SsoCallbackParamsProvider, params SsoCallbackParams) {
+	var request SsoCallbackRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SsoCallback(ctx, request.(SsoCallbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SsoCallback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SsoCallbackResponseObject); ok {
+		if err := validResponse.VisitSsoCallbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartSsoLogin operation middleware
+func (sh *strictHandler) StartSsoLogin(w http.ResponseWriter, r *http.Request, provider StartSsoLoginParamsProvider, params StartSsoLoginParams) {
+	var request StartSsoLoginRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartSsoLogin(ctx, request.(StartSsoLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartSsoLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartSsoLoginResponseObject); ok {
+		if err := validResponse.VisitStartSsoLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // VerifyEmail operation middleware
 func (sh *strictHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	var request VerifyEmailRequestObject
@@ -1523,6 +1923,40 @@ func (sh *strictHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// SetSsoConfig operation middleware
+func (sh *strictHandler) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
+	var request SetSsoConfigRequestObject
+
+	request.OrgId = orgId
+	request.Provider = provider
+
+	var body SetSsoConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetSsoConfig(ctx, request.(SetSsoConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetSsoConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetSsoConfigResponseObject); ok {
+		if err := validResponse.VisitSetSsoConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealth operation middleware
 func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthRequestObject
@@ -1550,44 +1984,50 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

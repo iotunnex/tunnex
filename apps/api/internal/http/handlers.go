@@ -63,7 +63,9 @@ type apiServer struct {
 	orgs         *tenancy.Service
 	auth         *auth.Service
 	sessions     *session.Store
+	sso          ssoPort // nil in the open build
 	cookieSecure bool
+	appBaseURL   string
 }
 
 // GetHealth implements GET /healthz.

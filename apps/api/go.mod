@@ -1,11 +1,12 @@
 module github.com/tunnexio/tunnex/apps/api
 
-go 1.25
+go 1.25.0
 
 toolchain go1.25.11
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
+	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/getkin/kin-openapi v0.140.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/golang-migrate/migrate/v4 v4.18.1
@@ -15,11 +16,13 @@ require (
 	github.com/oapi-codegen/runtime v1.4.2
 	github.com/redis/go-redis/v9 v9.21.0
 	golang.org/x/crypto v0.46.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
