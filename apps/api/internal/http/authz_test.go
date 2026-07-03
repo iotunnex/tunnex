@@ -9,33 +9,66 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
-func TestAuthorizeOrg(t *testing.T) {
+func principalWithRole(orgID uuid.UUID, role string) context.Context {
+	return authctx.WithPrincipal(context.Background(),
+		&authctx.Principal{UserID: uuid.New(), Roles: map[uuid.UUID]string{orgID: role}})
+}
+
+func TestAuthorizeFailClosedAndProgression(t *testing.T) {
 	orgA := uuid.New()
 	orgB := uuid.New()
-	user := uuid.New()
 
-	// Unauthenticated -> 401, fails closed.
-	if _, err := authorizeOrg(context.Background(), orgA); !hasCode(err, 401, "unauthenticated") {
-		t.Fatalf("no principal: want 401 unauthenticated, got %v", err)
+	// Unauthenticated -> 401.
+	if _, err := authorize(context.Background(), orgA, rbac.PermOrgView); !hasCode(err, 401, "unauthenticated") {
+		t.Fatalf("no principal: want 401, got %v", err)
 	}
 
-	member := authctx.WithPrincipal(context.Background(),
-		&authctx.Principal{UserID: user, Roles: map[uuid.UUID]string{orgA: "owner"}})
+	// Non-member -> 404 (existence not leaked), even for a low permission.
+	member := principalWithRole(orgA, rbac.RoleMember)
+	if _, err := authorize(member, orgB, rbac.PermOrgView); !hasCode(err, 404, "org_not_found") {
+		t.Fatalf("non-member: want 404, got %v", err)
+	}
 
-	// Member of A -> ok, and the authorized org is placed in context.
-	ctx, err := authorizeOrg(member, orgA)
+	// Member has view; the authorized org is placed in context.
+	ctx, err := authorize(member, orgA, rbac.PermOrgView)
 	if err != nil {
-		t.Fatalf("member of A: unexpected error %v", err)
+		t.Fatalf("member view: unexpected %v", err)
 	}
 	if got, ok := authctx.OrgFrom(ctx); !ok || got != orgA {
-		t.Fatalf("authorized org not in context: got %v ok=%v", got, ok)
+		t.Fatalf("authorized org not in context")
 	}
 
-	// Not a member of B -> 404 (not 403): no cross-tenant existence leak.
-	if _, err := authorizeOrg(member, orgB); !hasCode(err, 404, "org_not_found") {
-		t.Fatalf("non-member: want 404 org_not_found, got %v", err)
+	// Member lacks update -> 403 (they ARE a member, so not 404).
+	if _, err := authorize(member, orgA, rbac.PermOrgUpdate); !hasCode(err, 403, "forbidden") {
+		t.Fatalf("member update: want 403, got %v", err)
+	}
+}
+
+func TestAuthorizePermissionByRole(t *testing.T) {
+	org := uuid.New()
+	cases := []struct {
+		role string
+		perm rbac.Permission
+		ok   bool
+	}{
+		{rbac.RoleMember, rbac.PermOrgView, true},
+		{rbac.RoleMember, rbac.PermOrgUpdate, false},
+		{rbac.RoleMember, rbac.PermOrgDelete, false},
+		{rbac.RoleAdmin, rbac.PermOrgUpdate, true},
+		{rbac.RoleAdmin, rbac.PermOrgDelete, false},
+		{rbac.RoleOwner, rbac.PermOrgDelete, true},
+	}
+	for _, c := range cases {
+		_, err := authorize(principalWithRole(org, c.role), org, c.perm)
+		if c.ok && err != nil {
+			t.Errorf("%s/%s: want allow, got %v", c.role, c.perm, err)
+		}
+		if !c.ok && !hasCode(err, 403, "forbidden") {
+			t.Errorf("%s/%s: want 403 forbidden, got %v", c.role, c.perm, err)
+		}
 	}
 }
 

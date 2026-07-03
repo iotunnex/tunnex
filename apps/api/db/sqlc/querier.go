@@ -14,7 +14,9 @@ type Querier interface {
 	// lint:cross-org — authorized by the invitation id obtained via its token, not
 	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
+	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	CountOrganizations(ctx context.Context) (int64, error)
+	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
@@ -37,6 +39,7 @@ type Querier interface {
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
 	ListOrganizations(ctx context.Context) ([]Organization, error)
+	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — revocation targets a specific invitation id (already
 	// authorized at the handler layer by org membership before this runs).
 	RevokeInvitation(ctx context.Context, id uuid.UUID) error

@@ -10,27 +10,64 @@ import (
 
 // Query-lint: make the tenancy conventions executable, not just documented.
 //
-//   - Tables carrying deleted_at (organizations, users) MUST filter
-//     `deleted_at IS NULL` on SELECT/UPDATE, or silently resurrect deleted rows.
-//   - Tenant-owned tables (memberships, invitations) MUST scope by `org_id`, or
-//     leak/mutate another tenant's data.
+//   - Every table is TENANT-OWNED by default and must scope by `org_id` — unless
+//     it is in the explicit globalTables allowlist. New tables therefore default
+//     to *protected*: forgetting to classify one fails the build, instead of
+//     silently escaping the lint (the failure mode the hand-maintained list had).
+//   - Any table with a `deleted_at` column must filter `deleted_at IS NULL` on
+//     SELECT/UPDATE, or silently resurrect soft-deleted rows.
 //
-// Both rules have an explicit escape hatch (`lint:allow-deleted` /
-// `lint:cross-org`) so intentional exceptions are reviewed, not accidental —
-// same spirit as the set_updated_at trigger check.
-//
-// This is a source-level lint over db/queries/*.sql; false positives are cheap
-// (annotate), silent isolation bugs are not.
+// Both rules have an explicit escape hatch (`lint:cross-org` /
+// `lint:allow-deleted`) so intentional exceptions are reviewed, not accidental.
+// Source-level lint over db/queries/*.sql; false positives are cheap (annotate),
+// silent isolation bugs are not.
 
-var (
-	deletedAtTables = []string{"organizations", "users"}
-	tenantTables    = []string{"memberships", "invitations"}
-)
-
-type query struct {
-	name string
-	body string // full block incl. leading comments (annotations live here)
+// globalTables are legitimately NOT org-scoped (see migrations/README).
+var globalTables = map[string]bool{
+	"organizations": true, // the tenant root; scoped by id/slug
+	"users":         true, // global — email-first login, org resolved after
 }
+
+type schema struct {
+	tenant     map[string]bool // tables requiring org_id scoping
+	deletedAt  map[string]bool // tables with a deleted_at column
+	tableNames []string
+}
+
+func parseSchema(t *testing.T) schema {
+	t.Helper()
+	entries, err := os.ReadDir("migrations")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	tableRe := regexp.MustCompile(`(?is)create table\s+(\w+)\s*\((.*?)\n\);`)
+	s := schema{tenant: map[string]bool{}, deletedAt: map[string]bool{}}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".up.sql") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join("migrations", e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, m := range tableRe.FindAllStringSubmatch(string(content), -1) {
+			name, body := strings.ToLower(m[1]), strings.ToLower(m[2])
+			s.tableNames = append(s.tableNames, name)
+			if strings.Contains(body, "deleted_at") {
+				s.deletedAt[name] = true
+			}
+			if !globalTables[name] {
+				s.tenant[name] = true
+			}
+		}
+	}
+	if len(s.tableNames) == 0 {
+		t.Fatal("no tables parsed from migrations — lint would pass vacuously")
+	}
+	return s
+}
+
+type query struct{ name, body string }
 
 func loadQueries(t *testing.T) []query {
 	t.Helper()
@@ -38,8 +75,8 @@ func loadQueries(t *testing.T) []query {
 	if err != nil {
 		t.Fatalf("read queries dir: %v", err)
 	}
-	var out []query
 	nameRe := regexp.MustCompile(`(?m)^--\s*name:\s*(\w+)`)
+	var out []query
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
@@ -54,10 +91,7 @@ func loadQueries(t *testing.T) []query {
 			if i+1 < len(locs) {
 				end = locs[i+1][0]
 			}
-			out = append(out, query{
-				name: string(content)[loc[2]:loc[3]],
-				body: string(content)[loc[0]:end],
-			})
+			out = append(out, query{name: string(content)[loc[2]:loc[3]], body: string(content)[loc[0]:end]})
 		}
 	}
 	if len(out) == 0 {
@@ -66,40 +100,40 @@ func loadQueries(t *testing.T) []query {
 	return out
 }
 
+// refersTo matches SELECT/UPDATE/DELETE references that need scoping (INSERT
+// sets columns in VALUES and is exempt from these read/update-scope rules).
 func refersTo(low, table string) bool {
-	// SELECT/UPDATE/DELETE references that need scoping (INSERT sets columns in
-	// VALUES and is exempt from these read/update-scope rules).
-	re := regexp.MustCompile(`(?:from|update|join|delete\s+from)\s+` + table + `\b`)
-	return re.MatchString(low)
+	return regexp.MustCompile(`(?:from|update|join|delete\s+from)\s+` + table + `\b`).MatchString(low)
 }
 
 func TestQueriesScopeDeletedAt(t *testing.T) {
+	s := parseSchema(t)
 	for _, q := range loadQueries(t) {
 		low := strings.ToLower(q.body)
 		if strings.Contains(low, "lint:allow-deleted") {
 			continue
 		}
-		for _, tbl := range deletedAtTables {
+		for tbl := range s.deletedAt {
 			if refersTo(low, tbl) && !strings.Contains(low, "deleted_at") {
 				t.Errorf("query %q reads/updates %q without `deleted_at IS NULL` "+
-					"(add the filter, or annotate `-- lint:allow-deleted` with a reason)",
-					q.name, tbl)
+					"(add the filter, or annotate `-- lint:allow-deleted`)", q.name, tbl)
 			}
 		}
 	}
 }
 
 func TestQueriesScopeOrgID(t *testing.T) {
+	s := parseSchema(t)
 	for _, q := range loadQueries(t) {
 		low := strings.ToLower(q.body)
 		if strings.Contains(low, "lint:cross-org") {
 			continue
 		}
-		for _, tbl := range tenantTables {
+		for tbl := range s.tenant {
 			if refersTo(low, tbl) && !strings.Contains(low, "org_id") {
 				t.Errorf("query %q touches tenant-owned table %q without `org_id` scoping "+
-					"(add org_id, or annotate `-- lint:cross-org` with a reason)",
-					q.name, tbl)
+					"(add org_id, annotate `-- lint:cross-org`, or add %q to globalTables)",
+					q.name, tbl, tbl)
 			}
 		}
 	}

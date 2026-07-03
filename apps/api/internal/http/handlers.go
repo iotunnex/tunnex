@@ -11,19 +11,28 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
-// authorizeOrg fails closed: it requires an authenticated principal that is a
-// member of orgID, and returns the org-scoped context on success. A non-member
-// gets 404 (not 403) so org existence is never leaked across tenants.
-func authorizeOrg(ctx context.Context, orgID uuid.UUID) (context.Context, error) {
+// authorize fails closed and permission-gates a request against orgID:
+//   - no principal            -> 401 unauthenticated
+//   - principal not a member  -> 404 (not 403): no cross-tenant existence leak
+//   - member lacking the perm -> 403 forbidden
+//
+// On success it returns the org-scoped context. Call sites pass a Permission,
+// never a role, so the policy stays in package rbac.
+func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (context.Context, error) {
 	p, ok := authctx.PrincipalFrom(ctx)
 	if !ok {
 		return ctx, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
 	}
-	if _, member := p.RoleIn(orgID); !member {
+	role, member := p.RoleIn(orgID)
+	if !member {
 		return ctx, apierr.NotFound("org_not_found", "organization not found")
+	}
+	if !rbac.Can(role, perm) {
+		return ctx, apierr.New(http.StatusForbidden, "forbidden", "you do not have permission to perform this action")
 	}
 	return authctx.WithOrg(ctx, orgID), nil
 }
@@ -81,7 +90,7 @@ func (s apiServer) CreateOrganization(ctx context.Context, req api.CreateOrganiz
 
 // GetOrganization implements GET /api/v1/organizations/{orgId}.
 func (s apiServer) GetOrganization(ctx context.Context, req api.GetOrganizationRequestObject) (api.GetOrganizationResponseObject, error) {
-	ctx, err := authorizeOrg(ctx, req.OrgId)
+	ctx, err := authorize(ctx, req.OrgId, rbac.PermOrgView)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +109,7 @@ func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganiz
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	ctx, err := authorizeOrg(ctx, req.OrgId)
+	ctx, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +125,7 @@ func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganiz
 
 // DeleteOrganization implements DELETE /api/v1/organizations/{orgId}.
 func (s apiServer) DeleteOrganization(ctx context.Context, req api.DeleteOrganizationRequestObject) (api.DeleteOrganizationResponseObject, error) {
-	ctx, err := authorizeOrg(ctx, req.OrgId)
+	ctx, err := authorize(ctx, req.OrgId, rbac.PermOrgDelete)
 	if err != nil {
 		return nil, err
 	}

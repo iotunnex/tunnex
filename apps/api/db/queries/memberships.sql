@@ -21,3 +21,17 @@ ORDER BY created_at;
 -- name: GetMembership :one
 SELECT * FROM memberships
 WHERE org_id = $1 AND user_id = $2;
+
+-- name: ChangeMemberRole :one
+UPDATE memberships
+SET role = $3
+WHERE org_id = $1 AND user_id = $2
+RETURNING *;
+
+-- name: RemoveMember :execrows
+DELETE FROM memberships
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: CountOwners :one
+SELECT count(*) FROM memberships
+WHERE org_id = $1 AND role = 'owner';

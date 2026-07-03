@@ -11,6 +11,45 @@ import (
 	"github.com/google/uuid"
 )
 
+const changeMemberRole = `-- name: ChangeMemberRole :one
+UPDATE memberships
+SET role = $3
+WHERE org_id = $1 AND user_id = $2
+RETURNING id, org_id, user_id, role, created_at, updated_at
+`
+
+type ChangeMemberRoleParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+	Role   string    `json:"role"`
+}
+
+func (q *Queries) ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error) {
+	row := q.db.QueryRow(ctx, changeMemberRole, arg.OrgID, arg.UserID, arg.Role)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const countOwners = `-- name: CountOwners :one
+SELECT count(*) FROM memberships
+WHERE org_id = $1 AND role = 'owner'
+`
+
+func (q *Queries) CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOwners, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getMembership = `-- name: GetMembership :one
 SELECT id, org_id, user_id, role, created_at, updated_at FROM memberships
 WHERE org_id = $1 AND user_id = $2
@@ -101,6 +140,24 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeMember = `-- name: RemoveMember :execrows
+DELETE FROM memberships
+WHERE org_id = $1 AND user_id = $2
+`
+
+type RemoveMemberParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeMember, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertMembership = `-- name: UpsertMembership :one

@@ -74,7 +74,7 @@ func (s *Service) CreateOrganization(ctx context.Context, name, slug string) (sq
 		if e != nil {
 			return mapDBError(e)
 		}
-		return writeAudit(ctx, q, org.ID, "org.created", org.ID.String(),
+		return writeAudit(ctx, q, org.ID, nil, "org.created", "organization", org.ID.String(),
 			map[string]any{"name": name, "slug": slug})
 	})
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, id uuid.UUID, name str
 		if e != nil {
 			return e
 		}
-		return writeAudit(ctx, q, id, "org.updated", id.String(),
+		return writeAudit(ctx, q, id, nil, "org.updated", "organization", id.String(),
 			map[string]any{"name": map[string]string{"from": before.Name, "to": name}})
 	})
 	if err != nil {
@@ -132,19 +132,26 @@ func (s *Service) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) erro
 		if n == 0 {
 			return orgNotFound()
 		}
-		return writeAudit(ctx, q, id, "org.deleted", id.String(), map[string]any{})
+		return writeAudit(ctx, q, id, nil, "org.deleted", "organization", id.String(), map[string]any{})
 	})
 }
 
-func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetID string, meta map[string]any) error {
+// writeAudit records an audit event in the caller's transaction. actor may be
+// nil, which means a SYSTEM action (seed/migration/automation) — never an
+// unattributed user action. Once auth lands (S2), user-initiated mutations
+// (including every role change) MUST pass a non-nil actor.
+func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
 	b, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	targetType := "organization"
+	actorID := pgtype.UUID{}
+	if actor != nil {
+		actorID = pgtype.UUID{Bytes: [16]byte(*actor), Valid: true}
+	}
 	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
 		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
-		ActorUserID: pgtype.UUID{}, // null until authenticated actors exist (S2)
+		ActorUserID: actorID,
 		Action:      action,
 		TargetType:  &targetType,
 		TargetID:    &targetID,
