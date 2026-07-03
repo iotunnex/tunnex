@@ -62,6 +62,43 @@ func (s apiServer) CreateOrganization(ctx context.Context, req api.CreateOrganiz
 	}, nil
 }
 
+// GetOrganization implements GET /api/v1/organizations/{orgId}.
+func (s apiServer) GetOrganization(ctx context.Context, req api.GetOrganizationRequestObject) (api.GetOrganizationResponseObject, error) {
+	org, err := s.orgs.GetOrganization(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetOrganization200JSONResponse{
+		Body:    toAPIOrg(org),
+		Headers: api.GetOrganization200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// UpdateOrganization implements PATCH /api/v1/organizations/{orgId}.
+func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganizationRequestObject) (api.UpdateOrganizationResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	org, err := s.orgs.UpdateOrganization(ctx, req.OrgId, req.Body.Name)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateOrganization200JSONResponse{
+		Body:    toAPIOrg(org),
+		Headers: api.UpdateOrganization200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// DeleteOrganization implements DELETE /api/v1/organizations/{orgId}.
+func (s apiServer) DeleteOrganization(ctx context.Context, req api.DeleteOrganizationRequestObject) (api.DeleteOrganizationResponseObject, error) {
+	if err := s.orgs.SoftDeleteOrganization(ctx, req.OrgId); err != nil {
+		return nil, err
+	}
+	return api.DeleteOrganization204Response{
+		Headers: api.DeleteOrganization204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
 func toAPIOrg(o sqlc.Organization) api.Organization {
 	return api.Organization{
 		Id:        o.ID,

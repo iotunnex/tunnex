@@ -2,13 +2,21 @@
 // memberships). It is edition-aware: the org limit comes from the enterprise
 // boundary, so the open build caps org creation while the enterprise build does
 // not — without any conditional logic leaking into the HTTP layer.
+//
+// Every mutation writes an audit_logs row in the SAME transaction as the change,
+// so an org can never be created/updated/deleted without a corresponding audit
+// record. The actor is currently null (endpoints are unauthenticated until S2).
 package tenancy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -18,17 +26,35 @@ import (
 
 // Service provides organization operations.
 type Service struct {
-	q *sqlc.Queries
+	pool *pgxpool.Pool
+	q    *sqlc.Queries
 }
 
 // NewService builds a tenancy service over the given pool.
 func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{q: sqlc.New(pool)}
+	return &Service{pool: pool, q: sqlc.New(pool)}
 }
 
-// CreateOrganization creates an organization, enforcing the edition's org cap.
-// Returns a typed *apierr.Error ("org_limit_reached") when the open build's cap
-// is hit, or ("slug_taken") on a duplicate slug.
+// withTx runs fn inside a transaction (mutation + audit are atomic). When the
+// service was constructed without a pool (tests injecting a tx), fn runs on the
+// pre-set querier directly so the caller controls the transaction.
+func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
+	if s.pool == nil {
+		return fn(s.q)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+	if err := fn(sqlc.New(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// CreateOrganization creates an organization (enforcing the edition cap) and
+// records an org.created audit event atomically.
 func (s *Service) CreateOrganization(ctx context.Context, name, slug string) (sqlc.Organization, error) {
 	if !enterprise.Unlimited {
 		count, err := s.q.CountOrganizations(ctx)
@@ -41,17 +67,93 @@ func (s *Service) CreateOrganization(ctx context.Context, name, slug string) (sq
 		}
 	}
 
-	org, err := s.q.CreateOrganization(ctx, sqlc.CreateOrganizationParams{Name: name, Slug: slug})
+	var org sqlc.Organization
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		var e error
+		org, e = q.CreateOrganization(ctx, sqlc.CreateOrganizationParams{Name: name, Slug: slug})
+		if e != nil {
+			return mapDBError(e)
+		}
+		return writeAudit(ctx, q, org.ID, "org.created", org.ID.String(),
+			map[string]any{"name": name, "slug": slug})
+	})
 	if err != nil {
-		return sqlc.Organization{}, mapDBError(err)
+		return sqlc.Organization{}, err
 	}
 	return org, nil
+}
+
+// GetOrganization returns a live organization or a typed not-found error.
+func (s *Service) GetOrganization(ctx context.Context, id uuid.UUID) (sqlc.Organization, error) {
+	org, err := s.q.GetOrganizationByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.Organization{}, orgNotFound()
+	}
+	return org, err
 }
 
 // ListOrganizations returns all live organizations.
 func (s *Service) ListOrganizations(ctx context.Context) ([]sqlc.Organization, error) {
 	return s.q.ListOrganizations(ctx)
 }
+
+// UpdateOrganization updates the mutable settings (name only — slug is
+// immutable) and records an org.updated audit event atomically.
+func (s *Service) UpdateOrganization(ctx context.Context, id uuid.UUID, name string) (sqlc.Organization, error) {
+	var org sqlc.Organization
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		before, e := q.GetOrganizationByID(ctx, id)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return orgNotFound()
+		}
+		if e != nil {
+			return e
+		}
+		org, e = q.UpdateOrganizationName(ctx, sqlc.UpdateOrganizationNameParams{ID: id, Name: name})
+		if e != nil {
+			return e
+		}
+		return writeAudit(ctx, q, id, "org.updated", id.String(),
+			map[string]any{"name": map[string]string{"from": before.Name, "to": name}})
+	})
+	if err != nil {
+		return sqlc.Organization{}, err
+	}
+	return org, nil
+}
+
+// SoftDeleteOrganization soft-deletes an org and records org.deleted atomically.
+func (s *Service) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, e := q.SoftDeleteOrganization(ctx, id)
+		if e != nil {
+			return e
+		}
+		if n == 0 {
+			return orgNotFound()
+		}
+		return writeAudit(ctx, q, id, "org.deleted", id.String(), map[string]any{})
+	})
+}
+
+func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetID string, meta map[string]any) error {
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	targetType := "organization"
+	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
+		ActorUserID: pgtype.UUID{}, // null until authenticated actors exist (S2)
+		Action:      action,
+		TargetType:  &targetType,
+		TargetID:    &targetID,
+		Metadata:    b,
+	})
+	return err
+}
+
+func orgNotFound() error { return apierr.NotFound("org_not_found", "organization not found") }
 
 // mapDBError converts known Postgres errors into typed API errors.
 func mapDBError(err error) error {

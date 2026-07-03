@@ -82,6 +82,68 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/v1/organizations/{orgId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getOrganization
+      summary: Get an organization
+      tags: [organizations]
+      security: []
+      responses:
+        "200":
+          description: The organization.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateOrganization
+      summary: Update organization settings (name only; slug is immutable)
+      tags: [organizations]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationRequest"
+      responses:
+        "200":
+          description: The updated organization.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteOrganization
+      summary: Soft-delete an organization
+      tags: [organizations]
+      security: []
+      responses:
+        "204":
+          description: Deleted.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        default:
+          $ref: "#/components/responses/Error"
+
 components:
   headers:
     RequestId:
@@ -141,6 +203,17 @@ components:
           minLength: 1
           maxLength: 63
           pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+
+    UpdateOrganizationRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      description: Only the name is mutable; the slug is fixed at creation.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
 
     Error:
       type: object

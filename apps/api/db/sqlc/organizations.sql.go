@@ -119,22 +119,52 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 	return items, nil
 }
 
-const softDeleteOrganization = `-- name: SoftDeleteOrganization :exec
+const softDeleteOrganization = `-- name: SoftDeleteOrganization :execrows
 UPDATE organizations
 SET deleted_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, softDeleteOrganization, id)
-	return err
+func (q *Queries) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteOrganization, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateOrganizationName = `-- name: UpdateOrganizationName :one
+UPDATE organizations
+SET name = $2
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, name, slug, created_at, updated_at, deleted_at
+`
+
+type UpdateOrganizationNameParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// Slug is immutable after creation (S1.2); only name is updatable here.
+func (q *Queries) UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error) {
+	row := q.db.QueryRow(ctx, updateOrganizationName, arg.ID, arg.Name)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
 const upsertOrganization = `-- name: UpsertOrganization :one
 INSERT INTO organizations (id, name, slug)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE
-    SET name = EXCLUDED.name, slug = EXCLUDED.slug
+    SET name = EXCLUDED.name, slug = EXCLUDED.slug, deleted_at = NULL
 RETURNING id, name, slug, created_at, updated_at, deleted_at
 `
 
@@ -144,7 +174,8 @@ type UpsertOrganizationParams struct {
 	Slug string    `json:"slug"`
 }
 
-// Used by the seed with a fixed id; idempotent.
+// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
+// re-seeding restores a previously soft-deleted demo org to a clean live state.
 func (q *Queries) UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error) {
 	row := q.db.QueryRow(ctx, upsertOrganization, arg.ID, arg.Name, arg.Slug)
 	var i Organization

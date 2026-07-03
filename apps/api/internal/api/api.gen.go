@@ -18,6 +18,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
@@ -85,8 +86,16 @@ type Organization struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 
+// UpdateOrganizationRequest Only the name is mutable; the slug is fixed at creation.
+type UpdateOrganizationRequest struct {
+	Name string `json:"name"`
+}
+
 // CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
 type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
+
+// UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
+type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -96,6 +105,15 @@ type ServerInterface interface {
 	// Create an organization
 	// (POST /api/v1/organizations)
 	CreateOrganization(w http.ResponseWriter, r *http.Request)
+	// Soft-delete an organization
+	// (DELETE /api/v1/organizations/{orgId})
+	DeleteOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Get an organization
+	// (GET /api/v1/organizations/{orgId})
+	GetOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Update organization settings (name only; slug is immutable)
+	// (PATCH /api/v1/organizations/{orgId})
+	UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -114,6 +132,24 @@ func (_ Unimplemented) ListOrganizations(w http.ResponseWriter, r *http.Request)
 // Create an organization
 // (POST /api/v1/organizations)
 func (_ Unimplemented) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Soft-delete an organization
+// (DELETE /api/v1/organizations/{orgId})
+func (_ Unimplemented) DeleteOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get an organization
+// (GET /api/v1/organizations/{orgId})
+func (_ Unimplemented) GetOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update organization settings (name only; slug is immutable)
+// (PATCH /api/v1/organizations/{orgId})
+func (_ Unimplemented) UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -151,6 +187,81 @@ func (siw *ServerInterfaceWrapper) CreateOrganization(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateOrganization(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrganization operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrganization(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrganization operation middleware
+func (siw *ServerInterfaceWrapper) GetOrganization(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrganization(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOrganization operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOrganization(w, r, orgId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -294,6 +405,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/organizations", wrapper.CreateOrganization)
 	})
 	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.DeleteOrganization)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.GetOrganization)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.UpdateOrganization)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealth)
 	})
 
@@ -386,6 +506,121 @@ func (response CreateOrganizationdefaultJSONResponse) VisitCreateOrganizationRes
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type DeleteOrganizationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type DeleteOrganizationResponseObject interface {
+	VisitDeleteOrganizationResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrganization204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeleteOrganization204Response struct {
+	Headers DeleteOrganization204ResponseHeaders
+}
+
+func (response DeleteOrganization204Response) VisitDeleteOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOrganizationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteOrganizationdefaultJSONResponse) VisitDeleteOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetOrganizationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type GetOrganizationResponseObject interface {
+	VisitGetOrganizationResponse(w http.ResponseWriter) error
+}
+
+type GetOrganization200ResponseHeaders struct {
+	XRequestId string
+}
+
+type GetOrganization200JSONResponse struct {
+	Body    Organization
+	Headers GetOrganization200ResponseHeaders
+}
+
+func (response GetOrganization200JSONResponse) VisitGetOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetOrganizationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetOrganizationdefaultJSONResponse) VisitGetOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateOrganizationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *UpdateOrganizationJSONRequestBody
+}
+
+type UpdateOrganizationResponseObject interface {
+	VisitUpdateOrganizationResponse(w http.ResponseWriter) error
+}
+
+type UpdateOrganization200ResponseHeaders struct {
+	XRequestId string
+}
+
+type UpdateOrganization200JSONResponse struct {
+	Body    Organization
+	Headers UpdateOrganization200ResponseHeaders
+}
+
+func (response UpdateOrganization200JSONResponse) VisitUpdateOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateOrganizationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response UpdateOrganizationdefaultJSONResponse) VisitUpdateOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type GetHealthRequestObject struct {
 }
 
@@ -432,6 +667,15 @@ type StrictServerInterface interface {
 	// Create an organization
 	// (POST /api/v1/organizations)
 	CreateOrganization(ctx context.Context, request CreateOrganizationRequestObject) (CreateOrganizationResponseObject, error)
+	// Soft-delete an organization
+	// (DELETE /api/v1/organizations/{orgId})
+	DeleteOrganization(ctx context.Context, request DeleteOrganizationRequestObject) (DeleteOrganizationResponseObject, error)
+	// Get an organization
+	// (GET /api/v1/organizations/{orgId})
+	GetOrganization(ctx context.Context, request GetOrganizationRequestObject) (GetOrganizationResponseObject, error)
+	// Update organization settings (name only; slug is immutable)
+	// (PATCH /api/v1/organizations/{orgId})
+	UpdateOrganization(ctx context.Context, request UpdateOrganizationRequestObject) (UpdateOrganizationResponseObject, error)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -521,6 +765,91 @@ func (sh *strictHandler) CreateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// DeleteOrganization operation middleware
+func (sh *strictHandler) DeleteOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request DeleteOrganizationRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrganization(ctx, request.(DeleteOrganizationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrganization")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrganizationResponseObject); ok {
+		if err := validResponse.VisitDeleteOrganizationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrganization operation middleware
+func (sh *strictHandler) GetOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request GetOrganizationRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrganization(ctx, request.(GetOrganizationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrganization")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrganizationResponseObject); ok {
+		if err := validResponse.VisitGetOrganizationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOrganization operation middleware
+func (sh *strictHandler) UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request UpdateOrganizationRequestObject
+
+	request.OrgId = orgId
+
+	var body UpdateOrganizationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOrganization(ctx, request.(UpdateOrganizationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOrganization")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOrganizationResponseObject); ok {
+		if err := validResponse.VisitUpdateOrganizationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealth operation middleware
 func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthRequestObject
@@ -548,31 +877,34 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"DAAA//8PRDDUuBEAAA==",
+	"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",
+	"0lKIUgen5mqq1hfr/wcAAP//gD8ERfUXAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

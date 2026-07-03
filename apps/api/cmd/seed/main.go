@@ -113,10 +113,13 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, name string) (bool, er
 	return exists, err
 }
 
-// countRealOrgs counts organizations that are not the fixed demo org.
+// countRealOrgs counts LIVE organizations that are not the fixed demo org.
+// Soft-deleted orgs are excluded — they are not "real data" for the guard, and
+// counting them would wrongly block a reseed after demo data was deleted.
 func countRealOrgs(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	var n int64
 	err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM organizations WHERE id <> $1`, seeddata.DemoOrgID).Scan(&n)
+		`SELECT count(*) FROM organizations WHERE id <> $1 AND deleted_at IS NULL`,
+		seeddata.DemoOrgID).Scan(&n)
 	return n, err
 }

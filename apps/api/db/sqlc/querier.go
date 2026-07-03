@@ -34,10 +34,13 @@ type Querier interface {
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	RevokeInvitation(ctx context.Context, id uuid.UUID) error
-	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) error
+	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
+	// Slug is immutable after creation (S1.2); only name is updatable here.
+	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
 	// Idempotent on (org_id, user_id).
 	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
-	// Used by the seed with a fixed id; idempotent.
+	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
+	// re-seeding restores a previously soft-deleted demo org to a clean live state.
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
 	// Used by the seed with a fixed id; idempotent.
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
