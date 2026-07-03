@@ -2,6 +2,8 @@ module github.com/tunnexio/tunnex/apps/api
 
 go 1.25
 
+toolchain go1.25.11
+
 require (
 	github.com/getkin/kin-openapi v0.140.0
 	github.com/go-chi/chi/v5 v5.1.0
@@ -20,11 +22,13 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
+	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/oasdiff/yaml v0.1.0 // indirect
 	github.com/oasdiff/yaml3 v0.0.13 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 )
