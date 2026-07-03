@@ -11,7 +11,8 @@ import (
 )
 
 type Querier interface {
-	// Single-use: only transitions a pending, unexpired invite.
+	// lint:cross-org — authorized by the invitation id obtained via its token, not
+	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
@@ -19,7 +20,8 @@ type Querier interface {
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
-	// Callers must still check expires_at/accepted_at/revoked_at (single-use).
+	// lint:cross-org — the token hash IS the authorization key; lookup is by token,
+	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
@@ -31,8 +33,12 @@ type Querier interface {
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
+	// lint:cross-org — intentionally spans orgs: a user's memberships across all
+	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
 	ListOrganizations(ctx context.Context) ([]Organization, error)
+	// lint:cross-org — revocation targets a specific invitation id (already
+	// authorized at the handler layer by org membership before this runs).
 	RevokeInvitation(ctx context.Context, id uuid.UUID) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
 	// Slug is immutable after creation (S1.2); only name is updatable here.

@@ -74,6 +74,8 @@ WHERE user_id = $1
 ORDER BY created_at
 `
 
+// lint:cross-org — intentionally spans orgs: a user's memberships across all
+// their organizations (used to resolve which orgs a principal belongs to).
 func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error) {
 	rows, err := q.db.Query(ctx, listMembershipsByUser, userID)
 	if err != nil {

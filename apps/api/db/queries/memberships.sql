@@ -7,6 +7,8 @@ ON CONFLICT (org_id, user_id) DO UPDATE
 RETURNING *;
 
 -- name: ListMembershipsByUser :many
+-- lint:cross-org — intentionally spans orgs: a user's memberships across all
+-- their organizations (used to resolve which orgs a principal belongs to).
 SELECT * FROM memberships
 WHERE user_id = $1
 ORDER BY created_at;

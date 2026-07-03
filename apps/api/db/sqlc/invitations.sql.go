@@ -23,7 +23,8 @@ WHERE id = $1
 RETURNING id, org_id, email, role, token_hash, expires_at, accepted_at, revoked_at, invited_by_user_id, created_at, updated_at
 `
 
-// Single-use: only transitions a pending, unexpired invite.
+// lint:cross-org — authorized by the invitation id obtained via its token, not
+// by org scope. Single-use: only transitions a pending, unexpired invite.
 func (q *Queries) AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error) {
 	row := q.db.QueryRow(ctx, acceptInvitation, id)
 	var i Invitation
@@ -89,7 +90,8 @@ SELECT id, org_id, email, role, token_hash, expires_at, accepted_at, revoked_at,
 WHERE token_hash = $1
 `
 
-// Callers must still check expires_at/accepted_at/revoked_at (single-use).
+// lint:cross-org — the token hash IS the authorization key; lookup is by token,
+// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error) {
 	row := q.db.QueryRow(ctx, getInvitationByTokenHash, tokenHash)
 	var i Invitation
@@ -115,6 +117,8 @@ SET revoked_at = now()
 WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
 `
 
+// lint:cross-org — revocation targets a specific invitation id (already
+// authorized at the handler layer by org membership before this runs).
 func (q *Queries) RevokeInvitation(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeInvitation, id)
 	return err

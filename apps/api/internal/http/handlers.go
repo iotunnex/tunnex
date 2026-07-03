@@ -2,14 +2,31 @@ package http
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
+
+// authorizeOrg fails closed: it requires an authenticated principal that is a
+// member of orgID, and returns the org-scoped context on success. A non-member
+// gets 404 (not 403) so org existence is never leaked across tenants.
+func authorizeOrg(ctx context.Context, orgID uuid.UUID) (context.Context, error) {
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return ctx, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
+	}
+	if _, member := p.RoleIn(orgID); !member {
+		return ctx, apierr.NotFound("org_not_found", "organization not found")
+	}
+	return authctx.WithOrg(ctx, orgID), nil
+}
 
 // apiServer implements the generated api.StrictServerInterface. Handlers return
 // typed responses on success and plain errors on failure; the strict handler's
@@ -64,6 +81,10 @@ func (s apiServer) CreateOrganization(ctx context.Context, req api.CreateOrganiz
 
 // GetOrganization implements GET /api/v1/organizations/{orgId}.
 func (s apiServer) GetOrganization(ctx context.Context, req api.GetOrganizationRequestObject) (api.GetOrganizationResponseObject, error) {
+	ctx, err := authorizeOrg(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
 	org, err := s.orgs.GetOrganization(ctx, req.OrgId)
 	if err != nil {
 		return nil, err
@@ -79,6 +100,10 @@ func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganiz
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
+	ctx, err := authorizeOrg(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
 	org, err := s.orgs.UpdateOrganization(ctx, req.OrgId, req.Body.Name)
 	if err != nil {
 		return nil, err
@@ -91,6 +116,10 @@ func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganiz
 
 // DeleteOrganization implements DELETE /api/v1/organizations/{orgId}.
 func (s apiServer) DeleteOrganization(ctx context.Context, req api.DeleteOrganizationRequestObject) (api.DeleteOrganizationResponseObject, error) {
+	ctx, err := authorizeOrg(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.orgs.SoftDeleteOrganization(ctx, req.OrgId); err != nil {
 		return nil, err
 	}

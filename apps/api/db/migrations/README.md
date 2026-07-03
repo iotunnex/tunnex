@@ -52,6 +52,13 @@ Some tables are legitimately global. Adding `org_id` to them would be wrong.
 Rule of thumb: if a row is meaningful without reference to a single org (a user,
 an org itself, a pre-auth event), it is not tenant-owned.
 
+## audit_logs actor semantics
+`actor_user_id` is nullable, and NULL has a defined meaning: **a system action**
+(seed, migration, or an automated background process) — never an unattributed
+user action. Once authentication exists (S2), every user-initiated mutation MUST
+record its actor; a NULL actor on a user-facing mutation is a bug, not a shrug.
+Enforcement of "authenticated mutations always have an actor" lands with S2.2.
+
 ## Auto-migrate on boot — and when to turn it off (S10.1 / S11.4)
 The API auto-migrates on boot (`TUNNEX_AUTO_MIGRATE=true`) so the compose
 quickstart self-provisions. golang-migrate takes an advisory lock, so concurrent

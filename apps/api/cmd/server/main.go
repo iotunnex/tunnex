@@ -101,7 +101,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool))
+	// authFn is nil until S2 wires session-backed authentication; principal-gated
+	// endpoints therefore fail closed (401) in the meantime.
+	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool), nil)
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
 		os.Exit(1)

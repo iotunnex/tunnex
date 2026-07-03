@@ -59,7 +59,7 @@ This plan defines **every story** up front. We then build **one story at a time*
 ## EPIC 2 — Authentication (Google + Microsoft + Local)
 
 - **S2.1 Local auth** — signup/login, argon2id, **email verification + password reset (uses S0.3 mailer)**.
-- **S2.2 Session management** — Redis-backed cookie sessions, CSRF, logout, refresh.
+- **S2.2 Session management** — Redis-backed cookie sessions, CSRF, logout, refresh. **Carries the S1.3 handoff:** supply the real session-backed `AuthFunc` (resolves session → `authctx.Principal` with memberships); add a spec-driven test asserting every mutation endpoint returns 401 without a session (walks the OpenAPI paths); populate `audit_logs.actor_user_id` for authenticated mutations (NULL = system action only). Gate the org collection/create endpoints (org-item endpoints already fail closed as of S1.3).
 - **S2.3 Google OIDC** *(enterprise)* — login + account linking; per-org SSO config (secret encrypted at rest).
 - **S2.4 Microsoft Entra OIDC** *(enterprise)* — login + account linking; multi-tenant Azure app; secret encrypted.
 - **S2.5 SSO provisioning & domain capture** *(enterprise, security-sensitive — extra review)* — JIT user creation + role mapping. Require **DNS-TXT-verified domain ownership**; **block public domains** (gmail.com, etc.); **domain capture is globally unique** (two orgs cannot capture the same domain); never auto-join on unverified email.
