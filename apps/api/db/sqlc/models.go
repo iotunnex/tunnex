@@ -32,6 +32,17 @@ type AuthToken struct {
 	CreatedAt  time.Time          `json:"created_at"`
 }
 
+type DomainClaim struct {
+	ID                uuid.UUID          `json:"id"`
+	OrgID             uuid.UUID          `json:"org_id"`
+	Domain            string             `json:"domain"`
+	VerificationToken string             `json:"verification_token"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+}
+
 type Invitation struct {
 	ID              uuid.UUID          `json:"id"`
 	OrgID           uuid.UUID          `json:"org_id"`

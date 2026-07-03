@@ -34,22 +34,26 @@ func DefaultProviderFactory(ctx context.Context, cfg Config, redirectURL string)
 
 // Service orchestrates the SSO login flow.
 type Service struct {
-	pool     *pgxpool.Pool
-	q        *sqlc.Queries
-	configs  *ConfigService
-	flows    *FlowStore
-	factory  ProviderFactory
-	baseURL  string
-	logger   *slog.Logger
+	pool    *pgxpool.Pool
+	q       *sqlc.Queries
+	configs *ConfigService
+	flows   *FlowStore
+	domains *DomainService // nil disables domain-capture auto-join
+	factory ProviderFactory
+	baseURL string
+	logger  *slog.Logger
 }
 
 // NewService builds the SSO service.
-func NewService(pool *pgxpool.Pool, configs *ConfigService, flows *FlowStore, factory ProviderFactory, baseURL string, logger *slog.Logger) *Service {
-	return &Service{pool: pool, q: sqlc.New(pool), configs: configs, flows: flows, factory: factory, baseURL: baseURL, logger: logger}
+func NewService(pool *pgxpool.Pool, configs *ConfigService, flows *FlowStore, domains *DomainService, factory ProviderFactory, baseURL string, logger *slog.Logger) *Service {
+	return &Service{pool: pool, q: sqlc.New(pool), configs: configs, flows: flows, domains: domains, factory: factory, baseURL: baseURL, logger: logger}
 }
 
 // Configs exposes the config service (for the admin set-config endpoint).
 func (s *Service) Configs() *ConfigService { return s.configs }
+
+// Domains exposes the domain-capture service (for the admin domain endpoints).
+func (s *Service) Domains() *DomainService { return s.domains }
 
 func (s *Service) redirectURL(provider string) string {
 	return s.baseURL + "/api/v1/auth/sso/" + provider + "/callback"
@@ -140,14 +144,45 @@ func (s *Service) resolveUser(ctx context.Context, id Identity, orgID uuid.UUID)
 			userID = local.ID
 		}
 
-		// JIT membership: an SSO login into an org makes the user a member.
-		_, e := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{OrgID: orgID, UserID: userID, Role: rbac.RoleMember})
-		return e
+		// JIT membership into the org the user logged in through.
+		if e := s.ensureMembership(ctx, q, orgID, userID, "sso_login", id); e != nil {
+			return e
+		}
+
+		// Domain capture: also auto-join any org that has verified-captured the
+		// email's domain. This runs AFTER the linking decision above (a rejected
+		// identity never reaches here), so capture never bypasses DecideLink.
+		if s.domains != nil {
+			if capOrg, ok := s.domains.capturingOrgTx(ctx, q, id.Email); ok && capOrg != orgID {
+				if e := s.ensureMembership(ctx, q, capOrg, userID, "domain_capture", id); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return uuid.Nil, err
 	}
 	return userID, nil
+}
+
+// ensureMembership adds a member-role membership if absent, auditing the JIT join
+// (with the IdP subject) only when it actually creates one — no audit spam on
+// repeat logins. Role is always member (least privilege; group mapping is a
+// separate future story).
+func (s *Service) ensureMembership(ctx context.Context, q *sqlc.Queries, orgID, userID uuid.UUID, via string, id Identity) error {
+	if _, err := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: userID}); err == nil {
+		return nil // already a member
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{OrgID: orgID, UserID: userID, Role: rbac.RoleMember}); err != nil {
+		return err
+	}
+	uid := userID
+	return audit(ctx, q, orgID, &uid, "member.jit_joined", "membership", userID.String(),
+		map[string]any{"via": via, "provider": id.Provider, "idp_subject": id.Subject})
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {

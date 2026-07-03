@@ -22,12 +22,14 @@ type Querier interface {
 	CountOrganizations(ctx context.Context) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
+	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
+	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.
 	GetEnabledSSOConfigByProvider(ctx context.Context, arg GetEnabledSSOConfigByProviderParams) (SsoConfig, error)
@@ -40,6 +42,10 @@ type Querier interface {
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// lint:cross-org — JIT resolves the capturing org from an email domain before an
+	// org context exists; org_id is a column on the returned row. Only verified
+	// claims are returned (partial unique index guarantees at most one).
+	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
@@ -47,6 +53,7 @@ type Querier interface {
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
@@ -55,6 +62,7 @@ type Querier interface {
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — revocation targets a specific invitation id (already
@@ -62,6 +70,10 @@ type Querier interface {
 	RevokeInvitation(ctx context.Context, id uuid.UUID) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
+	// Verification loss: clear verified_at so the domain stops capturing (the claim
+	// is NOT deleted — the org keeps its pending claim and can re-verify).
+	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
+	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
 	// Idempotent on (org_id, user_id).

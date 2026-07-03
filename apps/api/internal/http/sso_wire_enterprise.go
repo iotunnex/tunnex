@@ -29,7 +29,8 @@ type ssoAdapter struct {
 func NewSSOPort(pool *pgxpool.Pool, sealer *crypto.Sealer, rdb *redis.Client, baseURL string, logger *slog.Logger) ssoPort {
 	configs := sso.NewConfigService(pool, sealer)
 	flows := sso.NewFlowStore(rdb, 10*time.Minute)
-	svc := sso.NewService(pool, configs, flows, sso.DefaultProviderFactory, baseURL, logger)
+	domains := sso.NewDomainService(pool)
+	svc := sso.NewService(pool, configs, flows, domains, sso.DefaultProviderFactory, baseURL, logger)
 	return &ssoAdapter{pool: pool, svc: svc}
 }
 
@@ -47,4 +48,12 @@ func (a *ssoAdapter) HandleCallback(ctx context.Context, provider, code, state s
 
 func (a *ssoAdapter) SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error {
 	return a.svc.Configs().Set(ctx, orgID, provider, clientID, clientSecret, tenantID, enabled)
+}
+
+func (a *ssoAdapter) CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (string, error) {
+	return a.svc.Domains().CreateClaim(ctx, actor, actorEmail, actorVerified, orgID, domain)
+}
+
+func (a *ssoAdapter) VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error {
+	return a.svc.Domains().Verify(ctx, actor, orgID, domain)
 }

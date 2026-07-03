@@ -186,6 +186,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim an email domain for capture (enterprise) */
+        post: operations["createDomainClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/domains/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify a claimed domain via its DNS TXT record (enterprise) */
+        post: operations["verifyDomainClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -275,6 +313,16 @@ export interface components {
         };
         SsoRedirect: {
             redirect_url: string;
+        };
+        DomainClaimRequest: {
+            domain: string;
+        };
+        DomainClaimResponse: {
+            /** @description Publish this exact value as a TXT record on the domain, then verify. */
+            txt_record: string;
+        };
+        DomainVerifyRequest: {
+            domain: string;
         };
         SsoConfigRequest: {
             client_id: string;
@@ -607,6 +655,62 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createDomainClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description Claim created — publish the returned TXT record, then verify. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainClaimResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    verifyDomainClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenericMessage"];
+                };
             };
             default: components["responses"]["Error"];
         };

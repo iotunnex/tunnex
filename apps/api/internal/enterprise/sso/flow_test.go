@@ -16,6 +16,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -30,6 +31,8 @@ type flowHarness struct {
 	svc *Service
 	idp *fakeIdP
 	org uuid.UUID
+	tx  pgx.Tx
+	q   *sqlc.Queries
 	ctx context.Context
 }
 
@@ -80,7 +83,7 @@ func newFlowHarness(t *testing.T) *flowHarness {
 	if err := svc.configs.Set(ctx, org, "google", "test-client", "secret", "", true); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
-	return &flowHarness{svc: svc, idp: idp, org: org, ctx: ctx}
+	return &flowHarness{svc: svc, idp: idp, org: org, tx: tx, q: q, ctx: ctx}
 }
 
 // start runs StartLogin and returns (state, nonce).

@@ -20,6 +20,7 @@ import (
 type Principal struct {
 	UserID        uuid.UUID
 	SessionID     string // the session backing this principal (for logout)
+	Email         string
 	EmailVerified bool
 	Roles         map[uuid.UUID]string // orgID -> role
 }

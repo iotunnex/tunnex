@@ -39,6 +39,7 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 		return &authctx.Principal{
 			UserID:        user.ID,
 			SessionID:     sess.ID,
+			Email:         user.Email,
 			EmailVerified: user.EmailVerifiedAt.Valid,
 			Roles:         roles,
 		}

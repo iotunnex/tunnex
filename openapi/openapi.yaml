@@ -225,6 +225,54 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/domains:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: createDomainClaim
+      summary: Claim an email domain for capture (enterprise)
+      tags: [sso]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DomainClaimRequest" }
+      responses:
+        "201":
+          description: Claim created — publish the returned TXT record, then verify.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DomainClaimResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/domains/verify:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: verifyDomainClaim
+      summary: Verify a claimed domain via its DNS TXT record (enterprise)
+      tags: [sso]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DomainVerifyRequest" }
+      responses:
+        "200":
+          description: Verified.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations:
     get:
       operationId: listOrganizations
@@ -421,6 +469,29 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    DomainClaimRequest:
+      type: object
+      required: [domain]
+      additionalProperties: false
+      properties:
+        domain: { type: string, minLength: 3, maxLength: 253 }
+
+    DomainClaimResponse:
+      type: object
+      required: [txt_record]
+      additionalProperties: false
+      properties:
+        txt_record:
+          type: string
+          description: Publish this exact value as a TXT record on the domain, then verify.
+
+    DomainVerifyRequest:
+      type: object
+      required: [domain]
+      additionalProperties: false
+      properties:
+        domain: { type: string, minLength: 3, maxLength: 253 }
 
     SsoConfigRequest:
       type: object

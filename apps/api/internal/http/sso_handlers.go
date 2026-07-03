@@ -9,6 +9,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 )
@@ -19,6 +20,8 @@ type ssoPort interface {
 	StartLogin(ctx context.Context, orgSlug, provider string) (redirectURL string, err error)
 	HandleCallback(ctx context.Context, provider, code, state string) (userID uuid.UUID, err error)
 	SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
+	CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (txtRecord string, err error)
+	VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error
 }
 
 func editionRequired() error {
@@ -92,5 +95,48 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 	}
 	return api.SetSsoConfig204Response{
 		Headers: api.SetSsoConfig204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// CreateDomainClaim implements POST /api/v1/organizations/{orgId}/domains.
+func (s apiServer) CreateDomainClaim(ctx context.Context, req api.CreateDomainClaimRequestObject) (api.CreateDomainClaimResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	if s.sso == nil {
+		return nil, editionRequired()
+	}
+	p, _ := authctx.PrincipalFrom(ctx) // non-nil after authorize
+	txt, err := s.sso.CreateDomainClaim(ctx, p.UserID, p.Email, p.EmailVerified, req.OrgId, req.Body.Domain)
+	if err != nil {
+		return nil, err
+	}
+	return api.CreateDomainClaim201JSONResponse{
+		Body:    api.DomainClaimResponse{TxtRecord: txt},
+		Headers: api.CreateDomainClaim201ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// VerifyDomainClaim implements POST /api/v1/organizations/{orgId}/domains/verify.
+func (s apiServer) VerifyDomainClaim(ctx context.Context, req api.VerifyDomainClaimRequestObject) (api.VerifyDomainClaimResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	if s.sso == nil {
+		return nil, editionRequired()
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.sso.VerifyDomain(ctx, p.UserID, req.OrgId, req.Body.Domain); err != nil {
+		return nil, err
+	}
+	return api.VerifyDomainClaim200JSONResponse{
+		Body:    api.GenericMessage{Message: "Domain verified."},
+		Headers: api.VerifyDomainClaim200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

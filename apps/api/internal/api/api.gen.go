@@ -57,6 +57,22 @@ type CreateOrganizationRequest struct {
 	Slug string `json:"slug"`
 }
 
+// DomainClaimRequest defines model for DomainClaimRequest.
+type DomainClaimRequest struct {
+	Domain string `json:"domain"`
+}
+
+// DomainClaimResponse defines model for DomainClaimResponse.
+type DomainClaimResponse struct {
+	// TxtRecord Publish this exact value as a TXT record on the domain, then verify.
+	TxtRecord string `json:"txt_record"`
+}
+
+// DomainVerifyRequest defines model for DomainVerifyRequest.
+type DomainVerifyRequest struct {
+	Domain string `json:"domain"`
+}
+
 // Error Standard error envelope for every non-2xx response. Chosen over bare
 // RFC 7807 so the correlation `request_id` is a first-class field the SPA
 // and CLI can surface directly; `code` is stable for programmatic handling.
@@ -202,6 +218,12 @@ type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
 // UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
 type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
+// CreateDomainClaimJSONRequestBody defines body for CreateDomainClaim for application/json ContentType.
+type CreateDomainClaimJSONRequestBody = DomainClaimRequest
+
+// VerifyDomainClaimJSONRequestBody defines body for VerifyDomainClaim for application/json ContentType.
+type VerifyDomainClaimJSONRequestBody = DomainVerifyRequest
+
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
 
@@ -246,6 +268,12 @@ type ServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Claim an email domain for capture (enterprise)
+	// (POST /api/v1/organizations/{orgId}/domains)
+	CreateDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Verify a claimed domain via its DNS TXT record (enterprise)
+	// (POST /api/v1/organizations/{orgId}/domains/verify)
+	VerifyDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
@@ -333,6 +361,18 @@ func (_ Unimplemented) GetOrganization(w http.ResponseWriter, r *http.Request, o
 // Update organization settings (name only; slug is immutable)
 // (PATCH /api/v1/organizations/{orgId})
 func (_ Unimplemented) UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Claim an email domain for capture (enterprise)
+// (POST /api/v1/organizations/{orgId}/domains)
+func (_ Unimplemented) CreateDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Verify a claimed domain via its DNS TXT record (enterprise)
+// (POST /api/v1/organizations/{orgId}/domains/verify)
+func (_ Unimplemented) VerifyDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -675,6 +715,68 @@ func (siw *ServerInterfaceWrapper) UpdateOrganization(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// CreateDomainClaim operation middleware
+func (siw *ServerInterfaceWrapper) CreateDomainClaim(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDomainClaim(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyDomainClaim operation middleware
+func (siw *ServerInterfaceWrapper) VerifyDomainClaim(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyDomainClaim(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetSsoConfig operation middleware
 func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -880,6 +982,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.UpdateOrganization)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/domains", wrapper.CreateDomainClaim)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/domains/verify", wrapper.VerifyDomainClaim)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.SetSsoConfig)
@@ -1399,6 +1507,86 @@ func (response UpdateOrganizationdefaultJSONResponse) VisitUpdateOrganizationRes
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type CreateDomainClaimRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreateDomainClaimJSONRequestBody
+}
+
+type CreateDomainClaimResponseObject interface {
+	VisitCreateDomainClaimResponse(w http.ResponseWriter) error
+}
+
+type CreateDomainClaim201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateDomainClaim201JSONResponse struct {
+	Body    DomainClaimResponse
+	Headers CreateDomainClaim201ResponseHeaders
+}
+
+func (response CreateDomainClaim201JSONResponse) VisitCreateDomainClaimResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateDomainClaimdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateDomainClaimdefaultJSONResponse) VisitCreateDomainClaimResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type VerifyDomainClaimRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *VerifyDomainClaimJSONRequestBody
+}
+
+type VerifyDomainClaimResponseObject interface {
+	VisitVerifyDomainClaimResponse(w http.ResponseWriter) error
+}
+
+type VerifyDomainClaim200ResponseHeaders struct {
+	XRequestId string
+}
+
+type VerifyDomainClaim200JSONResponse struct {
+	Body    GenericMessage
+	Headers VerifyDomainClaim200ResponseHeaders
+}
+
+func (response VerifyDomainClaim200JSONResponse) VisitVerifyDomainClaimResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type VerifyDomainClaimdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response VerifyDomainClaimdefaultJSONResponse) VisitVerifyDomainClaimResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type SetSsoConfigRequestObject struct {
 	OrgId    openapi_types.UUID `json:"orgId"`
 	Provider string             `json:"provider"`
@@ -1516,6 +1704,12 @@ type StrictServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(ctx context.Context, request UpdateOrganizationRequestObject) (UpdateOrganizationResponseObject, error)
+	// Claim an email domain for capture (enterprise)
+	// (POST /api/v1/organizations/{orgId}/domains)
+	CreateDomainClaim(ctx context.Context, request CreateDomainClaimRequestObject) (CreateDomainClaimResponseObject, error)
+	// Verify a claimed domain via its DNS TXT record (enterprise)
+	// (POST /api/v1/organizations/{orgId}/domains/verify)
+	VerifyDomainClaim(ctx context.Context, request VerifyDomainClaimRequestObject) (VerifyDomainClaimResponseObject, error)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(ctx context.Context, request SetSsoConfigRequestObject) (SetSsoConfigResponseObject, error)
@@ -1926,6 +2120,72 @@ func (sh *strictHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// CreateDomainClaim operation middleware
+func (sh *strictHandler) CreateDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreateDomainClaimRequestObject
+
+	request.OrgId = orgId
+
+	var body CreateDomainClaimJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDomainClaim(ctx, request.(CreateDomainClaimRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDomainClaim")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDomainClaimResponseObject); ok {
+		if err := validResponse.VisitCreateDomainClaimResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyDomainClaim operation middleware
+func (sh *strictHandler) VerifyDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request VerifyDomainClaimRequestObject
+
+	request.OrgId = orgId
+
+	var body VerifyDomainClaimJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyDomainClaim(ctx, request.(VerifyDomainClaimRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyDomainClaim")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyDomainClaimResponseObject); ok {
+		if err := validResponse.VisitVerifyDomainClaimResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetSsoConfig operation middleware
 func (sh *strictHandler) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
 	var request SetSsoConfigRequestObject
@@ -1987,51 +2247,54 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"3V/c/z8AAP//LFR0I/gzAAA=",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

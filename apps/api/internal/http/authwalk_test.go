@@ -23,6 +23,8 @@ var walkBodies = map[string]string{
 	"createorganization": `{"name":"Walk","slug":"walk-test"}`,
 	"updateorganization": `{"name":"Walk"}`,
 	"setssoconfig":       `{"client_id":"x","client_secret":"y","enabled":true}`,
+	"createdomainclaim":  `{"domain":"walk.example.com"}`,
+	"verifydomainclaim":  `{"domain":"walk.example.com"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
