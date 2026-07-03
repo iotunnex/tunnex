@@ -11,9 +11,36 @@ import (
 )
 
 type Querier interface {
+	// Single-use: only transitions a pending, unexpired invite.
+	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
+	CountOrganizations(ctx context.Context) (int64, error)
+	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
+	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
+	// Callers must still check expires_at/accepted_at/revoked_at (single-use).
+	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
+	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
+	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
+	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// audit_logs is append-only: there are intentionally NO update or delete queries
+	// here, and the DB enforces it (see 0002 triggers).
+	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
+	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
+	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	ListOrganizations(ctx context.Context) ([]Organization, error)
+	RevokeInvitation(ctx context.Context, id uuid.UUID) error
+	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) error
+	// Idempotent on (org_id, user_id).
+	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
+	// Used by the seed with a fixed id; idempotent.
+	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
+	// Used by the seed with a fixed id; idempotent.
+	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }
 
 var _ Querier = (*Queries)(nil)

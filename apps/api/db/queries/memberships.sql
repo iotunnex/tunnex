@@ -1,0 +1,21 @@
+-- name: UpsertMembership :one
+-- Idempotent on (org_id, user_id).
+INSERT INTO memberships (org_id, user_id, role)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, user_id) DO UPDATE
+    SET role = EXCLUDED.role
+RETURNING *;
+
+-- name: ListMembershipsByUser :many
+SELECT * FROM memberships
+WHERE user_id = $1
+ORDER BY created_at;
+
+-- name: ListMembershipsByOrg :many
+SELECT * FROM memberships
+WHERE org_id = $1
+ORDER BY created_at;
+
+-- name: GetMembership :one
+SELECT * FROM memberships
+WHERE org_id = $1 AND user_id = $2;

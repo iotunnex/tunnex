@@ -24,6 +24,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organizations
+         * @description Lists organizations. NOTE: authentication/tenant scoping is added in
+         *     S2/S1.3; this endpoint is temporarily unauthenticated.
+         *
+         */
+        get: operations["listOrganizations"];
+        put?: never;
+        /**
+         * Create an organization
+         * @description Creates an organization. In the open edition this fails with
+         *     `org_limit_reached` once one organization exists; the enterprise build
+         *     allows multiple.
+         *
+         */
+        post: operations["createOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -41,6 +70,20 @@ export interface components {
             service: string;
             /** @description Correlation ID for this request. */
             request_id?: string;
+        };
+        Organization: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CreateOrganizationRequest: {
+            name: string;
+            slug: string;
         };
         /** @description Standard error envelope for every non-2xx response. Chosen over bare
          *     RFC 7807 so the correlation `request_id` is a first-class field the SPA
@@ -107,6 +150,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listOrganizations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organizations. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The created organization. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
                 };
             };
             default: components["responses"]["Error"];

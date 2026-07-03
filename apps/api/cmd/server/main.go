@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
@@ -24,6 +26,7 @@ import (
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
+	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
 func main() {
@@ -90,7 +93,15 @@ func main() {
 		}
 	}
 
-	router, err := apphttp.NewRouter(logger)
+	// Database connection pool (used by the tenancy services).
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("db_pool_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool))
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
 		os.Exit(1)

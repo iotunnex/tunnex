@@ -91,6 +91,25 @@ generate-check: generate ## Fail if generated code is out of date (CI drift guar
 	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
 	@echo "generated code is up to date."
 
+.PHONY: build-editions
+build-editions: ## Compile both open and enterprise builds (catches edition rot)
+	@echo ">> open build"
+	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) go build ./...
+	@echo ">> enterprise build (-tags enterprise)"
+	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) go build -tags enterprise ./...
+
+.PHONY: test-editions
+test-editions: ## Run the suite in BOTH editions against the live DB
+	$(COMPOSE) up -d --wait postgres
+	@echo ">> open edition tests"
+	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod \
+	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  $(GO_IMAGE) go test ./...
+	@echo ">> enterprise edition tests (-tags enterprise)"
+	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod \
+	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  $(GO_IMAGE) go test -tags enterprise ./...
+
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres

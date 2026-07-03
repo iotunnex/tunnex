@@ -31,6 +31,57 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/v1/organizations:
+    get:
+      operationId: listOrganizations
+      summary: List organizations
+      description: |
+        Lists organizations. NOTE: authentication/tenant scoping is added in
+        S2/S1.3; this endpoint is temporarily unauthenticated.
+      tags: [organizations]
+      security: []
+      responses:
+        "200":
+          description: Organizations.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Organization"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createOrganization
+      summary: Create an organization
+      description: |
+        Creates an organization. In the open edition this fails with
+        `org_limit_reached` once one organization exists; the enterprise build
+        allows multiple.
+      tags: [organizations]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+      responses:
+        "201":
+          description: The created organization.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        default:
+          $ref: "#/components/responses/Error"
+
 components:
   headers:
     RequestId:
@@ -56,6 +107,40 @@ components:
         request_id:
           type: string
           description: Correlation ID for this request.
+
+    Organization:
+      type: object
+      required: [id, name, slug, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrganizationRequest:
+      type: object
+      required: [name, slug]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
 
     Error:
       type: object

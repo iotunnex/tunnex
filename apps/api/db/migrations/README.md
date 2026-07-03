@@ -31,12 +31,26 @@ is defined in 0001 (native `uuidv7()` arrives in PG18).
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
   ```
 
-### 3. Multi-tenancy — org_id scoping
-- Every tenant-owned table has `org_id uuid NOT NULL REFERENCES organizations(id)`.
-- Composite indexes **lead with `org_id`** (e.g. `(org_id, email)`), because
+### 3. Multi-tenancy — org_id scoping (tenant-owned tables only)
+- Every **tenant-owned** table has `org_id uuid NOT NULL REFERENCES organizations(id)`.
+- Composite indexes **lead with `org_id`** (e.g. `(org_id, user_id)`), because
   every query is tenant-scoped — this makes the tenant filter the index prefix.
 - Uniqueness that is per-tenant must be scoped: `UNIQUE (org_id, email)`, never
   a bare `UNIQUE (email)`.
+
+#### Global vs tenant-owned — do NOT cargo-cult org_id onto everything
+Some tables are legitimately global. Adding `org_id` to them would be wrong.
+
+| Table | Kind | Why / key uniqueness |
+|-------|------|----------------------|
+| `organizations` | **root** | It *is* the tenant; no `org_id`. `UNIQUE(slug) WHERE deleted_at IS NULL`. |
+| `users` | **global** | Login is email-first; org is resolved *after* login (locked tenant-routing decision). `UNIQUE(email) WHERE deleted_at IS NULL`. A user belongs to many orgs via `memberships`. |
+| `memberships` | tenant-owned | `org_id` + `UNIQUE(org_id, user_id)` — one membership per user per org. |
+| `invitations` | tenant-owned | `org_id`; one pending invite per `(org_id, email)`. |
+| `audit_logs` | **hybrid** | `org_id` is **nullable** — some events precede org resolution (e.g. failed login). Append-only. |
+
+Rule of thumb: if a row is meaningful without reference to a single org (a user,
+an org itself, a pre-auth event), it is not tenant-owned.
 
 ## Auto-migrate on boot — and when to turn it off (S10.1 / S11.4)
 The API auto-migrates on boot (`TUNNEX_AUTO_MIGRATE=true`) so the compose

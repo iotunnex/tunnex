@@ -18,8 +18,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/seeddata"
 )
 
@@ -71,10 +73,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	// S1.1: idempotent upsert of the demo org + owner using seeddata constants:
-	//   INSERT INTO organizations (id, name, slug) VALUES ($1,$2,$3)
-	//     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, ...;
-	//   INSERT INTO users (...) ON CONFLICT (id) DO UPDATE ...;
+	// Idempotent upsert of the demo org + owner + membership (fixed IDs).
+	q := sqlc.New(pool)
+	orgID := uuid.MustParse(seeddata.DemoOrgID)
+	userID := uuid.MustParse(seeddata.DemoOwnerUserID)
+
+	if _, err := q.UpsertOrganization(ctx, sqlc.UpsertOrganizationParams{
+		ID: orgID, Name: seeddata.DemoOrgName, Slug: seeddata.DemoOrgSlug,
+	}); err != nil {
+		logger.Error("seed_org_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: userID, Email: seeddata.DemoOwnerEmail, Name: seeddata.DemoOwnerName,
+	}); err != nil {
+		logger.Error("seed_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{
+		OrgID: orgID, UserID: userID, Role: "owner",
+	}); err != nil {
+		logger.Error("seed_membership_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_complete",
 		slog.String("demo_org_id", seeddata.DemoOrgID),
 		slog.String("demo_owner_email", seeddata.DemoOwnerEmail),

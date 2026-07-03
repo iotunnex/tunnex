@@ -14,16 +14,24 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthResponseStatus.
 const (
 	Ok HealthResponseStatus = "ok"
 )
+
+// CreateOrganizationRequest defines model for CreateOrganizationRequest.
+type CreateOrganizationRequest struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
 
 // Error Standard error envelope for every non-2xx response. Chosen over bare
 // RFC 7807 so the correlation `request_id` is a first-class field the SPA
@@ -68,8 +76,26 @@ type HealthResponse struct {
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
 
+// Organization defines model for Organization.
+type Organization struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	Slug      string             `json:"slug"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
+type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// List organizations
+	// (GET /api/v1/organizations)
+	ListOrganizations(w http.ResponseWriter, r *http.Request)
+	// Create an organization
+	// (POST /api/v1/organizations)
+	CreateOrganization(w http.ResponseWriter, r *http.Request)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -78,6 +104,18 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// List organizations
+// (GET /api/v1/organizations)
+func (_ Unimplemented) ListOrganizations(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create an organization
+// (POST /api/v1/organizations)
+func (_ Unimplemented) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Liveness probe
 // (GET /healthz)
@@ -93,6 +131,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListOrganizations operation middleware
+func (siw *ServerInterfaceWrapper) ListOrganizations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrganizations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrganization operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrganization(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +288,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations", wrapper.ListOrganizations)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations", wrapper.CreateOrganization)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealth)
 	})
 
@@ -235,6 +307,83 @@ type ErrorJSONResponse struct {
 	Body Error
 
 	Headers ErrorResponseHeaders
+}
+
+type ListOrganizationsRequestObject struct {
+}
+
+type ListOrganizationsResponseObject interface {
+	VisitListOrganizationsResponse(w http.ResponseWriter) error
+}
+
+type ListOrganizations200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListOrganizations200JSONResponse struct {
+	Body    []Organization
+	Headers ListOrganizations200ResponseHeaders
+}
+
+func (response ListOrganizations200JSONResponse) VisitListOrganizationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListOrganizationsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListOrganizationsdefaultJSONResponse) VisitListOrganizationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateOrganizationRequestObject struct {
+	Body *CreateOrganizationJSONRequestBody
+}
+
+type CreateOrganizationResponseObject interface {
+	VisitCreateOrganizationResponse(w http.ResponseWriter) error
+}
+
+type CreateOrganization201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateOrganization201JSONResponse struct {
+	Body    Organization
+	Headers CreateOrganization201ResponseHeaders
+}
+
+func (response CreateOrganization201JSONResponse) VisitCreateOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateOrganizationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateOrganizationdefaultJSONResponse) VisitCreateOrganizationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
 }
 
 type GetHealthRequestObject struct {
@@ -277,6 +426,12 @@ func (response GetHealthdefaultJSONResponse) VisitGetHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// List organizations
+	// (GET /api/v1/organizations)
+	ListOrganizations(ctx context.Context, request ListOrganizationsRequestObject) (ListOrganizationsResponseObject, error)
+	// Create an organization
+	// (POST /api/v1/organizations)
+	CreateOrganization(ctx context.Context, request CreateOrganizationRequestObject) (CreateOrganizationResponseObject, error)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -311,6 +466,61 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
+// ListOrganizations operation middleware
+func (sh *strictHandler) ListOrganizations(w http.ResponseWriter, r *http.Request) {
+	var request ListOrganizationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrganizations(ctx, request.(ListOrganizationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrganizations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrganizationsResponseObject); ok {
+		if err := validResponse.VisitListOrganizationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrganization operation middleware
+func (sh *strictHandler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+	var request CreateOrganizationRequestObject
+
+	var body CreateOrganizationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrganization(ctx, request.(CreateOrganizationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrganization")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrganizationResponseObject); ok {
+		if err := validResponse.VisitCreateOrganizationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealth operation middleware
 func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthRequestObject
@@ -338,24 +548,31 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/6xW328TuRP/V0b+fh+otEl68MApPKFyQCV0Qm2lO4lWZLKe3TV4x3v2bEiuyv9+Gu9C",
-	"QpKKIvG2iceemc+Pse9NGdouMLEkM783DaGlmD+v6J+eklxa/WEpldF14gKbubkIMZJH/QWXr6AKEaRx",
-	"CeKw5QWgTwGw6whjAseQKK4ogg91mprCaJyLZM1cYk+FSWVDLWoe2XRk5iZJdFyb7XarwakLnCgX9UeM",
-	"IepHGViIRT+x67wrczWzT0kLvN878f+RKjM3/5vtGp0Nq2k2nJazfN9gXoCvmbXkPWD+nozQTAZsTmUY",
-	"w2c7ELc5zZj5u1bQWqd50b+PoaMoTnut0Cc6rOtakC1GC5QLJF6RDx1lBmhFcQMcePJ0vd7VDhdNSMQQ",
-	"lIAlRrrlq9cX8Pz38+eQAkhDUO7RuRg5/OjsAlwChMrFJJPSY0pQOfI277l+//KWkS1cvLuEEhlSHyss",
-	"CayLVIrfvIBFGSzlQ5Lg0g9VdjHUEdsWxZXQIFvvuJ7esilMt9f9vaFHwfP9Hk14rNbrnL2AFsvGMU0i",
-	"oc31DCDqJmWY1th2XtXHQT5WoWdrikNBKiGCzqfjNK8Vm4mnFXntcumpTfCEpvUUVuidHfCt0Pk+UjrT",
-	"lE6oTY8S6aucVfOPBWGMuNHfLaWE9Ym23/Yt8l6z684j5yKmp/ra8f4jv7+AFqVsAGt0nOTQ3IcW3rf7",
-	"h4GiXdV33+LD8hOVchQ/yOA4rDD7uPycTLKKj7t8FUTIQofSgAzOCFVFbB3Xg/IL+NIQwzhwlp5OIvkg",
-	"I381KGqHLzFwDV+c5tGxmc/+MXQPY1aYt4RemqvR9D+Jx+OpPxr1JwFQQbjyBABX1IUoCucYAoztgfmk",
-	"Z6b1BDt38mhB6U+Y751bEVPKo0b6rEPivlXYwuc9xB6Adjx2V/oJXW4L47gKpyBiicFP1F8EL99fZpRu",
-	"ch9TF6Zwo4CljkolX2WVHNeeIIU+lioykNhLM79lXXwTvjpKK0izPCQpJtBpqwE3m46uc34ovSMWwEhQ",
-	"E1NEFXAVQwtObvnJosXPu5XFWZHPsNFVkgfRUM2yd97CQfCkbKj8vDgbRrM4yeQMTWmPpjArimlA4Hz6",
-	"2/Rc6QkdsTI3N8+m59NnOtRRmsyXXolemn/1uyZ5SBxJZ2epTPqR0in8GYDWQpHRg6WO2BKXjlLuO9dJ",
-	"2T6q6axUvZfNG5LBFebgDfH0/PyXvSAOfHfiKXGjfI9q1/tU2/pVDwrNVWHv5aFd3/r+9tRRiZd9dLIx",
-	"8w93hUl922Lc7FtILy+d0YJ1yubYJKHW3A0PmCxN/f/omsWWJiG62jE8yWEWltS4UbVkawKuHa/PTGH6",
-	"6M3czMz2bvtfAAAA//9HiJNjgwoAAA==",
+	"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",
+	"DAAA//8PRDDUuBEAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

@@ -7,11 +7,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	h, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// These tests exercise /healthz and the validator only — no DB access — so a
+	// service over a nil pool is sufficient.
+	h, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), tenancy.NewService(nil))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

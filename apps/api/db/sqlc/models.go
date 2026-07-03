@@ -3,3 +3,65 @@
 //   sqlc v1.31.1
 
 package sqlc
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type AuditLog struct {
+	ID          uuid.UUID   `json:"id"`
+	OrgID       pgtype.UUID `json:"org_id"`
+	ActorUserID pgtype.UUID `json:"actor_user_id"`
+	Action      string      `json:"action"`
+	TargetType  *string     `json:"target_type"`
+	TargetID    *string     `json:"target_id"`
+	Metadata    []byte      `json:"metadata"`
+	CreatedAt   time.Time   `json:"created_at"`
+}
+
+type Invitation struct {
+	ID              uuid.UUID          `json:"id"`
+	OrgID           uuid.UUID          `json:"org_id"`
+	Email           string             `json:"email"`
+	Role            string             `json:"role"`
+	TokenHash       []byte             `json:"token_hash"`
+	ExpiresAt       time.Time          `json:"expires_at"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	InvitedByUserID pgtype.UUID        `json:"invited_by_user_id"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type Membership struct {
+	ID        uuid.UUID `json:"id"`
+	OrgID     uuid.UUID `json:"org_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Organization struct {
+	ID        uuid.UUID          `json:"id"`
+	Name      string             `json:"name"`
+	Slug      string             `json:"slug"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type User struct {
+	ID              uuid.UUID          `json:"id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	PasswordHash    *string            `json:"password_hash"`
+	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
+	Status          string             `json:"status"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
