@@ -82,12 +82,13 @@ services:
       dockerfile: deploy/docker/nginx.Dockerfile
     restart: unless-stopped
     ports:
-      - "80:80"
+      # Host :80 -> container :8080 (non-root nginx-unprivileged image).
+      - "80:8080"
     depends_on:
       api:
         condition: service_healthy
       web:
-        condition: service_started
+        condition: service_healthy
 
   mailpit:
     image: axllent/mailpit:latest

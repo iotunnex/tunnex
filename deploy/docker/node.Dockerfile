@@ -13,4 +13,7 @@ FROM alpine:3.20
 # wireguard-tools land here in S3.x; kept minimal for the foundation stub.
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/tunnex-node /usr/local/bin/tunnex-node
+EXPOSE 9091
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:9091/healthz >/dev/null 2>&1 || exit 1
 ENTRYPOINT ["/usr/local/bin/tunnex-node"]
