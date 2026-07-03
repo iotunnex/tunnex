@@ -45,8 +45,18 @@ services:
       TUNNEX_ENV: ${TUNNEX_ENV:-development}
       TUNNEX_LOG_LEVEL: ${TUNNEX_LOG_LEVEL:-info}
       TUNNEX_API_ADDR: ${TUNNEX_API_ADDR:-:8080}
+      TUNNEX_SECRETS_DIR: /var/lib/tunnex/secrets
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@tunnex.local}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      # Dedicated volume for roots of trust — kept separate from app data so
+      # S11.2's backup story can scope it cleanly.
+      - tunnex_secrets:/var/lib/tunnex/secrets
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,3 +112,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  tunnex_secrets:
