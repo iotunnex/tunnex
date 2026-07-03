@@ -15,10 +15,16 @@ type Querier interface {
 	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
+	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
+	// given purpose. A reset token therefore cannot be consumed as a verification
+	// token and vice-versa.
+	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (AuthToken, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
+	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -33,16 +39,21 @@ type Querier interface {
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
+	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
+	// new password-reset token, so only the latest is valid).
+	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
 	ListOrganizations(ctx context.Context) ([]Organization, error)
+	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — revocation targets a specific invitation id (already
 	// authorized at the handler layer by org membership before this runs).
 	RevokeInvitation(ctx context.Context, id uuid.UUID) error
+	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)

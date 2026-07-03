@@ -21,6 +21,8 @@ type Config struct {
 	// AutoMigrate runs pending migrations on boot so `docker compose up`
 	// self-provisions the schema (S0.4).
 	AutoMigrate bool
+	// AppBaseURL is the public base URL used to build email links (S2.1).
+	AppBaseURL string
 	// SMTP holds mail delivery configuration (S0.3).
 	SMTP SMTP
 }
@@ -47,6 +49,7 @@ func Load() Config {
 		SecretsDir:  getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
 		DatabaseURL: getenv("DATABASE_URL", ""),
 		AutoMigrate: getbool("TUNNEX_AUTO_MIGRATE", true),
+		AppBaseURL:  getenv("APP_BASE_URL", "http://localhost"),
 		SMTP: SMTP{
 			Host:     getenv("SMTP_HOST", ""),
 			Port:     getenv("SMTP_PORT", "1025"),

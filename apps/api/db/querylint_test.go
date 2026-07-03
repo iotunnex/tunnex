@@ -26,6 +26,7 @@ import (
 var globalTables = map[string]bool{
 	"organizations": true, // the tenant root; scoped by id/slug
 	"users":         true, // global — email-first login, org resolved after
+	"auth_tokens":   true, // global — user-scoped auth tokens, predate org context
 }
 
 type schema struct {

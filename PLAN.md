@@ -33,6 +33,19 @@ This plan defines **every story** up front. We then build **one story at a time*
 
 ---
 
+## Armed Guards (living inventory — "what protects us")
+Each has been demonstrated to *fail* on a real violation during its story's DoD.
+Seed for the eventual SECURITY.md.
+- **Query-lint / org_id** (`db/querylint_test.go`) — tenant-owned-by-default (tables derived from migrations, `globalTables` allowlist); every tenant table query must scope by `org_id`.
+- **Query-lint / deleted_at** — soft-delete tables must filter `deleted_at IS NULL`.
+- **Trigger schema check** (`db/schema_test.go`) — every `updated_at` table has the `set_updated_at` trigger.
+- **audit_logs append-only** — DB triggers reject UPDATE/DELETE/TRUNCATE; actor FK to `users` enforces attribution.
+- **Codegen drift guard** (`make generate-check`) — spec/generated code can't diverge.
+- **Edition build+test** (`make build-editions` / `test-editions`) — open and enterprise builds both compiled & tested; neither rots.
+- **e2e correlation** (Playwright) — SPA→API `X-Request-Id` chain asserted end-to-end.
+- **RBAC matrix** (`rbac_test.go`) — executable privilege-escalation spec.
+- **Restart-persistence + fail-loud secrets** (S0.3) — master key never silently regenerates.
+
 ## Edition Model — Open-core (resolved)
 - **Schema is multi-tenant in core.** Everything carries `org_id`; the open edition simply **does not expose creating a second org** — an API/UI limit, not a schema fork. No migration or code move later.
 - **Enterprise features** (gated behind an `internal/enterprise/**` package + build tag): SSO (Google/Microsoft), Zero Trust policies, Kubernetes operator, and the multi-org limit-lift.
@@ -58,8 +71,8 @@ This plan defines **every story** up front. We then build **one story at a time*
 
 ## EPIC 2 — Authentication (Google + Microsoft + Local)
 
-- **S2.1 Local auth** — signup/login, argon2id, **email verification + password reset (uses S0.3 mailer)**.
-- **S2.2 Session management** — Redis-backed cookie sessions, CSRF, logout, refresh. **Carries the S1.3 handoff:** supply the real session-backed `AuthFunc` (resolves session → `authctx.Principal` with memberships); add a spec-driven test asserting every mutation endpoint returns 401 without a session (walks the OpenAPI paths); populate `audit_logs.actor_user_id` for authenticated mutations (NULL = system action only). Gate the org collection/create endpoints (org-item endpoints already fail closed as of S1.3).
+- **S2.1 Local auth** — signup/login, argon2id, **email verification + password reset (uses S0.3 mailer)**. DONE. **Decisions:** unverified users MAY log in; email-verification gates org-*mutating* actions (enforce once the principal carries verified state, S2.2). No account enumeration (generic signup/reset responses; generic login error + dummy-verify timing). Tokens hashed/purpose-bound/single-use/expiring.
+- **S2.2 Session management** — Redis-backed cookie sessions, CSRF, logout, refresh. **Carries the S1.3 + S2.1 handoffs:** supply the real session-backed `AuthFunc` (resolves session → `authctx.Principal` with memberships + verified state); spec-driven test asserting every mutation endpoint returns 401 without a session (walks the OpenAPI paths); populate `audit_logs.actor_user_id` for authenticated mutations (NULL = system only); gate the org collection/create endpoints; **wire login to establish a session cookie**; **password reset must revoke all of the user's existing sessions**; enforce verified-gating on org-mutating actions.
 - **S2.3 Google OIDC** *(enterprise)* — login + account linking; per-org SSO config (secret encrypted at rest).
 - **S2.4 Microsoft Entra OIDC** *(enterprise)* — login + account linking; multi-tenant Azure app; secret encrypted.
 - **S2.5 SSO provisioning & domain capture** *(enterprise, security-sensitive — extra review)* — JIT user creation + role mapping. Require **DNS-TXT-verified domain ownership**; **block public domains** (gmail.com, etc.); **domain capture is globally unique** (two orgs cannot capture the same domain); never auto-join on unverified email.

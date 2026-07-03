@@ -15,6 +15,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -31,7 +32,7 @@ type AuthFunc func(r *http.Request) *authctx.Principal
 // Middleware order matters: RequestID runs before the structured logger so the
 // correlation ID is available when the access log is written; the OpenAPI
 // validator runs before handlers so malformed requests never reach them.
-func NewRouter(logger *slog.Logger, orgs *tenancy.Service, authFn AuthFunc) (http.Handler, error) {
+func NewRouter(logger *slog.Logger, orgs *tenancy.Service, authSvc *auth.Service, authFn AuthFunc) (http.Handler, error) {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -64,7 +65,7 @@ func NewRouter(logger *slog.Logger, orgs *tenancy.Service, authFn AuthFunc) (htt
 		ErrorHandler: validationErrorHandler,
 	}))
 
-	srv := apiServer{orgs: orgs}
+	srv := apiServer{orgs: orgs, auth: authSvc}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

@@ -10,6 +10,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -42,6 +43,7 @@ func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (cont
 // ResponseErrorHandlerFunc renders those errors as the standard envelope.
 type apiServer struct {
 	orgs *tenancy.Service
+	auth *auth.Service
 }
 
 // GetHealth implements GET /healthz.

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db"
+	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
@@ -101,9 +102,11 @@ func main() {
 	}
 	defer pool.Close()
 
-	// authFn is nil until S2 wires session-backed authentication; principal-gated
+	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, logger)
+
+	// authFn is nil until S2.2 wires session-backed authentication; principal-gated
 	// endpoints therefore fail closed (401) in the meantime.
-	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool), nil)
+	router, err := apphttp.NewRouter(logger, tenancy.NewService(pool), authSvc, nil)
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
 		os.Exit(1)

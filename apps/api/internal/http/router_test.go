@@ -15,7 +15,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	// These tests exercise /healthz and the validator only — no DB access — so a
 	// service over a nil pool is sufficient.
-	h, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), tenancy.NewService(nil), nil)
+	h, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), tenancy.NewService(nil), nil, nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

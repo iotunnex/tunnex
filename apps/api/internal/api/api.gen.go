@@ -28,6 +28,13 @@ const (
 	Ok HealthResponseStatus = "ok"
 )
 
+// AuthUser defines model for AuthUser.
+type AuthUser struct {
+	Email         openapi_types.Email `json:"email"`
+	EmailVerified bool                `json:"email_verified"`
+	Id            openapi_types.UUID  `json:"id"`
+}
+
 // CreateOrganizationRequest defines model for CreateOrganizationRequest.
 type CreateOrganizationRequest struct {
 	Name string `json:"name"`
@@ -62,6 +69,11 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
+// GenericMessage defines model for GenericMessage.
+type GenericMessage struct {
+	Message string `json:"message"`
+}
+
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	// RequestId Correlation ID for this request.
@@ -77,6 +89,12 @@ type HealthResponse struct {
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
 
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	Password string              `json:"password"`
+}
+
 // Organization defines model for Organization.
 type Organization struct {
 	CreatedAt time.Time          `json:"created_at"`
@@ -86,10 +104,48 @@ type Organization struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 
+// PasswordResetConfirmRequest defines model for PasswordResetConfirmRequest.
+type PasswordResetConfirmRequest struct {
+	Password string `json:"password"`
+	Token    string `json:"token"`
+}
+
+// PasswordResetRequest defines model for PasswordResetRequest.
+type PasswordResetRequest struct {
+	Email openapi_types.Email `json:"email"`
+}
+
+// SignupRequest defines model for SignupRequest.
+type SignupRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	Name     *string             `json:"name,omitempty"`
+	Password string              `json:"password"`
+}
+
+// TokenRequest defines model for TokenRequest.
+type TokenRequest struct {
+	Token string `json:"token"`
+}
+
 // UpdateOrganizationRequest Only the name is mutable; the slug is fixed at creation.
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
 }
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// RequestPasswordResetJSONRequestBody defines body for RequestPasswordReset for application/json ContentType.
+type RequestPasswordResetJSONRequestBody = PasswordResetRequest
+
+// ConfirmPasswordResetJSONRequestBody defines body for ConfirmPasswordReset for application/json ContentType.
+type ConfirmPasswordResetJSONRequestBody = PasswordResetConfirmRequest
+
+// SignupJSONRequestBody defines body for Signup for application/json ContentType.
+type SignupJSONRequestBody = SignupRequest
+
+// VerifyEmailJSONRequestBody defines body for VerifyEmail for application/json ContentType.
+type VerifyEmailJSONRequestBody = TokenRequest
 
 // CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
 type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
@@ -99,6 +155,21 @@ type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Verify credentials
+	// (POST /api/v1/auth/login)
+	Login(w http.ResponseWriter, r *http.Request)
+	// Request a password-reset email
+	// (POST /api/v1/auth/password-reset)
+	RequestPasswordReset(w http.ResponseWriter, r *http.Request)
+	// Set a new password using a reset token
+	// (POST /api/v1/auth/password-reset/confirm)
+	ConfirmPasswordReset(w http.ResponseWriter, r *http.Request)
+	// Create a local account (sends a verification email)
+	// (POST /api/v1/auth/signup)
+	Signup(w http.ResponseWriter, r *http.Request)
+	// Verify an email address with a token
+	// (POST /api/v1/auth/verify-email)
+	VerifyEmail(w http.ResponseWriter, r *http.Request)
 	// List organizations
 	// (GET /api/v1/organizations)
 	ListOrganizations(w http.ResponseWriter, r *http.Request)
@@ -122,6 +193,36 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Verify credentials
+// (POST /api/v1/auth/login)
+func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Request a password-reset email
+// (POST /api/v1/auth/password-reset)
+func (_ Unimplemented) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Set a new password using a reset token
+// (POST /api/v1/auth/password-reset/confirm)
+func (_ Unimplemented) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a local account (sends a verification email)
+// (POST /api/v1/auth/signup)
+func (_ Unimplemented) Signup(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Verify an email address with a token
+// (POST /api/v1/auth/verify-email)
+func (_ Unimplemented) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // List organizations
 // (GET /api/v1/organizations)
@@ -167,6 +268,76 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestPasswordReset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmPasswordReset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Signup operation middleware
+func (siw *ServerInterfaceWrapper) Signup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Signup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyEmail operation middleware
+func (siw *ServerInterfaceWrapper) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyEmail(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListOrganizations operation middleware
 func (siw *ServerInterfaceWrapper) ListOrganizations(w http.ResponseWriter, r *http.Request) {
@@ -399,6 +570,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/login", wrapper.Login)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/password-reset", wrapper.RequestPasswordReset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/password-reset/confirm", wrapper.ConfirmPasswordReset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/signup", wrapper.Signup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/verify-email", wrapper.VerifyEmail)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/organizations", wrapper.ListOrganizations)
 	})
 	r.Group(func(r chi.Router) {
@@ -427,6 +613,201 @@ type ErrorJSONResponse struct {
 	Body Error
 
 	Headers ErrorResponseHeaders
+}
+
+type LoginRequestObject struct {
+	Body *LoginJSONRequestBody
+}
+
+type LoginResponseObject interface {
+	VisitLoginResponse(w http.ResponseWriter) error
+}
+
+type Login200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Login200JSONResponse struct {
+	Body    AuthUser
+	Headers Login200ResponseHeaders
+}
+
+func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type LogindefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response LogindefaultJSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RequestPasswordResetRequestObject struct {
+	Body *RequestPasswordResetJSONRequestBody
+}
+
+type RequestPasswordResetResponseObject interface {
+	VisitRequestPasswordResetResponse(w http.ResponseWriter) error
+}
+
+type RequestPasswordReset202ResponseHeaders struct {
+	XRequestId string
+}
+
+type RequestPasswordReset202JSONResponse struct {
+	Body    GenericMessage
+	Headers RequestPasswordReset202ResponseHeaders
+}
+
+func (response RequestPasswordReset202JSONResponse) VisitRequestPasswordResetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RequestPasswordResetdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RequestPasswordResetdefaultJSONResponse) VisitRequestPasswordResetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ConfirmPasswordResetRequestObject struct {
+	Body *ConfirmPasswordResetJSONRequestBody
+}
+
+type ConfirmPasswordResetResponseObject interface {
+	VisitConfirmPasswordResetResponse(w http.ResponseWriter) error
+}
+
+type ConfirmPasswordReset200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ConfirmPasswordReset200JSONResponse struct {
+	Body    GenericMessage
+	Headers ConfirmPasswordReset200ResponseHeaders
+}
+
+func (response ConfirmPasswordReset200JSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ConfirmPasswordResetdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ConfirmPasswordResetdefaultJSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SignupRequestObject struct {
+	Body *SignupJSONRequestBody
+}
+
+type SignupResponseObject interface {
+	VisitSignupResponse(w http.ResponseWriter) error
+}
+
+type Signup202ResponseHeaders struct {
+	XRequestId string
+}
+
+type Signup202JSONResponse struct {
+	Body    GenericMessage
+	Headers Signup202ResponseHeaders
+}
+
+func (response Signup202JSONResponse) VisitSignupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SignupdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SignupdefaultJSONResponse) VisitSignupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type VerifyEmailRequestObject struct {
+	Body *VerifyEmailJSONRequestBody
+}
+
+type VerifyEmailResponseObject interface {
+	VisitVerifyEmailResponse(w http.ResponseWriter) error
+}
+
+type VerifyEmail200ResponseHeaders struct {
+	XRequestId string
+}
+
+type VerifyEmail200JSONResponse struct {
+	Body    GenericMessage
+	Headers VerifyEmail200ResponseHeaders
+}
+
+func (response VerifyEmail200JSONResponse) VisitVerifyEmailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type VerifyEmaildefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response VerifyEmaildefaultJSONResponse) VisitVerifyEmailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
 }
 
 type ListOrganizationsRequestObject struct {
@@ -661,6 +1042,21 @@ func (response GetHealthdefaultJSONResponse) VisitGetHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Verify credentials
+	// (POST /api/v1/auth/login)
+	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// Request a password-reset email
+	// (POST /api/v1/auth/password-reset)
+	RequestPasswordReset(ctx context.Context, request RequestPasswordResetRequestObject) (RequestPasswordResetResponseObject, error)
+	// Set a new password using a reset token
+	// (POST /api/v1/auth/password-reset/confirm)
+	ConfirmPasswordReset(ctx context.Context, request ConfirmPasswordResetRequestObject) (ConfirmPasswordResetResponseObject, error)
+	// Create a local account (sends a verification email)
+	// (POST /api/v1/auth/signup)
+	Signup(ctx context.Context, request SignupRequestObject) (SignupResponseObject, error)
+	// Verify an email address with a token
+	// (POST /api/v1/auth/verify-email)
+	VerifyEmail(ctx context.Context, request VerifyEmailRequestObject) (VerifyEmailResponseObject, error)
 	// List organizations
 	// (GET /api/v1/organizations)
 	ListOrganizations(ctx context.Context, request ListOrganizationsRequestObject) (ListOrganizationsResponseObject, error)
@@ -708,6 +1104,161 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// Login operation middleware
+func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var request LoginRequestObject
+
+	var body LoginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Login(ctx, request.(LoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Login")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LoginResponseObject); ok {
+		if err := validResponse.VisitLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RequestPasswordReset operation middleware
+func (sh *strictHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var request RequestPasswordResetRequestObject
+
+	var body RequestPasswordResetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestPasswordReset(ctx, request.(RequestPasswordResetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestPasswordReset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestPasswordResetResponseObject); ok {
+		if err := validResponse.VisitRequestPasswordResetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmPasswordReset operation middleware
+func (sh *strictHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmPasswordResetRequestObject
+
+	var body ConfirmPasswordResetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmPasswordReset(ctx, request.(ConfirmPasswordResetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmPasswordReset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmPasswordResetResponseObject); ok {
+		if err := validResponse.VisitConfirmPasswordResetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Signup operation middleware
+func (sh *strictHandler) Signup(w http.ResponseWriter, r *http.Request) {
+	var request SignupRequestObject
+
+	var body SignupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Signup(ctx, request.(SignupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Signup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SignupResponseObject); ok {
+		if err := validResponse.VisitSignupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyEmail operation middleware
+func (sh *strictHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var request VerifyEmailRequestObject
+
+	var body VerifyEmailJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyEmail(ctx, request.(VerifyEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyEmailResponseObject); ok {
+		if err := validResponse.VisitVerifyEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListOrganizations operation middleware
@@ -877,34 +1428,43 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"0lKIUgen5mqq1hfr/wcAAP//gD8ERfUXAAA=",
+	"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",
+	"Jrent/8PAAD//6ACi+WaKAAA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
