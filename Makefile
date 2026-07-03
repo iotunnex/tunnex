@@ -31,6 +31,30 @@ ps: ## Show service status
 logs: ## Tail all service logs
 	$(COMPOSE) logs -f
 
+.PHONY: migrate
+migrate: ## Apply all database migrations
+	$(COMPOSE) run --rm --build migrate up
+
+.PHONY: migrate-down
+migrate-down: ## Roll back one database migration
+	$(COMPOSE) run --rm --build migrate down
+
+.PHONY: migrate-version
+migrate-version: ## Print the current schema version
+	$(COMPOSE) run --rm --build migrate version
+
+.PHONY: migrate-create
+migrate-create: ## Scaffold a migration pair: make migrate-create name=add_widgets
+	@test -n "$(name)" || { echo "usage: make migrate-create name=<snake_case>"; exit 1; }
+	@dir=apps/api/db/migrations; \
+	next=$$(printf "%04d" $$(( $$(ls $$dir/*.up.sql 2>/dev/null | wc -l | tr -d ' ') + 1 ))); \
+	touch $$dir/$${next}_$(name).up.sql $$dir/$${next}_$(name).down.sql; \
+	echo "created $$dir/$${next}_$(name).{up,down}.sql"
+
+.PHONY: sqlc
+sqlc: ## Regenerate typed query code from db/queries
+	docker run --rm -v "$(PWD)/apps/api":/src -w /src sqlc/sqlc generate
+
 .PHONY: api
 api: ## Run the API locally (outside docker)
 	cd apps/api && go run ./cmd/server

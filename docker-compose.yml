@@ -46,6 +46,7 @@ services:
       TUNNEX_LOG_LEVEL: ${TUNNEX_LOG_LEVEL:-info}
       TUNNEX_API_ADDR: ${TUNNEX_API_ADDR:-:8080}
       TUNNEX_SECRETS_DIR: /var/lib/tunnex/secrets
+      TUNNEX_AUTO_MIGRATE: ${TUNNEX_AUTO_MIGRATE:-true}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -98,6 +99,19 @@ services:
       api:
         condition: service_healthy
       web:
+        condition: service_healthy
+
+  # One-shot migration tool. Not started by `up` (tools profile); invoked via
+  # `make migrate` / `make migrate-down`. The API also auto-migrates on boot.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/migrate.Dockerfile
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
         condition: service_healthy
 
   mailpit:

@@ -16,6 +16,11 @@ type Config struct {
 	LogLevel string
 	// SecretsDir is the dedicated volume holding the roots of trust (S0.3).
 	SecretsDir string
+	// DatabaseURL is the postgres DSN (S0.4).
+	DatabaseURL string
+	// AutoMigrate runs pending migrations on boot so `docker compose up`
+	// self-provisions the schema (S0.4).
+	AutoMigrate bool
 	// SMTP holds mail delivery configuration (S0.3).
 	SMTP SMTP
 }
@@ -38,8 +43,10 @@ func Load() Config {
 	return Config{
 		Addr:       getenv("TUNNEX_API_ADDR", ":8080"),
 		Env:        getenv("TUNNEX_ENV", "development"),
-		LogLevel:   strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
-		SecretsDir: getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
+		LogLevel:    strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
+		SecretsDir:  getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
+		DatabaseURL: getenv("DATABASE_URL", ""),
+		AutoMigrate: getbool("TUNNEX_AUTO_MIGRATE", true),
 		SMTP: SMTP{
 			Host:     getenv("SMTP_HOST", ""),
 			Port:     getenv("SMTP_PORT", "1025"),
@@ -55,4 +62,19 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getbool(key string, fallback bool) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
@@ -73,6 +74,21 @@ func main() {
 	// sealer and mailer are consumed by auth/SSO flows starting in EPIC 2.
 	_ = sealer
 	_ = mailer
+
+	// --- S0.4: self-provision the schema so `docker compose up` just works ---
+	if cfg.AutoMigrate {
+		if cfg.DatabaseURL == "" {
+			logger.Error("auto_migrate_failed", slog.String("error", "DATABASE_URL is empty"))
+			os.Exit(1)
+		}
+		if err := db.Up(cfg.DatabaseURL); err != nil {
+			logger.Error("auto_migrate_failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		if v, dirty, ok, _ := db.Version(cfg.DatabaseURL); ok {
+			logger.Info("schema_migrated", slog.Uint64("version", uint64(v)), slog.Bool("dirty", dirty))
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
