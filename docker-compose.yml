@@ -80,11 +80,18 @@ services:
       # an operator provides a join token. Set it to auto-enroll.
       TUNNEX_JOIN_TOKEN: ${TUNNEX_JOIN_TOKEN:-}
       TUNNEX_NODE_STATE_DIR: /var/lib/tunnex-node
+      # Real WireGuard data plane (S3.2). "mem" for an in-memory dev backend.
+      TUNNEX_WG_BACKEND: ${TUNNEX_WG_BACKEND:-wgctrl}
+      TUNNEX_WG_INTERFACE: ${TUNNEX_WG_INTERFACE:-wg0}
     volumes:
       - tunnex_node_state:/var/lib/tunnex-node
-    # Required to manage WireGuard interfaces (S3.2). Harmless in S3.1.
+    # NET_ADMIN + /dev/net/tun let the agent create/configure the WG interface
+    # (kernel module if present, else userspace wireguard-go). readiness stays
+    # false + diagnosable if neither is available — no silent success.
     cap_add:
       - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     ports:
       # WireGuard data-plane UDP port, published for later stories.
       - "51820:51820/udp"

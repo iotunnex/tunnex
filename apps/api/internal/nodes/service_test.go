@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -123,6 +124,19 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Fatalf("authenticate renewed: %v", err)
 	}
 
+	// WG key reporting: a malformed key is rejected; a well-formed 32-byte base64
+	// key is stored on the active node.
+	if err := svc.ReportWGKey(ctx, node, "not-a-key"); code(err) != "invalid_wg_key" {
+		t.Fatalf("malformed key: want invalid_wg_key, got %v", err)
+	}
+	wgKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	if err := svc.ReportWGKey(ctx, node, wgKey); err != nil {
+		t.Fatalf("report valid key: %v", err)
+	}
+	if stored, _ := q.GetNodeByCertSerial(ctx, newSerial); stored.WgPublicKey != wgKey {
+		t.Fatalf("key not persisted: got %q", stored.WgPublicKey)
+	}
+
 	// Revoke -> cert auth fails AND renewal is refused (the revocation mechanism).
 	if err := svc.Revoke(ctx, actor, org, node.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
@@ -133,6 +147,11 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	revoked, _ := q.GetNodeByCertSerial(ctx, newSerial)
 	if _, err := svc.Renew(ctx, revoked, genCSR(t, "gw-1"), "0.3.0"); code(err) != "agent_revoked" {
 		t.Fatalf("renew revoked: want agent_revoked, got %v", err)
+	}
+	// Reporting a key for a revoked node is a zero-row update -> surfaced as a
+	// conflict, not a silent 204/no-op.
+	if err := svc.ReportWGKey(ctx, revoked, wgKey); code(err) != "node_not_active" {
+		t.Fatalf("report on revoked: want node_not_active, got %v", err)
 	}
 
 	// Versioned handshake.

@@ -76,7 +76,6 @@ func main() {
 		slog.Bool("first_boot", sec.GeneratedAny),
 		slog.String("master_key_fp", secrets.Fingerprint(sec.MasterKey)),
 		slog.String("session_secret_fp", secrets.Fingerprint(sec.SessionSecret)),
-		slog.String("wg_server_pubkey_fp", secrets.Fingerprint(sec.WGPublicKey)),
 		slog.String("mailer", mailer.Kind()),
 	)
 

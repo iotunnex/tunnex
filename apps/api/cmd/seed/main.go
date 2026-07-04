@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/password"
 	"github.com/tunnexio/tunnex/apps/api/internal/seeddata"
 )
 
@@ -94,6 +95,17 @@ func main() {
 	// actions (verified-gating, S2.2).
 	if err := q.MarkEmailVerified(ctx, userID); err != nil {
 		logger.Error("seed_verify_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// Set the demo owner's password (DemoOwnerPassword) so it can log in via
+	// local auth — the whole point of the demo credential.
+	phc, err := password.Hash(seeddata.DemoOwnerPassword)
+	if err != nil {
+		logger.Error("seed_hash_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: userID, PasswordHash: &phc}); err != nil {
+		logger.Error("seed_password_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{

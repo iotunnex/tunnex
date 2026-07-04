@@ -140,6 +140,23 @@ func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, ne
 	return body, keyPEM, nil
 }
 
+// ReportKey reports the node's locally-generated WireGuard public key.
+func (c *Client) ReportKey(ctx context.Context, publicKey string) error {
+	body, _ := json.Marshal(map[string]string{"public_key": publicKey})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("report status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // FetchDesired GETs the desired state over mTLS.
 func (c *Client) FetchDesired(ctx context.Context) (reconcile.DesiredState, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/agent/desired-state", nil)

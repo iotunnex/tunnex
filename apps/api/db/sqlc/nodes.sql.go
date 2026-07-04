@@ -74,7 +74,7 @@ func (q *Queries) CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (org_id, name, cert_serial, agent_version)
 VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key
 `
 
 type CreateNodeParams struct {
@@ -104,12 +104,13 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WgPublicKey,
 	)
 	return i, err
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key FROM nodes
 WHERE cert_serial = $1
 `
 
@@ -130,12 +131,13 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WgPublicKey,
 	)
 	return i, err
 }
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key FROM nodes
 WHERE org_id = $1 AND name = $2
 `
 
@@ -159,6 +161,7 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WgPublicKey,
 	)
 	return i, err
 }
@@ -200,7 +203,7 @@ func (q *Queries) InsertPlatformSecret(ctx context.Context, arg InsertPlatformSe
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key FROM nodes
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -226,6 +229,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 			&i.RevokedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WgPublicKey,
 		); err != nil {
 			return nil, err
 		}
@@ -270,6 +274,28 @@ type RevokeNodeParams struct {
 func (q *Queries) RevokeNode(ctx context.Context, arg RevokeNodeParams) error {
 	_, err := q.db.Exec(ctx, revokeNode, arg.OrgID, arg.ID)
 	return err
+}
+
+const setNodeWGPublicKey = `-- name: SetNodeWGPublicKey :execrows
+UPDATE nodes
+SET wg_public_key = $2, last_seen_at = now()
+WHERE id = $1 AND status = 'active'
+`
+
+type SetNodeWGPublicKeyParams struct {
+	ID          uuid.UUID `json:"id"`
+	WgPublicKey string    `json:"wg_public_key"`
+}
+
+// lint:cross-org — keyed by id after cert authorization; the node reports its
+// locally-generated WireGuard public key. Returns rows affected so the caller
+// can distinguish a real write from a no-op (e.g. node revoked mid-report).
+func (q *Queries) SetNodeWGPublicKey(ctx context.Context, arg SetNodeWGPublicKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setNodeWGPublicKey, arg.ID, arg.WgPublicKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchNodeSeen = `-- name: TouchNodeSeen :exec

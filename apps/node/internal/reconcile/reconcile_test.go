@@ -11,11 +11,19 @@ import (
 )
 
 type fakeBackend struct {
-	mu     sync.Mutex
-	peers  []Peer
-	applyN int
+	mu        sync.Mutex
+	peers     []Peer
+	applyN    int
+	configErr error
 }
 
+func (f *fakeBackend) setConfigErr(e error) { f.mu.Lock(); f.configErr = e; f.mu.Unlock() }
+func (f *fakeBackend) Configure(context.Context, InterfaceConfig) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.configErr
+}
+func (f *fakeBackend) applyCount() int { f.mu.Lock(); defer f.mu.Unlock(); return f.applyN }
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -64,7 +72,7 @@ var p2 = Peer{PublicKey: "k2", AllowedIPs: []string{"10.0.0.2/32"}}
 
 func TestReconcileAppliesAndIdempotent(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, discard())
+	r := New(b, "priv", discard())
 	ctx := context.Background()
 
 	if changed, _ := r.Reconcile(ctx, []Peer{p1}); !changed || b.count() != 1 {
@@ -81,7 +89,7 @@ func TestReconcileAppliesAndIdempotent(t *testing.T) {
 
 func TestRunOnceDataPlaneIndependence(t *testing.T) {
 	b := &fakeBackend{peers: []Peer{p1}}
-	r := New(b, discard())
+	r := New(b, "priv", discard())
 	c := &fakeClient{watch: make(chan struct{})}
 	c.setErr(errors.New("control plane down"))
 
@@ -105,7 +113,7 @@ func TestRunOnceDataPlaneIndependence(t *testing.T) {
 
 func TestRunPushConvergesQuickly(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, discard())
+	r := New(b, "priv", discard())
 	c := &fakeClient{watch: make(chan struct{}, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -125,7 +133,7 @@ func TestRunPushConvergesQuickly(t *testing.T) {
 
 func TestRunIntervalSafetyNet(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, discard())
+	r := New(b, "priv", discard())
 	// watch never fires -> only the interval (safety net) can converge.
 	c := &fakeClient{watch: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -135,6 +143,65 @@ func TestRunIntervalSafetyNet(t *testing.T) {
 
 	c.set(DesiredState{Peers: []Peer{p1}})
 	waitFor(t, 3*time.Second, func() bool { return b.count() == 1 })
+}
+
+// TestDirtyDeviceConvergence proves watch-item (c) at the reconcile layer: a
+// device carrying a STALE peer plus a still-correct peer converges to exactly
+// the desired set (stale removed, correct kept, new added) and a repeat run is a
+// no-op — no re-apply, so unchanged peers never flap.
+func TestDirtyDeviceConvergence(t *testing.T) {
+	stale := Peer{PublicKey: "gone", AllowedIPs: []string{"10.0.0.9/32"}}
+	// Device is dirty: it has a stale peer and the still-correct p1.
+	b := &fakeBackend{peers: []Peer{stale, p1}}
+	r := New(b, "priv", discard())
+	c := &fakeClient{watch: make(chan struct{})}
+	c.set(DesiredState{Peers: []Peer{p1, p2}}) // p1 kept, p2 added, stale dropped
+
+	if _, err := r.runOnce(context.Background(), c); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if !peersEqual(b.peers, []Peer{p1, p2}) {
+		t.Fatalf("did not converge to desired set: %+v", b.peers)
+	}
+	appliesAfterFirst := b.applyCount()
+
+	// Second run against identical desired state must not re-apply (no flap).
+	if changed, err := r.runOnce(context.Background(), c); err != nil || changed {
+		t.Fatalf("second run should be a no-op: changed=%v err=%v", changed, err)
+	}
+	if b.applyCount() != appliesAfterFirst {
+		t.Fatal("idempotence violated: re-applied an unchanged peer set")
+	}
+}
+
+// TestHealthyReflectsBackendFailure proves watch-item (d): a backend that cannot
+// configure the device (e.g. NET_ADMIN missing, port bound) leaves the agent
+// NOT-ready with a diagnosable error — never a silent success. Recovery flips it
+// back to ready.
+func TestHealthyReflectsBackendFailure(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", discard())
+	c := &fakeClient{watch: make(chan struct{})}
+	c.set(DesiredState{Peers: []Peer{p1}})
+
+	if r.Healthy() {
+		t.Fatal("should not be healthy before any successful reconcile")
+	}
+	b.setConfigErr(errors.New("operation not permitted (NET_ADMIN?)"))
+	if _, err := r.runOnce(context.Background(), c); err == nil {
+		t.Fatal("expected a backend configure error")
+	}
+	if r.Healthy() {
+		t.Fatal("backend failure must leave the agent NOT healthy (not-ready)")
+	}
+	// Recovery.
+	b.setConfigErr(nil)
+	if _, err := r.runOnce(context.Background(), c); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	if !r.Healthy() {
+		t.Fatal("healthy should flip true after a fully successful reconcile")
+	}
 }
 
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {

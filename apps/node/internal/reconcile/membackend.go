@@ -16,6 +16,9 @@ type MemBackend struct {
 // NewMemBackend returns an empty in-memory backend.
 func NewMemBackend() *MemBackend { return &MemBackend{} }
 
+// Configure records the interface config (no real device in the in-memory backend).
+func (m *MemBackend) Configure(context.Context, InterfaceConfig) error { return nil }
+
 func (m *MemBackend) Peers(context.Context) ([]Peer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

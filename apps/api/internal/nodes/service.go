@@ -40,9 +40,12 @@ type Peer struct {
 // DesiredState is what an agent should converge its interface to. Version lets
 // the agent detect changes cheaply; ProtocolVersion gates compatibility.
 type DesiredState struct {
-	ProtocolVersion int    `json:"protocol_version"`
-	NodeID          string `json:"node_id"`
-	Peers           []Peer `json:"peers"`
+	ProtocolVersion  int    `json:"protocol_version"`
+	NodeID           string `json:"node_id"`
+	InterfaceAddress string `json:"interface_address"` // TODO(S3.5): from the org pool allocator
+	MTU              int    `json:"mtu"`               // explicit, never inherited from ambient
+	ListenPort       int    `json:"listen_port"`
+	Peers            []Peer `json:"peers"`
 }
 
 // Service provides node control-plane operations.
@@ -177,10 +180,44 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 	return certPEM, nil
 }
 
-// DesiredState returns the peers the agent should converge to (empty until S3.2).
+// DesiredState returns the interface config + peers the agent should converge
+// to. The interface address is a deterministic placeholder until S3.5's pool
+// allocator owns it; MTU is explicit (WireGuard's default 1420).
 func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredState, error) {
 	_ = s.q.TouchNodeSeen(ctx, node.ID)
-	return DesiredState{ProtocolVersion: ProtocolVersion, NodeID: node.ID.String(), Peers: []Peer{}}, nil
+	return DesiredState{
+		ProtocolVersion:  ProtocolVersion,
+		NodeID:           node.ID.String(),
+		InterfaceAddress: "10.99.0.1/32", // TODO(S3.5): allocate from the org pool
+		MTU:              1420,
+		ListenPort:       51820,
+		Peers:            []Peer{},
+	}, nil
+}
+
+// ReportWGKey records the agent's locally-generated WireGuard public key. It
+// validates the key is a well-formed 32-byte base64 value (a malformed key would
+// later poison peer config for every node it is distributed to) and treats a
+// zero-row update (e.g. the node was revoked mid-report) as an error rather than
+// a silent no-op.
+func (s *Service) ReportWGKey(ctx context.Context, node sqlc.Node, publicKey string) error {
+	if !validWGKey(publicKey) {
+		return apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
+	}
+	n, err := s.q.SetNodeWGPublicKey(ctx, sqlc.SetNodeWGPublicKeyParams{ID: node.ID, WgPublicKey: publicKey})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return apierr.Conflict("node_not_active", "node is no longer active; key not stored")
+	}
+	return nil
+}
+
+// validWGKey reports whether s is a standard-base64-encoded 32-byte key.
+func validWGKey(s string) bool {
+	raw, err := base64.StdEncoding.DecodeString(s)
+	return err == nil && len(raw) == 32
 }
 
 // Revoke marks a node revoked (renewal will then be refused).

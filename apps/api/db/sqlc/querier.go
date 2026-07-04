@@ -88,6 +88,10 @@ type Querier interface {
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
+	// lint:cross-org — keyed by id after cert authorization; the node reports its
+	// locally-generated WireGuard public key. Returns rows affected so the caller
+	// can distinguish a real write from a no-op (e.g. node revoked mid-report).
+	SetNodeWGPublicKey(ctx context.Context, arg SetNodeWGPublicKeyParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)

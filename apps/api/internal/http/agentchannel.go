@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 )
 
@@ -54,7 +56,39 @@ func (a *AgentChannel) Handler() http.Handler {
 	r.Get("/agent/desired-state", a.desiredState)
 	r.Get("/agent/watch", a.watch)
 	r.Post("/agent/renew", a.renew)
+	r.Post("/agent/report", a.report)
 	return r
+}
+
+// report records the agent's locally-generated WireGuard public key.
+func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "client certificate required", http.StatusUnauthorized)
+		return
+	}
+	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
+	node, err := a.svc.AuthenticateCert(r.Context(), serial)
+	if err != nil {
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.PublicKey == "" {
+		http.Error(w, "public_key required", http.StatusBadRequest)
+		return
+	}
+	if err := a.svc.ReportWGKey(r.Context(), node, body.PublicKey); err != nil {
+		var ae *apierr.Error
+		if errors.As(err, &ae) {
+			http.Error(w, ae.Message, ae.Status)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *AgentChannel) desiredState(w http.ResponseWriter, r *http.Request) {

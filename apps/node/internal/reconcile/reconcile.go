@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,14 +21,29 @@ type Peer struct {
 
 // DesiredState is the control-plane response the agent reconciles toward.
 type DesiredState struct {
-	ProtocolVersion int    `json:"protocol_version"`
-	NodeID          string `json:"node_id"`
-	Peers           []Peer `json:"peers"`
+	ProtocolVersion  int    `json:"protocol_version"`
+	NodeID           string `json:"node_id"`
+	InterfaceAddress string `json:"interface_address"`
+	MTU              int    `json:"mtu"`
+	ListenPort       int    `json:"listen_port"`
+	Peers            []Peer `json:"peers"`
+}
+
+// InterfaceConfig is the device-level configuration. The PrivateKey is supplied
+// by the AGENT (generated locally, never from the control plane).
+type InterfaceConfig struct {
+	PrivateKey string
+	ListenPort int
+	Address    string
+	MTU        int
 }
 
 // WGBackend abstracts the WireGuard data plane. The real adapter wraps wgctrl;
 // the fake drives unit tests.
 type WGBackend interface {
+	// Configure idempotently ensures the interface exists with this key/port/
+	// address/MTU (converging a dirty device without flapping correct peers).
+	Configure(ctx context.Context, cfg InterfaceConfig) error
 	Peers(ctx context.Context) ([]Peer, error)
 	ApplyPeers(ctx context.Context, peers []Peer) error
 }
@@ -41,16 +57,25 @@ type ControlClient interface {
 	Watch(ctx context.Context) error
 }
 
-// Reconciler converges a backend toward desired state.
+// Reconciler converges a backend toward desired state. It holds the node's
+// locally-generated interface private key (never sourced from the control plane).
 type Reconciler struct {
-	backend WGBackend
-	logger  *slog.Logger
+	backend    WGBackend
+	privateKey string
+	logger     *slog.Logger
+	healthy    atomic.Bool
 }
 
-// New builds a Reconciler.
-func New(backend WGBackend, logger *slog.Logger) *Reconciler {
-	return &Reconciler{backend: backend, logger: logger}
+// New builds a Reconciler with the node's WireGuard private key.
+func New(backend WGBackend, privateKey string, logger *slog.Logger) *Reconciler {
+	return &Reconciler{backend: backend, privateKey: privateKey, logger: logger}
 }
+
+// Healthy reports whether the last reconcile fully succeeded (control plane
+// reachable AND the backend converged). Agent readiness reflects this, so a
+// backend failure — NET_ADMIN missing, port bound, device collision — surfaces
+// as not-ready and diagnosable, never a silent success or crash-loop.
+func (r *Reconciler) Healthy() bool { return r.healthy.Load() }
 
 // Reconcile converges the backend to the desired peer set. It applies the FULL
 // set (a resync), so a long-disconnected agent recovers correctly. Returns
@@ -75,9 +100,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, desired []Peer) (bool, error
 func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, error) {
 	ds, err := client.FetchDesired(ctx)
 	if err != nil {
+		r.healthy.Store(false)
 		return false, err
 	}
-	return r.Reconcile(ctx, ds.Peers)
+	// Idempotently ensure the interface config, then converge peers.
+	if err := r.backend.Configure(ctx, InterfaceConfig{
+		PrivateKey: r.privateKey, ListenPort: ds.ListenPort, Address: ds.InterfaceAddress, MTU: ds.MTU,
+	}); err != nil {
+		r.healthy.Store(false)
+		return false, err
+	}
+	changed, err := r.Reconcile(ctx, ds.Peers)
+	if err != nil {
+		r.healthy.Store(false)
+		return false, err
+	}
+	r.healthy.Store(true)
+	return changed, nil
 }
 
 // Run drives reconciliation from two independent triggers: Watch (push, low
