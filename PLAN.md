@@ -33,6 +33,19 @@ This plan defines **every story** up front. We then build **one story at a time*
 
 ---
 
+## Story status (re-entry checkpoint)
+Current: **S3.2 (WireGuard server lifecycle)** on branch `story/S3.2-wireguard-lifecycle`.
+Renewal fold-in committed (`8048371`): agent renews cert at half-life + atomic hot-swap
+(`CloseIdleConnections` after swap) + expiry⇒fresh-token rule; tested.
+Locked decisions: **node-generates** the WG key (private never leaves node; control plane
+stores pubkeys only), vestigial S0.3 WG server key removed, real wgctrl adapter idempotent
+vs a dirty device, explicit MTU, interface address = deterministic first-of-pool (S3.5 owns
+the allocator), compose e2e must prove a real WG device via `wg show`.
+Remaining: real wgctrl adapter (replace MemBackend), node keygen + pubkey reporting + re-key
+flow, failure-shape negatives (port bound / name collision / NET_ADMIN missing → readiness
+false, diagnosable), `wg show` e2e.
+Done through: EPIC 0–2 complete; S3.1 (node-agent keystone) merged.
+
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
 Seed for the eventual SECURITY.md.
