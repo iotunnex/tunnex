@@ -21,6 +21,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
+	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -37,6 +38,7 @@ type Deps struct {
 	Members      *tenancy.MembershipService
 	Invites      *invites.Service
 	Nodes        *nodes.Service
+	Devices      *devices.Service
 	Sessions     *session.Store
 	SSO          ssoPort // nil => open build (SSO endpoints return edition_required)
 	CookieSecure bool
@@ -93,7 +95,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

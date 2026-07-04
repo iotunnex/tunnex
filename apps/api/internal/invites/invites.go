@@ -16,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
+	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -102,7 +102,7 @@ func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, rol
 			OrgID: orgID, Email: email, Role: role, TokenHash: hash,
 			ExpiresAt: time.Now().Add(inviteTTL), InvitedByUserID: pgUUID(actor),
 		}); e != nil {
-			if isUnique(e) {
+			if pgerr.IsUnique(e) {
 				return apierr.Conflict("invite_pending", "an invitation is already pending for this email; resend or revoke it")
 			}
 			return e
@@ -243,11 +243,6 @@ func newToken() (raw string, hash []byte, err error) {
 func hashToken(raw string) []byte { h := sha256.Sum256([]byte(raw)); return h[:] }
 
 func pgUUID(id uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: [16]byte(id), Valid: true} }
-
-func isUnique(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
 
 func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UUID, action, targetID string, meta map[string]any) error {
 	b := []byte("{}")

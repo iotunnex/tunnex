@@ -27,6 +27,12 @@ const (
 	CookieAuthScopes = "cookieAuth.Scopes"
 )
 
+// Defines values for DeviceStatus.
+const (
+	DeviceStatusActive  DeviceStatus = "active"
+	DeviceStatusRevoked DeviceStatus = "revoked"
+)
+
 // Defines values for HealthResponseStatus.
 const (
 	Ok HealthResponseStatus = "ok"
@@ -41,8 +47,8 @@ const (
 
 // Defines values for NodeStatus.
 const (
-	Active  NodeStatus = "active"
-	Revoked NodeStatus = "revoked"
+	NodeStatusActive  NodeStatus = "active"
+	NodeStatusRevoked NodeStatus = "revoked"
 )
 
 // Defines values for SsoCallbackParamsProvider.
@@ -71,11 +77,43 @@ type AuthUser struct {
 	Id            openapi_types.UUID  `json:"id"`
 }
 
+// CreateDeviceRequest defines model for CreateDeviceRequest.
+type CreateDeviceRequest struct {
+	Name      string              `json:"name"`
+	NodeId    openapi_types.UUID  `json:"node_id"`
+	Platform  *string             `json:"platform,omitempty"`
+	PublicKey *string             `json:"public_key,omitempty"`
+	UserId    *openapi_types.UUID `json:"user_id,omitempty"`
+}
+
+// CreateDeviceResponse defines model for CreateDeviceResponse.
+type CreateDeviceResponse struct {
+	Device     Device  `json:"device"`
+	PrivateKey *string `json:"private_key,omitempty"`
+}
+
 // CreateOrganizationRequest defines model for CreateOrganizationRequest.
 type CreateOrganizationRequest struct {
 	Name string `json:"name"`
 	Slug string `json:"slug"`
 }
+
+// Device defines model for Device.
+type Device struct {
+	AssignedIp      *string            `json:"assigned_ip,omitempty"`
+	CreatedAt       time.Time          `json:"created_at"`
+	Id              openapi_types.UUID `json:"id"`
+	LastHandshakeAt *time.Time         `json:"last_handshake_at,omitempty"`
+	Name            string             `json:"name"`
+	NodeId          openapi_types.UUID `json:"node_id"`
+	Platform        *string            `json:"platform,omitempty"`
+	PublicKey       string             `json:"public_key"`
+	Status          DeviceStatus       `json:"status"`
+	UserId          openapi_types.UUID `json:"user_id"`
+}
+
+// DeviceStatus defines model for Device.Status.
+type DeviceStatus string
 
 // DomainClaimRequest defines model for DomainClaimRequest.
 type DomainClaimRequest struct {
@@ -302,6 +340,9 @@ type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
 // UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
 type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
+// CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
+type CreateDeviceJSONRequestBody = CreateDeviceRequest
+
 // CreateDomainClaimJSONRequestBody defines body for CreateDomainClaim for application/json ContentType.
 type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 
@@ -370,6 +411,15 @@ type ServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// List devices (own devices for members; all for admins)
+	// (GET /api/v1/organizations/{orgId}/devices)
+	ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Create a device/peer bound to the owning user
+	// (POST /api/v1/organizations/{orgId}/devices)
+	CreateDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Revoke a device (peer removed from the gateway within seconds)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke)
+	RevokeDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
 	// Claim an email domain for capture (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains)
 	CreateDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
@@ -499,6 +549,24 @@ func (_ Unimplemented) GetOrganization(w http.ResponseWriter, r *http.Request, o
 // Update organization settings (name only; slug is immutable)
 // (PATCH /api/v1/organizations/{orgId})
 func (_ Unimplemented) UpdateOrganization(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List devices (own devices for members; all for admins)
+// (GET /api/v1/organizations/{orgId}/devices)
+func (_ Unimplemented) ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a device/peer bound to the owning user
+// (POST /api/v1/organizations/{orgId}/devices)
+func (_ Unimplemented) CreateDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke a device (peer removed from the gateway within seconds)
+// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke)
+func (_ Unimplemented) RevokeDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -920,6 +988,108 @@ func (siw *ServerInterfaceWrapper) UpdateOrganization(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateOrganization(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDevices operation middleware
+func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDevices(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDevice operation middleware
+func (siw *ServerInterfaceWrapper) CreateDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDevice(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeDevice operation middleware
+func (siw *ServerInterfaceWrapper) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deviceId" -------------
+	var deviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deviceId", chi.URLParam(r, "deviceId"), &deviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deviceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeDevice(w, r, orgId, deviceId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1477,6 +1647,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}", wrapper.UpdateOrganization)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/devices", wrapper.ListDevices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices", wrapper.CreateDevice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/revoke", wrapper.RevokeDevice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/domains", wrapper.CreateDomainClaim)
@@ -2104,6 +2283,122 @@ func (response UpdateOrganizationdefaultJSONResponse) VisitUpdateOrganizationRes
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListDevicesRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListDevicesResponseObject interface {
+	VisitListDevicesResponse(w http.ResponseWriter) error
+}
+
+type ListDevices200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListDevices200JSONResponse struct {
+	Body    []Device
+	Headers ListDevices200ResponseHeaders
+}
+
+func (response ListDevices200JSONResponse) VisitListDevicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListDevicesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListDevicesdefaultJSONResponse) VisitListDevicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateDeviceRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreateDeviceJSONRequestBody
+}
+
+type CreateDeviceResponseObject interface {
+	VisitCreateDeviceResponse(w http.ResponseWriter) error
+}
+
+type CreateDevice201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateDevice201JSONResponse struct {
+	Body    CreateDeviceResponse
+	Headers CreateDevice201ResponseHeaders
+}
+
+func (response CreateDevice201JSONResponse) VisitCreateDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateDevicedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateDevicedefaultJSONResponse) VisitCreateDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RevokeDeviceRequestObject struct {
+	OrgId    openapi_types.UUID `json:"orgId"`
+	DeviceId openapi_types.UUID `json:"deviceId"`
+}
+
+type RevokeDeviceResponseObject interface {
+	VisitRevokeDeviceResponse(w http.ResponseWriter) error
+}
+
+type RevokeDevice204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RevokeDevice204Response struct {
+	Headers RevokeDevice204ResponseHeaders
+}
+
+func (response RevokeDevice204Response) VisitRevokeDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeDevicedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeDevicedefaultJSONResponse) VisitRevokeDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type CreateDomainClaimRequestObject struct {
 	OrgId openapi_types.UUID `json:"orgId"`
 	Body  *CreateDomainClaimJSONRequestBody
@@ -2614,6 +2909,15 @@ type StrictServerInterface interface {
 	// Update organization settings (name only; slug is immutable)
 	// (PATCH /api/v1/organizations/{orgId})
 	UpdateOrganization(ctx context.Context, request UpdateOrganizationRequestObject) (UpdateOrganizationResponseObject, error)
+	// List devices (own devices for members; all for admins)
+	// (GET /api/v1/organizations/{orgId}/devices)
+	ListDevices(ctx context.Context, request ListDevicesRequestObject) (ListDevicesResponseObject, error)
+	// Create a device/peer bound to the owning user
+	// (POST /api/v1/organizations/{orgId}/devices)
+	CreateDevice(ctx context.Context, request CreateDeviceRequestObject) (CreateDeviceResponseObject, error)
+	// Revoke a device (peer removed from the gateway within seconds)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke)
+	RevokeDevice(ctx context.Context, request RevokeDeviceRequestObject) (RevokeDeviceResponseObject, error)
 	// Claim an email domain for capture (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains)
 	CreateDomainClaim(ctx context.Context, request CreateDomainClaimRequestObject) (CreateDomainClaimResponseObject, error)
@@ -3116,6 +3420,92 @@ func (sh *strictHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ListDevices operation middleware
+func (sh *strictHandler) ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListDevicesRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDevices(ctx, request.(ListDevicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDevices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDevicesResponseObject); ok {
+		if err := validResponse.VisitListDevicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDevice operation middleware
+func (sh *strictHandler) CreateDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreateDeviceRequestObject
+
+	request.OrgId = orgId
+
+	var body CreateDeviceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDevice(ctx, request.(CreateDeviceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDevice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDeviceResponseObject); ok {
+		if err := validResponse.VisitCreateDeviceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeDevice operation middleware
+func (sh *strictHandler) RevokeDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	var request RevokeDeviceRequestObject
+
+	request.OrgId = orgId
+	request.DeviceId = deviceId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeDevice(ctx, request.(RevokeDeviceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeDevice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeDeviceResponseObject); ok {
+		if err := validResponse.VisitRevokeDeviceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateDomainClaim operation middleware
 func (sh *strictHandler) CreateDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	var request CreateDomainClaimRequestObject
@@ -3482,67 +3872,72 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/+xc63Ljtnd/lTPsfyZ2q4vXmzSt95NjbzZu9zb2Js3MrmtDxBGFNQgwAChb6/FMHiJP",
-	"mCfpACAlkoIu1lpadtpPliUCOJcfDs4NvI9imWZSoDA6OrqPRkgoKvfxHP/IUZszav+hqGPFMsOkiI6i",
-	"E6kUcmL/g7NTGEoFZsQ0KD/kBRCuJZAsQ6I0MAEa1RgVcJnoXtSJ7HNMIY2OjMqxE+l4hCmx65hJhtFR",
-	"pI1iIokeHh7swzqTQqMj6qVSUtkPsRQGhbEfSZZxFjtq+p+1JfC+MuM/FA6jo+if+jNG+/5X3fezuVXq",
-	"DLofoFzZklwRzO/dQjRdL5vQCsXj/ZkQH9wyxcp22HEcY2bOxJgZLB5z3FDKLBWEv1cyQ2WY5XxIuMZO",
-	"lFW+uo8ESdH+TcndaxSJGUVHhwcHnaYQO1FGtL6VioYeTpko/392GBhr5A2KVQPnxj1UlfyxmORy+pgc",
-	"fMbY2OmPczP6VaN6JOuYEsbth6FUKTHRUfFNgAH3w9UYFRsypBWQDaTkSIR9htHaXHnOaLSKJ/dIuWpj",
-	"kRCnJwqJwXcqIYJ9cWh9Wq0v1Ucn0jxPGsP+9XlzVEaMQWV3wH9/JN0vB91/v/yXve704/4//2OlWBx5",
-	"xXIhMZzKlDBxwglLN+OfugmaEvihzsvzVWQWs6yk0FuAR5Jo7syVwrjYcXXT8j4fcKZH3mDiHYkNjAnP",
-	"EYgGAh9+/wB+JEgBZoTgCe3YzwIcwCa9lUqoELCYw9/cZC1Vwku7oTajbbFtqND6/PBgFXV+VJA4oSTf",
-	"kDqSoDDWUmgmmwL8IWS8Y60CKHr5posilhQpxHbyoT0BETRLBBNJeRKH7OFnycTVZla9EwlJ8SpggZ6t",
-	"MTZT0shY8irzxUNMGExQzamgQqsXRJWCTkOWgRWWKW+jnR2Tq4q4g3qBk+OqSkIqWDmFY2zVLE4Sm5xc",
-	"5cA6IZ0mc0Hhlf7XUpnVGbowRFCiKKDzqlCMkcsMnduIY1QTEFJ0D+/uZg4XnIykRgHSeo0DovCTOP/5",
-	"BH78t4MfQUtnF+OKD3pdwP2K0Wtg1o4OmdKmG3OiNQwZcurGXLw//iSIoHDy+gxiIkDnakhiBMoUxoZP",
-	"XsC13VNuEm3IgHsqMyUTRdKUGBbDiAjKmUh6nwrIVU3PWuJpQErSAAou3OodSEk8YgK7Cgl19Hgh2kH2",
-	"GMA7kmbc6khIczWUuaAhqFA0hHE9v8zPVjZdjmPklssBx1TDHvaSnj2VGPXyHRLGc4V63y7JDKZ6Lc/6",
-	"1K3qnEhPEFGKTOz/KWpNkgDbv+QpERVm7zJOhCOiF+JrpvdVQcoLSImJR0ASwoQ2zYhk+YZxKppRPb8x",
-	"mieHg8HC/VPI5XEwcSie5/JUGoMUMmJGYPzOkMMhCmpPATemA7fWdSiipAHHoCQXauS/RsTY7XCrpEjg",
-	"lpnCdXFzrxbdYpl1olcoULH4zWzpR8ijQvDmFPyChJvRhmfB+uCbi5CDKrCQZHFABeeYSWWsQotHwJ5/",
-	"9e1vciHwrksyFpzaEJMHtv9rNkaB2hk7k7udgCJPrdjkTUViC0RbTDsjPSTjr4lwN3blOpGS3Ilyys+t",
-	"QOs/EJoy4TZzOkC1msdyQTdfiL//kEx8sC7KhuHcMo9qnrRly2+E4ro7uFwWlWdDkngtEyZ2ruhlyY31",
-	"VDudIcTU2+J4/hoXfz4n4XxQpFfE1JimxGDXsDTo763l6nUiTrS50ojiUZOXCFxiOsqdRGLDxujSeGN5",
-	"U8t2LEuVlImB0mY0nfeqTEKKqGZOHutiudTLVqS9WG5FvmXuhzyjjyRmmTTtKp0qg7UFQnJ8X6D9HDWa",
-	"EymGTG2YiWlJWnHFBq7x29aMwgVLRJ7t3HbuIIO8ic290NIBM9lMIDFn1rQwOpdeWZ2kKMZqjBWaDcaj",
-	"sC72gjSzQUFE2GE8L2TkXMU3LFZSy6GBPefQq+Q7DS+FUQT8FHB2uv8CcpFrpDCYwCspE+/YP+4EnEmq",
-	"yfmMkwUKOkcfND/aafbDrnLFVzsctadDhHyF47Xlwsavzgpvku6vA+Od4BMX1tm9agOxNHepgRfuS2v/",
-	"wUVjd0iBGHAnQREuP0HdIJTcD4a/GuNcMTO5iEeYlokNecPwOLcz30fMMuO/Ko+vMmq50qgLJ6BMFGTs",
-	"P3HiK3NMDGUowBJGSd7NOBEIx+/P3Mb54ObrMdmDDzbc0hnGVjxOVEwkHEHLXMU2SAajcjM6+iTsj69k",
-	"mRGwFOi+S/Kg0kCETx19mGR44dYHv1GAKITERrD2sIWhkikw80nsXafkZvbL9X7HzUEVGxqXSPHUDHLG",
-	"KTQe7sYjjG+u931qyTDjQjvPlOUx6kRTrzI66D3rHVikyQyFjfuOoue9g95zZ1zNyKmgTzLWHz/rO1+r",
-	"7z0sd3JLj0OLDweXMxodFZnRY/tsNM2t/CTp5OkKrrXE+UMdXkbl2Kz3Hh4cPPniRZgUKvsWLij8/edf",
-	"oNDkSpTYSYTdX8207BQeJ8dPVSS2NA1Jzs2iUVP5TMvXs90XHX287EQ6T1OiJlOGgECRHrDBZsGFy+QQ",
-	"sCEdlH6UIYkuE8Q6urQzTxGUm1Gf2VDeiV73iStfLwZTpbztXfbtICpURd8xrhpprACuPJFIvc0mcSxz",
-	"YXyi2qchWgkeTzUQAayqxRIkFTAEoMJl4uuDJToa6e3D3jMoyuXaHloUhWGE6xdwcdg7BHTZd6ZHWGxA",
-	"f0KAP0CsuOpoc6mHLUGsltbYMbam7REBVJ3MpOaT9a1Eka8yV1VcwZCFShg8MjeL0XNGMc2kla6z1DF3",
-	"fUa+KmTx4cyyz07U4cOGkCnUKEwQQnbROWV+H0ibyiRBCjI3rRT5uePcyyNXyoqp4mEtF30Zl3WtmJaY",
-	"94L6WnC9pf0XDODX2oeH38DG96B4FhTqnBtQmBBFOWptnc7bEZqRdTNHCC4WBrxj2uiWAsnNDATqsIBp",
-	"s9VjwNSPfbJpMaiKbNTOQdXIgrXOfyiJhSK110qwXKAFisDbKVggtzEXEPCgaXqZC0CjXSpsMUh8qmxL",
-	"sKjn4VpsZM6r0QlJixhyZnVKOyMVCGkq5uaWaCBcIaETa5qYNqhaiijfMQkEuIwJn/rNexoFtb6z9x+9",
-	"qD13+2vAS8v+fabkmFFUD/2YcD4g8Y2lN8EQ3LQ8KZ+xkbUiKRonpo9FUsNG27OURjn10jbnspSSuLxd",
-	"1InSMuMXLKYUC/2Ro5rMViq6EtZvpl4wjza+/Wf9iS4bm+C53wQNrOZmZD2+2OVHrJ9Wd+JBo+nAQMlb",
-	"jQrKTB/Sso2BZFkDla9lPK3+PKKF/InN3MU7KEEDeygMqkwxjVXoaS1XI08bosxi2NlfL7QsA5tvBbxG",
-	"MrKSzvS5x9uR1AhOKC5jb7WX+5b5ENakSr4KaU957laT2AFb+2GEcEbfT5EJv56/Lho5sMwBGgmCjFli",
-	"zZSRrTSiP2HChA3irY5cVP441PqW4+60yBQ+lH2U97LsldjCyVzL9LfOQ/ut6PxvcwhOikMSCKXKhiNF",
-	"CnC1XyYr215XTFazmUgb75DUnvfGvHYY5NbiD5BLkehi3zRicabNu9qiX6ndtZoWax0Gc12L80qvUfht",
-	"NT/VtZVcXf4Vzda/v3zoLMiveMdLW8RUh/TgzN9JkBkKQF/CKroBXWHDAuqTuJYqueIsZeZKIYlHSK9B",
-	"ihhBijo0itDXZ0VnNsnXRj4Jwrm81ZDm3LCMoy+KNALGuTs1W7I+iy/vrGWKnj0ZIXWMhk+tohukrrt2",
-	"wLN06evAWgLRRVaofy9VckYfPHg5+k76OjpO3fdz6FiV3fPDaEskdiGHpus5fITYOmGv8hWa5eI42ClQ",
-	"WwjQV2geJebVfrnD6VKnd9XtjUtX0Y1H8/qcbzLYkv1b3M2wY1dsHVgVWbI2wsvLsX4KajSGWU9oz7V4",
-	"SMEnL6aNHSwt+j32v8JI9v1Fu6JpbzeADSd4nfmvXLDcElwDl0x3fE6HLpGGanj2gemB/feff0E2vR+K",
-	"RQsC0sq10LmLoG041B0T0/DCg82FyjHJTK5w7YhzKXqLUPSbg9iHU7sCcf2W7v8HvsuhWIa6EFvFIC3B",
-	"OGYEmNFw+vaiesf663BZ7YBoh2XdervNBo02u6yPzPiHssjfAlB6oQHxeY/yll7Yw1zYVbMSgn3X2EC/",
-	"ORLPHRlbR2LtBQFtBqLCbouw6LVTb+qCPYG3Pg3YAcmp/clf/kW6/1TYHMsbbAE2LRktxOb3oRsB7nZV",
-	"a3DjeooIZMXd4sf1BIYR4psfdf/eGkbn6aG7XFa8F2EXUOkE5/X0bAeDp1Me3/grqOvlpMpBbQHEjKJp",
-	"F+t3elajHyrEL+i+QK070268ogasq3algMFGiFH/BxBzvglizluHmPMqYmY7nRbo2QwQvlV9URX9NdPm",
-	"rXtiF/Ujd1V4jbqRo6hN9aLy6i2IQlbNiwA7ynOup+3+Z8lEd3p965s6FGda5zi9gr8ld2LuDQM7zmXN",
-	"v2JgQeJ1dpkE9vRI3gpX99tvSxhmdQWkuAjWzTU6vK99BWYZJO/tH38e7dLRDZ9FnpZtetBvy9az/6VO",
-	"rNP7nkKBt4TDLeMcBggKh7muhzxrw6De3PVt9b+FTjCLhzzUpoZmell7Wy25zcvgmwZUF2TcGiR6jnKF",
-	"ZWdWqTOXNm8UIFenKUfuPUZfFrbm+DcIabuKdceBF+/96cFbCXhnUAnCgaIN7lDEzDruCsFdR/Uym6sj",
-	"+1cnbbOC3Hg504Izp3wlEtNALFut7MCavmcpU3KAVRVOtMHUarE+un57+uOl3YD+grK3Jk1kp9iVirnm",
-	"PvcYhQGOWHE5FWmCIBIm7ix63MX7qB89XD78TwAAAP//yIZUfv5ZAAA=",
+	"H4sIAAAAAAAC/+xc63IbO3J+la7JVq2U8CLL2Wwi//JKXq8SHx+X5LPZKluRoZnmEEcYYBbAkOJRqWof",
+	"Yp9wnySFywxnhuDVIjWnkl+iSFz68qHR3WjgMYpFlguOXKvo7DEaI0lQ2o9X+NcClb5MzD8JqljSXFPB",
+	"o7PoXEiJjJj/4PICRkKCHlMF0nV5A4QpASTPkUgFlINCOUEJTKRqEPUi045KTKIzLQvsRSoeY0bMPHqW",
+	"Y3QWKS0pT6OnpyfTWOWCK7REvZNSSPMhFlwj1+YjyXNGY0vN8GdlCHysjfgbiaPoLPqn4ZzRoftVDd1o",
+	"dpYmg/YHKGc2JNcE85e+F03fySY0g28+nAvxyU7jZzbd3sYx5vqST6hG38xykyTUUEHYJylylJoazkeE",
+	"KexFee2rx4iTDM3fjDx8QJ7qcXR2enLSawuxF+VEqamQSahxRnn5/6vTQF8t7pGv67jQ76mu5C9+kJuq",
+	"mbj7GWNthn9b6PFPCuWWrGNGKDMfRkJmREdn/psAA/aH2wlKOqKY1EB2JwRDwk0bmjTGKgqaROt4sk3K",
+	"WVuThDg9l0g0XuCExs+n71dBfXOR4O1GPPWinBFtGrUG/l0QR8Udo/HtPc4Ca7UXFQrl7S6itIzNyV4v",
+	"PbcutxRfYjuvswluCsutpBOicQm7LRb84MtJ/1GmhNNfrJl63uW+ciH2IsWKtNXt3163e+VEa5TG9P3P",
+	"F9L/5aT/Hzf/ctSvPh7/8282VaKdLiSGi0r8W/BMlKIpx+SW5kHIxVa2yS3RDdQlRGNfU0vQQp8NFwYj",
+	"St+OCU/UmNzjVjOUmnq2hbntSlSa6MIZSl5kRjsk1nSCdu+diPuGiXqGBWyblL3nbPYqUDh6GnQ3lBcE",
+	"jMgI5eeM0Gy3BZPYAdpL5ndN8L9ex5sfZS2FO9kk/aBvJcZ+b246IZ+MrNTYuVb4QGINE8IKBKKAwOe/",
+	"fAbXEwQHPUZwhPbMZw52K5oN1mquRsByDv9sB+uoEt6ZrXc32pZ7ETVaX5+erKPO9QoSx6VgO1JHUuTa",
+	"+BSKCr7J9hwrGUDRux/6yGORYAKxGXxkfGUEY1cpT0ufPWSBfhaU3+7m/3kbsMxjWdM3l0KLWLA6874R",
+	"5RpTlAsqqNHqBFGnoNeSZWCGVcrbaWXH5LYm7qBe4PxtXSUhFawdwjK2bpTNt532nl4Z8uYMLeaCwisj",
+	"tZUyazJ0rQlPiEwAbfyFfIJM5GgDTJygnAEXvH/68DAPzeB8LBRyECa+vCMSv/KrP57D7//95PeghLWL",
+	"cS1a/ebhfkuTb0CNHR1RqXQ/ZkQpGFFkie1z/entV054AucfLiEmHFQhRyRGSKjEWLPZG/hm1pQdRGly",
+	"xxyVuRSpJFlGNI3BOA+M8nTw1UOubno2Ek8LUiIJoODazt6DjMRjyrEvkSSWHidE08lsA/hAspwZHXGh",
+	"b0ei4EGvI0FNKFOL0/zRyKbPcILMcHnHMFNwhIN0YHYlmjj5jghlhUR1bKakGjO1UQx+YWe14aYjiEhJ",
+	"Zub/DJUiaYDtPxUZ4TVmH3JGuCViEOJrrvd16Yw3kBEdj4GkhHKl27mL1QvGqmhO9eLCaO8cFgZL14+X",
+	"y3YwsShe5PJCaI0J5ESPQbuVIUYj5InZBWyfHkyN6+DzKXcMg5JcqpH/HhNtlsNUCp7ClGrvutix14tu",
+	"ucx60XvkKGn8w3zqLeRRI3h3Cv6EhOnxjnvB5uBbyKUFVWAg6WOp5mBXmAupjUJ9EzD7X3P564JzfOiT",
+	"nAaHriKH5sgf6AQ5KmvsdGFXQhlaiPtAMNESbRUAlKSHZPw9ubCdXbleJAXDeqgkphyN/0CSjHK7mLM7",
+	"lOt5LCe044X4+09B+WfjouwY/6/yqBZJWzX9TihuuoOrZVFrG5LEB5FSfnBFr0qDbqbaaoQQUx/99vw9",
+	"Lv5i9tL6oHvMcChE/jzJjZ2SDqFEQjtp0Hbe6zIJKaKeatvWxdpfPmm53HyCbjEdkydbErNKmmaWRs6l",
+	"MUFIjp882q9QoT4XfETljpmYjhxArFnADX67mlG4pikv8oPbzgOcNe1ic6+VsMBMdxNIzKgxLTRZSK+s",
+	"T1L4vgpjiXqH/siNi73kQEojJzzsMF55GVlX8QcaS6HESMORdehl+lsF77iWBNwQcHlx/AYKXihM4G4G",
+	"74VInWO/3Q44l1Sb8zknSxR0hS5o3tppdt1uC8nWOxyN1iFCvsPx2vMR6E/WCu9yPtQExo+czWxYZ9aq",
+	"CcSywqYG3tgvjf0HG409YAJEg90JfLj8DAdNodOgYPirMC4k1bPreIxZmdgQ9xTfFmbkx4gaZtxX5fZV",
+	"Ri23CpV3AspEQU7/C2fuDJ/ykQgFWFxLwfo5Ixzh7adLu3A+2/EGVAzgswm3VI6xEY8VFeUpQ1CikLEJ",
+	"kkHLQo/PvnLz43tRZgQMBWpokzwoFRDuUkefZzle2/nBLRQgEiE1EazZbGEkRQZUf+VH3zJyP//l23HP",
+	"jpFIOtI2keKouSsoS6DVuB+PMb7/duxSS5pqG9o5pgyPUS+qvMroZPBqcGKQJnLkJu47i14PTgavrXHV",
+	"Y6uCIcnpcPJqaH2tofOw7M4tHA4NPixcLpPozGdG35q2UZVb+YNIZs9XmtFInD814aVlge3KkNOTk2ef",
+	"3IdJoQIR74LCP/72d5CoC8lL7KTcrK92WraCx/nb5yonMTSNSMH0sl6VfKpCl/nqi86+3PQiVWQZkbOK",
+	"ISDg0wMm2PRc2EwOARPSQelHaZKqMkGsohszcoWgQo+H1ITyVvRqSGyhy3Iw1QphnMu+H0SF6m0OjKtW",
+	"GiuAK0ckJs5mkzgWBdcuUe3SEJ0Ej6MaCAda12IJkhoYAlBhInXngyU6Wunt08Er8IU1ymxaCXJNCVNv",
+	"4Pp0cApos+9UjdEvQLdDgNtAjLiaaLOphz1BrJHWODC2qkKqAKrO51JzyfpOosidMtdVXMOQgUoYPKLQ",
+	"y9FzmWCWCyNda6ljZisS3amQwYc1yy470YQPHUEuUSHXQQiZSReU+a+BtKlIU0xAFLqTIr+ynDt5FFIa",
+	"MdU8rNWiL+OyvhHTCvPuqW8E13taf8EAfqN1ePoCNn4Avi1IVAXTIDElMmGolHE6p2PUY+NmjhFsLAz4",
+	"QJVWHQWSHRkINGEBVVnmNmAaxi7ZtBxUPht1cFC1smCd8x9KYsGn9joJlms0QOE4rcAChYm5gIADTdvL",
+	"XAIaZVNhy0HiUmV7gkUzD9dhI3NVj05I5mPIudUp7YyQwIWumZspUUCYRJLMjGmiSqPsKKJciS0QYCIm",
+	"rPKbjxTyxPjOzn90onbcHW8ALyWGj7kUE5qgfBrGhLE7Et8belMMwU2J87KNiawlyVBbMX3xSQ0Tbc9T",
+	"GuXQKy9ElEcpqc3bRb0oKzN+wcMUP9FfC5Sz+Uy+KmHzaxdLxlHalf9sPtBNaxG8doughdVCj43HF9v8",
+	"iPHTmk48KNQ9uJNiqlBCmenDpCxjIHneQuUHEVenP1tcNnlmM3f9I5SggSPkGmUuqcI69JQS65GnNJF6",
+	"OezMr9dKlIHNSwGvlYyspTNd7nE6FgrBCsVm7I32Cne5JoQ1IdPvQtpz7rv1JHbA1n4eI1wmnypkwk9X",
+	"H3whB5Y5QC2AkwlNjZnSopNG9A+YUm6CeKMjG5Vvh1pXctyvDpnCm7KL8t6VtRJ72Jkbmf7OeWh/9neE",
+	"uhyCE79JAkkSacIRnwJc75eJ2rJXNZPVLiZS2jkkjfbOmDc2g8JY/DtkgqfKr5tWLE6V/rEx6Xdqd6Oi",
+	"xUaFwULV4qLSGxS+rOYrXRvJNeVf02zz+5un3pL8inO8lEFMvcsALt2dBJEjB3RHWL4a0B5sGEB95d+E",
+	"TG8Zzai+lUjiMSbfQPAYQfAmNHzo67Kic5vkzka+csKYmCrICqZpztAdirQCxoVLWHuyPstve21kil49",
+	"GyFNjIZ3LV8N0tRdN+BZuvRNYK2A6DIrNHwUMr1Mnhx4GbpK+iY6Luz3C+hYl91z3ZKOSOxajHTfcbiF",
+	"2Hphr/I96tXiODkoUDsI0PeotxLzer/c4nSl07vu9saNPdGNx4v6XCwy2JP9W17NcGBXbBNY+SxZF+Hl",
+	"5NjcBRVqTY0ndGRLPARnszdVYQfNfL3H8XcYyaG7x6yWRpvGa7jwbQ7hac2vY6/zsTxVXfKuvDDhSEx5",
+	"9Y8JDN1ZrnoDhDH7ha01V3XNlYo4pOkIp9prN+/36jM1n0Y4sLcUfF9gjdfkVARHPjoS3JXlgn84AO5x",
+	"BnTky4X6VQXQccc8LM/HMEcTa4mCV4k1MbVXRE0QFkTmptZk+Og+mK/cYasrCt4/qnvBcUtq9rNg3KFq",
+	"bcGscyNdh664kf5MmFTwtriQmIlJWb1msJESjVMys5GcfeEnFjxZYsHW48Re71aHQsU6Wze/1r8ngxd4",
+	"2uDA9i70dEGocsQ0qAzeP/72d8irVwnQF75hUnuMYOH5gS4YOstEldRyYLPbbkxyXUjcOM+5Er0+Afri",
+	"IHZJvEOBuPk2xP+nW1dDsUywQmwUY3wIB8YJJUC1gouP1/WXPb4Pl/W6u25Y1r0Xee5Q3nnIU/k5/1CW",
+	"lnUAlE5oQFy2vfT9wnmNpbWcayE4tOV0yYsj8cqSsXckNp6l6TIQJfY7hEWnnWYpMRxxnLrDpx4Ilpif",
+	"3JMTmBw/FzYPGZWsCR06iM1fT9SS+xcttqtEDyPEp2mGj8YwunjWXmn2r/G8XADr6NkPBi8qHn9wDx9s",
+	"dhJSduoKIOYUVXcnfqvmlWEjifgL2i9QqV5VA+4rjxqBrIfBToiR/wcQc7ULYq46h5irOmLmKz3x6NkN",
+	"EO6C1Kps+kfb4hC5dPtAxQaZdEtRl/Lo5YMPwL2s2tfPDpQi30zbw58F5f3q0vCLOhSXShVYPfyyJ3di",
+	"4V2bA+eyFh+2WZK4n19hhCM1FlNuq026ko+3ugLirx/3C4UW7xtfvFwFyUfzpyvpd0fLPj3oj2XB86/U",
+	"ibV6P5LIcUoYTCljcIcgcVSoZsizMQyaJcUvq/891B8bPBSh4mjU1RMh+7oI0n6CZNeA6ppMOoNEx1Eh",
+	"sawHLnXmTqubZS/r05Rj+3reL0sLQt27dcrMYtxxYP61uQF8FIAPGiUnDBI0wR3ymBrHXSLYRxCczBaq",
+	"l9yDffusW2o9Cbhkzykf4qMKiGGrk3W/1et+uRR3WFfhTGnMjBabvZtvdny5MQvQnXM7a9JGdoZ9Iakt",
+	"KbfNErjDMfVPImCSIvCU8geDHvvcSzSMnm6e/jcAAP//M0XwNZ5kAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

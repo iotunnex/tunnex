@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 )
 
@@ -24,13 +26,15 @@ import (
 type AgentChannel struct {
 	svc      *nodes.Service
 	ca       *agentca.CA
+	hub      *nodepush.Hub
 	logger   *slog.Logger
 	watchHold time.Duration
 }
 
-// NewAgentChannel builds the channel handler.
-func NewAgentChannel(svc *nodes.Service, ca *agentca.CA, logger *slog.Logger) *AgentChannel {
-	return &AgentChannel{svc: svc, ca: ca, logger: logger, watchHold: 25 * time.Second}
+// NewAgentChannel builds the channel handler. hub may be nil (watch then falls
+// back to the timed long-poll only; the interval reconcile still converges).
+func NewAgentChannel(svc *nodes.Service, ca *agentca.CA, hub *nodepush.Hub, logger *slog.Logger) *AgentChannel {
+	return &AgentChannel{svc: svc, ca: ca, hub: hub, logger: logger, watchHold: 25 * time.Second}
 }
 
 // TLSConfig requires and verifies agent client certs against the CA, and
@@ -102,27 +106,52 @@ func (a *AgentChannel) desiredState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
 		return
 	}
+	// Read the change-version BEFORE the peer query so the reported version can
+	// never be newer than the data it accompanies (a change landing after this
+	// read leaves the agent with a stale version -> its next watch resyncs).
+	var version uint64
+	if a.hub != nil {
+		version = a.hub.Version(node.ID)
+	}
 	ds, err := a.svc.DesiredState(r.Context(), node)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	ds.Version = version
 	writeJSON(w, ds)
 }
 
-// watch is a long-poll: it holds the connection (up to watchHold) then returns,
-// prompting the agent to re-fetch. S3.2 will return early on an actual change.
+// watch is a long-poll: it returns the instant this node's desired state changes
+// (pushed via the hub) so revocations apply within the S3.1 <5s bound, or after
+// watchHold as a safety net. The agent re-fetches on return.
 func (a *AgentChannel) watch(w http.ResponseWriter, r *http.Request) {
 	serial := ""
 	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		serial = hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
 	}
-	if _, err := a.svc.AuthenticateCert(r.Context(), serial); err != nil {
+	node, err := a.svc.AuthenticateCert(r.Context(), serial)
+	if err != nil {
 		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
 		return
 	}
+	var changed <-chan struct{}
+	if a.hub != nil {
+		// Subscribe BEFORE reading the version so no Notify is missed in between.
+		ch, unsubscribe := a.hub.Subscribe(node.ID)
+		defer unsubscribe()
+		changed = ch
+		// If the node changed since the version the agent last fetched, return
+		// immediately — the change happened during the agent's fetch/apply gap.
+		since, _ := strconv.ParseUint(r.URL.Query().Get("v"), 10, 64)
+		if a.hub.Version(node.ID) != since {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
 	select {
 	case <-r.Context().Done():
+	case <-changed: // pushed change for this node -> return now
 	case <-time.After(a.watchHold):
 	}
 	w.WriteHeader(http.StatusOK)

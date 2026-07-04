@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -176,9 +177,11 @@ func (c *Client) FetchDesired(ctx context.Context) (reconcile.DesiredState, erro
 }
 
 // Watch long-polls the control plane; it returns when the server responds
-// (change or timeout), prompting a re-fetch.
-func (c *Client) Watch(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/agent/watch", nil)
+// (change or timeout), prompting a re-fetch. since is the version from the last
+// fetch — the server returns immediately if its version has advanced past it.
+func (c *Client) Watch(ctx context.Context, since uint64) error {
+	url := c.base + "/agent/watch?v=" + strconv.FormatUint(since, 10)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err

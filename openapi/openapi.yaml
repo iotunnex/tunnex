@@ -308,6 +308,62 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/devices:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listDevices
+      summary: List devices (own devices for members; all for admins)
+      tags: [devices]
+      responses:
+        "200":
+          description: Devices.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Device" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createDevice
+      summary: Create a device/peer bound to the owning user
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDeviceRequest" }
+      responses:
+        "201":
+          description: The created device (with a one-time private key if server-generated).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateDeviceResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/devices/{deviceId}/revoke:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: revokeDevice
+      summary: Revoke a device (peer removed from the gateway within seconds)
+      tags: [devices]
+      responses:
+        "204":
+          description: Revoked.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/invitations/accept:
     post:
       operationId: acceptInvitation
@@ -726,6 +782,45 @@ components:
       additionalProperties: false
       properties:
         join_token: { type: string }
+
+    Device:
+      type: object
+      required: [id, user_id, node_id, name, status, public_key, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid }
+        name: { type: string }
+        platform: { type: string }
+        public_key: { type: string }
+        assigned_ip: { type: string }
+        status: { type: string, enum: [active, revoked] }
+        created_at: { type: string, format: date-time }
+        last_handshake_at: { type: string, format: date-time }
+
+    CreateDeviceRequest:
+      type: object
+      required: [name, node_id]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 100 }
+        node_id: { type: string, format: uuid }
+        platform: { type: string, maxLength: 50 }
+        # Omit public_key to have the server generate the keypair (browser flow):
+        # the private key is then returned ONCE and never stored.
+        public_key: { type: string }
+        # Admins may create a device on behalf of another org member; omit for self.
+        user_id: { type: string, format: uuid }
+
+    CreateDeviceResponse:
+      type: object
+      required: [device]
+      additionalProperties: false
+      properties:
+        device: { $ref: "#/components/schemas/Device" }
+        # Present ONLY for the server-generated flow; shown once, never stored.
+        private_key: { type: string }
 
     InviteRequest:
       type: object

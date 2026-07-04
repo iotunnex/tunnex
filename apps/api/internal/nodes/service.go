@@ -14,13 +14,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
+	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
 // ProtocolVersion is the control-plane protocol version. The control plane must
@@ -45,7 +46,10 @@ type DesiredState struct {
 	InterfaceAddress string `json:"interface_address"` // TODO(S3.5): from the org pool allocator
 	MTU              int    `json:"mtu"`               // explicit, never inherited from ambient
 	ListenPort       int    `json:"listen_port"`
-	Peers            []Peer `json:"peers"`
+	// Version is the node's push change-version at fetch time; the agent echoes it
+	// on the next watch so a change during the fetch gap is not missed.
+	Version uint64 `json:"version"`
+	Peers   []Peer `json:"peers"`
 }
 
 // Service provides node control-plane operations.
@@ -134,7 +138,7 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		}
 		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: serial, AgentVersion: agentVersion})
 		if e != nil {
-			if isUnique(e) {
+			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")
 			}
 			return e
@@ -185,13 +189,27 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 // allocator owns it; MTU is explicit (WireGuard's default 1420).
 func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredState, error) {
 	_ = s.q.TouchNodeSeen(ctx, node.ID)
+	rows, err := s.q.ListActivePeersForNode(ctx, node.ID)
+	if err != nil {
+		return DesiredState{}, err
+	}
+	peers := make([]Peer, 0, len(rows))
+	for _, r := range rows {
+		p := Peer{PublicKey: r.PublicKey}
+		// AllowedIPs is the peer's assigned tunnel address (S3.5 owns allocation;
+		// until then assigned_ip is null and the peer carries no routes).
+		if r.AssignedIp != nil && *r.AssignedIp != "" {
+			p.AllowedIPs = []string{*r.AssignedIp + "/32"}
+		}
+		peers = append(peers, p)
+	}
 	return DesiredState{
 		ProtocolVersion:  ProtocolVersion,
 		NodeID:           node.ID.String(),
 		InterfaceAddress: "10.99.0.1/32", // TODO(S3.5): allocate from the org pool
 		MTU:              1420,
 		ListenPort:       51820,
-		Peers:            []Peer{},
+		Peers:            peers,
 	}, nil
 }
 
@@ -201,7 +219,7 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 // zero-row update (e.g. the node was revoked mid-report) as an error rather than
 // a silent no-op.
 func (s *Service) ReportWGKey(ctx context.Context, node sqlc.Node, publicKey string) error {
-	if !validWGKey(publicKey) {
+	if !wgkey.Valid(publicKey) {
 		return apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
 	}
 	n, err := s.q.SetNodeWGPublicKey(ctx, sqlc.SetNodeWGPublicKeyParams{ID: node.ID, WgPublicKey: publicKey})
@@ -214,16 +232,15 @@ func (s *Service) ReportWGKey(ctx context.Context, node sqlc.Node, publicKey str
 	return nil
 }
 
-// validWGKey reports whether s is a standard-base64-encoded 32-byte key.
-func validWGKey(s string) bool {
-	raw, err := base64.StdEncoding.DecodeString(s)
-	return err == nil && len(raw) == 32
-}
-
 // Revoke marks a node revoked (renewal will then be refused).
 func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) error {
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.RevokeNode(ctx, sqlc.RevokeNodeParams{OrgID: orgID, ID: nodeID}); e != nil {
+			return e
+		}
+		// Cascade: the node's peers can no longer reach a gateway, so revoke them
+		// too — no dangling active devices counting against caps or peer lists.
+		if _, e := q.RevokeDevicesForNode(ctx, nodeID); e != nil {
 			return e
 		}
 		return audit(ctx, q, orgID, &actor, "node.revoked", "node", nodeID.String(), map[string]any{})
@@ -245,11 +262,6 @@ func newToken() (raw string, hash []byte, err error) {
 }
 
 func hashToken(raw string) []byte { h := sha256.Sum256([]byte(raw)); return h[:] }
-
-func isUnique(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
 
 func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
 	b := []byte("{}")

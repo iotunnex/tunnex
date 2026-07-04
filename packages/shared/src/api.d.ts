@@ -261,6 +261,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List devices (own devices for members; all for admins) */
+        get: operations["listDevices"];
+        put?: never;
+        /** Create a device/peer bound to the owning user */
+        post: operations["createDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/devices/{deviceId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a device (peer removed from the gateway within seconds) */
+        post: operations["revokeDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/invitations/accept": {
         parameters: {
             query?: never;
@@ -536,6 +576,37 @@ export interface components {
         };
         JoinTokenResponse: {
             join_token: string;
+        };
+        Device: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: uuid */
+            node_id: string;
+            name: string;
+            platform?: string;
+            public_key: string;
+            assigned_ip?: string;
+            /** @enum {string} */
+            status: "active" | "revoked";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_handshake_at?: string;
+        };
+        CreateDeviceRequest: {
+            name: string;
+            /** Format: uuid */
+            node_id: string;
+            platform?: string;
+            public_key?: string;
+            /** Format: uuid */
+            user_id?: string;
+        };
+        CreateDeviceResponse: {
+            device: components["schemas"]["Device"];
+            private_key?: string;
         };
         InviteRequest: {
             /** Format: email */
@@ -982,6 +1053,81 @@ export interface operations {
             path: {
                 orgId: string;
                 nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Devices. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description The created device (with a one-time private key if server-generated). */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateDeviceResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
             };
             cookie?: never;
         };

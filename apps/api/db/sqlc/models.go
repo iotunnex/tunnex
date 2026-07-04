@@ -32,6 +32,23 @@ type AuthToken struct {
 	CreatedAt  time.Time          `json:"created_at"`
 }
 
+type Device struct {
+	ID              uuid.UUID          `json:"id"`
+	OrgID           uuid.UUID          `json:"org_id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	NodeID          uuid.UUID          `json:"node_id"`
+	Name            string             `json:"name"`
+	Platform        string             `json:"platform"`
+	PublicKey       string             `json:"public_key"`
+	AssignedIp      *string            `json:"assigned_ip"`
+	Status          string             `json:"status"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type DomainClaim struct {
 	ID                uuid.UUID          `json:"id"`
 	OrgID             uuid.UUID          `json:"org_id"`
@@ -93,12 +110,13 @@ type NodeJoinToken struct {
 }
 
 type Organization struct {
-	ID        uuid.UUID          `json:"id"`
-	Name      string             `json:"name"`
-	Slug      string             `json:"slug"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	ID                uuid.UUID          `json:"id"`
+	Name              string             `json:"name"`
+	Slug              string             `json:"slug"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	MaxDevicesPerUser int32              `json:"max_devices_per_user"`
 }
 
 type PlatformSecret struct {

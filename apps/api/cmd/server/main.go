@@ -25,10 +25,12 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
+	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
@@ -132,13 +134,16 @@ func main() {
 
 	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
 	nodeSvc := nodes.NewService(pool, agentCA)
+	pushHub := nodepush.New()
+	deviceSvc := devices.NewService(pool, pushHub, logger)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:         tenancy.NewService(pool),
 		Auth:         authSvc,
-		Members:      tenancy.NewMembershipService(pool, sessions),
+		Members:      tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
 		Invites:      invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
 		Nodes:        nodeSvc,
+		Devices:      deviceSvc,
 		Sessions:     sessions,
 		SSO:          apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		CookieSecure: cfg.CookieSecure,
@@ -157,7 +162,7 @@ func main() {
 	}
 
 	// mTLS agent control channel (separate listener; client certs verified vs CA).
-	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, logger)
+	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, pushHub, logger)
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
 		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))

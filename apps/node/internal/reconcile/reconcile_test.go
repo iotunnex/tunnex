@@ -56,7 +56,7 @@ func (c *fakeClient) FetchDesired(context.Context) (DesiredState, error) {
 	defer c.mu.Unlock()
 	return c.desired, c.fetchErr
 }
-func (c *fakeClient) Watch(ctx context.Context) error {
+func (c *fakeClient) Watch(ctx context.Context, _ uint64) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

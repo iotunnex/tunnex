@@ -26,7 +26,10 @@ type DesiredState struct {
 	InterfaceAddress string `json:"interface_address"`
 	MTU              int    `json:"mtu"`
 	ListenPort       int    `json:"listen_port"`
-	Peers            []Peer `json:"peers"`
+	// Version is the control plane's change-version at fetch time; echoed on the
+	// next Watch so a change during the fetch/apply gap is not missed.
+	Version uint64 `json:"version"`
+	Peers   []Peer `json:"peers"`
 }
 
 // InterfaceConfig is the device-level configuration. The PrivateKey is supplied
@@ -53,8 +56,9 @@ type ControlClient interface {
 	// FetchDesired returns the full desired state (a full resync, not a diff).
 	FetchDesired(ctx context.Context) (DesiredState, error)
 	// Watch blocks until the control plane signals a change (push) or returns an
-	// error/ctx cancellation. It is the low-latency path; the interval is the net.
-	Watch(ctx context.Context) error
+	// error/ctx cancellation. It carries the version from the last fetch so a
+	// change during the fetch gap makes Watch return immediately (no lost wakeup).
+	Watch(ctx context.Context, since uint64) error
 }
 
 // Reconciler converges a backend toward desired state. It holds the node's
@@ -64,6 +68,7 @@ type Reconciler struct {
 	privateKey string
 	logger     *slog.Logger
 	healthy    atomic.Bool
+	version    atomic.Uint64 // last desired-state version, echoed on Watch
 }
 
 // New builds a Reconciler with the node's WireGuard private key.
@@ -103,6 +108,7 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 		r.healthy.Store(false)
 		return false, err
 	}
+	r.version.Store(ds.Version) // echoed on the next Watch to close the fetch-gap
 	// Idempotently ensure the interface config, then converge peers.
 	if err := r.backend.Configure(ctx, InterfaceConfig{
 		PrivateKey: r.privateKey, ListenPort: ds.ListenPort, Address: ds.InterfaceAddress, MTU: ds.MTU,
@@ -131,9 +137,10 @@ func (r *Reconciler) Run(ctx context.Context, client ControlClient, interval, ba
 	defer ticker.Stop()
 
 	for {
-		// Push path: block until the control plane signals a change.
+		// Push path: block until the control plane signals a change. Echo the last
+		// fetched version so a change during the previous fetch/apply returns now.
 		watchCh := make(chan error, 1)
-		go func() { watchCh <- client.Watch(ctx) }()
+		go func() { watchCh <- client.Watch(ctx, r.version.Load()) }()
 
 		select {
 		case <-ctx.Done():

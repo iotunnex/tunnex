@@ -129,7 +129,9 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	if err := svc.ReportWGKey(ctx, node, "not-a-key"); code(err) != "invalid_wg_key" {
 		t.Fatalf("malformed key: want invalid_wg_key, got %v", err)
 	}
-	wgKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	wgKeyBytes := make([]byte, 32)
+	wgKeyBytes[0] = 1 // non-zero: an all-zero key is a degenerate point (rejected)
+	wgKey := base64.StdEncoding.EncodeToString(wgKeyBytes)
 	if err := svc.ReportWGKey(ctx, node, wgKey); err != nil {
 		t.Fatalf("report valid key: %v", err)
 	}

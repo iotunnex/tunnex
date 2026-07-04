@@ -19,17 +19,31 @@ type SessionRevoker interface {
 	DeleteAllForUser(ctx context.Context, userID uuid.UUID) error
 }
 
+// DevicePusher nudges the nodes carrying a user's peers to reconcile now, so an
+// account state change (de/reactivation) removes/restores that user's peers from
+// the data plane within seconds. Implemented by devices.Service.
+type DevicePusher interface {
+	PushUserNodes(ctx context.Context, userID uuid.UUID)
+}
+
 // MembershipService provides org-scoped membership reads. Every method scopes by
 // org_id (see the query-lint), so it cannot return another tenant's rows.
 type MembershipService struct {
 	pool    *pgxpool.Pool
 	q       *sqlc.Queries
 	revoker SessionRevoker
+	pusher  DevicePusher
 }
 
 // NewMembershipService builds a membership service over the given pool.
 func NewMembershipService(pool *pgxpool.Pool, revoker SessionRevoker) *MembershipService {
 	return &MembershipService{pool: pool, q: sqlc.New(pool), revoker: revoker}
+}
+
+// WithDevicePusher wires the offboarding peer cascade (optional).
+func (s *MembershipService) WithDevicePusher(p DevicePusher) *MembershipService {
+	s.pusher = p
+	return s
 }
 
 // DeactivateMember freezes a user's account (status only — memberships and role
@@ -66,6 +80,12 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 			return err
 		}
 	}
+	// Offboarding cascade: the user's peers now fall out of every node's desired
+	// state (the peer query requires an active owner); push so they are removed
+	// from the data plane within seconds, not at the next interval.
+	if s.pusher != nil {
+		s.pusher.PushUserNodes(ctx, targetUserID)
+	}
 	return nil
 }
 
@@ -77,12 +97,20 @@ func (s *MembershipService) ReactivateMember(ctx context.Context, actor, orgID, 
 		}
 		return err
 	}
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "active"}); e != nil {
 			return e
 		}
 		return writeAudit(ctx, q, orgID, &actor, "user.reactivated", "user", targetUserID.String(), map[string]any{})
-	})
+	}); err != nil {
+		return err
+	}
+	// Restore the user's peers to the data plane promptly (they re-enter desired
+	// state now that the owner is active again).
+	if s.pusher != nil {
+		s.pusher.PushUserNodes(ctx, targetUserID)
+	}
+	return nil
 }
 
 func (s *MembershipService) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {

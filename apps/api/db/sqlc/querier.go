@@ -22,12 +22,14 @@ type Querier interface {
 	// lint:cross-org — the token itself is the credential; the org comes from the
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
+	CountActiveDevicesForUser(ctx context.Context, arg CountActiveDevicesForUserParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	// lint:cross-org — spans a user's orgs to protect the last-owner invariant on
 	// global deactivation; each row's org_id is used in the correlated subquery.
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
+	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
@@ -37,6 +39,7 @@ type Querier interface {
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
+	GetDevice(ctx context.Context, arg GetDeviceParams) (Device, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.
@@ -49,6 +52,8 @@ type Querier interface {
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
+	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
+	GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
@@ -68,24 +73,44 @@ type Querier interface {
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
+	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
+	// fetches the peers for its own node). A peer is present only while BOTH the
+	// device is active AND its owning user is active — so deactivating a user drops
+	// their peers from every node's desired state (and reactivation restores them).
+	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Device, error)
+	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]Device, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	// lint:cross-org — keyed by user_id; used to find which nodes to push after a
+	// user's peers change (create/revoke/deactivate). Not org-scoped: a user's
+	// devices may span orgs and all affected nodes must be nudged to reconcile.
+	ListNodeIDsForUserActiveDevices(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
 	// Admin/system listing of all orgs; user-facing listing uses
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	// lint:cross-org — a transaction-scoped advisory lock keyed on the user, so the
+	// per-user device-cap check-and-insert is atomic against concurrent creates.
+	LockUserDeviceCreation(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
+	// Returns the gateway node_id (for the push) so the caller needs no extra read;
+	// pgx.ErrNoRows means the device was not active (already revoked / wrong org).
+	RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error)
+	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no
+	// longer reach a gateway, so they are revoked too (no dangling active devices).
+	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	// lint:cross-org — keyed by id after cert authorization; the node reports its
