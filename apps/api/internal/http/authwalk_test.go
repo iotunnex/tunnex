@@ -28,6 +28,7 @@ var walkBodies = map[string]string{
 	"createinvitation":   `{"email":"walk@example.com","role":"member"}`,
 	"resendinvitation":   `{"email":"walk@example.com"}`,
 	"revokeinvitation":   `{"email":"walk@example.com"}`,
+	"issuejointoken":     `{"node_name":"walk-node"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
@@ -57,6 +58,7 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 			reqPath := strings.ReplaceAll(path, "{orgId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{provider}", "google")
 			reqPath = strings.ReplaceAll(reqPath, "{userId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{nodeId}", uuid.NewString())
 
 			var body io.Reader
 			if b, ok := walkBodies[strings.ToLower(op.OperationID)]; ok {

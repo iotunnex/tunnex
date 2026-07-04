@@ -39,6 +39,12 @@ const (
 	Owner  InviteRequestRole = "owner"
 )
 
+// Defines values for NodeStatus.
+const (
+	Active  NodeStatus = "active"
+	Revoked NodeStatus = "revoked"
+)
+
 // Defines values for SsoCallbackParamsProvider.
 const (
 	SsoCallbackParamsProviderGoogle    SsoCallbackParamsProvider = "google"
@@ -90,6 +96,27 @@ type DomainVerifyRequest struct {
 // EmailRequest defines model for EmailRequest.
 type EmailRequest struct {
 	Email openapi_types.Email `json:"email"`
+}
+
+// EnrollRequest defines model for EnrollRequest.
+type EnrollRequest struct {
+	AgentVersion string `json:"agent_version"`
+
+	// Csr PEM-encoded certificate signing request
+	Csr             string `json:"csr"`
+	JoinToken       string `json:"join_token"`
+	NodeName        string `json:"node_name"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// EnrollResponse defines model for EnrollResponse.
+type EnrollResponse struct {
+	// CaCertificate PEM CA certificate
+	CaCertificate string `json:"ca_certificate"`
+
+	// Certificate PEM agent certificate
+	Certificate string             `json:"certificate"`
+	NodeId      openapi_types.UUID `json:"node_id"`
 }
 
 // Error Standard error envelope for every non-2xx response. Chosen over bare
@@ -149,11 +176,34 @@ type InviteRequest struct {
 // InviteRequestRole defines model for InviteRequest.Role.
 type InviteRequestRole string
 
+// JoinTokenRequest defines model for JoinTokenRequest.
+type JoinTokenRequest struct {
+	NodeName *string `json:"node_name,omitempty"`
+}
+
+// JoinTokenResponse defines model for JoinTokenResponse.
+type JoinTokenResponse struct {
+	JoinToken string `json:"join_token"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Email    openapi_types.Email `json:"email"`
 	Password string              `json:"password"`
 }
+
+// Node defines model for Node.
+type Node struct {
+	AgentVersion string             `json:"agent_version"`
+	EnrolledAt   time.Time          `json:"enrolled_at"`
+	Id           openapi_types.UUID `json:"id"`
+	LastSeenAt   *time.Time         `json:"last_seen_at,omitempty"`
+	Name         string             `json:"name"`
+	Status       NodeStatus         `json:"status"`
+}
+
+// NodeStatus defines model for Node.Status.
+type NodeStatus string
 
 // Organization defines model for Organization.
 type Organization struct {
@@ -225,6 +275,9 @@ type StartSsoLoginParams struct {
 // StartSsoLoginParamsProvider defines parameters for StartSsoLogin.
 type StartSsoLoginParamsProvider string
 
+// EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
+type EnrollAgentJSONRequestBody = EnrollRequest
+
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody = AcceptInviteRequest
 
@@ -264,11 +317,17 @@ type ResendInvitationJSONRequestBody = EmailRequest
 // RevokeInvitationJSONRequestBody defines body for RevokeInvitation for application/json ContentType.
 type RevokeInvitationJSONRequestBody = EmailRequest
 
+// IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
+type IssueJoinTokenJSONRequestBody = JoinTokenRequest
+
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Enroll a tunnex-node agent with a join token
+	// (POST /api/v1/agent/enroll)
+	EnrollAgent(w http.ResponseWriter, r *http.Request)
 	// Accept an invitation
 	// (POST /api/v1/auth/invitations/accept)
 	AcceptInvitation(w http.ResponseWriter, r *http.Request)
@@ -332,6 +391,15 @@ type ServerInterface interface {
 	// Reactivate a deactivated member
 	// (POST /api/v1/organizations/{orgId}/members/{userId}/reactivate)
 	ReactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID)
+	// List enrolled nodes
+	// (GET /api/v1/organizations/{orgId}/nodes)
+	ListNodes(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Issue a single-use node join token
+	// (POST /api/v1/organizations/{orgId}/nodes/join-token)
+	IssueJoinToken(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Revoke a node (renewal will be refused)
+	// (POST /api/v1/organizations/{orgId}/nodes/{nodeId}/revoke)
+	RevokeNode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, nodeId openapi_types.UUID)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
@@ -343,6 +411,12 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Enroll a tunnex-node agent with a join token
+// (POST /api/v1/agent/enroll)
+func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Accept an invitation
 // (POST /api/v1/auth/invitations/accept)
@@ -470,6 +544,24 @@ func (_ Unimplemented) ReactivateMember(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List enrolled nodes
+// (GET /api/v1/organizations/{orgId}/nodes)
+func (_ Unimplemented) ListNodes(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Issue a single-use node join token
+// (POST /api/v1/organizations/{orgId}/nodes/join-token)
+func (_ Unimplemented) IssueJoinToken(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke a node (renewal will be refused)
+// (POST /api/v1/organizations/{orgId}/nodes/{nodeId}/revoke)
+func (_ Unimplemented) RevokeNode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Configure an SSO provider for an organization (enterprise)
 // (PUT /api/v1/organizations/{orgId}/sso/{provider})
 func (_ Unimplemented) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
@@ -490,6 +582,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// EnrollAgent operation middleware
+func (siw *ServerInterfaceWrapper) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrollAgent(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // AcceptInvitation operation middleware
 func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
@@ -1058,6 +1164,108 @@ func (siw *ServerInterfaceWrapper) ReactivateMember(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListNodes operation middleware
+func (siw *ServerInterfaceWrapper) ListNodes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNodes(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueJoinToken operation middleware
+func (siw *ServerInterfaceWrapper) IssueJoinToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueJoinToken(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeNode operation middleware
+func (siw *ServerInterfaceWrapper) RevokeNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeNode(w, r, orgId, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetSsoConfig operation middleware
 func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -1226,6 +1434,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/agent/enroll", wrapper.EnrollAgent)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/invitations/accept", wrapper.AcceptInvitation)
 	})
 	r.Group(func(r chi.Router) {
@@ -1289,6 +1500,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/members/{userId}/reactivate", wrapper.ReactivateMember)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/nodes", wrapper.ListNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/nodes/join-token", wrapper.IssueJoinToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke", wrapper.RevokeNode)
+	})
+	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.SetSsoConfig)
 	})
 	r.Group(func(r chi.Router) {
@@ -1305,6 +1525,45 @@ type ErrorJSONResponse struct {
 	Body Error
 
 	Headers ErrorResponseHeaders
+}
+
+type EnrollAgentRequestObject struct {
+	Body *EnrollAgentJSONRequestBody
+}
+
+type EnrollAgentResponseObject interface {
+	VisitEnrollAgentResponse(w http.ResponseWriter) error
+}
+
+type EnrollAgent200ResponseHeaders struct {
+	XRequestId string
+}
+
+type EnrollAgent200JSONResponse struct {
+	Body    EnrollResponse
+	Headers EnrollAgent200ResponseHeaders
+}
+
+func (response EnrollAgent200JSONResponse) VisitEnrollAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type EnrollAgentdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response EnrollAgentdefaultJSONResponse) VisitEnrollAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
 }
 
 type AcceptInvitationRequestObject struct {
@@ -2116,6 +2375,122 @@ func (response ReactivateMemberdefaultJSONResponse) VisitReactivateMemberRespons
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListNodesRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListNodesResponseObject interface {
+	VisitListNodesResponse(w http.ResponseWriter) error
+}
+
+type ListNodes200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListNodes200JSONResponse struct {
+	Body    []Node
+	Headers ListNodes200ResponseHeaders
+}
+
+func (response ListNodes200JSONResponse) VisitListNodesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListNodesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListNodesdefaultJSONResponse) VisitListNodesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type IssueJoinTokenRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *IssueJoinTokenJSONRequestBody
+}
+
+type IssueJoinTokenResponseObject interface {
+	VisitIssueJoinTokenResponse(w http.ResponseWriter) error
+}
+
+type IssueJoinToken201ResponseHeaders struct {
+	XRequestId string
+}
+
+type IssueJoinToken201JSONResponse struct {
+	Body    JoinTokenResponse
+	Headers IssueJoinToken201ResponseHeaders
+}
+
+func (response IssueJoinToken201JSONResponse) VisitIssueJoinTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type IssueJoinTokendefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response IssueJoinTokendefaultJSONResponse) VisitIssueJoinTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RevokeNodeRequestObject struct {
+	OrgId  openapi_types.UUID `json:"orgId"`
+	NodeId openapi_types.UUID `json:"nodeId"`
+}
+
+type RevokeNodeResponseObject interface {
+	VisitRevokeNodeResponse(w http.ResponseWriter) error
+}
+
+type RevokeNode204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RevokeNode204Response struct {
+	Headers RevokeNode204ResponseHeaders
+}
+
+func (response RevokeNode204Response) VisitRevokeNodeResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeNodedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeNodedefaultJSONResponse) VisitRevokeNodeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type SetSsoConfigRequestObject struct {
 	OrgId    openapi_types.UUID `json:"orgId"`
 	Provider string             `json:"provider"`
@@ -2194,6 +2569,9 @@ func (response GetHealthdefaultJSONResponse) VisitGetHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Enroll a tunnex-node agent with a join token
+	// (POST /api/v1/agent/enroll)
+	EnrollAgent(ctx context.Context, request EnrollAgentRequestObject) (EnrollAgentResponseObject, error)
 	// Accept an invitation
 	// (POST /api/v1/auth/invitations/accept)
 	AcceptInvitation(ctx context.Context, request AcceptInvitationRequestObject) (AcceptInvitationResponseObject, error)
@@ -2257,6 +2635,15 @@ type StrictServerInterface interface {
 	// Reactivate a deactivated member
 	// (POST /api/v1/organizations/{orgId}/members/{userId}/reactivate)
 	ReactivateMember(ctx context.Context, request ReactivateMemberRequestObject) (ReactivateMemberResponseObject, error)
+	// List enrolled nodes
+	// (GET /api/v1/organizations/{orgId}/nodes)
+	ListNodes(ctx context.Context, request ListNodesRequestObject) (ListNodesResponseObject, error)
+	// Issue a single-use node join token
+	// (POST /api/v1/organizations/{orgId}/nodes/join-token)
+	IssueJoinToken(ctx context.Context, request IssueJoinTokenRequestObject) (IssueJoinTokenResponseObject, error)
+	// Revoke a node (renewal will be refused)
+	// (POST /api/v1/organizations/{orgId}/nodes/{nodeId}/revoke)
+	RevokeNode(ctx context.Context, request RevokeNodeRequestObject) (RevokeNodeResponseObject, error)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(ctx context.Context, request SetSsoConfigRequestObject) (SetSsoConfigResponseObject, error)
@@ -2292,6 +2679,37 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// EnrollAgent operation middleware
+func (sh *strictHandler) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+	var request EnrollAgentRequestObject
+
+	var body EnrollAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnrollAgent(ctx, request.(EnrollAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnrollAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnrollAgentResponseObject); ok {
+		if err := validResponse.VisitEnrollAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // AcceptInvitation operation middleware
@@ -2917,6 +3335,92 @@ func (sh *strictHandler) ReactivateMember(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListNodes operation middleware
+func (sh *strictHandler) ListNodes(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListNodesRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNodes(ctx, request.(ListNodesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNodes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListNodesResponseObject); ok {
+		if err := validResponse.VisitListNodesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IssueJoinToken operation middleware
+func (sh *strictHandler) IssueJoinToken(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request IssueJoinTokenRequestObject
+
+	request.OrgId = orgId
+
+	var body IssueJoinTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IssueJoinToken(ctx, request.(IssueJoinTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IssueJoinToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IssueJoinTokenResponseObject); ok {
+		if err := validResponse.VisitIssueJoinTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeNode operation middleware
+func (sh *strictHandler) RevokeNode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, nodeId openapi_types.UUID) {
+	var request RevokeNodeRequestObject
+
+	request.OrgId = orgId
+	request.NodeId = nodeId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeNode(ctx, request.(RevokeNodeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeNode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeNodeResponseObject); ok {
+		if err := validResponse.VisitRevokeNodeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetSsoConfig operation middleware
 func (sh *strictHandler) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
 	var request SetSsoConfigRequestObject
@@ -2978,60 +3482,67 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"p0sAAA==",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

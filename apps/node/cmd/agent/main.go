@@ -1,81 +1,152 @@
-// Command agent is the tunnex-node data-plane agent.
+// Command agent is the tunnex-node data-plane agent (S3.1).
 //
-// Foundation story (S0.1): this is a stub. It logs a registration-handshake
-// placeholder, exposes a liveness endpoint so `docker compose` healthchecks are
-// meaningful, and stays alive with a periodic heartbeat. The real control-plane
-// protocol (mTLS enrollment via one-time join token + desired-state reconcile
-// loop) lands in S3.1.
+// On boot it enrolls (join token -> mTLS cert) if it has no cert yet, then runs
+// the reconcile loop against the control plane's desired state. The WireGuard
+// backend is in-memory in S3.1; the real wgctrl device lands in S3.2.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"log/slog"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/tunnexio/tunnex/apps/node/internal/control"
+	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
+
+const protocolVersion = 1
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
 	apiURL := getenv("TUNNEX_API_URL", "http://api:8080")
+	agentURL := getenv("TUNNEX_AGENT_URL", "https://api:8443")
+	serverName := getenv("TUNNEX_AGENT_SERVERNAME", "tunnex-control")
+	joinToken := os.Getenv("TUNNEX_JOIN_TOKEN")
+	nodeName := getenv("TUNNEX_NODE_NAME", hostname())
+	certDir := getenv("TUNNEX_NODE_STATE_DIR", "/var/lib/tunnex-node")
 	healthAddr := getenv("TUNNEX_AGENT_HEALTH_ADDR", ":9091")
-	joinToken := os.Getenv("TUNNEX_JOIN_TOKEN") // exchanged for an mTLS cert in S3.1
 
-	logger.Info("agent_starting",
-		slog.String("api_url", apiURL),
-		slog.String("health_addr", healthAddr),
-		slog.Bool("has_join_token", joinToken != ""),
-	)
-
-	// Liveness endpoint (S0.2 healthcheck target). Readiness — which will report
-	// control-channel + reconcile status — arrives with the real protocol in S3.1.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "tunnex-node"})
-	})
-	health := &http.Server{Addr: healthAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("agent_health_failed", slog.String("error", err.Error()))
-		}
-	}()
-
-	// Placeholder for S3.1: enroll via join token, obtain mTLS cert, then open
-	// the control channel and start the reconcile loop against wgctrl.
-	logger.Info("agent_registration_pending",
-		slog.String("note", "control-plane protocol arrives in S3.1"),
-	)
+	var ready atomic.Bool
+	go serveHealth(healthAddr, &ready, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = health.Shutdown(shutdownCtx)
-			cancel()
-			logger.Info("agent_stopped")
+	certPEM, keyPEM, caPEM, err := loadCreds(certDir)
+	if err != nil {
+		// Not enrolled yet. Enroll if we have a join token; otherwise idle
+		// (liveness up, readiness false) until one is provided.
+		if joinToken == "" {
+			logger.Warn("agent_not_enrolled", slog.String("reason", "no cert and no TUNNEX_JOIN_TOKEN"))
+			<-ctx.Done()
 			return
-		case <-ticker.C:
-			logger.Info("agent_heartbeat")
+		}
+		logger.Info("agent_enrolling", slog.String("node_name", nodeName))
+		key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
+		if gerr != nil {
+			logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
+			os.Exit(1)
+		}
+		res, eerr := control.Enroll(ctx, apiURL, joinToken, csr, nodeName, version(), protocolVersion)
+		if eerr != nil {
+			logger.Error("agent_enroll_failed", slog.String("error", eerr.Error()))
+			os.Exit(1)
+		}
+		certPEM, keyPEM, caPEM = []byte(res.CertPEM), key, []byte(res.CAPEM)
+		if serr := saveCreds(certDir, certPEM, keyPEM, caPEM); serr != nil {
+			logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
+			os.Exit(1)
+		}
+		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
+	}
+
+	client, err := control.NewClient(agentURL, serverName, certPEM, keyPEM, caPEM)
+	if err != nil {
+		logger.Error("agent_client_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	backend := reconcile.NewMemBackend()
+	r := reconcile.New(backend, logger)
+
+	// Readiness flips true once the first reconcile against the control plane
+	// succeeds (enrolled + control session + backend healthy).
+	go func() {
+		if _, err := client.FetchDesired(ctx); err == nil {
+			ready.Store(true)
+			logger.Info("agent_ready")
+		}
+	}()
+
+	logger.Info("agent_reconciling", slog.String("node_name", nodeName))
+	r.Run(ctx, client, 60*time.Second, 5*time.Second)
+	logger.Info("agent_stopped")
+}
+
+// serveHealth exposes liveness (process up) and readiness (enrolled + control
+// session + backend healthy) — the split S8 multi-gateway views consume.
+func serveHealth(addr string, ready *atomic.Bool, logger *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "tunnex-node"})
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "not_ready"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	})
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("agent_health_failed", slog.String("error", err.Error()))
+	}
+}
+
+func loadCreds(dir string) (cert, key, ca []byte, err error) {
+	cert, err = os.ReadFile(filepath.Join(dir, "cert.pem"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	key, err = os.ReadFile(filepath.Join(dir, "key.pem"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ca, err = os.ReadFile(filepath.Join(dir, "ca.pem"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return cert, key, ca, nil
+}
+
+func saveCreds(dir string, cert, key, ca []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for name, data := range map[string][]byte{"cert.pem": cert, "key.pem": key, "ca.pem": ca} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
-func getenv(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
+func getenv(k, def string) string {
+	if v, ok := os.LookupEnv(k); ok && v != "" {
 		return v
 	}
-	return fallback
+	return def
 }
+
+func hostname() string { h, _ := os.Hostname(); return h }
+func version() string  { return getenv("TUNNEX_AGENT_VERSION", "0.1.0") }

@@ -58,6 +58,9 @@ services:
       # Dedicated volume for roots of trust — kept separate from app data so
       # S11.2's backup story can scope it cleanly.
       - tunnex_secrets:/var/lib/tunnex/secrets
+    ports:
+      # mTLS agent control channel (agents connect directly, bypassing nginx TLS).
+      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,8 +74,15 @@ services:
     restart: unless-stopped
     environment:
       TUNNEX_API_URL: ${TUNNEX_API_URL:-http://api:8080}
+      TUNNEX_AGENT_URL: ${TUNNEX_AGENT_URL:-https://api:8443}
+      TUNNEX_AGENT_SERVERNAME: tunnex-control
+      # Empty by default: the agent idles (liveness up, readiness not-ready) until
+      # an operator provides a join token. Set it to auto-enroll.
       TUNNEX_JOIN_TOKEN: ${TUNNEX_JOIN_TOKEN:-}
-    # Required to manage WireGuard interfaces (S3.x). Harmless for the stub.
+      TUNNEX_NODE_STATE_DIR: /var/lib/tunnex-node
+    volumes:
+      - tunnex_node_state:/var/lib/tunnex-node
+    # Required to manage WireGuard interfaces (S3.2). Harmless in S3.1.
     cap_add:
       - NET_ADMIN
     ports:
@@ -127,3 +137,4 @@ volumes:
   postgres_data:
   redis_data:
   tunnex_secrets:
+  tunnex_node_state:

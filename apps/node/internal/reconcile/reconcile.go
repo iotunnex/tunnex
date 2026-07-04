@@ -1,0 +1,157 @@
+// Package reconcile converges the local WireGuard interface toward the
+// control-plane desired state. The logic is backend-agnostic (WGBackend) so it
+// unit-tests against a fake — only a thin adapter touches real wgctrl.
+package reconcile
+
+import (
+	"context"
+	"log/slog"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Peer mirrors the control plane's peer shape (JSON contract).
+type Peer struct {
+	PublicKey  string   `json:"public_key"`
+	AllowedIPs []string `json:"allowed_ips"`
+	Endpoint   string   `json:"endpoint,omitempty"`
+}
+
+// DesiredState is the control-plane response the agent reconciles toward.
+type DesiredState struct {
+	ProtocolVersion int    `json:"protocol_version"`
+	NodeID          string `json:"node_id"`
+	Peers           []Peer `json:"peers"`
+}
+
+// WGBackend abstracts the WireGuard data plane. The real adapter wraps wgctrl;
+// the fake drives unit tests.
+type WGBackend interface {
+	Peers(ctx context.Context) ([]Peer, error)
+	ApplyPeers(ctx context.Context, peers []Peer) error
+}
+
+// ControlClient is the agent's view of the control plane.
+type ControlClient interface {
+	// FetchDesired returns the full desired state (a full resync, not a diff).
+	FetchDesired(ctx context.Context) (DesiredState, error)
+	// Watch blocks until the control plane signals a change (push) or returns an
+	// error/ctx cancellation. It is the low-latency path; the interval is the net.
+	Watch(ctx context.Context) error
+}
+
+// Reconciler converges a backend toward desired state.
+type Reconciler struct {
+	backend WGBackend
+	logger  *slog.Logger
+}
+
+// New builds a Reconciler.
+func New(backend WGBackend, logger *slog.Logger) *Reconciler {
+	return &Reconciler{backend: backend, logger: logger}
+}
+
+// Reconcile converges the backend to the desired peer set. It applies the FULL
+// set (a resync), so a long-disconnected agent recovers correctly. Returns
+// whether anything changed.
+func (r *Reconciler) Reconcile(ctx context.Context, desired []Peer) (bool, error) {
+	actual, err := r.backend.Peers(ctx)
+	if err != nil {
+		return false, err
+	}
+	if peersEqual(actual, desired) {
+		return false, nil
+	}
+	if err := r.backend.ApplyPeers(ctx, desired); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// runOnce fetches desired state and reconciles. A fetch error is returned
+// WITHOUT touching the backend — data-plane independence: a control-plane outage
+// never flushes live peers.
+func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, error) {
+	ds, err := client.FetchDesired(ctx)
+	if err != nil {
+		return false, err
+	}
+	return r.Reconcile(ctx, ds.Peers)
+}
+
+// Run drives reconciliation from two independent triggers: Watch (push, low
+// latency) and a ticker (safety net that converges even if push is broken). On
+// any control-plane error it backs off and leaves the data plane untouched.
+func (r *Reconciler) Run(ctx context.Context, client ControlClient, interval, backoff time.Duration) {
+	// Initial resync.
+	if _, err := r.runOnce(ctx, client); err != nil {
+		r.logger.Warn("reconcile_initial_failed", slog.String("error", err.Error()))
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		// Push path: block until the control plane signals a change.
+		watchCh := make(chan error, 1)
+		go func() { watchCh <- client.Watch(ctx) }()
+
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-watchCh:
+			if err != nil {
+				r.logger.Warn("watch_failed_backing_off", slog.String("error", err.Error()))
+				if !sleep(ctx, backoff) {
+					return
+				}
+				continue // the ticker keeps converging regardless (safety net)
+			}
+			if _, err := r.runOnce(ctx, client); err != nil {
+				r.logger.Warn("reconcile_after_push_failed", slog.String("error", err.Error()))
+			}
+		case <-ticker.C:
+			if _, err := r.runOnce(ctx, client); err != nil {
+				r.logger.Warn("reconcile_interval_failed", slog.String("error", err.Error()))
+			}
+		}
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func peersEqual(a, b []Peer) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ka, kb := make([]string, len(a)), make([]string, len(b))
+	for i := range a {
+		ka[i] = canon(a[i])
+	}
+	for i := range b {
+		kb[i] = canon(b[i])
+	}
+	sort.Strings(ka)
+	sort.Strings(kb)
+	for i := range ka {
+		if ka[i] != kb[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func canon(p Peer) string {
+	ips := append([]string(nil), p.AllowedIPs...)
+	sort.Strings(ips)
+	return p.PublicKey + "|" + strings.Join(ips, ",") + "|" + p.Endpoint
+}

@@ -66,6 +66,31 @@ type Membership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type Node struct {
+	ID           uuid.UUID          `json:"id"`
+	OrgID        uuid.UUID          `json:"org_id"`
+	Name         string             `json:"name"`
+	Status       string             `json:"status"`
+	CertSerial   string             `json:"cert_serial"`
+	AgentVersion string             `json:"agent_version"`
+	EnrolledAt   time.Time          `json:"enrolled_at"`
+	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
+type NodeJoinToken struct {
+	ID             uuid.UUID          `json:"id"`
+	OrgID          uuid.UUID          `json:"org_id"`
+	NodeName       *string            `json:"node_name"`
+	TokenHash      []byte             `json:"token_hash"`
+	ExpiresAt      time.Time          `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	ConsumedNodeID pgtype.UUID        `json:"consumed_node_id"`
+	CreatedAt      time.Time          `json:"created_at"`
+}
+
 type Organization struct {
 	ID        uuid.UUID          `json:"id"`
 	Name      string             `json:"name"`
@@ -73,6 +98,14 @@ type Organization struct {
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type PlatformSecret struct {
+	Name         string    `json:"name"`
+	SecretSealed []byte    `json:"secret_sealed"`
+	PublicPem    *string   `json:"public_pem"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type SsoConfig struct {

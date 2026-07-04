@@ -225,6 +225,89 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/agent/enroll:
+    post:
+      operationId: enrollAgent
+      summary: Enroll a tunnex-node agent with a join token
+      tags: [nodes]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollRequest" }
+      responses:
+        "200":
+          description: Enrolled — returns the signed agent certificate and the CA.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrollResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/nodes:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listNodes
+      summary: List enrolled nodes
+      tags: [nodes]
+      responses:
+        "200":
+          description: Nodes.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Node" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/nodes/join-token:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: issueJoinToken
+      summary: Issue a single-use node join token
+      tags: [nodes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JoinTokenRequest" }
+      responses:
+        "201":
+          description: The join token (shown once).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JoinTokenResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/nodes/{nodeId}/revoke:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: nodeId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: revokeNode
+      summary: Revoke a node (renewal will be refused)
+      tags: [nodes]
+      responses:
+        "204":
+          description: Revoked.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/invitations/accept:
     post:
       operationId: acceptInvitation
@@ -598,6 +681,51 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    EnrollRequest:
+      type: object
+      required: [join_token, csr, node_name, agent_version, protocol_version]
+      additionalProperties: false
+      properties:
+        join_token: { type: string, minLength: 1, maxLength: 200 }
+        csr: { type: string, description: "PEM-encoded certificate signing request" }
+        node_name: { type: string, minLength: 1, maxLength: 100 }
+        agent_version: { type: string, maxLength: 50 }
+        protocol_version: { type: integer }
+
+    EnrollResponse:
+      type: object
+      required: [node_id, certificate, ca_certificate]
+      additionalProperties: false
+      properties:
+        node_id: { type: string, format: uuid }
+        certificate: { type: string, description: "PEM agent certificate" }
+        ca_certificate: { type: string, description: "PEM CA certificate" }
+
+    Node:
+      type: object
+      required: [id, name, status, agent_version, enrolled_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [active, revoked] }
+        agent_version: { type: string }
+        enrolled_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+
+    JoinTokenRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        node_name: { type: string, maxLength: 100 }
+
+    JoinTokenResponse:
+      type: object
+      required: [join_token]
+      additionalProperties: false
+      properties:
+        join_token: { type: string }
 
     InviteRequest:
       type: object

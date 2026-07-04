@@ -21,6 +21,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
@@ -28,6 +29,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
+	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -116,13 +118,28 @@ func main() {
 			slog.String("warning", "session cookie Secure flag is OFF — development only; set TUNNEX_COOKIE_SECURE=true in production"))
 	}
 
+	// Agent CA (root of trust for tunnex-node mTLS): load-or-create, sealed under
+	// the master key, fail-loud on unusable, self-test at boot.
+	agentCA, caFirstBoot, err := agentca.LoadOrCreate(context.Background(), sqlc.New(pool), sealer)
+	if err != nil {
+		logger.Error("agent_ca_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := agentCA.SelfTest(); err != nil {
+		logger.Error("agent_ca_selftest_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("agent_ca_ready", slog.Bool("first_boot", caFirstBoot), slog.String("ca_fp", agentCA.Fingerprint()))
+
 	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
+	nodeSvc := nodes.NewService(pool, agentCA)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:         tenancy.NewService(pool),
 		Auth:         authSvc,
 		Members:      tenancy.NewMembershipService(pool, sessions),
 		Invites:      invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
+		Nodes:        nodeSvc,
 		Sessions:     sessions,
 		SSO:          apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		CookieSecure: cfg.CookieSecure,
@@ -139,6 +156,26 @@ func main() {
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// mTLS agent control channel (separate listener; client certs verified vs CA).
+	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, logger)
+	agentTLS, err := agentCh.TLSConfig("tunnex-control")
+	if err != nil {
+		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	agentSrv := &http.Server{
+		Addr:              cfg.AgentAddr,
+		Handler:           agentCh.Handler(),
+		TLSConfig:         agentTLS,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		logger.Info("agent_channel_starting", slog.String("addr", cfg.AgentAddr))
+		if err := agentSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("agent_channel_failed", slog.String("error", err.Error()))
+		}
+	}()
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -164,6 +201,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	_ = agentSrv.Shutdown(ctx)
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))
 		os.Exit(1)

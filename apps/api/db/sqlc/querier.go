@@ -19,6 +19,9 @@ type Querier interface {
 	// given purpose. A reset token therefore cannot be consumed as a verification
 	// token and vice-versa.
 	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (AuthToken, error)
+	// lint:cross-org — the token itself is the credential; the org comes from the
+	// returned row. Single-use + expiring.
+	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	// lint:cross-org — spans a user's orgs to protect the last-owner invariant on
 	// global deactivation; each row's org_id is used in the correlated subquery.
@@ -27,6 +30,8 @@ type Querier interface {
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
+	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
+	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
@@ -40,8 +45,13 @@ type Querier interface {
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
+	// lint:cross-org — the mTLS client cert IS the identity; the org comes from the
+	// node row. Used to authorize every agent request.
+	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
+	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -52,6 +62,9 @@ type Querier interface {
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
+	// Create-if-absent; the caller reads-back on conflict. Never overwrites, so a
+	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
+	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
@@ -62,6 +75,7 @@ type Querier interface {
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
 	// Admin/system listing of all orgs; user-facing listing uses
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
@@ -69,7 +83,11 @@ type Querier interface {
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
+	// lint:cross-org — keyed by node id after the caller authorized via the current
+	// cert; renewal rotates the serial and stamps activity/version.
+	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
+	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
@@ -81,6 +99,8 @@ type Querier interface {
 	// is NOT deleted — the org keeps its pending claim and can re-verify).
 	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
+	// lint:cross-org — keyed by id after cert authorization.
+	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
 	// Idempotent on (org_id, user_id).

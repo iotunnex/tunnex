@@ -11,6 +11,8 @@ import (
 type Config struct {
 	// Addr is the host:port the HTTP server binds to.
 	Addr string
+	// AgentAddr is the host:port the mTLS agent control channel binds to (S3.1).
+	AgentAddr string
 	// Env is the deployment environment name (development, production).
 	Env string
 	// LogLevel controls the minimum slog level (debug, info, warn, error).
@@ -54,6 +56,7 @@ func (c Config) IsProduction() bool { return c.Env == "production" }
 func Load() Config {
 	return Config{
 		Addr:       getenv("TUNNEX_API_ADDR", ":8080"),
+		AgentAddr:  getenv("TUNNEX_AGENT_ADDR", ":8443"),
 		Env:        getenv("TUNNEX_ENV", "development"),
 		LogLevel:    strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
 		SecretsDir:  getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),

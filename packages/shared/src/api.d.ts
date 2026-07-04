@@ -186,6 +186,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enroll a tunnex-node agent with a join token */
+        post: operations["enrollAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List enrolled nodes */
+        get: operations["listNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/nodes/join-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a single-use node join token */
+        post: operations["issueJoinToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a node (renewal will be refused) */
+        post: operations["revokeNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/invitations/accept": {
         parameters: {
             query?: never;
@@ -427,6 +502,40 @@ export interface components {
         };
         SsoRedirect: {
             redirect_url: string;
+        };
+        EnrollRequest: {
+            join_token: string;
+            /** @description PEM-encoded certificate signing request */
+            csr: string;
+            node_name: string;
+            agent_version: string;
+            protocol_version: number;
+        };
+        EnrollResponse: {
+            /** Format: uuid */
+            node_id: string;
+            /** @description PEM agent certificate */
+            certificate: string;
+            /** @description PEM CA certificate */
+            ca_certificate: string;
+        };
+        Node: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "active" | "revoked";
+            agent_version: string;
+            /** Format: date-time */
+            enrolled_at: string;
+            /** Format: date-time */
+            last_seen_at?: string;
+        };
+        JoinTokenRequest: {
+            node_name?: string;
+        };
+        JoinTokenResponse: {
+            join_token: string;
         };
         InviteRequest: {
             /** Format: email */
@@ -778,6 +887,107 @@ export interface operations {
         };
         responses: {
             /** @description Saved. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    enrollAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description Enrolled — returns the signed agent certificate and the CA. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Nodes. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    issueJoinToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The join token (shown once). */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinTokenResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
             204: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];
