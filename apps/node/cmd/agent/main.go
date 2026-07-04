@@ -70,13 +70,20 @@ func main() {
 		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
 	}
 
-	client, err := control.NewClient(agentURL, serverName, certPEM, keyPEM, caPEM)
+	client, err := control.NewClient(agentURL, serverName, nodeName, certPEM, keyPEM, caPEM)
 	if err != nil {
 		logger.Error("agent_client_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	backend := reconcile.NewMemBackend()
 	r := reconcile.New(backend, logger)
+
+	// Renew the cert at half-life (default 24h; the cert lives 48h) and hot-swap
+	// it. Persist the rotated cert so a restart uses the current one. If renewal
+	// fails until expiry, mTLS breaks and re-enrollment requires a fresh join
+	// token (no silent re-admission).
+	renewEvery := getdur("TUNNEX_AGENT_RENEW_INTERVAL", 24*time.Hour)
+	go renewLoop(ctx, client, certDir, renewEvery, logger)
 
 	// Readiness flips true once the first reconcile against the control plane
 	// succeeds (enrolled + control session + backend healthy).
@@ -139,6 +146,38 @@ func saveCreds(dir string, cert, key, ca []byte) error {
 		}
 	}
 	return nil
+}
+
+func renewLoop(ctx context.Context, client *control.Client, certDir string, every time.Duration, logger *slog.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			certPEM, keyPEM, err := client.Renew(ctx, version())
+			if err != nil {
+				logger.Warn("agent_renew_failed", slog.String("error", err.Error()))
+				continue
+			}
+			ca, _ := os.ReadFile(filepath.Join(certDir, "ca.pem"))
+			if err := saveCreds(certDir, certPEM, keyPEM, ca); err != nil {
+				logger.Warn("agent_renew_persist_failed", slog.String("error", err.Error()))
+				continue
+			}
+			logger.Info("agent_cert_renewed")
+		}
+	}
+}
+
+func getdur(k string, def time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(k); ok && v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
 }
 
 func getenv(k, def string) string {

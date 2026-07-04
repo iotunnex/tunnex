@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
@@ -71,15 +72,19 @@ func Enroll(ctx context.Context, apiURL, joinToken string, csrPEM []byte, nodeNa
 }
 
 // Client is the mTLS reconcile-channel client (implements reconcile.ControlClient).
+// The client certificate is served via GetClientCertificate reading an atomic
+// holder, so Renew can hot-swap it mid-flight without rebuilding the client.
 type Client struct {
-	base string
-	http *http.Client
+	base     string
+	nodeName string
+	cert     atomic.Pointer[tls.Certificate]
+	http     *http.Client
 }
 
 // NewClient builds an mTLS client presenting certPEM/keyPEM and trusting caPEM.
 // serverName is the control-channel server cert's name (dialing host may differ,
 // e.g. the compose service name).
-func NewClient(agentURL, serverName string, certPEM, keyPEM, caPEM []byte) (*Client, error) {
+func NewClient(agentURL, serverName, nodeName string, certPEM, keyPEM, caPEM []byte) (*Client, error) {
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return nil, err
@@ -88,18 +93,51 @@ func NewClient(agentURL, serverName string, certPEM, keyPEM, caPEM []byte) (*Cli
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, fmt.Errorf("bad CA PEM")
 	}
-	return &Client{
-		base: agentURL,
-		http: &http.Client{
-			Timeout: 60 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				RootCAs:      pool,
-				ServerName:   serverName,
-				MinVersion:   tls.VersionTLS12,
-			}},
-		},
-	}, nil
+	c := &Client{base: agentURL, nodeName: nodeName}
+	c.cert.Store(&cert)
+	c.http = &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return c.cert.Load(), nil
+			},
+			RootCAs:    pool,
+			ServerName: serverName,
+			MinVersion: tls.VersionTLS12,
+		}},
+	}
+	return c, nil
+}
+
+// Renew rotates the agent's certificate over the mTLS channel: it generates a
+// FRESH key + CSR, posts it (authenticated by the CURRENT cert), hot-swaps the
+// new cert in, and returns the new cert+key PEM for the caller to persist.
+// Renewing at half-life keeps the agent from ever reaching cert expiry.
+func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, newKeyPEM []byte, err error) {
+	keyPEM, csrPEM, err := GenerateKeyAndCSR(c.nodeName)
+	if err != nil {
+		return nil, nil, err
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/renew", bytes.NewReader(csrPEM))
+	req.Header.Set("X-Agent-Version", agentVersion)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("renew status %d: %s", resp.StatusCode, string(body))
+	}
+	newCert, err := tls.X509KeyPair(body, keyPEM)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.cert.Store(&newCert) // hot-swap: subsequent requests use the fresh cert
+	// Drop pooled TLS connections so the next request re-handshakes with the new
+	// cert (an existing keep-alive connection would keep presenting the old one).
+	c.http.CloseIdleConnections()
+	return body, keyPEM, nil
 }
 
 // FetchDesired GETs the desired state over mTLS.
