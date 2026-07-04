@@ -141,6 +141,11 @@ func (s *Service) Authenticate(ctx context.Context, email, pw string) (sqlc.User
 	if err != nil {
 		return sqlc.User{}, errInvalidCredentials()
 	}
+	// Only after the password checks out (so we never leak account state to an
+	// attacker) do we surface deactivation to the legitimate owner.
+	if user.Status != "active" {
+		return sqlc.User{}, apierr.New(403, "account_deactivated", "this account has been deactivated")
+	}
 	if needsRehash {
 		if nh, herr := password.Hash(pw); herr == nil {
 			if serr := s.q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: user.ID, PasswordHash: &nh}); serr != nil {

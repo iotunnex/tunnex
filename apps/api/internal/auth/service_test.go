@@ -150,6 +150,34 @@ func TestSignupVerifyLoginResetFlow(t *testing.T) {
 	}
 }
 
+func TestAuthenticateRejectsDeactivated(t *testing.T) {
+	svc, _, cleanup := newTestAuth(t)
+	defer cleanup()
+	ctx := context.Background()
+	email := "deact-" + time.Now().Format("150405.000000") + "@t.local"
+	const pw = "correct horse battery"
+
+	if err := svc.Signup(ctx, email, "D", pw); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	u, err := svc.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if err := svc.q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: u.ID, Status: "deactivated"}); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	// Correct password + deactivated -> account_deactivated (owner learns it).
+	if _, err := svc.Authenticate(ctx, email, pw); codeOf(err) != "account_deactivated" {
+		t.Fatalf("deactivated login: want account_deactivated, got %v", err)
+	}
+	// Wrong password stays generic (no state leak to an attacker).
+	if _, err := svc.Authenticate(ctx, email, "totally wrong pw"); codeOf(err) != "invalid_credentials" {
+		t.Fatalf("wrong pw on deactivated: want invalid_credentials, got %v", err)
+	}
+}
+
 func TestSignupRejectsWeakPassword(t *testing.T) {
 	svc, _, cleanup := newTestAuth(t)
 	defer cleanup()

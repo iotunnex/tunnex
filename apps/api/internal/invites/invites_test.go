@@ -143,6 +143,24 @@ func TestInviteAcceptAttachesExistingAndVerifies(t *testing.T) {
 	}
 }
 
+func TestInviteAcceptRejectsDeactivatedAccount(t *testing.T) {
+	svc, mailer, org, actor, ctx := newSvc(t)
+	u, err := svc.q.CreateUser(ctx, sqlc.CreateUserParams{Email: "frozen@example.com", Name: "F"})
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	if err := svc.q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: u.ID, Status: "deactivated"}); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if err := svc.Create(ctx, actor, org, "frozen@example.com", "member"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Accepting must not resurrect a frozen account into a membership.
+	if _, _, err := svc.Accept(ctx, mailer.last(), "", ""); codeOf(err) != "account_deactivated" {
+		t.Fatalf("accept into frozen account: want account_deactivated, got %v", err)
+	}
+}
+
 func TestInviteRevokeAndResend(t *testing.T) {
 	svc, mailer, org, actor, ctx := newSvc(t)
 	email := "rr-" + uuid.NewString() + "@example.com"

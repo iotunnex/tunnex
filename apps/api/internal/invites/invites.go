@@ -160,6 +160,10 @@ func (s *Service) Accept(ctx context.Context, token, name, pw string) (uuid.UUID
 		case e != nil:
 			return e
 		default: // AcceptAttach
+			// Never resurrect a frozen account into a new membership.
+			if local.Status != "active" {
+				return apierr.New(403, "account_deactivated", "this account is deactivated; contact an administrator")
+			}
 			userID = local.ID
 		}
 
