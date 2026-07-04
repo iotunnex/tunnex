@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -62,6 +63,8 @@ func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
 type apiServer struct {
 	orgs         *tenancy.Service
 	auth         *auth.Service
+	members      *tenancy.MembershipService
+	invites      *invites.Service
 	sessions     *session.Store
 	sso          ssoPort // nil in the open build
 	cookieSecure bool

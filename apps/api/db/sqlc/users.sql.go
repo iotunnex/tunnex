@@ -111,6 +111,22 @@ func (q *Queries) SetUserPassword(ctx context.Context, arg SetUserPasswordParams
 	return err
 }
 
+const setUserStatus = `-- name: SetUserStatus :exec
+UPDATE users
+SET status = $2
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type SetUserStatusParams struct {
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
+}
+
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) error {
+	_, err := q.db.Exec(ctx, setUserStatus, arg.ID, arg.Status)
+	return err
+}
+
 const upsertUser = `-- name: UpsertUser :one
 INSERT INTO users (id, email, name)
 VALUES ($1, $2, $3)

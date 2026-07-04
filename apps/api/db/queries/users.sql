@@ -28,3 +28,8 @@ WHERE id = $1 AND deleted_at IS NULL;
 UPDATE users
 SET email_verified_at = now()
 WHERE id = $1 AND deleted_at IS NULL AND email_verified_at IS NULL;
+
+-- name: SetUserStatus :exec
+UPDATE users
+SET status = $2
+WHERE id = $1 AND deleted_at IS NULL;

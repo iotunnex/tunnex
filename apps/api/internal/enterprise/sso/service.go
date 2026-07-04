@@ -180,6 +180,10 @@ func (s *Service) ensureMembership(ctx context.Context, q *sqlc.Queries, orgID, 
 	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{OrgID: orgID, UserID: userID, Role: rbac.RoleMember}); err != nil {
 		return err
 	}
+	// A JIT join makes any pending invite for this (org, email) moot.
+	if err := q.SupersedePendingInvites(ctx, sqlc.SupersedePendingInvitesParams{OrgID: orgID, Email: id.Email}); err != nil {
+		return err
+	}
 	uid := userID
 	return audit(ctx, q, orgID, &uid, "member.jit_joined", "membership", userID.String(),
 		map[string]any{"via": via, "provider": id.Provider, "idp_subject": id.Subject})

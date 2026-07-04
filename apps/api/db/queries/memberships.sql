@@ -35,3 +35,10 @@ WHERE org_id = $1 AND user_id = $2;
 -- name: CountOwners :one
 SELECT count(*) FROM memberships
 WHERE org_id = $1 AND role = 'owner';
+
+-- name: CountOrgsWhereSoleOwner :one
+-- lint:cross-org — spans a user's orgs to protect the last-owner invariant on
+-- global deactivation; each row's org_id is used in the correlated subquery.
+SELECT count(*) FROM memberships m
+WHERE m.user_id = $1 AND m.role = 'owner'
+  AND (SELECT count(*) FROM memberships o WHERE o.org_id = m.org_id AND o.role = 'owner') = 1;

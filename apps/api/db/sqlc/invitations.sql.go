@@ -111,15 +111,78 @@ func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash []byte
 	return i, err
 }
 
-const revokeInvitation = `-- name: RevokeInvitation :exec
-UPDATE invitations
-SET revoked_at = now()
-WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+const listInvitations = `-- name: ListInvitations :many
+SELECT id, org_id, email, role, token_hash, expires_at, accepted_at, revoked_at, invited_by_user_id, created_at, updated_at FROM invitations
+WHERE org_id = $1
+ORDER BY created_at DESC
 `
 
-// lint:cross-org — revocation targets a specific invitation id (already
-// authorized at the handler layer by org membership before this runs).
-func (q *Queries) RevokeInvitation(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, revokeInvitation, id)
+func (q *Queries) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error) {
+	rows, err := q.db.Query(ctx, listInvitations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Invitation{}
+	for rows.Next() {
+		var i Invitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Email,
+			&i.Role,
+			&i.TokenHash,
+			&i.ExpiresAt,
+			&i.AcceptedAt,
+			&i.RevokedAt,
+			&i.InvitedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeInvitationByOrgEmail = `-- name: RevokeInvitationByOrgEmail :execrows
+UPDATE invitations
+SET revoked_at = now()
+WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+`
+
+type RevokeInvitationByOrgEmailParams struct {
+	OrgID uuid.UUID `json:"org_id"`
+	Email string    `json:"email"`
+}
+
+func (q *Queries) RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeInvitationByOrgEmail, arg.OrgID, arg.Email)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const supersedePendingInvites = `-- name: SupersedePendingInvites :exec
+UPDATE invitations
+SET revoked_at = now()
+WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+`
+
+type SupersedePendingInvitesParams struct {
+	OrgID uuid.UUID `json:"org_id"`
+	Email string    `json:"email"`
+}
+
+// When a user joins an org another way (e.g. domain-capture JIT), pending
+// invites for that (org, email) become moot — revoke them so they can't be
+// accepted into a second membership attempt.
+func (q *Queries) SupersedePendingInvites(ctx context.Context, arg SupersedePendingInvitesParams) error {
+	_, err := q.db.Exec(ctx, supersedePendingInvites, arg.OrgID, arg.Email)
 	return err
 }

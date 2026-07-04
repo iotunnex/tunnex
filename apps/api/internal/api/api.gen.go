@@ -32,6 +32,13 @@ const (
 	Ok HealthResponseStatus = "ok"
 )
 
+// Defines values for InviteRequestRole.
+const (
+	Admin  InviteRequestRole = "admin"
+	Member InviteRequestRole = "member"
+	Owner  InviteRequestRole = "owner"
+)
+
 // Defines values for SsoCallbackParamsProvider.
 const (
 	SsoCallbackParamsProviderGoogle    SsoCallbackParamsProvider = "google"
@@ -43,6 +50,13 @@ const (
 	StartSsoLoginParamsProviderGoogle    StartSsoLoginParamsProvider = "google"
 	StartSsoLoginParamsProviderMicrosoft StartSsoLoginParamsProvider = "microsoft"
 )
+
+// AcceptInviteRequest defines model for AcceptInviteRequest.
+type AcceptInviteRequest struct {
+	Name     *string `json:"name,omitempty"`
+	Password *string `json:"password,omitempty"`
+	Token    string  `json:"token"`
+}
 
 // AuthUser defines model for AuthUser.
 type AuthUser struct {
@@ -71,6 +85,11 @@ type DomainClaimResponse struct {
 // DomainVerifyRequest defines model for DomainVerifyRequest.
 type DomainVerifyRequest struct {
 	Domain string `json:"domain"`
+}
+
+// EmailRequest defines model for EmailRequest.
+type EmailRequest struct {
+	Email openapi_types.Email `json:"email"`
 }
 
 // Error Standard error envelope for every non-2xx response. Chosen over bare
@@ -120,6 +139,15 @@ type HealthResponse struct {
 
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
+
+// InviteRequest defines model for InviteRequest.
+type InviteRequest struct {
+	Email openapi_types.Email `json:"email"`
+	Role  InviteRequestRole   `json:"role"`
+}
+
+// InviteRequestRole defines model for InviteRequest.Role.
+type InviteRequestRole string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -197,6 +225,9 @@ type StartSsoLoginParams struct {
 // StartSsoLoginParamsProvider defines parameters for StartSsoLogin.
 type StartSsoLoginParamsProvider string
 
+// AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
+type AcceptInvitationJSONRequestBody = AcceptInviteRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -224,11 +255,23 @@ type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 // VerifyDomainClaimJSONRequestBody defines body for VerifyDomainClaim for application/json ContentType.
 type VerifyDomainClaimJSONRequestBody = DomainVerifyRequest
 
+// CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
+type CreateInvitationJSONRequestBody = InviteRequest
+
+// ResendInvitationJSONRequestBody defines body for ResendInvitation for application/json ContentType.
+type ResendInvitationJSONRequestBody = EmailRequest
+
+// RevokeInvitationJSONRequestBody defines body for RevokeInvitation for application/json ContentType.
+type RevokeInvitationJSONRequestBody = EmailRequest
+
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Accept an invitation
+	// (POST /api/v1/auth/invitations/accept)
+	AcceptInvitation(w http.ResponseWriter, r *http.Request)
 	// Verify credentials
 	// (POST /api/v1/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -274,6 +317,21 @@ type ServerInterface interface {
 	// Verify a claimed domain via its DNS TXT record (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains/verify)
 	VerifyDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Invite a user to the organization
+	// (POST /api/v1/organizations/{orgId}/invitations)
+	CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Resend an invitation (new token, old invalidated)
+	// (POST /api/v1/organizations/{orgId}/invitations/resend)
+	ResendInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Revoke a pending invitation
+	// (POST /api/v1/organizations/{orgId}/invitations/revoke)
+	RevokeInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Deactivate a member's account (freezes access, revokes sessions)
+	// (POST /api/v1/organizations/{orgId}/members/{userId}/deactivate)
+	DeactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID)
+	// Reactivate a deactivated member
+	// (POST /api/v1/organizations/{orgId}/members/{userId}/reactivate)
+	ReactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
@@ -285,6 +343,12 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Accept an invitation
+// (POST /api/v1/auth/invitations/accept)
+func (_ Unimplemented) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Verify credentials
 // (POST /api/v1/auth/login)
@@ -376,6 +440,36 @@ func (_ Unimplemented) VerifyDomainClaim(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Invite a user to the organization
+// (POST /api/v1/organizations/{orgId}/invitations)
+func (_ Unimplemented) CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resend an invitation (new token, old invalidated)
+// (POST /api/v1/organizations/{orgId}/invitations/resend)
+func (_ Unimplemented) ResendInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke a pending invitation
+// (POST /api/v1/organizations/{orgId}/invitations/revoke)
+func (_ Unimplemented) RevokeInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Deactivate a member's account (freezes access, revokes sessions)
+// (POST /api/v1/organizations/{orgId}/members/{userId}/deactivate)
+func (_ Unimplemented) DeactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Reactivate a deactivated member
+// (POST /api/v1/organizations/{orgId}/members/{userId}/reactivate)
+func (_ Unimplemented) ReactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Configure an SSO provider for an organization (enterprise)
 // (PUT /api/v1/organizations/{orgId}/sso/{provider})
 func (_ Unimplemented) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
@@ -396,6 +490,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// AcceptInvitation operation middleware
+func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptInvitation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -777,6 +885,179 @@ func (siw *ServerInterfaceWrapper) VerifyDomainClaim(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// CreateInvitation operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInvitation(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResendInvitation operation middleware
+func (siw *ServerInterfaceWrapper) ResendInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResendInvitation(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeInvitation operation middleware
+func (siw *ServerInterfaceWrapper) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeInvitation(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeactivateMember operation middleware
+func (siw *ServerInterfaceWrapper) DeactivateMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeactivateMember(w, r, orgId, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReactivateMember operation middleware
+func (siw *ServerInterfaceWrapper) ReactivateMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReactivateMember(w, r, orgId, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetSsoConfig operation middleware
 func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -945,6 +1226,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/invitations/accept", wrapper.AcceptInvitation)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
@@ -990,6 +1274,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/domains/verify", wrapper.VerifyDomainClaim)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/invitations", wrapper.CreateInvitation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/invitations/resend", wrapper.ResendInvitation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/invitations/revoke", wrapper.RevokeInvitation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/members/{userId}/deactivate", wrapper.DeactivateMember)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/members/{userId}/reactivate", wrapper.ReactivateMember)
+	})
+	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.SetSsoConfig)
 	})
 	r.Group(func(r chi.Router) {
@@ -1006,6 +1305,45 @@ type ErrorJSONResponse struct {
 	Body Error
 
 	Headers ErrorResponseHeaders
+}
+
+type AcceptInvitationRequestObject struct {
+	Body *AcceptInvitationJSONRequestBody
+}
+
+type AcceptInvitationResponseObject interface {
+	VisitAcceptInvitationResponse(w http.ResponseWriter) error
+}
+
+type AcceptInvitation200ResponseHeaders struct {
+	XRequestId string
+}
+
+type AcceptInvitation200JSONResponse struct {
+	Body    GenericMessage
+	Headers AcceptInvitation200ResponseHeaders
+}
+
+func (response AcceptInvitation200JSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type AcceptInvitationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response AcceptInvitationdefaultJSONResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
 }
 
 type LoginRequestObject struct {
@@ -1587,6 +1925,197 @@ func (response VerifyDomainClaimdefaultJSONResponse) VisitVerifyDomainClaimRespo
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type CreateInvitationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreateInvitationJSONRequestBody
+}
+
+type CreateInvitationResponseObject interface {
+	VisitCreateInvitationResponse(w http.ResponseWriter) error
+}
+
+type CreateInvitation202ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateInvitation202JSONResponse struct {
+	Body    GenericMessage
+	Headers CreateInvitation202ResponseHeaders
+}
+
+func (response CreateInvitation202JSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateInvitationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateInvitationdefaultJSONResponse) VisitCreateInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ResendInvitationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *ResendInvitationJSONRequestBody
+}
+
+type ResendInvitationResponseObject interface {
+	VisitResendInvitationResponse(w http.ResponseWriter) error
+}
+
+type ResendInvitation202ResponseHeaders struct {
+	XRequestId string
+}
+
+type ResendInvitation202JSONResponse struct {
+	Body    GenericMessage
+	Headers ResendInvitation202ResponseHeaders
+}
+
+func (response ResendInvitation202JSONResponse) VisitResendInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ResendInvitationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ResendInvitationdefaultJSONResponse) VisitResendInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RevokeInvitationRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *RevokeInvitationJSONRequestBody
+}
+
+type RevokeInvitationResponseObject interface {
+	VisitRevokeInvitationResponse(w http.ResponseWriter) error
+}
+
+type RevokeInvitation204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RevokeInvitation204Response struct {
+	Headers RevokeInvitation204ResponseHeaders
+}
+
+func (response RevokeInvitation204Response) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeInvitationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeInvitationdefaultJSONResponse) VisitRevokeInvitationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeactivateMemberRequestObject struct {
+	OrgId  openapi_types.UUID `json:"orgId"`
+	UserId openapi_types.UUID `json:"userId"`
+}
+
+type DeactivateMemberResponseObject interface {
+	VisitDeactivateMemberResponse(w http.ResponseWriter) error
+}
+
+type DeactivateMember204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeactivateMember204Response struct {
+	Headers DeactivateMember204ResponseHeaders
+}
+
+func (response DeactivateMember204Response) VisitDeactivateMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeactivateMemberdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeactivateMemberdefaultJSONResponse) VisitDeactivateMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ReactivateMemberRequestObject struct {
+	OrgId  openapi_types.UUID `json:"orgId"`
+	UserId openapi_types.UUID `json:"userId"`
+}
+
+type ReactivateMemberResponseObject interface {
+	VisitReactivateMemberResponse(w http.ResponseWriter) error
+}
+
+type ReactivateMember204ResponseHeaders struct {
+	XRequestId string
+}
+
+type ReactivateMember204Response struct {
+	Headers ReactivateMember204ResponseHeaders
+}
+
+func (response ReactivateMember204Response) VisitReactivateMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReactivateMemberdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ReactivateMemberdefaultJSONResponse) VisitReactivateMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type SetSsoConfigRequestObject struct {
 	OrgId    openapi_types.UUID `json:"orgId"`
 	Provider string             `json:"provider"`
@@ -1665,6 +2194,9 @@ func (response GetHealthdefaultJSONResponse) VisitGetHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Accept an invitation
+	// (POST /api/v1/auth/invitations/accept)
+	AcceptInvitation(ctx context.Context, request AcceptInvitationRequestObject) (AcceptInvitationResponseObject, error)
 	// Verify credentials
 	// (POST /api/v1/auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -1710,6 +2242,21 @@ type StrictServerInterface interface {
 	// Verify a claimed domain via its DNS TXT record (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains/verify)
 	VerifyDomainClaim(ctx context.Context, request VerifyDomainClaimRequestObject) (VerifyDomainClaimResponseObject, error)
+	// Invite a user to the organization
+	// (POST /api/v1/organizations/{orgId}/invitations)
+	CreateInvitation(ctx context.Context, request CreateInvitationRequestObject) (CreateInvitationResponseObject, error)
+	// Resend an invitation (new token, old invalidated)
+	// (POST /api/v1/organizations/{orgId}/invitations/resend)
+	ResendInvitation(ctx context.Context, request ResendInvitationRequestObject) (ResendInvitationResponseObject, error)
+	// Revoke a pending invitation
+	// (POST /api/v1/organizations/{orgId}/invitations/revoke)
+	RevokeInvitation(ctx context.Context, request RevokeInvitationRequestObject) (RevokeInvitationResponseObject, error)
+	// Deactivate a member's account (freezes access, revokes sessions)
+	// (POST /api/v1/organizations/{orgId}/members/{userId}/deactivate)
+	DeactivateMember(ctx context.Context, request DeactivateMemberRequestObject) (DeactivateMemberResponseObject, error)
+	// Reactivate a deactivated member
+	// (POST /api/v1/organizations/{orgId}/members/{userId}/reactivate)
+	ReactivateMember(ctx context.Context, request ReactivateMemberRequestObject) (ReactivateMemberResponseObject, error)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(ctx context.Context, request SetSsoConfigRequestObject) (SetSsoConfigResponseObject, error)
@@ -1745,6 +2292,37 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// AcceptInvitation operation middleware
+func (sh *strictHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	var request AcceptInvitationRequestObject
+
+	var body AcceptInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptInvitation(ctx, request.(AcceptInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptInvitationResponseObject); ok {
+		if err := validResponse.VisitAcceptInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // Login operation middleware
@@ -2186,6 +2764,159 @@ func (sh *strictHandler) VerifyDomainClaim(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// CreateInvitation operation middleware
+func (sh *strictHandler) CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreateInvitationRequestObject
+
+	request.OrgId = orgId
+
+	var body CreateInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInvitation(ctx, request.(CreateInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInvitationResponseObject); ok {
+		if err := validResponse.VisitCreateInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResendInvitation operation middleware
+func (sh *strictHandler) ResendInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ResendInvitationRequestObject
+
+	request.OrgId = orgId
+
+	var body ResendInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResendInvitation(ctx, request.(ResendInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResendInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResendInvitationResponseObject); ok {
+		if err := validResponse.VisitResendInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeInvitation operation middleware
+func (sh *strictHandler) RevokeInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request RevokeInvitationRequestObject
+
+	request.OrgId = orgId
+
+	var body RevokeInvitationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInvitation(ctx, request.(RevokeInvitationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInvitation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeInvitationResponseObject); ok {
+		if err := validResponse.VisitRevokeInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeactivateMember operation middleware
+func (sh *strictHandler) DeactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID) {
+	var request DeactivateMemberRequestObject
+
+	request.OrgId = orgId
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeactivateMember(ctx, request.(DeactivateMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeactivateMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeactivateMemberResponseObject); ok {
+		if err := validResponse.VisitDeactivateMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReactivateMember operation middleware
+func (sh *strictHandler) ReactivateMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, userId openapi_types.UUID) {
+	var request ReactivateMemberRequestObject
+
+	request.OrgId = orgId
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReactivateMember(ctx, request.(ReactivateMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReactivateMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReactivateMemberResponseObject); ok {
+		if err := validResponse.VisitReactivateMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetSsoConfig operation middleware
 func (sh *strictHandler) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
 	var request SetSsoConfigRequestObject
@@ -2247,54 +2978,60 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
+	"p0sAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

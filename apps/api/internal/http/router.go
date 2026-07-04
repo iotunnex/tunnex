@@ -19,6 +19,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -32,6 +33,8 @@ type AuthFunc func(r *http.Request) *authctx.Principal
 type Deps struct {
 	Orgs         *tenancy.Service
 	Auth         *auth.Service
+	Members      *tenancy.MembershipService
+	Invites      *invites.Service
 	Sessions     *session.Store
 	SSO          ssoPort // nil => open build (SSO endpoints return edition_required)
 	CookieSecure bool
@@ -88,7 +91,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, auth: d.Auth, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, auth: d.Auth, members: d.Members, invites: d.Invites, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

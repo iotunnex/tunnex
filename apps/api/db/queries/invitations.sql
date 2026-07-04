@@ -20,9 +20,20 @@ WHERE id = $1
   AND expires_at > now()
 RETURNING *;
 
--- name: RevokeInvitation :exec
--- lint:cross-org — revocation targets a specific invitation id (already
--- authorized at the handler layer by org membership before this runs).
+-- name: RevokeInvitationByOrgEmail :execrows
 UPDATE invitations
 SET revoked_at = now()
-WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL;
+WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL;
+
+-- name: SupersedePendingInvites :exec
+-- When a user joins an org another way (e.g. domain-capture JIT), pending
+-- invites for that (org, email) become moot — revoke them so they can't be
+-- accepted into a second membership attempt.
+UPDATE invitations
+SET revoked_at = now()
+WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL;
+
+-- name: ListInvitations :many
+SELECT * FROM invitations
+WHERE org_id = $1
+ORDER BY created_at DESC;

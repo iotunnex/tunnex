@@ -13,16 +13,91 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
+// SessionRevoker revokes all of a user's sessions (implemented by the session
+// store). Deactivation uses it to cut live access immediately.
+type SessionRevoker interface {
+	DeleteAllForUser(ctx context.Context, userID uuid.UUID) error
+}
+
 // MembershipService provides org-scoped membership reads. Every method scopes by
 // org_id (see the query-lint), so it cannot return another tenant's rows.
 type MembershipService struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	pool    *pgxpool.Pool
+	q       *sqlc.Queries
+	revoker SessionRevoker
 }
 
 // NewMembershipService builds a membership service over the given pool.
-func NewMembershipService(pool *pgxpool.Pool) *MembershipService {
-	return &MembershipService{pool: pool, q: sqlc.New(pool)}
+func NewMembershipService(pool *pgxpool.Pool, revoker SessionRevoker) *MembershipService {
+	return &MembershipService{pool: pool, q: sqlc.New(pool), revoker: revoker}
+}
+
+// DeactivateMember freezes a user's account (status only — memberships and role
+// history are preserved for a clean reactivation) and revokes every live
+// session. It refuses to deactivate the sole owner of any org (last-owner
+// invariant) so an org can never be orphaned.
+func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, targetUserID uuid.UUID) error {
+	// target must belong to the acting org (authorization scope).
+	if _, err := s.q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.NotFound("member_not_found", "member not found")
+		}
+		return err
+	}
+	sole, err := s.q.CountOrgsWhereSoleOwner(ctx, targetUserID)
+	if err != nil {
+		return err
+	}
+	if sole > 0 {
+		return apierr.Conflict("last_owner", "this user is the only owner of an organization and cannot be deactivated")
+	}
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "deactivated"}); e != nil {
+			return e
+		}
+		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})
+	}); err != nil {
+		return err
+	}
+	// Cut live access immediately (belt-and-suspenders with the SessionAuth
+	// status check that also 401s any in-flight session).
+	if s.revoker != nil {
+		if err := s.revoker.DeleteAllForUser(ctx, targetUserID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReactivateMember restores a frozen user; memberships/roles are intact.
+func (s *MembershipService) ReactivateMember(ctx context.Context, actor, orgID, targetUserID uuid.UUID) error {
+	if _, err := s.q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.NotFound("member_not_found", "member not found")
+		}
+		return err
+	}
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "active"}); e != nil {
+			return e
+		}
+		return writeAudit(ctx, q, orgID, &actor, "user.reactivated", "user", targetUserID.String(), map[string]any{})
+	})
+}
+
+func (s *MembershipService) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
+	if s.pool == nil {
+		return fn(s.q)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := fn(sqlc.New(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ListMembers returns the memberships of a single org.
@@ -39,23 +114,6 @@ func (s *MembershipService) GetMember(ctx context.Context, orgID, userID uuid.UU
 		return sqlc.Membership{}, apierr.NotFound("member_not_found", "member not found")
 	}
 	return m, err
-}
-
-// withTx mirrors Service.withTx: mutation + audit are atomic; a nil pool (tests
-// injecting a tx) runs on the pre-set querier.
-func (s *MembershipService) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
-	if s.pool == nil {
-		return fn(s.q)
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := fn(sqlc.New(tx)); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 // ChangeMemberRole changes a member's role, enforcing the RBAC relational rules

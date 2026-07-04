@@ -28,6 +28,11 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 		if err != nil {
 			return nil
 		}
+		// A deactivated user's live session is invalid on its very next request —
+		// not merely blocked from future logins.
+		if user.Status != "active" {
+			return nil
+		}
 		memberships, err := q.ListMembershipsByUser(r.Context(), sess.UserID)
 		if err != nil {
 			return nil

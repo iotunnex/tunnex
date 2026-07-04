@@ -90,6 +90,12 @@ func main() {
 		logger.Error("seed_user_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	// The demo owner is verified so it can immediately perform org-mutating
+	// actions (verified-gating, S2.2).
+	if err := q.MarkEmailVerified(ctx, userID); err != nil {
+		logger.Error("seed_verify_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{
 		OrgID: orgID, UserID: userID, Role: "owner",
 	}); err != nil {

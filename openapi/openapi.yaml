@@ -225,6 +225,135 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/auth/invitations/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation
+      tags: [invitations]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcceptInviteRequest" }
+      responses:
+        "200":
+          description: Accepted; the account is a member.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/invitations:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: createInvitation
+      summary: Invite a user to the organization
+      tags: [invitations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteRequest" }
+      responses:
+        "202":
+          description: Invitation sent.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/invitations/resend:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: resendInvitation
+      summary: Resend an invitation (new token, old invalidated)
+      tags: [invitations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailRequest" }
+      responses:
+        "202":
+          description: Invitation re-sent.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/invitations/revoke:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: revokeInvitation
+      summary: Revoke a pending invitation
+      tags: [invitations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailRequest" }
+      responses:
+        "204":
+          description: Revoked.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/members/{userId}/deactivate:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: deactivateMember
+      summary: Deactivate a member's account (freezes access, revokes sessions)
+      tags: [members]
+      responses:
+        "204":
+          description: Deactivated.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/members/{userId}/reactivate:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reactivateMember
+      summary: Reactivate a deactivated member
+      tags: [members]
+      responses:
+        "204":
+          description: Reactivated.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/domains:
     parameters:
       - name: orgId
@@ -469,6 +598,30 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    InviteRequest:
+      type: object
+      required: [email, role]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        role: { type: string, enum: [owner, admin, member] }
+
+    EmailRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+
+    AcceptInviteRequest:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, maxLength: 200 }
+        password: { type: string, minLength: 12, maxLength: 200 }
 
     DomainClaimRequest:
       type: object

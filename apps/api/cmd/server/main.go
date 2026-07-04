@@ -25,6 +25,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
+	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
@@ -120,6 +121,8 @@ func main() {
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:         tenancy.NewService(pool),
 		Auth:         authSvc,
+		Members:      tenancy.NewMembershipService(pool, sessions),
+		Invites:      invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
 		Sessions:     sessions,
 		SSO:          apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		CookieSecure: cfg.CookieSecure,

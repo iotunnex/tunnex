@@ -20,6 +20,9 @@ type Querier interface {
 	// token and vice-versa.
 	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (AuthToken, error)
 	CountOrganizations(ctx context.Context) (int64, error)
+	// lint:cross-org — spans a user's orgs to protect the last-owner invariant on
+	// global deactivation; each row's org_id is used in the correlated subquery.
+	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
@@ -54,6 +57,7 @@ type Querier interface {
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
+	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
@@ -65,11 +69,14 @@ type Querier interface {
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
-	// lint:cross-org — revocation targets a specific invitation id (already
-	// authorized at the handler layer by org membership before this runs).
-	RevokeInvitation(ctx context.Context, id uuid.UUID) error
+	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
+	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
+	// When a user joins an org another way (e.g. domain-capture JIT), pending
+	// invites for that (org, email) become moot — revoke them so they can't be
+	// accepted into a second membership attempt.
+	SupersedePendingInvites(ctx context.Context, arg SupersedePendingInvitesParams) error
 	// Verification loss: clear verified_at so the domain stops capturing (the claim
 	// is NOT deleted — the org keeps its pending claim and can re-verify).
 	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
