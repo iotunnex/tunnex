@@ -35,3 +35,8 @@ data/
 # Logs
 *.log
 npm-debug.log*
+
+# tsc -b build artifacts
+*.tsbuildinfo
+apps/web/vite.config.js
+apps/web/vite.config.d.ts

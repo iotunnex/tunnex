@@ -88,6 +88,23 @@ func (r logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
 	return nil
 }
 
+// CurrentUser returns the session's user (for SPA auth rehydration on load), or
+// 401 if there is no valid session. The principal is attached by SessionAuth.
+func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObject) (api.CurrentUserResponseObject, error) {
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
+	}
+	return api.CurrentUser200JSONResponse{
+		Body: api.AuthUser{
+			Id:            p.UserID,
+			Email:         openapi_types.Email(p.Email),
+			EmailVerified: p.EmailVerified,
+		},
+		Headers: api.CurrentUser200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
 // Logout revokes the current session and clears the cookie.
 func (s apiServer) Logout(ctx context.Context, _ api.LogoutRequestObject) (api.LogoutResponseObject, error) {
 	if p, ok := authctx.PrincipalFrom(ctx); ok && p.SessionID != "" {

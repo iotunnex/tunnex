@@ -5,7 +5,8 @@ export default {
     extend: {
       colors: {
         // Tunnex palette — deep slate ground with a secure-tunnel teal accent.
-        // Swap these for the real brand tokens when the logo/brand kit lands (S4.1).
+        // This is the deliberate placeholder identity; swap these tokens (and the
+        // Logo in src/brand.tsx) for the real brand kit when it lands.
         ink: {
           900: "#0a0e14",
           800: "#0f141c",

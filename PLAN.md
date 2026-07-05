@@ -22,6 +22,7 @@ This plan defines **every story** up front. We then build **one story at a time*
 
 ### Cross-Cutting Principles (apply to every story)
 - **Identity ↔ credential binding:** a device/peer credential is only ever valid for its owning user's identity. No floating credentials.
+- **Revocation is a full sweep:** revoking a credential releases *everything it ever claimed* — its peer slot (removed from the gateway), its pool address (freed for reuse), and its live telemetry (cleared, so it can't report stale "online"). Established for WireGuard devices in S3.3/S3.5/S3.6; **EPIC 9's OpenVPN devices must apply the identical sweep** (cert/CRL revocation + address release + status clear), not just cert revocation.
 - **Desired-state reconciliation:** data-plane state (WG interface) is continuously reconciled against control-plane desired state — never assumed in sync. Same pattern powers the K8s operator.
 - **Structured logging + request IDs from day one** (S0.1 DoD), not retrofitted at the end.
 - **Secrets encrypted at rest** under a bootstrap master key (S0.3); per-org IdP client secrets are never plaintext.

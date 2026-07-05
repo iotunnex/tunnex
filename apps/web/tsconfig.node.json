@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
     "composite": true,
+    // Composite projects must emit; send the throwaway config .d.ts/.js into
+    // gitignored node_modules so `tsc -b` never pollutes the source tree.
+    "outDir": "./node_modules/.tmp/tsnode",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
