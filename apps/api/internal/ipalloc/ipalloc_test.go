@@ -1,0 +1,110 @@
+package ipalloc
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestAllocateLowestFreeDeterministic(t *testing.T) {
+	// Empty pool -> .2 (skips .0 network, .1 gateway).
+	ip, err := Allocate("10.99.0.0/24", nil)
+	if err != nil || ip != "10.99.0.2" {
+		t.Fatalf("want 10.99.0.2, got %q err=%v", ip, err)
+	}
+	// .2 taken -> .3; deterministic: same inputs, same output.
+	for i := 0; i < 3; i++ {
+		ip, err = Allocate("10.99.0.0/24", []string{"10.99.0.2"})
+		if err != nil || ip != "10.99.0.3" {
+			t.Fatalf("want 10.99.0.3 deterministically, got %q err=%v", ip, err)
+		}
+	}
+	// Lowest-free reuses a gap (release/reuse): .2 free, .3 taken -> .2.
+	ip, _ = Allocate("10.99.0.0/24", []string{"10.99.0.3", "10.99.0.4"})
+	if ip != "10.99.0.2" {
+		t.Fatalf("want lowest-free 10.99.0.2 (gap reuse), got %q", ip)
+	}
+}
+
+func TestReservedAddressesNeverAllocated(t *testing.T) {
+	// A /29 = 8 addrs: .0 network, .1 gateway, .2-.6 hosts (5), .7 broadcast.
+	cidr := "10.0.0.0/29"
+	used := []string{}
+	got := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		ip, err := Allocate(cidr, used)
+		if err != nil {
+			t.Fatalf("allocation %d failed early: %v", i, err)
+		}
+		got[ip] = true
+		used = append(used, ip)
+	}
+	// Exhaustion arrives at EXACTLY capacity (5 hosts), cleanly.
+	if _, err := Allocate(cidr, used); !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("want ErrPoolExhausted at capacity, got %v", err)
+	}
+	// The reserved addresses were never handed out.
+	for _, r := range []string{"10.0.0.0", "10.0.0.1", "10.0.0.7"} {
+		if got[r] {
+			t.Fatalf("reserved address %s was allocated", r)
+		}
+	}
+	// And exactly .2-.6 were allocated.
+	for _, h := range []string{"10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5", "10.0.0.6"} {
+		if !got[h] {
+			t.Fatalf("expected host %s to be allocatable", h)
+		}
+	}
+}
+
+func TestAllocateIgnoresOutOfPoolUsed(t *testing.T) {
+	// A stale used-entry from a different pool must not perturb allocation.
+	ip, err := Allocate("10.99.0.0/24", []string{"192.168.1.5", "garbage"})
+	if err != nil || ip != "10.99.0.2" {
+		t.Fatalf("out-of-pool/garbage used should be ignored, got %q err=%v", ip, err)
+	}
+}
+
+func TestPoolTooSmall(t *testing.T) {
+	// /31 and /32 have no allocatable host after reservations.
+	if _, err := Allocate("10.0.0.0/31", nil); !errors.Is(err, ErrPoolTooSmall) {
+		t.Fatalf("want ErrPoolTooSmall for /31, got %v", err)
+	}
+}
+
+func TestGatewayCIDR(t *testing.T) {
+	gw, err := GatewayCIDR("10.99.0.0/24")
+	if err != nil || gw != "10.99.0.1/24" {
+		t.Fatalf("want 10.99.0.1/24, got %q err=%v", gw, err)
+	}
+	// Works from an unmasked input too.
+	gw, _ = GatewayCIDR("10.5.0.0/16")
+	if gw != "10.5.0.1/16" {
+		t.Fatalf("want 10.5.0.1/16, got %q", gw)
+	}
+}
+
+func TestOutOfRangeResizeShrink(t *testing.T) {
+	alloc := []string{"10.99.0.2", "10.99.0.130", "10.99.0.200"}
+	// Shrinking 10.99.0.0/24 -> /25 (0-127) orphans .130 and .200.
+	off, err := OutOfRange("10.99.0.0/25", alloc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(off) != 2 || off[0] != "10.99.0.130" || off[1] != "10.99.0.200" {
+		t.Fatalf("want [.130 .200] as offenders, got %v", off)
+	}
+	// Growing (or same size) orphans nothing.
+	off, _ = OutOfRange("10.99.0.0/23", alloc)
+	if len(off) != 0 {
+		t.Fatalf("grow should orphan nothing, got %v", off)
+	}
+}
+
+func TestBadCIDR(t *testing.T) {
+	if _, err := Allocate("not-a-cidr", nil); !errors.Is(err, ErrBadCIDR) {
+		t.Fatalf("want ErrBadCIDR, got %v", err)
+	}
+	if _, err := Allocate("2001:db8::/64", nil); !errors.Is(err, ErrBadCIDR) {
+		t.Fatalf("want ErrBadCIDR for IPv6 (IPv4-only), got %v", err)
+	}
+}

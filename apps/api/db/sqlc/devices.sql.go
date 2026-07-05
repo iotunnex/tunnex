@@ -177,14 +177,15 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 	return items, nil
 }
 
-const listAssignedIPsForNode = `-- name: ListAssignedIPsForNode :many
+const listAssignedIPsForOrg = `-- name: ListAssignedIPsForOrg :many
 SELECT assigned_ip FROM devices
-WHERE node_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
 `
 
-// lint:cross-org — keyed by node_id under the node's advisory lock during Create.
-func (q *Queries) ListAssignedIPsForNode(ctx context.Context, nodeID uuid.UUID) ([]*string, error) {
-	rows, err := q.db.Query(ctx, listAssignedIPsForNode, nodeID)
+// The org's live tunnel allocations (flat pool, across all nodes). Read under the
+// org advisory lock during Create so the lowest-free choice can't be raced.
+func (q *Queries) ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([]*string, error) {
+	rows, err := q.db.Query(ctx, listAssignedIPsForOrg, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,9 +324,10 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
 
 // lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
-// user id or node id, passed as text). Create takes BOTH (in sorted order, so
-// no deadlock) to make the per-user cap check AND the per-node IP allocation
-// atomic against concurrent creates.
+// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
+// deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
+// against concurrent creates; ResizePool takes the org key so it serializes with
+// allocation.
 func (q *Queries) LockDeviceKey(ctx context.Context, dollar_1 string) error {
 	_, err := q.db.Exec(ctx, lockDeviceKey, dollar_1)
 	return err
@@ -333,7 +335,7 @@ func (q *Queries) LockDeviceKey(ctx context.Context, dollar_1 string) error {
 
 const revokeDevice = `-- name: RevokeDevice :one
 UPDATE devices
-SET status = 'revoked', revoked_at = now()
+SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
 WHERE id = $1 AND org_id = $2 AND status = 'active' AND deleted_at IS NULL
 RETURNING node_id
 `
@@ -345,6 +347,8 @@ type RevokeDeviceParams struct {
 
 // Returns the gateway node_id (for the push) so the caller needs no extra read;
 // pgx.ErrNoRows means the device was not active (already revoked / wrong org).
+// Clears assigned_ip to release the address explicitly (rather than relying on
+// every reader to also filter status='active').
 func (q *Queries) RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, revokeDevice, arg.ID, arg.OrgID)
 	var node_id uuid.UUID

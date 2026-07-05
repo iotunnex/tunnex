@@ -78,8 +78,9 @@ type Querier interface {
 	// device is active AND its owning user is active — so deactivating a user drops
 	// their peers from every node's desired state (and reactivation restores them).
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
-	// lint:cross-org — keyed by node_id under the node's advisory lock during Create.
-	ListAssignedIPsForNode(ctx context.Context, nodeID uuid.UUID) ([]*string, error)
+	// The org's live tunnel allocations (flat pool, across all nodes). Read under the
+	// org advisory lock during Create so the lowest-free choice can't be raced.
+	ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([]*string, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Device, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]Device, error)
@@ -99,9 +100,10 @@ type Querier interface {
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
-	// user id or node id, passed as text). Create takes BOTH (in sorted order, so
-	// no deadlock) to make the per-user cap check AND the per-node IP allocation
-	// atomic against concurrent creates.
+	// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
+	// deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
+	// against concurrent creates; ResizePool takes the org key so it serializes with
+	// allocation.
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
@@ -111,6 +113,8 @@ type Querier interface {
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
 	// Returns the gateway node_id (for the push) so the caller needs no extra read;
 	// pgx.ErrNoRows means the device was not active (already revoked / wrong org).
+	// Clears assigned_ip to release the address explicitly (rather than relying on
+	// every reader to also filter status='active').
 	RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error)
 	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no
 	// longer reach a gateway, so they are revoked too (no dangling active devices).
@@ -137,6 +141,9 @@ type Querier interface {
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// lint:cross-org — keyed by id after cert authorization.
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
+	// Resize the org tunnel pool. The service refuses a shrink that would orphan
+	// live allocations (checked in Go before calling this); this just persists it.
+	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
 	// Idempotent on (org_id, user_id).

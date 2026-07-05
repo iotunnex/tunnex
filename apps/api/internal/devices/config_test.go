@@ -1,33 +1,9 @@
 package devices
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 )
-
-func TestAllocateIPLowestFree(t *testing.T) {
-	two, three := "10.99.0.2", "10.99.0.3"
-	ip, err := allocateIP([]*string{&three}) // .3 taken -> .2 is lowest free
-	if err != nil || ip != "10.99.0.2" {
-		t.Fatalf("want 10.99.0.2, got %q err=%v", ip, err)
-	}
-	ip, err = allocateIP([]*string{&two, &three}) // .2,.3 taken -> .4
-	if err != nil || ip != "10.99.0.4" {
-		t.Fatalf("want 10.99.0.4, got %q err=%v", ip, err)
-	}
-}
-
-func TestAllocateIPExhausted(t *testing.T) {
-	used := make([]*string, 0, 253)
-	for i := 2; i <= 254; i++ {
-		s := "10.99.0." + strconv.Itoa(i)
-		used = append(used, &s)
-	}
-	if _, err := allocateIP(used); code(err) != "pool_exhausted" {
-		t.Fatalf("want pool_exhausted, got %v", err)
-	}
-}
 
 func TestBuildConfigSplitTunnel(t *testing.T) {
 	conf := buildConfig(configParams{
@@ -35,7 +11,7 @@ func TestBuildConfigSplitTunnel(t *testing.T) {
 		privateKey:   "PRIVKEY==",
 		serverPubKey: "SERVERPUB==",
 		endpoint:     "gw.example.com:51820",
-		allowedIPs:   allowedIPsFor(false),
+		allowedIPs:   allowedIPsFor(false, "10.99.0.0/24"),
 	})
 	for _, want := range []string{
 		"[Interface]", "PrivateKey = PRIVKEY==", "Address = 10.99.0.2/32", "MTU = 1420",
@@ -49,14 +25,21 @@ func TestBuildConfigSplitTunnel(t *testing.T) {
 	if strings.Contains(conf, "0.0.0.0/0") {
 		t.Fatal("split-tunnel config must not route all traffic")
 	}
+	if strings.Contains(conf, "DNS =") {
+		t.Fatal("split-tunnel config should not force a DNS server")
+	}
 }
 
 func TestBuildConfigFullTunnel(t *testing.T) {
 	conf := buildConfig(configParams{
 		address: "10.99.0.2", privateKey: "k", serverPubKey: "s",
-		endpoint: "h:51820", allowedIPs: allowedIPsFor(true),
+		endpoint: "h:51820", allowedIPs: allowedIPsFor(true, "10.99.0.0/24"),
+		dns: dnsFor(true),
 	})
 	if !strings.Contains(conf, "AllowedIPs = 0.0.0.0/0") {
 		t.Fatalf("full-tunnel config must route all traffic:\n%s", conf)
+	}
+	if !strings.Contains(conf, "DNS = "+fullTunnelDNS) {
+		t.Fatalf("full-tunnel config must set a DNS server:\n%s", conf)
 	}
 }

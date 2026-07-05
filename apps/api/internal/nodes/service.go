@@ -23,6 +23,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
@@ -32,6 +33,11 @@ import (
 const ProtocolVersion = 1
 
 const joinTokenTTL = time.Hour
+
+// defaultGatewayCIDR is the interface address used when an org's pool can't be
+// read (soft-deleted org / invalid CIDR) — matches the default pool's gateway so
+// desired-state fetches degrade gracefully instead of failing.
+const defaultGatewayCIDR = "10.99.0.1/24"
 
 // Peer is one WireGuard peer in a node's desired state. S3.2 populates these;
 // S3.1 carries the shape so the reconcile protocol is complete.
@@ -189,8 +195,8 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 
 // DesiredState returns the interface config + peers the agent should converge
 // to: one Peer per active device owned by an active user, each with its assigned
-// /32 as AllowedIPs. The interface address/pool is fixed until S3.5's allocator
-// owns it; MTU is explicit (WireGuard's default 1420).
+// /32 as AllowedIPs. The interface address is the org pool's gateway (S3.5);
+// MTU is explicit (WireGuard's default 1420).
 func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredState, error) {
 	_ = s.q.TouchNodeSeen(ctx, node.ID)
 	rows, err := s.q.ListActivePeersForNode(ctx, node.ID)
@@ -207,13 +213,22 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		}
 		peers = append(peers, p)
 	}
+	// The interface address is the pool gateway (first usable host) with the
+	// pool's prefix, so the server has an on-link route to the whole pool and can
+	// route peer traffic. Derived from the org pool (S3.5). If the org row is
+	// unavailable (e.g. soft-deleted) or its CIDR is somehow invalid, fall back to
+	// the default pool rather than failing the whole fetch — the agent must still
+	// be able to converge (e.g. to drop peers), not spin on errors.
+	gatewayCIDR := defaultGatewayCIDR
+	if org, oerr := s.q.GetOrganizationByID(ctx, node.OrgID); oerr == nil {
+		if gw, gerr := ipalloc.GatewayCIDR(org.PoolCidr); gerr == nil {
+			gatewayCIDR = gw
+		}
+	}
 	return DesiredState{
 		ProtocolVersion:  ProtocolVersion,
 		NodeID:           node.ID.String(),
-		// /24 (not /32) so the server has an on-link route to the whole pool and
-		// can actually route peer traffic (the S3.3-deferred routing gap). TODO
-		// (S3.5): the pool/CIDR comes from the org allocator.
-		InterfaceAddress: "10.99.0.1/24",
+		InterfaceAddress: gatewayCIDR,
 		MTU:              1420,
 		ListenPort:       51820,
 		Peers:            peers,

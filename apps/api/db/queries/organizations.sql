@@ -48,3 +48,11 @@ VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE
     SET name = EXCLUDED.name, slug = EXCLUDED.slug, deleted_at = NULL
 RETURNING *;
+
+-- name: UpdateOrgPoolCidr :one
+-- Resize the org tunnel pool. The service refuses a shrink that would orphan
+-- live allocations (checked in Go before calling this); this just persists it.
+UPDATE organizations
+SET pool_cidr = $2
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING *;

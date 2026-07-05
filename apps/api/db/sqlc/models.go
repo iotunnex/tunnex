@@ -118,6 +118,7 @@ type Organization struct {
 	UpdatedAt         time.Time          `json:"updated_at"`
 	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
 	MaxDevicesPerUser int32              `json:"max_devices_per_user"`
+	PoolCidr          string             `json:"pool_cidr"`
 }
 
 type PlatformSecret struct {

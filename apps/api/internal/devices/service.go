@@ -22,10 +22,22 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
+
+// derefStrings collapses a []*string (nullable SQL column) to non-nil values.
+func derefStrings(in []*string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != nil {
+			out = append(out, *s)
+		}
+	}
+	return out
+}
 
 // Service provides device/peer operations.
 type Service struct {
@@ -106,12 +118,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 
 	var dev sqlc.Device
 	var node sqlc.Node
-	var assignedIP string
+	var assignedIP, poolCIDR string
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		// Take the user AND node advisory locks (in sorted order -> no deadlock) so
-		// the per-user cap check and the per-node IP allocation are both atomic
+		// Take the user AND org advisory locks (in sorted order -> no deadlock) so
+		// the per-user cap check and the org-wide IP allocation are both atomic
 		// against concurrent creates.
-		for _, key := range sortedKeys(in.OwnerID.String(), in.NodeID.String()) {
+		for _, key := range sortedKeys(in.OwnerID.String(), in.OrgID.String()) {
 			if e := q.LockDeviceKey(ctx, key); e != nil {
 				return e
 			}
@@ -144,6 +156,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		if e != nil {
 			return e
 		}
+		poolCIDR = org.PoolCidr
 		if org.MaxDevicesPerUser > 0 {
 			count, ce := q.CountActiveDevicesForUser(ctx, sqlc.CountActiveDevicesForUserParams{OrgID: in.OrgID, UserID: in.OwnerID})
 			if ce != nil {
@@ -153,15 +166,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 				return apierr.Conflict("device_limit", "device limit reached for this user")
 			}
 		}
-		// Allocate the lowest free tunnel address on this node (minimal; S3.5 owns
-		// the real allocator). Safe under the node advisory lock above.
-		usedIPs, e := q.ListAssignedIPsForNode(ctx, in.NodeID)
+		// Allocate the lowest free tunnel address from the org's flat pool
+		// (deterministic; safe under the org advisory lock + the org_ip unique index).
+		usedIPs, e := q.ListAssignedIPsForOrg(ctx, in.OrgID)
 		if e != nil {
 			return e
 		}
-		ip, e := allocateIP(usedIPs)
+		ip, e := ipalloc.Allocate(org.PoolCidr, derefStrings(usedIPs))
 		if e != nil {
-			return e
+			if errors.Is(e, ipalloc.ErrPoolExhausted) {
+				return apierr.Conflict("pool_exhausted", "no free tunnel address in the org pool")
+			}
+			return e // bad/too-small CIDR is a server misconfiguration
 		}
 		assignedIP = ip
 
@@ -172,8 +188,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		})
 		if e != nil {
 			if c := pgerr.UniqueConstraint(e); c != "" {
-				if strings.Contains(c, "_ip_") { // devices_node_ip_key
-					return apierr.Conflict("ip_conflict", "tunnel address already in use on this node")
+				if strings.Contains(c, "_ip_") { // devices_org_ip_key
+					return apierr.Conflict("ip_conflict", "tunnel address already in use in this org")
 				}
 				return apierr.Conflict("duplicate_key", "this public key is already registered on the node")
 			}
@@ -201,7 +217,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			privateKey:   oneTimePriv,
 			serverPubKey: node.WgPublicKey,
 			endpoint:     node.Endpoint,
-			allowedIPs:   allowedIPsFor(in.FullTunnel),
+			allowedIPs:   allowedIPsFor(in.FullTunnel, poolCIDR),
 			dns:          dnsFor(in.FullTunnel),
 		})
 	}
@@ -215,6 +231,35 @@ func sortedKeys(a, b string) [2]string {
 		return [2]string{a, b}
 	}
 	return [2]string{b, a}
+}
+
+// ResizePool changes the org's tunnel pool CIDR. Growing is always safe; a shrink
+// is REFUSED if any live allocation would fall outside the new range (returning
+// the offenders) — never silently orphaning addresses. Runs under the org lock so
+// a concurrent allocation can't slip in during the check.
+func (s *Service) ResizePool(ctx context.Context, orgID uuid.UUID, newCIDR string) error {
+	if _, err := ipalloc.GatewayCIDR(newCIDR); err != nil {
+		return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
+	}
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
+			return e
+		}
+		used, e := q.ListAssignedIPsForOrg(ctx, orgID)
+		if e != nil {
+			return e
+		}
+		offenders, e := ipalloc.OutOfRange(newCIDR, derefStrings(used))
+		if e != nil {
+			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
+		}
+		if len(offenders) > 0 {
+			return apierr.Conflict("pool_shrink_conflict",
+				"cannot shrink the pool: live allocations fall outside "+newCIDR+": "+strings.Join(offenders, ", "))
+		}
+		_, e = q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: newCIDR})
+		return e
+	})
 }
 
 // ListForUser returns a user's devices in an org (self-service view).

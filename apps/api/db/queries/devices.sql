@@ -24,8 +24,10 @@ WHERE org_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL;
 -- name: RevokeDevice :one
 -- Returns the gateway node_id (for the push) so the caller needs no extra read;
 -- pgx.ErrNoRows means the device was not active (already revoked / wrong org).
+-- Clears assigned_ip to release the address explicitly (rather than relying on
+-- every reader to also filter status='active').
 UPDATE devices
-SET status = 'revoked', revoked_at = now()
+SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
 WHERE id = $1 AND org_id = $2 AND status = 'active' AND deleted_at IS NULL
 RETURNING node_id;
 
@@ -38,15 +40,17 @@ WHERE node_id = $1 AND status = 'active' AND deleted_at IS NULL;
 
 -- name: LockDeviceKey :exec
 -- lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
--- user id or node id, passed as text). Create takes BOTH (in sorted order, so
--- no deadlock) to make the per-user cap check AND the per-node IP allocation
--- atomic against concurrent creates.
+-- user id or org id, passed as text). Create takes BOTH (in sorted order, so no
+-- deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
+-- against concurrent creates; ResizePool takes the org key so it serializes with
+-- allocation.
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 
--- name: ListAssignedIPsForNode :many
--- lint:cross-org — keyed by node_id under the node's advisory lock during Create.
+-- name: ListAssignedIPsForOrg :many
+-- The org's live tunnel allocations (flat pool, across all nodes). Read under the
+-- org advisory lock during Create so the lowest-free choice can't be raced.
 SELECT assigned_ip FROM devices
-WHERE node_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL;
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL;
 
 -- name: ListActivePeersForNode :many
 -- lint:cross-org — keyed by node_id after mTLS cert authorization (the agent

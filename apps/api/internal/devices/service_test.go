@@ -257,6 +257,53 @@ func TestCreateRejectsNonMemberOwner(t *testing.T) {
 	}
 }
 
+// TestAllocationSequentialAndReuse: allocation is deterministic lowest-free and
+// respects existing allocations (no reassignment); a revoked device's address is
+// reused (release-on-revocation).
+func TestAllocationSequentialAndReuse(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	d1, _ := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "a"})
+	d2, _ := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "b"})
+	if *d1.Device.AssignedIp != "10.99.0.2" || *d2.Device.AssignedIp != "10.99.0.3" {
+		t.Fatalf("want .2 then .3, got %v then %v", *d1.Device.AssignedIp, *d2.Device.AssignedIp)
+	}
+	// Revoke .2 -> its address is released and reused by the next allocation.
+	if err := svc.Revoke(ctx, org, user, d1.Device.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	d3, _ := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "c"})
+	if *d3.Device.AssignedIp != "10.99.0.2" {
+		t.Fatalf("revoked address should be reused (want .2), got %v", *d3.Device.AssignedIp)
+	}
+}
+
+// TestResizePoolShrinkRefusesOrphans: growing is fine; a shrink that would strand
+// a live allocation is refused (never silently orphaned).
+func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	// Seed a device whose address is in /24 but outside /25 (0-127).
+	if _, err := tx.Exec(ctx, "INSERT INTO devices (org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,'d','k',$4)",
+		org, user, node, "10.99.0.200"); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	// Grow to /23 — safe.
+	if err := svc.ResizePool(ctx, org, "10.99.0.0/23"); err != nil {
+		t.Fatalf("grow should succeed: %v", err)
+	}
+	// Shrink to /25 — would orphan 10.99.0.200; must refuse.
+	if err := svc.ResizePool(ctx, org, "10.99.0.0/25"); code(err) != "pool_shrink_conflict" {
+		t.Fatalf("shrink should refuse with pool_shrink_conflict, got %v", err)
+	}
+	// A bad CIDR is rejected.
+	if err := svc.ResizePool(ctx, org, "not-a-cidr"); code(err) != "invalid_cidr" {
+		t.Fatalf("bad cidr: want invalid_cidr, got %v", err)
+	}
+}
+
 // TestCreatePushesGateway: creating a device notifies the gateway node's watcher.
 func TestCreatePushesGateway(t *testing.T) {
 	ctx, tx := txOrSkip(t)
