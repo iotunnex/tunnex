@@ -61,7 +61,49 @@ func (a *AgentChannel) Handler() http.Handler {
 	r.Get("/agent/watch", a.watch)
 	r.Post("/agent/renew", a.renew)
 	r.Post("/agent/report", a.report)
+	r.Post("/agent/status", a.status)
 	return r
+}
+
+// status ingests per-peer live telemetry (handshake/bytes/endpoint) from the
+// agent and upserts it against the node's devices.
+func (a *AgentChannel) status(w http.ResponseWriter, r *http.Request) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "client certificate required", http.StatusUnauthorized)
+		return
+	}
+	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
+	node, err := a.svc.AuthenticateCert(r.Context(), serial)
+	if err != nil {
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Peers []struct {
+			PublicKey     string `json:"public_key"`
+			LastHandshake int64  `json:"last_handshake"`
+			RxBytes       int64  `json:"rx_bytes"`
+			TxBytes       int64  `json:"tx_bytes"`
+			Endpoint      string `json:"endpoint"`
+		} `json:"peers"`
+	}
+	// Bound the body (a report is capped at ~1000 peers agent-side).
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	stats := make([]nodes.PeerStatus, 0, len(body.Peers))
+	for _, p := range body.Peers {
+		stats = append(stats, nodes.PeerStatus{
+			PublicKey: p.PublicKey, LastHandshake: p.LastHandshake,
+			RxBytes: p.RxBytes, TxBytes: p.TxBytes,
+		})
+	}
+	if err := a.svc.ReportStatus(r.Context(), node, stats); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // report records the agent's locally-generated WireGuard public key.

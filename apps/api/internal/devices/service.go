@@ -14,6 +14,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -262,14 +263,47 @@ func (s *Service) ResizePool(ctx context.Context, orgID uuid.UUID, newCIDR strin
 	})
 }
 
-// ListForUser returns a user's devices in an org (self-service view).
-func (s *Service) ListForUser(ctx context.Context, orgID, userID uuid.UUID) ([]sqlc.Device, error) {
-	return s.q.ListDevicesByUser(ctx, sqlc.ListDevicesByUserParams{OrgID: orgID, UserID: userID})
+// DeviceWithStatus is a device plus its live telemetry (nil when never reported).
+type DeviceWithStatus struct {
+	Device          sqlc.Device
+	LastHandshakeAt *time.Time
+	RxBytes         *int64
+	TxBytes         *int64
 }
 
-// ListForOrg returns all devices in an org (admin view).
-func (s *Service) ListForOrg(ctx context.Context, orgID uuid.UUID) ([]sqlc.Device, error) {
-	return s.q.ListDevicesByOrg(ctx, orgID)
+// ListForUser returns a user's devices in an org (self-service view) with status.
+func (s *Service) ListForUser(ctx context.Context, orgID, userID uuid.UUID) ([]DeviceWithStatus, error) {
+	rows, err := s.q.ListDevicesByUser(ctx, sqlc.ListDevicesByUserParams{OrgID: orgID, UserID: userID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DeviceWithStatus, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+	}
+	return out, nil
+}
+
+// ListForOrg returns all devices in an org (admin view) with status.
+func (s *Service) ListForOrg(ctx context.Context, orgID uuid.UUID) ([]DeviceWithStatus, error) {
+	rows, err := s.q.ListDevicesByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DeviceWithStatus, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+	}
+	return out, nil
+}
+
+// tsPtr converts a nullable timestamptz to *time.Time.
+func tsPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	u := t.Time
+	return &u
 }
 
 // Get returns a device scoped to its org (not-found otherwise — no cross-tenant leak).
@@ -294,6 +328,11 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 			return e
 		}
 		nodeID = n
+		// Release the device's live status so a revoked device can't report stale
+		// online/handshake via the API.
+		if e := q.DeleteDeviceStatus(ctx, deviceID); e != nil {
+			return e
+		}
 		return audit(ctx, q, orgID, &actorID, "device.revoked", "device", deviceID.String(), map[string]any{})
 	})
 	if err != nil {

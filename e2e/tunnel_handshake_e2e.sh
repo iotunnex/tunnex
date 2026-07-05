@@ -37,6 +37,7 @@ tok=$(capi -s -b /j/cookies -H 'X-Tunnex-CSRF: 1' -H 'Content-Type: application/
 	"$API/api/v1/organizations/$DEMO_ORG/nodes/join-token" | jq -r '.join_token')
 [ -n "$tok" ] && [ "$tok" != null ] || fail "no join token"
 TUNNEX_JOIN_TOKEN="$tok" TUNNEX_WG_BACKEND=wgctrl TUNNEX_NODE_ENDPOINT=node-agent:51820 \
+	TUNNEX_AGENT_STATUS_INTERVAL=5s \
 	docker compose up -d --build node-agent >/dev/null
 for i in $(seq 1 45); do
 	docker compose exec -T node-agent wget -qO- http://127.0.0.1:9091/readyz 2>/dev/null | grep -q '"ready"' && break
@@ -82,4 +83,15 @@ if echo "$out" | grep -q "0 B received"; then
 fi
 echo "$out" | grep -qE "transfer: .+ received" || fail "no transfer recorded on the tunnel"
 
-say "PASS — downloaded config established a real WireGuard tunnel (handshake + traffic to the gateway)."
+say "FULL LOOP: the connected device reports ONLINE to the control plane (S3.6)"
+online=""
+for _ in $(seq 1 12); do
+	online=$(capi -s -b /j/cookies "$API/api/v1/organizations/$DEMO_ORG/devices" | jq -r '.[0].online')
+	[ "$online" = "true" ] && break
+	sleep 3
+done
+[ "$online" = "true" ] || fail "device never reported online after connecting"
+lh=$(capi -s -b /j/cookies "$API/api/v1/organizations/$DEMO_ORG/devices" | jq -r '.[0].last_handshake_at')
+echo "   device online=true, last_handshake_at=$lh"
+
+say "PASS — config established a real tunnel (handshake + traffic) AND the user can see the device is connected."

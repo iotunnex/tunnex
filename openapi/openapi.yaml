@@ -797,7 +797,14 @@ components:
         assigned_ip: { type: string }
         status: { type: string, enum: [active, revoked] }
         created_at: { type: string, format: date-time }
+        # Live status (S3.6). last_handshake_at is the most recent WireGuard
+        # handshake; `online` is DERIVED from its recency (WireGuard has no
+        # connection state) — treat it as an approximation. rx/tx are raw byte
+        # gauges that reset when the interface restarts (display only).
         last_handshake_at: { type: string, format: date-time }
+        online: { type: boolean }
+        rx_bytes: { type: integer, format: int64 }
+        tx_bytes: { type: integer, format: int64 }
 
     CreateDeviceRequest:
       type: object

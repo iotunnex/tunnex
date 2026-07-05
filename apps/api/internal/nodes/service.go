@@ -249,6 +249,45 @@ func validEndpoint(s string) bool {
 	return err == nil && p > 0 && p <= 65535
 }
 
+// PeerStatus is per-peer live telemetry reported by the agent.
+type PeerStatus struct {
+	PublicKey     string
+	LastHandshake int64 // unix seconds, 0 = never
+	RxBytes       int64
+	TxBytes       int64
+}
+
+// ReportStatus upserts the reported per-peer telemetry, mapping each pubkey to
+// its active device on the node. Batched (one round-trip); unknown pubkeys no-op.
+func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []PeerStatus) error {
+	if len(stats) == 0 {
+		return nil
+	}
+	// Reject an implausibly-future handshake (bogus counter / bad clock): stored
+	// verbatim it would make time.Since() negative and pin the device "online"
+	// forever. A small skew tolerance is allowed.
+	maxHS := time.Now().Add(2 * time.Minute).Unix()
+	params := make([]sqlc.UpsertDeviceStatusParams, 0, len(stats))
+	for _, st := range stats {
+		var hs pgtype.Timestamptz
+		if st.LastHandshake > 0 && st.LastHandshake <= maxHS {
+			hs = pgtype.Timestamptz{Time: time.Unix(st.LastHandshake, 0).UTC(), Valid: true}
+		}
+		params = append(params, sqlc.UpsertDeviceStatusParams{
+			NodeID: node.ID, PublicKey: st.PublicKey, LastHandshakeAt: hs,
+			RxBytes: st.RxBytes, TxBytes: st.TxBytes,
+		})
+	}
+	// br.Exec closes the batch results itself, so we do not Close separately.
+	var firstErr error
+	s.q.UpsertDeviceStatus(ctx, params).Exec(func(_ int, err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	})
+	return firstErr
+}
+
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
 // public endpoint. It validates the key is a well-formed 32-byte base64 value and
 // the endpoint (if present) is a clean host:port — a malformed value would poison

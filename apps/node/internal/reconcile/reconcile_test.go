@@ -24,6 +24,7 @@ func (f *fakeBackend) Configure(context.Context, InterfaceConfig) error {
 	return f.configErr
 }
 func (f *fakeBackend) applyCount() int { f.mu.Lock(); defer f.mu.Unlock(); return f.applyN }
+func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) { return nil, nil }
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+func TestParseWGStats(t *testing.T) {
+	// Line 0 = interface; peer line fields: pubkey, psk, endpoint, allowed-ips,
+	// latest-handshake(unix), rx, tx, keepalive.
+	dump := strings.Join([]string{
+		"iprivkey\tipubkey\t51820\toff",
+		"peerkey1\t(none)\t203.0.113.5:51820\t10.0.0.2/32\t1700000000\t4096\t8192\toff",
+		"peerkey2\t(none)\t(none)\t10.0.0.3/32\t0\t0\t0\toff", // never handshaked
+	}, "\n")
+
+	stats := parseWGStats(dump)
+	if len(stats) != 2 {
+		t.Fatalf("want 2 peer stats, got %d", len(stats))
+	}
+	if stats[0].PublicKey != "peerkey1" || stats[0].LastHandshake != 1700000000 ||
+		stats[0].RxBytes != 4096 || stats[0].TxBytes != 8192 {
+		t.Fatalf("peer0 mis-parsed: %+v", stats[0])
+	}
+	// A never-handshaked peer: handshake 0, zero bytes.
+	if stats[1].LastHandshake != 0 || stats[1].RxBytes != 0 {
+		t.Fatalf("peer1 should be zeroed: %+v", stats[1])
+	}
+}
+
 func TestParseWGInterface(t *testing.T) {
 	// A configured interface: private-key, PUBLIC-key, listen-port, fwmark.
 	pub, port := parseWGInterface("iPrivKey==\tiPubKey==\t51820\toff\npeerkey\t(none)\t...\t10.0.0.2/32")

@@ -116,6 +116,9 @@ func main() {
 	renewEvery := getdur("TUNNEX_AGENT_RENEW_INTERVAL", 24*time.Hour)
 	go renewLoop(ctx, client, certDir, renewEvery, logger)
 
+	// Report per-peer live telemetry (handshake/bytes/endpoint) on an interval.
+	go statusLoop(ctx, client, backend, getdur("TUNNEX_AGENT_STATUS_INTERVAL", 30*time.Second), logger)
+
 	// Readiness mirrors the reconciler's health (enrolled + control session +
 	// backend converged). It flips false if the backend later fails (e.g. device
 	// lost) so orchestrators see the true state, not a stale first success.
@@ -248,6 +251,40 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 		return false
 	case <-t.C:
 		return true
+	}
+}
+
+// maxStatusPeers caps a status report so a gateway with thousands of peers can't
+// turn a heartbeat into a huge post. Excess is dropped (and logged) — the status
+// view is best-effort telemetry, not the source of truth.
+const maxStatusPeers = 1000
+
+// statusLoop periodically reads per-peer telemetry from the backend and reports
+// it. Best-effort: a failed report only means a momentarily stale status view.
+func statusLoop(ctx context.Context, client *control.Client, backend reconcile.WGBackend, every time.Duration, logger *slog.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			stats, err := backend.Stats(ctx)
+			if err != nil {
+				logger.Warn("agent_stats_read_failed", slog.String("error", err.Error()))
+				continue
+			}
+			if len(stats) == 0 {
+				continue
+			}
+			if len(stats) > maxStatusPeers {
+				logger.Warn("agent_status_truncated", slog.Int("peers", len(stats)), slog.Int("cap", maxStatusPeers))
+				stats = stats[:maxStatusPeers]
+			}
+			if err := client.ReportStatus(ctx, stats); err != nil {
+				logger.Warn("agent_status_report_failed", slog.String("error", err.Error()))
+			}
+		}
 	}
 }
 

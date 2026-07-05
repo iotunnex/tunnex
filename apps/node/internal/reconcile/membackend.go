@@ -31,3 +31,6 @@ func (m *MemBackend) ApplyPeers(_ context.Context, peers []Peer) error {
 	m.peers = append([]Peer(nil), peers...)
 	return nil
 }
+
+// Stats returns no telemetry (the in-memory backend has no real device).
+func (m *MemBackend) Stats(context.Context) ([]PeerStat, error) { return nil, nil }

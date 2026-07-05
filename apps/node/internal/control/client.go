@@ -159,6 +159,25 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string) err
 	return nil
 }
 
+// ReportStatus posts per-peer live telemetry (handshake/bytes/endpoint) over the
+// mTLS channel. Fire-and-forget from the caller's view: a failed report just
+// means a momentarily stale status view, not a data-plane problem.
+func (c *Client) ReportStatus(ctx context.Context, stats []reconcile.PeerStat) error {
+	body, _ := json.Marshal(map[string]any{"peers": stats})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/status", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("status report status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // FetchDesired GETs the desired state over mTLS.
 func (c *Client) FetchDesired(ctx context.Context) (reconcile.DesiredState, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/agent/desired-state", nil)

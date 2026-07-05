@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -22,7 +23,7 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	p, _ := authctx.PrincipalFrom(ctx)
 	role, _ := p.RoleIn(req.OrgId)
 
-	var devs []sqlc.Device
+	var devs []devices.DeviceWithStatus
 	var err error
 	if rbac.Can(role, rbac.PermMemberManage) {
 		devs, err = s.devices.ListForOrg(ctx, req.OrgId)
@@ -34,7 +35,7 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	}
 	out := make([]api.Device, 0, len(devs))
 	for _, d := range devs {
-		out = append(out, toAPIDevice(d))
+		out = append(out, toAPIDeviceWithStatus(d))
 	}
 	return api.ListDevices200JSONResponse{
 		Body:    out,
@@ -118,6 +119,12 @@ func (s apiServer) RevokeDevice(ctx context.Context, req api.RevokeDeviceRequest
 	}, nil
 }
 
+// onlineThreshold: a device is treated as "online" if its last WireGuard
+// handshake is within this window. WireGuard has no connection state — this is an
+// APPROXIMATION derived from handshake recency (~2.5-3min matches WG's rekey
+// cadence); the UI shows "last seen" for honest precision.
+const onlineThreshold = 3 * time.Minute
+
 func toAPIDevice(d sqlc.Device) api.Device {
 	out := api.Device{
 		Id:        d.ID,
@@ -134,9 +141,21 @@ func toAPIDevice(d sqlc.Device) api.Device {
 	if d.AssignedIp != nil {
 		out.AssignedIp = d.AssignedIp
 	}
-	if d.LastHandshakeAt.Valid {
-		t := d.LastHandshakeAt.Time
-		out.LastHandshakeAt = &t
-	}
 	return out
+}
+
+func toAPIDeviceWithStatus(d devices.DeviceWithStatus) api.Device {
+	out := toAPIDevice(d.Device)
+	out.LastHandshakeAt = d.LastHandshakeAt
+	out.RxBytes = d.RxBytes
+	out.TxBytes = d.TxBytes
+	online := deviceOnline(d.LastHandshakeAt)
+	out.Online = &online
+	return out
+}
+
+// deviceOnline derives online-ness from handshake recency (WireGuard has no
+// connection state) — an approximation, not a live socket check.
+func deviceOnline(lastHandshake *time.Time) bool {
+	return lastHandshake != nil && time.Since(*lastHandshake) <= onlineThreshold
 }

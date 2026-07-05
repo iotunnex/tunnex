@@ -46,6 +46,17 @@ type InterfaceConfig struct {
 	MTU        int
 }
 
+// PeerStat is per-peer live telemetry read from the device: last handshake (unix
+// seconds, 0 = never), raw byte gauges (reset on interface restart), and current
+// source endpoint. Reported to the control plane for the connection-status view.
+type PeerStat struct {
+	PublicKey     string `json:"public_key"`
+	LastHandshake int64  `json:"last_handshake"`
+	RxBytes       int64  `json:"rx_bytes"`
+	TxBytes       int64  `json:"tx_bytes"`
+	Endpoint      string `json:"endpoint,omitempty"`
+}
+
 // WGBackend abstracts the WireGuard data plane. The real adapter wraps wgctrl;
 // the fake drives unit tests.
 type WGBackend interface {
@@ -54,6 +65,8 @@ type WGBackend interface {
 	Configure(ctx context.Context, cfg InterfaceConfig) error
 	Peers(ctx context.Context) ([]Peer, error)
 	ApplyPeers(ctx context.Context, peers []Peer) error
+	// Stats reports per-peer live telemetry (handshake/bytes/endpoint).
+	Stats(ctx context.Context) ([]PeerStat, error)
 }
 
 // ControlClient is the agent's view of the control plane.

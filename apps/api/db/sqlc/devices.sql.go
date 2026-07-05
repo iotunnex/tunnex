@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countActiveDevicesForUser = `-- name: CountActiveDevicesForUser :one
@@ -31,7 +32,7 @@ func (q *Queries) CountActiveDevicesForUser(ctx context.Context, arg CountActive
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, last_handshake_at, created_at, updated_at, revoked_at, deleted_at
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at
 `
 
 type CreateDeviceParams struct {
@@ -65,7 +66,6 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.PublicKey,
 		&i.AssignedIp,
 		&i.Status,
-		&i.LastHandshakeAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RevokedAt,
@@ -74,8 +74,20 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 	return i, err
 }
 
+const deleteDeviceStatus = `-- name: DeleteDeviceStatus :exec
+DELETE FROM device_status WHERE device_id = $1
+`
+
+// lint:cross-org — keyed by device_id (the caller already authorized the device
+// via its org). Clears a device's live status (on revoke) so a revoked device
+// never reports stale online/handshake via the API.
+func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDeviceStatus, deviceID)
+	return err
+}
+
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, last_handshake_at, created_at, updated_at, revoked_at, deleted_at FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -97,7 +109,6 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.PublicKey,
 		&i.AssignedIp,
 		&i.Status,
-		&i.LastHandshakeAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RevokedAt,
@@ -205,35 +216,46 @@ func (q *Queries) ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, last_handshake_at, created_at, updated_at, revoked_at, deleted_at FROM devices
-WHERE org_id = $1 AND deleted_at IS NULL
-ORDER BY created_at
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.deleted_at IS NULL
+ORDER BY d.created_at
 `
 
-func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Device, error) {
+type ListDevicesByOrgRow struct {
+	Device          Device             `json:"device"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes         *int64             `json:"rx_bytes"`
+	TxBytes         *int64             `json:"tx_bytes"`
+}
+
+func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error) {
 	rows, err := q.db.Query(ctx, listDevicesByOrg, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Device{}
+	items := []ListDevicesByOrgRow{}
 	for rows.Next() {
-		var i Device
+		var i ListDevicesByOrgRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.UserID,
-			&i.NodeID,
-			&i.Name,
-			&i.Platform,
-			&i.PublicKey,
-			&i.AssignedIp,
-			&i.Status,
+			&i.Device.ID,
+			&i.Device.OrgID,
+			&i.Device.UserID,
+			&i.Device.NodeID,
+			&i.Device.Name,
+			&i.Device.Platform,
+			&i.Device.PublicKey,
+			&i.Device.AssignedIp,
+			&i.Device.Status,
+			&i.Device.CreatedAt,
+			&i.Device.UpdatedAt,
+			&i.Device.RevokedAt,
+			&i.Device.DeletedAt,
 			&i.LastHandshakeAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.RevokedAt,
-			&i.DeletedAt,
+			&i.RxBytes,
+			&i.TxBytes,
 		); err != nil {
 			return nil, err
 		}
@@ -246,9 +268,11 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Devi
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, last_handshake_at, created_at, updated_at, revoked_at, deleted_at FROM devices
-WHERE org_id = $1 AND user_id = $2 AND deleted_at IS NULL
-ORDER BY created_at
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
+ORDER BY d.created_at
 `
 
 type ListDevicesByUserParams struct {
@@ -256,30 +280,39 @@ type ListDevicesByUserParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]Device, error) {
+type ListDevicesByUserRow struct {
+	Device          Device             `json:"device"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes         *int64             `json:"rx_bytes"`
+	TxBytes         *int64             `json:"tx_bytes"`
+}
+
+func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error) {
 	rows, err := q.db.Query(ctx, listDevicesByUser, arg.OrgID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Device{}
+	items := []ListDevicesByUserRow{}
 	for rows.Next() {
-		var i Device
+		var i ListDevicesByUserRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.UserID,
-			&i.NodeID,
-			&i.Name,
-			&i.Platform,
-			&i.PublicKey,
-			&i.AssignedIp,
-			&i.Status,
+			&i.Device.ID,
+			&i.Device.OrgID,
+			&i.Device.UserID,
+			&i.Device.NodeID,
+			&i.Device.Name,
+			&i.Device.Platform,
+			&i.Device.PublicKey,
+			&i.Device.AssignedIp,
+			&i.Device.Status,
+			&i.Device.CreatedAt,
+			&i.Device.UpdatedAt,
+			&i.Device.RevokedAt,
+			&i.Device.DeletedAt,
 			&i.LastHandshakeAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.RevokedAt,
-			&i.DeletedAt,
+			&i.RxBytes,
+			&i.TxBytes,
 		); err != nil {
 			return nil, err
 		}

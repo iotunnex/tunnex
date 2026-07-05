@@ -227,7 +227,14 @@ function Devices({ email }: { email: string }) {
             <div>
               <span className="text-sm text-white">{d.name}</span>
               <span className="ml-2 text-xs text-slate-500">{d.assigned_ip ?? "—"}</span>
-              {d.status === "revoked" && <span className="ml-2 text-xs text-rose-400">revoked</span>}
+              {d.status === "revoked" ? (
+                <span className="ml-2 text-xs text-rose-400">revoked</span>
+              ) : (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs text-slate-400">
+                  <span className={`h-1.5 w-1.5 rounded-full ${d.online ? "bg-accent-400" : "bg-slate-600"}`} />
+                  {lastSeen(d.last_handshake_at)}
+                </span>
+              )}
             </div>
             {d.status === "active" && (
               <button onClick={() => revoke(d.id)} className="text-xs text-slate-400 hover:text-rose-400">
@@ -240,6 +247,17 @@ function Devices({ email }: { email: string }) {
       </ul>
     </div>
   );
+}
+
+// lastSeen renders honest recency ("last seen 42s ago") rather than faking a
+// live-connection claim — WireGuard only knows the last handshake time.
+function lastSeen(at?: string): string {
+  if (!at) return "never connected";
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 1000));
+  if (secs < 60) return `last seen ${secs}s ago`;
+  if (secs < 3600) return `last seen ${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `last seen ${Math.floor(secs / 3600)}h ago`;
+  return `last seen ${Math.floor(secs / 86400)}d ago`;
 }
 
 function Wordmark() {

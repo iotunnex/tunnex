@@ -36,6 +36,10 @@ type Querier interface {
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// lint:cross-org — keyed by device_id (the caller already authorized the device
+	// via its org). Clears a device's live status (on revoke) so a revoked device
+	// never reports stale online/handshake via the API.
+	DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -82,8 +86,8 @@ type Querier interface {
 	// org advisory lock during Create so the lowest-free choice can't be raced.
 	ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([]*string, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
-	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Device, error)
-	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]Device, error)
+	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
+	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
@@ -146,6 +150,12 @@ type Querier interface {
 	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
+	// lint:cross-org — keyed by node_id (agent is cert-authorized) + pubkey. Batched
+	// (pgx.Batch) so a whole report is a single round-trip; no per-peer write
+	// amplification and the write lands on the lean status table, not the devices
+	// row. Maps pubkey->active device on this node; an unknown pubkey is a no-op.
+	// rx/tx are raw gauges.
+	UpsertDeviceStatus(ctx context.Context, arg []UpsertDeviceStatusParams) *UpsertDeviceStatusBatchResults
 	// Idempotent on (org_id, user_id).
 	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so

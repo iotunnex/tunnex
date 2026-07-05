@@ -304,6 +304,67 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 	}
 }
 
+// TestGetDeviceCrossOrgNotFound: a device id from another org reads as not-found
+// (org-scoped read path — no cross-tenant leak).
+func TestGetDeviceCrossOrgNotFound(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "d"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	otherOrg := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O2',$2)", otherOrg, "s2-"+otherOrg.String()); err != nil {
+		t.Fatalf("other org: %v", err)
+	}
+	if _, err := svc.Get(ctx, otherOrg, res.Device.ID); code(err) != "device_not_found" {
+		t.Fatalf("cross-org Get: want device_not_found, got %v", err)
+	}
+}
+
+// TestListDoesNotLeakCrossOrg: listing one org never returns another org's
+// devices (the LEFT JOIN on device_status must not widen the org scope).
+func TestListDoesNotLeakCrossOrg(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svcA, orgA, userA, nodeA := setup(t, tx, 10)
+	if _, err := svcA.Create(ctx, CreateInput{OrgID: orgA, ActorID: userA, OwnerID: userA, NodeID: nodeA, Name: "a"}); err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	// A separate org B with its own device.
+	svcB, orgB, userB, nodeB := setup(t, tx, 10)
+	if _, err := svcB.Create(ctx, CreateInput{OrgID: orgB, ActorID: userB, OwnerID: userB, NodeID: nodeB, Name: "b"}); err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	// Org A's list (user + org views) must contain only A's device.
+	if l, _ := svcA.ListForOrg(ctx, orgA); len(l) != 1 || l[0].Device.OrgID != orgA {
+		t.Fatalf("ListForOrg leaked cross-org: %+v", l)
+	}
+	if l, _ := svcA.ListForUser(ctx, orgA, userA); len(l) != 1 || l[0].Device.OrgID != orgA {
+		t.Fatalf("ListForUser leaked cross-org: %+v", l)
+	}
+}
+
+// TestListSurfacesStatus: ListForUser joins and returns live status.
+func TestListSurfacesStatus(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	res, _ := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "d"})
+	// Before any report: status fields are nil.
+	list, _ := svc.ListForUser(ctx, org, user)
+	if len(list) != 1 || list[0].LastHandshakeAt != nil || list[0].RxBytes != nil {
+		t.Fatalf("pre-report status should be nil: %+v", list)
+	}
+	// Seed a status row and confirm the list surfaces it.
+	if _, err := tx.Exec(ctx, "INSERT INTO device_status (device_id,last_handshake_at,rx_bytes,tx_bytes) VALUES ($1,now(),$2,$3)",
+		res.Device.ID, int64(4096), int64(8192)); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+	list, _ = svc.ListForUser(ctx, org, user)
+	if len(list) != 1 || list[0].LastHandshakeAt == nil || list[0].RxBytes == nil || *list[0].RxBytes != 4096 {
+		t.Fatalf("list did not surface status: %+v", list[0])
+	}
+}
+
 // TestCreatePushesGateway: creating a device notifies the gateway node's watcher.
 func TestCreatePushesGateway(t *testing.T) {
 	ctx, tx := txOrSkip(t)

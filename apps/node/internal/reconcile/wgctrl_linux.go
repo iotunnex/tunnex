@@ -177,6 +177,40 @@ func (b *wgctrlBackend) Peers(ctx context.Context) ([]Peer, error) {
 	return parseWGDump(out), nil
 }
 
+// Stats parses per-peer live telemetry from `wg show <iface> dump`.
+func (b *wgctrlBackend) Stats(ctx context.Context) ([]PeerStat, error) {
+	out, err := run(ctx, "wg", "show", b.iface, "dump")
+	if err != nil {
+		return nil, err
+	}
+	return parseWGStats(out), nil
+}
+
+// parseWGStats parses the peer lines of a dump into telemetry. Peer fields:
+// pubkey, psk, endpoint, allowed-ips, latest-handshake(unix), rx, tx, keepalive.
+func parseWGStats(out string) []PeerStat {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var stats []PeerStat
+	for i, line := range lines {
+		if i == 0 || line == "" {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		if len(f) < 7 {
+			continue
+		}
+		s := PeerStat{PublicKey: f[0]}
+		if f[2] != "(none)" && f[2] != "" {
+			s.Endpoint = f[2]
+		}
+		s.LastHandshake, _ = strconv.ParseInt(f[4], 10, 64)
+		s.RxBytes, _ = strconv.ParseInt(f[5], 10, 64)
+		s.TxBytes, _ = strconv.ParseInt(f[6], 10, 64)
+		stats = append(stats, s)
+	}
+	return stats
+}
+
 // parseWGDump parses `wg show <iface> dump` output into peers. The first line is
 // the interface itself (skipped); each subsequent tab-separated line is a peer:
 // pubkey, preshared-key, endpoint, allowed-ips, ...

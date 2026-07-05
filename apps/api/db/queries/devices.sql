@@ -8,14 +8,18 @@ SELECT * FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL;
 
 -- name: ListDevicesByUser :many
-SELECT * FROM devices
-WHERE org_id = $1 AND user_id = $2 AND deleted_at IS NULL
-ORDER BY created_at;
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
+ORDER BY d.created_at;
 
 -- name: ListDevicesByOrg :many
-SELECT * FROM devices
-WHERE org_id = $1 AND deleted_at IS NULL
-ORDER BY created_at;
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.deleted_at IS NULL
+ORDER BY d.created_at;
 
 -- name: CountActiveDevicesForUser :one
 SELECT count(*) FROM devices
@@ -37,6 +41,12 @@ RETURNING node_id;
 UPDATE devices
 SET status = 'revoked', revoked_at = now()
 WHERE node_id = $1 AND status = 'active' AND deleted_at IS NULL;
+
+-- name: DeleteDeviceStatus :exec
+-- lint:cross-org — keyed by device_id (the caller already authorized the device
+-- via its org). Clears a device's live status (on revoke) so a revoked device
+-- never reports stale online/handshake via the API.
+DELETE FROM device_status WHERE device_id = $1;
 
 -- name: LockDeviceKey :exec
 -- lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
@@ -76,3 +86,20 @@ WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL;
 -- Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
 SELECT * FROM nodes
 WHERE id = $1 AND org_id = $2 AND status = 'active';
+
+-- name: UpsertDeviceStatus :batchexec
+-- lint:cross-org — keyed by node_id (agent is cert-authorized) + pubkey. Batched
+-- (pgx.Batch) so a whole report is a single round-trip; no per-peer write
+-- amplification and the write lands on the lean status table, not the devices
+-- row. Maps pubkey->active device on this node; an unknown pubkey is a no-op.
+-- rx/tx are raw gauges.
+INSERT INTO device_status (device_id, last_handshake_at, rx_bytes, tx_bytes, updated_at)
+SELECT d.id, @last_handshake_at, @rx_bytes, @tx_bytes, now()
+FROM devices d
+WHERE d.node_id = @node_id AND d.public_key = @public_key
+  AND d.status = 'active' AND d.deleted_at IS NULL
+ON CONFLICT (device_id) DO UPDATE
+SET last_handshake_at = EXCLUDED.last_handshake_at,
+    rx_bytes = EXCLUDED.rx_bytes,
+    tx_bytes = EXCLUDED.tx_bytes,
+    updated_at = now();

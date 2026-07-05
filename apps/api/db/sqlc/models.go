@@ -33,20 +33,27 @@ type AuthToken struct {
 }
 
 type Device struct {
-	ID              uuid.UUID          `json:"id"`
-	OrgID           uuid.UUID          `json:"org_id"`
-	UserID          uuid.UUID          `json:"user_id"`
-	NodeID          uuid.UUID          `json:"node_id"`
-	Name            string             `json:"name"`
-	Platform        string             `json:"platform"`
-	PublicKey       string             `json:"public_key"`
-	AssignedIp      *string            `json:"assigned_ip"`
-	Status          string             `json:"status"`
+	ID         uuid.UUID          `json:"id"`
+	OrgID      uuid.UUID          `json:"org_id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	NodeID     uuid.UUID          `json:"node_id"`
+	Name       string             `json:"name"`
+	Platform   string             `json:"platform"`
+	PublicKey  string             `json:"public_key"`
+	AssignedIp *string            `json:"assigned_ip"`
+	Status     string             `json:"status"`
+	CreatedAt  time.Time          `json:"created_at"`
+	UpdatedAt  time.Time          `json:"updated_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type DeviceStatus struct {
+	DeviceID        uuid.UUID          `json:"device_id"`
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
-	CreatedAt       time.Time          `json:"created_at"`
+	RxBytes         int64              `json:"rx_bytes"`
+	TxBytes         int64              `json:"tx_bytes"`
 	UpdatedAt       time.Time          `json:"updated_at"`
-	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type DomainClaim struct {

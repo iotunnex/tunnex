@@ -594,6 +594,11 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             last_handshake_at?: string;
+            online?: boolean;
+            /** Format: int64 */
+            rx_bytes?: number;
+            /** Format: int64 */
+            tx_bytes?: number;
         };
         CreateDeviceRequest: {
             name: string;
