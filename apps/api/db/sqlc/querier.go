@@ -78,6 +78,8 @@ type Querier interface {
 	// device is active AND its owning user is active — so deactivating a user drops
 	// their peers from every node's desired state (and reactivation restores them).
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
+	// lint:cross-org — keyed by node_id under the node's advisory lock during Create.
+	ListAssignedIPsForNode(ctx context.Context, nodeID uuid.UUID) ([]*string, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]Device, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]Device, error)
@@ -96,9 +98,11 @@ type Querier interface {
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
-	// lint:cross-org — a transaction-scoped advisory lock keyed on the user, so the
-	// per-user device-cap check-and-insert is atomic against concurrent creates.
-	LockUserDeviceCreation(ctx context.Context, dollar_1 string) error
+	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
+	// user id or node id, passed as text). Create takes BOTH (in sorted order, so
+	// no deadlock) to make the per-user cap check AND the per-node IP allocation
+	// atomic against concurrent creates.
+	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
@@ -114,9 +118,12 @@ type Querier interface {
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	// lint:cross-org — keyed by id after cert authorization; the node reports its
-	// locally-generated WireGuard public key. Returns rows affected so the caller
-	// can distinguish a real write from a no-op (e.g. node revoked mid-report).
-	SetNodeWGPublicKey(ctx context.Context, arg SetNodeWGPublicKeyParams) (int64, error)
+	// locally-generated WireGuard public key and its public endpoint (host:port that
+	// peer configs dial). Returns rows affected so the caller can distinguish a real
+	// write from a no-op (e.g. node revoked mid-report).
+	// endpoint uses COALESCE(NULLIF(...)) so an agent that reports an empty endpoint
+	// (env unset on a restart) never clobbers a previously-good value.
+	SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)

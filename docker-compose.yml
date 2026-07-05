@@ -83,6 +83,10 @@ services:
       # Real WireGuard data plane (S3.2). "mem" for an in-memory dev backend.
       TUNNEX_WG_BACKEND: ${TUNNEX_WG_BACKEND:-wgctrl}
       TUNNEX_WG_INTERFACE: ${TUNNEX_WG_INTERFACE:-wg0}
+      # Public WireGuard endpoint (host:port) peer configs dial. MUST be reachable
+      # by clients — set to your gateway's public address in production. The
+      # compose default (service name) works for containers on this network.
+      TUNNEX_NODE_ENDPOINT: ${TUNNEX_NODE_ENDPOINT:-node-agent:51820}
     volumes:
       - tunnex_node_state:/var/lib/tunnex-node
     # NET_ADMIN + /dev/net/tun let the agent create/configure the WG interface

@@ -72,7 +72,7 @@ var p2 = Peer{PublicKey: "k2", AllowedIPs: []string{"10.0.0.2/32"}}
 
 func TestReconcileAppliesAndIdempotent(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	ctx := context.Background()
 
 	if changed, _ := r.Reconcile(ctx, []Peer{p1}); !changed || b.count() != 1 {
@@ -89,7 +89,7 @@ func TestReconcileAppliesAndIdempotent(t *testing.T) {
 
 func TestRunOnceDataPlaneIndependence(t *testing.T) {
 	b := &fakeBackend{peers: []Peer{p1}}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	c := &fakeClient{watch: make(chan struct{})}
 	c.setErr(errors.New("control plane down"))
 
@@ -113,7 +113,7 @@ func TestRunOnceDataPlaneIndependence(t *testing.T) {
 
 func TestRunPushConvergesQuickly(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	c := &fakeClient{watch: make(chan struct{}, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -133,7 +133,7 @@ func TestRunPushConvergesQuickly(t *testing.T) {
 
 func TestRunIntervalSafetyNet(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	// watch never fires -> only the interval (safety net) can converge.
 	c := &fakeClient{watch: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,7 +153,7 @@ func TestDirtyDeviceConvergence(t *testing.T) {
 	stale := Peer{PublicKey: "gone", AllowedIPs: []string{"10.0.0.9/32"}}
 	// Device is dirty: it has a stale peer and the still-correct p1.
 	b := &fakeBackend{peers: []Peer{stale, p1}}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	c := &fakeClient{watch: make(chan struct{})}
 	c.set(DesiredState{Peers: []Peer{p1, p2}}) // p1 kept, p2 added, stale dropped
 
@@ -180,7 +180,7 @@ func TestDirtyDeviceConvergence(t *testing.T) {
 // back to ready.
 func TestHealthyReflectsBackendFailure(t *testing.T) {
 	b := &fakeBackend{}
-	r := New(b, "priv", discard())
+	r := New(b, "priv", "pub", discard())
 	c := &fakeClient{watch: make(chan struct{})}
 	c.set(DesiredState{Peers: []Peer{p1}})
 

@@ -13,3 +13,14 @@ func IsUnique(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// UniqueConstraint returns the violated constraint's name if err is a
+// unique-violation (23505), else "". Lets callers distinguish which index
+// collided instead of mapping every 23505 to one error.
+func UniqueConstraint(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return pgErr.ConstraintName
+	}
+	return ""
+}

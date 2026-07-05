@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+func TestParseWGInterface(t *testing.T) {
+	// A configured interface: private-key, PUBLIC-key, listen-port, fwmark.
+	pub, port := parseWGInterface("iPrivKey==\tiPubKey==\t51820\toff\npeerkey\t(none)\t...\t10.0.0.2/32")
+	if pub != "iPubKey==" {
+		t.Fatalf("want public key from field 1, got %q", pub)
+	}
+	if port != 51820 {
+		t.Fatalf("want port 51820, got %d", port)
+	}
+	// A freshly-created keyless interface: both keys are "(none)".
+	pub, port = parseWGInterface("(none)\t(none)\t38717\toff")
+	if pub != "" {
+		t.Fatalf("keyless interface should yield empty pubkey, got %q", pub)
+	}
+	if port != 38717 {
+		t.Fatalf("want port 38717, got %d", port)
+	}
+	// Malformed / empty input.
+	if p, n := parseWGInterface(""); p != "" || n != 0 {
+		t.Fatalf("empty dump should yield (\"\",0), got (%q,%d)", p, n)
+	}
+}
+
 func TestParseWGDump(t *testing.T) {
 	// Line 0 = interface (privkey, pubkey, listen-port, fwmark). Then two peers;
 	// the second has no endpoint and no allowed-ips ("(none)").

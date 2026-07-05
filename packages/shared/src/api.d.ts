@@ -603,10 +603,12 @@ export interface components {
             public_key?: string;
             /** Format: uuid */
             user_id?: string;
+            full_tunnel?: boolean;
         };
         CreateDeviceResponse: {
             device: components["schemas"]["Device"];
             private_key?: string;
+            config?: string;
         };
         InviteRequest: {
             /** Format: email */

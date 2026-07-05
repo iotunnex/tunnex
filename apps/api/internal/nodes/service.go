@@ -10,6 +10,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -185,8 +188,9 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 }
 
 // DesiredState returns the interface config + peers the agent should converge
-// to. The interface address is a deterministic placeholder until S3.5's pool
-// allocator owns it; MTU is explicit (WireGuard's default 1420).
+// to: one Peer per active device owned by an active user, each with its assigned
+// /32 as AllowedIPs. The interface address/pool is fixed until S3.5's allocator
+// owns it; MTU is explicit (WireGuard's default 1420).
 func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredState, error) {
 	_ = s.q.TouchNodeSeen(ctx, node.ID)
 	rows, err := s.q.ListActivePeersForNode(ctx, node.ID)
@@ -196,8 +200,8 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	peers := make([]Peer, 0, len(rows))
 	for _, r := range rows {
 		p := Peer{PublicKey: r.PublicKey}
-		// AllowedIPs is the peer's assigned tunnel address (S3.5 owns allocation;
-		// until then assigned_ip is null and the peer carries no routes).
+		// AllowedIPs is the peer's assigned tunnel address (its /32). A device with
+		// no address yet (shouldn't happen post-S3.4 allocation) carries no routes.
 		if r.AssignedIp != nil && *r.AssignedIp != "" {
 			p.AllowedIPs = []string{*r.AssignedIp + "/32"}
 		}
@@ -206,23 +210,48 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	return DesiredState{
 		ProtocolVersion:  ProtocolVersion,
 		NodeID:           node.ID.String(),
-		InterfaceAddress: "10.99.0.1/32", // TODO(S3.5): allocate from the org pool
+		// /24 (not /32) so the server has an on-link route to the whole pool and
+		// can actually route peer traffic (the S3.3-deferred routing gap). TODO
+		// (S3.5): the pool/CIDR comes from the org allocator.
+		InterfaceAddress: "10.99.0.1/24",
 		MTU:              1420,
 		ListenPort:       51820,
 		Peers:            peers,
 	}, nil
 }
 
-// ReportWGKey records the agent's locally-generated WireGuard public key. It
-// validates the key is a well-formed 32-byte base64 value (a malformed key would
-// later poison peer config for every node it is distributed to) and treats a
-// zero-row update (e.g. the node was revoked mid-report) as an error rather than
-// a silent no-op.
-func (s *Service) ReportWGKey(ctx context.Context, node sqlc.Node, publicKey string) error {
+// validEndpoint reports whether s is a clean host:port with a numeric port and
+// no whitespace/control characters (which would allow config injection).
+func validEndpoint(s string) bool {
+	if s == "" || len(s) > 259 || strings.ContainsAny(s, " \t\r\n") {
+		return false
+	}
+	host, port, err := net.SplitHostPort(s)
+	if err != nil || host == "" {
+		return false
+	}
+	p, err := strconv.Atoi(port)
+	return err == nil && p > 0 && p <= 65535
+}
+
+// ReportWGInfo records the agent's locally-generated WireGuard public key and
+// public endpoint. It validates the key is a well-formed 32-byte base64 value and
+// the endpoint (if present) is a clean host:port — a malformed value would poison
+// the .conf of every peer on this node. A zero-row update (e.g. the node was
+// revoked mid-report) is an error, not a silent no-op.
+func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, endpoint string) error {
 	if !wgkey.Valid(publicKey) {
 		return apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
 	}
-	n, err := s.q.SetNodeWGPublicKey(ctx, sqlc.SetNodeWGPublicKeyParams{ID: node.ID, WgPublicKey: publicKey})
+	// A non-empty endpoint must be a clean host:port. This is the value that gets
+	// concatenated verbatim into every peer's .conf, so an unvalidated endpoint
+	// (newlines, extra directives) from a compromised agent could inject arbitrary
+	// wg-quick config into other users' downloads. Empty is allowed (COALESCE in
+	// the query keeps any prior value).
+	if endpoint != "" && !validEndpoint(endpoint) {
+		return apierr.BadRequest("invalid_endpoint", "endpoint must be a host:port with no whitespace")
+	}
+	n, err := s.q.SetNodeWGInfo(ctx, sqlc.SetNodeWGInfoParams{ID: node.ID, WgPublicKey: publicKey, Endpoint: endpoint})
 	if err != nil {
 		return err
 	}

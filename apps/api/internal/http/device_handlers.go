@@ -74,6 +74,9 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	if req.Body.PublicKey != nil {
 		in.PublicKey = *req.Body.PublicKey
 	}
+	if req.Body.FullTunnel != nil {
+		in.FullTunnel = *req.Body.FullTunnel
+	}
 	res, err := s.devices.Create(ctx, in)
 	if err != nil {
 		return nil, err
@@ -81,6 +84,9 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	body := api.CreateDeviceResponse{Device: toAPIDevice(res.Device)}
 	if res.PrivateKeyOneTime != "" {
 		body.PrivateKey = &res.PrivateKeyOneTime
+	}
+	if res.Config != "" {
+		body.Config = &res.Config
 	}
 	return api.CreateDevice201JSONResponse{
 		Body:    body,

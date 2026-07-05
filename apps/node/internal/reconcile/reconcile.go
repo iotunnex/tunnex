@@ -33,9 +33,14 @@ type DesiredState struct {
 }
 
 // InterfaceConfig is the device-level configuration. The PrivateKey is supplied
-// by the AGENT (generated locally, never from the control plane).
+// by the AGENT (generated locally, never from the control plane). PublicKey is
+// the key's public half — the adapter compares it against the device's current
+// public key to decide if the private key needs (re)setting, which is robust to
+// WireGuard clamping the stored private key (the raw private bytes differ after
+// clamping, but the public key does not).
 type InterfaceConfig struct {
 	PrivateKey string
+	PublicKey  string
 	ListenPort int
 	Address    string
 	MTU        int
@@ -66,14 +71,16 @@ type ControlClient interface {
 type Reconciler struct {
 	backend    WGBackend
 	privateKey string
+	publicKey  string
 	logger     *slog.Logger
 	healthy    atomic.Bool
 	version    atomic.Uint64 // last desired-state version, echoed on Watch
 }
 
-// New builds a Reconciler with the node's WireGuard private key.
-func New(backend WGBackend, privateKey string, logger *slog.Logger) *Reconciler {
-	return &Reconciler{backend: backend, privateKey: privateKey, logger: logger}
+// New builds a Reconciler with the node's WireGuard key pair (public key is used
+// only for the clamp-safe "is the interface key already set" check).
+func New(backend WGBackend, privateKey, publicKey string, logger *slog.Logger) *Reconciler {
+	return &Reconciler{backend: backend, privateKey: privateKey, publicKey: publicKey, logger: logger}
 }
 
 // Healthy reports whether the last reconcile fully succeeded (control plane
@@ -111,7 +118,8 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	r.version.Store(ds.Version) // echoed on the next Watch to close the fetch-gap
 	// Idempotently ensure the interface config, then converge peers.
 	if err := r.backend.Configure(ctx, InterfaceConfig{
-		PrivateKey: r.privateKey, ListenPort: ds.ListenPort, Address: ds.InterfaceAddress, MTU: ds.MTU,
+		PrivateKey: r.privateKey, PublicKey: r.publicKey,
+		ListenPort: ds.ListenPort, Address: ds.InterfaceAddress, MTU: ds.MTU,
 	}); err != nil {
 		r.healthy.Store(false)
 		return false, err

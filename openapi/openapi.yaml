@@ -812,6 +812,8 @@ components:
         public_key: { type: string }
         # Admins may create a device on behalf of another org member; omit for self.
         user_id: { type: string, format: uuid }
+        # Route all traffic (0.0.0.0/0). Default false = split-tunnel (org network only).
+        full_tunnel: { type: boolean }
 
     CreateDeviceResponse:
       type: object
@@ -821,6 +823,8 @@ components:
         device: { $ref: "#/components/schemas/Device" }
         # Present ONLY for the server-generated flow; shown once, never stored.
         private_key: { type: string }
+        # The ready-to-use wg-quick .conf (server-generated flow only), shown once.
+        config: { type: string }
 
     InviteRequest:
       type: object

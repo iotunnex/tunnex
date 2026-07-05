@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -69,13 +70,18 @@ type CreateInput struct {
 	// PublicKey, if set, is a client-generated peer key (preferred). If empty, the
 	// server generates a keypair and returns the private key ONCE (browser flow).
 	PublicKey string
+	// FullTunnel routes all client traffic (0.0.0.0/0); default is split-tunnel
+	// (org network only) — the zero-trust posture.
+	FullTunnel bool
 }
 
 // CreateResult is the created device plus, only for the server-generated flow,
-// the one-time private key (never stored, never returned again).
+// the one-time private key and the ready-to-use .conf (never stored, never
+// returned again).
 type CreateResult struct {
 	Device            sqlc.Device
 	PrivateKeyOneTime string // non-empty only when the server generated the key
+	Config            string // full .conf, only for the server-generated flow
 }
 
 // Create issues a device/peer for OwnerID, enforcing owner membership and the
@@ -99,10 +105,16 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	}
 
 	var dev sqlc.Device
+	var node sqlc.Node
+	var assignedIP string
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		// Serialize this user's creates so the cap check-and-insert is atomic.
-		if e := q.LockUserDeviceCreation(ctx, in.OwnerID.String()); e != nil {
-			return e
+		// Take the user AND node advisory locks (in sorted order -> no deadlock) so
+		// the per-user cap check and the per-node IP allocation are both atomic
+		// against concurrent creates.
+		for _, key := range sortedKeys(in.OwnerID.String(), in.NodeID.String()) {
+			if e := q.LockDeviceKey(ctx, key); e != nil {
+				return e
+			}
 		}
 		// The owner must be a member of THIS org (identity binding — no cross-tenant
 		// or non-member owners, even when an admin creates on someone's behalf).
@@ -113,11 +125,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			return e
 		}
 		// The node must belong to this org (and be active) — no cross-org attach.
-		if _, e := q.GetOrgNode(ctx, sqlc.GetOrgNodeParams{ID: in.NodeID, OrgID: in.OrgID}); e != nil {
+		n, e := q.GetOrgNode(ctx, sqlc.GetOrgNodeParams{ID: in.NodeID, OrgID: in.OrgID})
+		if e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				return apierr.NotFound("node_not_found", "no such active node in this organization")
 			}
 			return e
+		}
+		node = n
+		// A device is useless without a reachable gateway endpoint (the classic
+		// self-hosted first-run failure is a config with an internal container IP)
+		// or the node's WG public key (the peer would dial an empty server key).
+		if node.Endpoint == "" || node.WgPublicKey == "" {
+			return apierr.Conflict("node_not_ready", "the node has not reported its endpoint/key yet; ensure the agent is enrolled and TUNNEX_NODE_ENDPOINT is set")
 		}
 		// Per-user cap (0 = unlimited, per the org setting).
 		org, e := q.GetOrganizationByID(ctx, in.OrgID)
@@ -133,14 +153,28 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 				return apierr.Conflict("device_limit", "device limit reached for this user")
 			}
 		}
+		// Allocate the lowest free tunnel address on this node (minimal; S3.5 owns
+		// the real allocator). Safe under the node advisory lock above.
+		usedIPs, e := q.ListAssignedIPsForNode(ctx, in.NodeID)
+		if e != nil {
+			return e
+		}
+		ip, e := allocateIP(usedIPs)
+		if e != nil {
+			return e
+		}
+		assignedIP = ip
 
 		created, e := q.CreateDevice(ctx, sqlc.CreateDeviceParams{
 			OrgID: in.OrgID, UserID: in.OwnerID, NodeID: in.NodeID,
 			Name: in.Name, Platform: in.Platform, PublicKey: pub,
-			AssignedIp: nil, // TODO(S3.5): allocate from the org pool
+			AssignedIp: &assignedIP,
 		})
 		if e != nil {
-			if pgerr.IsUnique(e) {
+			if c := pgerr.UniqueConstraint(e); c != "" {
+				if strings.Contains(c, "_ip_") { // devices_node_ip_key
+					return apierr.Conflict("ip_conflict", "tunnel address already in use on this node")
+				}
 				return apierr.Conflict("duplicate_key", "this public key is already registered on the node")
 			}
 			return e
@@ -157,7 +191,30 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		return CreateResult{}, err
 	}
 	s.push(dev.NodeID)
-	return CreateResult{Device: dev, PrivateKeyOneTime: oneTimePriv}, nil
+
+	res := CreateResult{Device: dev, PrivateKeyOneTime: oneTimePriv}
+	// Only the server-generated flow can produce a complete config (it holds the
+	// one-time private key); the client-generated flow assembles its own.
+	if oneTimePriv != "" {
+		res.Config = buildConfig(configParams{
+			address:      assignedIP,
+			privateKey:   oneTimePriv,
+			serverPubKey: node.WgPublicKey,
+			endpoint:     node.Endpoint,
+			allowedIPs:   allowedIPsFor(in.FullTunnel),
+			dns:          dnsFor(in.FullTunnel),
+		})
+	}
+	return res, nil
+}
+
+// sortedKeys returns a and b in ascending order, so multiple advisory locks are
+// always acquired in the same order across callers (deadlock-free).
+func sortedKeys(a, b string) [2]string {
+	if a <= b {
+		return [2]string{a, b}
+	}
+	return [2]string{b, a}
 }
 
 // ListForUser returns a user's devices in an org (self-service view).

@@ -54,13 +54,18 @@ UPDATE nodes
 SET last_seen_at = now()
 WHERE id = $1;
 
--- name: SetNodeWGPublicKey :execrows
+-- name: SetNodeWGInfo :execrows
 -- lint:cross-org — keyed by id after cert authorization; the node reports its
--- locally-generated WireGuard public key. Returns rows affected so the caller
--- can distinguish a real write from a no-op (e.g. node revoked mid-report).
+-- locally-generated WireGuard public key and its public endpoint (host:port that
+-- peer configs dial). Returns rows affected so the caller can distinguish a real
+-- write from a no-op (e.g. node revoked mid-report).
+-- endpoint uses COALESCE(NULLIF(...)) so an agent that reports an empty endpoint
+-- (env unset on a restart) never clobbers a previously-good value.
 UPDATE nodes
-SET wg_public_key = $2, last_seen_at = now()
-WHERE id = $1 AND status = 'active';
+SET wg_public_key = @wg_public_key,
+    endpoint = COALESCE(NULLIF(@endpoint::text, ''), nodes.endpoint),
+    last_seen_at = now()
+WHERE id = @id AND status = 'active';
 
 -- name: RevokeNode :exec
 UPDATE nodes

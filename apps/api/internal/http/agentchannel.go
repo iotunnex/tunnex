@@ -78,12 +78,13 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		PublicKey string `json:"public_key"`
+		Endpoint  string `json:"endpoint"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	if err := a.svc.ReportWGKey(r.Context(), node, body.PublicKey); err != nil {
+	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {
 			http.Error(w, ae.Message, ae.Status)

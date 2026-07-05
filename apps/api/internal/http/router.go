@@ -60,6 +60,15 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	r.Use(applog.Requests(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	// API responses are never cacheable: some carry one-time secrets (a device's
+	// server-generated private key / .conf), and none should be stored by an
+	// intermediary proxy or the browser.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			next.ServeHTTP(w, req)
+		})
+	})
 
 	// Attach the authenticated principal (if any) so downstream authorization can
 	// fail closed. The org used for scoping is derived from this principal's

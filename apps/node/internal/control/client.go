@@ -141,9 +141,10 @@ func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, ne
 	return body, keyPEM, nil
 }
 
-// ReportKey reports the node's locally-generated WireGuard public key.
-func (c *Client) ReportKey(ctx context.Context, publicKey string) error {
-	body, _ := json.Marshal(map[string]string{"public_key": publicKey})
+// ReportInfo reports the node's locally-generated WireGuard public key and its
+// public endpoint (host:port that peer configs dial).
+func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string) error {
+	body, _ := json.Marshal(map[string]string{"public_key": publicKey, "endpoint": endpoint})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)

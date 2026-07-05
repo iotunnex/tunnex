@@ -44,8 +44,8 @@ func setup(t *testing.T, tx pgx.Tx, maxDevices int) (*Service, uuid.UUID, uuid.U
 	if _, err := tx.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, user); err != nil {
 		t.Fatalf("membership: %v", err)
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,$3,$4)",
-		node, org, "gw", "serial-"+node.String()); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint) VALUES ($1,$2,$3,$4,$5,$6)",
+		node, org, "gw", "serial-"+node.String(), "c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0=", "gw.example.com:51820"); err != nil {
 		t.Fatalf("node: %v", err)
 	}
 	return &Service{q: sqlc.New(tx), logger: slog.Default()}, org, user, node
@@ -105,6 +105,13 @@ func TestServerGeneratedKeyNeverStored(t *testing.T) {
 	}
 	if res.Device.UserID != user {
 		t.Fatal("device not bound to its owner")
+	}
+	// The server-generated flow returns a complete, ready-to-use config carrying
+	// the one-time private key and the gateway endpoint (watch-items a + b).
+	if !strings.Contains(res.Config, "PrivateKey = "+res.PrivateKeyOneTime) ||
+		!strings.Contains(res.Config, "Endpoint = gw.example.com:51820") ||
+		!strings.Contains(res.Config, "Address = "+*res.Device.AssignedIp+"/32") {
+		t.Fatalf("config incomplete:\n%s", res.Config)
 	}
 }
 

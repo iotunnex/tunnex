@@ -107,7 +107,7 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 }
 
 const getOrgNode = `-- name: GetOrgNode :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint FROM nodes
 WHERE id = $1 AND org_id = $2 AND status = 'active'
 `
 
@@ -133,6 +133,7 @@ func (q *Queries) GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.WgPublicKey,
+		&i.Endpoint,
 	)
 	return i, err
 }
@@ -169,6 +170,32 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAssignedIPsForNode = `-- name: ListAssignedIPsForNode :many
+SELECT assigned_ip FROM devices
+WHERE node_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+`
+
+// lint:cross-org — keyed by node_id under the node's advisory lock during Create.
+func (q *Queries) ListAssignedIPsForNode(ctx context.Context, nodeID uuid.UUID) ([]*string, error) {
+	rows, err := q.db.Query(ctx, listAssignedIPsForNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*string{}
+	for rows.Next() {
+		var assigned_ip *string
+		if err := rows.Scan(&assigned_ip); err != nil {
+			return nil, err
+		}
+		items = append(items, assigned_ip)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -291,14 +318,16 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 	return items, nil
 }
 
-const lockUserDeviceCreation = `-- name: LockUserDeviceCreation :exec
+const lockDeviceKey = `-- name: LockDeviceKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
 
-// lint:cross-org — a transaction-scoped advisory lock keyed on the user, so the
-// per-user device-cap check-and-insert is atomic against concurrent creates.
-func (q *Queries) LockUserDeviceCreation(ctx context.Context, dollar_1 string) error {
-	_, err := q.db.Exec(ctx, lockUserDeviceCreation, dollar_1)
+// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
+// user id or node id, passed as text). Create takes BOTH (in sorted order, so
+// no deadlock) to make the per-user cap check AND the per-node IP allocation
+// atomic against concurrent creates.
+func (q *Queries) LockDeviceKey(ctx context.Context, dollar_1 string) error {
+	_, err := q.db.Exec(ctx, lockDeviceKey, dollar_1)
 	return err
 }
 

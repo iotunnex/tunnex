@@ -87,12 +87,15 @@ func main() {
 		logger.Error("agent_wg_key_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	// Report the WG public key to the control plane, retrying until it lands. A
-	// one-shot best-effort call could leave the control plane without our key
-	// (transient boot-time error) while the agent still went ready — a silent
-	// data-plane hole. Readiness is gated on keyReported below, so we never
-	// advertise ready until the control plane actually holds our key.
-	go reportKeyLoop(ctx, client, wgPub, &keyReported, logger)
+	// Report the WG public key + public endpoint to the control plane, retrying
+	// until it lands. A one-shot best-effort call could leave the control plane
+	// without our key (transient boot-time error) while the agent still went
+	// ready — a silent data-plane hole. Readiness is gated on keyReported below,
+	// so we never advertise ready until the control plane actually holds our key.
+	// The endpoint (host:port peer configs dial) is operator-provided; it cannot
+	// be discovered from inside the container.
+	wgEndpoint := os.Getenv("TUNNEX_NODE_ENDPOINT")
+	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &keyReported, logger)
 
 	// Backend selection: "wgctrl" drives a real WireGuard device (Linux + NET_ADMIN,
 	// used in compose/prod); anything else uses the in-memory backend (dev/CI).
@@ -104,7 +107,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("agent_backend_selected", slog.String("backend", wgBackend), slog.String("interface", wgIface))
-	r := reconcile.New(backend, wgPriv, logger)
+	r := reconcile.New(backend, wgPriv, wgPub, logger)
 
 	// Renew the cert at half-life (default 24h; the cert lives 48h) and hot-swap
 	// it. Persist the rotated cert so a restart uses the current one. If renewal
@@ -216,11 +219,11 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 // with backoff until it succeeds (then sets reported and returns). The report is
 // idempotent server-side, so retrying is safe. Until it succeeds the agent stays
 // not-ready, so no orchestrator routes to a node the control plane can't peer.
-func reportKeyLoop(ctx context.Context, client *control.Client, pubKey string, reported *atomic.Bool, logger *slog.Logger) {
+func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, reported *atomic.Bool, logger *slog.Logger) {
 	const maxBackoff = 30 * time.Second
 	backoff := time.Second
 	for {
-		if err := client.ReportKey(ctx, pubKey); err != nil {
+		if err := client.ReportInfo(ctx, pubKey, endpoint); err != nil {
 			logger.Warn("agent_report_key_failed", slog.String("error", err.Error()))
 			if !sleepCtx(ctx, backoff) {
 				return

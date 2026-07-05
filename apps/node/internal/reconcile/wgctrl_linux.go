@@ -45,33 +45,34 @@ func (b *wgctrlBackend) Configure(ctx context.Context, cfg InterfaceConfig) erro
 	if err := b.ensureDevice(ctx); err != nil {
 		return err
 	}
-	curPriv, curPort := b.currentWGInterface(ctx)
+	curPub, curPort := b.currentWGInterface(ctx)
 
-	// Build a single `wg set` with only the fields that changed.
-	args := []string{"set", b.iface}
-	var keyFileName string
-	if cfg.PrivateKey != "" && cfg.PrivateKey != curPriv {
-		f, err := os.CreateTemp("", "wgkey")
+	// (Re)set the private key only when the interface's PUBLIC key doesn't already
+	// match ours. Comparing public keys is clamp-invariant: WireGuard clamps the
+	// stored private key, so the raw private bytes always differ, but the public
+	// key is stable — so this fires exactly once (or on a real re-key), never on
+	// every reconcile. Done as its own `wg set` so it can't disturb the port.
+	if cfg.PrivateKey != "" && (cfg.PublicKey == "" || cfg.PublicKey != curPub) {
+		keyFile, err := os.CreateTemp("", "wgkey")
 		if err != nil {
 			return err
 		}
-		keyFileName = f.Name()
-		defer os.Remove(keyFileName)
-		_ = os.Chmod(keyFileName, 0o600)
-		if _, err := f.WriteString(cfg.PrivateKey); err != nil {
-			_ = f.Close()
+		defer os.Remove(keyFile.Name())
+		_ = os.Chmod(keyFile.Name(), 0o600)
+		if _, err := keyFile.WriteString(cfg.PrivateKey); err != nil {
+			_ = keyFile.Close()
 			return err
 		}
-		_ = f.Close()
-		args = append(args, "private-key", keyFileName)
+		_ = keyFile.Close()
+		if _, err := run(ctx, "wg", "set", b.iface, "private-key", keyFile.Name()); err != nil {
+			return err
+		}
 	}
-	// A zero listen-port would make wg pick a RANDOM port; refuse it rather than
-	// silently move off the published UDP port.
+	// Set the listen port only when it differs — re-setting it to the current
+	// value fails with "Address in use". A zero desired port would make wg pick a
+	// random port, so refuse it.
 	if cfg.ListenPort > 0 && cfg.ListenPort != curPort {
-		args = append(args, "listen-port", strconv.Itoa(cfg.ListenPort))
-	}
-	if len(args) > 2 {
-		if _, err := run(ctx, "wg", args...); err != nil {
+		if _, err := run(ctx, "wg", "set", b.iface, "listen-port", strconv.Itoa(cfg.ListenPort)); err != nil {
 			return err
 		}
 	}
@@ -102,28 +103,39 @@ func (b *wgctrlBackend) ensureDevice(ctx context.Context) error {
 	return fmt.Errorf("cannot create wg device %q: kernel WireGuard module unavailable and no wireguard-go binary (need NET_ADMIN + WG kernel module or wireguard-go)", b.iface)
 }
 
-// currentWGInterface returns the interface's current private key and listen port
+// currentWGInterface returns the interface's current PUBLIC key and listen port
 // from `wg show <iface> dump` (line 0: private-key, public-key, listen-port,
-// fwmark). Returns ("", 0) if unreadable.
-func (b *wgctrlBackend) currentWGInterface(ctx context.Context) (privKey string, listenPort int) {
+// fwmark). The public key is used for the clamp-safe key-set check. Returns
+// ("", 0) if unreadable.
+func (b *wgctrlBackend) currentWGInterface(ctx context.Context) (pubKey string, listenPort int) {
 	out, err := run(ctx, "wg", "show", b.iface, "dump")
 	if err != nil {
 		return "", 0
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) == 0 {
+	return parseWGInterface(out)
+}
+
+// parseWGInterface parses the interface (first) line of `wg show <iface> dump`
+// (private-key, PUBLIC-key, listen-port, fwmark), returning the public key and
+// port. We compare the PUBLIC key (field 1), not the private key (field 0):
+// WireGuard clamps the stored private key, so its raw bytes differ from what the
+// agent generated, but the derived public key is stable. Returns ("", 0) if the
+// line is malformed or the interface has no key yet ("(none)").
+func parseWGInterface(dump string) (pubKey string, listenPort int) {
+	lines := strings.Split(strings.TrimSpace(dump), "\n")
+	if len(lines) == 0 || lines[0] == "" {
 		return "", 0
 	}
 	f := strings.Split(lines[0], "\t")
 	if len(f) < 3 {
 		return "", 0
 	}
-	priv := f[0]
-	if priv == "(none)" {
-		priv = ""
+	pub := f[1]
+	if pub == "(none)" {
+		pub = ""
 	}
 	port, _ := strconv.Atoi(f[2])
-	return priv, port
+	return pub, port
 }
 
 // hasAddress reports whether addr (e.g. "10.99.0.1/32") is already on the device.
