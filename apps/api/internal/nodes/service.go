@@ -265,7 +265,12 @@ func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []Peer
 	}
 	// Reject an implausibly-future handshake (bogus counter / bad clock): stored
 	// verbatim it would make time.Since() negative and pin the device "online"
-	// forever. A small skew tolerance is allowed.
+	// forever. A small skew tolerance is allowed. This is the SINGLE enforcement
+	// point of the "handshake is never in the future" data invariant that every
+	// online reader relies on (see tenancy.OnlineWindow) — hence the regression
+	// test in status_test.go. A dropped future report degrades in the HONEST
+	// direction: it nulls a previously-valid handshake (fake-offline is a
+	// tolerable degradation; fake-online would be a lie).
 	maxHS := time.Now().Add(2 * time.Minute).Unix()
 	params := make([]sqlc.UpsertDeviceStatusParams, 0, len(stats))
 	for _, st := range stats {
