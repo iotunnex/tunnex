@@ -35,17 +35,18 @@ This plan defines **every story** up front. We then build **one story at a time*
 ---
 
 ## Story status (re-entry checkpoint)
-Current: **S3.2 (WireGuard server lifecycle)** on branch `story/S3.2-wireguard-lifecycle`.
-Renewal fold-in committed (`8048371`): agent renews cert at half-life + atomic hot-swap
-(`CloseIdleConnections` after swap) + expiry⇒fresh-token rule; tested.
-Locked decisions: **node-generates** the WG key (private never leaves node; control plane
-stores pubkeys only), vestigial S0.3 WG server key removed, real wgctrl adapter idempotent
-vs a dirty device, explicit MTU, interface address = deterministic first-of-pool (S3.5 owns
-the allocator), compose e2e must prove a real WG device via `wg show`.
-Remaining: real wgctrl adapter (replace MemBackend), node keygen + pubkey reporting + re-key
-flow, failure-shape negatives (port bound / name collision / NET_ADMIN missing → readiness
-false, diagnosable), `wg show` e2e.
-Done through: EPIC 0–2 complete; S3.1 (node-agent keystone) merged.
+**Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
+Current: **S4.5b (CIDR resize)** on branch `story/S4.5b-cidr-resize` — 6 commits, design phase
+CLOSED, **the concurrent-race harness is the next build (red run first)**. Full remaining plan +
+all race-harness facts (primitive = `pg_advisory_xact_lock`, connection pinning, deterministic
+red, outcome-shaped green, lock-then-read confirmed) live in project memory (tunnex-s4-decisions).
+Deferred (do not lose): the fresh-user ONBOARDING gap (no org on signup, no gateway-enroll UI) —
+address after EPIC 4.
+Done through (merged to `main`): **EPIC 0–2 complete; EPIC 3 complete (S3.1–S3.6); EPIC 4 S4.1
+(shell/design) · S4.2 (auth screens) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org
+settings + SSO config UI) all merged.** Remaining in EPIC 4: S4.5b (in progress), then S4.6
+(audit-log viewer) closes the epic. If this pointer disagrees with the handoff doc / git log,
+TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
