@@ -115,14 +115,15 @@ func ssoErrorCode(err error) string {
 }
 
 // SetSsoConfig implements PUT /api/v1/organizations/{orgId}/sso/{provider}.
-// authorize runs first so a sessionless request is 401 (keeps the spec 401-walk
-// honest); the edition gate applies to authenticated callers on the open build.
+// authorize runs FIRST so a sessionless request is 401 before any body check
+// (keeps the spec 401-walk honest and doesn't leak route existence); the edition
+// gate applies to authenticated callers on the open build.
 func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequestObject) (api.SetSsoConfigResponseObject, error) {
-	if req.Body == nil {
-		return nil, apierr.BadRequest("invalid_request", "request body is required")
-	}
 	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
 		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	if s.sso == nil {
 		return nil, editionRequired()

@@ -93,6 +93,12 @@ func TestConfigSealAndDecryptAfterRestart(t *testing.T) {
 	if contains(meta, string(sealedBytes)) {
 		t.Fatal("audit metadata contains the sealed secret bytes")
 	}
+	// Positive check: the non-secret client_id IS present, so a regression that
+	// drops the metadata entirely (which would trivially pass the no-secret
+	// checks above) is still caught.
+	if !contains(meta, "client-id-123") {
+		t.Fatal("audit metadata missing the expected non-secret client_id")
+	}
 
 	// The stored bytes must NOT contain the plaintext.
 	var stored []byte
