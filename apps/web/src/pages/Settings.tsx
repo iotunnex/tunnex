@@ -146,25 +146,30 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function load() {
+  // load fetches the current (non-secret) config. sso_not_configured (404) is the
+  // normal "no config yet" state, not an error. Guarded against setState after
+  // unmount via the cancelled flag the caller passes.
+  async function load(isCancelled: () => boolean) {
     const { data, error } = await api.GET("/api/v1/organizations/{orgId}/sso/{provider}", {
       params: { path: { orgId, provider } },
     });
-    if (error) {
-      // sso_not_configured (404) is the normal "no config yet" state, not an error.
+    if (isCancelled()) return;
+    if (error || !data) {
       setConfigured(false);
       return;
     }
-    if (data) {
-      setView(data);
-      setConfigured(true);
-      setClientId(data.client_id);
-      setEnabled(data.enabled);
-      setTenantId(data.tenant_id ?? "");
-    }
+    setView(data);
+    setConfigured(true);
+    setClientId(data.client_id);
+    setEnabled(data.enabled);
+    setTenantId(data.tenant_id ?? "");
   }
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void load(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, provider]);
 
@@ -182,7 +187,7 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
     if (error) return setErr(apiErrorMessage(error, "Could not save the SSO config."));
     setClientSecret(""); // never keep the secret in page state after save
     setSaved(true);
-    await load(); // pick up the new fingerprint
+    await load(() => false); // refresh to pick up the new fingerprint
   }
 
   return (
