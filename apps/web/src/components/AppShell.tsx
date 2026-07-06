@@ -11,7 +11,7 @@ import { HealthStatus } from "./HealthStatus";
 const NAV = [
   { to: "/dashboard", label: "Dashboard", enabled: true },
   { to: "/devices", label: "Devices", enabled: true },
-  { to: "/users", label: "Users", enabled: false },
+  { to: "/users", label: "Users", enabled: true },
   { to: "/settings", label: "Settings", enabled: false },
   { to: "/audit", label: "Audit log", enabled: false },
 ];

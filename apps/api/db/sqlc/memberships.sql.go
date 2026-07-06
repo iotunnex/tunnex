@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -146,6 +147,57 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) (
 			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgMembersWithUser = `-- name: ListOrgMembersWithUser :many
+SELECT m.user_id, m.role, m.created_at AS joined_at,
+       u.email, u.name, u.status, (u.email_verified_at IS NOT NULL)::boolean AS email_verified
+FROM memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.org_id = $1 AND u.deleted_at IS NULL
+ORDER BY m.created_at
+`
+
+type ListOrgMembersWithUserRow struct {
+	UserID        uuid.UUID `json:"user_id"`
+	Role          string    `json:"role"`
+	JoinedAt      time.Time `json:"joined_at"`
+	Email         string    `json:"email"`
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	EmailVerified bool      `json:"email_verified"`
+}
+
+// The org roster for the Users page: membership joined to the user record so the
+// UI has name/email/status/verified in one query. Soft-deleted users are
+// excluded (their membership row survives a soft-delete); deactivated members
+// stay on the roster (status carries that).
+func (q *Queries) ListOrgMembersWithUser(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersWithUserRow, error) {
+	rows, err := q.db.Query(ctx, listOrgMembersWithUser, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOrgMembersWithUserRow{}
+	for rows.Next() {
+		var i ListOrgMembersWithUserRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Role,
+			&i.JoinedAt,
+			&i.Email,
+			&i.Name,
+			&i.Status,
+			&i.EmailVerified,
 		); err != nil {
 			return nil, err
 		}

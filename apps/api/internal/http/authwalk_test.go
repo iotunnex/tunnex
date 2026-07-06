@@ -26,6 +26,7 @@ var walkBodies = map[string]string{
 	"createdomainclaim":  `{"domain":"walk.example.com"}`,
 	"verifydomainclaim":  `{"domain":"walk.example.com"}`,
 	"createinvitation":   `{"email":"walk@example.com","role":"member"}`,
+	"changememberrole":   `{"role":"member"}`,
 	"resendinvitation":   `{"email":"walk@example.com"}`,
 	"revokeinvitation":   `{"email":"walk@example.com"}`,
 	"issuejointoken":     `{"node_name":"walk-node"}`,

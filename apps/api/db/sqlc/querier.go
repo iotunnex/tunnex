@@ -112,6 +112,11 @@ type Querier interface {
 	// devices may span orgs and all affected nodes must be nudged to reconcile.
 	ListNodeIDsForUserActiveDevices(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
+	// The org roster for the Users page: membership joined to the user record so the
+	// UI has name/email/status/verified in one query. Soft-deleted users are
+	// excluded (their membership row survives a soft-delete); deactivated members
+	// stay on the roster (status carries that).
+	ListOrgMembersWithUser(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersWithUserRow, error)
 	// Admin/system listing of all orgs; user-facing listing uses
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)

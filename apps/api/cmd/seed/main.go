@@ -115,6 +115,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A second member (plain 'member' role) so the roster is populated and the
+	// role-gated Users UI is testable. Verified + password-set so it can log in.
+	// Seeded via idempotent upserts (no audit rows — keeps the dashboard's
+	// "No activity yet" empty state intact).
+	memberID := uuid.MustParse(seeddata.DemoMemberUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: memberID, Email: seeddata.DemoMemberEmail, Name: seeddata.DemoMemberName,
+	}); err != nil {
+		logger.Error("seed_member_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := q.MarkEmailVerified(ctx, memberID); err != nil {
+		logger.Error("seed_member_verify_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	mphc, err := password.Hash(seeddata.DemoMemberPassword)
+	if err != nil {
+		logger.Error("seed_member_hash_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: memberID, PasswordHash: &mphc}); err != nil {
+		logger.Error("seed_member_password_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{
+		OrgID: orgID, UserID: memberID, Role: "member",
+	}); err != nil {
+		logger.Error("seed_member_membership_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_complete",
 		slog.String("demo_org_id", seeddata.DemoOrgID),
 		slog.String("demo_owner_email", seeddata.DemoOwnerEmail),

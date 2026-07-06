@@ -28,9 +28,25 @@ test("dashboard renders real counts for the seeded org", async ({ page }) => {
 
 test("a fresh org shows the empty-state onboarding funnel", async ({ page }) => {
   await login(page);
-  // No gateway is enrolled in the seed, so the onboarding call-to-enroll shows
-  // and the activity feed reads empty rather than fabricating entries.
+  // No gateway is enrolled in the seed, so the onboarding call-to-enroll shows.
+  // This is the durable empty-state: nothing in the test suite ever enrolls a
+  // real node. (We deliberately do NOT assert "No activity yet" here — audit
+  // activity legitimately accumulates as other tests invite/change roles, and
+  // audit_logs is append-only. The empty activity RENDER is covered
+  // deterministically below with a mocked overview.)
   await expect(page.getByText("No gateway enrolled yet.")).toBeVisible();
+});
+
+test("the activity feed renders an explicit empty state (mocked)", async ({ page }) => {
+  // Deterministic empty-activity render, independent of accumulated audit rows.
+  await page.route("**/api/v1/organizations/*/overview", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ members: 1, devices: 0, nodes: 0, online: 0, recent_activity: [] }),
+    }),
+  );
+  await login(page);
   await expect(page.getByText("No activity yet.")).toBeVisible();
 });
 

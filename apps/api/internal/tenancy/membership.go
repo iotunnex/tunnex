@@ -133,6 +133,13 @@ func (s *MembershipService) ListMembers(ctx context.Context, orgID uuid.UUID) ([
 	return s.q.ListMembershipsByOrg(ctx, orgID)
 }
 
+// ListMembersWithUser returns the org roster enriched with user fields
+// (name/email/status/verified) for the Users page. Org-scoped; excludes
+// soft-deleted users, keeps deactivated members (status carries that).
+func (s *MembershipService) ListMembersWithUser(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListOrgMembersWithUserRow, error) {
+	return s.q.ListOrgMembersWithUser(ctx, orgID)
+}
+
 // GetMember returns a membership scoped to (orgID, userID), or a typed not-found
 // error. Because the lookup is org-scoped, a user in another org reads as
 // not-found — no cross-tenant existence leak.

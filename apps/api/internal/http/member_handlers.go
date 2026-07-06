@@ -4,12 +4,66 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5/middleware"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
+
+// ListMembers GET /api/v1/organizations/{orgId}/members — the org roster
+// (incl. deactivated members). Any member may list (PermMemberList).
+func (s apiServer) ListMembers(ctx context.Context, req api.ListMembersRequestObject) (api.ListMembersResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMemberList); err != nil {
+		return nil, err
+	}
+	rows, err := s.members.ListMembersWithUser(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.Member, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toAPIMember(r))
+	}
+	return api.ListMembers200JSONResponse{
+		Body:    out,
+		Headers: api.ListMembers200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+func toAPIMember(r sqlc.ListOrgMembersWithUserRow) api.Member {
+	return api.Member{
+		UserId:        r.UserID,
+		Email:         openapi_types.Email(r.Email),
+		Name:          r.Name,
+		Role:          api.MemberRole(r.Role),
+		Status:        api.MemberStatus(r.Status),
+		EmailVerified: r.EmailVerified,
+		JoinedAt:      r.JoinedAt,
+	}
+}
+
+// ChangeMemberRole PUT /api/v1/organizations/{orgId}/members/{userId}/role.
+// Gated on PermMemberManage; the service applies the RBAC relational rules
+// (only an owner manages/creates owners) and the last-owner invariant.
+func (s apiServer) ChangeMemberRole(ctx context.Context, req api.ChangeMemberRoleRequestObject) (api.ChangeMemberRoleResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMemberManage); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	actorRole, _ := p.RoleIn(req.OrgId)
+	if _, err := s.members.ChangeMemberRole(ctx, &p.UserID, actorRole, req.OrgId, req.UserId, string(req.Body.Role)); err != nil {
+		return nil, err
+	}
+	return api.ChangeMemberRole204Response{
+		Headers: api.ChangeMemberRole204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
 
 // CreateInvitation POST /api/v1/organizations/{orgId}/invitations.
 func (s apiServer) CreateInvitation(ctx context.Context, req api.CreateInvitationRequestObject) (api.CreateInvitationResponseObject, error) {

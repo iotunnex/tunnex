@@ -21,4 +21,15 @@ const (
 	DemoOwnerName = "Demo Owner"
 	// DemoOwnerPassword is the demo owner's password (development only).
 	DemoOwnerPassword = "tunnex-demo-password"
+
+	// DemoMemberUserID is a second seeded user with the plain 'member' role, so
+	// the Users roster is populated and the role-gated UI (owner sees controls,
+	// member does not) is exercisable end-to-end.
+	DemoMemberUserID = "01900000-0000-7000-8000-000000000003"
+	// DemoMemberEmail is the demo member's login email.
+	DemoMemberEmail = "member@demo.tunnex.local"
+	// DemoMemberName is the demo member's display name.
+	DemoMemberName = "Demo Member"
+	// DemoMemberPassword is the demo member's password (development only).
+	DemoMemberPassword = "tunnex-demo-password"
 )

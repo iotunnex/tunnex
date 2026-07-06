@@ -454,6 +454,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List the organization's members (roster incl. deactivated) */
+        get: operations["listMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/members/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Change a member's role (RBAC-gated; refuses demoting the last owner) */
+        put: operations["changeMemberRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/members/{userId}/deactivate": {
         parameters: {
             query?: never;
@@ -697,6 +736,24 @@ export interface components {
         InviteRequest: {
             /** Format: email */
             email: string;
+            /** @enum {string} */
+            role: "owner" | "admin" | "member";
+        };
+        Member: {
+            /** Format: uuid */
+            user_id: string;
+            /** Format: email */
+            email: string;
+            name: string;
+            /** @enum {string} */
+            role: "owner" | "admin" | "member";
+            /** @enum {string} */
+            status: "active" | "deactivated";
+            email_verified: boolean;
+            /** Format: date-time */
+            joined_at: string;
+        };
+        ChangeRoleRequest: {
             /** @enum {string} */
             role: "owner" | "admin" | "member";
         };
@@ -1439,6 +1496,57 @@ export interface operations {
         };
         responses: {
             /** @description Revoked. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The members. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    changeMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Role changed. (Client refetches the roster.) */
             204: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];

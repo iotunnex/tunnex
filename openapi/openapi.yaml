@@ -518,6 +518,52 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/members:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listMembers
+      summary: List the organization's members (roster incl. deactivated)
+      tags: [members]
+      responses:
+        "200":
+          description: The members.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Member" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/members/{userId}/role:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: changeMemberRole
+      summary: Change a member's role (RBAC-gated; refuses demoting the last owner)
+      tags: [members]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeRoleRequest" }
+      responses:
+        "204":
+          description: Role changed. (Client refetches the roster.)
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/members/{userId}/deactivate:
     parameters:
       - name: orgId
@@ -904,6 +950,27 @@ components:
       additionalProperties: false
       properties:
         email: { type: string, format: email, maxLength: 320 }
+        role: { type: string, enum: [owner, admin, member] }
+
+    Member:
+      type: object
+      required: [user_id, email, name, role, status, email_verified, joined_at]
+      additionalProperties: false
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { type: string, enum: [owner, admin, member] }
+        # Account status — a deactivated member stays on the roster (S2.6).
+        status: { type: string, enum: [active, deactivated] }
+        email_verified: { type: boolean }
+        joined_at: { type: string, format: date-time }
+
+    ChangeRoleRequest:
+      type: object
+      required: [role]
+      additionalProperties: false
+      properties:
         role: { type: string, enum: [owner, admin, member] }
 
     EmailRequest:
