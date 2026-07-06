@@ -9,8 +9,11 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,9 +22,14 @@ import (
 // KeySize is the master-key length for AES-256.
 const KeySize = 32
 
+// fingerprintLabel domain-separates the fingerprint subkey from the AEAD key
+// (derived from the same master key) so the two primitives never share bytes.
+const fingerprintLabel = "tunnex-fingerprint-v1"
+
 // Sealer encrypts and decrypts values under a fixed master key.
 type Sealer struct {
-	aead cipher.AEAD
+	aead  cipher.AEAD
+	fpKey []byte // HMAC subkey for Fingerprint (derived from the master key)
 }
 
 // NewSealer builds a Sealer from a 32-byte master key.
@@ -37,7 +45,24 @@ func NewSealer(key []byte) (*Sealer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Sealer{aead: aead}, nil
+	// Derive a distinct HMAC key for fingerprints from the master key.
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(fingerprintLabel))
+	return &Sealer{aead: aead, fpKey: mac.Sum(nil)}, nil
+}
+
+// Fingerprint returns a short, KEYED proof-of-a-secret: the first 12 hex chars
+// of HMAC-SHA256(subkey, plaintext). It is safe to store unsealed and return in
+// API responses — being keyed (not a bare hash), it is NOT an offline-guessing
+// oracle against the plaintext, so it holds even for low-entropy inputs. Use it
+// to prove "the stored secret is the one you pasted" (compare the fingerprint
+// returned at write time against a later GET) WITHOUT ever revealing the secret.
+// This is the codebase's proof-of-secret convention (reuse it for API keys /
+// webhook secrets); never display or store a bare hash of a secret instead.
+func (s *Sealer) Fingerprint(plaintext []byte) string {
+	mac := hmac.New(sha256.New, s.fpKey)
+	mac.Write(plaintext)
+	return hex.EncodeToString(mac.Sum(nil))[:12]
 }
 
 // Seal encrypts plaintext and returns base64(nonce || ciphertext || tag).

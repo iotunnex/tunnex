@@ -5,6 +5,7 @@ package sso
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -57,10 +58,49 @@ func (c *ConfigService) Set(ctx context.Context, orgID uuid.UUID, provider, clie
 		Provider:           provider,
 		ClientID:           clientID,
 		ClientSecretSealed: []byte(sealed),
-		TenantID:           tid,
-		Enabled:            enabled,
+		// Keyed proof-of-secret stored alongside the sealed value so the settings
+		// UI can show it without ever unsealing the secret (S4.5).
+		SecretFingerprint: c.sealer.Fingerprint([]byte(clientSecret)),
+		TenantID:          tid,
+		Enabled:           enabled,
 	})
 	return err
+}
+
+// ConfigView is the non-secret projection of a provider config for display.
+// It deliberately carries NO client secret (sealed or plaintext) — only the
+// keyed fingerprint that proves which secret is stored.
+type ConfigView struct {
+	Provider          string
+	ClientID          string
+	TenantID          string
+	SecretFingerprint string
+	Enabled           bool
+	UpdatedAt         time.Time
+}
+
+// View returns the display projection for (org, provider) WITHOUT decrypting the
+// secret — the secret never leaves the seal on a read path.
+func (c *ConfigService) View(ctx context.Context, orgID uuid.UUID, provider string) (ConfigView, error) {
+	row, err := c.q.GetSSOConfig(ctx, sqlc.GetSSOConfigParams{OrgID: orgID, Provider: provider})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ConfigView{}, apierr.NotFound("sso_not_configured", "SSO is not configured for this provider")
+	}
+	if err != nil {
+		return ConfigView{}, err
+	}
+	tenantID := ""
+	if row.TenantID != nil {
+		tenantID = *row.TenantID
+	}
+	return ConfigView{
+		Provider:          row.Provider,
+		ClientID:          row.ClientID,
+		TenantID:          tenantID,
+		SecretFingerprint: row.SecretFingerprint,
+		Enabled:           row.Enabled,
+		UpdatedAt:         row.UpdatedAt,
+	}, nil
 }
 
 // Get returns the decrypted config for (org, provider).

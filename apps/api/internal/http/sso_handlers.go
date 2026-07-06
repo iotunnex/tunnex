@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -21,8 +22,20 @@ type ssoPort interface {
 	StartLogin(ctx context.Context, orgSlug, provider string) (redirectURL string, err error)
 	HandleCallback(ctx context.Context, provider, code, state string) (userID uuid.UUID, err error)
 	SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
+	ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error)
 	CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (txtRecord string, err error)
 	VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error
+}
+
+// SSOConfigView is the non-secret projection returned by the read endpoint. It
+// carries the keyed fingerprint but NEVER the client secret (sealed or plain).
+type SSOConfigView struct {
+	Provider          string
+	ClientID          string
+	TenantID          string
+	SecretFingerprint string
+	Enabled           bool
+	UpdatedAt         time.Time
 }
 
 func editionRequired() error {
@@ -123,6 +136,37 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 	}
 	return api.SetSsoConfig204Response{
 		Headers: api.SetSsoConfig204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// GetSsoConfig implements GET /api/v1/organizations/{orgId}/sso/{provider}. It
+// returns the NON-SECRET view (keyed fingerprint, never the secret — the field
+// doesn't exist in the response type). 401 first (keeps the spec 401-walk
+// honest), then the edition gate on the open build (403 edition_required).
+func (s apiServer) GetSsoConfig(ctx context.Context, req api.GetSsoConfigRequestObject) (api.GetSsoConfigResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	if s.sso == nil {
+		return nil, editionRequired()
+	}
+	v, err := s.sso.ViewConfig(ctx, req.OrgId, string(req.Provider))
+	if err != nil {
+		return nil, err
+	}
+	body := api.SsoConfigView{
+		Provider:          api.SsoConfigViewProvider(v.Provider),
+		ClientId:          v.ClientID,
+		Enabled:           v.Enabled,
+		SecretFingerprint: v.SecretFingerprint,
+		UpdatedAt:         v.UpdatedAt,
+	}
+	if v.TenantID != "" {
+		body.TenantId = &v.TenantID
+	}
+	return api.GetSsoConfig200JSONResponse{
+		Body:    body,
+		Headers: api.GetSsoConfig200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
 

@@ -9,8 +9,27 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
+
+// TestGetSsoConfigEditionGatedInOpenBuild proves the SSO-config READ endpoint is
+// edition-enforced SERVER-side in the open build (not merely hidden in the UI):
+// an authenticated, authorized owner still gets 403 edition_required because the
+// SSO port is nil. authorize() runs first (so a sessionless request 401s — the
+// spec walk stays honest); the edition gate fires for authenticated callers.
+func TestGetSsoConfigEditionGatedInOpenBuild(t *testing.T) {
+	s := apiServer{} // open build: sso port is nil
+	org := uuid.New()
+	ctx := principalWithRole(org, rbac.RoleOwner) // authed + verified owner
+	_, err := s.GetSsoConfig(ctx, api.GetSsoConfigRequestObject{OrgId: org, Provider: "google"})
+	if !hasCode(err, 403, "edition_required") {
+		t.Fatalf("open-build GetSsoConfig: want 403 edition_required, got %v", err)
+	}
+}
 
 // Open build: SSO is not wired, and the SSO endpoints return the edition_required
 // envelope (not a missing route or a crash).

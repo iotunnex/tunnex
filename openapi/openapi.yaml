@@ -256,6 +256,18 @@ paths:
         in: path
         required: true
         schema: { type: string, enum: [google, microsoft] }
+    get:
+      operationId: getSsoConfig
+      summary: Read an SSO provider's config (enterprise) — never returns the secret
+      tags: [sso]
+      responses:
+        "200":
+          description: The provider config (no secret material — only a keyed fingerprint).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SsoConfigView" }
+        default: { $ref: "#/components/responses/Error" }
     put:
       operationId: setSsoConfig
       summary: Configure an SSO provider for an organization (enterprise)
@@ -1024,6 +1036,21 @@ components:
           maxLength: 200
           description: Required for Microsoft (the org's Entra tenant ID); unused by Google.
         enabled: { type: boolean }
+
+    # Read projection of an SSO config. WRITE-ONLY SECRET: there is deliberately
+    # NO client_secret field here — the secret is never returned. secret_fingerprint
+    # is a keyed HMAC (safe to expose) that proves which secret is stored.
+    SsoConfigView:
+      type: object
+      required: [provider, client_id, enabled, secret_fingerprint, updated_at]
+      additionalProperties: false
+      properties:
+        provider: { type: string, enum: [google, microsoft] }
+        client_id: { type: string }
+        tenant_id: { type: string }
+        enabled: { type: boolean }
+        secret_fingerprint: { type: string }
+        updated_at: { type: string, format: date-time }
 
     AuthUser:
       type: object

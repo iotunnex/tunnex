@@ -85,6 +85,21 @@ func TestConfigSealAndDecryptAfterRestart(t *testing.T) {
 		t.Fatalf("decrypted secret = %q, want %q", got.ClientSecret, secret)
 	}
 
+	// View is the display projection: it carries the KEYED fingerprint (matching
+	// an independent HMAC of the same secret) and — structurally — no secret at
+	// all (ConfigView has no secret field). This is what the settings GET returns.
+	view, err := reader.View(ctx, org, "google")
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	wantFP := newSealer(t, masterKey).Fingerprint([]byte(secret))
+	if wantFP == "" || view.SecretFingerprint != wantFP {
+		t.Fatalf("view fingerprint = %q, want %q (keyed HMAC of the stored secret)", view.SecretFingerprint, wantFP)
+	}
+	if view.ClientID != "client-id-123" || !view.Enabled {
+		t.Fatalf("view = %+v, want client-id-123 + enabled", view)
+	}
+
 	// A DIFFERENT key cannot decrypt it.
 	otherKey := make([]byte, crypto.KeySize)
 	_, _ = rand.Read(otherKey)

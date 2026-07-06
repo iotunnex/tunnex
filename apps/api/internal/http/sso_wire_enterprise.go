@@ -50,6 +50,21 @@ func (a *ssoAdapter) SetConfig(ctx context.Context, orgID uuid.UUID, provider, c
 	return a.svc.Configs().Set(ctx, orgID, provider, clientID, clientSecret, tenantID, enabled)
 }
 
+func (a *ssoAdapter) ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error) {
+	v, err := a.svc.Configs().View(ctx, orgID, provider)
+	if err != nil {
+		return SSOConfigView{}, err
+	}
+	return SSOConfigView{
+		Provider:          v.Provider,
+		ClientID:          v.ClientID,
+		TenantID:          v.TenantID,
+		SecretFingerprint: v.SecretFingerprint,
+		Enabled:           v.Enabled,
+		UpdatedAt:         v.UpdatedAt,
+	}, nil
+}
+
 func (a *ssoAdapter) CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (string, error) {
 	return a.svc.Domains().CreateClaim(ctx, actor, actorEmail, actorVerified, orgID, domain)
 }

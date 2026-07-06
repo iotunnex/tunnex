@@ -12,7 +12,7 @@ import (
 )
 
 const getEnabledSSOConfigByProvider = `-- name: GetEnabledSSOConfigByProvider :one
-SELECT id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id FROM sso_configs
+SELECT id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id, secret_fingerprint FROM sso_configs
 WHERE provider = $1 AND client_id = $2 AND enabled = true
 `
 
@@ -36,12 +36,13 @@ func (q *Queries) GetEnabledSSOConfigByProvider(ctx context.Context, arg GetEnab
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TenantID,
+		&i.SecretFingerprint,
 	)
 	return i, err
 }
 
 const getSSOConfig = `-- name: GetSSOConfig :one
-SELECT id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id FROM sso_configs
+SELECT id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id, secret_fingerprint FROM sso_configs
 WHERE org_id = $1 AND provider = $2
 `
 
@@ -63,19 +64,21 @@ func (q *Queries) GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (Sso
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TenantID,
+		&i.SecretFingerprint,
 	)
 	return i, err
 }
 
 const upsertSSOConfig = `-- name: UpsertSSOConfig :one
-INSERT INTO sso_configs (org_id, provider, client_id, client_secret_sealed, tenant_id, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO sso_configs (org_id, provider, client_id, client_secret_sealed, secret_fingerprint, tenant_id, enabled)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (org_id, provider) DO UPDATE
     SET client_id = EXCLUDED.client_id,
         client_secret_sealed = EXCLUDED.client_secret_sealed,
+        secret_fingerprint = EXCLUDED.secret_fingerprint,
         tenant_id = EXCLUDED.tenant_id,
         enabled = EXCLUDED.enabled
-RETURNING id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id
+RETURNING id, org_id, provider, client_id, client_secret_sealed, enabled, created_at, updated_at, tenant_id, secret_fingerprint
 `
 
 type UpsertSSOConfigParams struct {
@@ -83,6 +86,7 @@ type UpsertSSOConfigParams struct {
 	Provider           string    `json:"provider"`
 	ClientID           string    `json:"client_id"`
 	ClientSecretSealed []byte    `json:"client_secret_sealed"`
+	SecretFingerprint  string    `json:"secret_fingerprint"`
 	TenantID           *string   `json:"tenant_id"`
 	Enabled            bool      `json:"enabled"`
 }
@@ -93,6 +97,7 @@ func (q *Queries) UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams
 		arg.Provider,
 		arg.ClientID,
 		arg.ClientSecretSealed,
+		arg.SecretFingerprint,
 		arg.TenantID,
 		arg.Enabled,
 	)
@@ -107,6 +112,7 @@ func (q *Queries) UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TenantID,
+		&i.SecretFingerprint,
 	)
 	return i, err
 }

@@ -236,7 +236,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /** Read an SSO provider's config (enterprise) — never returns the secret */
+        get: operations["getSsoConfig"];
         /** Configure an SSO provider for an organization (enterprise) */
         put: operations["setSsoConfig"];
         post?: never;
@@ -783,6 +784,16 @@ export interface components {
             tenant_id?: string;
             enabled: boolean;
         };
+        SsoConfigView: {
+            /** @enum {string} */
+            provider: "google" | "microsoft";
+            client_id: string;
+            tenant_id?: string;
+            enabled: boolean;
+            secret_fingerprint: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         AuthUser: {
             /** Format: uuid */
             id: string;
@@ -1167,6 +1178,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSsoConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "google" | "microsoft";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The provider config (no secret material — only a keyed fingerprint). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoConfigView"];
+                };
             };
             default: components["responses"]["Error"];
         };

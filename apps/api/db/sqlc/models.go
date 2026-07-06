@@ -146,6 +146,7 @@ type SsoConfig struct {
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	TenantID           *string   `json:"tenant_id"`
+	SecretFingerprint  string    `json:"secret_fingerprint"`
 }
 
 type User struct {

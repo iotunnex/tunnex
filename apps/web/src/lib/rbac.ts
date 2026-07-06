@@ -18,6 +18,12 @@ export function can(role: Role | undefined, perm: string): boolean {
   return role ? (grants[role]?.has(perm) ?? false) : false;
 }
 
+// NOTE: the drift guard covers the GRANT TABLE above (generated from Go) but NOT
+// the relational logic below — canManageMembership is control flow, not data, so
+// it can't be a fixture. It is the one surface still mirrored BY HAND; if you
+// change rbac.CanManageMembership in Go, change it here too (no build will catch
+// it). Keep the two in lockstep manually.
+//
 // canManageMembership mirrors rbac.CanManageMembership: the actor needs
 // member:manage, only an owner may manage another owner, and only an owner may
 // promote someone TO owner. newRole "" means removal/deactivation (no promotion).
