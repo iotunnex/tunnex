@@ -60,6 +60,13 @@ func Can(role string, p Permission) bool {
 // IsMutating reports whether a permission changes state. Mutating actions are
 // gated on a verified email (S2.2); read permissions are not.
 func IsMutating(p Permission) bool {
+	// Deliberately an ALLOWLIST OF READS: only the read permissions are
+	// non-mutating; everything else (including any future permission) is treated
+	// as mutating and therefore gated on a verified email. This is the
+	// fail-closed polarity — an unclassified new permission gets the gate by
+	// default, so the worst case is an unverified user 403ing on a read, never an
+	// unverified user slipping through a mutation. Do NOT invert this into a
+	// mutating-allowlist.
 	switch p {
 	case PermOrgView, PermMemberList:
 		return false
