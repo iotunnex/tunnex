@@ -128,7 +128,11 @@ func (s *MembershipService) withTx(ctx context.Context, fn func(*sqlc.Queries) e
 	return tx.Commit(ctx)
 }
 
-// ListMembers returns the memberships of a single org.
+// ListMembers returns the BARE membership rows of a single org (no user join,
+// no soft-delete filter). The Users UI uses ListMembersWithUser instead (roster
+// with name/email/status, soft-deleted excluded); this variant is retained for
+// the cross-tenant isolation test. Prefer ListMembersWithUser for anything
+// user-facing so soft-deleted users can't leak.
 func (s *MembershipService) ListMembers(ctx context.Context, orgID uuid.UUID) ([]sqlc.Membership, error) {
 	return s.q.ListMembershipsByOrg(ctx, orgID)
 }

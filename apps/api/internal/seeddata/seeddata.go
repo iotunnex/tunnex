@@ -32,4 +32,16 @@ const (
 	DemoMemberName = "Demo Member"
 	// DemoMemberPassword is the demo member's password (development only).
 	DemoMemberPassword = "tunnex-demo-password"
+
+	// DemoUnverifiedAdminUserID is an admin whose email is intentionally NOT
+	// verified, so the UI can prove it hides mutating controls (invite/role/
+	// deactivate) that the server would 403 with email_not_verified — a role
+	// grant is necessary but not sufficient.
+	DemoUnverifiedAdminUserID = "01900000-0000-7000-8000-000000000004"
+	// DemoUnverifiedAdminEmail is that admin's login email.
+	DemoUnverifiedAdminEmail = "unverified-admin@demo.tunnex.local"
+	// DemoUnverifiedAdminName is that admin's display name.
+	DemoUnverifiedAdminName = "Demo Unverified Admin"
+	// DemoUnverifiedAdminPassword is that admin's password (development only).
+	DemoUnverifiedAdminPassword = "tunnex-demo-password"
 )

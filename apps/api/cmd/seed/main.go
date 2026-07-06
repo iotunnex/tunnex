@@ -146,6 +146,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// An admin whose email is deliberately UNVERIFIED (no MarkEmailVerified): the
+	// UI must hide mutating controls for them (server would 403 email_not_verified)
+	// even though their role grants member:invite/manage. Can still log in
+	// (login is allowed unverified) so the gate is testable.
+	unverifiedAdminID := uuid.MustParse(seeddata.DemoUnverifiedAdminUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: unverifiedAdminID, Email: seeddata.DemoUnverifiedAdminEmail, Name: seeddata.DemoUnverifiedAdminName,
+	}); err != nil {
+		logger.Error("seed_uadmin_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	uaphc, err := password.Hash(seeddata.DemoUnverifiedAdminPassword)
+	if err != nil {
+		logger.Error("seed_uadmin_hash_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: unverifiedAdminID, PasswordHash: &uaphc}); err != nil {
+		logger.Error("seed_uadmin_password_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{
+		OrgID: orgID, UserID: unverifiedAdminID, Role: "admin",
+	}); err != nil {
+		logger.Error("seed_uadmin_membership_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_complete",
 		slog.String("demo_org_id", seeddata.DemoOrgID),
 		slog.String("demo_owner_email", seeddata.DemoOwnerEmail),

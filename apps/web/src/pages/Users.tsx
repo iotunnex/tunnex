@@ -11,6 +11,12 @@ const selectCls =
 export default function Users() {
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
+  // The server gates every MUTATING permission on the actor's verified email
+  // (authorize() -> email_not_verified 403), separately from RBAC. Mirror that
+  // here so we don't offer invite/role/deactivate controls that would only 403.
+  // The global VerifyEmailBanner (AppShell) is the standing explanation, so we
+  // hide rather than repeat a per-control message.
+  const emailVerified = state.status === "authed" && state.user.email_verified;
   const [org, setOrg] = useState<Org | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +97,7 @@ export default function Users() {
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
 
-      {can(myRole, "member:invite") && org && <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />}
+      {can(myRole, "member:invite") && emailVerified && org && <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />}
 
       <ul className="mt-6 space-y-2">
         {members.map((m) => {
@@ -100,7 +106,7 @@ export default function Users() {
           // (an owner handing off ownership). Deactivate is never offered on self
           // (it would log you out — a footgun, not a feature). The last-owner
           // disable therefore surfaces on the sole owner's OWN role control.
-          const canManage = canManageMembership(myRole, m.role, "");
+          const canManage = emailVerified && canManageMembership(myRole, m.role, "");
           const assignable = ROLES.filter((r) => canManageMembership(myRole, m.role, r));
           return (
             <li key={m.user_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-800 px-4 py-3">
@@ -193,7 +199,16 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[14rem] flex-1">
             <Field label="Invite by email">
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@company.com" />
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setSent(false); // a fresh address isn't "sent" until submitted
+                }}
+                required
+                placeholder="name@company.com"
+              />
             </Field>
           </div>
           <select className={selectCls} value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">

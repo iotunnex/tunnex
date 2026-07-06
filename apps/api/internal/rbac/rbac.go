@@ -25,6 +25,11 @@ const (
 )
 
 // rolePermissions is the role -> permission grant table. This map IS the policy.
+//
+// MIRRORED CLIENT-SIDE in apps/web/src/lib/rbac.ts (to gate which controls
+// render). The server is authoritative; the client copy is UX only. If you
+// change this table or CanManageMembership, update rbac.ts in the same commit —
+// there is no codegen keeping them in sync yet (tracked as a follow-up).
 var rolePermissions = map[string]map[Permission]bool{
 	RoleMember: {
 		PermOrgView:    true,
