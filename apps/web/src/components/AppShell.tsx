@@ -107,7 +107,9 @@ function VerifyEmailBanner() {
     <div className="mb-6 flex items-center justify-between rounded-lg border border-warn/40 bg-warn/5 px-4 py-3">
       <span className="text-sm text-slate-300">
         Verify your email to unlock all actions.
-        {state === "sent" && <span className="ml-1 text-ok">Sent — check your inbox.</span>}
+        {/* Success feedback uses the accent, not green: green is reserved for
+            liveness ("alive right now"), not "the action worked" (S4.4 decision f). */}
+        {state === "sent" && <span className="ml-1 text-accent-400">Sent — check your inbox.</span>}
         {state === "error" && <span className="ml-1 text-danger">Couldn&rsquo;t send — try again.</span>}
       </span>
       {state !== "sent" && (

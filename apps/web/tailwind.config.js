@@ -21,8 +21,14 @@ export default {
           600: "#6344e6", // pressed
         },
         // Semantic status — RESERVED, deliberately distinct from the accent hue so
-        // "connected / caution / revoked" never reads as a brand highlight.
-        ok: "#2ecc8f", // online / healthy (brief green — status only, never brand)
+        // it never reads as a brand highlight. The reservation is NARROW so it
+        // stays sharp (S4.4 decision f):
+        //   ok    = LIVENESS ONLY ("alive right now": online peer, healthy check).
+        //           NOT success feedback — "sent / saved / role changed" use the
+        //           accent (positive + on-brand), so green keeps meaning "live".
+        //   warn  = caution / one-time secret.
+        //   danger= revoked / error.
+        ok: "#2ecc8f", // liveness only (online / healthy)
         warn: "#fbbf24", // caution / one-time secret (amber)
         danger: "#fb7185", // revoked / error (rose)
       },
