@@ -359,8 +359,16 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 // lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
 // user id or org id, passed as text). Create takes BOTH (in sorted order, so no
 // deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
-// against concurrent creates; ResizePool takes the org key so it serializes with
-// allocation.
+// against concurrent creates.
+//
+// TWO CLIENTS, both load-bearing: (1) device allocation (per-org mutual
+// exclusion); (2) CIDR resize (S4.5b) — ResizePool takes the org key so its
+// orphan check can't race a concurrent allocation during the resize window. A
+// future S3.5 refactor that rescopes/weakens this lock (per-device keys, etc.)
+// MUST keep resize and allocation contending on the SAME per-org key, or it
+// silently reopens that race — see TestResizeAllocationRace (the red-without-lock
+// guard). Resize takes only the org key; allocation takes {owner,org} sorted;
+// resize never waits on the owner key, so no inversion/deadlock.
 func (q *Queries) LockDeviceKey(ctx context.Context, dollar_1 string) error {
 	_, err := q.db.Exec(ctx, lockDeviceKey, dollar_1)
 	return err

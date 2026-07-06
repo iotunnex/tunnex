@@ -237,10 +237,11 @@ func sortedKeys(a, b string) [2]string {
 }
 
 // ShrinkOrphansError is returned when a resize would strand live allocations.
-// Orphans is the FULL list, ordered by assigned_ip ascending (from
-// ipalloc.Orphans); the HTTP layer caps the rendered slice and reports the true
-// total, so the 409 body is bounded but the count is honest.
-type ShrinkOrphansError struct{ Orphans []string }
+// Orphans is the FULL list, ordered by assigned_ip ascending, each tagged with
+// its reason (out_of_range | reserved_collision — the latter looks fine to the
+// eye, so the reason must reach the UI). The HTTP layer caps the rendered slice
+// and reports the true total, so the 409 body is bounded but the count is honest.
+type ShrinkOrphansError struct{ Orphans []ipalloc.Orphan }
 
 func (e *ShrinkOrphansError) Error() string {
 	return fmt.Sprintf("resize would strand %d live allocation(s)", len(e.Orphans))
@@ -303,6 +304,10 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		if e != nil {
 			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
 		}
+		// See this function's doc-comment PREMISE: on a valid grow this is provably
+		// empty for Allocate-produced IPs; if it fires on a grow, that invariant was
+		// violated (a direct assigned_ip writer). Do NOT drop this as "shrink-only"
+		// without re-reading that proof.
 		if len(orphans) > 0 {
 			return &ShrinkOrphansError{Orphans: orphans}
 		}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
@@ -299,8 +300,8 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 	var orphErr *ShrinkOrphansError
 	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/25"); !errors.As(err, &orphErr) {
 		t.Fatalf("shrink should refuse with *ShrinkOrphansError, got %v", err)
-	} else if len(orphErr.Orphans) != 1 || orphErr.Orphans[0] != "10.99.0.200" {
-		t.Fatalf("orphans = %v, want [10.99.0.200]", orphErr.Orphans)
+	} else if len(orphErr.Orphans) != 1 || orphErr.Orphans[0].Addr != "10.99.0.200" || orphErr.Orphans[0].Reason != ipalloc.ReasonOutOfRange {
+		t.Fatalf("orphans = %+v, want [{10.99.0.200 out_of_range}]", orphErr.Orphans)
 	}
 	// A bad CIDR is rejected.
 	if err := svc.ResizePool(ctx, user, org, "not-a-cidr"); code(err) != "invalid_cidr" {

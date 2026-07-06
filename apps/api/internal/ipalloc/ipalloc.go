@@ -89,16 +89,34 @@ func OutOfRange(newCIDR string, allocated []string) ([]string, error) {
 	return out, nil
 }
 
-// Orphans returns the allocated addresses a resize to newCIDR would strand:
-// those OUTSIDE the new range, OR those colliding with the new range's RESERVED
-// addresses (network, gateway, broadcast). The reserved case is the subtle one —
-// a device numerically INSIDE the new range but sitting on .0/.1/broadcast is
-// still orphaned, because the allocator will never hand those out and they can't
-// remain assigned (OutOfRange alone misses it). The result is deterministically
-// ordered by numeric address ascending (== assigned_ip order for valid IPv4), so
-// the resize 409 is stable and byte-exact-testable; unparseable inputs are
-// treated as orphans and sorted last by their raw string.
-func Orphans(newCIDR string, allocated []string) ([]string, error) {
+// Orphan-reason values (kept in sync with the OpenAPI Orphan.reason enum).
+const (
+	// ReasonOutOfRange: the address falls outside the new range entirely.
+	ReasonOutOfRange = "out_of_range"
+	// ReasonReservedCollision: the address is numerically INSIDE the new range but
+	// lands on its network/gateway/broadcast — looks fine to the eye, still stranded.
+	ReasonReservedCollision = "reserved_collision"
+)
+
+// Orphan is a stranded allocation plus WHY it's stranded. The reason matters to
+// an admin: an out_of_range address is visibly outside the new range, but a
+// reserved_collision address is numerically INSIDE it and looks fine ("why is
+// this device blocking the shrink?") — so the 409 must say which.
+type Orphan struct {
+	Addr   string
+	Reason string
+}
+
+// Orphans returns the allocations a resize to newCIDR would strand: those OUTSIDE
+// the new range, OR those colliding with the new range's RESERVED addresses
+// (network, gateway, broadcast). The reserved case is the subtle one — a device
+// numerically INSIDE the new range but sitting on .0/.1/broadcast is still
+// orphaned, because the allocator will never hand those out and they can't remain
+// assigned (OutOfRange alone misses it). Deterministically ordered by numeric
+// address ascending (== assigned_ip order for valid IPv4), so the resize 409 is
+// stable and byte-exact-testable; unparseable inputs are treated as out_of_range
+// orphans and sorted last by their raw string.
+func Orphans(newCIDR string, allocated []string) ([]Orphan, error) {
 	p, err := prefix(newCIDR)
 	if err != nil {
 		return nil, err
@@ -115,20 +133,24 @@ func Orphans(newCIDR string, allocated []string) ([]string, error) {
 	reserved := map[uint32]bool{network: true, network + 1: true, broadcast: true}
 
 	type offender struct {
-		u    uint32
-		ok   bool
-		addr string
+		u      uint32
+		ok     bool
+		addr   string
+		reason string
 	}
 	var offenders []offender
 	for _, s := range allocated {
 		a, perr := netip.ParseAddr(s)
 		if perr != nil || !a.Is4() {
-			offenders = append(offenders, offender{addr: s, ok: false})
+			offenders = append(offenders, offender{addr: s, ok: false, reason: ReasonOutOfRange})
 			continue
 		}
 		u := toU32(a)
-		if !p.Contains(a) || reserved[u] {
-			offenders = append(offenders, offender{u: u, ok: true, addr: s})
+		switch {
+		case !p.Contains(a):
+			offenders = append(offenders, offender{u: u, ok: true, addr: s, reason: ReasonOutOfRange})
+		case reserved[u]:
+			offenders = append(offenders, offender{u: u, ok: true, addr: s, reason: ReasonReservedCollision})
 		}
 	}
 	// Deterministic order: valid addresses by numeric value asc, then unparseable
@@ -142,9 +164,9 @@ func Orphans(newCIDR string, allocated []string) ([]string, error) {
 		}
 		return offenders[i].addr < offenders[j].addr
 	})
-	out := make([]string, len(offenders))
+	out := make([]Orphan, len(offenders))
 	for i, o := range offenders {
-		out[i] = o.addr
+		out[i] = Orphan{Addr: o.addr, Reason: o.reason}
 	}
 	return out, nil
 }
