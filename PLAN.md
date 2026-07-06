@@ -105,7 +105,7 @@ Seed for the eventual SECURITY.md.
 
 - **S4.1 App shell & design system** — Tunnex brand (logo assets from user), Tailwind theme, layout, nav, auth-gated routing.
 - **S4.2 Login / signup / SSO screens** — all three auth paths.
-- **S4.3 Dashboard home** — org overview, members, activity, live connection stats.
+- **S4.3 Dashboard home** — org overview, members, activity, live connection stats. **Delivered:** single `GET /api/v1/organizations/{orgId}/overview` (counts + audit-log activity slice, LIMIT 10; `/organizations` matches every existing route — `/orgs` was only shorthand). Online tile inherits S3.6 honesty ("Seen in last N min", active-owner filter); `tenancy.OnlineWindow` is the single source of truth for the window; future-handshake upper bound is a data invariant at ingestion, not a per-read predicate.
 - **S4.4 Users & roles UI** — list, invite, edit role, deactivate.
 - **S4.5 Org settings & SSO config UI** — connect Google/Microsoft, domain-capture rules.
 - **S4.6 Audit log viewer** — filterable event stream.

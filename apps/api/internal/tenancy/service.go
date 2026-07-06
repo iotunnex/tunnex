@@ -198,6 +198,13 @@ func mapDBError(err error) error {
 // (WireGuard has no live state). The HTTP device-list threshold aliases this
 // (see http.onlineThreshold) so the dashboard tile and the per-device dot can
 // never drift apart.
+//
+// Read predicates only need the LOWER bound (handshake >= now-OnlineWindow). The
+// upper bound (handshake must not be in the future — which would pin a device
+// "online" forever) is a DATA INVARIANT enforced once at ingestion in
+// nodes.Service.ReportStatus (future handshakes past a small skew are dropped),
+// so last_handshake_at is never future-dated at rest. Do not re-implement that
+// clamp per read site — it would diverge from deviceOnline and duplicate the fix.
 const OnlineWindow = 3 * time.Minute
 
 // Overview is the dashboard aggregate for an org.

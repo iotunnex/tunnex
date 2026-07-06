@@ -33,3 +33,24 @@ test("a fresh org shows the empty-state onboarding funnel", async ({ page }) => 
   await expect(page.getByText("No gateway enrolled yet.")).toBeVisible();
   await expect(page.getByText("No activity yet.")).toBeVisible();
 });
+
+test("the reserved status-green appears only on the live liveness tile", async ({ page }) => {
+  // Mock a populated overview so the online tile is > 0. The seed has online=0,
+  // so this is the only way to exercise the reservation. Green (#2ecc8f / .text-ok)
+  // must land on the 'Seen in last 3 min' value and nowhere else on the page.
+  await page.route("**/api/v1/organizations/*/overview", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ members: 4, devices: 3, nodes: 1, online: 2, recent_activity: [] }),
+    }),
+  );
+  await login(page);
+
+  const onlineValue = page.getByText("Seen in last 3 min").locator("xpath=preceding-sibling::div[1]");
+  await expect(onlineValue).toHaveText("2");
+  await expect(onlineValue).toHaveClass(/text-ok/);
+  // The other tiles are neutral, never green — green is a status color, not brand.
+  const membersValue = page.getByText("Members", { exact: true }).locator("xpath=preceding-sibling::div[1]");
+  await expect(membersValue).not.toHaveClass(/text-ok/);
+});

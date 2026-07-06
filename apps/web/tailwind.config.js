@@ -22,7 +22,7 @@ export default {
         },
         // Semantic status — RESERVED, deliberately distinct from the accent hue so
         // "connected / caution / revoked" never reads as a brand highlight.
-        ok: "#34d399", // online / healthy (emerald)
+        ok: "#2ecc8f", // online / healthy (brief green — status only, never brand)
         warn: "#fbbf24", // caution / one-time secret (amber)
         danger: "#fb7185", // revoked / error (rose)
       },

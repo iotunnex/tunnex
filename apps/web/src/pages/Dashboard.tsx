@@ -46,8 +46,10 @@ export default function Dashboard() {
             <Stat label="Members" value={data.members} />
             <Stat label="Devices" value={data.devices} />
             <Stat label="Gateways" value={data.nodes} />
-            {/* Honest label: online is derived from last-handshake recency (S3.6). */}
-            <Stat label="Seen in last 3 min" value={data.online} />
+            {/* Honest label: online is derived from last-handshake recency (S3.6).
+                This liveness tile is the ONE place the reserved status-green
+                (ok token) appears on the dashboard — and only when >0. */}
+            <Stat label="Seen in last 3 min" value={data.online} tone={data.online > 0 ? "ok" : undefined} />
           </div>
 
           {/* Empty states double as the onboarding funnel for a fresh org. */}
@@ -85,10 +87,10 @@ export default function Dashboard() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, tone }: { label: string; value: number; tone?: "ok" }) {
   return (
     <div className="rounded-xl border border-white/5 bg-ink-800 p-4">
-      <div className="font-mono text-2xl font-semibold text-white">{value}</div>
+      <div className={`font-mono text-2xl font-semibold ${tone === "ok" ? "text-ok" : "text-white"}`}>{value}</div>
       <div className="mt-1 text-xs text-slate-500">{label}</div>
     </div>
   );
