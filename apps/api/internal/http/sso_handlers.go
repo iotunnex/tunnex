@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -43,15 +44,22 @@ func (s apiServer) StartSsoLogin(ctx context.Context, req api.StartSsoLoginReque
 	}, nil
 }
 
-// ssoCallbackResponse issues the post-login redirect and sets the session cookie.
+// ssoCallbackResponse issues a browser redirect after the IdP round-trip. On
+// success it sets the session cookie and lands in the app; on failure it carries
+// no cookie and lands on the login page with an error code the SPA renders as
+// human-readable guidance (never a raw JSON error envelope — the browser followed
+// the IdP redirect here, so a person is looking at this response).
 type ssoCallbackResponse struct {
-	sess     session.Session
-	secure   bool
-	location string
+	sess      session.Session
+	setCookie bool
+	secure    bool
+	location  string
 }
 
 func (r ssoCallbackResponse) VisitSsoCallbackResponse(w http.ResponseWriter) error {
-	session.SetCookie(w, r.sess, r.secure)
+	if r.setCookie {
+		session.SetCookie(w, r.sess, r.secure)
+	}
 	w.Header().Set("Location", r.location)
 	w.WriteHeader(http.StatusFound)
 	return nil
@@ -64,13 +72,33 @@ func (s apiServer) SsoCallback(ctx context.Context, req api.SsoCallbackRequestOb
 	}
 	userID, err := s.sso.HandleCallback(ctx, string(req.Provider), req.Params.Code, req.Params.State)
 	if err != nil {
-		return nil, err
+		// Redirect to a human-readable login landing carrying the reject reason,
+		// not a raw error body. Reflect only KNOWN reject codes into the URL (never
+		// arbitrary error text), falling back to a generic code otherwise.
+		return ssoCallbackResponse{location: s.appBaseURL + "/login?sso_error=" + ssoErrorCode(err)}, nil
 	}
 	sess, err := s.sessions.Create(ctx, userID) // SSO mints a fresh session (fixation rule)
 	if err != nil {
 		return nil, err
 	}
-	return ssoCallbackResponse{sess: sess, secure: s.cookieSecure, location: s.appBaseURL + "/"}, nil
+	return ssoCallbackResponse{sess: sess, setCookie: true, secure: s.cookieSecure, location: s.appBaseURL + "/"}, nil
+}
+
+// ssoRejectCodes is the allowlist of SSO callback reject reasons the SPA renders
+// as guidance. Anything else collapses to "sso_failed" so no arbitrary error
+// text is ever reflected into the login URL.
+var ssoRejectCodes = map[string]bool{
+	"unverified_local_exists": true,
+	"idp_email_unverified":    true,
+	"edition_required":        true,
+}
+
+func ssoErrorCode(err error) string {
+	var ae *apierr.Error
+	if errors.As(err, &ae) && ssoRejectCodes[ae.Code] {
+		return ae.Code
+	}
+	return "sso_failed"
 }
 
 // SetSsoConfig implements PUT /api/v1/organizations/{orgId}/sso/{provider}.

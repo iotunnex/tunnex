@@ -112,6 +112,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public deployment metadata (edition, enabled SSO providers)
+         * @description Lets the SPA gate edition-only UI (e.g. hide SSO in the open build) without a build-time bundle fork.
+         */
+        get: operations["getMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verify-email/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend the current user's email-verification link
+         * @description Idempotent; a no-op (still 202) if already verified. Requires a session.
+         */
+        post: operations["resendVerification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -674,6 +714,11 @@ export interface components {
             email: string;
             email_verified: boolean;
         };
+        Meta: {
+            /** @enum {string} */
+            edition: "open" | "enterprise";
+            sso_providers: ("google" | "microsoft")[];
+        };
         SignupRequest: {
             /** Format: email */
             email: string;
@@ -885,6 +930,50 @@ export interface operations {
         responses: {
             /** @description Password updated. */
             200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deployment metadata. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Meta"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resendVerification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description If verification is pending, an email has been sent. */
+            202: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;

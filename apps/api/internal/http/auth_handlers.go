@@ -88,6 +88,22 @@ func (r logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
 	return nil
 }
 
+// ResendVerification re-sends the current user's email-verification link. Session
+// gated; idempotent (202 even if already verified — reveals nothing).
+func (s apiServer) ResendVerification(ctx context.Context, _ api.ResendVerificationRequestObject) (api.ResendVerificationResponseObject, error) {
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
+	}
+	if err := s.auth.ResendVerification(ctx, p.UserID); err != nil {
+		return nil, err
+	}
+	return api.ResendVerification202JSONResponse{
+		Body:    api.GenericMessage{Message: "If your email is unverified, a verification link has been sent."},
+		Headers: api.ResendVerification202ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
 // CurrentUser returns the session's user (for SPA auth rehydration on load), or
 // 401 if there is no valid session. The principal is attached by SessionAuth.
 func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObject) (api.CurrentUserResponseObject, error) {

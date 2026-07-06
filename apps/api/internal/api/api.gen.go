@@ -45,6 +45,18 @@ const (
 	Owner  InviteRequestRole = "owner"
 )
 
+// Defines values for MetaEdition.
+const (
+	Enterprise MetaEdition = "enterprise"
+	Open       MetaEdition = "open"
+)
+
+// Defines values for MetaSsoProviders.
+const (
+	MetaSsoProvidersGoogle    MetaSsoProviders = "google"
+	MetaSsoProvidersMicrosoft MetaSsoProviders = "microsoft"
+)
+
 // Defines values for NodeStatus.
 const (
 	NodeStatusActive  NodeStatus = "active"
@@ -59,8 +71,8 @@ const (
 
 // Defines values for StartSsoLoginParamsProvider.
 const (
-	StartSsoLoginParamsProviderGoogle    StartSsoLoginParamsProvider = "google"
-	StartSsoLoginParamsProviderMicrosoft StartSsoLoginParamsProvider = "microsoft"
+	Google    StartSsoLoginParamsProvider = "google"
+	Microsoft StartSsoLoginParamsProvider = "microsoft"
 )
 
 // AcceptInviteRequest defines model for AcceptInviteRequest.
@@ -235,6 +247,18 @@ type LoginRequest struct {
 	Password string              `json:"password"`
 }
 
+// Meta defines model for Meta.
+type Meta struct {
+	Edition      MetaEdition        `json:"edition"`
+	SsoProviders []MetaSsoProviders `json:"sso_providers"`
+}
+
+// MetaEdition defines model for Meta.Edition.
+type MetaEdition string
+
+// MetaSsoProviders defines model for Meta.SsoProviders.
+type MetaSsoProviders string
+
 // Node defines model for Node.
 type Node struct {
 	AgentVersion string             `json:"agent_version"`
@@ -404,6 +428,12 @@ type ServerInterface interface {
 	// Verify an email address with a token
 	// (POST /api/v1/auth/verify-email)
 	VerifyEmail(w http.ResponseWriter, r *http.Request)
+	// Resend the current user's email-verification link
+	// (POST /api/v1/auth/verify-email/resend)
+	ResendVerification(w http.ResponseWriter, r *http.Request)
+	// Public deployment metadata (edition, enabled SSO providers)
+	// (GET /api/v1/meta)
+	GetMeta(w http.ResponseWriter, r *http.Request)
 	// List organizations
 	// (GET /api/v1/organizations)
 	ListOrganizations(w http.ResponseWriter, r *http.Request)
@@ -533,6 +563,18 @@ func (_ Unimplemented) StartSsoLogin(w http.ResponseWriter, r *http.Request, pro
 // Verify an email address with a token
 // (POST /api/v1/auth/verify-email)
 func (_ Unimplemented) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resend the current user's email-verification link
+// (POST /api/v1/auth/verify-email/resend)
+func (_ Unimplemented) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Public deployment metadata (edition, enabled SSO providers)
+// (GET /api/v1/meta)
+func (_ Unimplemented) GetMeta(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -889,6 +931,40 @@ func (siw *ServerInterfaceWrapper) VerifyEmail(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyEmail(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResendVerification operation middleware
+func (siw *ServerInterfaceWrapper) ResendVerification(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResendVerification(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMeta operation middleware
+func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMeta(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1671,6 +1747,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/auth/verify-email", wrapper.VerifyEmail)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/verify-email/resend", wrapper.ResendVerification)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/organizations", wrapper.ListOrganizations)
 	})
 	r.Group(func(r chi.Router) {
@@ -2159,6 +2241,82 @@ type VerifyEmaildefaultJSONResponse struct {
 }
 
 func (response VerifyEmaildefaultJSONResponse) VisitVerifyEmailResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ResendVerificationRequestObject struct {
+}
+
+type ResendVerificationResponseObject interface {
+	VisitResendVerificationResponse(w http.ResponseWriter) error
+}
+
+type ResendVerification202ResponseHeaders struct {
+	XRequestId string
+}
+
+type ResendVerification202JSONResponse struct {
+	Body    GenericMessage
+	Headers ResendVerification202ResponseHeaders
+}
+
+func (response ResendVerification202JSONResponse) VisitResendVerificationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ResendVerificationdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ResendVerificationdefaultJSONResponse) VisitResendVerificationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetMetaRequestObject struct {
+}
+
+type GetMetaResponseObject interface {
+	VisitGetMetaResponse(w http.ResponseWriter) error
+}
+
+type GetMeta200ResponseHeaders struct {
+	XRequestId string
+}
+
+type GetMeta200JSONResponse struct {
+	Body    Meta
+	Headers GetMeta200ResponseHeaders
+}
+
+func (response GetMeta200JSONResponse) VisitGetMetaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetMetadefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetMetadefaultJSONResponse) VisitGetMetaResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -2972,6 +3130,12 @@ type StrictServerInterface interface {
 	// Verify an email address with a token
 	// (POST /api/v1/auth/verify-email)
 	VerifyEmail(ctx context.Context, request VerifyEmailRequestObject) (VerifyEmailResponseObject, error)
+	// Resend the current user's email-verification link
+	// (POST /api/v1/auth/verify-email/resend)
+	ResendVerification(ctx context.Context, request ResendVerificationRequestObject) (ResendVerificationResponseObject, error)
+	// Public deployment metadata (edition, enabled SSO providers)
+	// (GET /api/v1/meta)
+	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
 	// List organizations
 	// (GET /api/v1/organizations)
 	ListOrganizations(ctx context.Context, request ListOrganizationsRequestObject) (ListOrganizationsResponseObject, error)
@@ -3375,6 +3539,54 @@ func (sh *strictHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyEmailResponseObject); ok {
 		if err := validResponse.VisitVerifyEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResendVerification operation middleware
+func (sh *strictHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var request ResendVerificationRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResendVerification(ctx, request.(ResendVerificationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResendVerification")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResendVerificationResponseObject); ok {
+		if err := validResponse.VisitResendVerificationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMeta operation middleware
+func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
+	var request GetMetaRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMeta(ctx, request.(GetMetaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMeta")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
+		if err := validResponse.VisitGetMetaResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3974,74 +4186,78 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

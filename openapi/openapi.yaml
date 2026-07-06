@@ -136,6 +136,37 @@ paths:
               schema: { $ref: "#/components/schemas/GenericMessage" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/meta:
+    get:
+      operationId: getMeta
+      summary: Public deployment metadata (edition, enabled SSO providers)
+      description: Lets the SPA gate edition-only UI (e.g. hide SSO in the open build) without a build-time bundle fork.
+      tags: [meta]
+      security: []
+      responses:
+        "200":
+          description: Deployment metadata.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Meta" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/verify-email/resend:
+    post:
+      operationId: resendVerification
+      summary: Resend the current user's email-verification link
+      description: Idempotent; a no-op (still 202) if already verified. Requires a session.
+      tags: [auth]
+      responses:
+        "202":
+          description: If verification is pending, an email has been sent.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/me:
     get:
       operationId: currentUser
@@ -916,6 +947,18 @@ components:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         email_verified: { type: boolean }
+
+    Meta:
+      type: object
+      required: [edition, sso_providers]
+      additionalProperties: false
+      properties:
+        edition: { type: string, enum: [open, enterprise] }
+        # SSO providers this deployment can offer (empty in the open edition, so
+        # the SPA hides SSO entirely rather than showing buttons that error).
+        sso_providers:
+          type: array
+          items: { type: string, enum: [google, microsoft] }
 
     SignupRequest:
       type: object

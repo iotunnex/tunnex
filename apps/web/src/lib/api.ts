@@ -8,6 +8,7 @@ export const api = createTunnexClient("/");
 export const CSRF = { "X-Tunnex-CSRF": "1" };
 
 export type AuthUser = components["schemas"]["AuthUser"];
+export type Meta = components["schemas"]["Meta"];
 export type Org = components["schemas"]["Organization"];
 export type Node = components["schemas"]["Node"];
 export type Device = components["schemas"]["Device"];

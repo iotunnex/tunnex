@@ -4,6 +4,10 @@ import { PRODUCT_NAME } from "./brand";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { AppShell } from "./components/AppShell";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import VerifyEmail from "./pages/VerifyEmail";
 import Devices from "./pages/Devices";
 
 /**
@@ -23,6 +27,12 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<AnonOnly><Login /></AnonOnly>} />
+        <Route path="/signup" element={<AnonOnly><Signup /></AnonOnly>} />
+        <Route path="/forgot-password" element={<AnonOnly><ForgotPassword /></AnonOnly>} />
+        {/* Reset + verify are reached from emailed links; usable while logged out
+            and harmless while logged in, so they are not auth-gated. */}
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route path="/devices" element={<Devices />} />
         </Route>

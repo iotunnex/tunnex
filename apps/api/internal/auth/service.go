@@ -156,6 +156,40 @@ func (s *Service) Authenticate(ctx context.Context, email, pw string) (sqlc.User
 	return user, nil
 }
 
+// ResendVerification issues a fresh verification token + email for an as-yet
+// unverified user (the authenticated caller). It is idempotent: already-verified
+// users no-op, and it reveals nothing (the caller is the account owner).
+func (s *Service) ResendVerification(ctx context.Context, userID uuid.UUID) error {
+	user, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.EmailVerifiedAt.Valid {
+		return nil // already verified — nothing to do
+	}
+	raw, tokenHash, err := newToken()
+	if err != nil {
+		return err
+	}
+	// Invalidate prior verification tokens first (mirror RequestPasswordReset), so
+	// repeated resends don't accumulate rows or leave many tokens valid at once.
+	// (Per-caller email throttling is a separate concern — S11.3 rate limiting.)
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.InvalidateUserTokens(ctx, sqlc.InvalidateUserTokensParams{UserID: user.ID, Purpose: purposeVerify}); e != nil {
+			return e
+		}
+		_, e := q.CreateAuthToken(ctx, sqlc.CreateAuthTokenParams{
+			UserID: user.ID, Purpose: purposeVerify, TokenHash: tokenHash, ExpiresAt: time.Now().Add(verifyTTL),
+		})
+		return e
+	}); err != nil {
+		return err
+	}
+	s.send(ctx, user.Email, "Verify your Tunnex email",
+		"Verify your email: "+s.baseURL+"/verify-email?token="+raw)
+	return nil
+}
+
 // VerifyEmail consumes an email-verification token and marks the user verified.
 func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
