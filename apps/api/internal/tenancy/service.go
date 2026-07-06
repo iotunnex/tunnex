@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -190,4 +191,47 @@ func mapDBError(err error) error {
 		return apierr.Conflict("slug_taken", "that organization slug is already in use")
 	}
 	return err
+}
+
+// OnlineWindow is the SINGLE SOURCE OF TRUTH for S3.6's online approximation: a
+// device is "seen recently" if its last handshake is within this window
+// (WireGuard has no live state). The HTTP device-list threshold aliases this
+// (see http.onlineThreshold) so the dashboard tile and the per-device dot can
+// never drift apart.
+const OnlineWindow = 3 * time.Minute
+
+// Overview is the dashboard aggregate for an org.
+type Overview struct {
+	Members        int64
+	Devices        int64
+	Nodes          int64
+	Online         int64
+	RecentActivity []sqlc.AuditLog
+}
+
+// Overview returns the org's counts + a recent audit slice for the dashboard
+// home in a single service call (one API round-trip). Every read is org-scoped.
+func (s *Service) Overview(ctx context.Context, orgID uuid.UUID) (Overview, error) {
+	var o Overview
+	var err error
+	if o.Members, err = s.q.CountMembersByOrg(ctx, orgID); err != nil {
+		return Overview{}, err
+	}
+	if o.Devices, err = s.q.CountActiveDevicesByOrg(ctx, orgID); err != nil {
+		return Overview{}, err
+	}
+	if o.Nodes, err = s.q.CountActiveNodesByOrg(ctx, orgID); err != nil {
+		return Overview{}, err
+	}
+	since := pgtype.Timestamptz{Time: time.Now().Add(-OnlineWindow), Valid: true}
+	if o.Online, err = s.q.CountOnlineDevicesByOrg(ctx, sqlc.CountOnlineDevicesByOrgParams{OrgID: orgID, LastHandshakeAt: since}); err != nil {
+		return Overview{}, err
+	}
+	o.RecentActivity, err = s.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{
+		OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Limit: 10, Offset: 0,
+	})
+	if err != nil {
+		return Overview{}, err
+	}
+	return o, nil
 }

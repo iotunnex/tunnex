@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
+	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
 // ListDevices GET /api/v1/organizations/{orgId}/devices. Members see their own
@@ -122,8 +123,10 @@ func (s apiServer) RevokeDevice(ctx context.Context, req api.RevokeDeviceRequest
 // onlineThreshold: a device is treated as "online" if its last WireGuard
 // handshake is within this window. WireGuard has no connection state — this is an
 // APPROXIMATION derived from handshake recency (~2.5-3min matches WG's rekey
-// cadence); the UI shows "last seen" for honest precision.
-const onlineThreshold = 3 * time.Minute
+// cadence); the UI shows "last seen" for honest precision. It aliases
+// tenancy.OnlineWindow (the single source of truth) so the per-device dot and
+// the dashboard "seen in last N min" tile can never drift apart.
+const onlineThreshold = tenancy.OnlineWindow
 
 func toAPIDevice(d sqlc.Device) api.Device {
 	out := api.Device{

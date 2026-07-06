@@ -55,7 +55,7 @@ export default function Login() {
       return;
     }
     setUser(data);
-    navigate("/devices", { replace: true });
+    navigate("/dashboard", { replace: true });
   }
 
   return (

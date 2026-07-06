@@ -22,7 +22,20 @@ type Querier interface {
 	// lint:cross-org — the token itself is the credential; the org comes from the
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
+	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountActiveDevicesForUser(ctx context.Context, arg CountActiveDevicesForUserParams) (int64, error)
+	CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// Org roster size. Joins users to exclude soft-deleted accounts (whose
+	// membership row survives a soft-delete); deactivated members are still on the
+	// roster, so they are intentionally counted.
+	CountMembersByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// "Seen recently": last handshake within the window ($2 = now - OnlineWindow),
+	// an S3.6-style online approximation. The boundary is inclusive (>=) to match
+	// deviceOnline's `time.Since(h) <= threshold`. Requires an ACTIVE owner too: a
+	// deactivated user's peers are offboarded from the data plane (they fall out of
+	// the node's desired state) even though the device row stays 'active', so
+	// counting them as "online" would be dishonest.
+	CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDevicesByOrgParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	// lint:cross-org — spans a user's orgs to protect the last-owner invariant on
 	// global deactivation; each row's org_id is used in the correlated subquery.

@@ -9,7 +9,73 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countActiveDevicesByOrg = `-- name: CountActiveDevicesByOrg :one
+SELECT count(*) FROM devices WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL
+`
+
+func (q *Queries) CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveDevicesByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countActiveNodesByOrg = `-- name: CountActiveNodesByOrg :one
+SELECT count(*) FROM nodes WHERE org_id = $1 AND status = 'active'
+`
+
+func (q *Queries) CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveNodesByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMembersByOrg = `-- name: CountMembersByOrg :one
+SELECT count(*) FROM memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.org_id = $1 AND u.deleted_at IS NULL
+`
+
+// Org roster size. Joins users to exclude soft-deleted accounts (whose
+// membership row survives a soft-delete); deactivated members are still on the
+// roster, so they are intentionally counted.
+func (q *Queries) CountMembersByOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMembersByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countOnlineDevicesByOrg = `-- name: CountOnlineDevicesByOrg :one
+SELECT count(*) FROM devices d
+JOIN device_status ds ON ds.device_id = d.id
+JOIN users u ON u.id = d.user_id
+WHERE d.org_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
+  AND u.status = 'active' AND u.deleted_at IS NULL
+  AND ds.last_handshake_at >= $2
+`
+
+type CountOnlineDevicesByOrgParams struct {
+	OrgID           uuid.UUID          `json:"org_id"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+}
+
+// "Seen recently": last handshake within the window ($2 = now - OnlineWindow),
+// an S3.6-style online approximation. The boundary is inclusive (>=) to match
+// deviceOnline's `time.Since(h) <= threshold`. Requires an ACTIVE owner too: a
+// deactivated user's peers are offboarded from the data plane (they fall out of
+// the node's desired state) even though the device row stays 'active', so
+// counting them as "online" would be dishonest.
+func (q *Queries) CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDevicesByOrgParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOnlineDevicesByOrg, arg.OrgID, arg.LastHandshakeAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const countOrganizations = `-- name: CountOrganizations :one
 SELECT count(*) FROM organizations

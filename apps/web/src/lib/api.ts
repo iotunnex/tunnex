@@ -12,6 +12,7 @@ export type Meta = components["schemas"]["Meta"];
 export type Org = components["schemas"]["Organization"];
 export type Node = components["schemas"]["Node"];
 export type Device = components["schemas"]["Device"];
+export type OrgOverview = components["schemas"]["OrgOverview"];
 
 // apiErrorMessage pulls the human message out of the standard error envelope.
 export function apiErrorMessage(error: unknown, fallback: string): string {

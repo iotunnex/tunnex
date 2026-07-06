@@ -6,11 +6,11 @@ import { useAuth } from "../lib/auth";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
 
-// Nav items. Only Devices is live in EPIC 3/4.1; the rest are placeholders the
-// later EPIC 4 stories (dashboard, users, settings, audit) fill in.
+// Nav items. Dashboard + Devices are live (EPIC 3, S4.3); the rest are
+// placeholders the later EPIC 4 stories (users, settings, audit) fill in.
 const NAV = [
+  { to: "/dashboard", label: "Dashboard", enabled: true },
   { to: "/devices", label: "Devices", enabled: true },
-  { to: "/dashboard", label: "Dashboard", enabled: false },
   { to: "/users", label: "Users", enabled: false },
   { to: "/settings", label: "Settings", enabled: false },
   { to: "/audit", label: "Audit log", enabled: false },

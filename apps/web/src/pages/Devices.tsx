@@ -1,17 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { PRODUCT_NAME } from "../brand";
 import { api, CSRF, apiErrorMessage, type Device, type Node, type Org } from "../lib/api";
+import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input, StatusDot } from "../components/ui";
 
 // lastSeen renders honest recency ("last seen 42s ago"), never a faked live claim
-// — WireGuard only knows the last handshake time (online is derived from it).
+// — WireGuard only knows the last handshake time (online is derived from it). The
+// recency math is shared with the dashboard via relativeAge.
 function lastSeen(at?: string): string {
   if (!at) return "never connected";
-  const s = Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 1000));
-  if (s < 60) return `last seen ${s}s ago`;
-  if (s < 3600) return `last seen ${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `last seen ${Math.floor(s / 3600)}h ago`;
-  return `last seen ${Math.floor(s / 86400)}d ago`;
+  return `last seen ${relativeAge(at)}`;
 }
 
 export default function Devices() {

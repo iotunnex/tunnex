@@ -321,6 +321,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** Dashboard overview — counts + recent activity */
+        get: operations["getOrgOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices": {
         parameters: {
             query?: never;
@@ -713,6 +732,22 @@ export interface components {
             /** Format: email */
             email: string;
             email_verified: boolean;
+        };
+        ActivityEntry: {
+            action: string;
+            target_type?: string;
+            target_id?: string;
+            /** Format: uuid */
+            actor_id?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        OrgOverview: {
+            members: number;
+            devices: number;
+            nodes: number;
+            online: number;
+            recent_activity: components["schemas"]["ActivityEntry"][];
         };
         Meta: {
             /** @enum {string} */
@@ -1203,6 +1238,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getOrgOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Org overview. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgOverview"];
+                };
             };
             default: components["responses"]["Error"];
         };

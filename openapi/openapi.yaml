@@ -354,6 +354,25 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/overview:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getOrgOverview
+      summary: Dashboard overview — counts + recent activity
+      tags: [organizations]
+      responses:
+        "200":
+          description: Org overview.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgOverview" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/devices:
     parameters:
       - name: orgId
@@ -947,6 +966,31 @@ components:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         email_verified: { type: boolean }
+
+    ActivityEntry:
+      type: object
+      required: [action, created_at]
+      additionalProperties: false
+      properties:
+        action: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        actor_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    OrgOverview:
+      type: object
+      required: [members, devices, nodes, online, recent_activity]
+      additionalProperties: false
+      properties:
+        members: { type: integer }
+        devices: { type: integer }
+        nodes: { type: integer }
+        # Devices whose last handshake is within the recency window (S3.6 approx).
+        online: { type: integer }
+        recent_activity:
+          type: array
+          items: { $ref: "#/components/schemas/ActivityEntry" }
 
     Meta:
       type: object

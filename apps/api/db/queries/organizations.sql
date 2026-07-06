@@ -56,3 +56,31 @@ UPDATE organizations
 SET pool_cidr = $2
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
+
+-- name: CountMembersByOrg :one
+-- Org roster size. Joins users to exclude soft-deleted accounts (whose
+-- membership row survives a soft-delete); deactivated members are still on the
+-- roster, so they are intentionally counted.
+SELECT count(*) FROM memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.org_id = $1 AND u.deleted_at IS NULL;
+
+-- name: CountActiveDevicesByOrg :one
+SELECT count(*) FROM devices WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL;
+
+-- name: CountActiveNodesByOrg :one
+SELECT count(*) FROM nodes WHERE org_id = $1 AND status = 'active';
+
+-- name: CountOnlineDevicesByOrg :one
+-- "Seen recently": last handshake within the window ($2 = now - OnlineWindow),
+-- an S3.6-style online approximation. The boundary is inclusive (>=) to match
+-- deviceOnline's `time.Since(h) <= threshold`. Requires an ACTIVE owner too: a
+-- deactivated user's peers are offboarded from the data plane (they fall out of
+-- the node's desired state) even though the device row stays 'active', so
+-- counting them as "online" would be dishonest.
+SELECT count(*) FROM devices d
+JOIN device_status ds ON ds.device_id = d.id
+JOIN users u ON u.id = d.user_id
+WHERE d.org_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
+  AND u.status = 'active' AND u.deleted_at IS NULL
+  AND ds.last_handshake_at >= $2;

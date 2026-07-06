@@ -8,6 +8,7 @@ import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
+import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 
 /**
@@ -34,10 +35,11 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/devices" element={<Devices />} />
         </Route>
         {/* Default: the shell decides (RequireAuth bounces anon users to /login). */}
-        <Route path="*" element={<Navigate to="/devices" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AuthProvider>
   );
@@ -56,7 +58,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 function AnonOnly({ children }: { children: React.ReactNode }) {
   const { state } = useAuth();
   if (state.status === "loading") return <FullScreenLoading />;
-  if (state.status === "authed") return <Navigate to="/devices" replace />;
+  if (state.status === "authed") return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 

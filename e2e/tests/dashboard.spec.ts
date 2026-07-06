@@ -1,0 +1,35 @@
+import { test, expect, type Page } from "@playwright/test";
+
+// S4.3 dashboard home. The seeded demo org has one member (the owner) and no
+// gateways, devices, or activity yet — so it exercises BOTH the real-count path
+// (Members renders a live number) and the empty-state onboarding funnel.
+const OWNER_EMAIL = "owner@demo.tunnex.local";
+const OWNER_PASS = "tunnex-demo-password";
+
+async function login(page: Page) {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(OWNER_EMAIL);
+  await page.getByLabel("Password").fill(OWNER_PASS);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+}
+
+test("dashboard renders real counts for the seeded org", async ({ page }) => {
+  await login(page);
+  // The org name is shown.
+  await expect(page.getByText("Demo Organization")).toBeVisible();
+  // The Members stat is a live count: the label sits directly under its value.
+  const membersLabel = page.getByText("Members", { exact: true });
+  await expect(membersLabel).toBeVisible();
+  await expect(membersLabel.locator("xpath=preceding-sibling::div[1]")).toHaveText(/^\d+$/);
+  // Honest online label from S3.6 (not a fabricated "online" claim).
+  await expect(page.getByText("Seen in last 3 min")).toBeVisible();
+});
+
+test("a fresh org shows the empty-state onboarding funnel", async ({ page }) => {
+  await login(page);
+  // No gateway is enrolled in the seed, so the onboarding call-to-enroll shows
+  // and the activity feed reads empty rather than fabricating entries.
+  await expect(page.getByText("No gateway enrolled yet.")).toBeVisible();
+  await expect(page.getByText("No activity yet.")).toBeVisible();
+});
