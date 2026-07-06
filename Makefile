@@ -70,7 +70,12 @@ PG_PASS ?= tunnex_dev_password
 PG_DB ?= tunnex
 
 .PHONY: generate
-generate: generate-go generate-ts sqlc ## Regenerate all code from openapi/openapi.yaml
+generate: generate-go generate-ts generate-rbac sqlc ## Regenerate all code from openapi/openapi.yaml
+
+.PHONY: generate-rbac
+generate-rbac: ## Emit the RBAC grant table (rbac.Policy) as JSON for the web client mirror
+	docker run --rm -v "$(PWD)":/repo -w /repo/apps/api -e GOFLAGS=-mod=mod $(GO_IMAGE) \
+	  go run ./cmd/rbac-policy-gen /repo/apps/web/src/lib/rbac-policy.json
 
 .PHONY: generate-go
 generate-go: ## Generate the Go server (types + chi strict-server) from the spec
@@ -87,7 +92,7 @@ generate-ts: ## Generate the TypeScript API types from the spec
 .PHONY: generate-check
 generate-check: generate ## Fail if generated code is out of date (CI drift guard)
 	@git diff --exit-code -- \
-	  apps/api/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts \
+	  apps/api/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts apps/web/src/lib/rbac-policy.json \
 	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
 	@echo "generated code is up to date."
 

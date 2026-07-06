@@ -3,6 +3,8 @@
 // when a role is added or a permission moves, only this file changes.
 package rbac
 
+import "sort"
+
 // Permission is a capability a role may hold.
 type Permission string
 
@@ -55,6 +57,26 @@ var rolePermissions = map[string]map[Permission]bool{
 // Can reports whether a role holds a permission.
 func Can(role string, p Permission) bool {
 	return rolePermissions[role][p]
+}
+
+// Policy returns the role→permissions grant table as sorted string slices — the
+// serializable, authoritative form. `make generate-rbac` marshals this to
+// apps/web/src/lib/rbac-policy.json, which the client RBAC mirror (lib/rbac.ts)
+// consumes; `make generate-check` then fails the build if the committed JSON has
+// drifted from this table. So this map is the ONE source of truth for grants and
+// the client can no longer silently diverge. (canManageMembership's relational
+// rules are logic, not data, and remain mirrored by hand.)
+func Policy() map[string][]string {
+	out := make(map[string][]string, len(rolePermissions))
+	for role, perms := range rolePermissions {
+		list := make([]string, 0, len(perms))
+		for p := range perms {
+			list = append(list, string(p))
+		}
+		sort.Strings(list)
+		out[role] = list
+	}
+	return out
 }
 
 // IsMutating reports whether a permission changes state. Mutating actions are

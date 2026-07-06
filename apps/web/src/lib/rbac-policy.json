@@ -1,0 +1,21 @@
+{
+  "admin": [
+    "member:invite",
+    "member:list",
+    "member:manage",
+    "org:update",
+    "org:view"
+  ],
+  "member": [
+    "member:list",
+    "org:view"
+  ],
+  "owner": [
+    "member:invite",
+    "member:list",
+    "member:manage",
+    "org:delete",
+    "org:update",
+    "org:view"
+  ]
+}

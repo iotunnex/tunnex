@@ -1,17 +1,21 @@
 import type { Role } from "./api";
+import rbacPolicy from "./rbac-policy.json";
 
-// Client-side MIRROR of the server RBAC policy (apps/api/internal/rbac/rbac.go).
-// This gates what CONTROLS render — it is UX, never enforcement. Every action is
-// still authorized server-side; the UI simply must not offer what the server
-// forbids (S4.4 watch-item a). Keep this table in lockstep with the Go one.
-const grants: Record<Role, Set<string>> = {
-  member: new Set(["org:view", "member:list"]),
-  admin: new Set(["org:view", "member:list", "org:update", "member:invite", "member:manage"]),
-  owner: new Set(["org:view", "member:list", "org:update", "org:delete", "member:invite", "member:manage"]),
-};
+// Client-side MIRROR of the server RBAC policy. This gates what CONTROLS render
+// — it is UX, never enforcement. Every action is still authorized server-side;
+// the UI simply must not offer what the server forbids (S4.4 watch-item a).
+//
+// The grant table is NOT hand-copied: rbac-policy.json is GENERATED from the Go
+// source of truth (rbac.Policy, via `make generate-rbac`) and `make
+// generate-check` fails the build if it drifts. So adding/moving a permission in
+// rbac.go can no longer silently desync this mirror. (canManageMembership's
+// relational rules below are logic, not data, and are still mirrored by hand.)
+const grants: Record<string, Set<string>> = Object.fromEntries(
+  Object.entries(rbacPolicy as Record<string, string[]>).map(([role, perms]) => [role, new Set(perms)]),
+);
 
 export function can(role: Role | undefined, perm: string): boolean {
-  return role ? grants[role].has(perm) : false;
+  return role ? (grants[role]?.has(perm) ?? false) : false;
 }
 
 // canManageMembership mirrors rbac.CanManageMembership: the actor needs
