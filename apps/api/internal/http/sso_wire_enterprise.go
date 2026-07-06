@@ -46,8 +46,8 @@ func (a *ssoAdapter) HandleCallback(ctx context.Context, provider, code, state s
 	return a.svc.HandleCallback(ctx, provider, code, state)
 }
 
-func (a *ssoAdapter) SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error {
-	return a.svc.Configs().Set(ctx, orgID, provider, clientID, clientSecret, tenantID, enabled)
+func (a *ssoAdapter) SetConfig(ctx context.Context, actor, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error {
+	return a.svc.Configs().Set(ctx, actor, orgID, provider, clientID, clientSecret, tenantID, enabled)
 }
 
 func (a *ssoAdapter) ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error) {

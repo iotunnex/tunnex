@@ -21,7 +21,7 @@ import (
 type ssoPort interface {
 	StartLogin(ctx context.Context, orgSlug, provider string) (redirectURL string, err error)
 	HandleCallback(ctx context.Context, provider, code, state string) (userID uuid.UUID, err error)
-	SetConfig(ctx context.Context, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
+	SetConfig(ctx context.Context, actor, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
 	ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error)
 	CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (txtRecord string, err error)
 	VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error
@@ -127,11 +127,12 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 	if s.sso == nil {
 		return nil, editionRequired()
 	}
+	p, _ := authctx.PrincipalFrom(ctx)
 	tenantID := ""
 	if req.Body.TenantId != nil {
 		tenantID = *req.Body.TenantId
 	}
-	if err := s.sso.SetConfig(ctx, req.OrgId, req.Provider, req.Body.ClientId, req.Body.ClientSecret, tenantID, req.Body.Enabled); err != nil {
+	if err := s.sso.SetConfig(ctx, p.UserID, req.OrgId, req.Provider, req.Body.ClientId, req.Body.ClientSecret, tenantID, req.Body.Enabled); err != nil {
 		return nil, err
 	}
 	return api.SetSsoConfig204Response{

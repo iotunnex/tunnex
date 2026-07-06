@@ -58,6 +58,11 @@ func newFlowHarness(t *testing.T) *flowHarness {
 	if _, err := tx.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)", org, "O", "sso-"+org.String()); err != nil {
 		t.Fatalf("org: %v", err)
 	}
+	// An actor user for the config-write audit row's FK (audit_logs.actor_user_id).
+	actor := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'Actor')", actor, actor.String()+"@t.local"); err != nil {
+		t.Fatalf("actor: %v", err)
+	}
 
 	key := make([]byte, crypto.KeySize)
 	_, _ = rand.Read(key)
@@ -80,7 +85,7 @@ func newFlowHarness(t *testing.T) *flowHarness {
 		baseURL: "http://app",
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	if err := svc.configs.Set(ctx, org, "google", "test-client", "secret", "", true); err != nil {
+	if err := svc.configs.Set(ctx, actor, org, "google", "test-client", "secret", "", true); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
 	return &flowHarness{svc: svc, idp: idp, org: org, tx: tx, q: q, ctx: ctx}

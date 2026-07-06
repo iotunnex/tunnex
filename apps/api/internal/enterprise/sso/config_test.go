@@ -47,11 +47,15 @@ func TestConfigSealAndDecryptAfterRestart(t *testing.T) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// A real org to satisfy the FK.
+	// A real org + actor user to satisfy the FKs (audit_logs.actor_user_id).
 	org := uuid.New()
 	if _, err := tx.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)",
 		org, "O", "sso-"+org.String()); err != nil {
 		t.Fatalf("org: %v", err)
+	}
+	actor := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'Actor')", actor, actor.String()+"@t.local"); err != nil {
+		t.Fatalf("actor: %v", err)
 	}
 
 	masterKey := make([]byte, crypto.KeySize)
@@ -62,8 +66,32 @@ func TestConfigSealAndDecryptAfterRestart(t *testing.T) {
 
 	// Write with one sealer instance.
 	writer := newConfigService(sqlc.New(tx), newSealer(t, masterKey))
-	if err := writer.Set(ctx, org, "google", "client-id-123", secret, "", true); err != nil {
+	if err := writer.Set(ctx, actor, org, "google", "client-id-123", secret, "", true); err != nil {
 		t.Fatalf("set: %v", err)
+	}
+
+	// (e) The config write records an actor-attributed audit row whose metadata
+	// contains NO secret material — neither the plaintext secret nor the sealed
+	// bytes may ever land in an audit_logs.metadata payload.
+	var auditCount int
+	var meta []byte
+	if err := tx.QueryRow(ctx,
+		"SELECT count(*) OVER (), metadata FROM audit_logs WHERE org_id=$1 AND actor_user_id=$2 AND action='sso.config_updated' LIMIT 1",
+		org, actor).Scan(&auditCount, &meta); err != nil {
+		t.Fatalf("audit query: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("want 1 sso.config_updated audit row attributed to the actor, got %d", auditCount)
+	}
+	if contains(meta, secret) {
+		t.Fatal("audit metadata contains the plaintext client secret")
+	}
+	var sealedBytes []byte
+	if err := tx.QueryRow(ctx, "SELECT client_secret_sealed FROM sso_configs WHERE org_id=$1 AND provider='google'", org).Scan(&sealedBytes); err != nil {
+		t.Fatalf("read sealed: %v", err)
+	}
+	if contains(meta, string(sealedBytes)) {
+		t.Fatal("audit metadata contains the sealed secret bytes")
 	}
 
 	// The stored bytes must NOT contain the plaintext.
