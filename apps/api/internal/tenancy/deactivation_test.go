@@ -72,6 +72,17 @@ func TestDeactivationFreezesAndGuardsLastOwner(t *testing.T) {
 	if len(rev.called) != 1 || rev.called[0] != member {
 		t.Fatalf("sessions not revoked for member: %v", rev.called)
 	}
+	// Audit: the deactivation recorded a user.deactivated event attributed to the
+	// acting user (watch-item e — every mutation lands in audit_logs with actor).
+	var deactivatedRows int
+	if err := tx.QueryRow(ctx,
+		"SELECT count(*) FROM audit_logs WHERE org_id=$1 AND actor_user_id=$2 AND action='user.deactivated' AND target_id=$3",
+		orgA, actor, member.String()).Scan(&deactivatedRows); err != nil {
+		t.Fatalf("audit query: %v", err)
+	}
+	if deactivatedRows != 1 {
+		t.Fatalf("want 1 actor-attributed user.deactivated audit row, got %d", deactivatedRows)
+	}
 
 	// The last-owner invariant blocks deactivating an org's sole owner.
 	if err := svc.DeactivateMember(ctx, actor, orgB, soleOwner); !isCode(err, "last_owner") {

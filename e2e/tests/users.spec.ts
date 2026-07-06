@@ -53,6 +53,22 @@ test("an unverified admin is offered no mutating controls despite the role", asy
   await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
 });
 
+// (a) The verified-gate is a SERVER control, not just a UI one: a direct API
+// call (bypassing the hidden UI) from the unverified admin is refused 403
+// email_not_verified. This proves the UI gate is honest mirroring, not a
+// UI-only security control an attacker could curl around.
+test("the server (not just the UI) refuses a mutation from an unverified admin", async ({ page }) => {
+  const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
+  const MEMBER_ID = "01900000-0000-7000-8000-000000000003"; // seeddata.DemoMemberUserID
+  await loginAs(page, UNVERIFIED_ADMIN);
+  const resp = await page.request.put(`/api/v1/organizations/${ORG}/members/${MEMBER_ID}/role`, {
+    headers: { "X-Tunnex-CSRF": "1" },
+    data: { role: "member" },
+  });
+  expect(resp.status()).toBe(403);
+  expect(JSON.parse(await resp.text()).error.code).toBe("email_not_verified");
+});
+
 // (b) Last-owner: the sole owner's own role control is disabled-with-explanation
 // (client mirror of the server's last-owner refusal).
 test("the sole owner's own role control is disabled with an explanation", async ({ page }) => {

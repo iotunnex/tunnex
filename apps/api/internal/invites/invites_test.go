@@ -83,6 +83,21 @@ func TestInviteCreateAcceptNewUser(t *testing.T) {
 	if err := svc.Create(ctx, actor, org, email, "member"); err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
+	// Audit: invite.created is attributed to the acting user (watch-item e —
+	// every mutation lands in audit_logs with the correct actor).
+	logs, err := svc.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{OrgID: pgUUID(org), Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatalf("audit list: %v", err)
+	}
+	foundInvite := false
+	for _, l := range logs {
+		if l.Action == "invite.created" && l.ActorUserID.Valid && l.ActorUserID.Bytes == [16]byte(actor) {
+			foundInvite = true
+		}
+	}
+	if !foundInvite {
+		t.Fatal("expected an actor-attributed invite.created audit row")
+	}
 	token := mailer.last()
 
 	// Accept creates a VERIFIED user + membership.
