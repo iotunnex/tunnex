@@ -236,12 +236,21 @@ func sortedKeys(a, b string) [2]string {
 	return [2]string{b, a}
 }
 
+// OrphanDevice is a device a resize would strand: which device, its address, and
+// why (out_of_range | reserved_collision — the latter is numerically inside the
+// new range and looks fine, so the reason must reach the UI).
+type OrphanDevice struct {
+	DeviceID   uuid.UUID
+	Name       string
+	AssignedIP string
+	Reason     string
+}
+
 // ShrinkOrphansError is returned when a resize would strand live allocations.
-// Orphans is the FULL list, ordered by assigned_ip ascending, each tagged with
-// its reason (out_of_range | reserved_collision — the latter looks fine to the
-// eye, so the reason must reach the UI). The HTTP layer caps the rendered slice
-// and reports the true total, so the 409 body is bounded but the count is honest.
-type ShrinkOrphansError struct{ Orphans []ipalloc.Orphan }
+// Orphans is the FULL list, ordered by assigned_ip ascending; the HTTP layer caps
+// the rendered slice and reports the true total, so the 409 body is bounded but
+// the count is honest.
+type ShrinkOrphansError struct{ Orphans []OrphanDevice }
 
 func (e *ShrinkOrphansError) Error() string {
 	return fmt.Sprintf("resize would strand %d live allocation(s)", len(e.Orphans))
@@ -296,11 +305,23 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		if !grow && !shrink {
 			return apierr.BadRequest("illegal_resize", "the new range must contain, or be contained by, the current range")
 		}
-		used, e := q.ListAssignedIPsForOrg(ctx, orgID)
+		// SINGLE read: the same device rows feed both the orphan check and the 409
+		// objects, so the check and the build can't drift (no phantom orphan, no
+		// count mismatch) under this org lock.
+		rows, e := q.ListActiveDeviceAllocations(ctx, orgID)
 		if e != nil {
 			return e
 		}
-		orphans, e := ipalloc.Orphans(newCIDR, derefStrings(used))
+		ips := make([]string, 0, len(rows))
+		byIP := make(map[string]sqlc.ListActiveDeviceAllocationsRow, len(rows))
+		for _, r := range rows {
+			if r.AssignedIp == nil { // query filters NOT NULL; defensive
+				continue
+			}
+			ips = append(ips, *r.AssignedIp)
+			byIP[*r.AssignedIp] = r
+		}
+		orphans, e := ipalloc.Orphans(newCIDR, ips)
 		if e != nil {
 			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
 		}
@@ -309,7 +330,12 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		// violated (a direct assigned_ip writer). Do NOT drop this as "shrink-only"
 		// without re-reading that proof.
 		if len(orphans) > 0 {
-			return &ShrinkOrphansError{Orphans: orphans}
+			objs := make([]OrphanDevice, len(orphans))
+			for i, o := range orphans {
+				r := byIP[o.Addr] // present by construction: built from the same rows
+				objs[i] = OrphanDevice{DeviceID: r.ID, Name: r.Name, AssignedIP: o.Addr, Reason: o.Reason}
+			}
+			return &ShrinkOrphansError{Orphans: objs}
 		}
 		if _, e = q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: newCIDR}); e != nil {
 			return e

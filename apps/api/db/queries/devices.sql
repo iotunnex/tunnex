@@ -70,6 +70,15 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 SELECT assigned_ip FROM devices
 WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL;
 
+-- name: ListActiveDeviceAllocations :many
+-- Live allocations WITH the owning device (id, name) — the SINGLE source for the
+-- resize orphan check AND the 409 orphan objects, so the check and the build
+-- can't drift (one read under the org lock). Filters MUST stay identical to
+-- ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+SELECT id, name, assigned_ip FROM devices
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+ORDER BY assigned_ip;
+
 -- name: ListActivePeersForNode :many
 -- lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 -- fetches the peers for its own node). A peer is present only while BOTH the

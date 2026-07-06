@@ -90,6 +90,11 @@ type Querier interface {
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
+	// Live allocations WITH the owning device (id, name) — the SINGLE source for the
+	// resize orphan check AND the 409 orphan objects, so the check and the build
+	// can't drift (one read under the org lock). Filters MUST stay identical to
+	// ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+	ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops

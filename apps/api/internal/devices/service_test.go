@@ -300,8 +300,10 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 	var orphErr *ShrinkOrphansError
 	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/25"); !errors.As(err, &orphErr) {
 		t.Fatalf("shrink should refuse with *ShrinkOrphansError, got %v", err)
-	} else if len(orphErr.Orphans) != 1 || orphErr.Orphans[0].Addr != "10.99.0.200" || orphErr.Orphans[0].Reason != ipalloc.ReasonOutOfRange {
-		t.Fatalf("orphans = %+v, want [{10.99.0.200 out_of_range}]", orphErr.Orphans)
+	} else if len(orphErr.Orphans) != 1 {
+		t.Fatalf("orphans = %+v, want exactly one", orphErr.Orphans)
+	} else if o := orphErr.Orphans[0]; o.AssignedIP != "10.99.0.200" || o.Reason != ipalloc.ReasonOutOfRange || o.Name != "d" || o.DeviceID == (uuid.UUID{}) {
+		t.Fatalf("orphan = %+v, want {device_id set, name d, 10.99.0.200, out_of_range}", o)
 	}
 	// A bad CIDR is rejected.
 	if err := svc.ResizePool(ctx, user, org, "not-a-cidr"); code(err) != "invalid_cidr" {

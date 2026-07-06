@@ -149,6 +149,42 @@ func (q *Queries) GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, e
 	return i, err
 }
 
+const listActiveDeviceAllocations = `-- name: ListActiveDeviceAllocations :many
+SELECT id, name, assigned_ip FROM devices
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+ORDER BY assigned_ip
+`
+
+type ListActiveDeviceAllocationsRow struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	AssignedIp *string   `json:"assigned_ip"`
+}
+
+// Live allocations WITH the owning device (id, name) — the SINGLE source for the
+// resize orphan check AND the 409 orphan objects, so the check and the build
+// can't drift (one read under the org lock). Filters MUST stay identical to
+// ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+func (q *Queries) ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveDeviceAllocations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveDeviceAllocationsRow{}
+	for rows.Next() {
+		var i ListActiveDeviceAllocationsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.AssignedIp); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivePeersForNode = `-- name: ListActivePeersForNode :many
 SELECT d.public_key, d.assigned_ip
 FROM devices d
