@@ -108,3 +108,61 @@ func TestBadCIDR(t *testing.T) {
 		t.Fatalf("want ErrBadCIDR for IPv6 (IPv4-only), got %v", err)
 	}
 }
+
+func eqStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestOrphansOrderingAndOutOfRange covers the shrink orphan set: out-of-range
+// addresses AND new-reserved collisions, deterministically ordered by numeric
+// address (== assigned_ip order) for a stable, byte-exact 409.
+func TestOrphansOrderingAndOutOfRange(t *testing.T) {
+	// Shrink 10.0.0.0/24 -> /28 (range .0-.15; network .0, gateway .1, broadcast .15).
+	got, err := Orphans("10.0.0.0/28", []string{
+		"10.0.0.200", // out of range
+		"10.0.0.5",   // inside, not reserved -> NOT an orphan
+		"10.0.0.15",  // NEW broadcast (numerically inside) -> orphan
+		"10.0.0.1",   // NEW gateway -> orphan
+		"10.0.0.0",   // NEW network -> orphan
+		"10.0.0.20",  // out of range
+	})
+	if err != nil {
+		t.Fatalf("Orphans: %v", err)
+	}
+	want := []string{"10.0.0.0", "10.0.0.1", "10.0.0.15", "10.0.0.20", "10.0.0.200"}
+	if !eqStrs(got, want) {
+		t.Fatalf("orphans = %v, want %v (numeric-asc; .5 excluded)", got, want)
+	}
+}
+
+// TestOrphansCatchesNewReservedCollision is the watch-item (b) edge in isolation:
+// a device numerically INSIDE the new range but sitting on what BECOMES the new
+// broadcast is orphaned — OutOfRange alone would miss it.
+func TestOrphansCatchesNewReservedCollision(t *testing.T) {
+	const dev = "10.0.0.15" // becomes the /28 broadcast
+	oor, _ := OutOfRange("10.0.0.0/28", []string{dev})
+	if len(oor) != 0 {
+		t.Fatalf("precondition: OutOfRange should NOT flag %s (it is inside /28); got %v", dev, oor)
+	}
+	orphans, err := Orphans("10.0.0.0/28", []string{dev})
+	if err != nil || !eqStrs(orphans, []string{dev}) {
+		t.Fatalf("Orphans must flag the future-broadcast device %s; got %v err=%v", dev, orphans, err)
+	}
+}
+
+// TestOrphansUnparseableSortLast: a malformed stored address is treated as an
+// orphan and ordered after valid ones.
+func TestOrphansUnparseableSortLast(t *testing.T) {
+	got, err := Orphans("10.0.0.0/28", []string{"garbage", "10.0.0.20"})
+	if err != nil || !eqStrs(got, []string{"10.0.0.20", "garbage"}) {
+		t.Fatalf("orphans = %v err=%v, want [10.0.0.20 garbage]", got, err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 )
 
 var (
@@ -84,6 +85,66 @@ func OutOfRange(newCIDR string, allocated []string) ([]string, error) {
 		if perr != nil || !p.Contains(a) {
 			out = append(out, s)
 		}
+	}
+	return out, nil
+}
+
+// Orphans returns the allocated addresses a resize to newCIDR would strand:
+// those OUTSIDE the new range, OR those colliding with the new range's RESERVED
+// addresses (network, gateway, broadcast). The reserved case is the subtle one —
+// a device numerically INSIDE the new range but sitting on .0/.1/broadcast is
+// still orphaned, because the allocator will never hand those out and they can't
+// remain assigned (OutOfRange alone misses it). The result is deterministically
+// ordered by numeric address ascending (== assigned_ip order for valid IPv4), so
+// the resize 409 is stable and byte-exact-testable; unparseable inputs are
+// treated as orphans and sorted last by their raw string.
+func Orphans(newCIDR string, allocated []string) ([]string, error) {
+	p, err := prefix(newCIDR)
+	if err != nil {
+		return nil, err
+	}
+	network := toU32(p.Addr())
+	hostBits := 32 - p.Bits()
+	// For a /31 or /32 there is no distinct broadcast; the resize validation
+	// refuses such a pool (too small) before this runs, but stay well-defined:
+	// treat every reserved slot as the network address in that degenerate case.
+	broadcast := network
+	if hostBits >= 1 {
+		broadcast = network + (uint32(1) << hostBits) - 1
+	}
+	reserved := map[uint32]bool{network: true, network + 1: true, broadcast: true}
+
+	type offender struct {
+		u    uint32
+		ok   bool
+		addr string
+	}
+	var offenders []offender
+	for _, s := range allocated {
+		a, perr := netip.ParseAddr(s)
+		if perr != nil || !a.Is4() {
+			offenders = append(offenders, offender{addr: s, ok: false})
+			continue
+		}
+		u := toU32(a)
+		if !p.Contains(a) || reserved[u] {
+			offenders = append(offenders, offender{u: u, ok: true, addr: s})
+		}
+	}
+	// Deterministic order: valid addresses by numeric value asc, then unparseable
+	// ones by raw string.
+	sort.Slice(offenders, func(i, j int) bool {
+		if offenders[i].ok != offenders[j].ok {
+			return offenders[i].ok // valid (ok) before invalid
+		}
+		if offenders[i].ok {
+			return offenders[i].u < offenders[j].u
+		}
+		return offenders[i].addr < offenders[j].addr
+	})
+	out := make([]string, len(offenders))
+	for i, o := range offenders {
+		out[i] = o.addr
 	}
 	return out, nil
 }
