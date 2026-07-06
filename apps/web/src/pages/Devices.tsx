@@ -22,6 +22,7 @@ export default function Devices() {
   const [name, setName] = useState("");
   const [fullTunnel, setFullTunnel] = useState(false);
   const [config, setConfig] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function loadDevices(orgId: string) {
@@ -103,6 +104,17 @@ export default function Devices() {
     await loadDevices(org.id);
   }
 
+  async function copy() {
+    if (!config) return;
+    try {
+      await navigator.clipboard.writeText(config);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard denied — the user can still select/download */
+    }
+  }
+
   function download() {
     if (!config) return;
     // The private key is served exactly once, so this download must not fail:
@@ -152,21 +164,37 @@ export default function Devices() {
         </Card>
       </form>
 
-      {/* The one-time config reveal: the most security-sensitive moment in the app.
-          It exists only in page state — navigating away loses it, by design, and it
-          is never re-fetched (the private key is served exactly once). */}
+      {/* The one-time config CEREMONY: the most security-sensitive moment in the
+          app. A deliberate modal (amber, blocks the page) — the config exists only
+          in page state, is never re-fetched (the private key is served exactly
+          once), and must be explicitly acknowledged ("I've saved it") to dismiss.
+          Navigating away also discards it. */}
       {config && (
-        <div className="mt-4 rounded-xl border border-accent-500/40 bg-ink-800 p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-accent-300">Your configuration — shown once</span>
-            <Button variant="ghost" onClick={download}>
-              Download {PRODUCT_NAME}.conf
-            </Button>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/80 p-4">
+          <div className="w-full max-w-lg rounded-xl border-2 border-warn/60 bg-ink-800 p-5 shadow-2xl">
+            <div className="flex items-center gap-2">
+              <StatusDot tone="warn" />
+              <span className="text-sm font-semibold text-warn">Your configuration — shown once</span>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              This file contains your device's <span className="text-warn">private key</span>. It is shown{" "}
+              <span className="font-semibold">exactly once</span> and cannot be retrieved again — save it now.
+            </p>
+            <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-ink-950 p-3 font-mono text-xs text-slate-300">
+              {config}
+            </pre>
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex gap-2">
+                <Button onClick={download}>Download {PRODUCT_NAME}.conf</Button>
+                <Button variant="ghost" onClick={copy}>
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <Button variant="ghost" onClick={() => setConfig(null)}>
+                I&rsquo;ve saved it
+              </Button>
+            </div>
           </div>
-          <pre className="mt-3 overflow-x-auto rounded-md bg-ink-900 p-3 text-xs text-slate-300">{config}</pre>
-          <p className="mt-2 text-xs text-amber-400">
-            This contains your private key and will not be shown again — download it now. Leaving this page discards it.
-          </p>
         </div>
       )}
 
@@ -175,7 +203,7 @@ export default function Devices() {
           <li key={d.id} className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-800 px-4 py-3">
             <div>
               <span className="text-sm text-white">{d.name}</span>
-              <span className="ml-2 text-xs text-slate-500">{d.assigned_ip ?? "—"}</span>
+              <span className="ml-2 font-mono text-xs text-slate-500">{d.assigned_ip ?? "—"}</span>
               {d.status === "revoked" ? (
                 <span className="ml-2 text-xs text-rose-400">revoked</span>
               ) : (

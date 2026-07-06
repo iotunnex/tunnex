@@ -15,7 +15,7 @@ export function Button({
   const variants = {
     primary: "bg-accent-500 text-white hover:bg-accent-600",
     ghost: "border border-white/10 text-slate-200 hover:bg-white/5",
-    danger: "text-slate-400 hover:text-rose-400",
+    danger: "text-slate-400 hover:text-danger",
   } as const;
   return <button className={`${base} ${variants[variant]} ${className}`} {...props} />;
 }
@@ -51,12 +51,13 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
   );
 }
 
-/** StatusDot: a small colored dot for online/offline/neutral state. */
+/** StatusDot: a small colored dot for online/offline/neutral state (semantic
+ * tokens, deliberately not the brand accent). */
 export function StatusDot({ tone }: { tone: "on" | "off" | "warn" }) {
-  const cls = { on: "bg-accent-400", off: "bg-slate-600", warn: "bg-amber-400" }[tone];
+  const cls = { on: "bg-ok", off: "bg-slate-600", warn: "bg-warn" }[tone];
   return <span className={`inline-block h-1.5 w-1.5 rounded-full ${cls}`} />;
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {
-  return children ? <p className="text-xs text-rose-400">{children}</p> : null;
+  return children ? <p className="text-xs text-danger">{children}</p> : null;
 }

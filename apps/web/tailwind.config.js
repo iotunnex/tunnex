@@ -4,33 +4,33 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Tunnex palette — deep slate ground with a secure-tunnel teal accent.
-        // This is the deliberate placeholder identity; swap these tokens (and the
-        // Logo in src/brand.tsx) for the real brand kit when it lands.
+        // Tunnex brand kit. Backgrounds are near-black with a faint violet bias
+        // (chosen to sit under the iris accent, not a pure grey). The <Logo> in
+        // src/brand.tsx + these tokens are the whole brand surface.
         ink: {
-          900: "#0a0e14",
-          800: "#0f141c",
-          700: "#161d28",
-          600: "#1f2836",
+          950: "#08080d", // deepest (overlays/scrim base)
+          900: "#0b0b12", // app background
+          800: "#12121c", // card / container
+          700: "#1a1a28", // raised layer / control background
+          600: "#232335", // subtle borders / dividers
         },
+        // Accent — electric iris. 500 is the brand anchor (#7C5CFF).
         accent: {
-          400: "#2dd4bf",
-          500: "#14b8a6",
-          600: "#0d9488",
+          400: "#9b84ff", // hover / active / focus glow
+          500: "#7c5cff", // primary CTA
+          600: "#6344e6", // pressed
         },
+        // Semantic status — RESERVED, deliberately distinct from the accent hue so
+        // "connected / caution / revoked" never reads as a brand highlight.
+        ok: "#34d399", // online / healthy (emerald)
+        warn: "#fbbf24", // caution / one-time secret (amber)
+        danger: "#fb7185", // revoked / error (rose)
       },
       fontFamily: {
-        sans: [
-          "ui-sans-serif",
-          "system-ui",
-          "-apple-system",
-          "Segoe UI",
-          "Roboto",
-          "Helvetica Neue",
-          "Arial",
-          "sans-serif",
-        ],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        // Inter for UI/body; JetBrains Mono is FIRST-CLASS for the things a VPN
+        // admin reads character-by-character: IPs, public keys, config files.
+        sans: ['"Inter Variable"', "ui-sans-serif", "system-ui", "Segoe UI", "Roboto", "sans-serif"],
+        mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
     },
   },

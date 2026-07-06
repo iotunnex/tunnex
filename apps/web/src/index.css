@@ -13,5 +13,5 @@ body,
 }
 
 body {
-  @apply bg-ink-900 text-slate-200 antialiased;
+  @apply bg-ink-900 text-slate-200 antialiased font-sans;
 }
