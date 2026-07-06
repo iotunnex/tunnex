@@ -290,17 +290,33 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 		org, user, node, "10.99.0.200"); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
-	// Grow to /23 — safe.
-	if err := svc.ResizePool(ctx, org, "10.99.0.0/23"); err != nil {
+	// Grow to /23 — safe (superset; .200 is inside and not a new reserved addr).
+	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
 		t.Fatalf("grow should succeed: %v", err)
 	}
-	// Shrink to /25 — would orphan 10.99.0.200; must refuse.
-	if err := svc.ResizePool(ctx, org, "10.99.0.0/25"); code(err) != "pool_shrink_conflict" {
-		t.Fatalf("shrink should refuse with pool_shrink_conflict, got %v", err)
+	// Shrink to /25 — would strand 10.99.0.200; must refuse with the typed orphan
+	// error carrying the offender.
+	var orphErr *ShrinkOrphansError
+	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/25"); !errors.As(err, &orphErr) {
+		t.Fatalf("shrink should refuse with *ShrinkOrphansError, got %v", err)
+	} else if len(orphErr.Orphans) != 1 || orphErr.Orphans[0] != "10.99.0.200" {
+		t.Fatalf("orphans = %v, want [10.99.0.200]", orphErr.Orphans)
 	}
 	// A bad CIDR is rejected.
-	if err := svc.ResizePool(ctx, org, "not-a-cidr"); code(err) != "invalid_cidr" {
+	if err := svc.ResizePool(ctx, user, org, "not-a-cidr"); code(err) != "invalid_cidr" {
 		t.Fatalf("bad cidr: want invalid_cidr, got %v", err)
+	}
+	// Idempotent: resizing to the current CIDR is a no-op success (200), not an error.
+	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
+		t.Fatalf("idempotent resize to current CIDR should succeed, got %v", err)
+	}
+	// Illegal shape: a disjoint /24 (neither superset nor subset) is refused.
+	if err := svc.ResizePool(ctx, user, org, "10.88.0.0/24"); code(err) != "illegal_resize" {
+		t.Fatalf("disjoint resize: want illegal_resize, got %v", err)
+	}
+	// Too small: a /31 can't hold the reserved addresses + a host.
+	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/31"); code(err) != "cidr_too_small" {
+		t.Fatalf("tiny cidr: want cidr_too_small, got %v", err)
 	}
 }
 

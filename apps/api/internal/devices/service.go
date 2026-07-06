@@ -12,7 +12,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -234,32 +236,81 @@ func sortedKeys(a, b string) [2]string {
 	return [2]string{b, a}
 }
 
-// ResizePool changes the org's tunnel pool CIDR. Growing is always safe; a shrink
-// is REFUSED if any live allocation would fall outside the new range (returning
-// the offenders) — never silently orphaning addresses. Runs under the org lock so
-// a concurrent allocation can't slip in during the check.
-func (s *Service) ResizePool(ctx context.Context, orgID uuid.UUID, newCIDR string) error {
-	if _, err := ipalloc.GatewayCIDR(newCIDR); err != nil {
+// ShrinkOrphansError is returned when a resize would strand live allocations.
+// Orphans is the FULL list, ordered by assigned_ip ascending (from
+// ipalloc.Orphans); the HTTP layer caps the rendered slice and reports the true
+// total, so the 409 body is bounded but the count is honest.
+type ShrinkOrphansError struct{ Orphans []string }
+
+func (e *ShrinkOrphansError) Error() string {
+	return fmt.Sprintf("resize would strand %d live allocation(s)", len(e.Orphans))
+}
+
+// ResizePool changes the org's tunnel pool CIDR, atomically with an
+// org.cidr_resized audit row, under the SAME per-org lock the allocator takes
+// (LockDeviceKey) — so a concurrent device-create cannot slip a new allocation
+// past the orphan check during the resize window. (Lock ordering: resize takes
+// only the org key; allocation takes {owner,org} sorted; resize never waits on
+// the owner key, so no inversion/deadlock.)
+//
+// Legal shapes are grow-superset or shrink-subset only; an identical CIDR is an
+// idempotent no-op. The orphan check runs UNCONDITIONALLY (not shrink-only): on
+// a valid grow it is provably empty for Allocate-produced IPs — every reserved
+// address of the new range is outside the usable interval [O_net+2, O_bcast-1]
+// that any allocation occupies — so it fires only if that INVARIANT is broken.
+// PREMISE: this assumes every assigned_ip was produced by ipalloc.Allocate (∈ the
+// usable interval); UNIQUE(org_id,assigned_ip) enforces uniqueness, NOT range
+// membership. Any future path that writes assigned_ip directly (a Pritunl-style
+// import that preserves IPs; EPIC 9 OpenVPN if it doesn't allocate through
+// ipalloc) MUST use Allocate or re-validate this — otherwise a grow could strand
+// such an address on a new reserved slot, and the check firing here is the
+// backstop that turns silent corruption into a refused resize.
+func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCIDR string) error {
+	newP, err := netip.ParsePrefix(newCIDR)
+	if err != nil || !newP.Addr().Is4() {
 		return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
+	}
+	newP = newP.Masked()
+	if 32-newP.Bits() < 2 { // need network + gateway + >=1 host + broadcast
+		return apierr.BadRequest("cidr_too_small", "the pool is too small to hold the gateway and at least one device (need /30 or larger)")
 	}
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
 			return e
 		}
+		org, e := q.GetOrganizationByID(ctx, orgID)
+		if e != nil {
+			return e
+		}
+		oldP, e := netip.ParsePrefix(org.PoolCidr)
+		if e != nil {
+			return e // a stored CIDR should always be valid
+		}
+		oldP = oldP.Masked()
+		if oldP == newP {
+			return nil // idempotent: identical CIDR is a successful no-op
+		}
+		grow := newP.Bits() <= oldP.Bits() && newP.Contains(oldP.Addr())
+		shrink := oldP.Bits() <= newP.Bits() && oldP.Contains(newP.Addr())
+		if !grow && !shrink {
+			return apierr.BadRequest("illegal_resize", "the new range must contain, or be contained by, the current range")
+		}
 		used, e := q.ListAssignedIPsForOrg(ctx, orgID)
 		if e != nil {
 			return e
 		}
-		offenders, e := ipalloc.OutOfRange(newCIDR, derefStrings(used))
+		orphans, e := ipalloc.Orphans(newCIDR, derefStrings(used))
 		if e != nil {
 			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
 		}
-		if len(offenders) > 0 {
-			return apierr.Conflict("pool_shrink_conflict",
-				"cannot shrink the pool: live allocations fall outside "+newCIDR+": "+strings.Join(offenders, ", "))
+		if len(orphans) > 0 {
+			return &ShrinkOrphansError{Orphans: orphans}
 		}
-		_, e = q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: newCIDR})
-		return e
+		if _, e = q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: newCIDR}); e != nil {
+			return e
+		}
+		return audit(ctx, q, orgID, &actor, "org.cidr_resized", "organization", orgID.String(),
+			map[string]any{"from": org.PoolCidr, "to": newCIDR})
 	})
 }
 
