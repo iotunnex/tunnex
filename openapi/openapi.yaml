@@ -770,6 +770,39 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/v1/organizations/{orgId}/pool-cidr:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      # EDITION-NEUTRAL: the address allocator is core/open (S3.5), so resize has
+      # no edition gate. Do not add one.
+      operationId: resizePool
+      summary: Resize the org's WireGuard address pool (grow-superset or shrink-subset)
+      tags: [organizations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PoolCidrRequest" }
+      responses:
+        "200":
+          description: The updated organization (also returned unchanged for an idempotent no-op resize).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Organization" }
+        "409":
+          description: The shrink would strand live allocations; none were changed.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResizeConflict" }
+        default:
+          $ref: "#/components/responses/Error"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -804,7 +837,7 @@ components:
 
     Organization:
       type: object
-      required: [id, name, slug, created_at, updated_at]
+      required: [id, name, slug, pool_cidr, created_at, updated_at]
       additionalProperties: false
       properties:
         id:
@@ -814,12 +847,47 @@ components:
           type: string
         slug:
           type: string
+        pool_cidr:
+          type: string
+          description: The org's flat WireGuard address pool (IPv4 CIDR).
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    PoolCidrRequest:
+      type: object
+      required: [cidr]
+      additionalProperties: false
+      properties:
+        cidr: { type: string, description: New pool CIDR (IPv4). Must contain or be contained by the current range. }
+
+    # One stranded allocation. reason distinguishes out_of_range (visibly outside
+    # the new range) from reserved_collision (numerically INSIDE it but on the new
+    # network/gateway/broadcast — looks fine to the eye, still stranded).
+    Orphan:
+      type: object
+      required: [device_id, name, assigned_ip, reason]
+      additionalProperties: false
+      properties:
+        device_id: { type: string, format: uuid }
+        name: { type: string }
+        assigned_ip: { type: string }
+        reason: { type: string, enum: [out_of_range, reserved_collision] }
+
+    # 409 body when a resize would strand live allocations. orphan_count is the
+    # true total; orphans is capped (the caller renders the list, the count is honest).
+    ResizeConflict:
+      type: object
+      required: [orphan_count, orphans]
+      additionalProperties: false
+      properties:
+        orphan_count: { type: integer }
+        orphans:
+          type: array
+          items: { $ref: "#/components/schemas/Orphan" }
 
     CreateOrganizationRequest:
       type: object

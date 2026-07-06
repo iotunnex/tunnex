@@ -182,6 +182,7 @@ func toAPIOrg(o sqlc.Organization) api.Organization {
 		Id:        o.ID,
 		Name:      o.Name,
 		Slug:      o.Slug,
+		PoolCidr:  o.PoolCidr,
 		CreatedAt: o.CreatedAt,
 		UpdatedAt: o.UpdatedAt,
 	}

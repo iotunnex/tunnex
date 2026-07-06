@@ -234,6 +234,10 @@ func sortedKeys(a, b string) [2]string {
 	return [2]string{b, a}
 }
 
+// afterResizeCheck is a test-only barrier fired inside ResizePool's window
+// (after the orphan check, before commit). Always nil in production.
+var afterResizeCheck func()
+
 // OrphanDevice is a device a resize would strand: which device, its address, and
 // why (out_of_range | reserved_collision — the latter is numerically inside the
 // new range and looks fine, so the reason must reach the UI).
@@ -322,6 +326,13 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		orphans, e := ipalloc.Orphans(newCIDR, ips)
 		if e != nil {
 			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
+		}
+		// Test seam: a barrier fired AFTER the orphan check, BEFORE the commit — it
+		// lets TestResizeAllocationRace drive a real concurrent CreateDevice into
+		// exactly this window to prove the LockDeviceKey above actually excludes it.
+		// nil in production (zero cost).
+		if afterResizeCheck != nil {
+			afterResizeCheck()
 		}
 		// See this function's doc-comment PREMISE: on a valid grow this is provably
 		// empty for Allocate-produced IPs; if it fires on a grow, that invariant was

@@ -620,6 +620,25 @@ export interface paths {
         patch: operations["updateOrganization"];
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/pool-cidr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Resize the org's WireGuard address pool (grow-superset or shrink-subset) */
+        put: operations["resizePool"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -643,10 +662,28 @@ export interface components {
             id: string;
             name: string;
             slug: string;
+            /** @description The org's flat WireGuard address pool (IPv4 CIDR). */
+            pool_cidr: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        PoolCidrRequest: {
+            /** @description New pool CIDR (IPv4). Must contain or be contained by the current range. */
+            cidr: string;
+        };
+        Orphan: {
+            /** Format: uuid */
+            device_id: string;
+            name: string;
+            assigned_ip: string;
+            /** @enum {string} */
+            reason: "out_of_range" | "reserved_collision";
+        };
+        ResizeConflict: {
+            orphan_count: number;
+            orphans: components["schemas"]["Orphan"][];
         };
         CreateOrganizationRequest: {
             name: string;
@@ -1812,6 +1849,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resizePool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolCidrRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated organization (also returned unchanged for an idempotent no-op resize). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            /** @description The shrink would strand live allocations; none were changed. */
+            409: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResizeConflict"];
                 };
             };
             default: components["responses"]["Error"];
