@@ -161,10 +161,11 @@ type ListActiveDeviceAllocationsRow struct {
 	AssignedIp *string   `json:"assigned_ip"`
 }
 
-// Live allocations WITH the owning device (id, name) — the SINGLE source for the
-// resize orphan check AND the 409 orphan objects, so the check and the build
-// can't drift (one read under the org lock). Filters MUST stay identical to
-// ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+// The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
+// device (id, name). The SINGLE definition of "live allocation" — used by BOTH
+// device-create's lowest-free choice AND resize's orphan check/409 objects, so
+// there are no two filtered reads to drift apart. Read under the org advisory
+// lock so allocation and resize serialize on the same snapshot.
 func (q *Queries) ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error) {
 	rows, err := q.db.Query(ctx, listActiveDeviceAllocations, orgID)
 	if err != nil {
@@ -217,33 +218,6 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAssignedIPsForOrg = `-- name: ListAssignedIPsForOrg :many
-SELECT assigned_ip FROM devices
-WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
-`
-
-// The org's live tunnel allocations (flat pool, across all nodes). Read under the
-// org advisory lock during Create so the lowest-free choice can't be raced.
-func (q *Queries) ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([]*string, error) {
-	rows, err := q.db.Query(ctx, listAssignedIPsForOrg, orgID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []*string{}
-	for rows.Next() {
-		var assigned_ip *string
-		if err := rows.Scan(&assigned_ip); err != nil {
-			return nil, err
-		}
-		items = append(items, assigned_ip)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

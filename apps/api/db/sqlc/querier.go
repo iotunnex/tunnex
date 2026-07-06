@@ -90,19 +90,17 @@ type Querier interface {
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
-	// Live allocations WITH the owning device (id, name) — the SINGLE source for the
-	// resize orphan check AND the 409 orphan objects, so the check and the build
-	// can't drift (one read under the org lock). Filters MUST stay identical to
-	// ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+	// The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
+	// device (id, name). The SINGLE definition of "live allocation" — used by BOTH
+	// device-create's lowest-free choice AND resize's orphan check/409 objects, so
+	// there are no two filtered reads to drift apart. Read under the org advisory
+	// lock so allocation and resize serialize on the same snapshot.
 	ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops
 	// their peers from every node's desired state (and reactivation restores them).
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
-	// The org's live tunnel allocations (flat pool, across all nodes). Read under the
-	// org advisory lock during Create so the lowest-free choice can't be raced.
-	ListAssignedIPsForOrg(ctx context.Context, orgID uuid.UUID) ([]*string, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)

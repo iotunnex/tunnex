@@ -64,17 +64,12 @@ DELETE FROM device_status WHERE device_id = $1;
 -- resize never waits on the owner key, so no inversion/deadlock.
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 
--- name: ListAssignedIPsForOrg :many
--- The org's live tunnel allocations (flat pool, across all nodes). Read under the
--- org advisory lock during Create so the lowest-free choice can't be raced.
-SELECT assigned_ip FROM devices
-WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL;
-
 -- name: ListActiveDeviceAllocations :many
--- Live allocations WITH the owning device (id, name) — the SINGLE source for the
--- resize orphan check AND the 409 orphan objects, so the check and the build
--- can't drift (one read under the org lock). Filters MUST stay identical to
--- ListAssignedIPsForOrg (active, non-deleted, assigned_ip set).
+-- The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
+-- device (id, name). The SINGLE definition of "live allocation" — used by BOTH
+-- device-create's lowest-free choice AND resize's orphan check/409 objects, so
+-- there are no two filtered reads to drift apart. Read under the org advisory
+-- lock so allocation and resize serialize on the same snapshot.
 SELECT id, name, assigned_ip FROM devices
 WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
 ORDER BY assigned_ip;

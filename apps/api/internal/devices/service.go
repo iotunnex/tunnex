@@ -31,17 +31,6 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
-// derefStrings collapses a []*string (nullable SQL column) to non-nil values.
-func derefStrings(in []*string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s != nil {
-			out = append(out, *s)
-		}
-	}
-	return out
-}
-
 // Service provides device/peer operations.
 type Service struct {
 	pool   *pgxpool.Pool
@@ -171,11 +160,20 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		}
 		// Allocate the lowest free tunnel address from the org's flat pool
 		// (deterministic; safe under the org advisory lock + the org_ip unique index).
-		usedIPs, e := q.ListAssignedIPsForOrg(ctx, in.OrgID)
+		// Uses the SAME query as resize's orphan check (ListActiveDeviceAllocations)
+		// so there is one definition of "live allocation" — no two filtered reads to
+		// drift apart.
+		allocs, e := q.ListActiveDeviceAllocations(ctx, in.OrgID)
 		if e != nil {
 			return e
 		}
-		ip, e := ipalloc.Allocate(org.PoolCidr, derefStrings(usedIPs))
+		usedIPs := make([]string, 0, len(allocs))
+		for _, r := range allocs {
+			if r.AssignedIp != nil {
+				usedIPs = append(usedIPs, *r.AssignedIp)
+			}
+		}
+		ip, e := ipalloc.Allocate(org.PoolCidr, usedIPs)
 		if e != nil {
 			if errors.Is(e, ipalloc.ErrPoolExhausted) {
 				return apierr.Conflict("pool_exhausted", "no free tunnel address in the org pool")
