@@ -15,6 +15,7 @@ export type Device = components["schemas"]["Device"];
 export type OrgOverview = components["schemas"]["OrgOverview"];
 export type Member = components["schemas"]["Member"];
 export type Role = Member["role"];
+export type SsoConfigView = components["schemas"]["SsoConfigView"];
 
 // apiErrorMessage pulls the human message out of the standard error envelope.
 export function apiErrorMessage(error: unknown, fallback: string): string {

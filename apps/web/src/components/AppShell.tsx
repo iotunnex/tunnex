@@ -12,7 +12,7 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", enabled: true },
   { to: "/devices", label: "Devices", enabled: true },
   { to: "/users", label: "Users", enabled: true },
-  { to: "/settings", label: "Settings", enabled: false },
+  { to: "/settings", label: "Settings", enabled: true },
   { to: "/audit", label: "Audit log", enabled: false },
 ];
 

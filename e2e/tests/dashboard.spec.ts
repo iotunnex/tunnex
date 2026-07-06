@@ -16,8 +16,8 @@ async function login(page: Page) {
 
 test("dashboard renders real counts for the seeded org", async ({ page }) => {
   await login(page);
-  // The org name is shown.
-  await expect(page.getByText("Demo Organization")).toBeVisible();
+  // (Org name is asserted in settings.spec, not here — the settings edit test
+  // renames+reverts the shared demo org, so an exact-name check would race it.)
   // The Members stat is a live count: the label sits directly under its value.
   const membersLabel = page.getByText("Members", { exact: true });
   await expect(membersLabel).toBeVisible();
