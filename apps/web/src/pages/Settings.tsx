@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, CSRF, apiErrorMessage, type Meta, type Org, type Member, type Role, type SsoConfigView } from "../lib/api";
+import { api, CSRF, apiErrorMessage, type Meta, type Org, type Member, type Role, type SsoConfigView, type ResizeConflict } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
@@ -63,6 +63,7 @@ export default function Settings() {
       {org && isAdmin && (
         <>
           <OrgSection org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
+          <PoolSection org={org} canEdit={emailVerified} onResized={(o) => setOrg(o)} />
           {/* SSO config is enterprise-only; hidden in the open edition per /meta
               (watch-item b), with a muted note rather than a dead form. */}
           {meta?.edition === "enterprise" ? (
@@ -76,6 +77,102 @@ export default function Settings() {
         </>
       )}
     </div>
+  );
+}
+
+// isResizeConflict narrows a resize error to the structured 409 (orphan list),
+// distinguishing it from the generic error envelope.
+function isResizeConflict(e: unknown): e is ResizeConflict {
+  return typeof e === "object" && e !== null && "orphans" in e && "orphan_count" in e;
+}
+
+function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; onResized: (o: Org) => void }) {
+  const [cidr, setCidr] = useState(org.pool_cidr);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [conflict, setConflict] = useState<ResizeConflict | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    setConflict(null);
+    setDone(false);
+    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/pool-cidr", {
+      params: { path: { orgId: org.id } },
+      headers: CSRF,
+      body: { cidr },
+    });
+    setBusy(false);
+    if (error) {
+      // A shrink that would strand devices comes back as the structured 409:
+      // render the (capped) list with names + reasons so the refusal is actionable.
+      if (isResizeConflict(error)) return setConflict(error);
+      return setErr(apiErrorMessage(error, "Could not resize the pool."));
+    }
+    if (data) {
+      onResized(data);
+      setCidr(data.pool_cidr);
+      setDone(true);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-4">
+      <Card>
+        <h2 className="text-sm font-semibold text-slate-300">Address pool</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          The WireGuard address range devices are assigned from. Grow to add capacity; shrink only within the current range.
+        </p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div className="min-w-[12rem] flex-1">
+            <Field label="Pool CIDR">
+              <Input value={cidr} onChange={(e) => { setCidr(e.target.value); setDone(false); setConflict(null); }} required disabled={!canEdit} placeholder="10.0.0.0/24" />
+            </Field>
+          </div>
+          <Button type="submit" disabled={busy || !canEdit || cidr === org.pool_cidr}>
+            {busy ? "Resizing…" : "Resize pool"}
+          </Button>
+        </div>
+
+        {/* Accept-and-surface (S4.5b decision e): the resize succeeds, but existing
+            configs embed the old range and are one-time — they can't be re-served. */}
+        {done && (
+          <p className="mt-3 text-xs text-accent-400">
+            Pool resized to <span className="font-mono">{cidr}</span>. Existing devices keep their current addresses — to reach
+            addresses in the new range, re-issue their configs (revoke + recreate; configs are shown once and can’t be re-sent).
+          </p>
+        )}
+
+        {/* Actionable shrink refusal: which devices block it, and why. */}
+        {conflict && (
+          <div className="mt-3 rounded-lg border border-danger/40 bg-danger/5 p-3">
+            <p className="text-sm text-slate-300">
+              Can’t shrink: {conflict.orphan_count} device{conflict.orphan_count === 1 ? "" : "s"} must be removed or renumbered
+              first.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {conflict.orphans.map((o) => (
+                <li key={o.device_id} className="flex items-center justify-between text-xs">
+                  <span className="text-slate-300">{o.name}</span>
+                  <span className="font-mono text-slate-500">
+                    {o.assigned_ip}
+                    <span className="ml-2 text-slate-600">
+                      {o.reason === "reserved_collision" ? "collides with a reserved address" : "outside the new range"}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {conflict.orphan_count > conflict.orphans.length && (
+              <p className="mt-1 text-xs text-slate-600">…and {conflict.orphan_count - conflict.orphans.length} more.</p>
+            )}
+          </div>
+        )}
+        <ErrorText>{err}</ErrorText>
+      </Card>
+    </form>
   );
 }
 
