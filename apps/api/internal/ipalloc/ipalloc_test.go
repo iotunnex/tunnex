@@ -2,6 +2,7 @@ package ipalloc
 
 import (
 	"errors"
+	"net/netip"
 	"testing"
 )
 
@@ -83,20 +84,21 @@ func TestGatewayCIDR(t *testing.T) {
 	}
 }
 
-func TestOutOfRangeResizeShrink(t *testing.T) {
+func TestOrphansShrinkAndGrow(t *testing.T) {
 	alloc := []string{"10.99.0.2", "10.99.0.130", "10.99.0.200"}
-	// Shrinking 10.99.0.0/24 -> /25 (0-127) orphans .130 and .200.
-	off, err := OutOfRange("10.99.0.0/25", alloc)
+	// Shrinking 10.99.0.0/24 -> /25 (0-127) strands .130 and .200 (out of range).
+	off, err := Orphans("10.99.0.0/25", alloc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(off) != 2 || off[0] != "10.99.0.130" || off[1] != "10.99.0.200" {
-		t.Fatalf("want [.130 .200] as offenders, got %v", off)
+	if len(off) != 2 || off[0].Addr != "10.99.0.130" || off[1].Addr != "10.99.0.200" {
+		t.Fatalf("want [.130 .200] as orphans, got %v", addrs(off))
 	}
-	// Growing (or same size) orphans nothing.
-	off, _ = OutOfRange("10.99.0.0/23", alloc)
+	// Growing (superset) strands nothing (.2/.130/.200 all inside /23, none on a
+	// new reserved addr).
+	off, _ = Orphans("10.99.0.0/23", alloc)
 	if len(off) != 0 {
-		t.Fatalf("grow should orphan nothing, got %v", off)
+		t.Fatalf("grow should strand nothing, got %v", addrs(off))
 	}
 }
 
@@ -160,13 +162,16 @@ func TestOrphansOrderingAndOutOfRange(t *testing.T) {
 
 // TestOrphansCatchesNewReservedCollision is the watch-item (b) edge in isolation:
 // a device numerically INSIDE the new range but sitting on what BECOMES the new
-// broadcast is orphaned as reserved_collision — OutOfRange alone would miss it.
+// broadcast is orphaned as reserved_collision — a plain range-containment check
+// would pass it (which is exactly why Orphans exists, not a bare contains-check).
 func TestOrphansCatchesNewReservedCollision(t *testing.T) {
 	const dev = "10.0.0.15" // becomes the /28 broadcast
-	oor, _ := OutOfRange("10.0.0.0/28", []string{dev})
-	if len(oor) != 0 {
-		t.Fatalf("precondition: OutOfRange should NOT flag %s (it is inside /28); got %v", dev, oor)
+	// Contrast: the device IS numerically inside the new /28 — a naive
+	// containment check would NOT flag it...
+	if !netip.MustParsePrefix("10.0.0.0/28").Contains(netip.MustParseAddr(dev)) {
+		t.Fatalf("precondition: %s must be inside /28 for this contrast to be meaningful", dev)
 	}
+	// ...but Orphans catches it as a reserved-address collision.
 	orphans, err := Orphans("10.0.0.0/28", []string{dev})
 	if err != nil || len(orphans) != 1 || orphans[0].Addr != dev || orphans[0].Reason != ReasonReservedCollision {
 		t.Fatalf("Orphans must flag %s as reserved_collision; got %+v err=%v", dev, orphans, err)

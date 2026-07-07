@@ -292,13 +292,13 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 		t.Fatalf("seed device: %v", err)
 	}
 	// Grow to /23 — safe (superset; .200 is inside and not a new reserved addr).
-	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
+	if _, err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
 		t.Fatalf("grow should succeed: %v", err)
 	}
 	// Shrink to /25 — would strand 10.99.0.200; must refuse with the typed orphan
 	// error carrying the offender.
 	var orphErr *ShrinkOrphansError
-	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/25"); !errors.As(err, &orphErr) {
+	if _, err := svc.ResizePool(ctx, user, org, "10.99.0.0/25"); !errors.As(err, &orphErr) {
 		t.Fatalf("shrink should refuse with *ShrinkOrphansError, got %v", err)
 	} else if len(orphErr.Orphans) != 1 {
 		t.Fatalf("orphans = %+v, want exactly one", orphErr.Orphans)
@@ -306,19 +306,19 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 		t.Fatalf("orphan = %+v, want {device_id set, name d, 10.99.0.200, out_of_range}", o)
 	}
 	// A bad CIDR is rejected.
-	if err := svc.ResizePool(ctx, user, org, "not-a-cidr"); code(err) != "invalid_cidr" {
+	if _, err := svc.ResizePool(ctx, user, org, "not-a-cidr"); code(err) != "invalid_cidr" {
 		t.Fatalf("bad cidr: want invalid_cidr, got %v", err)
 	}
 	// Idempotent: resizing to the current CIDR is a no-op success (200), not an error.
-	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
+	if _, err := svc.ResizePool(ctx, user, org, "10.99.0.0/23"); err != nil {
 		t.Fatalf("idempotent resize to current CIDR should succeed, got %v", err)
 	}
 	// Illegal shape: a disjoint /24 (neither superset nor subset) is refused.
-	if err := svc.ResizePool(ctx, user, org, "10.88.0.0/24"); code(err) != "illegal_resize" {
+	if _, err := svc.ResizePool(ctx, user, org, "10.88.0.0/24"); code(err) != "illegal_resize" {
 		t.Fatalf("disjoint resize: want illegal_resize, got %v", err)
 	}
 	// Too small: a /31 can't hold the reserved addresses + a host.
-	if err := svc.ResizePool(ctx, user, org, "10.99.0.0/31"); code(err) != "cidr_too_small" {
+	if _, err := svc.ResizePool(ctx, user, org, "10.99.0.0/31"); code(err) != "cidr_too_small" {
 		t.Fatalf("tiny cidr: want cidr_too_small, got %v", err)
 	}
 }
@@ -349,7 +349,7 @@ func TestResizePoolGrowSafety(t *testing.T) {
 	// last host (.254). Neither seeded device collides with a new reserved addr, so
 	// the grow succeeds with no orphans — the proof holds, and the check-anyway
 	// orphan pass is provably empty here.
-	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+	if _, err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
 		t.Fatalf("downward grow-superset should succeed (proof: no allocation lands on a new reserved addr), got %v", err)
 	}
 	var cidr string
@@ -370,7 +370,7 @@ func TestResizePoolAudit(t *testing.T) {
 	}
 
 	// Grow /24 -> /23: one audit row, attributed to the actor, with from+to.
-	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+	if _, err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
 		t.Fatalf("grow: %v", err)
 	}
 	var count int
@@ -389,7 +389,7 @@ func TestResizePoolAudit(t *testing.T) {
 	}
 
 	// Idempotent no-op (resize to the current /23): NO new audit row.
-	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+	if _, err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
 		t.Fatalf("idempotent resize: %v", err)
 	}
 	var total int

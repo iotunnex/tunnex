@@ -71,24 +71,6 @@ func GatewayCIDR(cidr string) (string, error) {
 	return fmt.Sprintf("%s/%d", gw, p.Bits()), nil
 }
 
-// OutOfRange returns the allocated addresses that fall OUTSIDE newCIDR — the
-// resize-shrink safety check. A non-empty result means the shrink would orphan
-// live allocations and must be refused. Unparseable inputs count as offenders.
-func OutOfRange(newCIDR string, allocated []string) ([]string, error) {
-	p, err := prefix(newCIDR)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, s := range allocated {
-		a, perr := netip.ParseAddr(s)
-		if perr != nil || !p.Contains(a) {
-			out = append(out, s)
-		}
-	}
-	return out, nil
-}
-
 // Orphan-reason values (kept in sync with the OpenAPI Orphan.reason enum).
 const (
 	// ReasonOutOfRange: the address falls outside the new range entirely.
@@ -112,7 +94,7 @@ type Orphan struct {
 // (network, gateway, broadcast). The reserved case is the subtle one — a device
 // numerically INSIDE the new range but sitting on .0/.1/broadcast is still
 // orphaned, because the allocator will never hand those out and they can't remain
-// assigned (OutOfRange alone misses it). Deterministically ordered by numeric
+// assigned (a plain range-containment check alone misses it). Deterministically ordered by numeric
 // address ascending (== assigned_ip order for valid IPv4), so the resize 409 is
 // stable and byte-exact-testable; unparseable inputs are treated as out_of_range
 // orphans and sorted last by their raw string.

@@ -37,6 +37,11 @@ type Service struct {
 	q      *sqlc.Queries
 	hub    *nodepush.Hub
 	logger *slog.Logger
+	// afterResizeCheck is a test-only barrier fired inside ResizePool's window
+	// (after the orphan check, before commit) so TestResizeAllocationRace can drive
+	// a concurrent CreateDevice into that window. Always nil in production; a
+	// per-Service field (not a package global) so parallel tests can't clobber it.
+	afterResizeCheck func()
 }
 
 // NewService builds the device service. hub may be nil (no push; interval
@@ -234,10 +239,6 @@ func sortedKeys(a, b string) [2]string {
 	return [2]string{b, a}
 }
 
-// afterResizeCheck is a test-only barrier fired inside ResizePool's window
-// (after the orphan check, before commit). Always nil in production.
-var afterResizeCheck func()
-
 // OrphanDevice is a device a resize would strand: which device, its address, and
 // why (out_of_range | reserved_collision — the latter is numerically inside the
 // new range and looks fine, so the reason must reach the UI).
@@ -277,16 +278,21 @@ func (e *ShrinkOrphansError) Error() string {
 // ipalloc) MUST use Allocate or re-validate this — otherwise a grow could strand
 // such an address on a new reserved slot, and the check firing here is the
 // backstop that turns silent corruption into a refused resize.
-func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCIDR string) error {
+func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCIDR string) (sqlc.Organization, error) {
 	newP, err := netip.ParsePrefix(newCIDR)
 	if err != nil || !newP.Addr().Is4() {
-		return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
+		return sqlc.Organization{}, apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
 	}
 	newP = newP.Masked()
 	if 32-newP.Bits() < 2 { // need network + gateway + >=1 host + broadcast
-		return apierr.BadRequest("cidr_too_small", "the pool is too small to hold the gateway and at least one device (need /30 or larger)")
+		return sqlc.Organization{}, apierr.BadRequest("cidr_too_small", "the pool is too small to hold the gateway and at least one device (need /30 or larger)")
 	}
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	// Persist the CANONICAL (masked) form, not the raw input — so a host-bits-dirty
+	// but valid input (e.g. "10.0.1.5/23") is stored/audited/echoed as "10.0.0.0/23",
+	// matching what the pool actually is.
+	masked := newP.String()
+	var result sqlc.Organization
+	err = s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
 			return e
 		}
@@ -300,7 +306,8 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		}
 		oldP = oldP.Masked()
 		if oldP == newP {
-			return nil // idempotent: identical CIDR is a successful no-op
+			result = org // idempotent: identical CIDR is a successful no-op (no update, no audit)
+			return nil
 		}
 		grow := newP.Bits() <= oldP.Bits() && newP.Contains(oldP.Addr())
 		shrink := oldP.Bits() <= newP.Bits() && oldP.Contains(newP.Addr())
@@ -323,16 +330,16 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 			ips = append(ips, *r.AssignedIp)
 			byIP[*r.AssignedIp] = r
 		}
-		orphans, e := ipalloc.Orphans(newCIDR, ips)
+		orphans, e := ipalloc.Orphans(masked, ips)
 		if e != nil {
 			return apierr.BadRequest("invalid_cidr", "pool_cidr must be a valid IPv4 CIDR")
 		}
-		// Test seam: a barrier fired AFTER the orphan check, BEFORE the commit — it
-		// lets TestResizeAllocationRace drive a real concurrent CreateDevice into
-		// exactly this window to prove the LockDeviceKey above actually excludes it.
-		// nil in production (zero cost).
-		if afterResizeCheck != nil {
-			afterResizeCheck()
+		// Test seam (per-Service, nil in prod): a barrier fired AFTER the orphan
+		// check, BEFORE the commit — lets TestResizeAllocationRace drive a real
+		// concurrent CreateDevice into this window to prove the LockDeviceKey above
+		// actually excludes it.
+		if s.afterResizeCheck != nil {
+			s.afterResizeCheck()
 		}
 		// See this function's doc-comment PREMISE: on a valid grow this is provably
 		// empty for Allocate-produced IPs; if it fires on a grow, that invariant was
@@ -346,12 +353,18 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 			}
 			return &ShrinkOrphansError{Orphans: objs}
 		}
-		if _, e = q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: newCIDR}); e != nil {
+		updated, e := q.UpdateOrgPoolCidr(ctx, sqlc.UpdateOrgPoolCidrParams{ID: orgID, PoolCidr: masked})
+		if e != nil {
 			return e
 		}
+		result = updated // return the row we committed, in-tx — no post-commit re-fetch to race a concurrent delete
 		return audit(ctx, q, orgID, &actor, "org.cidr_resized", "organization", orgID.String(),
-			map[string]any{"from": org.PoolCidr, "to": newCIDR})
+			map[string]any{"from": org.PoolCidr, "to": masked})
 	})
+	if err != nil {
+		return sqlc.Organization{}, err
+	}
+	return result, nil
 }
 
 // DeviceWithStatus is a device plus its live telemetry (nil when never reported).

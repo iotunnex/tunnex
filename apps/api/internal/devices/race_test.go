@@ -89,14 +89,13 @@ func TestResizeAllocationRace(t *testing.T) {
 	// inside the window and unblocks the seam immediately (deterministic red).
 	resizeInWindow := make(chan struct{})
 	createDone := make(chan struct{})
-	afterResizeCheck = func() {
+	svcResize.afterResizeCheck = func() {
 		close(resizeInWindow)
 		select {
 		case <-createDone:
 		case <-time.After(3 * time.Second):
 		}
 	}
-	t.Cleanup(func() { afterResizeCheck = nil })
 
 	var resizeErr, createErr error
 	var createdIP string
@@ -105,7 +104,7 @@ func TestResizeAllocationRace(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		resizeErr = svcResize.ResizePool(ctx, user, org, "10.0.0.128/25")
+		_, resizeErr = svcResize.ResizePool(ctx, user, org, "10.0.0.128/25")
 	}()
 
 	// Only start the create once resize is inside its window (holding the lock in

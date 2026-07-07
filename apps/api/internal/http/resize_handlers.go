@@ -29,7 +29,9 @@ func (s apiServer) ResizePool(ctx context.Context, req api.ResizePoolRequestObje
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	p, _ := authctx.PrincipalFrom(ctx) // non-nil after authorize
-	err := s.devices.ResizePool(ctx, p.UserID, req.OrgId, req.Body.Cidr)
+	// ResizePool returns the org row it committed IN-TX, so there's no post-commit
+	// re-fetch that could 404 on a concurrent soft-delete of a resize that succeeded.
+	org, err := s.devices.ResizePool(ctx, p.UserID, req.OrgId, req.Body.Cidr)
 
 	// A shrink that would strand allocations is a structured 409 (not the generic
 	// error envelope): the capped orphan list + the honest total count.
@@ -45,10 +47,6 @@ func (s apiServer) ResizePool(ctx context.Context, req api.ResizePoolRequestObje
 	}
 
 	// Success (incl. idempotent no-op): return the org with its current pool_cidr.
-	org, err := s.orgs.GetOrganization(ctx, req.OrgId)
-	if err != nil {
-		return nil, err
-	}
 	return api.ResizePool200JSONResponse{
 		Body:    toAPIOrg(org),
 		Headers: api.ResizePool200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
