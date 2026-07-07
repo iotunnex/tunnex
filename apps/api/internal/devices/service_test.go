@@ -323,6 +323,84 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 	}
 }
 
+// TestResizePoolGrowSafety asserts the grow-safety proof (see ResizePool's
+// doc-comment PREMISE): a valid grow-superset NEVER strands an Allocate-produced
+// allocation on a new reserved address — including the DOWNWARD-grow case where
+// the network address itself moves lower. Every allocation lives in the old
+// pool's usable interval [O_net+2, O_bcast-1], and every NEW reserved address is
+// <= O_net+1 or >= O_bcast, strictly outside it.
+func TestResizePoolGrowSafety(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	// Start at 10.0.1.0/24, with allocations at both boundaries of the usable
+	// interval (first host .2 and last host .254).
+	if _, err := tx.Exec(ctx, "UPDATE organizations SET pool_cidr='10.0.1.0/24' WHERE id=$1", org); err != nil {
+		t.Fatalf("set pool: %v", err)
+	}
+	for _, ip := range []string{"10.0.1.2", "10.0.1.254"} {
+		if _, err := tx.Exec(ctx, "INSERT INTO devices (org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,$5,$6)",
+			org, user, node, "d-"+ip, "k-"+ip, ip); err != nil {
+			t.Fatalf("seed %s: %v", ip, err)
+		}
+	}
+	// DOWNWARD grow to 10.0.0.0/23: the new network (10.0.0.0) + gateway (10.0.0.1)
+	// move BELOW every allocation, and the new broadcast (10.0.1.255) is above the
+	// last host (.254). Neither seeded device collides with a new reserved addr, so
+	// the grow succeeds with no orphans — the proof holds, and the check-anyway
+	// orphan pass is provably empty here.
+	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+		t.Fatalf("downward grow-superset should succeed (proof: no allocation lands on a new reserved addr), got %v", err)
+	}
+	var cidr string
+	if err := tx.QueryRow(ctx, "SELECT pool_cidr FROM organizations WHERE id=$1", org).Scan(&cidr); err != nil || cidr != "10.0.0.0/23" {
+		t.Fatalf("pool_cidr = %q err=%v, want 10.0.0.0/23", cidr, err)
+	}
+}
+
+// TestResizePoolAudit: a successful resize records org.cidr_resized attributed to
+// the actor with old+new CIDR; an idempotent no-op writes ZERO audit rows (part
+// of the idempotency decision — 200, no side effects).
+func TestResizePoolAudit(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	_ = node
+	if _, err := tx.Exec(ctx, "UPDATE organizations SET pool_cidr='10.0.0.0/24' WHERE id=$1", org); err != nil {
+		t.Fatalf("set pool: %v", err)
+	}
+
+	// Grow /24 -> /23: one audit row, attributed to the actor, with from+to.
+	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+		t.Fatalf("grow: %v", err)
+	}
+	var count int
+	var meta []byte
+	if err := tx.QueryRow(ctx,
+		"SELECT count(*) OVER (), metadata FROM audit_logs WHERE org_id=$1 AND actor_user_id=$2 AND action='org.cidr_resized' LIMIT 1",
+		org, user).Scan(&count, &meta); err != nil {
+		t.Fatalf("audit query: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("want 1 org.cidr_resized audit row, got %d", count)
+	}
+	m := string(meta)
+	if !strings.Contains(m, "10.0.0.0/24") || !strings.Contains(m, "10.0.0.0/23") {
+		t.Fatalf("audit metadata must carry old+new CIDR, got %s", m)
+	}
+
+	// Idempotent no-op (resize to the current /23): NO new audit row.
+	if err := svc.ResizePool(ctx, user, org, "10.0.0.0/23"); err != nil {
+		t.Fatalf("idempotent resize: %v", err)
+	}
+	var total int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='org.cidr_resized'", org).Scan(&total); err != nil {
+		t.Fatalf("audit count: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("idempotent no-op must write NO audit row; total org.cidr_resized rows = %d, want 1", total)
+	}
+}
+
 // TestGetDeviceCrossOrgNotFound: a device id from another org reads as not-found
 // (org-scoped read path — no cross-tenant leak).
 func TestGetDeviceCrossOrgNotFound(t *testing.T) {
