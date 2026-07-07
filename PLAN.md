@@ -42,17 +42,17 @@ rebase the active story branch onto it to keep the ff-merge clean.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.5b (CIDR resize)** on branch `story/S4.5b-cidr-resize` — 6 commits, design phase
-CLOSED, **the concurrent-race harness is the next build (red run first)**. Full remaining plan +
-all race-harness facts (primitive = `pg_advisory_xact_lock`, connection pinning, deterministic
-red, outcome-shaped green, lock-then-read confirmed) live in project memory (tunnex-s4-decisions).
+Current: **S4.6 (Audit log viewer)** — NEXT, not started. The epic-closer; assembly over
+existing infrastructure (audit_logs, the S4.3 activity query, the AppShell). Decide-before-code:
+keyset pagination on `(created_at, id)` not offset; extend `ListAuditLogsByOrg` (don't fork the
+S4.3 query); composite indexes leading with `org_id`; strictly read-only (no mutation endpoint);
+secret-free `details` render asserted on a `sso.config_updated` event; org-scoped actor filter.
 Deferred (do not lose): the fresh-user ONBOARDING gap (no org on signup, no gateway-enroll UI) —
-address after EPIC 4.
+address after EPIC 4 per the user's call.
 Done through (merged to `main`): **EPIC 0–2 complete; EPIC 3 complete (S3.1–S3.6); EPIC 4 S4.1
-(shell/design) · S4.2 (auth screens) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org
-settings + SSO config UI) all merged.** Remaining in EPIC 4: S4.5b (in progress), then S4.6
-(audit-log viewer) closes the epic. If this pointer disagrees with the handoff doc / git log,
-TRUST GIT (`git log --oneline -15`) and update this line.
+(shell) · S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) ·
+S4.5b (CIDR resize) all merged.** Remaining in EPIC 4: S4.6 closes the epic. If this pointer
+disagrees with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
