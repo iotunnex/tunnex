@@ -55,18 +55,42 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 const listAuditLogsByOrg = `-- name: ListAuditLogsByOrg :many
 SELECT id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at FROM audit_logs
 WHERE org_id = $1
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3
+  AND ($2::uuid IS NULL OR actor_user_id = $2)
+  AND ($3::text IS NULL OR action = $3)
+  AND ($4::timestamptz IS NULL OR created_at >= $4)
+  AND ($5::timestamptz IS NULL OR created_at <= $5)
+  AND ($6::timestamptz IS NULL OR (created_at, id) < ($6, $7::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $8
 `
 
 type ListAuditLogsByOrgParams struct {
-	OrgID  pgtype.UUID `json:"org_id"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
+	OrgID    pgtype.UUID        `json:"org_id"`
+	Actor    pgtype.UUID        `json:"actor"`
+	Action   *string            `json:"action"`
+	FromTs   pgtype.Timestamptz `json:"from_ts"`
+	ToTs     pgtype.Timestamptz `json:"to_ts"`
+	CursorTs pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+	Lim      int32              `json:"lim"`
 }
 
+// Org-scoped audit feed with optional filters (actor / action / date range) and
+// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
+// nullable, so the S4.3 dashboard passes none (latest N). The cursor is written
+// as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
+// rather than an OR-expansion the planner can't use.
 func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLogsByOrg, arg.OrgID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listAuditLogsByOrg,
+		arg.OrgID,
+		arg.Actor,
+		arg.Action,
+		arg.FromTs,
+		arg.ToTs,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

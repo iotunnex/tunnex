@@ -234,11 +234,48 @@ func (s *Service) Overview(ctx context.Context, orgID uuid.UUID) (Overview, erro
 	if o.Online, err = s.q.CountOnlineDevicesByOrg(ctx, sqlc.CountOnlineDevicesByOrgParams{OrgID: orgID, LastHandshakeAt: since}); err != nil {
 		return Overview{}, err
 	}
+	// Latest 10, no filters/cursor — the same extended query the audit viewer uses
+	// (all narg filters left nil/NULL = the unfiltered head of the feed).
 	o.RecentActivity, err = s.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{
-		OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Limit: 10, Offset: 0,
+		OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Lim: 10,
 	})
 	if err != nil {
 		return Overview{}, err
 	}
 	return o, nil
+}
+
+// AuditFilter is the optional filter/cursor set for the audit-log viewer. A nil
+// field means "unfiltered"; CursorTS+CursorID together fetch the page after that
+// keyset position ((created_at,id) DESC).
+type AuditFilter struct {
+	Actor    *uuid.UUID
+	Action   *string
+	From, To *time.Time
+	CursorTS *time.Time
+	CursorID *uuid.UUID
+	Limit    int32
+}
+
+// ListAuditLogs returns a keyset page of the org's audit feed, newest first,
+// through the SAME extended query the dashboard's latest-N slice uses (no forked
+// activity source). Org-scoped by the query-lint; every read stays within orgID.
+func (s *Service) ListAuditLogs(ctx context.Context, orgID uuid.UUID, f AuditFilter) ([]sqlc.AuditLog, error) {
+	p := sqlc.ListAuditLogsByOrgParams{OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Lim: f.Limit}
+	if f.Actor != nil {
+		p.Actor = pgtype.UUID{Bytes: *f.Actor, Valid: true}
+	}
+	p.Action = f.Action
+	if f.From != nil {
+		p.FromTs = pgtype.Timestamptz{Time: *f.From, Valid: true}
+	}
+	if f.To != nil {
+		p.ToTs = pgtype.Timestamptz{Time: *f.To, Valid: true}
+	}
+	// Both cursor halves or neither — a half-cursor would silently disable paging.
+	if f.CursorTS != nil && f.CursorID != nil {
+		p.CursorTs = pgtype.Timestamptz{Time: *f.CursorTS, Valid: true}
+		p.CursorID = pgtype.UUID{Bytes: *f.CursorID, Valid: true}
+	}
+	return s.q.ListAuditLogsByOrg(ctx, p)
 }

@@ -101,6 +101,11 @@ type Querier interface {
 	// device is active AND its owning user is active — so deactivating a user drops
 	// their peers from every node's desired state (and reactivation restores them).
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
+	// Org-scoped audit feed with optional filters (actor / action / date range) and
+	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
+	// nullable, so the S4.3 dashboard passes none (latest N). The cursor is written
+	// as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
+	// rather than an OR-expansion the planner can't use.
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)

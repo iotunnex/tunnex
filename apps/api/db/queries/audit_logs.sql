@@ -7,7 +7,17 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: ListAuditLogsByOrg :many
+-- Org-scoped audit feed with optional filters (actor / action / date range) and
+-- KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
+-- nullable, so the S4.3 dashboard passes none (latest N). The cursor is written
+-- as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
+-- rather than an OR-expansion the planner can't use.
 SELECT * FROM audit_logs
 WHERE org_id = $1
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3;
+  AND (sqlc.narg('actor')::uuid IS NULL OR actor_user_id = sqlc.narg('actor'))
+  AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+  AND (sqlc.narg('from_ts')::timestamptz IS NULL OR created_at >= sqlc.narg('from_ts'))
+  AND (sqlc.narg('to_ts')::timestamptz IS NULL OR created_at <= sqlc.narg('to_ts'))
+  AND (sqlc.narg('cursor_ts')::timestamptz IS NULL OR (created_at, id) < (sqlc.narg('cursor_ts'), sqlc.narg('cursor_id')::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg('lim');

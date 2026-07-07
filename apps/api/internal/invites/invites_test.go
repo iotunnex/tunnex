@@ -85,7 +85,7 @@ func TestInviteCreateAcceptNewUser(t *testing.T) {
 	}
 	// Audit: invite.created is attributed to the acting user (watch-item e —
 	// every mutation lands in audit_logs with the correct actor).
-	logs, err := svc.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{OrgID: pgUUID(org), Limit: 10, Offset: 0})
+	logs, err := svc.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{OrgID: pgUUID(org), Lim: 10})
 	if err != nil {
 		t.Fatalf("audit list: %v", err)
 	}

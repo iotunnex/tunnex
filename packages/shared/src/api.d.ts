@@ -341,6 +341,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** The org's audit log — filterable, keyset-paginated (read-only) */
+        get: operations["listAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices": {
         parameters: {
             query?: never;
@@ -846,6 +865,20 @@ export interface components {
             actor_id?: string;
             /** Format: date-time */
             created_at: string;
+        };
+        AuditLogEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            actor_id?: string;
+            action: string;
+            target_type?: string;
+            target_id?: string;
+            details: {
+                [key: string]: unknown;
+            };
         };
         OrgOverview: {
             members: number;
@@ -1391,6 +1424,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgOverview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description Filter by acting user (must be an org member). */
+                actor?: string;
+                action?: string;
+                /** @description created_at >= this. */
+                from?: string;
+                /** @description created_at <= this. */
+                to?: string;
+                cursor_ts?: string;
+                cursor_id?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of audit entries, newest first. Fewer than `limit` means the last page. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogEntry"][];
                 };
             };
             default: components["responses"]["Error"];
