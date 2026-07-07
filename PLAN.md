@@ -32,6 +32,12 @@ This plan defines **every story** up front. We then build **one story at a time*
 2. Self-review + run `/code-review`; run tests; verify end-to-end.
 3. Report outcome, get sign-off, then start the next story.
 
+**Where a commit lives:** product code ALWAYS on the story branch (the sign-off/merge
+gate depends on branch isolation). A process/docs correction whose value is *immediate*
+(e.g. fixing this re-entry checkpoint) lands on `main` directly — a fix that only helps
+pre-merge sessions is useless stuck on an unmerged branch. When main advances this way,
+rebase the active story branch onto it to keep the ff-merge clean.
+
 ---
 
 ## Story status (re-entry checkpoint)
