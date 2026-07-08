@@ -65,8 +65,14 @@ export class CredentialStore {
   load(): StoredCredential | null {
     const raw = this.persist.read();
     if (!raw) return null;
+    // Both branches degrade to null on a corrupt/truncated file (never throw) —
+    // a damaged credential must read as "logged out", not crash startup.
     if (raw.length >= 10 && raw.subarray(0, 10).toString("utf8") === "PLAINTEXT:") {
-      return JSON.parse(raw.subarray(10).toString("utf8")) as StoredCredential;
+      try {
+        return JSON.parse(raw.subarray(10).toString("utf8")) as StoredCredential;
+      } catch {
+        return null;
+      }
     }
     if (!this.safe.isEncryptionAvailable()) return null; // can't decrypt now
     try {

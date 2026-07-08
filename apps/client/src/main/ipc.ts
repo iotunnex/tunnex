@@ -37,13 +37,22 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
       throw new Error("invalid server url");
     }
     const hasCred = store.load() !== null;
-    const { url: accepted, reloginRequired } = await config.setServerUrl(url, hasCred);
+    const { url: accepted, reloginRequired, wasUnset } = await config.validateServerUrl(url, hasCred);
     // A credential must never reach a server it wasn't minted against: on a real
-    // change, revoke + clear before anything can send the old token to the new URL.
+    // change, revoke + clear the old credential BEFORE the new URL is persisted,
+    // so there is no window where (origin=new, credential=old) can attach.
     if (reloginRequired) {
       await runLogout(store);
     }
-    win.webContents.reload();
+    config.commitServerUrl(accepted);
+    // First run (unset → set) must LOAD the SPA — reload() would re-load the
+    // current (setup data:) URL and cannot change origin. Otherwise a plain
+    // reload picks up the new auth/config state.
+    if (wasUnset) {
+      void win.loadURL("app://tunnex/index.html");
+    } else {
+      win.webContents.reload();
+    }
     return { url: accepted, reloginRequired };
   });
 }

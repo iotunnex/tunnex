@@ -78,16 +78,19 @@ function fakePersist(): Persistence & { buf: Buffer | null } {
 const cred: StoredCredential = { server: "https://x", token: "tnx_secret", fingerprint: "abc", expiresAt: "2999-01-01T00:00:00Z" };
 
 test("with a keychain, the credential round-trips encrypted (never plaintext on disk)", () => {
+  // A fake that actually OBSCURES (base64) so "no plaintext on disk" is a real
+  // assertion, not a tautology against a passthrough.
   const safe: SafeStorageLike = {
     isEncryptionAvailable: () => true,
-    encryptString: (s) => Buffer.from("ENC(" + s + ")"),
-    decryptString: (b) => b.toString("utf8").slice(4, -1),
+    encryptString: (s) => Buffer.from("ENC:" + Buffer.from(s).toString("base64")),
+    decryptString: (b) => Buffer.from(b.toString("utf8").slice(4), "base64").toString("utf8"),
   };
   const p = fakePersist();
   const store = new CredentialStore(safe, p, false);
   store.save(cred);
-  assert.ok(!p.buf!.toString("utf8").includes("tnx_secret") === false ? true : true); // enc form present
-  assert.ok(p.buf!.toString("utf8").startsWith("ENC("));
+  const onDisk = p.buf!.toString("utf8");
+  assert.ok(onDisk.startsWith("ENC:"), "stored via safeStorage");
+  assert.ok(!onDisk.includes("tnx_secret"), "raw token must NOT appear on disk");
   assert.deepEqual(store.load(), cred);
   store.clear();
   assert.equal(store.load(), null);
