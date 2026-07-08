@@ -11,6 +11,8 @@ import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
 import VerifyPending from "./pages/VerifyPending";
 import CreateOrg from "./pages/CreateOrg";
+import CliAuth from "./pages/CliAuth";
+import CliDevice from "./pages/CliDevice";
 import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 import Users from "./pages/Users";
@@ -46,6 +48,10 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route path="/create-org" element={<RequireNoOrg><CreateOrg /></RequireNoOrg>} />
           <Route path="/verify-pending" element={<VerifyPending />} />
+          {/* S5.1 CLI auth: the browser consent leg (`tunnex login`) and the
+              device-code approval page. Authenticated but org-independent. */}
+          <Route path="/cli-auth" element={<CliAuth />} />
+          <Route path="/cli-device" element={<CliDevice />} />
           <Route element={<RequireOrg><AppShell /></RequireOrg>}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
