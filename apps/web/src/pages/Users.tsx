@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, CSRF, apiErrorMessage, type Member, type Org, type Role } from "../lib/api";
+import { api, apiErrorMessage, type Member, type Org, type Role } from "../lib/api";
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
@@ -74,14 +74,13 @@ export default function Users() {
       () =>
         api.PUT("/api/v1/organizations/{orgId}/members/{userId}/role", {
           params: { path: { orgId: org!.id, userId: m.user_id } },
-          headers: CSRF,
           body: { role },
         }),
       "Could not change the role.",
     );
 
   const setActive = (m: Member, activate: boolean) => {
-    const path = { params: { path: { orgId: org!.id, userId: m.user_id } }, headers: CSRF } as const;
+    const path = { params: { path: { orgId: org!.id, userId: m.user_id } } } as const;
     return mutate(
       () =>
         activate
@@ -183,7 +182,6 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
     setSent(false);
     const { error } = await api.POST("/api/v1/organizations/{orgId}/invitations", {
       params: { path: { orgId } },
-      headers: CSRF,
       body: { email, role },
     });
     setBusy(false);

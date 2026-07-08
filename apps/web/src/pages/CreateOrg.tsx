@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { PRODUCT_NAME } from "../brand";
-import { api, CSRF, apiErrorCode, apiErrorMessage } from "../lib/api";
+import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { AuthLayout } from "../components/AuthLayout";
 import { Button, ErrorText, Field, Input } from "../components/ui";
@@ -68,7 +68,6 @@ export default function CreateOrg() {
     setError(null);
     try {
       const { data, error } = await api.POST("/api/v1/organizations", {
-        headers: CSRF,
         body: { name: name.trim(), slug: finalSlug },
       });
       if (error || !data) {

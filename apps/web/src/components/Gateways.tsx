@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, CSRF, apiErrorMessage, type Node, type Org } from "../lib/api";
+import { api, apiErrorMessage, type Node, type Org } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
@@ -25,7 +25,6 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
     try {
       const { data, error } = await api.POST("/api/v1/organizations/{orgId}/nodes/join-token", {
         params: { path: { orgId: org.id } },
-        headers: CSRF,
         // node_name is optional; only send it when the user named the gateway.
         body: nodeName.trim() ? { node_name: nodeName.trim() } : {},
       });

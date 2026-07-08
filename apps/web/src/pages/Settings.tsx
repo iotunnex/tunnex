@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, CSRF, apiErrorMessage, type Meta, type Org, type Member, type Role, type SsoConfigView, type ResizeConflict } from "../lib/api";
+import { api, apiErrorMessage, type Meta, type Org, type Member, type Role, type SsoConfigView, type ResizeConflict } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
@@ -101,7 +101,6 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
     setDone(false);
     const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/pool-cidr", {
       params: { path: { orgId: org.id } },
-      headers: CSRF,
       body: { cidr },
     });
     setBusy(false);
@@ -189,7 +188,6 @@ function OrgSection({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onS
     setSaved(false);
     const { data, error } = await api.PATCH("/api/v1/organizations/{orgId}", {
       params: { path: { orgId: org.id } },
-      headers: CSRF,
       body: { name },
     });
     setBusy(false);
@@ -277,7 +275,6 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
     setSaved(false);
     const { error } = await api.PUT("/api/v1/organizations/{orgId}/sso/{provider}", {
       params: { path: { orgId, provider } },
-      headers: CSRF,
       body: { client_id: clientId, client_secret: clientSecret, tenant_id: tenantId || undefined, enabled },
     });
     setBusy(false);

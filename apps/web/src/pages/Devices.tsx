@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { PRODUCT_NAME } from "../brand";
-import { api, CSRF, apiErrorMessage, type Device, type Node, type Org } from "../lib/api";
+import { api, apiErrorMessage, type Device, type Node, type Org } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input, StatusDot } from "../components/ui";
 import { Gateways } from "../components/Gateways";
@@ -76,7 +76,6 @@ export default function Devices() {
     setConfig(null);
     const { data, error } = await api.POST("/api/v1/organizations/{orgId}/devices", {
       params: { path: { orgId: org.id } },
-      headers: CSRF,
       body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel },
     });
     setBusy(false);
@@ -94,7 +93,6 @@ export default function Devices() {
     setError(null);
     const { error } = await api.POST("/api/v1/organizations/{orgId}/devices/{deviceId}/revoke", {
       params: { path: { orgId: org.id, deviceId: id } },
-      headers: CSRF,
     });
     if (error) {
       setError(apiErrorMessage(error, "Could not revoke the device."));

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, CSRF } from "./api";
+import { api } from "./api";
 
 export type ResendState = "idle" | "busy" | "sent" | "error";
 
@@ -15,7 +15,7 @@ export function useResendVerification() {
   async function resend() {
     setState("busy");
     try {
-      const { error } = await api.POST("/api/v1/auth/verify-email/resend", { headers: CSRF });
+      const { error } = await api.POST("/api/v1/auth/verify-email/resend", {});
       setState(error ? "error" : "sent");
     } catch {
       setState("error");

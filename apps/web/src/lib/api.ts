@@ -3,9 +3,8 @@ import { createTunnexClient, type components } from "@tunnex/shared";
 // One typed client for the whole SPA (same-origin; the session cookie rides along).
 export const api = createTunnexClient("/");
 
-// The CSRF guard only requires this header to be PRESENT on state-changing
-// requests that carry the session cookie — a value a cross-site form can't set.
-export const CSRF = { "X-Tunnex-CSRF": "1" };
+// The X-Tunnex-CSRF header is attached to every unsafe-method request by
+// createTunnexClient itself (see packages/shared) — no per-call plumbing.
 
 export type AuthUser = components["schemas"]["AuthUser"];
 export type Meta = components["schemas"]["Meta"];

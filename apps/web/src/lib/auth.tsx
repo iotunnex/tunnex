@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, CSRF, type AuthUser } from "./api";
+import { api, type AuthUser } from "./api";
 
 type AuthState =
   | { status: "loading" }
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setUser = (user: AuthUser) => setState({ status: "authed", user });
 
   const logout = async () => {
-    await api.POST("/api/v1/auth/logout", { headers: CSRF }).catch(() => {});
+    await api.POST("/api/v1/auth/logout", {}).catch(() => {});
     setState({ status: "anon" });
   };
 
