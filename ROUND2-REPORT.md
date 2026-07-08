@@ -71,15 +71,40 @@ alternative rejected: exempting login server-side would reopen login-CSRF.
   browser/device-code exchange, stored 0600, sent as a header (no CSRF dance). Final D1/D3 wording
   waits on B3.
 
-## Part B — remaining human walk (real tenant)
+## Part B — RESULTS (run 2026-07-08, real Entra tenant, human-driven by Pawan)
 
-B1 fingerprint-after-reload (needs enterprise build — blocked on the enterprise-e2e-stack gap, or
-run a one-off `-tags enterprise` image) · B2 DNS-TXT + public-domain refusal · B3 JIT first login
-(**record every redirect hop — this decides D1**) · B4 account linking · B5 unverified-email SSO
-(or explicit N/A) · B6 member-role empty dashboard (UX-backlog).
+Setup: one-off `-tags enterprise` api image (uncommitted Dockerfile edit); real tenant
+`4a898aae-0274-4843-9416-1a0c2bc97357` (iotunnexoutlook.onmicrosoft.com, Entra ID Free); app
+`tunnex-dev` (`ff341a6d-3a06-4e10-8e3d-a6983784ebde`) with Web redirect URI
+`http://localhost/api/v1/auth/sso/microsoft/callback`.
+
+| Step | Expected | Observed | Verdict |
+|---|---|---|---|
+| **B1** | write-only secret | GET returns `client_id/enabled/provider/tenant_id/secret_fingerprint` — structurally NO secret field (checked in devtools against the live response). `sso.config_updated` audit row secret-free, fingerprint matches the GET. | **ok** — the payload-level check the open e2e stack couldn't run, now demonstrated in a real browser |
+| **B3** | JIT, no funnel | Fresh Entra user → password → **consent screen (accepted as plain user)** → straight to dashboard as member. `member.jit_joined` audit `{provider: microsoft, via: sso_login, idp_subject}`. Never saw create-org/verify-pending. No MFA, no conditional-access, no device prompt; Entra accepted the plain-http localhost redirect. | **ok** |
+| **B4** | linking, no duplicate | Local signup (verified via Mailpit) then SSO login with the same email: users table holds **exactly one row** (created at local-signup time, `has_password=t`) + JIT membership — both credential types on one account. Negative leg (`sso_link_required` 409 for an unverified local account) not exercised live (server code present); optional. | **ok** (positive leg proven) |
+| **B5** | no auto-join on unverified email | **N/A by design**: Entra doesn't assert `email_verified`; a pinned-tenant login is directory-vouched (microsoft.go normalizer). No exercisable path. | recorded |
+| **B6** | member empty dashboard sensible | Member's dashboard shows "Enroll a gateway →" but `IssueJoinToken` requires `org:update` — the link leads to a guaranteed 403. Role-aware empty-state gap. | **finding → UX-backlog** |
+| **B2** | DNS-TXT capture + public-domain refusal | **OPEN** — needs DNS control over a real domain (tunnex.io); curl recipe in this repo's walk notes; **no Settings UI for domain capture exists** (S4.5 shipped SSO config only) — that absence is itself a finding (UX-backlog or story). | pending DNS |
+
+Config frictions hit during setup (operator-error class, but informative): Entra's Secret **ID**
+pasted as client_id → `AADSTS700016` (tunnex cannot validate a client_id at save; acceptable);
+a stale Microsoft error page refreshed → `AADSTS900561` (harmless artifact).
+
+### D-item verdicts (final)
+
+- **D1 RESOLVED — localhost callback, device-code fallback.** The B3 flow was
+  authorize → password → user-consent → redirect; no MFA/CA on this tenant, and crucially any
+  MFA/CA challenge completes IN-BROWSER before the final redirect, so a `127.0.0.1:<port>`
+  callback survives it. Entra accepted a plain-http localhost redirect URI. Device-code remains
+  the fallback for hosts with no browser at all (servers/CI), per the original S5.1 sketch.
+- **D2 RESOLVED** (Part A): CLI owns device creation; atomic `0600` write; config never re-fetchable.
+- **D3 RESOLVED** (Part A + B1): dedicated header-borne CLI credential; adds S5.1 server-side scope
+  (credential model + issuance endpoint, keyed-fingerprint audit per the proof-of-secret convention).
 
 ## Disposition
 
-Uncommitted: this report + `e2e/tests/round2-walk.spec.ts` (ROUND2-gated). Stack left running with
-the walk org (`w1@walk.local` / `walk-password-round2-NEW`). Bug B1 + frictions await your call —
-none block S5.1's un-hold except the B-walk itself.
+Walk complete except: B2 (pending DNS access — curl-only, UI absent) and the optional B4 negative
+leg. Findings ledger: bug B1 (fixed in S4.8) · F1–F6 (F1/F2/F3/F4 fixed in S4.8; F5/F6 UX-backlog) ·
+B6 member-empty-state gap (UX-backlog) · domain-capture UI missing (UX-backlog/story). The one-off
+enterprise Dockerfile edit stays uncommitted and is reverted after the walk.

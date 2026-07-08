@@ -65,10 +65,15 @@ wrapper. **S5.1 decide-items, updated from the Part A walk evidence (ROUND2-REPO
   **This ADDS SERVER-SIDE SCOPE to S5.1: a CLI credential model + issuance endpoint** (long-lived
   token minted via browser/device-code exchange, sent as a header, keyed-fingerprint in audit per
   the S4.5 proof-of-secret convention).
-- **D1 OPEN — pending B3** (Entra redirect/MFA/conditional-access behavior vs a
-  `127.0.0.1:<port>` callback; only the real-tenant walk answers it).
-Still pending: **Part B of the Round-2 walk** (B1–B6 — enterprise SSO config, DNS-TXT domain
-capture, JIT, linking; human, real Entra tenant) — B3 decides D1, BEFORE S5.1 locks CLI flow.
+- **D1 RESOLVED — localhost callback primary, device-code fallback (B3, real Entra tenant
+  2026-07-08).** Observed flow: authorize → password → user-consent → redirect; Entra accepted a
+  plain-http localhost redirect URI; any MFA/CA challenge completes IN-BROWSER before the final
+  redirect, so `127.0.0.1:<port>` survives it. Device-code covers browserless hosts (servers/CI).
+Part B of the Round-2 walk RAN (see ROUND2-REPORT.md Part B results): B1/B3/B4 proven live,
+B5 N/A by design, B6 → UX-backlog (member empty state offers enroll the server 403s). Remaining
+loose ends, non-blocking: B2 domain-capture (pending DNS; **no Settings UI for domains exists** —
+UX-backlog/story) and the optional B4 negative leg (`sso_link_required`).
+**All three S5.1 decide-items are now RESOLVED — S5.1 un-holds once S4.8 merges.**
 Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Developer ID (~$99/yr, days)
 + Windows EV cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; nothing in S5.1
 blocks on it, but the validation clock starts at application.
@@ -226,8 +231,11 @@ ceremony + a deferred-ledger entry).
   names produce an empty slug requiring a manual one. Cosmetic.
 - F6: the verify-email success page could point to sign-in more loudly (the link does not and
   should not establish a session; the page just under-sells the next step).
-- B6 (when Part B runs): member-role user's empty dashboard has no actionable next step (no
-  gateway-enroll permission) — assess whether the member empty state needs its own copy.
+- B6 (CONFIRMED in the Part B walk): the member-role dashboard shows "Enroll a gateway →" but
+  IssueJoinToken requires org:update — the affordance leads to a guaranteed 403. Role-aware
+  empty-state copy needed (same class as the S4.3 role-aware empty-state watch-item).
+- Domain-capture has API endpoints but NO Settings UI (found in Part B) — surfacing claim/TXT/verify
+  states in the UI is an open story candidate (S4.5 watch-item d was never built).
 
 ## EPIC 5 — CLI Client (dogfood & de-risk before Electron)
 
