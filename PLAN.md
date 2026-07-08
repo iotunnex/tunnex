@@ -46,42 +46,23 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.8 MERGED (Round-2 walk fixes: B1 CSRF lockout via client-wide header, F1–F4, walk
-spec + report committed). The Round-2 walk is DONE (Parts A+B, ROUND2-REPORT.md) and all three
-S5.1 decide-items are RESOLVED. S5.1 (`tunnex` CLI) IS IN PROGRESS on story/S5.1-cli — commit one
-(paper decisions) delivered and approved with recorded additions; next is the spec commit.**
+Current: **S5.1 (`tunnex` CLI) IN PROGRESS on story/S5.1-cli — commit one (paper decisions)
+delivered and APPROVED with recorded additions (verified-gated minting; bearer≡cookie everywhere,
+exceptions argued in spec; state alongside PKCE, device-code inherits code hygiene; SHA256SUMS;
+expired-credential UX). Next: the SPEC commit (credential model + endpoints, codegen, guards
+auto-arm). S4.8 MERGED (Round-2 fixes); the Round-2 walk is DONE (Parts A+B, ROUND2-REPORT.md);
+all three S5.1 decide-items RESOLVED — scope lives in the S5.1 bullet + decide block under EPIC 5.**
 Ledger (open, non-blocking): B2 domain-capture DNS leg + missing domain-capture Settings UI
 (trigger = capture-UI story); B4 negative leg (optional); B6 member-empty-state copy (rides the
 next dashboard story).
-Ops: code-signing procurement still open (Pawan).
-Next after S4.8 + Part B: the natural S5.1 work — CLI `login`, get a config, `wg-quick up/down`
-wrapper. **S5.1 decide-items, updated from the Part A walk evidence (ROUND2-REPORT.md):**
-- **D2 RESOLVED — CLI owns device creation.** The device config is served EXACTLY ONCE at creation
-  and is never re-fetchable, so "fetch config for a device" cannot exist: the CLI creates the
-  device itself and atomically writes the config `0600` at that moment (CLI state dir or
-  /etc/wireguard). The browser's ~/Downloads-with-default-perms drop is the anti-pattern.
-- **D3 NEAR-RESOLVED — dedicated header-borne CLI credential, NOT cookies.** Observed: 30-day
-  httpOnly SameSite=Lax cookie + CSRF header on unsafe methods + reset-revokes-all; bug B1 was a
-  live demo of cookie/CSRF coupling hurting non-browser clients. Nothing token-shaped exists yet.
-  **This ADDS SERVER-SIDE SCOPE to S5.1: a CLI credential model + issuance endpoint** (long-lived
-  token minted via browser/device-code exchange, sent as a header, keyed-fingerprint in audit per
-  the S4.5 proof-of-secret convention).
-- **D1 RESOLVED — localhost callback primary, device-code fallback (B3, real Entra tenant
-  2026-07-08).** Observed flow: authorize → password → user-consent → redirect; Entra accepted a
-  plain-http localhost redirect URI; any MFA/CA challenge completes IN-BROWSER before the final
-  redirect, so `127.0.0.1:<port>` survives it. Device-code covers browserless hosts (servers/CI).
-Part B of the Round-2 walk RAN (see ROUND2-REPORT.md Part B results): B1/B3/B4 proven live,
-B5 N/A by design, B6 → UX-backlog (member empty state offers enroll the server 403s). Remaining
-loose ends, non-blocking: B2 domain-capture (pending DNS; **no Settings UI for domains exists** —
-UX-backlog/story) and the optional B4 negative leg (`sso_link_required`).
-**All three S5.1 decide-items are now RESOLVED — S5.1 un-holds once S4.8 merges.**
-Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Developer ID (~$99/yr, days)
-+ Windows EV cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; nothing in S5.1
-blocks on it, but the validation clock starts at application.
-Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), and EPIC 4 COMPLETE — S4.1
-(shell) · S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) ·
-S4.5b (CIDR resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel).** Next epic: EPIC 5 (CLI client). If this pointer
-disagrees with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
+Ops (Pawan, long lead): code-signing procurement — Apple Developer ID (~$99/yr, days) + Windows EV
+cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; the validation clock starts at
+application.
+Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
+S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
+resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes).** Current
+epic: EPIC 5 (CLI client). If this pointer disagrees with the handoff doc / git log, TRUST GIT
+(`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -236,11 +217,67 @@ ceremony + a deferred-ledger entry).
   IssueJoinToken requires org:update — the affordance leads to a guaranteed 403. Role-aware
   empty-state copy needed (same class as the S4.3 role-aware empty-state watch-item).
 - Domain-capture has API endpoints but NO Settings UI (found in Part B) — surfacing claim/TXT/verify
-  states in the UI is an open story candidate (S4.5 watch-item d was never built).
+  states in the UI is an open story candidate (S4.5 watch-item d was never built). Trigger = the
+  capture-UI story; the B2 DNS-TXT manual leg rides it.
+- B4 negative leg (optional): live-exercise `sso_link_required` 409 (SSO login vs an UNVERIFIED
+  local account) — server code confirmed present; needs a third Entra test user.
 
 ## EPIC 5 — CLI Client (dogfood & de-risk before Electron)
 
-- **S5.1 `tunnex` CLI** — `login` (browser + deep-link callback), fetch config, `wg-quick up/down` wrapper. Validates the client↔API↔agent protocol in days and unblocks dogfooding. **Headless acceptance:** when no browser/URL-scheme is available (servers, CI, site gateways), fall back to **device-code flow or localhost callback** (`http://127.0.0.1:<port>/callback`).
+- **S5.1 `tunnex` CLI** — walk-derived scope (Round-2, D1/D2/D3 resolved; supersedes the original
+  "fetch config" sketch):
+  **Auth (D1+D3):** `tunnex login` opens the SYSTEM BROWSER to Tunnex; authentication (local or
+  SSO — MFA and all) completes in-browser against Tunnex; Tunnex then redirects to the CLI's
+  `http://127.0.0.1:<port>/callback` with a ONE-TIME authorization code; the CLI exchanges the code
+  for a **dedicated CLI credential** — a NEW server-side model: hashed at rest, identity-bound
+  (identity↔credential principle), keyed-fingerprint audit rows written same-tx (proof-of-secret
+  convention), header-borne (no cookie → csrfGuard is already inert for it — VERIFY with a test),
+  revocable. **Entra never sees the loopback** — the CLI callback is Tunnex's own redirect; the
+  server needs a loopback-redirect allowlist (127.0.0.1 only, any port). **D1 caveat (recorded):**
+  verified on an MFA-less Free tenant; the MFA claim rides the in-browser-completion ARGUMENT
+  (challenges finish before the final redirect), not observation. **Device-code fallback for
+  browserless hosts stays in scope.**
+  **Config (D2):** the CLI OWNS device creation — the config is captured exactly once at creation
+  and written atomically, `0600`, under `~/.config/tunnex/`; then the `wg-quick up/down` wrapper.
+  Guards auto-arm: new endpoints picked up by the 401-walk + RBAC matrix; one deliberate-red per
+  new guard.
+
+### S5.1 decide-before-code (COMMIT ONE — decided on paper, for review before code)
+
+**(1) CLI credential lifetime + revocation semantics.**
+- **Password reset SWEEPS CLI credentials — YES** (the default stands, no argument against it):
+  a reset signals identity compromise; S2.2 already sweeps sessions on exactly that signal, and a
+  surviving CLI credential would be a back door around the sweep. Same tx, same trigger.
+- **Deactivation sweeps too** (S2.6 parity — a deactivated user's CLI must die with their sessions).
+- **Lifetime: 90-day absolute expiry**, no sliding refresh in S5.1 (`tunnex login` again is cheap;
+  refresh-token machinery is not — defer until dogfooding demands it). Expiry stored server-side
+  next to the hash.
+- **Listable/revocable: API now, dashboard UI deferred.** The model ships with list + revoke
+  endpoints (name, created_at, last_used_at, fingerprint — never the token), because the endpoints
+  arm the 401-walk/RBAC guards and `tunnex logout` needs revoke anyway. The dashboard "CLI
+  sessions" panel is a LEDGERED follow-up (rides a later dashboard story), not S5.1.
+
+**(2) Header format + OpenAPI representation.**
+- **`Authorization: Bearer <token>`** — the standard every CLI/tool ecosystem expects; no custom
+  header. Token format: opaque random (32B, base64url), prefixed `tnx_` so leaked-secret scanners
+  can pattern-match it; NEVER a JWT (server-side revocation must be instant, not TTL-bound).
+- **OpenAPI: a second securityScheme** (`http`/`bearer`) alongside the cookie scheme; gated ops
+  accept either. The 401-walk keeps walking sessionless ops; a new deliberate-red proves a
+  REVOKED bearer token is refused (not just a missing one).
+- csrfGuard stays cookie-keyed and is therefore inert for bearer requests — one test PROVES a
+  bearer mutation with no cookie and no X-Tunnex-CSRF header succeeds (the CLI never does the
+  CSRF dance; that was D3's point).
+
+**(3) Loopback callback discipline (join-token-class hygiene).**
+- **Port: OS-assigned ephemeral** — the CLI listens on `127.0.0.1:0` and puts the actual port in
+  the redirect it requests; the server's allowlist validates host `127.0.0.1` (or `[::1]`)
+  EXACTLY, any port, fixed path `/callback` — nothing else, ever (no `localhost` — DNS-spoofable).
+- **Code: single-use, 60s TTL, PKCE-bound.** The CLI mints a code_verifier, sends the S256
+  challenge on the authorize leg; the exchange requires the matching verifier — a stolen code
+  alone is useless (same discipline as join tokens: hashed at rest, consumed atomically).
+- **Exact-match binding:** the code is bound at mint to the EXACT redirect (host+port+path) it was
+  issued for; the exchange re-presents it and must match. State parameter carried end-to-end for
+  the CLI's own request correlation.
 - **(Ops, when EPIC 5 begins)** Begin **code-signing cert procurement** — Apple Developer ID + Windows EV cert (weeks of lead time).
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)
