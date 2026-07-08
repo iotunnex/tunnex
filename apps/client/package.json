@@ -5,7 +5,8 @@
   "description": "Tunnex desktop client (Electron)",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --require ts-node/register --test test/*.test.ts"
   },
