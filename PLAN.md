@@ -38,20 +38,21 @@ gate depends on branch isolation). A process/docs correction whose value is *imm
 pre-merge sessions is useless stuck on an unmerged branch. When main advances this way,
 rebase the active story branch onto it to keep the ff-merge clean.
 
+**Merge instructions are session-bound:** a merge instruction executes in the session that
+receives it, or is RE-CONFIRMED at re-entry — a sign-off read out of a summary/handoff is not
+authorization to merge. (Codified after S4.8's merge waited on an explicit re-confirmation.)
+
 ---
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.8 (Round-2 walk fixes) IN PROGRESS.** The scripted Part A walk ran (see
-ROUND2-REPORT.md): full enrollment loop proven LIVE (token → agent → node → device → real WG
-handshake + traffic), 1 bug + 6 frictions found. S4.8 scope, priority order: (1) B1 CSRF
-stale-cookie login lockout — client-wide X-Tunnex-CSRF in createTunnexClient, kill per-page
-hand-plumbs, regression e2e (stale cookie present → login succeeds, Set-Cookie replaces it);
-(2) F1+F2 — ceremony emits TUNNEX_NODE_NAME for name-pinned tokens + compose plumbs it, e2e;
-(3) F3 — Sealer.Fingerprint on node.token_issued + enrollment audit rows, shared-fingerprint test;
-(4) F4 — visit-time re-route on /create-org (RequireNoOrg), e2e; (5) commit the ROUND2-gated walk
-spec + report. F5/F6 → UX-backlog (no code).
-**S5.1 remains HELD on: S4.8 merge + Part B of the walk (B1–B6, human, real Entra tenant + DNS).**
+Current: **S4.8 MERGED (Round-2 walk fixes: B1 CSRF lockout via client-wide header, F1–F4, walk
+spec + report committed). The Round-2 walk is DONE (Parts A+B, ROUND2-REPORT.md) and all three
+S5.1 decide-items are RESOLVED. S5.1 (`tunnex` CLI) IS IN PROGRESS on story/S5.1-cli — commit one
+(paper decisions) delivered and approved with recorded additions; next is the spec commit.**
+Ledger (open, non-blocking): B2 domain-capture DNS leg + missing domain-capture Settings UI
+(trigger = capture-UI story); B4 negative leg (optional); B6 member-empty-state copy (rides the
+next dashboard story).
 Ops: code-signing procurement still open (Pawan).
 Next after S4.8 + Part B: the natural S5.1 work — CLI `login`, get a config, `wg-quick up/down`
 wrapper. **S5.1 decide-items, updated from the Part A walk evidence (ROUND2-REPORT.md):**
