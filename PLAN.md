@@ -42,16 +42,21 @@ rebase the active story branch onto it to keep the ff-merge clean.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.6 (Audit log viewer)** — NEXT, not started. The epic-closer; assembly over
-existing infrastructure (audit_logs, the S4.3 activity query, the AppShell). Decide-before-code:
-keyset pagination on `(created_at, id)` not offset; extend `ListAuditLogsByOrg` (don't fork the
-S4.3 query); composite indexes leading with `org_id`; strictly read-only (no mutation endpoint);
-secret-free `details` render asserted on a `sso.config_updated` event; org-scoped actor filter.
+Current: **EPIC 4 CLOSED. S5.1 (`tunnex` CLI) is NEXT — not started; watch-items pending.**
+The natural next work: CLI `login` (browser + deep-link callback, with a device-code / localhost
+`127.0.0.1:<port>` callback fallback for headless), fetch config, `wg-quick up/down` wrapper.
+Decide-before-code (from the S5.1 opening, TBD): device-code vs localhost-callback selection;
+client-side config storage location + file permissions; how the CLI authenticates against a
+session model built for browser cookies.
 Deferred (do not lose): the fresh-user ONBOARDING gap (no org on signup, no gateway-enroll UI) —
-address after EPIC 4 per the user's call.
-Done through (merged to `main`): **EPIC 0–2 complete; EPIC 3 complete (S3.1–S3.6); EPIC 4 S4.1
+scheduled for after EPIC 4 per the user; also a **Round-2 manual testing walk** (fresh-org + Entra
+SSO against a real tenant) is now viable and wanted BEFORE S5.1 locks CLI flow assumptions.
+Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Developer ID (~$99/yr, days)
++ Windows EV cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; nothing in S5.1
+blocks on it, but the validation clock starts at application.
+Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), and EPIC 4 COMPLETE — S4.1
 (shell) · S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) ·
-S4.5b (CIDR resize) all merged.** Remaining in EPIC 4: S4.6 closes the epic. If this pointer
+S4.5b (CIDR resize) · S4.6 (audit viewer).** Next epic: EPIC 5 (CLI client). If this pointer
 disagrees with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
