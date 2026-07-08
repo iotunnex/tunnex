@@ -247,6 +247,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/cli/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a one-time CLI authorization code (browser leg)
+         * @description COOKIE-SESSION ONLY (argued exception to bearer≡cookie): minting a new credential from an existing bearer credential would be self-replication — a stolen token could outlive its expiry by re-minting. The browser session is the human checkpoint. Verified email required. The redirect_uri must be a loopback (http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback, any port, exactly that path — never a hostname). The code is single-use, expires in 60s, and is bound to this exact redirect_uri + PKCE challenge.
+         *
+         */
+        post: operations["cliAuthorize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange a one-time code (+ PKCE verifier) for a CLI credential
+         * @description Public (the CLI holds no credential yet). The exchange requires the code, the PKCE verifier matching the challenge presented at authorize, and the EXACT redirect_uri the code was bound to. Any mismatch, reuse, or expiry → 400 invalid_grant. The credential is returned EXACTLY ONCE.
+         *
+         */
+        post: operations["cliToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's CLI credentials (metadata only — never tokens) */
+        get: operations["listCliCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/credentials/{credentialId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke one of the caller's CLI credentials (immediate)
+         * @description Self-scoped (a caller revokes only their own credential). Allowed unverified — revoking a credential is logout-class, not org-mutating.
+         *
+         */
+        delete: operations["revokeCliCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the device-code fallback (browserless hosts)
+         * @description Public. Returns a short user_code the user enters at verification_uri from any browser, and a device_code the CLI polls with. Same hygiene class as authorization codes — hashed at rest, single-use, short TTL.
+         *
+         */
+        post: operations["cliDeviceStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/device/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a device-code login (browser leg)
+         * @description COOKIE-SESSION ONLY (same argued exception as cliAuthorize) + verified email required — this is the human checkpoint of the device flow.
+         *
+         */
+        post: operations["cliDeviceApprove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/cli/device/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Poll for the device-flow credential
+         * @description Public. 400 authorization_pending until approved; expired/consumed codes → 400 invalid_grant. On approval the credential is returned EXACTLY ONCE.
+         *
+         */
+        post: operations["cliDeviceToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agent/enroll": {
         parameters: {
             query?: never;
@@ -711,6 +854,69 @@ export interface components {
         /** @description Only the name is mutable; the slug is fixed at creation. */
         UpdateOrganizationRequest: {
             name: string;
+        };
+        CliAuthorizeRequest: {
+            /** @description Loopback only — http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback (any port, exactly that path; hostnames incl. "localhost" are refused — DNS-spoofable).
+             *      */
+            redirect_uri: string;
+            /** @description PKCE S256 challenge (base64url SHA-256 of the CLI's verifier). */
+            code_challenge: string;
+            /** @description Echoed to the loopback callback verbatim (CLI-side correlation/CSRF). */
+            state: string;
+        };
+        CliAuthorizeResponse: {
+            /** @description One-time authorization code (single-use, hashed at rest). */
+            code: string;
+            state: string;
+            /** @description Code lifetime in seconds (60). */
+            expires_in: number;
+        };
+        CliTokenRequest: {
+            code: string;
+            code_verifier: string;
+            /** @description Must EXACTLY match the redirect the code was bound to at mint. */
+            redirect_uri: string;
+        };
+        CliTokenResponse: {
+            /** @description The dedicated CLI bearer credential, prefixed tnx_ (secret-scanner matchable). Shown exactly once; stored hashed; send as "Authorization: Bearer <token>".
+             *      */
+            token: string;
+            /**
+             * Format: date-time
+             * @description Absolute expiry (90 days).
+             */
+            expires_at: string;
+            /** @description Keyed 12-hex proof-of-secret; matches audit rows. */
+            fingerprint: string;
+        };
+        CliCredential: {
+            /** Format: uuid */
+            id: string;
+            /** @description Client-supplied label (e.g. hostname) or a default. */
+            name: string;
+            fingerprint: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        CliDeviceStartResponse: {
+            /** @description Poll credential; never shown to the user. */
+            device_code: string;
+            /** @description Short human code entered in the browser. */
+            user_code: string;
+            verification_uri: string;
+            /** @description Minimum poll interval in seconds. */
+            interval: number;
+            expires_in: number;
+        };
+        CliDeviceApproveRequest: {
+            user_code: string;
+        };
+        CliDeviceTokenRequest: {
+            device_code: string;
         };
         GenericMessage: {
             message: string;
@@ -1300,6 +1506,176 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cliAuthorize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CliAuthorizeRequest"];
+            };
+        };
+        responses: {
+            /** @description One-time code minted; the SPA redirects the browser to the loopback. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliAuthorizeResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cliToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CliTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The dedicated CLI credential — shown exactly once, never re-served. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliTokenResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCliCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's credentials (fingerprints, never token material). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliCredential"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeCliCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked (idempotent for an already-revoked credential). */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cliDeviceStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Device flow started. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliDeviceStartResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cliDeviceApprove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CliDeviceApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Approved — the polling CLI will receive its credential. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cliDeviceToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CliDeviceTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The dedicated CLI credential — shown exactly once. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliTokenResponse"];
+                };
             };
             default: components["responses"]["Error"];
         };

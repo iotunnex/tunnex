@@ -10,9 +10,12 @@ servers:
   - url: /
     description: Same-origin (served behind the edge nginx)
 
-# Endpoints require a session cookie by default; public ones set `security: []`.
+# Endpoints require a session cookie OR a CLI bearer credential by default
+# (bearer ≡ cookie, S5.1); public ones set `security: []`; cookie-only ops
+# (credential minting) override with `security: [{cookieAuth: []}]` + argument.
 security:
   - cookieAuth: []
+  - bearerAuth: []
 
 paths:
   /healthz:
@@ -281,6 +284,168 @@ paths:
         "204":
           description: Saved.
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  # ---- CLI credential flow (S5.1) -------------------------------------------
+  # `tunnex login` opens the system browser; auth completes IN-BROWSER (local or
+  # SSO, MFA and all); the SPA then calls cliAuthorize and redirects the browser
+  # to the CLI's loopback callback with a one-time code + state; the CLI
+  # exchanges code+PKCE-verifier for a dedicated bearer credential (tnx_...).
+  # Device-code fallback for browserless hosts. Codes and credentials are hashed
+  # at rest; audit rows carry the keyed fingerprint (proof-of-secret convention).
+  /api/v1/auth/cli/authorize:
+    post:
+      operationId: cliAuthorize
+      summary: Mint a one-time CLI authorization code (browser leg)
+      description: >
+        COOKIE-SESSION ONLY (argued exception to bearer≡cookie): minting a new
+        credential from an existing bearer credential would be self-replication —
+        a stolen token could outlive its expiry by re-minting. The browser session
+        is the human checkpoint. Verified email required. The redirect_uri must be
+        a loopback (http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback,
+        any port, exactly that path — never a hostname). The code is single-use,
+        expires in 60s, and is bound to this exact redirect_uri + PKCE challenge.
+      tags: [cli-auth]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CliAuthorizeRequest" }
+      responses:
+        "200":
+          description: One-time code minted; the SPA redirects the browser to the loopback.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CliAuthorizeResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/token:
+    post:
+      operationId: cliToken
+      summary: Exchange a one-time code (+ PKCE verifier) for a CLI credential
+      description: >
+        Public (the CLI holds no credential yet). The exchange requires the code,
+        the PKCE verifier matching the challenge presented at authorize, and the
+        EXACT redirect_uri the code was bound to. Any mismatch, reuse, or expiry
+        → 400 invalid_grant. The credential is returned EXACTLY ONCE.
+      tags: [cli-auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CliTokenRequest" }
+      responses:
+        "200":
+          description: The dedicated CLI credential — shown exactly once, never re-served.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CliTokenResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/credentials:
+    get:
+      operationId: listCliCredentials
+      summary: List the caller's CLI credentials (metadata only — never tokens)
+      tags: [cli-auth]
+      responses:
+        "200":
+          description: The caller's credentials (fingerprints, never token material).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CliCredential" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/credentials/{credentialId}:
+    delete:
+      operationId: revokeCliCredential
+      summary: Revoke one of the caller's CLI credentials (immediate)
+      description: >
+        Self-scoped (a caller revokes only their own credential). Allowed
+        unverified — revoking a credential is logout-class, not org-mutating.
+      tags: [cli-auth]
+      parameters:
+        - name: credentialId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Revoked (idempotent for an already-revoked credential).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/device:
+    post:
+      operationId: cliDeviceStart
+      summary: Start the device-code fallback (browserless hosts)
+      description: >
+        Public. Returns a short user_code the user enters at verification_uri
+        from any browser, and a device_code the CLI polls with. Same hygiene
+        class as authorization codes — hashed at rest, single-use, short TTL.
+      tags: [cli-auth]
+      security: []
+      responses:
+        "200":
+          description: Device flow started.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CliDeviceStartResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/device/approve:
+    post:
+      operationId: cliDeviceApprove
+      summary: Approve a device-code login (browser leg)
+      description: >
+        COOKIE-SESSION ONLY (same argued exception as cliAuthorize) + verified
+        email required — this is the human checkpoint of the device flow.
+      tags: [cli-auth]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CliDeviceApproveRequest" }
+      responses:
+        "200":
+          description: Approved — the polling CLI will receive its credential.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericMessage" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/cli/device/token:
+    post:
+      operationId: cliDeviceToken
+      summary: Poll for the device-flow credential
+      description: >
+        Public. 400 authorization_pending until approved; expired/consumed codes
+        → 400 invalid_grant. On approval the credential is returned EXACTLY ONCE.
+      tags: [cli-auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CliDeviceTokenRequest" }
+      responses:
+        "200":
+          description: The dedicated CLI credential — shown exactly once.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CliTokenResponse" }
         default: { $ref: "#/components/responses/Error" }
 
   /api/v1/agent/enroll:
@@ -839,6 +1004,12 @@ components:
       type: apiKey
       in: cookie
       name: tunnex_session
+    # CLI credential (tnx_...). bearer ≡ cookie on every authenticated endpoint;
+    # the ONLY exceptions are argued on the ops themselves (cliAuthorize +
+    # cliDeviceApprove — credential minting must not be reachable from a bearer).
+    bearerAuth:
+      type: http
+      scheme: bearer
 
   headers:
     RequestId:
@@ -944,6 +1115,104 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+
+    # ---- CLI credential flow (S5.1) ----------------------------------------
+    CliAuthorizeRequest:
+      type: object
+      required: [redirect_uri, code_challenge, state]
+      additionalProperties: false
+      properties:
+        redirect_uri:
+          type: string
+          maxLength: 200
+          description: >
+            Loopback only — http://127.0.0.1:<port>/callback or
+            http://[::1]:<port>/callback (any port, exactly that path; hostnames
+            incl. "localhost" are refused — DNS-spoofable).
+        code_challenge:
+          type: string
+          minLength: 43
+          maxLength: 128
+          description: PKCE S256 challenge (base64url SHA-256 of the CLI's verifier).
+        state:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Echoed to the loopback callback verbatim (CLI-side correlation/CSRF).
+
+    CliAuthorizeResponse:
+      type: object
+      required: [code, state, expires_in]
+      additionalProperties: false
+      properties:
+        code: { type: string, description: "One-time authorization code (single-use, hashed at rest)." }
+        state: { type: string }
+        expires_in: { type: integer, description: "Code lifetime in seconds (60)." }
+
+    CliTokenRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri]
+      additionalProperties: false
+      properties:
+        code: { type: string, minLength: 1, maxLength: 200 }
+        code_verifier: { type: string, minLength: 43, maxLength: 128 }
+        redirect_uri:
+          type: string
+          maxLength: 200
+          description: Must EXACTLY match the redirect the code was bound to at mint.
+
+    # WRITE-ONCE SECRET: the token appears ONLY here, never in any GET/list
+    # response type (structural absence — the proof-of-secret convention).
+    CliTokenResponse:
+      type: object
+      required: [token, expires_at, fingerprint]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: >
+            The dedicated CLI bearer credential, prefixed tnx_ (secret-scanner
+            matchable). Shown exactly once; stored hashed; send as
+            "Authorization: Bearer <token>".
+        expires_at: { type: string, format: date-time, description: "Absolute expiry (90 days)." }
+        fingerprint: { type: string, description: "Keyed 12-hex proof-of-secret; matches audit rows." }
+
+    CliCredential:
+      type: object
+      required: [id, name, fingerprint, created_at, expires_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: "Client-supplied label (e.g. hostname) or a default." }
+        fingerprint: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+
+    CliDeviceStartResponse:
+      type: object
+      required: [device_code, user_code, verification_uri, interval, expires_in]
+      additionalProperties: false
+      properties:
+        device_code: { type: string, description: "Poll credential; never shown to the user." }
+        user_code: { type: string, description: "Short human code entered in the browser." }
+        verification_uri: { type: string }
+        interval: { type: integer, description: "Minimum poll interval in seconds." }
+        expires_in: { type: integer }
+
+    CliDeviceApproveRequest:
+      type: object
+      required: [user_code]
+      additionalProperties: false
+      properties:
+        user_code: { type: string, minLength: 1, maxLength: 32 }
+
+    CliDeviceTokenRequest:
+      type: object
+      required: [device_code]
+      additionalProperties: false
+      properties:
+        device_code: { type: string, minLength: 1, maxLength: 200 }
 
     GenericMessage:
       type: object

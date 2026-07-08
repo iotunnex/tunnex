@@ -32,6 +32,9 @@ var walkBodies = map[string]string{
 	"revokeinvitation":   `{"email":"walk@example.com"}`,
 	"issuejointoken":     `{"node_name":"walk-node"}`,
 	"createdevice":       `{"name":"walk-device","node_id":"00000000-0000-0000-0000-000000000000"}`,
+	// S5.1 CLI-auth gated ops (cliToken/cliDeviceStart/cliDeviceToken are public).
+	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
+	"clideviceapprove": `{"user_code":"WALK-CODE"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
@@ -63,6 +66,7 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 			reqPath = strings.ReplaceAll(reqPath, "{userId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{nodeId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{deviceId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{credentialId}", uuid.NewString())
 
 			var body io.Reader
 			if b, ok := walkBodies[strings.ToLower(op.OperationID)]; ok {

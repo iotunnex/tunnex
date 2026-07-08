@@ -278,6 +278,22 @@ ceremony + a deferred-ledger entry).
 - **Exact-match binding:** the code is bound at mint to the EXACT redirect (host+port+path) it was
   issued for; the exchange re-presents it and must match. State parameter carried end-to-end for
   the CLI's own request correlation.
+
+**Approved (sign-off) with recorded ADDITIONS:**
+- **(a) Minting is verified-gated** (`requireVerifiedUser` on the authorize + device-approve legs).
+  No exception argued: an unverified account must not mint a long-lived credential when the same
+  account can't perform org mutations — the credential would outlive/outrank its owner's standing.
+- **(b) bearer ≡ cookie on ALL authenticated endpoints.** Any exception is ARGUED IN THE SPEC on
+  the op itself. Two exceptions argued: `cliAuthorize` and `cliDeviceApprove` are cookie-session
+  ONLY — minting a new credential from an existing bearer credential is self-replication (a stolen
+  token could outlive its expiry by re-minting); the browser leg is the human checkpoint.
+- **(c) `state` carried on the loopback callback alongside PKCE** (CLI-side request correlation +
+  CSRF on the loopback listener); the device-code fallback inherits the SAME code-hygiene class
+  (hashed at rest, single-use, short TTL, atomic consume).
+- **SHA256SUMS for website distribution:** every released CLI artifact set ships a SHA256SUMS file
+  (and its URL is printed in install docs); signing rides the EPIC 5 ops item (Apple ID + EV cert).
+- **Expired-credential UX:** on any 401 `credential_expired`, the CLI prints exactly one actionable
+  line — `credential expired — run 'tunnex login'` — never a raw error dump.
 - **(Ops, when EPIC 5 begins)** Begin **code-signing cert procurement** — Apple Developer ID + Windows EV cert (weeks of lead time).
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)

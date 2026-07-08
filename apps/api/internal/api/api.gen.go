@@ -24,6 +24,7 @@ import (
 )
 
 const (
+	BearerAuthScopes = "bearerAuth.Scopes"
 	CookieAuthScopes = "cookieAuth.Scopes"
 )
 
@@ -148,6 +149,85 @@ type ChangeRoleRequest struct {
 
 // ChangeRoleRequestRole defines model for ChangeRoleRequest.Role.
 type ChangeRoleRequestRole string
+
+// CliAuthorizeRequest defines model for CliAuthorizeRequest.
+type CliAuthorizeRequest struct {
+	// CodeChallenge PKCE S256 challenge (base64url SHA-256 of the CLI's verifier).
+	CodeChallenge string `json:"code_challenge"`
+
+	// RedirectUri Loopback only — http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback (any port, exactly that path; hostnames incl. "localhost" are refused — DNS-spoofable).
+	RedirectUri string `json:"redirect_uri"`
+
+	// State Echoed to the loopback callback verbatim (CLI-side correlation/CSRF).
+	State string `json:"state"`
+}
+
+// CliAuthorizeResponse defines model for CliAuthorizeResponse.
+type CliAuthorizeResponse struct {
+	// Code One-time authorization code (single-use, hashed at rest).
+	Code string `json:"code"`
+
+	// ExpiresIn Code lifetime in seconds (60).
+	ExpiresIn int    `json:"expires_in"`
+	State     string `json:"state"`
+}
+
+// CliCredential defines model for CliCredential.
+type CliCredential struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	ExpiresAt   time.Time          `json:"expires_at"`
+	Fingerprint string             `json:"fingerprint"`
+	Id          openapi_types.UUID `json:"id"`
+	LastUsedAt  *time.Time         `json:"last_used_at,omitempty"`
+
+	// Name Client-supplied label (e.g. hostname) or a default.
+	Name string `json:"name"`
+}
+
+// CliDeviceApproveRequest defines model for CliDeviceApproveRequest.
+type CliDeviceApproveRequest struct {
+	UserCode string `json:"user_code"`
+}
+
+// CliDeviceStartResponse defines model for CliDeviceStartResponse.
+type CliDeviceStartResponse struct {
+	// DeviceCode Poll credential; never shown to the user.
+	DeviceCode string `json:"device_code"`
+	ExpiresIn  int    `json:"expires_in"`
+
+	// Interval Minimum poll interval in seconds.
+	Interval int `json:"interval"`
+
+	// UserCode Short human code entered in the browser.
+	UserCode        string `json:"user_code"`
+	VerificationUri string `json:"verification_uri"`
+}
+
+// CliDeviceTokenRequest defines model for CliDeviceTokenRequest.
+type CliDeviceTokenRequest struct {
+	DeviceCode string `json:"device_code"`
+}
+
+// CliTokenRequest defines model for CliTokenRequest.
+type CliTokenRequest struct {
+	Code         string `json:"code"`
+	CodeVerifier string `json:"code_verifier"`
+
+	// RedirectUri Must EXACTLY match the redirect the code was bound to at mint.
+	RedirectUri string `json:"redirect_uri"`
+}
+
+// CliTokenResponse defines model for CliTokenResponse.
+type CliTokenResponse struct {
+	// ExpiresAt Absolute expiry (90 days).
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Fingerprint Keyed 12-hex proof-of-secret; matches audit rows.
+	Fingerprint string `json:"fingerprint"`
+
+	// Token The dedicated CLI bearer credential, prefixed tnx_ (secret-scanner matchable). Shown exactly once; stored hashed; send as "Authorization: Bearer <token>".
+	Token string `json:"token"`
+}
 
 // CreateDeviceRequest defines model for CreateDeviceRequest.
 type CreateDeviceRequest struct {
@@ -486,6 +566,18 @@ type ListAuditLogsParams struct {
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
+// CliAuthorizeJSONRequestBody defines body for CliAuthorize for application/json ContentType.
+type CliAuthorizeJSONRequestBody = CliAuthorizeRequest
+
+// CliDeviceApproveJSONRequestBody defines body for CliDeviceApprove for application/json ContentType.
+type CliDeviceApproveJSONRequestBody = CliDeviceApproveRequest
+
+// CliDeviceTokenJSONRequestBody defines body for CliDeviceToken for application/json ContentType.
+type CliDeviceTokenJSONRequestBody = CliDeviceTokenRequest
+
+// CliTokenJSONRequestBody defines body for CliToken for application/json ContentType.
+type CliTokenJSONRequestBody = CliTokenRequest
+
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody = AcceptInviteRequest
 
@@ -545,6 +637,27 @@ type ServerInterface interface {
 	// Enroll a tunnex-node agent with a join token
 	// (POST /api/v1/agent/enroll)
 	EnrollAgent(w http.ResponseWriter, r *http.Request)
+	// Mint a one-time CLI authorization code (browser leg)
+	// (POST /api/v1/auth/cli/authorize)
+	CliAuthorize(w http.ResponseWriter, r *http.Request)
+	// List the caller's CLI credentials (metadata only — never tokens)
+	// (GET /api/v1/auth/cli/credentials)
+	ListCliCredentials(w http.ResponseWriter, r *http.Request)
+	// Revoke one of the caller's CLI credentials (immediate)
+	// (DELETE /api/v1/auth/cli/credentials/{credentialId})
+	RevokeCliCredential(w http.ResponseWriter, r *http.Request, credentialId openapi_types.UUID)
+	// Start the device-code fallback (browserless hosts)
+	// (POST /api/v1/auth/cli/device)
+	CliDeviceStart(w http.ResponseWriter, r *http.Request)
+	// Approve a device-code login (browser leg)
+	// (POST /api/v1/auth/cli/device/approve)
+	CliDeviceApprove(w http.ResponseWriter, r *http.Request)
+	// Poll for the device-flow credential
+	// (POST /api/v1/auth/cli/device/token)
+	CliDeviceToken(w http.ResponseWriter, r *http.Request)
+	// Exchange a one-time code (+ PKCE verifier) for a CLI credential
+	// (POST /api/v1/auth/cli/token)
+	CliToken(w http.ResponseWriter, r *http.Request)
 	// Accept an invitation
 	// (POST /api/v1/auth/invitations/accept)
 	AcceptInvitation(w http.ResponseWriter, r *http.Request)
@@ -668,6 +781,48 @@ type Unimplemented struct{}
 // Enroll a tunnex-node agent with a join token
 // (POST /api/v1/agent/enroll)
 func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Mint a one-time CLI authorization code (browser leg)
+// (POST /api/v1/auth/cli/authorize)
+func (_ Unimplemented) CliAuthorize(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the caller's CLI credentials (metadata only — never tokens)
+// (GET /api/v1/auth/cli/credentials)
+func (_ Unimplemented) ListCliCredentials(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke one of the caller's CLI credentials (immediate)
+// (DELETE /api/v1/auth/cli/credentials/{credentialId})
+func (_ Unimplemented) RevokeCliCredential(w http.ResponseWriter, r *http.Request, credentialId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Start the device-code fallback (browserless hosts)
+// (POST /api/v1/auth/cli/device)
+func (_ Unimplemented) CliDeviceStart(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Approve a device-code login (browser leg)
+// (POST /api/v1/auth/cli/device/approve)
+func (_ Unimplemented) CliDeviceApprove(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Poll for the device-flow credential
+// (POST /api/v1/auth/cli/device/token)
+func (_ Unimplemented) CliDeviceToken(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Exchange a one-time code (+ PKCE verifier) for a CLI credential
+// (POST /api/v1/auth/cli/token)
+func (_ Unimplemented) CliToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -922,6 +1077,143 @@ func (siw *ServerInterfaceWrapper) EnrollAgent(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// CliAuthorize operation middleware
+func (siw *ServerInterfaceWrapper) CliAuthorize(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CliAuthorize(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCliCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListCliCredentials(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCliCredentials(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeCliCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeCliCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "credentialId" -------------
+	var credentialId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credentialId", chi.URLParam(r, "credentialId"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "credentialId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeCliCredential(w, r, credentialId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CliDeviceStart operation middleware
+func (siw *ServerInterfaceWrapper) CliDeviceStart(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CliDeviceStart(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CliDeviceApprove operation middleware
+func (siw *ServerInterfaceWrapper) CliDeviceApprove(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CliDeviceApprove(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CliDeviceToken operation middleware
+func (siw *ServerInterfaceWrapper) CliDeviceToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CliDeviceToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CliToken operation middleware
+func (siw *ServerInterfaceWrapper) CliToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CliToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptInvitation operation middleware
 func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 
@@ -970,6 +1262,8 @@ func (siw *ServerInterfaceWrapper) CurrentUser(w http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1148,6 +1442,8 @@ func (siw *ServerInterfaceWrapper) ResendVerification(w http.ResponseWriter, r *
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1182,6 +1478,8 @@ func (siw *ServerInterfaceWrapper) ListOrganizations(w http.ResponseWriter, r *h
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1201,6 +1499,8 @@ func (siw *ServerInterfaceWrapper) CreateOrganization(w http.ResponseWriter, r *
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1233,6 +1533,8 @@ func (siw *ServerInterfaceWrapper) DeleteOrganization(w http.ResponseWriter, r *
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1263,6 +1565,8 @@ func (siw *ServerInterfaceWrapper) GetOrganization(w http.ResponseWriter, r *htt
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1295,6 +1599,8 @@ func (siw *ServerInterfaceWrapper) UpdateOrganization(w http.ResponseWriter, r *
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1325,6 +1631,8 @@ func (siw *ServerInterfaceWrapper) ListAuditLogs(w http.ResponseWriter, r *http.
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1416,6 +1724,8 @@ func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Re
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1446,6 +1756,8 @@ func (siw *ServerInterfaceWrapper) CreateDevice(w http.ResponseWriter, r *http.R
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1487,6 +1799,8 @@ func (siw *ServerInterfaceWrapper) RevokeDevice(w http.ResponseWriter, r *http.R
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1517,6 +1831,8 @@ func (siw *ServerInterfaceWrapper) CreateDomainClaim(w http.ResponseWriter, r *h
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1549,6 +1865,8 @@ func (siw *ServerInterfaceWrapper) VerifyDomainClaim(w http.ResponseWriter, r *h
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1579,6 +1897,8 @@ func (siw *ServerInterfaceWrapper) CreateInvitation(w http.ResponseWriter, r *ht
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1611,6 +1931,8 @@ func (siw *ServerInterfaceWrapper) ResendInvitation(w http.ResponseWriter, r *ht
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1642,6 +1964,8 @@ func (siw *ServerInterfaceWrapper) RevokeInvitation(w http.ResponseWriter, r *ht
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1672,6 +1996,8 @@ func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1713,6 +2039,8 @@ func (siw *ServerInterfaceWrapper) DeactivateMember(w http.ResponseWriter, r *ht
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1752,6 +2080,8 @@ func (siw *ServerInterfaceWrapper) ReactivateMember(w http.ResponseWriter, r *ht
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1793,6 +2123,8 @@ func (siw *ServerInterfaceWrapper) ChangeMemberRole(w http.ResponseWriter, r *ht
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1824,6 +2156,8 @@ func (siw *ServerInterfaceWrapper) ListNodes(w http.ResponseWriter, r *http.Requ
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1854,6 +2188,8 @@ func (siw *ServerInterfaceWrapper) IssueJoinToken(w http.ResponseWriter, r *http
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1895,6 +2231,8 @@ func (siw *ServerInterfaceWrapper) RevokeNode(w http.ResponseWriter, r *http.Req
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1926,6 +2264,8 @@ func (siw *ServerInterfaceWrapper) GetOrgOverview(w http.ResponseWriter, r *http
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1956,6 +2296,8 @@ func (siw *ServerInterfaceWrapper) ResizePool(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -1997,6 +2339,8 @@ func (siw *ServerInterfaceWrapper) GetSsoConfig(w http.ResponseWriter, r *http.R
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
 	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2036,6 +2380,8 @@ func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.R
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
@@ -2179,6 +2525,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/agent/enroll", wrapper.EnrollAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli/authorize", wrapper.CliAuthorize)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/cli/credentials", wrapper.ListCliCredentials)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/auth/cli/credentials/{credentialId}", wrapper.RevokeCliCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli/device", wrapper.CliDeviceStart)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli/device/approve", wrapper.CliDeviceApprove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli/device/token", wrapper.CliDeviceToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli/token", wrapper.CliToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/invitations/accept", wrapper.AcceptInvitation)
@@ -2339,6 +2706,274 @@ type EnrollAgentdefaultJSONResponse struct {
 }
 
 func (response EnrollAgentdefaultJSONResponse) VisitEnrollAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliAuthorizeRequestObject struct {
+	Body *CliAuthorizeJSONRequestBody
+}
+
+type CliAuthorizeResponseObject interface {
+	VisitCliAuthorizeResponse(w http.ResponseWriter) error
+}
+
+type CliAuthorize200ResponseHeaders struct {
+	XRequestId string
+}
+
+type CliAuthorize200JSONResponse struct {
+	Body    CliAuthorizeResponse
+	Headers CliAuthorize200ResponseHeaders
+}
+
+func (response CliAuthorize200JSONResponse) VisitCliAuthorizeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliAuthorizedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CliAuthorizedefaultJSONResponse) VisitCliAuthorizeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListCliCredentialsRequestObject struct {
+}
+
+type ListCliCredentialsResponseObject interface {
+	VisitListCliCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListCliCredentials200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListCliCredentials200JSONResponse struct {
+	Body    []CliCredential
+	Headers ListCliCredentials200ResponseHeaders
+}
+
+func (response ListCliCredentials200JSONResponse) VisitListCliCredentialsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListCliCredentialsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListCliCredentialsdefaultJSONResponse) VisitListCliCredentialsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RevokeCliCredentialRequestObject struct {
+	CredentialId openapi_types.UUID `json:"credentialId"`
+}
+
+type RevokeCliCredentialResponseObject interface {
+	VisitRevokeCliCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeCliCredential204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RevokeCliCredential204Response struct {
+	Headers RevokeCliCredential204ResponseHeaders
+}
+
+func (response RevokeCliCredential204Response) VisitRevokeCliCredentialResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeCliCredentialdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeCliCredentialdefaultJSONResponse) VisitRevokeCliCredentialResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceStartRequestObject struct {
+}
+
+type CliDeviceStartResponseObject interface {
+	VisitCliDeviceStartResponse(w http.ResponseWriter) error
+}
+
+type CliDeviceStart200ResponseHeaders struct {
+	XRequestId string
+}
+
+type CliDeviceStart200JSONResponse struct {
+	Body    CliDeviceStartResponse
+	Headers CliDeviceStart200ResponseHeaders
+}
+
+func (response CliDeviceStart200JSONResponse) VisitCliDeviceStartResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceStartdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CliDeviceStartdefaultJSONResponse) VisitCliDeviceStartResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceApproveRequestObject struct {
+	Body *CliDeviceApproveJSONRequestBody
+}
+
+type CliDeviceApproveResponseObject interface {
+	VisitCliDeviceApproveResponse(w http.ResponseWriter) error
+}
+
+type CliDeviceApprove200ResponseHeaders struct {
+	XRequestId string
+}
+
+type CliDeviceApprove200JSONResponse struct {
+	Body    GenericMessage
+	Headers CliDeviceApprove200ResponseHeaders
+}
+
+func (response CliDeviceApprove200JSONResponse) VisitCliDeviceApproveResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceApprovedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CliDeviceApprovedefaultJSONResponse) VisitCliDeviceApproveResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceTokenRequestObject struct {
+	Body *CliDeviceTokenJSONRequestBody
+}
+
+type CliDeviceTokenResponseObject interface {
+	VisitCliDeviceTokenResponse(w http.ResponseWriter) error
+}
+
+type CliDeviceToken200ResponseHeaders struct {
+	XRequestId string
+}
+
+type CliDeviceToken200JSONResponse struct {
+	Body    CliTokenResponse
+	Headers CliDeviceToken200ResponseHeaders
+}
+
+func (response CliDeviceToken200JSONResponse) VisitCliDeviceTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliDeviceTokendefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CliDeviceTokendefaultJSONResponse) VisitCliDeviceTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliTokenRequestObject struct {
+	Body *CliTokenJSONRequestBody
+}
+
+type CliTokenResponseObject interface {
+	VisitCliTokenResponse(w http.ResponseWriter) error
+}
+
+type CliToken200ResponseHeaders struct {
+	XRequestId string
+}
+
+type CliToken200JSONResponse struct {
+	Body    CliTokenResponse
+	Headers CliToken200ResponseHeaders
+}
+
+func (response CliToken200JSONResponse) VisitCliTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CliTokendefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CliTokendefaultJSONResponse) VisitCliTokenResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -3835,6 +4470,27 @@ type StrictServerInterface interface {
 	// Enroll a tunnex-node agent with a join token
 	// (POST /api/v1/agent/enroll)
 	EnrollAgent(ctx context.Context, request EnrollAgentRequestObject) (EnrollAgentResponseObject, error)
+	// Mint a one-time CLI authorization code (browser leg)
+	// (POST /api/v1/auth/cli/authorize)
+	CliAuthorize(ctx context.Context, request CliAuthorizeRequestObject) (CliAuthorizeResponseObject, error)
+	// List the caller's CLI credentials (metadata only — never tokens)
+	// (GET /api/v1/auth/cli/credentials)
+	ListCliCredentials(ctx context.Context, request ListCliCredentialsRequestObject) (ListCliCredentialsResponseObject, error)
+	// Revoke one of the caller's CLI credentials (immediate)
+	// (DELETE /api/v1/auth/cli/credentials/{credentialId})
+	RevokeCliCredential(ctx context.Context, request RevokeCliCredentialRequestObject) (RevokeCliCredentialResponseObject, error)
+	// Start the device-code fallback (browserless hosts)
+	// (POST /api/v1/auth/cli/device)
+	CliDeviceStart(ctx context.Context, request CliDeviceStartRequestObject) (CliDeviceStartResponseObject, error)
+	// Approve a device-code login (browser leg)
+	// (POST /api/v1/auth/cli/device/approve)
+	CliDeviceApprove(ctx context.Context, request CliDeviceApproveRequestObject) (CliDeviceApproveResponseObject, error)
+	// Poll for the device-flow credential
+	// (POST /api/v1/auth/cli/device/token)
+	CliDeviceToken(ctx context.Context, request CliDeviceTokenRequestObject) (CliDeviceTokenResponseObject, error)
+	// Exchange a one-time code (+ PKCE verifier) for a CLI credential
+	// (POST /api/v1/auth/cli/token)
+	CliToken(ctx context.Context, request CliTokenRequestObject) (CliTokenResponseObject, error)
 	// Accept an invitation
 	// (POST /api/v1/auth/invitations/accept)
 	AcceptInvitation(ctx context.Context, request AcceptInvitationRequestObject) (AcceptInvitationResponseObject, error)
@@ -4004,6 +4660,204 @@ func (sh *strictHandler) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnrollAgentResponseObject); ok {
 		if err := validResponse.VisitEnrollAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CliAuthorize operation middleware
+func (sh *strictHandler) CliAuthorize(w http.ResponseWriter, r *http.Request) {
+	var request CliAuthorizeRequestObject
+
+	var body CliAuthorizeJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CliAuthorize(ctx, request.(CliAuthorizeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CliAuthorize")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CliAuthorizeResponseObject); ok {
+		if err := validResponse.VisitCliAuthorizeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListCliCredentials operation middleware
+func (sh *strictHandler) ListCliCredentials(w http.ResponseWriter, r *http.Request) {
+	var request ListCliCredentialsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCliCredentials(ctx, request.(ListCliCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCliCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCliCredentialsResponseObject); ok {
+		if err := validResponse.VisitListCliCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeCliCredential operation middleware
+func (sh *strictHandler) RevokeCliCredential(w http.ResponseWriter, r *http.Request, credentialId openapi_types.UUID) {
+	var request RevokeCliCredentialRequestObject
+
+	request.CredentialId = credentialId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeCliCredential(ctx, request.(RevokeCliCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeCliCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeCliCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeCliCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CliDeviceStart operation middleware
+func (sh *strictHandler) CliDeviceStart(w http.ResponseWriter, r *http.Request) {
+	var request CliDeviceStartRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CliDeviceStart(ctx, request.(CliDeviceStartRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CliDeviceStart")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CliDeviceStartResponseObject); ok {
+		if err := validResponse.VisitCliDeviceStartResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CliDeviceApprove operation middleware
+func (sh *strictHandler) CliDeviceApprove(w http.ResponseWriter, r *http.Request) {
+	var request CliDeviceApproveRequestObject
+
+	var body CliDeviceApproveJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CliDeviceApprove(ctx, request.(CliDeviceApproveRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CliDeviceApprove")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CliDeviceApproveResponseObject); ok {
+		if err := validResponse.VisitCliDeviceApproveResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CliDeviceToken operation middleware
+func (sh *strictHandler) CliDeviceToken(w http.ResponseWriter, r *http.Request) {
+	var request CliDeviceTokenRequestObject
+
+	var body CliDeviceTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CliDeviceToken(ctx, request.(CliDeviceTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CliDeviceToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CliDeviceTokenResponseObject); ok {
+		if err := validResponse.VisitCliDeviceTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CliToken operation middleware
+func (sh *strictHandler) CliToken(w http.ResponseWriter, r *http.Request) {
+	var request CliTokenRequestObject
+
+	var body CliTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CliToken(ctx, request.(CliTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CliToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CliTokenResponseObject); ok {
+		if err := validResponse.VisitCliTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5112,96 +5966,124 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"QY9t794b9r59/vZ/AQAA//8+U7bptokAAA==",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
