@@ -117,7 +117,10 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               )}
             </>
           }
-          secret={pinnedName ? `TUNNEX_JOIN_TOKEN=${token} TUNNEX_NODE_NAME=${pinnedName}` : `TUNNEX_JOIN_TOKEN=${token}`}
+          // The name is shell-quoted: node_name has no charset restriction, so an
+          // unquoted space would silently truncate the value on paste and resurrect
+          // the exact node_name_mismatch loop this line exists to prevent.
+          secret={pinnedName ? `TUNNEX_JOIN_TOKEN=${token} TUNNEX_NODE_NAME="${pinnedName.replace(/(["\\$`])/g, "\\$1")}"` : `TUNNEX_JOIN_TOKEN=${token}`}
           copyLabel="Copy"
           onDismiss={() => {
             setToken(null);

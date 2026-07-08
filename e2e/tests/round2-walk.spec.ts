@@ -160,8 +160,12 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
 
   // The S4.5-style ceremony: amber, shown-once, explicit ack.
   await expect(page.getByText("Join token — shown once")).toBeVisible();
+  // Extract ONLY the token value — since S4.8 the pre line also carries
+  // TUNNEX_NODE_NAME for a name-pinned token; a prefix-strip would smuggle the
+  // suffix into .walk-token (breaking A5 enrollment) AND make the no-resurrect /
+  // audit-leak assertions below search for a never-occurring string (vacuous).
   const pre = await page.locator("pre").textContent();
-  const token = pre!.replace(/^\s*TUNNEX_JOIN_TOKEN=/, "").trim();
+  const token = pre!.match(/TUNNEX_JOIN_TOKEN=(\S+)/)![1];
   expect(token.length).toBeGreaterThan(10);
   // Hand the token to the out-of-band A5 enrollment step (the compose agent).
   fs.writeFileSync("/e2e/.walk-token", token);

@@ -189,12 +189,22 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
 
   // The one-time ceremony: amber modal, token shown, must be acknowledged.
   await expect(page.getByText("Join token — shown once")).toBeVisible();
-  // The COMPLETE env line for a name-pinned token: token AND the pinned name.
-  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN} TUNNEX_NODE_NAME=walk-gw`);
+  // The COMPLETE env line for a name-pinned token: token AND the (shell-quoted)
+  // pinned name — an unquoted space would truncate the value on paste.
+  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN} TUNNEX_NODE_NAME="walk-gw"`);
   await expect(page.getByText(/pinned to the name/)).toBeVisible();
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
-  // Dismissed → the token is gone from the page and was minted exactly once (it is
-  // never re-served; re-enrolling would mint a NEW token).
+  // Dismissed → the token is gone from the page (never re-served).
   await expect(page.getByText(new RegExp(TOKEN))).toHaveCount(0);
   expect(issued).toBe(1);
+
+  // UNNAMED branch: a second mint without a name must render the PLAIN line —
+  // no TUNNEX_NODE_NAME, no pinning note, and no stale pinned name leaking from
+  // the previous (named) ceremony.
+  await page.getByRole("button", { name: "Enroll gateway" }).click();
+  await page.getByRole("button", { name: "Generate join token" }).click();
+  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN}`);
+  await expect(page.getByText(/pinned to the name/)).toHaveCount(0);
+  await page.getByRole("button", { name: /I.?ve saved it/ }).click();
+  expect(issued).toBe(2);
 });
