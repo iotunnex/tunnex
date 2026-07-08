@@ -389,16 +389,31 @@ Ledgered at implementation sign-off (MERGED item):
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)
 
-- **S6.0b CI pipeline (verification gates + client build matrix)** — SCHEDULED (promoted from a
-  ledger line at the S6.1 review). The whole repo's gates run only via manual `make`/`turbo`; there
-  is NO automated CI (`.github/workflows` absent), so drift-guard / 401-walk / RBAC / editions /
-  e2e / typecheck all depend on a human remembering to run them. The Electron client adds a
-  cross-platform build+typecheck+test surface (macOS + Windows) that a human cannot reliably cover.
-  Scope: a CI workflow running the existing gates on push/PR + a client build matrix (build the
-  Electron app on macOS and Windows runners; run the client unit tests; later the
-  playwright-electron integration test under xvfb). **Must land before S6.5** (signing/packaging
-  needs a reproducible build), **recommended before S6.3** (native `wireguard-go`/wintun embedding
-  multiplies the platform matrix — automate it before it grows).
+- **S6.0b CI pipeline (verification gates + client build matrix)** — IN PROGRESS. The repo's gates
+  ran only via manual `make`/`turbo` (no `.github/workflows`); the Electron client adds a macOS +
+  Windows surface a human can't reliably cover. **Scope:** GitHub Actions on push/PR —
+  (i) a **Linux `gates` job** running the existing make gates (codegen drift, both-edition tests,
+  web typecheck+build); RED BLOCKS MERGE. (ii) a **`client` matrix** (macOS + Windows runners):
+  `pnpm install` (electron provisioned via the onlyBuiltDependencies allowlist), client
+  typecheck + unit tests + build — none LAUNCH Electron (no display needed), so the matrix is
+  display-free; RED BLOCKS MERGE. (iii) **full e2e in CI is OPPORTUNISTIC** — included as a job, but
+  if it resists (runner resources / flakiness) it drops to nightly/non-blocking (ledger). (iv)
+  **playwright-electron** is NOT in scope now — launching Electron needs xvfb + the built app + the
+  stack, not "trivially cheap"; ledgered for later. Must land before S6.5; recommended before S6.3.
+
+### S6.0b decide-before-code (COMMIT ONE, for review): deliberate-red representation in CI
+The story-protocol proves each new guard by a DELIBERATE RED — comment out the guard, watch its test
+fail, record the one-line failure in the commit — then restore green. **Decision: CI runs the GREEN
+suite only; deliberate-reds stay MANUAL, dev-time, recorded in commit messages.** A red is produced
+by committing *broken* code (a removed guard); CI cannot host that without a permanently-failing job,
+and a "red on a branch that removes the guard" is exactly what a human does locally, not a committed
+artifact. What CI guarantees instead: the GREEN test each red proves (401-walk, RBAC matrix, the
+sweep tests, the no-oracle byte-identical test, CORS no-credentials, bearer session_required, …) runs
+on every push and RED BLOCKS MERGE — so a regression that would re-open the hole fails CI even though
+the *red demonstration* isn't itself a CI job. The deliberate-red remains the AUTHOR's proof the test
+detects the violation; CI is the CONTINUOUS proof the invariant still holds. (Argue if a subset of
+reds should be encoded as committed "guard-present" assertions — none proposed; the green tests
+already assert the positive invariant.)
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
   `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
