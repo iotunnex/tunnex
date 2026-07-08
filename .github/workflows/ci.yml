@@ -1,0 +1,86 @@
+name: CI
+
+# S6.0b: the verification gates, automated. Red BLOCKS merge on the two gate
+# jobs (gates, client). The e2e job is OPPORTUNISTIC — if it proves flaky or
+# resource-starved it moves to nightly/non-blocking (see PLAN S6.0b ledger).
+#
+# Electron is NEVER launched in CI (the client tests import no electron at
+# runtime; typecheck/build need only its types), so ELECTRON_SKIP_BINARY_DOWNLOAD
+# is set everywhere and no display/xvfb is needed. A launch-based
+# playwright-electron target is deliberately out of scope (ledgered).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+jobs:
+  # Linux: the existing make gates + web typecheck/build. RED BLOCKS MERGE.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Codegen drift guard
+        run: make generate-check
+
+      - name: Both editions — build + test (open + enterprise)
+        run: |
+          docker compose up -d --wait postgres
+          make migrate
+          make test-editions
+
+      - name: Web — typecheck + build
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @tunnex/web build
+
+  # macOS + Windows: the desktop client. Display-free (no Electron launch).
+  # RED BLOCKS MERGE — this is the cross-platform surface a human can't cover.
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install (electron binary skipped — CI never launches it)
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Client — typecheck
+        run: pnpm --filter @tunnex/client run typecheck
+      - name: Client — unit tests
+        run: pnpm --filter @tunnex/client test
+      - name: Client — build
+        run: pnpm --filter @tunnex/client build
+
+  # Full stack + Playwright. OPPORTUNISTIC: kept green when it can be, but if it
+  # resists (resource limits / flakiness) demote to nightly (PLAN ledger) rather
+  # than block merges on infra noise.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the stack + seed
+        run: |
+          docker compose up -d --build --wait
+          make seed
+      - name: Playwright e2e (SPA → API)
+        run: |
+          docker run --rm --network tunnex_default \
+            -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+            mcr.microsoft.com/playwright:v1.48.2-jammy \
+            sh -c "npm install --no-audit --no-fund --silent && npx playwright test"

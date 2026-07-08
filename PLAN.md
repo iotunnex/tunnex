@@ -46,17 +46,14 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 6 IN PROGRESS — S6.1 (client shell) + S6.2 (renderer transport switch) both MERGED.
-The desktop app is now TENANT-FUNCTIONAL: smoke-verified live on macOS — "control plane operational",
-"Sign in with your browser" → keychain credential → Overview with REAL data (Demo Organization, 3
-members, real audit rows). S6.2 shipped the origin-rewrite transport + server CORS (corsBearer,
-exact-origin app://tunnex, NEVER Allow-Credentials — cookie/CSRF posture untouched) after two
-real-Electron finders caught the Blink Request-duplex throw + the missing CORS. NEXT: S6.3 (tunnel
-control — start/stop WireGuard, embed wireguard-go/wintun, privilege helper). **S6.0b (CI pipeline)
-STRONGLY recommended BEFORE S6.3** — S6.3 multiplies the platform matrix (native code, mac+win) and
-there is still no automated CI. S3.7 parked at paper. Beta deferred — re-decide at EPIC 6 close.
-Ops CLOCK RUNNING: signing applications (Apple Dev ID + Windows EV) must be filed THIS WEEK (Pawan)
-— S6.5 hard-blocked otherwise.**
+Current: **S6.0b (CI) IN PROGRESS — gates before native code; S6.3 (tunnel control) next after.
+Signing: NOT yet confirmed filed (Pawan to file this week — Apple Dev ID + Windows EV; S6.5 gate).**
+CI = GitHub Actions: Linux `gates` (drift + both editions + web build; red blocks merge) + `client`
+matrix macOS+Windows (typecheck/test/build, display-free — Electron never launched in CI; red
+blocks) + opportunistic `e2e` (ledger if it resists) + NO playwright-electron (ledgered). Merged
+so far in EPIC 6: S6.1 (client shell) + S6.2 (renderer transport — desktop tenant-functional,
+smoke-verified live; origin-rewrite + server CORS with never-Allow-Credentials). S3.7 parked at
+paper. Beta deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
