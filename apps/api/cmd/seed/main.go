@@ -173,6 +173,34 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A VERIFIED user with NO membership — the fresh-signup state the onboarding
+	// funnel targets (S4.7). In the open edition the demo org already occupies the
+	// single-org slot, so this user's create-org attempt is refused
+	// (org_limit_reached) and the UI lands on the invitation-only card; routing +
+	// cap are thus testable against the REAL API, not a mock.
+	noOrgID := uuid.MustParse(seeddata.DemoNoOrgUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: noOrgID, Email: seeddata.DemoNoOrgEmail, Name: seeddata.DemoNoOrgName,
+	}); err != nil {
+		logger.Error("seed_noorg_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	noorgPHC, err := password.Hash(seeddata.DemoNoOrgPassword)
+	if err != nil {
+		logger.Error("seed_noorg_hash_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: noOrgID, PasswordHash: &noorgPHC}); err != nil {
+		logger.Error("seed_noorg_password_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// Verified so the funnel routes them to /create-org (the verified branch), and
+	// deliberately given NO membership (no UpsertMembership).
+	if err := q.MarkEmailVerified(ctx, noOrgID); err != nil {
+		logger.Error("seed_noorg_verify_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_complete",
 		slog.String("demo_org_id", seeddata.DemoOrgID),
 		slog.String("demo_owner_email", seeddata.DemoOwnerEmail),

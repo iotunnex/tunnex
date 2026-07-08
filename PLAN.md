@@ -140,7 +140,8 @@ Post-verify, a router branches on the caller's **membership count** (not auth-pa
 2. **0 memberships, org-create allowed** → **explicit "Create your organization" step**
    (user names the org; slug auto-derived) → on success, owner membership + dashboard.
 3. **0 memberships, cap reached** (open build, second tenant) → **invitation-only dead-end card**,
-   NO create button. Server is the truth (`org_limit_reached` 403); the UI only mirrors it.
+   NO create control. Server is the truth (`org_limit_reached` 403); the UI only mirrors it.
+   **Reached REACTIVELY, not pre-empted** — see the amendment below.
 
 Path carve-outs (must NOT hit the create-org step — they already produce membership):
 - **Invite accept** → membership added → dashboard.
@@ -156,6 +157,32 @@ Decisions locked (the three decide-before-code items):
 - **(3) Verified-email gate = structural, upstream of create-org.** `requireVerifiedUser` already
   refuses unverified create-org; the funnel routes signup→verify BEFORE the create-org step, so the
   refusal is by construction, not a surprise 403. TRACE it in a test (unverified → refusal shown).
+
+**AMENDMENT (build) — cap-reached is REACTIVE-403, not pre-empted.** The paper spec put a
+verified/0-membership/cap-reached user straight onto the dead-end card (never seeing a create form).
+Amended to: show the create step, and on the server's `org_limit_reached` swap to the invitation
+card (create form + all create controls removed). **Rationale:** the cap is GLOBAL and deployment-wide
+(`tenancy.CreateOrganization` → `CountOrganizations()` ≥ `MaxOrganizations`, i.e. one live org total).
+A verified 0-membership user cannot know the single slot is taken without asking the server, and the
+only way to pre-empt client-side would be to reveal that *some org they are not a member of exists* —
+a tenant-isolation leak. So the server is the sole authority and the UI reacts to its 403. The end
+state still satisfies the spec's intent: the user lands on the invitation card with **no usable
+create affordance**. **On the 403 the UI re-checks membership first** (`GET /organizations`): if the
+user gained a membership between routing and refusal (invite accepted elsewhere, JIT-join, admin add)
+they go to the dashboard; only a still-0-membership user sees the card. Proven end-to-end against the
+REAL open build (seed `DemoNoOrgUser`, no mock) in `onboarding.spec.ts`.
+
+Edge-case decisions (one line each, for the record):
+- **Soft-deleted-org membership counting:** the funnel counts memberships via the `GET /organizations`
+  handler → **`ListOrganizationsForUser`** (`organizations.sql`), which filters `o.deleted_at IS NULL`
+  (query-lint deleted_at guard enforces it) — so a user whose only org was soft-deleted counts as 0
+  and is routed to create-org, never trapped pointing at a dead org.
+- **Deactivated-user routing:** a deactivated user is blocked at login (`account_deactivated` 403,
+  `auth/service.go`) → no session → never reaches the funnel; no funnel special-case needed.
+- **Invite-accept vs email-verification ordering:** `invites.Accept` **marks the email verified THEN
+  upserts the membership in one tx** (token proves inbox control) — so an invitee lands in the shell
+  already verified and with ≥1 membership (has-org branch); they never hit create-org or
+  verify-pending.
 
 Conventions named: gateway **join token = one-time secret** (S4.5 config-download ceremony — amber
 callout, "I've saved it" gate, no route back, keyed fingerprint in logs/audit, never the raw token);

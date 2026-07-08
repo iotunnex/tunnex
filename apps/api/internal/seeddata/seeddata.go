@@ -44,4 +44,17 @@ const (
 	DemoUnverifiedAdminName = "Demo Unverified Admin"
 	// DemoUnverifiedAdminPassword is that admin's password (development only).
 	DemoUnverifiedAdminPassword = "tunnex-demo-password"
+
+	// DemoNoOrgUserID is a VERIFIED user with NO membership — the fresh-signup
+	// state the onboarding funnel (S4.7) targets. It lets the create-org routing
+	// and the open-edition single-org cap (invitation-only) be exercised against
+	// the REAL backend (the demo org already occupies the single-org slot), not a
+	// mock.
+	DemoNoOrgUserID = "01900000-0000-7000-8000-000000000005"
+	// DemoNoOrgEmail is that user's login email.
+	DemoNoOrgEmail = "fresh-user@demo.tunnex.local"
+	// DemoNoOrgName is that user's display name.
+	DemoNoOrgName = "Demo Fresh User"
+	// DemoNoOrgPassword is that user's password (development only).
+	DemoNoOrgPassword = "tunnex-demo-password"
 )

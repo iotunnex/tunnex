@@ -72,8 +72,16 @@ export default function CreateOrg() {
         body: { name: name.trim(), slug: finalSlug },
       });
       if (error || !data) {
-        // Cap reached → invitation-only (branch 3). Any other code → inline message.
-        if (apiErrorCode(error) === "org_limit_reached") return setCapped(true);
+        // Cap reached: before showing the dead-end, RE-CHECK membership. Between
+        // the funnel routing us here (0 orgs) and this refusal, the user may have
+        // gained a membership (an invite accepted in another tab, JIT-join, or an
+        // admin adding them) — that user belongs in the dashboard, not a dead-end.
+        // Only a still-0-membership user sees the invitation-only card (branch 3).
+        if (apiErrorCode(error) === "org_limit_reached") {
+          const { data: orgs } = await api.GET("/api/v1/organizations");
+          if ((orgs?.length ?? 0) > 0) return navigate("/dashboard", { replace: true });
+          return setCapped(true);
+        }
         return setError(apiErrorMessage(error, "Could not create the organization."));
       }
       navigate("/dashboard", { replace: true });

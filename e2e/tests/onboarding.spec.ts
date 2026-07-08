@@ -6,7 +6,12 @@ import { test, expect, type Page } from "@playwright/test";
 // return [] for the logged-in user — the same UI-render convention the audit /
 // settings specs use. The has-org happy path and the enroll ceremony run against
 // the REAL backend.
-const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" }; // verified
+const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" }; // verified, has demo org
+// A VERIFIED user with NO membership (seeddata.DemoNoOrgUser) — the real fresh-
+// signup state. Because the open-edition single-org slot is already taken by the
+// demo org, this user's create attempt is refused by the REAL backend, so the
+// routing and the invitation-only cap are proven end-to-end, not mocked.
+const FRESH = { email: "fresh-user@demo.tunnex.local", pass: "tunnex-demo-password" };
 const UNVERIFIED = { email: "unverified-admin@demo.tunnex.local", pass: "tunnex-demo-password" };
 const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
 
@@ -23,9 +28,9 @@ async function signIn(page: Page, who: { email: string; pass: string }) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
-test("a verified user with no organization is routed to the create-org step", async ({ page }) => {
-  await page.route(ORGS_URL, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
-  await signIn(page, OWNER);
+test("a verified user with no organization is routed to the create-org step (real backend)", async ({ page }) => {
+  // No mock — the real fresh user has zero memberships, so RequireOrg funnels them.
+  await signIn(page, FRESH);
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
   await expect(page).toHaveURL(/\/create-org$/);
 
@@ -57,24 +62,21 @@ test("a user who already has an organization skips the funnel and lands on the d
   await expect(page.getByRole("heading", { name: "Create your organization" })).toHaveCount(0);
 });
 
-test("the create-org step surfaces the single-org cap as an invitation-only message", async ({ page }) => {
-  // 0 orgs → routed to create-org; the server owns the cap and refuses the POST
-  // with org_limit_reached; the UI mirrors that (never invents the permission).
-  await page.route(ORGS_URL, (route) => {
-    if (route.request().method() === "POST") {
-      return route.fulfill({
-        status: 403,
-        contentType: "application/json",
-        body: JSON.stringify({ error: { code: "org_limit_reached", message: "single organization only" } }),
-      });
-    }
-    return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-  });
-  await signIn(page, OWNER);
+test("the open-build second-signup path ends on the invitation card with no usable create affordance (real backend)", async ({ page }) => {
+  // REAL open-edition proof: the fresh verified 0-membership user is routed to
+  // create-org, but the deployment's single-org slot is taken by the demo org, so
+  // the REAL POST returns org_limit_reached and the UI lands on the invitation-only
+  // dead-end — with the create form (and any create control) gone.
+  await signIn(page, FRESH);
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
   await page.getByLabel("Organization name").fill("Second Org");
   await page.getByRole("button", { name: "Create organization" }).click();
   await expect(page.getByRole("heading", { name: "Invitation required" })).toBeVisible();
+  // No usable create affordance survives: the form, its fields, and the submit
+  // button are all gone — the user cannot attempt a create from the dead-end.
+  await expect(page.getByRole("button", { name: "Create organization" })).toHaveCount(0);
+  await expect(page.getByLabel("Organization name")).toHaveCount(0);
+  await expect(page.getByLabel("Slug")).toHaveCount(0);
 });
 
 test("a successful create routes the fresh user into the dashboard", async ({ page }) => {
@@ -111,6 +113,46 @@ test("a successful create routes the fresh user into the dashboard", async ({ pa
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await expect(page.getByText("Funnel Org")).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard$/);
+});
+
+test("org_limit_reached re-checks membership: a user who gained one meanwhile goes to the dashboard, not the dead-end", async ({ page }) => {
+  // #2: between the funnel routing the user to create-org (0 orgs) and the create
+  // refusal, they gained a membership (invite accepted elsewhere / JIT / admin add).
+  // The 403 handler must re-check and send them to the dashboard — NOT the card.
+  const ORG_OBJ = {
+    id: ORG,
+    name: "Joined Org",
+    slug: "joined-org",
+    pool_cidr: "10.99.0.0/24",
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  };
+  let posted = false; // the membership "appears" only after the create is refused
+  await page.route(ORGS_URL, (route) => {
+    if (route.request().method() === "POST") {
+      posted = true;
+      return route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "org_limit_reached", message: "single organization only" } }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(posted ? [ORG_OBJ] : []) });
+  });
+  await page.route(/\/api\/v1\/organizations\/[^/]+\/overview$/, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ members: 1, devices: 0, nodes: 0, online: 0, recent_activity: [] }),
+    }),
+  );
+  await signIn(page, OWNER);
+  await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
+  await page.getByLabel("Organization name").fill("Whatever Org");
+  await page.getByRole("button", { name: "Create organization" }).click();
+  // Re-check found a membership → dashboard, and the invitation dead-end is NOT shown.
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Invitation required" })).toHaveCount(0);
 });
 
 test("enrolling a gateway shows the join token exactly once (one-time-secret ceremony)", async ({ page }) => {
