@@ -13,7 +13,7 @@ const NAV = [
   { to: "/devices", label: "Devices", enabled: true },
   { to: "/users", label: "Users", enabled: true },
   { to: "/settings", label: "Settings", enabled: true },
-  { to: "/audit", label: "Audit log", enabled: false },
+  { to: "/audit", label: "Audit log", enabled: true },
 ];
 
 /** AppShell is the authenticated layout: header (brand + user + logout), sidebar

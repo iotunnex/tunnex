@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import AuditLog from "./pages/AuditLog";
 
 /**
  * App is the router + auth shell (S4.1). Authenticated pages live under AppShell
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/audit" element={<AuditLog />} />
         </Route>
         {/* Default: the shell decides (RequireAuth bounces anon users to /login). */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
