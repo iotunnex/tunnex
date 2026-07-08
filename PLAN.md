@@ -509,6 +509,28 @@ present — detect and warn/refuse rather than silently downgrade.
     gap.
   - Guards: any new endpoint auto-armed by the 401-walk + RBAC; the token-never-in-renderer invariant
     gets an explicit assertion.
+
+**COMMIT ONE — decisions confirmed (pre-positions folded, no deviation; build proceeds directly):**
+- **(1) Desktop detection + one-bundle runtime branching.** `window.tunnex` presence IS the desktop
+  signal — one SPA bundle, runtime branch (no build fork). A bootstrap in `main.tsx` awaits
+  `config.getServerUrl()` and calls `setApiOrigin(origin)` in `@tunnex/shared` BEFORE React renders,
+  so every request (incl. the first `/auth/me`) targets the configured server. Web path unchanged
+  (origin unset → same-origin `/`).
+- **(2) Main-process exact-origin bearer injection; residual acknowledged.** The S6.1 `attachBearer`
+  (bearer only when request-origin === configured-origin === `cred.server`, unexpired) stays the ONLY
+  thing that sees the token. The client middleware only rewrites the ORIGIN of the request URL; it
+  never touches auth. RESIDUAL (acknowledged): the renderer still *initiates* authenticated calls and
+  *reads* their response bodies — unavoidable (it is the UI) and not a token exposure; the invariant
+  is "token never enters renderer JS", which holds.
+- **(3) No web login FORM in desktop; bridge-driven auth state; unverified consent messaging.** In
+  desktop mode the SPA's Sign-in screen replaces email/password with "Sign in with your browser"
+  (`auth.login()`); on success main reloads → `/auth/me` (bearer) → authed. Logout in desktop routes
+  through `auth.logout()` (revoke + clear keychain + reload). The `/cli-auth` consent page (runs in
+  the system browser, cookie session) messages an UNVERIFIED user clearly on `email_not_verified`
+  instead of a generic error.
+- **(4) SSO parity = verify-only, zero build.** The `/cli-auth` browser leg already completes any
+  local-or-SSO login in the system browser before the loopback code is minted (S5.1 + Part-B proof),
+  so desktop SSO needs no desktop-specific code. Confirmed, no build.
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
 - **S6.5 Packaging & signing** — `electron-builder` `.dmg` + `.exe`/msi, code-signing + notarization (certs from EPIC 5).
