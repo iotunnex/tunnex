@@ -32,7 +32,7 @@ func (s apiServer) CliAuthorize(ctx context.Context, req api.CliAuthorizeRequest
 		return nil, err
 	}
 	return api.CliAuthorize200JSONResponse{
-		Body:    api.CliAuthorizeResponse{Code: code, State: req.Body.State, ExpiresIn: expiresIn},
+		Body:    api.CliAuthorizeResult{Code: code, State: req.Body.State, ExpiresIn: expiresIn},
 		Headers: api.CliAuthorize200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
@@ -47,7 +47,7 @@ func (s apiServer) CliToken(ctx context.Context, req api.CliTokenRequestObject) 
 		return nil, err
 	}
 	return api.CliToken200JSONResponse{
-		Body:    api.CliTokenResponse{Token: cred.Token, ExpiresAt: cred.ExpiresAt, Fingerprint: cred.Fingerprint},
+		Body:    api.CliCredentialGrant{Token: cred.Token, ExpiresAt: cred.ExpiresAt, Fingerprint: cred.Fingerprint},
 		Headers: api.CliToken200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
@@ -102,7 +102,7 @@ func (s apiServer) CliDeviceStart(ctx context.Context, _ api.CliDeviceStartReque
 		return nil, err
 	}
 	return api.CliDeviceStart200JSONResponse{
-		Body: api.CliDeviceStartResponse{
+		Body: api.CliDeviceStartResult{
 			DeviceCode: d.DeviceCode, UserCode: d.UserCode,
 			VerificationUri: s.appBaseURL + "/cli-device",
 			Interval:        d.Interval, ExpiresIn: d.ExpiresIn,
@@ -139,7 +139,7 @@ func (s apiServer) CliDeviceToken(ctx context.Context, req api.CliDeviceTokenReq
 		return nil, err
 	}
 	return api.CliDeviceToken200JSONResponse{
-		Body:    api.CliTokenResponse{Token: cred.Token, ExpiresAt: cred.ExpiresAt, Fingerprint: cred.Fingerprint},
+		Body:    api.CliCredentialGrant{Token: cred.Token, ExpiresAt: cred.ExpiresAt, Fingerprint: cred.Fingerprint},
 		Headers: api.CliDeviceToken200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

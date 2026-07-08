@@ -83,7 +83,7 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	if err != nil {
 		return nil, err
 	}
-	body := api.CreateDeviceResponse{Device: toAPIDevice(res.Device)}
+	body := api.CreateDeviceResult{Device: toAPIDevice(res.Device)}
 	if res.PrivateKeyOneTime != "" {
 		body.PrivateKey = &res.PrivateKeyOneTime
 	}

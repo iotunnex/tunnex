@@ -304,11 +304,17 @@ page displays the user_code it is approving. **Playwright proof of the no-click-
 (landing on the consent page mints nothing; only the click calls cliAuthorize).
 
 Ledgered at spec sign-off (flags 2+3):
-- **Admin revoke of another user's CLI credential** — rides the dashboard "CLI sessions" panel
-  item (already ledgered); until then revocation is self-serve + the reset/deactivation sweeps.
 - **Rate-limit targets for the public CLI endpoints** (cliToken, cliDeviceStart, cliDeviceToken —
   brute-force surface: code guessing, device-code polling) → S11.3 (rate limiting & security
   headers); interval/slow_down semantics are already in the device contract.
+
+Ledgered at implementation sign-off (MERGED item):
+- **User-scoped credential surface** = admin revoke of another user's CLI credential + the
+  CLI-credential audit slice (cli.credential_issued/_revoked rows are written org-NULL and are
+  therefore invisible to the org-filtered audit viewer — the rows exist, the surface doesn't).
+  **Trigger: the security-review pass or the dashboard CLI-sessions panel story, whichever lands
+  first.** Until then: revocation is self-serve (`tunnex logout`, DELETE endpoint) + the
+  reset/deactivation sweeps; the audit slice is queryable in the DB.
 - **(Ops, when EPIC 5 begins)** Begin **code-signing cert procurement** — Apple Developer ID + Windows EV cert (weeks of lead time).
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)

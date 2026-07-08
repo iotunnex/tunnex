@@ -78,9 +78,12 @@ generate-rbac: ## Emit the RBAC grant table (rbac.Policy) as JSON for the web cl
 	  go run ./cmd/rbac-policy-gen /repo/apps/web/src/lib/rbac-policy.json
 
 .PHONY: generate-go
-generate-go: ## Generate the Go server (types + chi strict-server) from the spec
-	@mkdir -p apps/api/internal/api
+generate-go: ## Generate the Go server (api) + Go client (cli) from the spec
+	@mkdir -p apps/api/internal/api apps/cli/internal/api
 	docker run --rm -v "$(PWD)":/repo -w /repo/apps/api -e GOFLAGS=-mod=mod $(GO_IMAGE) \
+	  go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) \
+	  -config oapi-codegen.yaml ../../openapi/openapi.yaml
+	docker run --rm -v "$(PWD)":/repo -w /repo/apps/cli -e GOFLAGS=-mod=mod $(GO_IMAGE) \
 	  go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) \
 	  -config oapi-codegen.yaml ../../openapi/openapi.yaml
 
@@ -92,9 +95,23 @@ generate-ts: ## Generate the TypeScript API types from the spec
 .PHONY: generate-check
 generate-check: generate ## Fail if generated code is out of date (CI drift guard)
 	@git diff --exit-code -- \
-	  apps/api/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts apps/web/src/lib/rbac-policy.json \
+	  apps/api/internal/api apps/cli/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts apps/web/src/lib/rbac-policy.json \
 	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
 	@echo "generated code is up to date."
+
+.PHONY: cli-dist
+cli-dist: ## Cross-compile the tunnex CLI for release + SHA256SUMS (S5.1)
+	@mkdir -p dist
+	@for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \
+	  goos=$${target%/*}; goarch=$${target#*/}; ext=""; \
+	  [ "$$goos" = "windows" ] && ext=".exe"; \
+	  echo ">> $$goos/$$goarch"; \
+	  docker run --rm -v "$(PWD)":/repo -w /repo/apps/cli -e GOFLAGS=-mod=mod \
+	    -e CGO_ENABLED=0 -e GOOS=$$goos -e GOARCH=$$goarch $(GO_IMAGE) \
+	    go build -trimpath -ldflags="-s -w" -o /repo/dist/tunnex-$$goos-$$goarch$$ext ./cmd/tunnex || exit 1; \
+	done
+	@cd dist && sha256sum tunnex-* > SHA256SUMS && cat SHA256SUMS
+	@echo ">> dist/ ready — publish the binaries WITH SHA256SUMS (S5.1 release convention)."
 
 .PHONY: build-editions
 build-editions: ## Compile both open and enterprise builds (catches edition rot)

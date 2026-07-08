@@ -1142,6 +1142,7 @@ components:
 
     CliAuthorizeResponse:
       type: object
+      x-go-name: CliAuthorizeResult
       required: [code, state, expires_in]
       additionalProperties: false
       properties:
@@ -1163,8 +1164,11 @@ components:
 
     # WRITE-ONCE SECRET: the token appears ONLY here, never in any GET/list
     # response type (structural absence — the proof-of-secret convention).
+    # x-go-name avoids colliding with oapi-codegen's generated CliTokenResponse
+    # operation wrapper (Go naming only; the wire contract is unchanged).
     CliTokenResponse:
       type: object
+      x-go-name: CliCredentialGrant
       required: [token, expires_at, fingerprint]
       additionalProperties: false
       properties:
@@ -1191,6 +1195,7 @@ components:
 
     CliDeviceStartResponse:
       type: object
+      x-go-name: CliDeviceStartResult
       required: [device_code, user_code, verification_uri, interval, expires_in]
       additionalProperties: false
       properties:
@@ -1314,6 +1319,7 @@ components:
 
     CreateDeviceResponse:
       type: object
+      x-go-name: CreateDeviceResult
       required: [device]
       additionalProperties: false
       properties:
