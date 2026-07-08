@@ -430,9 +430,31 @@ CLI hold SEPARATE credentials (both independently revocable) — no shared store
 requirement. Caveat to handle: `safeStorage` on Linux can fall back to plaintext when no keyring is
 present — detect and warn/refuse rather than silently downgrade.
 
-Open sub-questions for the review: the `app://` protocol vs `loadFile` specifics; whether the server
-URL is per-launch or persisted config; exact preload API shape; and whether the SPA gains a transport
-switch or a token-taking client factory (interacts with (b)).
+**RESOLVED (review, approved) — the four sub-questions + two additions:**
+- **`app://` protocol:** standard + secure registration (`registerSchemesAsPrivileged`
+  `{standard:true, secure:true}`) serving the in-bundle SPA; STRICT in-bundle path resolution — any
+  path escaping the bundle dir is rejected (escape-rejection is a tested unit, not a comment).
+- **SPA auth:** a token-taking client factory extending the S4.8 middleware seam, but the **raw token
+  NEVER crosses into the renderer** — an attach-on-request bridge (main injects `Authorization: Bearer`
+  on requests to the configured API origin), NOT a `getToken`. The token lives only in main + the
+  keychain.
+- **Server URL:** persisted in a **MAIN-PROCESS config file** (electron-store or equiv.), never
+  renderer storage — it's where the auth flow + updater point, so it's main's concern; the renderer
+  consumes it via `config.getServerUrl` over the bridge. First run shows a server-URL prompt screen;
+  the URL is validated by hitting **`/healthz` before it is accepted**. **Changing the server URL when
+  a credential exists FORCES re-login** (revoke local + clear the keychain entry) — a stored
+  credential must never be sent to a server it was not minted against (the desktop cousin of the
+  loopback exact-binding discipline).
+- **Preload API = verb-specific, promise-based, minimal allowlist** — `auth.{login, logout, status}`,
+  `config.{getServerUrl, setServerUrl}`, and a **reserved-but-empty `tunnel.*`** namespace for S6.3.
+  **NO generic `invoke(channel, args)`** (that makes the allowlist decorative). Main **validates every
+  method's inputs** (never trust the renderer, same posture as never trusting the browser). This list
+  IS the (c) allowlist and doubles as the audit surface.
+- **Linux `safeStorage` no-keyring fallback = REFUSE by default**, with an explicit
+  `--allow-insecure-credential-storage` opt-out (a flag + a VISIBLE UI state, never a config default —
+  "warn" gets clicked through, and a plaintext `tnx_` on disk without even the CLI's 0600 discipline is
+  strictly worse). Acceptable alternative offered: refuse keychain-less persistence but allow
+  **device-code login per session** (credential in memory only) — slower but honest.
 
 - **S6.2 Client auth** — login against tenant (local + SSO via system browser + deep link).
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
