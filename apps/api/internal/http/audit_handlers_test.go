@@ -7,9 +7,37 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
+
+// TestListAuditLogsHalfCursorRejected: a keyset cursor is both halves or neither.
+// A half-cursor is rejected 400 BEFORE any DB read (an authed principal is enough
+// to pass authorize), so it never silently resets to page 1.
+func TestListAuditLogsHalfCursorRejected(t *testing.T) {
+	s := apiServer{}
+	org := uuid.New()
+	ctx := principalWithRole(org, rbac.RoleMember) // PermOrgView is enough
+	ts := time.Now()
+	_, err := s.ListAuditLogs(ctx, api.ListAuditLogsRequestObject{
+		OrgId:  org,
+		Params: api.ListAuditLogsParams{CursorTs: &ts}, // ts without id
+	})
+	if !hasCode(err, 400, "invalid_cursor") {
+		t.Fatalf("half-cursor (ts only): want 400 invalid_cursor, got %v", err)
+	}
+	id := openapi_types.UUID(uuid.New())
+	_, err = s.ListAuditLogs(ctx, api.ListAuditLogsRequestObject{
+		OrgId:  org,
+		Params: api.ListAuditLogsParams{CursorId: &id}, // id without ts
+	})
+	if !hasCode(err, 400, "invalid_cursor") {
+		t.Fatalf("half-cursor (id only): want 400 invalid_cursor, got %v", err)
+	}
+}
 
 // TestToAuditLogEntrySecretFreeRender is watch-item (e): the viewer renders a
 // secret-adjacent event (sso.config_updated) and must surface only the KEYED

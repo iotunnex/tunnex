@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, apiErrorMessage, type AuditLogEntry, type Member, type Org } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
@@ -10,19 +10,36 @@ const selectCls =
 
 // Filters applied to the feed. Empty string = unset.
 type Filters = { actor: string; action: string; from: string; to: string };
+const NO_FILTERS: Filters = { actor: "", action: "", from: "", to: "" };
+
+// A type=date value is a calendar day ("YYYY-MM-DD"); parse it in the user's LOCAL
+// zone (no trailing Z) and cover the whole day so `created_at <= to` is inclusive.
+const dayStart = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
 
 export default function AuditLog() {
   const [org, setOrg] = useState<Org | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-  const [filters, setFilters] = useState<Filters>({ actor: "", action: "", from: "", to: "" });
-  const [more, setMore] = useState(false); // a full page came back → maybe more
+  // `filters` is the editing state; `applied` is the set that produced the current
+  // list — "Load more" must page with `applied`, never mid-edit `filters`, or the
+  // keyset cursor (from the applied list) mixes with a different filter set.
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [applied, setApplied] = useState<Filters>(NO_FILTERS);
+  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Generation token: each fetch bumps it; a response whose token is stale (a
+  // newer fetch started, or the component unmounted) is discarded — so out-of-
+  // order responses can't leave a stale page as the final list.
+  const reqSeq = useRef(0);
 
-  // fetchPage loads from the top (cursor omitted) or appends after `cursor`
-  // (the last entry's created_at + id — keyset, not offset).
+  // fetchPage loads from the top (cursor omitted) or appends after `cursor` (the
+  // last entry's created_at + id — keyset, not offset). It fetches PAGE+1 and
+  // shows PAGE: the extra row is how we know there's a next page without a count
+  // (page.length === PAGE would dead-click at exact multiples).
   async function fetchPage(orgId: string, f: Filters, cursor?: AuditLogEntry) {
+    const seq = ++reqSeq.current;
     setBusy(true);
     const { data, error } = await api.GET("/api/v1/organizations/{orgId}/audit-logs", {
       params: {
@@ -30,22 +47,26 @@ export default function AuditLog() {
         query: {
           actor: f.actor || undefined,
           action: f.action || undefined,
-          from: f.from ? new Date(f.from).toISOString() : undefined,
-          to: f.to ? new Date(f.to).toISOString() : undefined,
+          from: f.from ? dayStart(f.from) : undefined,
+          to: f.to ? dayEnd(f.to) : undefined,
           cursor_ts: cursor?.created_at,
           cursor_id: cursor?.id,
-          limit: PAGE,
+          limit: PAGE + 1,
         },
       },
     });
+    if (seq !== reqSeq.current) return; // superseded by a newer fetch / unmounted
     setBusy(false);
     if (error) return setError(apiErrorMessage(error, "Could not load the audit log."));
-    const page = data ?? [];
+    const fetched = data ?? [];
+    const page = fetched.slice(0, PAGE); // drop the has-more probe row
     setEntries((prev) => (cursor ? [...prev, ...page] : page));
-    setMore(page.length === PAGE); // a short page means we've reached the end
+    setMore(fetched.length > PAGE);
+    setApplied(f); // this filter set now owns the displayed list + its cursor
   }
 
   useEffect(() => {
+    reqSeq.current++; // invalidate any in-flight fetch on unmount
     let cancelled = false;
     (async () => {
       const { data: orgs, error: orgErr } = await api.GET("/api/v1/organizations");
@@ -58,10 +79,11 @@ export default function AuditLog() {
       // org's members (the server enforces org-scoping too).
       const { data: ms } = await api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId: first.id } } });
       if (!cancelled) setMembers(ms ?? []);
-      if (!cancelled) await fetchPage(first.id, { actor: "", action: "", from: "", to: "" });
+      if (!cancelled) await fetchPage(first.id, NO_FILTERS);
     })();
     return () => {
       cancelled = true;
+      reqSeq.current++; // discard a fetchPage response that resolves post-unmount
     };
   }, []);
 
@@ -132,7 +154,7 @@ export default function AuditLog() {
 
       {more && (
         <div className="mt-4">
-          <Button variant="ghost" disabled={busy} onClick={() => org && fetchPage(org.id, filters, entries[entries.length - 1])}>
+          <Button variant="ghost" disabled={busy} onClick={() => org && fetchPage(org.id, applied, entries[entries.length - 1])}>
             {busy ? "Loading…" : "Load more"}
           </Button>
         </div>

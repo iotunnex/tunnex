@@ -10,6 +10,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
@@ -43,6 +44,12 @@ func (s apiServer) ListAuditLogs(ctx context.Context, req api.ListAuditLogsReque
 	if p.Actor != nil {
 		a := uuid.UUID(*p.Actor)
 		f.Actor = &a
+	}
+	// A keyset cursor is both halves or neither — a half-cursor is a client bug
+	// that would otherwise SILENTLY reset to page 1 (and the row-value comparison
+	// against a NULL id would drop rows at the cursor timestamp). Reject it.
+	if (p.CursorTs == nil) != (p.CursorId == nil) {
+		return nil, apierr.BadRequest("invalid_cursor", "cursor_ts and cursor_id must be provided together")
 	}
 	if p.CursorId != nil {
 		c := uuid.UUID(*p.CursorId)

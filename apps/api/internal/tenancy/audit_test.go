@@ -72,8 +72,8 @@ func TestListAuditLogsKeysetAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("page1: %v", err)
 	}
-	if len(p1) != 3 || p1[0].Action != "org.cidr_resized" || p1[2].Action != "device.created" {
-		t.Fatalf("page1 = %v, want [cidr_resized, device.revoked, device.created]", actions(p1))
+	if len(p1) != 3 || p1[0].Action != "org.cidr_resized" || p1[1].Action != "device.revoked" || p1[2].Action != "device.created" {
+		t.Fatalf("page1 = %v, want [cidr_resized, device.revoked, device.created] (full order, incl. the middle row)", actions(p1))
 	}
 	for _, r := range p1 {
 		if r.OrgID.Bytes != [16]byte(orgA) {
