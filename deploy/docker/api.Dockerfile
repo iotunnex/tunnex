@@ -3,16 +3,14 @@
 
 FROM golang:1.25.11-alpine AS build
 WORKDIR /src
-# git: Go needs it to fetch VCS-only module deps on a cold cache (CI).
-RUN apk add --no-cache git
 
 # Download deps first for layer caching. go.sum is created on first build.
 COPY apps/api/go.mod apps/api/go.sum* ./
-ENV GOFLAGS=-mod=mod
+ENV GOFLAGS=-mod=readonly
 RUN go mod download
 
 COPY apps/api/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 tunnex

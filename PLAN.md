@@ -398,15 +398,18 @@ Ledgered at implementation sign-off (MERGED item):
   **playwright-electron** is NOT in scope now — launching Electron needs xvfb + the built app + the
   stack, not "trivially cheap"; ledgered for later. Must land before S6.5; recommended before S6.3.
 
-**S6.0b LEDGER — e2e-in-CI demoted to non-blocking (opportunistic, as designed).** First Actions
-runs on the Linux `e2e` job hit a runner-only `git: not found` during the api image's `go build`
-(module VCS fetch into `/go/pkg/mod/cache/vcs`) that does NOT reproduce locally (cold-cache local
-build needs no git) and PERSISTED even with `apk add git` in the builder stage + `-buildvcs=false` —
-pointing at a runner/registry-network quirk (proxy fallback to `direct`), not our Dockerfile. Per
-the S6.0b mandate (full e2e in CI is opportunistic), the job is marked `continue-on-error: true` so
-it never blocks merge; **gates + client remain the blocking gates**. e2e still runs locally
-(`make e2e`, 45/45) and the CI e2e job stays visible for diagnosis. TRIGGER to re-block: root-cause
-the runner git/proxy behavior (candidates: pin `GOPROXY`, vendor modules, or a prebuilt base image).
+**S6.0b LEDGER — CI first-run fixes (root-caused).** The blocking jobs (gates + client) were red on
+first runs; all three causes fixed: (1) `.env` absent → `cp .env.example .env` before DB steps;
+(2) a Windows-only path fixture in the client test (resolve the root per-platform); (3) THE big one —
+`GOFLAGS=-mod=mod` made `go build`/`go test` RE-RESOLVE the module graph on the cold CI cache and,
+because the module path (`github.com/tunnexio/tunnex/...`) is NOT the real repo
+(`github.com/iotunnex/tunnex`), it ran `git ls-remote https://github.com/tunnexio/tunnex` → exit 128.
+It surfaced only after the repo went public (the mismatched path suddenly looked resolvable) and did
+NOT reproduce locally (populated cache). Fix: `-mod=readonly` (go.sum is committed + complete) on the
+apps/api build/test/seed commands + the api/migrate/node Dockerfiles — go then trusts go.mod/go.sum
+and never remote-resolves. **`e2e` stays non-blocking `continue-on-error` by design** (full-stack,
+heavier/flakier; opportunistic per mandate), not because it's broken — with the readonly fix it is
+expected to pass. Gates + client are the blocking gates.
 
 ### S6.0b decide-before-code (COMMIT ONE, for review): deliberate-red representation in CI
 The story-protocol proves each new guard by a DELIBERATE RED — comment out the guard, watch its test

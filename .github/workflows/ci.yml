@@ -73,13 +73,12 @@ jobs:
   # than block merges on infra noise.
   e2e:
     runs-on: ubuntu-latest
-    # OPPORTUNISTIC / NON-BLOCKING (ledgered): the first runs hit a runner-only
-    # `git not found` during the api image's `go build` (module VCS fetch) that
-    # does NOT reproduce locally and persisted even with git in the builder — a
-    # runner/registry-network quirk under investigation. Per the S6.0b mandate
-    # (full e2e in CI is opportunistic, ledger if it resists), this job does not
-    # gate merges; the gates + client jobs do. Remove continue-on-error once the
-    # build quirk is root-caused.
+    # OPPORTUNISTIC / NON-BLOCKING by design (S6.0b mandate: full e2e in CI is
+    # opportunistic). The gates + client jobs are the merge gates; this job spins
+    # the whole stack and is inherently heavier/flakier, so it never blocks merge.
+    # (The early-run build failures were the -mod=readonly root cause — a module
+    # graph re-resolution that git-ls-remote'd the mismatched module path — now
+    # fixed repo-wide, so this job is expected to pass.)
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
