@@ -46,9 +46,15 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 6 OPEN — S6.1 (client shell) next. Ops CLOCK RUNNING: signing applications (Apple
-Dev ID + Windows EV) must be filed this week (Pawan) — S6.5 hard-blocked otherwise. S3.7 parked at
-paper. Beta milestone deferred, not rejected — re-decide at EPIC 6 close.**
+Current: **EPIC 6 IN PROGRESS — S6.1 (client shell) MERGED (Electron shell, app:// serving the SPA
+bundle, hardened window + preload allowlist, keychain login via system-browser+loopback — PROVEN on
+a live macOS smoke: setup/healthz, hardened renderer, nav lock, login→keychain fingerprint
+322266aa538d secureStorage:true, logout revokes+clears). NEXT: S6.2 (renderer transport switch —
+make the app functional against a tenant; the SPA still shows "control plane unreachable" until it
+targets the configured server + bearer). S6.0b (CI pipeline) SCHEDULED — before S6.5, recommended
+before S6.3. S3.7 parked at paper. Beta deferred, not rejected — re-decide at EPIC 6 close.
+Ops CLOCK RUNNING: signing applications (Apple Dev ID + Windows EV) must be filed THIS WEEK (Pawan)
+— S6.5 hard-blocked otherwise.**
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
@@ -380,7 +386,26 @@ Ledgered at implementation sign-off (MERGED item):
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)
 
+- **S6.0b CI pipeline (verification gates + client build matrix)** — SCHEDULED (promoted from a
+  ledger line at the S6.1 review). The whole repo's gates run only via manual `make`/`turbo`; there
+  is NO automated CI (`.github/workflows` absent), so drift-guard / 401-walk / RBAC / editions /
+  e2e / typecheck all depend on a human remembering to run them. The Electron client adds a
+  cross-platform build+typecheck+test surface (macOS + Windows) that a human cannot reliably cover.
+  Scope: a CI workflow running the existing gates on push/PR + a client build matrix (build the
+  Electron app on macOS and Windows runners; run the client unit tests; later the
+  playwright-electron integration test under xvfb). **Must land before S6.5** (signing/packaging
+  needs a reproducible build), **recommended before S6.3** (native `wireguard-go`/wintun embedding
+  multiplies the platform matrix — automate it before it grows).
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
+  **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
+  `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
+  hardened window (contextIsolation/sandbox on, nodeIntegration off, navigation locked); preload
+  verb-specific allowlist (`auth.*`/`config.*`/reserved `tunnel.*`, no generic invoke, main
+  validates inputs); S5.1 login reused in main (system browser + single-shot loopback →
+  `safeStorage` keychain, refuse-by-default + `--allow-insecure-credential-storage`); bearer
+  attach-on-request on the exact minting origin only; `/healthz`-validated main-process server
+  config with force-relogin-on-change; first-run setup screen; `electron-updater` scaffolded inert
+  (`AUTOUPDATE_ENABLED=false`). 17 unit tests over the pure security core.
 
 ### S6.1 paper decisions (COMMIT ONE — decided on paper, for review before any code)
 
@@ -456,7 +481,34 @@ present — detect and warn/refuse rather than silently downgrade.
   strictly worse). Acceptable alternative offered: refuse keychain-less persistence but allow
   **device-code login per session** (credential in memory only) — slower but honest.
 
-- **S6.2 Client auth** — login against tenant (local + SSO via system browser + deep link).
+- **S6.2 Client auth / renderer transport switch** — make the desktop app FUNCTIONAL against a
+  tenant: the SPA (still "control plane unreachable" after S6.1 because it targets same-origin
+  `app://`) must call the CONFIGURED server with the bearer, and the desktop must expose login/logout
+  in the UI (no more devtools-console-only). **DECIDE-BEFORE-CODE (commit one, for review):**
+  - **(1) How the SPA learns it is in desktop mode + its server base URL.** The web SPA uses
+    `createTunnexClient("/")` (same-origin cookie). In Electron there is no same-origin server. Options
+    to decide: (a) the preload exposes `config.getServerUrl()` (already built) and a tiny bootstrap in
+    the SPA switches the client's base URL to it when `window.tunnex` exists; (b) main rewrites a
+    build-time base-URL constant. Lean (a) — runtime, no bundle fork, reuses the existing bridge; argue
+    if (b).
+  - **(2) Transport = bearer, not cookie — where the switch lives.** The S4.8 client-header seam +
+    the main-process `attachBearer` injector (S6.1) already add `Authorization: Bearer` on requests to
+    the server origin. So the SPA in desktop mode must (i) point its base URL at the server origin and
+    (ii) NOT rely on cookies. Decide: does the SPA client factory take an explicit "desktop transport"
+    (base URL + no credentials:'include'), or does main's injector + a base-URL swap suffice with the
+    SPA unchanged? The token must STILL never enter the renderer (S6.1 invariant) — the injector stays
+    the only thing that sees it.
+  - **(3) Login/logout UI + auth state in the renderer.** The SPA needs a desktop-aware entry: when
+    `window.tunnex` exists, the Sign-in screen offers "Sign in with your browser" (calls
+    `auth.login()`), and the app reflects `auth.status()` (logged-in/expired/secureStorage). Decide the
+    minimal SPA change vs a desktop-only shell around it, and how an expired credential (local, no
+    server oracle) surfaces (a re-login prompt).
+  - **(4) SSO parity.** S6.2's title includes SSO. Confirm SSO needs NOTHING desktop-specific — the
+    `/cli-auth` browser leg already completes any local-or-SSO login in the system browser before the
+    loopback code is minted (the S5.1/Part-B proof), so desktop SSO is free. State it, or surface the
+    gap.
+  - Guards: any new endpoint auto-armed by the 401-walk + RBAC; the token-never-in-renderer invariant
+    gets an explicit assertion.
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
 - **S6.5 Packaging & signing** — `electron-builder` `.dmg` + `.exe`/msi, code-signing + notarization (certs from EPIC 5).
