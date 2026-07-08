@@ -46,22 +46,17 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S5.1 (`tunnex` CLI) IN PROGRESS on story/S5.1-cli — commit one (paper decisions)
-delivered and APPROVED with recorded additions (verified-gated minting; bearer≡cookie everywhere,
-exceptions argued in spec; state alongside PKCE, device-code inherits code hygiene; SHA256SUMS;
-expired-credential UX). Next: the SPEC commit (credential model + endpoints, codegen, guards
-auto-arm). S4.8 MERGED (Round-2 fixes); the Round-2 walk is DONE (Parts A+B, ROUND2-REPORT.md);
-all three S5.1 decide-items RESOLVED — scope lives in the S5.1 bullet + decide block under EPIC 5.**
-Ledger (open, non-blocking): B2 domain-capture DNS leg + missing domain-capture Settings UI
-(trigger = capture-UI story); B4 negative leg (optional); B6 member-empty-state copy (rides the
-next dashboard story).
-Ops (Pawan, long lead): code-signing procurement — Apple Developer ID (~$99/yr, days) + Windows EV
-cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; the validation clock starts at
-application.
+Current: **S5.1 MERGED — EPIC 5 COMPLETE (CLI login via loopback+device-code, dedicated bearer
+credential model, CLI-owned device creation, wg-quick wrapper, cli-dist ×5 + SHA256SUMS). DECISION
+PENDING (user): public-beta milestone — pull forward per Positioning section, or proceed straight to
+EPIC 6. Ops trigger NOW LIVE: code-signing procurement was re-anchored to "when EPIC 6 opens" — if
+EPIC 6 is chosen, applications must start same-week (Windows EV 1–3wk validation precedes S6.5).
+Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
+CLI-sessions panel.**
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
-resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes).** Current
-epic: EPIC 5 (CLI client). If this pointer disagrees with the handoff doc / git log, TRUST GIT
+resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
+(tunnex CLI).** If this pointer disagrees with the handoff doc / git log, TRUST GIT
 (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
