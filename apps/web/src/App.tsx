@@ -1,6 +1,7 @@
-import { useEffect } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { PRODUCT_NAME } from "./brand";
+import { api } from "./lib/api";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { AppShell } from "./components/AppShell";
 import Login from "./pages/Login";
@@ -8,6 +9,8 @@ import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
+import VerifyPending from "./pages/VerifyPending";
+import CreateOrg from "./pages/CreateOrg";
 import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 import Users from "./pages/Users";
@@ -37,12 +40,19 @@ export default function App() {
             and harmless while logged in, so they are not auth-gated. */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
-        <Route element={<RequireAuth><AppShell /></RequireAuth>}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/devices" element={<Devices />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/audit" element={<AuditLog />} />
+        {/* Authenticated area. The onboarding funnel (S4.7) lives BETWEEN auth and
+            the shell: /create-org and /verify-pending are reachable while
+            authenticated with no org yet; the shell itself is gated by RequireOrg. */}
+        <Route element={<RequireAuth />}>
+          <Route path="/create-org" element={<CreateOrg />} />
+          <Route path="/verify-pending" element={<VerifyPending />} />
+          <Route element={<RequireOrg><AppShell /></RequireOrg>}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/devices" element={<Devices />} />
+            <Route path="/users" element={<Users />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/audit" element={<AuditLog />} />
+          </Route>
         </Route>
         {/* Default: the shell decides (RequireAuth bounces anon users to /login). */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -51,12 +61,62 @@ export default function App() {
   );
 }
 
-// RequireAuth gates the shell: it waits out the /me bootstrap (no login flash for
-// an already-authenticated user), then redirects anonymous users to /login.
-function RequireAuth({ children }: { children: React.ReactNode }) {
+// RequireAuth gates the authenticated area: it waits out the /me bootstrap (no
+// login flash for an already-authenticated user), then redirects anonymous users
+// to /login. Renders the nested routes via <Outlet />.
+function RequireAuth() {
   const { state } = useAuth();
   if (state.status === "loading") return <FullScreenLoading />;
   if (state.status === "anon") return <Navigate to="/login" replace />;
+  return <Outlet />;
+}
+
+// RequireOrg is the onboarding funnel's router (S4.7). It gates the app shell on
+// having at least one organization, sending a user with none through the funnel:
+//   - >=1 membership          -> render the shell
+//   - 0 memberships, verified -> /create-org (the explicit create-org step)
+//   - 0 memberships, unverified -> /verify-pending (create-org is verified-gated)
+// The SSO-JIT and invite paths never trip this: they produce a membership, so the
+// caller already has >=1 org and lands straight in the shell.
+//
+// This runs one GET /organizations per shell entry (the layout route stays mounted
+// across page navigations, so it does NOT refetch on every nav). Each page still
+// fetches its own org — a deliberate small duplication until the deferred
+// useCurrentOrg hook (org-switcher story) lifts org context app-wide.
+//
+// The create-org → /dashboard handoff assumes read-your-writes: after a 201 the
+// remounted RequireOrg refetches and must see the new org. That holds for the
+// single-primary Postgres this product deploys; a read-replica topology could
+// briefly bounce the user back to /create-org (accepted — tunnex has no replicas).
+function RequireOrg({ children }: { children: React.ReactNode }) {
+  const { state } = useAuth();
+  const [status, setStatus] = useState<"loading" | "none" | "has">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .GET("/api/v1/organizations")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        // Fail OPEN on a fetch error: let the shell render and surface the real
+        // error, rather than trapping a transient failure in the create-org funnel
+        // (an errored fetch is not the same signal as an empty list).
+        if (error) return setStatus("has");
+        setStatus((data?.length ?? 0) > 0 ? "has" : "none");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("has");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (status === "loading") return <FullScreenLoading />;
+  if (status === "none") {
+    const unverified = state.status === "authed" && !state.user.email_verified;
+    return <Navigate to={unverified ? "/verify-pending" : "/create-org"} replace />;
+  }
   return <>{children}</>;
 }
 

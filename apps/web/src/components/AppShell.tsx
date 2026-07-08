@@ -1,8 +1,7 @@
-import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Logo, PRODUCT_TAGLINE } from "../brand";
-import { api, CSRF } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
 
@@ -89,20 +88,9 @@ export function AppShell() {
 
 // VerifyEmailBanner nudges an unverified user (login is allowed unverified, but
 // org-mutating actions are gated server-side). Resend goes through the real
-// mailer flow (POST /auth/verify-email/resend).
+// mailer flow (POST /auth/verify-email/resend) via the shared hook.
 function VerifyEmailBanner() {
-  const [state, setState] = useState<"idle" | "busy" | "sent" | "error">("idle");
-  async function resend() {
-    setState("busy");
-    // Only claim success on a real success — a failed/errored request must not
-    // show "Sent" (which would hide the button and mislead the user).
-    try {
-      const { error } = await api.POST("/api/v1/auth/verify-email/resend", { headers: CSRF });
-      setState(error ? "error" : "sent");
-    } catch {
-      setState("error");
-    }
-  }
+  const { state, resend } = useResendVerification();
   return (
     <div className="mb-6 flex items-center justify-between rounded-lg border border-warn/40 bg-warn/5 px-4 py-3">
       <span className="text-sm text-slate-300">

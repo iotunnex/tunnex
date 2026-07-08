@@ -24,3 +24,10 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   const e = error as { error?: { message?: string } } | undefined;
   return e?.error?.message ?? fallback;
 }
+
+// apiErrorCode pulls the stable machine-readable code out of the error envelope
+// (e.g. "org_limit_reached") so callers can branch on it instead of matching prose.
+export function apiErrorCode(error: unknown): string | undefined {
+  const e = error as { error?: { code?: string } } | undefined;
+  return e?.error?.code;
+}

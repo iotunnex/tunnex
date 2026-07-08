@@ -57,6 +57,9 @@ export default function Dashboard() {
             <Card className="mt-4">
               <p className="text-sm text-slate-300">No gateway enrolled yet.</p>
               <p className="mt-1 text-xs text-slate-500">Enroll a tunnex-node agent to start serving WireGuard peers.</p>
+              <Link to="/devices" className="mt-2 inline-block text-xs text-accent-400 hover:text-accent-500">
+                Enroll a gateway →
+              </Link>
             </Card>
           )}
           {data.devices === 0 && data.nodes > 0 && (
