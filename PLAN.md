@@ -42,15 +42,16 @@ rebase the active story branch onto it to keep the ff-merge clean.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 4 CLOSED. S5.1 (`tunnex` CLI) is NEXT — not started; watch-items pending.**
-The natural next work: CLI `login` (browser + deep-link callback, with a device-code / localhost
-`127.0.0.1:<port>` callback fallback for headless), fetch config, `wg-quick up/down` wrapper.
-Decide-before-code (from the S5.1 opening, TBD): device-code vs localhost-callback selection;
-client-side config storage location + file permissions; how the CLI authenticates against a
-session model built for browser cookies.
-Deferred (do not lose): the fresh-user ONBOARDING gap (no org on signup, no gateway-enroll UI) —
-scheduled for after EPIC 4 per the user; also a **Round-2 manual testing walk** (fresh-org + Entra
-SSO against a real tenant) is now viable and wanted BEFORE S5.1 locks CLI flow assumptions.
+Current: **S4.7 (fresh-user onboarding) IN PROGRESS — reopened EPIC 4's onboarding gap as its own
+story. Commit one = the onboarding state-machine decision (below). S5.1 (`tunnex` CLI) HELD until
+S4.7 merges + Pawan's Round-2 walk lands its friction list.**
+Next after S4.7: the natural S5.1 work — CLI `login` (browser + deep-link callback, with a
+device-code / localhost `127.0.0.1:<port>` callback fallback for headless), fetch config,
+`wg-quick up/down` wrapper. S5.1 decide-before-code (TBD, HELD): device-code vs localhost-callback
+selection; client-side config storage location + file permissions; how the CLI authenticates
+against a session model built for browser cookies.
+Still pending: **Round-2 manual testing walk** (fresh-org + Entra SSO against a real tenant) —
+wanted right after S4.7 merges, BEFORE S5.1 locks CLI flow assumptions; its friction feeds S5.1.
 Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Developer ID (~$99/yr, days)
 + Windows EV cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; nothing in S5.1
 blocks on it, but the validation clock starts at application.
@@ -122,6 +123,48 @@ Seed for the eventual SECURITY.md.
 - **S4.5 Org settings & SSO config UI** — connect Google/Microsoft, domain-capture rules. **Delivered (org settings + SSO config only; CIDR resize split to its own story):** SSO secret is WRITE-ONLY (GET returns a keyed HMAC fingerprint, never the secret — no `client_secret` field in the response type); config writes are audited (`sso.config_updated`, actor-attributed, secret-free metadata); open builds refuse SSO-config endpoints with 403 `edition_required` (the established precedent, not 404); the client RBAC mirror is now GENERATED from the Go grant table (drift = red build). **Deferred tests (enterprise e2e stack, no owning story — EPIC 7 trigger):** the payload-level "GET has no secret" Playwright assertion and the fingerprint-display Playwright check are blocked because the e2e stack builds the open edition (GET /sso → 403 there). Proven structurally (schema) + by the enterprise `View` unit test, which SUBSTITUTES but does not satisfy the e2e — same discipline as the real-node-enrollment download test.
 - **S4.5b CIDR resize** (split from S4.5) — resize the org WG pool. **Delivered:** `PUT /organizations/{orgId}/pool-cidr` (edition-neutral — allocator is core/open); grow-superset / shrink-subset only (else `illegal_resize`), identical CIDR = idempotent 200, `< /30` = `cidr_too_small`; canonical (masked) CIDR stored/audited. Shrink that would strand allocations → structured 409 `{orphan_count, orphans[≤20]{device_id,name,assigned_ip,reason}}`, reason = `out_of_range | reserved_collision` (ipalloc.Orphans, reserved-collision-aware, single-read so check == 409 objects). Check runs UNCONDITIONALLY (check-anyway) — provably empty on a valid grow, a backstop if a non-Allocate writer breaks the invariant. Atomic + audited (`org.cidr_resized`, no row on no-op) under the shared per-org `LockDeviceKey`; `TestResizeAllocationRace` proves the lock excludes a concurrent allocation (red-without-lock demonstrated). **Deferred test (SUBSTITUTES, does not satisfy):** the 409 orphan-list UI render is Playwright-tested against a MOCKED endpoint — a real stranded-device render needs an enrolled gateway the open e2e stack lacks. Trigger: whichever lands first — the enterprise e2e stack (EPIC 7) or Playwright-side node enrollment.
 - **S4.6 Audit log viewer** — filterable event stream.
+- **S4.7 Fresh-user onboarding** — close the empty-funnel gap: a freshly-verified local user with
+  zero orgs currently lands on a dead-end dashboard (no create-org / no gateway-enroll affordance).
+  Ship the post-verify router + explicit create-org step + gateway-enroll empty state.
+
+### S4.7 onboarding state machine (COMMIT ONE — decided on paper, before code)
+Grounded in code: `auth.Signup` makes user + verify token, **no org / no membership**;
+`CreateOrganization` (`handlers.go`) is `requireVerifiedUser`-gated; open-build org cap is
+`enterprise.Unlimited{MaxOrganizations:1}` → `org_limit_reached` 403 (`tenancy/service.go`); SSO JIT
+`ensureMembership` adds a member-role membership + `member.jit_joined` audit and **never** touches
+create-org.
+
+Post-verify, a router branches on the caller's **membership count** (not auth-path):
+
+1. **≥1 membership** → straight to dashboard (skip the funnel entirely).
+2. **0 memberships, org-create allowed** → **explicit "Create your organization" step**
+   (user names the org; slug auto-derived) → on success, owner membership + dashboard.
+3. **0 memberships, cap reached** (open build, second tenant) → **invitation-only dead-end card**,
+   NO create button. Server is the truth (`org_limit_reached` 403); the UI only mirrors it.
+
+Path carve-outs (must NOT hit the create-org step — they already produce membership):
+- **Invite accept** → membership added → dashboard.
+- **SSO JIT login** → `ensureMembership` → dashboard.
+
+Decisions locked (the three decide-before-code items):
+- **(1) Signup→org shape = EXPLICIT create-org step** (not silent auto-create). One funnel; the
+  JIT + invite paths bypass it because they already yield membership; auto-create would fork
+  behavior by auth-path and inject a phantom "My Organization". User names their own org.
+- **(2) Open-edition second-signup = invitation-only.** The single-org cap is already
+  server-enforced; the UI mirrors with the dead-end card, never invents permission. A legal second
+  local signup with no org lands on the same card.
+- **(3) Verified-email gate = structural, upstream of create-org.** `requireVerifiedUser` already
+  refuses unverified create-org; the funnel routes signup→verify BEFORE the create-org step, so the
+  refusal is by construction, not a surprise 403. TRACE it in a test (unverified → refusal shown).
+
+Conventions named: gateway **join token = one-time secret** (S4.5 config-download ceremony — amber
+callout, "I've saved it" gate, no route back, keyed fingerprint in logs/audit, never the raw token);
+audit rows same-tx, actor-attributed, secret-free; guards auto-arm (401-walk picks up any new gated
+op, RBAC matrix, deliberate-red one-line per new guard).
+
+Prove: fresh-org empty-state render set (Playwright, all three router branches); enrollment e2e
+(join-token → agent joins → node appears — real compose agent if the harness allows, else mocked
+ceremony + a deferred-ledger entry).
 
 ## EPIC 5 — CLI Client (dogfood & de-risk before Electron)
 
