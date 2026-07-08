@@ -46,14 +46,15 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S6.0b (CI) IN PROGRESS — gates before native code; S6.3 (tunnel control) next after.
-Signing: NOT yet confirmed filed (Pawan to file this week — Apple Dev ID + Windows EV; S6.5 gate).**
-CI = GitHub Actions: Linux `gates` (drift + both editions + web build; red blocks merge) + `client`
-matrix macOS+Windows (typecheck/test/build, display-free — Electron never launched in CI; red
-blocks) + opportunistic `e2e` (ledger if it resists) + NO playwright-electron (ledgered). Merged
-so far in EPIC 6: S6.1 (client shell) + S6.2 (renderer transport — desktop tenant-functional,
-smoke-verified live; origin-rewrite + server CORS with never-Allow-Credentials). S3.7 parked at
-paper. Beta deferred — re-decide at EPIC 6 close.
+Current: **S6.0b MERGED — CI LIVE on GitHub Actions (Linux gates + mac/win client matrix, red blocks
+merge; e2e opportunistic/ledgered). Remote established. S6.3 (tunnel control) next — decision-first,
+privilege helper is the heavyweight item.** First green run went 4/4 (gates + client mac + client
+win + e2e) after fixing: `.env` in CI, a Windows path-fixture, `-mod=readonly`, and THE real gates
+bug — `.gitignore`'s unanchored `secrets/` had silently kept apps/api/internal/secrets SOURCE out of
+git (fine locally, broken on every fresh clone). Remote: github.com/iotunnex/tunnex (public); pushed
+as the iotunnex account. Merged in EPIC 6: S6.1 (client shell) + S6.2 (renderer transport — desktop
+tenant-functional) + S6.0b (CI). **Signing: NOT yet confirmed filed (Pawan — Apple Dev ID + Windows
+EV this week; S6.5 gate).** S3.7 parked at paper. Beta deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
@@ -424,6 +425,29 @@ the *red demonstration* isn't itself a CI job. The deliberate-red remains the AU
 detects the violation; CI is the CONTINUOUS proof the invariant still holds. (Argue if a subset of
 reds should be encoded as committed "guard-present" assertions — none proposed; the green tests
 already assert the positive invariant.)
+
+### S6.3 Tunnel control — DECIDE-BEFORE-CODE (privilege helper gets a FULL review round)
+Scope: start/stop a WireGuard tunnel from the desktop app — embed a userspace WireGuard
+(`wireguard-go` on macOS, `wintun`/`wireguard-nt` on Windows) and configure the interface, which
+needs elevated privilege. The **privilege helper is the heavyweight, security-critical item** and
+its architecture must be reported for review BEFORE any code, covering FOUR decide-items:
+1. **Minimum surface** — exactly what the helper does (bring an interface up/down with a specific
+   config; set routes/DNS) and, more importantly, what it REFUSES. No arbitrary config path, no
+   shell, no generic "run as root" — a typed, minimal verb set mirroring the preload allowlist
+   posture (S6.1). The helper is the privileged trust boundary; its surface IS the attack surface.
+2. **Caller authentication** — how the helper knows it is talking to the REAL Tunnex app and not
+   another local process (code-signing identity / audited client requirements on macOS XPC; a
+   signed-peer check on the Windows service pipe). A root helper that trusts any local caller is a
+   local-privilege-escalation primitive.
+3. **Install/uninstall lifecycle per platform** — macOS `SMAppService` (or a LaunchDaemon) register/
+   unregister; Windows service install/remove — idempotent, clean uninstall (no orphaned root
+   daemon), and how it is signed/notarized (ties to S6.5).
+4. **Why NOT wireguard-tools-as-root** — argue the baseline explicitly: why the app does not simply
+   shell out to `wg-quick`/`wg` under sudo/elevation (auditability, surface, credential prompts,
+   packaging), justifying the dedicated minimal helper instead.
+Standard protocol otherwise: decide-items reported for review → build → multi-finder + the security
+review → e2e where the harness allows + human smoke for tunnel-up/down.
+
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
   `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
