@@ -170,11 +170,17 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
 
   await page.getByRole("button", { name: "Enroll gateway" }).click();
+  // Name the gateway: the token is PINNED to this name server-side, so the
+  // ceremony must emit the COMPLETE env line incl. TUNNEX_NODE_NAME (Round-2
+  // friction F1 — without it the agent loops node_name_mismatch).
+  await page.getByLabel(/Gateway name/).fill("walk-gw");
   await page.getByRole("button", { name: "Generate join token" }).click();
 
   // The one-time ceremony: amber modal, token shown, must be acknowledged.
   await expect(page.getByText("Join token — shown once")).toBeVisible();
-  await expect(page.getByText(new RegExp(TOKEN))).toBeVisible();
+  // The COMPLETE env line for a name-pinned token: token AND the pinned name.
+  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN} TUNNEX_NODE_NAME=walk-gw`);
+  await expect(page.getByText(/pinned to the name/)).toBeVisible();
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   // Dismissed → the token is gone from the page and was minted exactly once (it is
   // never re-served; re-enrolling would mint a NEW token).

@@ -16,23 +16,30 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   const [open, setOpen] = useState(false);
   const [nodeName, setNodeName] = useState("");
   const [token, setToken] = useState<string | null>(null);
+  // The name the token was PINNED to at issue time — the server refuses this
+  // token from an agent enrolling under any other name, so the ceremony must
+  // hand the operator the COMPLETE env line. (Round-2 friction F1: the modal
+  // omitted TUNNEX_NODE_NAME and the agent looped node_name_mismatch.)
+  const [pinnedName, setPinnedName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function issue() {
     setBusy(true);
     setError(null);
+    const pinned = nodeName.trim() || null;
     try {
       const { data, error } = await api.POST("/api/v1/organizations/{orgId}/nodes/join-token", {
         params: { path: { orgId: org.id } },
         // node_name is optional; only send it when the user named the gateway.
-        body: nodeName.trim() ? { node_name: nodeName.trim() } : {},
+        body: pinned ? { node_name: pinned } : {},
       });
       if (error || !data) {
         setError(apiErrorMessage(error, "Could not issue a join token."));
         return;
       }
       setToken(data.join_token); // shown once — never re-served
+      setPinnedName(pinned);
       setOpen(false);
       setNodeName("");
     } catch {
@@ -97,15 +104,25 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
           title="Join token — shown once"
           caption={
             <>
-              Give this token to a <span className="font-mono">tunnex-node</span> agent (as{" "}
-              <span className="font-mono">TUNNEX_JOIN_TOKEN</span>). It is shown{" "}
+              Start a <span className="font-mono">tunnex-node</span> agent with this environment. It is shown{" "}
               <span className="font-semibold">exactly once</span>, is single-use, and cannot be retrieved again — save it
               now.
+              {pinnedName && (
+                <>
+                  {" "}
+                  The token is <span className="font-semibold">pinned to the name</span>{" "}
+                  <span className="font-mono">{pinnedName}</span> — the agent must enroll with exactly that{" "}
+                  <span className="font-mono">TUNNEX_NODE_NAME</span> or the server refuses it.
+                </>
+              )}
             </>
           }
-          secret={`TUNNEX_JOIN_TOKEN=${token}`}
-          copyLabel="Copy token"
-          onDismiss={() => setToken(null)}
+          secret={pinnedName ? `TUNNEX_JOIN_TOKEN=${token} TUNNEX_NODE_NAME=${pinnedName}` : `TUNNEX_JOIN_TOKEN=${token}`}
+          copyLabel="Copy"
+          onDismiss={() => {
+            setToken(null);
+            setPinnedName(null);
+          }}
         />
       )}
     </Card>

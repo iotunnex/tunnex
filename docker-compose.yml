@@ -79,6 +79,10 @@ services:
       # Empty by default: the agent idles (liveness up, readiness not-ready) until
       # an operator provides a join token. Set it to auto-enroll.
       TUNNEX_JOIN_TOKEN: ${TUNNEX_JOIN_TOKEN:-}
+      # Must match the name the join token was pinned to (if it was named in the
+      # dashboard) — the server refuses a pinned token under any other name.
+      # Empty = the agent's hostname.
+      TUNNEX_NODE_NAME: ${TUNNEX_NODE_NAME:-}
       TUNNEX_NODE_STATE_DIR: /var/lib/tunnex-node
       # Real WireGuard data plane (S3.2). "mem" for an in-memory dev backend.
       TUNNEX_WG_BACKEND: ${TUNNEX_WG_BACKEND:-wgctrl}
