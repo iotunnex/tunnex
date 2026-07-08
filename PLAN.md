@@ -309,12 +309,11 @@ Ledgered at spec sign-off (flags 2+3):
   headers); interval/slow_down semantics are already in the device contract.
 
 Ledgered at story-end review (S5.1 5/n+):
-- **Expired-credential 401 is a deliberate ORACLE** (`credential_expired` distinct from the generic
-  revoked/unknown 401). Two finders flagged it as contradicting the codebase's no-oracle discipline;
-  it is the signed-off CLI-UX mechanism ("run 'tunnex login'"). ACCEPTED as a low-severity tradeoff
-  (an attacker already holding a real-but-expired token learns only that it aged out). If it must go:
-  the CLI already stores `expires_at` locally and can print the line from that, letting the server
-  return a generic 401 — **a `security-review`-pass decision, not a silent change.** Surfaced to Pawan.
+- **Expired-credential 401 oracle — REMOVED (not accepted).** The distinct `credential_expired`
+  code was dropped: the server now returns a generic 401 for expired, BYTE-IDENTICAL to
+  revoked/unknown (extended no-oracle test asserts all three identical). The CLI disambiguates
+  expiry from its LOCALLY stored `expires_at` and prints the exact "run 'tunnex login'" line, so the
+  UX is preserved with no server-side oracle. Closed at Pawan's direction pre-merge.
 - **Expired/consumed CLI-code GC**: `cli_auth_codes` (60s) and `cli_device_codes` (15m) rows are
   never deleted after expiry/consumption → unbounded growth. Add a periodic
   `DELETE … WHERE expires_at < now() OR consumed_at IS NOT NULL` sweep (a cron/boot job). → S11 hardening.

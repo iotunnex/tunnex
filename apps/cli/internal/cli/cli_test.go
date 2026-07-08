@@ -98,6 +98,32 @@ func TestCredentialRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLoadActiveCredentialExpiry pins that the CLI recognizes its OWN expired
+// credential locally (the server gives no expiry oracle) and reports it as
+// ErrCredentialExpired — not a raw 401.
+func TestLoadActiveCredentialExpiry(t *testing.T) {
+	t.Setenv("TUNNEX_STATE_DIR", t.TempDir())
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now = func() time.Time { return base }
+	defer func() { now = time.Now }()
+
+	// Not-yet-expired → returned normally.
+	if err := SaveCredential(Credential{Server: "http://x", Token: "tnx_a", ExpiresAt: base.Add(time.Hour)}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := LoadActiveCredential(); err != nil {
+		t.Fatalf("live credential: %v", err)
+	}
+	// Expired → ErrCredentialExpired (the exact re-login line as its message).
+	if err := SaveCredential(Credential{Server: "http://x", Token: "tnx_a", ExpiresAt: base.Add(-time.Second)}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	_, err := LoadActiveCredential()
+	if err != ErrCredentialExpired || err.Error() != ExpiredCredentialLine {
+		t.Fatalf("expired: want ErrCredentialExpired (%q), got %v", ExpiredCredentialLine, err)
+	}
+}
+
 // TestCallbackHandler pins the loopback hygiene: state mismatch → failure page
 // + error result + the code NEVER read; good callback → success page + code;
 // only ONE result is ever emitted.

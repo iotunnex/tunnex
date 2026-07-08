@@ -156,48 +156,57 @@ func TestBearerCredentialSemantics(t *testing.T) {
 		t.Fatalf("bearer DELETE without CSRF header: want 204, got %d — %s", resp.StatusCode, b)
 	}
 
-	// NO-ORACLE: a REVOKED bearer and an UNKNOWN bearer must be byte-identical
-	// (an attacker probing a stolen token can't tell "was real, revoked" from
-	// "never existed"). cred2 was just revoked; a random tnx_ is unknown.
-	revokedResp := do("GET", "/api/v1/auth/cli/credentials", cred2.Token)
-	revokedBody, _ := io.ReadAll(revokedResp.Body)
-	unknownResp := do("GET", "/api/v1/auth/cli/credentials", "tnx_"+strings.Repeat("z", 43))
-	unknownBody, _ := io.ReadAll(unknownResp.Body)
-	if revokedResp.StatusCode != 401 || unknownResp.StatusCode != 401 {
-		t.Fatalf("revoked/unknown status: %d / %d", revokedResp.StatusCode, unknownResp.StatusCode)
+	// NO-ORACLE: REVOKED, EXPIRED, and UNKNOWN bearers must ALL be byte-identical
+	// 401s — an attacker probing a stolen token learns nothing (not "was real,
+	// revoked", not "was real, aged out", not "never existed"). Expiry is
+	// surfaced to the CLI from its LOCAL expires_at, so the server carries no
+	// distinct code. cred2 is revoked; cred1 we age out; a random tnx_ is unknown.
+	h := sha256.Sum256([]byte(cred1.Token))
+	if _, err := pool.Exec(ctx, "UPDATE cli_credentials SET expires_at = now() - interval '1 second' WHERE token_hash=$1", h[:]); err != nil {
+		t.Fatalf("expire: %v", err)
 	}
+	revokedBody := get401(t, do, cred2.Token)
+	expiredBody := get401(t, do, cred1.Token)
+	unknownBody := get401(t, do, "tnx_"+strings.Repeat("z", 43))
 	if !bytes.Equal(stripReqID(revokedBody), stripReqID(unknownBody)) {
 		t.Fatalf("revoked vs unknown NOT identical (oracle):\n revoked=%s\n unknown=%s", revokedBody, unknownBody)
+	}
+	if !bytes.Equal(stripReqID(expiredBody), stripReqID(unknownBody)) {
+		t.Fatalf("expired vs unknown NOT identical (oracle):\n expired=%s\n unknown=%s", expiredBody, unknownBody)
+	}
+	if strings.Contains(string(expiredBody), "credential_expired") {
+		t.Fatalf("expired bearer leaked a distinct oracle code: %s", expiredBody)
 	}
 
 	// DEACTIVATED user's bearer → generic 401 (independent of the sweep — a
 	// direct status flip that didn't run SweepUser must still kill the credential).
+	// A freshly-minted live credential isolates the status path (cred1 is expired).
+	live := mint()
 	if _, err := pool.Exec(ctx, "UPDATE users SET status='deactivated' WHERE id=$1", userID); err != nil {
 		t.Fatalf("deactivate: %v", err)
 	}
-	if resp := do("GET", "/api/v1/auth/cli/credentials", cred1.Token); resp.StatusCode != 401 {
+	if resp := do("GET", "/api/v1/auth/cli/credentials", live.Token); resp.StatusCode != 401 {
 		t.Fatalf("deactivated user's bearer: want 401, got %d", resp.StatusCode)
 	}
 	if _, err := pool.Exec(ctx, "UPDATE users SET status='active' WHERE id=$1", userID); err != nil {
 		t.Fatalf("reactivate: %v", err)
 	}
 
-	// EXPIRED bearer → DISTINCT 401 credential_expired (the signed-off CLI UX;
-	// the accepted-oracle tradeoff is recorded in PLAN).
-	h := sha256.Sum256([]byte(cred1.Token))
-	if _, err := pool.Exec(ctx, "UPDATE cli_credentials SET expires_at = now() - interval '1 second' WHERE token_hash=$1", h[:]); err != nil {
-		t.Fatalf("expire: %v", err)
-	}
-	resp = do("GET", "/api/v1/auth/cli/credentials", cred1.Token)
-	body, _ = io.ReadAll(resp.Body)
-	if resp.StatusCode != 401 || !strings.Contains(string(body), "credential_expired") {
-		t.Fatalf("expired bearer: want 401 credential_expired, got %d — %s", resp.StatusCode, body)
-	}
-
 	// No bearer at all → generic 401 (the walk covers this per-op already).
 	if resp := do("GET", "/api/v1/auth/cli/credentials", ""); resp.StatusCode != 401 {
 		t.Fatalf("no auth: want 401, got %d", resp.StatusCode)
 	}
+}
+
+// get401 does a GET expecting a 401 and returns its body.
+func get401(t *testing.T, do func(string, string, string) *http.Response, bearer string) []byte {
+	t.Helper()
+	resp := do("GET", "/api/v1/auth/cli/credentials", bearer)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 401 {
+		t.Fatalf("want 401, got %d — %s", resp.StatusCode, body)
+	}
+	return body
 }
 
 // stripReqID removes the per-request request_id so two error envelopes can be

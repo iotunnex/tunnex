@@ -12,7 +12,7 @@ import (
 // config is served exactly once at creation and is never re-fetchable, so the
 // CLI owns creation and writes atomically 0600 in the same breath).
 func CreateDevice(ctx context.Context, name string, fullTunnel bool) error {
-	cred, err := LoadCredential()
+	cred, err := LoadActiveCredential()
 	if err != nil {
 		return err
 	}

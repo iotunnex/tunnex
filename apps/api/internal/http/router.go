@@ -47,7 +47,8 @@ type Deps struct {
 	AppBaseURL   string
 	AuthFn       AuthFunc
 	// BearerFn resolves a CLI bearer credential (S5.1). Tried BEFORE the cookie
-	// session; an expired credential short-circuits with 401 credential_expired.
+	// session; any invalid bearer (unknown/revoked/expired) is one generic 401
+	// (no oracle) — the CLI recognizes expiry from its local expires_at.
 	BearerFn BearerAuthFunc
 }
 
@@ -78,18 +79,17 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	// Attach the authenticated principal (if any) so downstream authorization can
 	// fail closed. The org used for scoping is derived from this principal's
 	// memberships, never from client input. A CLI bearer credential (S5.1) is
-	// tried FIRST: bearer ≡ cookie for authorization, and an EXPIRED credential
-	// is answered distinctly (401 credential_expired) so the CLI can prompt
-	// re-login instead of guessing.
+	// tried FIRST: bearer ≡ cookie for authorization. Any invalid bearer
+	// (unknown/revoked/expired) is one generic 401 (no oracle); the CLI knows
+	// its own expiry from the locally-stored expires_at.
 	//
-	// PRECEDENCE (intended, asymmetric): a request carries EITHER a bearer OR a
-	// cookie in practice — the CLI sends no cookie and a browser never attaches
-	// an Authorization header cross-site. An UNKNOWN/REVOKED bearer resolves to
-	// (nil,nil) and falls through to the cookie path; an EXPIRED bearer
-	// short-circuits with 401 and never consults the cookie (the CLI's re-login
-	// signal must not be masked by a stray session). A future client that sent
-	// BOTH must not rely on this: a valid bearer wins; a stale one is not a way
-	// to assume a cookie identity. Keep this precedence explicit if refactoring.
+	// PRECEDENCE (intended): a request carries EITHER a bearer OR a cookie in
+	// practice — the CLI sends no cookie and a browser never attaches an
+	// Authorization header cross-site. An invalid bearer resolves to (nil,nil)
+	// and falls through to the cookie path; a VALID bearer wins outright. A stale
+	// bearer is therefore never a way to assume a cookie identity. The error
+	// return of BearerFn is retained for a future path that needs a distinct
+	// refusal; today it is always nil.
 	if d.AuthFn != nil || d.BearerFn != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

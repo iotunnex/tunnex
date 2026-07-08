@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -77,6 +78,12 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		// An expired credential prints ONLY the actionable line (S5.1 acceptance),
+		// never a raw "error: …" dump.
+		if errors.Is(err, cli.ErrCredentialExpired) {
+			fmt.Fprintln(os.Stderr, cli.ExpiredCredentialLine)
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
