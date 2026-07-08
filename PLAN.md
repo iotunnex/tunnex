@@ -46,13 +46,15 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 6 IN PROGRESS — S6.1 (client shell) MERGED (Electron shell, app:// serving the SPA
-bundle, hardened window + preload allowlist, keychain login via system-browser+loopback — PROVEN on
-a live macOS smoke: setup/healthz, hardened renderer, nav lock, login→keychain fingerprint
-322266aa538d secureStorage:true, logout revokes+clears). NEXT: S6.2 (renderer transport switch —
-make the app functional against a tenant; the SPA still shows "control plane unreachable" until it
-targets the configured server + bearer). S6.0b (CI pipeline) SCHEDULED — before S6.5, recommended
-before S6.3. S3.7 parked at paper. Beta deferred, not rejected — re-decide at EPIC 6 close.
+Current: **EPIC 6 IN PROGRESS — S6.1 (client shell) + S6.2 (renderer transport switch) both MERGED.
+The desktop app is now TENANT-FUNCTIONAL: smoke-verified live on macOS — "control plane operational",
+"Sign in with your browser" → keychain credential → Overview with REAL data (Demo Organization, 3
+members, real audit rows). S6.2 shipped the origin-rewrite transport + server CORS (corsBearer,
+exact-origin app://tunnex, NEVER Allow-Credentials — cookie/CSRF posture untouched) after two
+real-Electron finders caught the Blink Request-duplex throw + the missing CORS. NEXT: S6.3 (tunnel
+control — start/stop WireGuard, embed wireguard-go/wintun, privilege helper). **S6.0b (CI pipeline)
+STRONGLY recommended BEFORE S6.3** — S6.3 multiplies the platform matrix (native code, mac+win) and
+there is still no automated CI. S3.7 parked at paper. Beta deferred — re-decide at EPIC 6 close.
 Ops CLOCK RUNNING: signing applications (Apple Dev ID + Windows EV) must be filed THIS WEEK (Pawan)
 — S6.5 hard-blocked otherwise.**
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
@@ -60,8 +62,9 @@ CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
-(tunnex CLI).** Current epic: EPIC 6 (Electron desktop client), S6.1 next. If this pointer disagrees
-with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
+(tunnex CLI) · EPIC 6 S6.1 (client shell) + S6.2 (renderer transport — tenant-functional).**
+Current epic: EPIC 6, S6.3 next (S6.0b CI recommended first). If this pointer disagrees with the
+handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
