@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
@@ -64,6 +65,7 @@ func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
 // ResponseErrorHandlerFunc renders those errors as the standard envelope.
 type apiServer struct {
 	orgs         *tenancy.Service
+	cliAuth      *cliauth.Service
 	auth         *auth.Service
 	members      *tenancy.MembershipService
 	invites      *invites.Service

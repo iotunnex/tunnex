@@ -19,6 +19,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
@@ -34,6 +35,7 @@ type AuthFunc func(r *http.Request) *authctx.Principal
 // Deps are the router's dependencies.
 type Deps struct {
 	Orgs         *tenancy.Service
+	CliAuth      *cliauth.Service
 	Auth         *auth.Service
 	Members      *tenancy.MembershipService
 	Invites      *invites.Service
@@ -44,6 +46,9 @@ type Deps struct {
 	CookieSecure bool
 	AppBaseURL   string
 	AuthFn       AuthFunc
+	// BearerFn resolves a CLI bearer credential (S5.1). Tried BEFORE the cookie
+	// session; an expired credential short-circuits with 401 credential_expired.
+	BearerFn BearerAuthFunc
 }
 
 // NewRouter builds the API router with the standard middleware chain and mounts
@@ -72,12 +77,28 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 
 	// Attach the authenticated principal (if any) so downstream authorization can
 	// fail closed. The org used for scoping is derived from this principal's
-	// memberships, never from client input.
-	if d.AuthFn != nil {
+	// memberships, never from client input. A CLI bearer credential (S5.1) is
+	// tried FIRST: bearer ≡ cookie for authorization, and an EXPIRED credential
+	// is answered distinctly (401 credential_expired) so the CLI can prompt
+	// re-login instead of guessing.
+	if d.AuthFn != nil || d.BearerFn != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if p := d.AuthFn(req); p != nil {
-					req = req.WithContext(authctx.WithPrincipal(req.Context(), p))
+				if d.BearerFn != nil {
+					p, err := d.BearerFn(req)
+					if err != nil {
+						apierr.Write(w, req, err)
+						return
+					}
+					if p != nil {
+						next.ServeHTTP(w, req.WithContext(authctx.WithPrincipal(req.Context(), p)))
+						return
+					}
+				}
+				if d.AuthFn != nil {
+					if p := d.AuthFn(req); p != nil {
+						req = req.WithContext(authctx.WithPrincipal(req.Context(), p))
+					}
 				}
 				next.ServeHTTP(w, req)
 			})
@@ -104,7 +125,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

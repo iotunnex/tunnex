@@ -294,6 +294,21 @@ ceremony + a deferred-ledger entry).
   (and its URL is printed in install docs); signing rides the EPIC 5 ops item (Apple ID + EV cert).
 - **Expired-credential UX:** on any 401 `credential_expired`, the CLI prints exactly one actionable
   line — `credential expired — run 'tunnex login'` — never a raw error dump.
+
+**S5.1 ACCEPTANCE CRITERION (spec sign-off flag 1) — the consent page is a real checkpoint:**
+the browser leg renders an explicit consent page that (i) requires a DELIBERATE CLICK to mint —
+never auto-approves on load (an instant redirect would reduce the "human checkpoint" argument for
+the cookie-only exception to theater); (ii) DISPLAYS the loopback redirect it will send the code
+to, INCLUDING THE PORT (the user can see which local process is asking); (iii) the device-approve
+page displays the user_code it is approving. **Playwright proof of the no-click-no-mint property**
+(landing on the consent page mints nothing; only the click calls cliAuthorize).
+
+Ledgered at spec sign-off (flags 2+3):
+- **Admin revoke of another user's CLI credential** — rides the dashboard "CLI sessions" panel
+  item (already ledgered); until then revocation is self-serve + the reset/deactivation sweeps.
+- **Rate-limit targets for the public CLI endpoints** (cliToken, cliDeviceStart, cliDeviceToken —
+  brute-force surface: code guessing, device-code polling) → S11.3 (rate limiting & security
+  headers); interval/slow_down semantics are already in the device contract.
 - **(Ops, when EPIC 5 begins)** Begin **code-signing cert procurement** — Apple Developer ID + Windows EV cert (weeks of lead time).
 
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)

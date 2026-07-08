@@ -32,6 +32,40 @@ type AuthToken struct {
 	CreatedAt  time.Time          `json:"created_at"`
 }
 
+type CliAuthCode struct {
+	ID            uuid.UUID          `json:"id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	CodeHash      []byte             `json:"code_hash"`
+	RedirectUri   string             `json:"redirect_uri"`
+	CodeChallenge string             `json:"code_challenge"`
+	ExpiresAt     time.Time          `json:"expires_at"`
+	ConsumedAt    pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+}
+
+type CliCredential struct {
+	ID          uuid.UUID          `json:"id"`
+	UserID      uuid.UUID          `json:"user_id"`
+	Name        string             `json:"name"`
+	TokenHash   []byte             `json:"token_hash"`
+	Fingerprint string             `json:"fingerprint"`
+	CreatedAt   time.Time          `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt   time.Time          `json:"expires_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type CliDeviceCode struct {
+	ID             uuid.UUID          `json:"id"`
+	DeviceCodeHash []byte             `json:"device_code_hash"`
+	UserCodeHash   []byte             `json:"user_code_hash"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	ExpiresAt      time.Time          `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      time.Time          `json:"created_at"`
+}
+
 type Device struct {
 	ID         uuid.UUID          `json:"id"`
 	OrgID      uuid.UUID          `json:"org_id"`

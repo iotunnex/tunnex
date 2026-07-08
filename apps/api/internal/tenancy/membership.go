@@ -10,6 +10,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -67,6 +68,11 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 	}
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "deactivated"}); e != nil {
+			return e
+		}
+		// Deactivation sweeps CLI credentials too (S5.1, session parity) — in the
+		// SAME tx as the status flip, so the sweep can't be lost between the two.
+		if e := cliauth.SweepUser(ctx, q, targetUserID); e != nil {
 			return e
 		}
 		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})

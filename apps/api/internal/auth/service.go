@@ -23,6 +23,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
 )
@@ -259,7 +260,13 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 			return err
 		}
 		resetUserID = tok.UserID
-		return q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: tok.UserID, PasswordHash: &hash})
+		if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: tok.UserID, PasswordHash: &hash}); err != nil {
+			return err
+		}
+		// The SWEEP also kills every live CLI credential (S5.1): a reset signals
+		// identity compromise, and a surviving header-borne credential would be a
+		// back door around the session revocation below. Same tx as the reset.
+		return cliauth.SweepUser(ctx, q, tok.UserID)
 	}); err != nil {
 		return err
 	}

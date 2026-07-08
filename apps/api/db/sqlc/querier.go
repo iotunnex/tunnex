@@ -14,11 +14,17 @@ type Querier interface {
 	// lint:cross-org — authorized by the invitation id obtained via its token, not
 	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
+	// The browser leg binds the human's identity to the pending device code.
+	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
 	// given purpose. A reset token therefore cannot be consumed as a verification
 	// token and vice-versa.
 	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (AuthToken, error)
+	// Atomic single-use consume; returns the row only on the FIRST valid redemption.
+	ConsumeCliAuthCode(ctx context.Context, codeHash []byte) (CliAuthCode, error)
+	// Atomic single-use consume of an APPROVED device code.
+	ConsumeCliDeviceCode(ctx context.Context, deviceCodeHash []byte) (CliDeviceCode, error)
 	// lint:cross-org — the token itself is the credential; the org comes from the
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
@@ -42,6 +48,12 @@ type Querier interface {
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
+	CreateCliAuthCode(ctx context.Context, arg CreateCliAuthCodeParams) (CliAuthCode, error)
+	// CLI credential flow (S5.1). All secrets arrive here PRE-HASHED (sha-256); the
+	// raw token/code never reaches SQL. Consumption is a single atomic UPDATE so a
+	// code can never be redeemed twice (no check-then-consume window).
+	CreateCliCredential(ctx context.Context, arg CreateCliCredentialParams) (CliCredential, error)
+	CreateCliDeviceCode(ctx context.Context, arg CreateCliDeviceCodeParams) (CliDeviceCode, error)
 	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
@@ -56,6 +68,12 @@ type Querier interface {
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
+	// Active = not revoked and not expired. Expired/revoked rows fail auth closed.
+	GetActiveCliCredentialByHash(ctx context.Context, tokenHash []byte) (CliCredential, error)
+	// Any state (auth needs to distinguish "expired" from "unknown" for the CLI's
+	// credential_expired UX line).
+	GetCliCredentialByHash(ctx context.Context, tokenHash []byte) (CliCredential, error)
+	GetCliDeviceCodeByDeviceHash(ctx context.Context, deviceCodeHash []byte) (CliDeviceCode, error)
 	GetDevice(ctx context.Context, arg GetDeviceParams) (Device, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
@@ -107,6 +125,7 @@ type Querier interface {
 	// as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
 	// rather than an OR-expansion the planner can't use.
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	ListCliCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]CliCredential, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
@@ -149,6 +168,13 @@ type Querier interface {
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
+	// The SWEEP: password reset and account deactivation kill every live CLI
+	// credential exactly like they kill sessions (a surviving credential would be a
+	// back door around the sweep).
+	RevokeAllCliCredentialsForUser(ctx context.Context, userID uuid.UUID) error
+	// Self-scoped: the WHERE user_id makes another user's credential unreachable
+	// (idempotent 204 semantics; no existence leak).
+	RevokeCliCredential(ctx context.Context, arg RevokeCliCredentialParams) (int64, error)
 	// Returns the gateway node_id (for the push) so the caller needs no extra read;
 	// pgx.ErrNoRows means the device was not active (already revoked / wrong org).
 	// Clears assigned_ip to release the address explicitly (rather than relying on
@@ -176,6 +202,7 @@ type Querier interface {
 	// Verification loss: clear verified_at so the domain stops capturing (the claim
 	// is NOT deleted — the org keeps its pending claim and can re-verify).
 	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
+	TouchCliCredentialUsed(ctx context.Context, id uuid.UUID) error
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// lint:cross-org — keyed by id after cert authorization.
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error

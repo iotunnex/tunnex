@@ -23,6 +23,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
+	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
@@ -136,9 +137,11 @@ func main() {
 	nodeSvc := nodes.NewService(pool, agentCA, sealer)
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
+	cliAuthSvc := cliauth.NewService(pool, sealer)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:         tenancy.NewService(pool),
+		CliAuth:      cliAuthSvc,
 		Auth:         authSvc,
 		Members:      tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
 		Invites:      invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
@@ -149,6 +152,7 @@ func main() {
 		CookieSecure: cfg.CookieSecure,
 		AppBaseURL:   cfg.AppBaseURL,
 		AuthFn:       apphttp.SessionAuth(sessions, sqlc.New(pool)),
+		BearerFn:     apphttp.BearerAuth(sqlc.New(pool)),
 	})
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
