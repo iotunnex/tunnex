@@ -381,6 +381,59 @@ Ledgered at implementation sign-off (MERGED item):
 ## EPIC 6 — Electron Desktop Client (Windows + macOS)
 
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
+
+### S6.1 paper decisions (COMMIT ONE — decided on paper, for review before any code)
+
+New surface (`apps/client`, Electron main + preload + the reused SPA renderer). Nothing exists yet;
+this commit is the contract, not code. Grounded in S5.1: the CLI credential flow (system browser →
+`127.0.0.1:<port>/callback` → PKCE code → `tnx_` bearer, header-borne, no cookies) already exists and
+the desktop client REUSES it wholesale.
+
+**(a) Auth = reuse the S5.1 credential flow via the SYSTEM browser + loopback.** The Electron MAIN
+process runs the same single-shot loopback listener the CLI does, opens the user's DEFAULT browser to
+`/cli-auth` (never an embedded `BrowserWindow`/webview), receives the one-time code, exchanges it for a
+`tnx_` bearer credential. **No embedded-webview login, no cookies in the client.** Rationale: an
+embedded webview can capture credentials and is refused by Google/Microsoft for OAuth; the system
+browser + loopback is the audited S5.1 path and gives SSO/MFA for free. Deviation would have to be
+argued — none proposed.
+
+**(b) Renderer reuse = the built SPA bundle, pointed at a CONFIGURED server, authed by BEARER.** The
+existing `apps/web` build (locked: "same bundle reused by the Electron renderer") is loaded in the
+renderer via a custom `app://` protocol (not `file://` — file URLs break same-origin/fetch
+assumptions and are a security footgun). What DIFFERS from the browser SPA: (i) no nginx same-origin —
+the API base URL is configured (a server field, persisted), so `createTunnexClient("/")` becomes
+`createTunnexClient(serverURL)`; (ii) auth is the bearer credential injected from main via the preload
+bridge (the SPA's client attaches `Authorization: Bearer`), NOT the cookie session. The SPA's
+existing client-layer header hook (from S4.8) is the natural seam. Confirm in review: whether the SPA
+needs a small "transport mode" switch (cookie for web, bearer for desktop) or the client factory just
+takes an optional token.
+
+**(c) IPC security posture = locked-down by default; the preload bridge is the ONLY privileged
+surface.** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; the renderer gets
+node/OS access through NOTHING except a minimal `contextBridge.exposeInMainWorld` allowlist (get the
+configured server, get/refresh the bearer, trigger login/logout — and later the S6.3 tunnel
+up/down/status calls). No remote module. This allowlist IS the S6.3 tunnel-control precursor: privileged
+WireGuard actions will be added as explicit IPC channels, never direct renderer access.
+
+**(d) Auto-update = electron-updater SCAFFOLDED but INERT until S6.5 signing.** Wire `electron-updater`
+(config + a placeholder feed URL) so the plumbing exists, but do NOT call `checkForUpdates` / enable
+it: macOS auto-update (Squirrel.Mac) requires a signed + notarized app and simply cannot function
+unsigned, and shipping an unsigned auto-updater is a security anti-pattern. Scaffold-don't-enable;
+S6.5 flips it on once the certs land.
+
+**(e) Credential storage = OS keychain via Electron `safeStorage`, NOT the CLI's 0600 file.** The
+desktop client stores the `tnx_` credential encrypted through `safeStorage.encryptString`
+(Keychain / DPAPI / libsecret), never a plaintext-ish file — a desktop is a shared, GUI environment
+where a `0600` file is weaker than the OS keychain. Argue in review: the CLI's
+`~/.config/tunnex/credential.json` convention stays correct for headless/CLI; the desktop client and
+CLI hold SEPARATE credentials (both independently revocable) — no shared store, no interop
+requirement. Caveat to handle: `safeStorage` on Linux can fall back to plaintext when no keyring is
+present — detect and warn/refuse rather than silently downgrade.
+
+Open sub-questions for the review: the `app://` protocol vs `loadFile` specifics; whether the server
+URL is per-launch or persisted config; exact preload API shape; and whether the SPA gains a transport
+switch or a token-taking client factory (interacts with (b)).
+
 - **S6.2 Client auth** — login against tenant (local + SSO via system browser + deep link).
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
