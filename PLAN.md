@@ -42,10 +42,10 @@ rebase the active story branch onto it to keep the ff-merge clean.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.7 (fresh-user onboarding) IN PROGRESS — reopened EPIC 4's onboarding gap as its own
-story. Commit one = the onboarding state-machine decision (below). S5.1 (`tunnex` CLI) HELD until
-S4.7 merges + Pawan's Round-2 walk lands its friction list.**
-Next after S4.7: the natural S5.1 work — CLI `login` (browser + deep-link callback, with a
+Current: **S4.7 MERGED (EPIC 4 closed again, incl. onboarding funnel + reactive-403 amendment).
+NEXT: Round-2 manual walk (fresh-org + Entra SSO vs real tenant) — its friction list feeds S5.1
+watch-items. S5.1 remains HELD until the walk lands. Ops: code-signing procurement still open (Pawan).**
+Next after the walk: the natural S5.1 work — CLI `login` (browser + deep-link callback, with a
 device-code / localhost `127.0.0.1:<port>` callback fallback for headless), fetch config,
 `wg-quick up/down` wrapper. S5.1 decide-before-code (TBD, HELD): device-code vs localhost-callback
 selection; client-side config storage location + file permissions; how the CLI authenticates
@@ -57,7 +57,7 @@ Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Develop
 blocks on it, but the validation clock starts at application.
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), and EPIC 4 COMPLETE — S4.1
 (shell) · S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) ·
-S4.5b (CIDR resize) · S4.6 (audit viewer).** Next epic: EPIC 5 (CLI client). If this pointer
+S4.5b (CIDR resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel).** Next epic: EPIC 5 (CLI client). If this pointer
 disagrees with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
@@ -183,6 +183,12 @@ Edge-case decisions (one line each, for the record):
   upserts the membership in one tx** (token proves inbox control) — so an invitee lands in the shell
   already verified and with ≥1 membership (has-org branch); they never hit create-org or
   verify-pending.
+  **Clarification (existing behavior, NOT new in S4.7):** this verify-then-membership ordering
+  predates S4.7 (`invites.go` Accept, shipped in S2.6) — S4.7 adds **no** new Go for invite-accept, it
+  only relies on the existing flow so the funnel is correct. Audit coverage is likewise pre-existing:
+  Accept writes an `invite.accepted` audit row (actor = the invitee) in the same tx. S4.7 introduced
+  no new server behavior or audit action here; the only new backend code in the story is the
+  `DemoNoOrgUser` seed fixture (commit `6ac1a6b`).
 
 Conventions named: gateway **join token = one-time secret** (S4.5 config-download ceremony — amber
 callout, "I've saved it" gate, no route back, keyed fingerprint in logs/audit, never the raw token);
