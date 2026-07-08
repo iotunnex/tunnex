@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, apiErrorMessage, type Meta } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { desktop } from "../lib/desktop";
 import { AuthLayout } from "../components/AuthLayout";
 import { Button, ErrorText, Field, Input } from "../components/ui";
 
@@ -18,6 +19,43 @@ function ssoErrorText(code: string): string {
 }
 
 export default function Login() {
+  // Desktop mode: NO email/password form. Auth completes in the system browser
+  // (the S5.1 flow); the client never sees the password. On success the main
+  // process reloads the window → /auth/me (bearer) → authed.
+  if (desktop()) return <DesktopLogin />;
+  return <BrowserLogin />;
+}
+
+function DesktopLogin() {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function signIn() {
+    setBusy(true);
+    setError(null);
+    try {
+      await desktop()!.auth.login();
+      // Main reloads the window on success; if we get here without a reload the
+      // login still succeeded — a status refresh will pick it up.
+    } catch (e) {
+      setBusy(false);
+      setError((e as Error)?.message || "Sign-in was cancelled or failed.");
+    }
+  }
+  return (
+    <AuthLayout>
+      <h1 className="text-xl font-semibold text-white">Sign in</h1>
+      <p className="mt-1 text-sm text-slate-400">
+        Tunnex opens your browser to sign in — your password is never entered in this app.
+      </p>
+      <ErrorText>{error}</ErrorText>
+      <Button onClick={signIn} disabled={busy} className="mt-5 w-full">
+        {busy ? "Waiting for the browser…" : "Sign in with your browser"}
+      </Button>
+    </AuthLayout>
+  );
+}
+
+function BrowserLogin() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();

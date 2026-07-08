@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, apiErrorMessage } from "../lib/api";
+import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { AuthLayout } from "../components/AuthLayout";
 import { Button, ErrorText } from "../components/ui";
@@ -47,6 +47,11 @@ export default function CliAuth() {
     });
     if (error || !data) {
       setBusy(false);
+      // Minting requires a verified email (requireVerifiedSessionUser). Spell
+      // that out instead of a generic failure — the user can act on it.
+      if (apiErrorCode(error) === "email_not_verified") {
+        return setError("Verify your email before authorizing a device — check your inbox, then try again.");
+      }
       return setError(apiErrorMessage(error, "Could not authorize the CLI."));
     }
     // Hand the one-time code back to the CLI's loopback listener.

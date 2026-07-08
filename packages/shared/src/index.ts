@@ -15,6 +15,19 @@ export type TunnexClient = Client<paths>;
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// Desktop transport switch (S6.2). The web SPA is same-origin (baseUrl "/"), but
+// the Electron renderer loads over app:// and must reach the CONFIGURED server
+// origin. setApiOrigin rewrites the ORIGIN of every request URL at the client
+// layer — one bundle, runtime branch, no build fork. Null (the default) leaves
+// requests same-origin, so the browser build is unaffected. Auth is untouched
+// here: the desktop bearer is injected by the Electron MAIN process on the
+// configured origin (S6.1), never by this middleware — the token never enters
+// renderer JS.
+let apiOrigin: string | null = null;
+export function setApiOrigin(origin: string | null): void {
+  apiOrigin = origin && origin.replace(/\/+$/, ""); // trim trailing slash; "" → null
+}
+
 /**
  * Create a typed Tunnex API client. baseUrl defaults to same-origin ("/").
  *
@@ -31,10 +44,17 @@ export function createTunnexClient(baseUrl = "/"): TunnexClient {
   const client = createClient<paths>({ baseUrl });
   client.use({
     onRequest({ request }) {
-      if (UNSAFE_METHODS.has(request.method)) {
-        request.headers.set("X-Tunnex-CSRF", "1");
+      let req = request;
+      // Desktop: re-home the request onto the configured server origin (path +
+      // query preserved). Rebuild rather than mutate (Request.url is read-only).
+      if (apiOrigin) {
+        const u = new URL(request.url);
+        req = new Request(apiOrigin + u.pathname + u.search, request);
       }
-      return request;
+      if (UNSAFE_METHODS.has(req.method)) {
+        req.headers.set("X-Tunnex-CSRF", "1");
+      }
+      return req;
     },
   });
   return client;

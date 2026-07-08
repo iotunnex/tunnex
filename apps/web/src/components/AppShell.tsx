@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Logo, PRODUCT_TAGLINE } from "../brand";
 import { useAuth } from "../lib/auth";
+import { desktop } from "../lib/desktop";
 import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
@@ -23,6 +24,13 @@ export function AppShell() {
   const email = state.status === "authed" ? state.user.email : "";
 
   async function onLogout() {
+    // Desktop: revoke the credential + clear the keychain via the bridge (main
+    // reloads the window afterward). Browser: the cookie-session logout.
+    const d = desktop();
+    if (d) {
+      await d.auth.logout().catch(() => {});
+      return; // main reloads → /auth/me (no bearer) → anon → /login
+    }
     await logout();
     navigate("/login", { replace: true });
   }
