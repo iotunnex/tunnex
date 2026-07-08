@@ -112,6 +112,58 @@ Seed for the eventual SECURITY.md.
 - **S3.4 Client config generation + bare UI page** — `.conf` output (DNS, allowed IPs, keepalive) + minimal download page. **← "Tunnex is real" milestone.**
 - **S3.5 IP allocation service** — deterministic, collision-free assignment from org pool. **Acceptance (edge cases):** address **release/reuse** on revocation; safe on **org CIDR resize**; no reassignment of an in-flight address.
 - **S3.6 Live connection status** — handshake/last-seen, bytes tx/rx, online peers (data from agent).
+- **S3.7 Gateway NAT + forwarding (full-tunnel egress)** — make `--full-tunnel` (`AllowedIPs=0.0.0.0/0`)
+  actually reach the internet: the agent enables IP forwarding + source-NAT on the gateway so client
+  traffic egresses via the gateway host. Today the config connects but egress dies at the gateway
+  (split-tunnel only). **DECISION-FIRST — do not implement until the decision commit is reviewed AND
+  the beta-vs-EPIC-6 call is made (that gates everything).**
+
+### S3.7 paper decision (COMMIT ONE — decided on paper, for review before any code)
+
+Grounded in code: the agent drives WG via `wgctrl` (netlink), holds `NET_ADMIN` + `/dev/net/tun`,
+and reports endpoint/wg-key to the control plane (`reportKeyLoop`). Device configs already emit
+`0.0.0.0/0` for full-tunnel (`devices/config.go`); nothing sets up forwarding/NAT anywhere in
+`apps/node/` — that is the whole gap.
+
+**(1) Privilege posture — NET_ADMIN is enough; the real dependency is the HOST kernel, so DETECT it.**
+No `privileged: true`. The agent already has `CAP_NET_ADMIN` in its own netns; `net.ipv4.ip_forward`
+is a per-netns sysctl writable with NET_ADMIN, and a source-NAT rule on the container's egress
+interface needs NET_ADMIN + the host's `nf_nat`/`nf_conntrack` (and masquerade support) loaded in the
+kernel — a capability caps can't grant. So S3.7 does NOT add privileges; it PROBES at boot whether
+egress NAT is achievable (ip_forward writable AND a masquerade rule can be added AND conntrack is
+present) and degrades gracefully when it isn't (locked-down host).
+
+**(2) iptables vs nftables — nftables, native.** The agent already speaks netlink for WG; it manages
+the NAT ruleset the same way (nftables netlink API, or the `nft` binary as a fallback) in its OWN
+named table/chain (e.g. `tunnex` table, a `postrouting` masquerade chain scoped to the pool CIDR →
+egress iface). Rationale: iptables-legacy is deprecated, iptables-nft is a shim over exactly this,
+and a dedicated nft table is atomically replaceable and won't collide with host rules. NO shelling to
+`wg-quick` PostUp (the agent owns the interface, not wg-quick). Masquerade is scoped to the org pool
+source CIDR — never a blanket rule.
+
+**(3) Per-gateway capability flag + `--full-tunnel` REFUSE (not warn).** The agent reports an
+`egress_nat` capability bit (from the probe) up the existing report channel; stored on the `nodes`
+row. Creating a device with `full_tunnel=true` against a gateway whose `egress_nat` is false is
+REFUSED server-side (typed `gateway_no_egress`) — a full-tunnel config that silently blackholes all
+internet is worse than a clear refusal; the UI mirrors it (disable/explain the full-tunnel toggle
+for incapable gateways). Split-tunnel is always allowed.
+
+**(4) Desired-state + full-sweep (reuse the cross-cutting principles).** NAT rules are data-plane
+state → RECONCILED on the S3.1 interval (the agent re-asserts ip_forward + the masquerade ruleset,
+heals a flushed table), never assumed. And revocation is a full sweep: when the gateway is revoked
+(or its last full-tunnel peer is gone) the NAT table is torn down — no dangling masquerade.
+
+**(5) Egress e2e (the proof obligation).** A compose "internet" target reachable by the gateway but
+NOT directly by the client; a client container with a full-tunnel `.conf` reaches it ONLY through the
+tunnel (real WG + real NAT, like the S4.5b race harness is real). Deliberate-red: flush the
+masquerade rule → egress fails (proves the rule carries it, not a leak). Negative: a device create
+with `full_tunnel=true` against a no-capability gateway → `gateway_no_egress`.
+
+Open sub-questions to settle IN the decision review (not assumed): whether `egress_nat` is a boolean
+column or a capabilities JSONB on `nodes` (forward-compat for future gateway caps); whether the probe
+runs once at enroll or every reconcile (host state can change); and the exact typed error + whether
+the open edition gates full-tunnel at all (it is core/edition-neutral like the allocator — lean
+neutral, confirm).
 
 ## EPIC 4 — Full Web Dashboard
 
