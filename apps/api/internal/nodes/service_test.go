@@ -8,9 +8,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -86,7 +88,7 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ca: %v", err)
 	}
-	svc := &Service{q: q, ca: ca}
+	svc := &Service{q: q, ca: ca, sealer: sealer}
 
 	// Issue a name-pinned token and enroll.
 	raw, err := svc.IssueJoinToken(ctx, actor, org, "gw-1")
@@ -98,6 +100,28 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Fatalf("enroll: %v", err)
 	}
 	serial := serialOf(t, ca, res.CertPEM) // also verifies cert chains to CA
+
+	// Audit correlation (S4.8/F3): the node.token_issued and node.enrolled rows
+	// carry the SAME keyed token fingerprint, and neither carries the raw token.
+	wantFP := sealer.Fingerprint([]byte(raw))
+	for _, action := range []string{"node.token_issued", "node.enrolled"} {
+		var metadata []byte
+		if err := tx.QueryRow(ctx,
+			"SELECT metadata FROM audit_logs WHERE org_id=$1 AND action=$2 ORDER BY created_at DESC LIMIT 1",
+			org, action).Scan(&metadata); err != nil {
+			t.Fatalf("audit row %s: %v", action, err)
+		}
+		var meta map[string]any
+		if err := json.Unmarshal(metadata, &meta); err != nil {
+			t.Fatalf("audit metadata %s: %v", action, err)
+		}
+		if fp, _ := meta["token_fingerprint"].(string); fp != wantFP {
+			t.Fatalf("%s token_fingerprint: want %q, got %q (meta=%v)", action, wantFP, fp, meta)
+		}
+		if strings.Contains(string(metadata), raw) {
+			t.Fatalf("%s metadata leaks the raw token", action)
+		}
+	}
 
 	// Cert identity resolves to the node.
 	node, err := svc.AuthenticateCert(ctx, serial)

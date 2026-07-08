@@ -23,6 +23,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
@@ -66,11 +67,15 @@ type Service struct {
 	pool *pgxpool.Pool
 	q    *sqlc.Queries
 	ca   *agentca.CA
+	// sealer supplies the keyed proof-of-secret fingerprint (S4.5 convention)
+	// written to the join-token audit rows, so issuance and redemption correlate
+	// without the raw token ever entering the audit stream.
+	sealer *crypto.Sealer
 }
 
 // NewService builds the node service.
-func NewService(pool *pgxpool.Pool, ca *agentca.CA) *Service {
-	return &Service{pool: pool, q: sqlc.New(pool), ca: ca}
+func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Service {
+	return &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer}
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
@@ -105,7 +110,10 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		}); e != nil {
 			return e
 		}
-		return audit(ctx, q, orgID, &actor, "node.token_issued", "node", nodeName, map[string]any{"node_name": nodeName})
+		// Keyed fingerprint (never the raw token, never a bare hash) so this row
+		// correlates with the node.enrolled row that redeems the same token.
+		return audit(ctx, q, orgID, &actor, "node.token_issued", "node", nodeName,
+			map[string]any{"node_name": nodeName, "token_fingerprint": s.sealer.Fingerprint([]byte(raw))})
 	})
 	if err != nil {
 		return "", err
@@ -153,7 +161,10 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 			return e
 		}
 		res = EnrollResult{NodeID: node.ID.String(), CertPEM: certPEM, CAPEM: string(s.ca.CertPEM())}
-		return audit(ctx, q, tok.OrgID, nil, "node.enrolled", "node", node.ID.String(), map[string]any{"name": nodeName, "agent_version": agentVersion})
+		// Same keyed fingerprint as the node.token_issued row — issue and redeem
+		// correlate in the audit stream without the raw token appearing anywhere.
+		return audit(ctx, q, tok.OrgID, nil, "node.enrolled", "node", node.ID.String(),
+			map[string]any{"name": nodeName, "agent_version": agentVersion, "token_fingerprint": s.sealer.Fingerprint([]byte(rawToken))})
 	})
 	if err != nil {
 		return EnrollResult{}, err

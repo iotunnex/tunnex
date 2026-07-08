@@ -133,7 +133,7 @@ func main() {
 	logger.Info("agent_ca_ready", slog.Bool("first_boot", caFirstBoot), slog.String("ca_fp", agentCA.Fingerprint()))
 
 	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
-	nodeSvc := nodes.NewService(pool, agentCA)
+	nodeSvc := nodes.NewService(pool, agentCA, sealer)
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 
