@@ -203,18 +203,15 @@ test("A6: second fresh signup ends on the invitation card with no usable create 
 
 // ---- A7: manual /create-org visit while holding an org -----------------------
 
-test("A7: RECORD — a with-org user visiting /create-org sees the form (submit re-routes; no visit-time re-route)", async ({ page }) => {
+test("A7: a with-org user visiting /create-org is re-routed to the dashboard at visit time", async ({ page }) => {
+  // The original walk run OBSERVED the form rendering here (friction F4 in
+  // ROUND2-REPORT.md); S4.8 added the RequireNoOrg visit-time guard. This now
+  // asserts the walk's ORIGINAL expectation.
   await login(page, W1);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await page.goto("/create-org");
-  // WALK EXPECTED: re-route to dashboard on visit.
-  // OBSERVED (asserted here so the record is exact): the form renders; the
-  // visit-time membership check does not exist — only the post-403 re-check does.
-  await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
-  // The submit path DOES land them on the dashboard (403 → re-check → has org):
-  await page.getByLabel("Organization name").fill("Another Org");
-  await page.getByRole("button", { name: "Create organization" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: "Create your organization" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Invitation required" })).toHaveCount(0);
 });
 
