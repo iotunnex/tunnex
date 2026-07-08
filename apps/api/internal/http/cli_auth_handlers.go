@@ -20,7 +20,7 @@ import (
 // CliAuthorize POST /api/v1/auth/cli/authorize — mints the one-time loopback
 // code (browser consent leg; the SPA calls this ONLY on the consent click).
 func (s apiServer) CliAuthorize(ctx context.Context, req api.CliAuthorizeRequestObject) (api.CliAuthorizeResponseObject, error) {
-	p, err := requireVerifiedUser(ctx)
+	p, err := requireVerifiedSessionUser(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s apiServer) CliDeviceStart(ctx context.Context, _ api.CliDeviceStartReque
 
 // CliDeviceApprove POST /api/v1/auth/cli/device/approve — the human checkpoint.
 func (s apiServer) CliDeviceApprove(ctx context.Context, req api.CliDeviceApproveRequestObject) (api.CliDeviceApproveResponseObject, error) {
-	p, err := requireVerifiedUser(ctx)
+	p, err := requireVerifiedSessionUser(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -55,7 +55,11 @@ export default function Login() {
       return;
     }
     setUser(data);
-    navigate("/dashboard", { replace: true });
+    // Honor a `next` from RequireAuth, but ONLY a local path (leading single
+    // slash) so it can never become an open redirect to another origin.
+    const next = params.get("next");
+    const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+    navigate(dest, { replace: true });
   }
 
   return (

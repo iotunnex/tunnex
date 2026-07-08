@@ -100,6 +100,14 @@ func (s *Service) MintAuthCode(ctx context.Context, userID uuid.UUID, redirectUR
 	if err := ValidateLoopbackRedirect(redirectURI); err != nil {
 		return "", 0, err
 	}
+	// PKCE must actually be in effect: reject a challenge that is not a 43-char
+	// base64url S256 digest at MINT time (loud failure), rather than silently
+	// minting a code that can never be redeemed (a self-DoS a broken client
+	// wouldn't understand).
+	if !isS256Challenge(codeChallenge) {
+		return "", 0, apierr.BadRequest("invalid_challenge",
+			"code_challenge must be a base64url-encoded SHA-256 (S256) PKCE challenge")
+	}
 	raw, hash, err := newSecret("tnxc_")
 	if err != nil {
 		return "", 0, err
@@ -298,20 +306,47 @@ func newSecret(prefix string) (string, []byte, error) {
 func hash(raw string) []byte { h := sha256.Sum256([]byte(raw)); return h[:] }
 
 // newUserCode returns a short human-typable code (XXXX-XXXX, unambiguous set).
+// Rejection sampling keeps the distribution UNIFORM — a plain byte%28 would bias
+// toward the first four symbols (256 mod 28 = 4) and shave entropy.
 func newUserCode() (string, error) {
 	const alphabet = "BCDFGHJKLMNPQRSTVWXZ23456789" // no vowels (no words), no 0/O/1/I
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
 	out := make([]byte, 0, 9)
-	for i, v := range b {
-		if i == 4 {
+	for len(out) < 9 {
+		if len(out) == 4 {
 			out = append(out, '-')
+			continue
 		}
-		out = append(out, alphabet[int(v)%len(alphabet)])
+		i, err := uniformIndex(len(alphabet))
+		if err != nil {
+			return "", err
+		}
+		out = append(out, alphabet[i])
 	}
 	return string(out), nil
+}
+
+// uniformIndex returns a uniform int in [0,n) via rejection sampling.
+func uniformIndex(n int) (int, error) {
+	max := 256 - (256 % n) // reject bytes at/above this to remove modulo bias
+	b := make([]byte, 1)
+	for {
+		if _, err := rand.Read(b); err != nil {
+			return 0, err
+		}
+		if int(b[0]) < max {
+			return int(b[0]) % n, nil
+		}
+	}
+}
+
+// isS256Challenge reports whether s is a 43-char base64url (no padding) string —
+// the exact shape of a base64url(SHA-256) PKCE challenge.
+func isS256Challenge(s string) bool {
+	if len(s) != 43 {
+		return false
+	}
+	_, err := base64.RawURLEncoding.DecodeString(s)
+	return err == nil
 }
 
 // normalizeUserCode is forgiving about case and a missing dash.

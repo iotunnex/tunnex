@@ -20,9 +20,9 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
+	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
-	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -81,6 +81,15 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	// tried FIRST: bearer ≡ cookie for authorization, and an EXPIRED credential
 	// is answered distinctly (401 credential_expired) so the CLI can prompt
 	// re-login instead of guessing.
+	//
+	// PRECEDENCE (intended, asymmetric): a request carries EITHER a bearer OR a
+	// cookie in practice — the CLI sends no cookie and a browser never attaches
+	// an Authorization header cross-site. An UNKNOWN/REVOKED bearer resolves to
+	// (nil,nil) and falls through to the cookie path; an EXPIRED bearer
+	// short-circuits with 401 and never consults the cookie (the CLI's re-login
+	// signal must not be masked by a stray session). A future client that sent
+	// BOTH must not rely on this: a valid bearer wins; a stale one is not a way
+	// to assume a cookie identity. Keep this precedence explicit if refactoring.
 	if d.AuthFn != nil || d.BearerFn != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

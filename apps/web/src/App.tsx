@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "./brand";
 import { api } from "./lib/api";
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -72,8 +72,15 @@ export default function App() {
 // to /login. Renders the nested routes via <Outlet />.
 function RequireAuth() {
   const { state } = useAuth();
+  const location = useLocation();
   if (state.status === "loading") return <FullScreenLoading />;
-  if (state.status === "anon") return <Navigate to="/login" replace />;
+  if (state.status === "anon") {
+    // Preserve the intended destination so it survives the login round-trip —
+    // the CLI login flow (`tunnex login` → /cli-auth?…) on a fresh machine
+    // depends on landing back on /cli-auth WITH its query params (S5.1).
+    const next = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?next=${next}`} replace />;
+  }
   return <Outlet />;
 }
 

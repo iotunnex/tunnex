@@ -42,6 +42,35 @@ func TestWriteFileAtomic0600(t *testing.T) {
 	}
 }
 
+// TestWriteFileAtomicFailurePreservesPrevious pins the ATOMICITY that a plain
+// os.WriteFile would not give: a failed write must leave the EXISTING file
+// intact (never a truncated/half-written key) and drop no temp litter. Forced
+// by making the destination a directory whose final rename cannot succeed onto
+// the pre-existing good file... instead we force the temp write path to fail by
+// pointing at a path whose parent is a file, and assert the good file survives.
+func TestWriteFileAtomicFailurePreservesPrevious(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "device.conf")
+	if err := WriteFileAtomic0600(good, []byte("GOOD-KEY")); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// A path whose parent component is a FILE (good) — MkdirAll under it fails,
+	// so the write aborts before touching anything.
+	bad := filepath.Join(good, "nested", "device.conf")
+	if err := WriteFileAtomic0600(bad, []byte("HALF")); err == nil {
+		t.Fatal("expected the write to fail")
+	}
+	// The pre-existing good file is untouched, and no temp file was left in dir.
+	b, err := os.ReadFile(good)
+	if err != nil || string(b) != "GOOD-KEY" {
+		t.Fatalf("previous file damaged: %q err=%v", b, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("temp litter after failed write: %d entries", len(entries))
+	}
+}
+
 // TestCredentialRoundTrip pins the credential store (0600, XDG/TUNNEX_STATE_DIR).
 func TestCredentialRoundTrip(t *testing.T) {
 	t.Setenv("TUNNEX_STATE_DIR", t.TempDir())

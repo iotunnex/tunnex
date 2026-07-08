@@ -221,6 +221,80 @@ func TestDeviceFlow(t *testing.T) {
 	}
 }
 
+// TestExpiredCodesAreRefused pins that the expires_at guard in the consume
+// queries actually gates redemption — a dropped "expires_at > now()" would make
+// the 60s/15m codes redeemable forever.
+func TestExpiredCodesAreRefused(t *testing.T) {
+	ctx, svc, q, tx, user := setup(t)
+	verifier, challenge := pkcePair(t)
+
+	// Loopback: mint, then force the row past expiry → exchange refused.
+	code, _, err := svc.MintAuthCode(ctx, user, "http://127.0.0.1:1/callback", challenge)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE cli_auth_codes SET expires_at = now() - interval '1 second'"); err != nil {
+		t.Fatalf("age code: %v", err)
+	}
+	if _, err := svc.ExchangeCode(ctx, code, verifier, "http://127.0.0.1:1/callback"); codeOf(err) != "invalid_grant" {
+		t.Fatalf("expired auth code: want invalid_grant, got %v", err)
+	}
+	_ = q
+
+	// Device: start + approve, then expire before poll → refused.
+	d, err := svc.StartDevice(ctx)
+	if err != nil {
+		t.Fatalf("device start: %v", err)
+	}
+	if err := svc.ApproveDevice(ctx, user, d.UserCode); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE cli_device_codes SET expires_at = now() - interval '1 second'"); err != nil {
+		t.Fatalf("age device: %v", err)
+	}
+	if _, err := svc.PollDevice(ctx, d.DeviceCode); codeOf(err) != "invalid_grant" {
+		t.Fatalf("expired device code: want invalid_grant, got %v", err)
+	}
+}
+
+// TestChallengeValidation pins the PKCE-in-effect check at mint time.
+func TestChallengeValidation(t *testing.T) {
+	ctx, svc, _, _, user := setup(t)
+	for _, bad := range []string{"", "short", strings.Repeat("a", 42), strings.Repeat("!", 43)} {
+		if _, _, err := svc.MintAuthCode(ctx, user, "http://127.0.0.1:1/callback", bad); codeOf(err) != "invalid_challenge" {
+			t.Fatalf("challenge %q: want invalid_challenge, got %v", bad, err)
+		}
+	}
+	_, valid := pkcePair(t)
+	if _, _, err := svc.MintAuthCode(ctx, user, "http://127.0.0.1:1/callback", valid); err != nil {
+		t.Fatalf("valid challenge rejected: %v", err)
+	}
+}
+
+// TestUserCodeUniform sanity-checks the rejection-sampled alphabet: every symbol
+// is reachable and the dash is fixed at position 4 (no bias assertion — just
+// that the generator uses the full set and shape).
+func TestUserCodeUniform(t *testing.T) {
+	seen := map[rune]bool{}
+	for range 400 {
+		c, err := newUserCode()
+		if err != nil {
+			t.Fatalf("gen: %v", err)
+		}
+		if len(c) != 9 || c[4] != '-' {
+			t.Fatalf("shape: %q", c)
+		}
+		for _, r := range c {
+			if r != '-' {
+				seen[r] = true
+			}
+		}
+	}
+	if len(seen) != 28 {
+		t.Fatalf("alphabet coverage: %d/28 symbols seen", len(seen))
+	}
+}
+
 // TestSweep pins the sweep semantics the reset/deactivation paths rely on.
 func TestSweep(t *testing.T) {
 	ctx, svc, q, _, user := setup(t)

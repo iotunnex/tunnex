@@ -24,10 +24,10 @@ import (
 // against. It authorizes every request by the client CERTIFICATE (serial ->
 // node), never by anything in the request body (the machine-edition IDOR rule).
 type AgentChannel struct {
-	svc      *nodes.Service
-	ca       *agentca.CA
-	hub      *nodepush.Hub
-	logger   *slog.Logger
+	svc       *nodes.Service
+	ca        *agentca.CA
+	hub       *nodepush.Hub
+	logger    *slog.Logger
 	watchHold time.Duration
 }
 

@@ -1,10 +1,12 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -58,8 +60,8 @@ func TestBearerCredentialSemantics(t *testing.T) {
 	svc := cliauth.NewService(pool, sealer)
 
 	router, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), Deps{
-		Orgs:    tenancy.NewService(pool),
-		CliAuth: svc,
+		Orgs:     tenancy.NewService(pool),
+		CliAuth:  svc,
 		BearerFn: BearerAuth(sqlc.New(pool)),
 	})
 	if err != nil {
@@ -112,31 +114,76 @@ func TestBearerCredentialSemantics(t *testing.T) {
 		t.Fatal("credential list leaked token material")
 	}
 
-	// THE CSRF-INERT PROOF: an unsafe-method mutation with a bearer, NO cookie,
-	// NO X-Tunnex-CSRF header — csrfGuard must not interfere (it is cookie-keyed).
+	// COOKIE-ONLY MINTING (the argued exception, decision b) — a bearer must NOT
+	// be able to mint a new credential from an existing one (self-replication).
+	// This is the deliberate-red guard: refused with 403 session_required.
+	mintBody := strings.NewReader(`{"redirect_uri":"http://127.0.0.1:9/callback","code_challenge":"` + strings.Repeat("a", 43) + `","state":"x"}`)
+	mreq, _ := http.NewRequest("POST", srv.URL+"/api/v1/auth/cli/authorize", mintBody)
+	mreq.Header.Set("Content-Type", "application/json")
+	mreq.Header.Set("Authorization", "Bearer "+cred1.Token)
+	mresp, err := srv.Client().Do(mreq)
+	if err != nil {
+		t.Fatalf("mint-from-bearer: %v", err)
+	}
+	mrb, _ := io.ReadAll(mresp.Body)
+	if mresp.StatusCode != 403 || !strings.Contains(string(mrb), "session_required") {
+		t.Fatalf("bearer minting a credential: want 403 session_required, got %d — %s", mresp.StatusCode, mrb)
+	}
+
+	// Locate cred2's id by PARSING the list (not string-slicing — a field-order
+	// change must not silently mis-target the revoke).
+	var creds []struct {
+		Id          string `json:"id"`
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(body, &creds); err != nil {
+		t.Fatalf("parse list: %v", err)
+	}
 	var cred2ID string
-	for _, line := range strings.Split(string(body), "},") {
-		if strings.Contains(line, cred2.Fingerprint) {
-			cred2ID = line[strings.Index(line, `"id":"`)+6:]
-			cred2ID = cred2ID[:36]
+	for _, c := range creds {
+		if c.Fingerprint == cred2.Fingerprint {
+			cred2ID = c.Id
 		}
 	}
 	if cred2ID == "" {
 		t.Fatal("could not locate cred2 id in list")
 	}
+
+	// THE CSRF-INERT PROOF: an unsafe-method mutation with a bearer, NO cookie,
+	// NO X-Tunnex-CSRF header — csrfGuard must not interfere (it is cookie-keyed).
 	if resp := do("DELETE", "/api/v1/auth/cli/credentials/"+cred2ID, cred1.Token); resp.StatusCode != 204 {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("bearer DELETE without CSRF header: want 204, got %d — %s", resp.StatusCode, b)
 	}
 
-	// REVOKED bearer → generic 401 (cred2 was just revoked).
-	resp = do("GET", "/api/v1/auth/cli/credentials", cred2.Token)
-	body, _ = io.ReadAll(resp.Body)
-	if resp.StatusCode != 401 || strings.Contains(string(body), "credential_expired") {
-		t.Fatalf("revoked bearer: want generic 401, got %d — %s", resp.StatusCode, body)
+	// NO-ORACLE: a REVOKED bearer and an UNKNOWN bearer must be byte-identical
+	// (an attacker probing a stolen token can't tell "was real, revoked" from
+	// "never existed"). cred2 was just revoked; a random tnx_ is unknown.
+	revokedResp := do("GET", "/api/v1/auth/cli/credentials", cred2.Token)
+	revokedBody, _ := io.ReadAll(revokedResp.Body)
+	unknownResp := do("GET", "/api/v1/auth/cli/credentials", "tnx_"+strings.Repeat("z", 43))
+	unknownBody, _ := io.ReadAll(unknownResp.Body)
+	if revokedResp.StatusCode != 401 || unknownResp.StatusCode != 401 {
+		t.Fatalf("revoked/unknown status: %d / %d", revokedResp.StatusCode, unknownResp.StatusCode)
+	}
+	if !bytes.Equal(stripReqID(revokedBody), stripReqID(unknownBody)) {
+		t.Fatalf("revoked vs unknown NOT identical (oracle):\n revoked=%s\n unknown=%s", revokedBody, unknownBody)
 	}
 
-	// EXPIRED bearer → DISTINCT 401 credential_expired.
+	// DEACTIVATED user's bearer → generic 401 (independent of the sweep — a
+	// direct status flip that didn't run SweepUser must still kill the credential).
+	if _, err := pool.Exec(ctx, "UPDATE users SET status='deactivated' WHERE id=$1", userID); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if resp := do("GET", "/api/v1/auth/cli/credentials", cred1.Token); resp.StatusCode != 401 {
+		t.Fatalf("deactivated user's bearer: want 401, got %d", resp.StatusCode)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE users SET status='active' WHERE id=$1", userID); err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+
+	// EXPIRED bearer → DISTINCT 401 credential_expired (the signed-off CLI UX;
+	// the accepted-oracle tradeoff is recorded in PLAN).
 	h := sha256.Sum256([]byte(cred1.Token))
 	if _, err := pool.Exec(ctx, "UPDATE cli_credentials SET expires_at = now() - interval '1 second' WHERE token_hash=$1", h[:]); err != nil {
 		t.Fatalf("expire: %v", err)
@@ -151,4 +198,18 @@ func TestBearerCredentialSemantics(t *testing.T) {
 	if resp := do("GET", "/api/v1/auth/cli/credentials", ""); resp.StatusCode != 401 {
 		t.Fatalf("no auth: want 401, got %d", resp.StatusCode)
 	}
+}
+
+// stripReqID removes the per-request request_id so two error envelopes can be
+// compared for the no-oracle property (only request_id legitimately differs).
+func stripReqID(b []byte) []byte {
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil {
+		return b
+	}
+	if e, ok := m["error"].(map[string]any); ok {
+		delete(e, "request_id")
+	}
+	out, _ := json.Marshal(m)
+	return out
 }

@@ -38,10 +38,12 @@ test("the consent page shows the loopback target with its port and does NOT auto
   // The port is called out on its own (accent span) — proves it's surfaced, not buried.
   await expect(page.getByText("54321", { exact: true })).toBeVisible();
 
-  // NO-CLICK-NO-MINT: sit on the page; nothing was minted.
-  await page.waitForTimeout(400);
-  expect(minted).toBe(0);
+  // NO-CLICK-NO-MINT: the authorize control is present but nothing was minted —
+  // re-checked AFTER the control settles, so a deferred/debounced auto-mint
+  // (effect, idle callback, focus handler) would still be caught.
   await expect(page.getByRole("button", { name: "Authorize this CLI" })).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(minted).toBe(0);
 });
 
 test("the explicit click mints the code and redirects to the loopback with code + state", async ({ page }) => {
@@ -80,7 +82,20 @@ test("a non-loopback redirect_uri is refused (no authorize control shown)", asyn
   expect(minted).toBe(0);
 });
 
-test("the device page approves the printed user_code (human checkpoint)", async ({ page }) => {
+test("a logged-out `tunnex login` returns to the consent page after sign-in (S5.1/F4)", async ({ page }) => {
+  // Fresh-machine case: hit /cli-auth with no session → bounced to login → after
+  // sign-in, land BACK on the consent page with its query params intact.
+  await page.context().clearCookies();
+  await page.goto(CONSENT);
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await page.getByLabel("Email").fill(OWNER.email);
+  await page.getByLabel("Password").fill(OWNER.pass);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Authorize the Tunnex CLI" })).toBeVisible();
+  await expect(page.getByText("127.0.0.1:54321/callback")).toBeVisible();
+});
+
+test("the device page warns against phishing and approves the printed user_code", async ({ page }) => {
   let approvedCode = "";
   await page.route("**/api/v1/auth/cli/device/approve", (route) => {
     approvedCode = JSON.parse(route.request().postData() || "{}").user_code;
@@ -88,7 +103,8 @@ test("the device page approves the printed user_code (human checkpoint)", async 
   });
   await login(page);
   await page.goto("/cli-device?user_code=WXYZ-2345");
-  // The code is displayed (prefilled) and must be explicitly approved.
+  // The anti-phishing warning is present, and the code is displayed (prefilled).
+  await expect(page.getByText(/Only enter a code you started yourself/i)).toBeVisible();
   await expect(page.getByLabel("Device code")).toHaveValue("WXYZ-2345");
   await page.getByRole("button", { name: "Approve this device" }).click();
   await expect(page.getByRole("heading", { name: "CLI approved" })).toBeVisible();

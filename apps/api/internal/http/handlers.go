@@ -60,6 +60,27 @@ func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
 	return p, nil
 }
 
+// requireVerifiedSessionUser is requireVerifiedUser PLUS a proof that the
+// principal is backed by a browser SESSION, not a CLI bearer credential. It
+// ENFORCES the cookie-only exception argued in the spec for CLI credential
+// minting (cliAuthorize / cliDeviceApprove): a bearer-built principal has no
+// SessionID (only SessionAuth sets it), so minting a NEW credential from an
+// existing bearer credential — self-replication that would let a stolen token
+// outlive its expiry and survive revocation of the original — is refused. The
+// browser session is the human checkpoint; without this the spec's
+// "cookie-session only" would be documentation, not behavior.
+func requireVerifiedSessionUser(ctx context.Context) (*authctx.Principal, error) {
+	p, err := requireVerifiedUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if p.SessionID == "" {
+		return nil, apierr.New(http.StatusForbidden, "session_required",
+			"a browser session is required to authorize a CLI credential; a CLI credential cannot mint another")
+	}
+	return p, nil
+}
+
 // apiServer implements the generated api.StrictServerInterface. Handlers return
 // typed responses on success and plain errors on failure; the strict handler's
 // ResponseErrorHandlerFunc renders those errors as the standard envelope.

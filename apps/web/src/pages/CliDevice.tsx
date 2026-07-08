@@ -50,6 +50,12 @@ export default function CliDevice() {
         Signed in as <span className="text-slate-200">{email}</span>. Enter the code shown by{" "}
         <span className="font-mono">tunnex login --device</span> to grant it a credential.
       </p>
+      {/* Anti-phishing (device-flow's inherent risk): approving binds a credential
+          to YOUR identity for whoever is polling that code. */}
+      <p className="mt-3 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-xs text-slate-300">
+        Only enter a code you started yourself on this or another of your machines. If someone asked you to enter a
+        code here, stop — approving it would give <span className="font-semibold">them</span> access to your account.
+      </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Device code">
           <Input value={userCode} onChange={(e) => setUserCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" required autoFocus />
