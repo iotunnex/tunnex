@@ -3,6 +3,8 @@
 
 FROM golang:1.25.11-alpine AS build
 WORKDIR /src
+# git: Go needs it to fetch VCS-only module deps on a cold cache (CI).
+RUN apk add --no-cache git
 COPY apps/node/go.mod apps/node/go.sum* ./
 ENV GOFLAGS=-mod=mod
 RUN go mod download

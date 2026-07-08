@@ -11,7 +11,10 @@ import * as crypto from "node:crypto";
 
 // ---- app:// path escape-rejection (the security core of the protocol) --------
 test("resolveBundlePath serves in-bundle files and REJECTS escapes", () => {
-  const root = "/app/bundle";
+  // Resolve the fixture root for the host platform (Windows prefixes a drive) so
+  // expectations match resolveBundlePath's own absolute resolution — the function
+  // is correct cross-platform; only a POSIX-literal fixture broke on Windows CI.
+  const root = path.resolve("/app/bundle");
   assert.equal(resolveBundlePath(root, "/"), path.join(root, "index.html"));
   assert.equal(resolveBundlePath(root, "/index.html"), path.join(root, "index.html"));
   assert.equal(resolveBundlePath(root, "/assets/app.js"), path.join(root, "assets/app.js"));
@@ -27,7 +30,7 @@ test("resolveBundlePath serves in-bundle files and REJECTS escapes", () => {
     assert.equal(resolveBundlePath(root, bad), null, `must reject ${bad}`);
   }
   // The /root-evil prefix trap: a sibling dir sharing the prefix is NOT inside.
-  assert.equal(resolveBundlePath("/app/bundle", "/../bundle-evil/x"), null);
+  assert.equal(resolveBundlePath(root, "/../bundle-evil/x"), null);
 });
 
 // ---- server URL: shape + /healthz validation + relogin-on-change -------------

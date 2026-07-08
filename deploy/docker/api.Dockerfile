@@ -3,6 +3,8 @@
 
 FROM golang:1.25.11-alpine AS build
 WORKDIR /src
+# git: Go needs it to fetch VCS-only module deps on a cold cache (CI).
+RUN apk add --no-cache git
 
 # Download deps first for layer caching. go.sum is created on first build.
 COPY apps/api/go.mod apps/api/go.sum* ./

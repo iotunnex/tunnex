@@ -33,6 +33,7 @@ jobs:
 
       - name: Both editions — build + test (open + enterprise)
         run: |
+          cp .env.example .env   # compose + make migrate read DATABASE_URL from here
           docker compose up -d --wait postgres
           make migrate
           make test-editions
@@ -76,6 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Bring up the stack + seed
         run: |
+          cp .env.example .env
           docker compose up -d --build --wait
           make seed
       - name: Playwright e2e (SPA → API)
