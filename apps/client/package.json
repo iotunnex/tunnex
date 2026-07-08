@@ -1,0 +1,23 @@
+{
+  "name": "@tunnex/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tunnex desktop client (Electron)",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --loader ts-node/esm test/*.test.ts"
+  },
+  "dependencies": {
+    "electron-log": "5.2.0",
+    "electron-store": "8.2.0",
+    "electron-updater": "6.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.0",
+    "electron": "31.7.7",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.4"
+  }
+}
