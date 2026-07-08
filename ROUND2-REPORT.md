@@ -74,8 +74,8 @@ alternative rejected: exempting login server-side would reopen login-CSRF.
 ## Part B — RESULTS (run 2026-07-08, real Entra tenant, human-driven by Pawan)
 
 Setup: one-off `-tags enterprise` api image (uncommitted Dockerfile edit); real tenant
-`4a898aae-0274-4843-9416-1a0c2bc97357` (iotunnexoutlook.onmicrosoft.com, Entra ID Free); app
-`tunnex-dev` (`ff341a6d-3a06-4e10-8e3d-a6983784ebde`) with Web redirect URI
+`<your-entra-tenant-id>` (<your-tenant>.onmicrosoft.com, Entra ID Free); app
+`tunnex-dev` (`<your-app-client-id>`) with Web redirect URI
 `http://localhost/api/v1/auth/sso/microsoft/callback`.
 
 | Step | Expected | Observed | Verdict |
