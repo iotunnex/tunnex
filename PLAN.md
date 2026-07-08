@@ -46,18 +46,16 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S5.1 MERGED — EPIC 5 COMPLETE (CLI login via loopback+device-code, dedicated bearer
-credential model, CLI-owned device creation, wg-quick wrapper, cli-dist ×5 + SHA256SUMS). DECISION
-PENDING (user): public-beta milestone — pull forward per Positioning section, or proceed straight to
-EPIC 6. Ops trigger NOW LIVE: code-signing procurement was re-anchored to "when EPIC 6 opens" — if
-EPIC 6 is chosen, applications must start same-week (Windows EV 1–3wk validation precedes S6.5).
+Current: **EPIC 6 OPEN — S6.1 (client shell) next. Ops CLOCK RUNNING: signing applications (Apple
+Dev ID + Windows EV) must be filed this week (Pawan) — S6.5 hard-blocked otherwise. S3.7 parked at
+paper. Beta milestone deferred, not rejected — re-decide at EPIC 6 close.**
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
-CLI-sessions panel.**
+CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
-(tunnex CLI).** If this pointer disagrees with the handoff doc / git log, TRUST GIT
-(`git log --oneline -15`) and update this line.
+(tunnex CLI).** Current epic: EPIC 6 (Electron desktop client), S6.1 next. If this pointer disagrees
+with the handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -115,10 +113,12 @@ Seed for the eventual SECURITY.md.
 - **S3.7 Gateway NAT + forwarding (full-tunnel egress)** — make `--full-tunnel` (`AllowedIPs=0.0.0.0/0`)
   actually reach the internet: the agent enables IP forwarding + source-NAT on the gateway so client
   traffic egresses via the gateway host. Today the config connects but egress dies at the gateway
-  (split-tunnel only). **DECISION-FIRST — do not implement until the decision commit is reviewed AND
-  the beta-vs-EPIC-6 call is made (that gates everything).**
+  (split-tunnel only).
+  **PARKED at paper (2026-07-08).** The paper decision below stands, unreviewed-for-build; EPIC 6 was
+  chosen over pulling this forward. **Ledger trigger: EPIC 6 close OR the beta milestone, whichever
+  comes first** — resume with a decision review, then build. Beta was DEFERRED, not rejected.
 
-### S3.7 paper decision (COMMIT ONE — decided on paper, for review before any code)
+### S3.7 paper decision (PARKED — decided on paper; review + build deferred to the trigger above)
 
 Grounded in code: the agent drives WG via `wgctrl` (netlink), holds `NET_ADMIN` + `/dev/net/tun`,
 and reports endpoint/wg-key to the control plane (`reportKeyLoop`). Device configs already emit
