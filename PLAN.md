@@ -398,6 +398,16 @@ Ledgered at implementation sign-off (MERGED item):
   **playwright-electron** is NOT in scope now — launching Electron needs xvfb + the built app + the
   stack, not "trivially cheap"; ledgered for later. Must land before S6.5; recommended before S6.3.
 
+**S6.0b LEDGER — e2e-in-CI demoted to non-blocking (opportunistic, as designed).** First Actions
+runs on the Linux `e2e` job hit a runner-only `git: not found` during the api image's `go build`
+(module VCS fetch into `/go/pkg/mod/cache/vcs`) that does NOT reproduce locally (cold-cache local
+build needs no git) and PERSISTED even with `apk add git` in the builder stage + `-buildvcs=false` —
+pointing at a runner/registry-network quirk (proxy fallback to `direct`), not our Dockerfile. Per
+the S6.0b mandate (full e2e in CI is opportunistic), the job is marked `continue-on-error: true` so
+it never blocks merge; **gates + client remain the blocking gates**. e2e still runs locally
+(`make e2e`, 45/45) and the CI e2e job stays visible for diagnosis. TRIGGER to re-block: root-cause
+the runner git/proxy behavior (candidates: pin `GOPROXY`, vendor modules, or a prebuilt base image).
+
 ### S6.0b decide-before-code (COMMIT ONE, for review): deliberate-red representation in CI
 The story-protocol proves each new guard by a DELIBERATE RED — comment out the guard, watch its test
 fail, record the one-line failure in the commit — then restore green. **Decision: CI runs the GREEN

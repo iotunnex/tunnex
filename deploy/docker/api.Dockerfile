@@ -12,7 +12,7 @@ ENV GOFLAGS=-mod=mod
 RUN go mod download
 
 COPY apps/api/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 tunnex

@@ -116,9 +116,9 @@ cli-dist: ## Cross-compile the tunnex CLI for release + SHA256SUMS (S5.1)
 .PHONY: build-editions
 build-editions: ## Compile both open and enterprise builds (catches edition rot)
 	@echo ">> open build"
-	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) go build ./...
+	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) sh -c "apk add --no-cache git && go build ./..."
 	@echo ">> enterprise build (-tags enterprise)"
-	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) go build -tags enterprise ./...
+	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod $(GO_IMAGE) sh -c "apk add --no-cache git && go build -tags enterprise ./..."
 
 .PHONY: test-editions
 test-editions: ## Run the suite in BOTH editions against the live DB
@@ -126,18 +126,18 @@ test-editions: ## Run the suite in BOTH editions against the live DB
 	@echo ">> open edition tests"
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go test ./...
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go test ./..."
 	@echo ">> enterprise edition tests (-tags enterprise)"
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go test -tags enterprise ./...
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go test -tags enterprise ./..."
 
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=mod \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go run ./cmd/seed
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go run ./cmd/seed"
 
 .PHONY: e2e
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e
