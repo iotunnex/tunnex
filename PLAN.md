@@ -42,16 +42,33 @@ rebase the active story branch onto it to keep the ff-merge clean.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S4.7 MERGED (EPIC 4 closed again, incl. onboarding funnel + reactive-403 amendment).
-NEXT: Round-2 manual walk (fresh-org + Entra SSO vs real tenant) — its friction list feeds S5.1
-watch-items. S5.1 remains HELD until the walk lands. Ops: code-signing procurement still open (Pawan).**
-Next after the walk: the natural S5.1 work — CLI `login` (browser + deep-link callback, with a
-device-code / localhost `127.0.0.1:<port>` callback fallback for headless), fetch config,
-`wg-quick up/down` wrapper. S5.1 decide-before-code (TBD, HELD): device-code vs localhost-callback
-selection; client-side config storage location + file permissions; how the CLI authenticates
-against a session model built for browser cookies.
-Still pending: **Round-2 manual testing walk** (fresh-org + Entra SSO against a real tenant) —
-wanted right after S4.7 merges, BEFORE S5.1 locks CLI flow assumptions; its friction feeds S5.1.
+Current: **S4.8 (Round-2 walk fixes) IN PROGRESS.** The scripted Part A walk ran (see
+ROUND2-REPORT.md): full enrollment loop proven LIVE (token → agent → node → device → real WG
+handshake + traffic), 1 bug + 6 frictions found. S4.8 scope, priority order: (1) B1 CSRF
+stale-cookie login lockout — client-wide X-Tunnex-CSRF in createTunnexClient, kill per-page
+hand-plumbs, regression e2e (stale cookie present → login succeeds, Set-Cookie replaces it);
+(2) F1+F2 — ceremony emits TUNNEX_NODE_NAME for name-pinned tokens + compose plumbs it, e2e;
+(3) F3 — Sealer.Fingerprint on node.token_issued + enrollment audit rows, shared-fingerprint test;
+(4) F4 — visit-time re-route on /create-org (RequireNoOrg), e2e; (5) commit the ROUND2-gated walk
+spec + report. F5/F6 → UX-backlog (no code).
+**S5.1 remains HELD on: S4.8 merge + Part B of the walk (B1–B6, human, real Entra tenant + DNS).**
+Ops: code-signing procurement still open (Pawan).
+Next after S4.8 + Part B: the natural S5.1 work — CLI `login`, get a config, `wg-quick up/down`
+wrapper. **S5.1 decide-items, updated from the Part A walk evidence (ROUND2-REPORT.md):**
+- **D2 RESOLVED — CLI owns device creation.** The device config is served EXACTLY ONCE at creation
+  and is never re-fetchable, so "fetch config for a device" cannot exist: the CLI creates the
+  device itself and atomically writes the config `0600` at that moment (CLI state dir or
+  /etc/wireguard). The browser's ~/Downloads-with-default-perms drop is the anti-pattern.
+- **D3 NEAR-RESOLVED — dedicated header-borne CLI credential, NOT cookies.** Observed: 30-day
+  httpOnly SameSite=Lax cookie + CSRF header on unsafe methods + reset-revokes-all; bug B1 was a
+  live demo of cookie/CSRF coupling hurting non-browser clients. Nothing token-shaped exists yet.
+  **This ADDS SERVER-SIDE SCOPE to S5.1: a CLI credential model + issuance endpoint** (long-lived
+  token minted via browser/device-code exchange, sent as a header, keyed-fingerprint in audit per
+  the S4.5 proof-of-secret convention).
+- **D1 OPEN — pending B3** (Entra redirect/MFA/conditional-access behavior vs a
+  `127.0.0.1:<port>` callback; only the real-tenant walk answers it).
+Still pending: **Part B of the Round-2 walk** (B1–B6 — enterprise SSO config, DNS-TXT domain
+capture, JIT, linking; human, real Entra tenant) — B3 decides D1, BEFORE S5.1 locks CLI flow.
 Ops (Pawan, long lead — START NOW): code-signing procurement — Apple Developer ID (~$99/yr, days)
 + Windows EV cert (~$300-500/yr, 1-3wk validation). Hard-blocks S6.5 packaging; nothing in S5.1
 blocks on it, but the validation clock starts at application.
@@ -198,6 +215,19 @@ op, RBAC matrix, deliberate-red one-line per new guard).
 Prove: fresh-org empty-state render set (Playwright, all three router branches); enrollment e2e
 (join-token → agent joins → node appears — real compose agent if the harness allows, else mocked
 ceremony + a deferred-ledger entry).
+
+- **S4.8 Round-2 walk fixes** — the Part A walk's bug + top frictions (see ROUND2-REPORT.md):
+  B1 CSRF stale-cookie login lockout (client-wide header in createTunnexClient); F1+F2 name-pinned
+  join-token ceremony line + compose plumb; F3 token fingerprint in issuance/enrollment audit;
+  F4 visit-time /create-org re-route; commit the ROUND2-gated walk spec + report.
+
+**UX-backlog (from the Round-2 walk — recorded, NO code scheduled):**
+- F5: org-name slugging drops non-ASCII (`Ä` → dropped, not transliterated to `a`); emoji-only
+  names produce an empty slug requiring a manual one. Cosmetic.
+- F6: the verify-email success page could point to sign-in more loudly (the link does not and
+  should not establish a session; the page just under-sells the next step).
+- B6 (when Part B runs): member-role user's empty dashboard has no actionable next step (no
+  gateway-enroll permission) — assess whether the member empty state needs its own copy.
 
 ## EPIC 5 — CLI Client (dogfood & de-risk before Electron)
 
