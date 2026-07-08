@@ -44,7 +44,7 @@ export default function App() {
             the shell: /create-org and /verify-pending are reachable while
             authenticated with no org yet; the shell itself is gated by RequireOrg. */}
         <Route element={<RequireAuth />}>
-          <Route path="/create-org" element={<CreateOrg />} />
+          <Route path="/create-org" element={<RequireNoOrg><CreateOrg /></RequireNoOrg>} />
           <Route path="/verify-pending" element={<VerifyPending />} />
           <Route element={<RequireOrg><AppShell /></RequireOrg>}>
             <Route path="/dashboard" element={<Dashboard />} />
@@ -69,6 +69,37 @@ function RequireAuth() {
   if (state.status === "loading") return <FullScreenLoading />;
   if (state.status === "anon") return <Navigate to="/login" replace />;
   return <Outlet />;
+}
+
+// RequireNoOrg is RequireOrg's inverse, guarding the create-org step itself
+// (S4.8/F4): a user who ALREADY belongs to an org and navigates to /create-org
+// manually is re-routed to the dashboard at VISIT time — previously only the
+// submit path re-checked (403 → membership re-check), so the form rendered
+// pointlessly. Fail-open on a fetch error: the form is safe to show (the
+// submit path still ends in the server's answer).
+function RequireNoOrg({ children }: { children: React.ReactNode }) {
+  const [status, setStatus] = useState<"loading" | "none" | "has">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .GET("/api/v1/organizations")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) return setStatus("none"); // fail open to the form
+        setStatus((data?.length ?? 0) > 0 ? "has" : "none");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("none");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (status === "loading") return <FullScreenLoading />;
+  if (status === "has") return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
 }
 
 // RequireOrg is the onboarding funnel's router (S4.7). It gates the app shell on

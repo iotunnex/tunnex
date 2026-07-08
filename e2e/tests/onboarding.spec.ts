@@ -155,6 +155,17 @@ test("org_limit_reached re-checks membership: a user who gained one meanwhile go
   await expect(page.getByRole("heading", { name: "Invitation required" })).toHaveCount(0);
 });
 
+test("a user who already has an org visiting /create-org is re-routed at VISIT time (S4.8/F4)", async ({ page }) => {
+  // Real backend: the seeded owner belongs to the demo org, so /create-org must
+  // bounce to the dashboard without ever rendering the form.
+  await signIn(page, OWNER);
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/create-org");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: "Create your organization" })).toHaveCount(0);
+});
+
 test("enrolling a gateway shows the join token exactly once (one-time-secret ceremony)", async ({ page }) => {
   const TOKEN = "jt-onboarding-secret-xyz";
   let issued = 0;
