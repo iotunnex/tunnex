@@ -26,8 +26,13 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
   });
 
   ipcMain.handle("auth:logout", async () => {
-    await runLogout(store);
-    win.webContents.reload();
+    // Reload REGARDLESS of a logout error so the renderer re-syncs auth state
+    // (never leave the user on an authed UI with no feedback).
+    try {
+      await runLogout(store);
+    } finally {
+      win.webContents.reload();
+    }
   });
 
   ipcMain.handle("config:getServerUrl", () => config.getServerUrl());

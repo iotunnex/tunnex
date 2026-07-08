@@ -35,6 +35,11 @@ type Config struct {
 	SessionIdleTTL time.Duration
 	// SessionAbsoluteTTL is the hard maximum session lifetime (S2.2).
 	SessionAbsoluteTTL time.Duration
+	// CORSAllowedOrigins are the EXACT origins allowed to make cross-origin,
+	// BEARER-authenticated requests (S6.2 desktop client, whose renderer origin
+	// is app://tunnex). Credentials (cookies) are NEVER allowed cross-origin, so
+	// this cannot weaken the same-origin cookie/CSRF posture. Comma-separated.
+	CORSAllowedOrigins []string
 	// SMTP holds mail delivery configuration (S0.3).
 	SMTP SMTP
 }
@@ -55,11 +60,11 @@ func (c Config) IsProduction() bool { return c.Env == "production" }
 // server runs with zero configuration during development.
 func Load() Config {
 	return Config{
-		Addr:       getenv("TUNNEX_API_ADDR", ":8080"),
-		AgentAddr:  getenv("TUNNEX_AGENT_ADDR", ":8443"),
-		Env:        getenv("TUNNEX_ENV", "development"),
-		LogLevel:    strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
-		SecretsDir:  getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
+		Addr:               getenv("TUNNEX_API_ADDR", ":8080"),
+		AgentAddr:          getenv("TUNNEX_AGENT_ADDR", ":8443"),
+		Env:                getenv("TUNNEX_ENV", "development"),
+		LogLevel:           strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
+		SecretsDir:         getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
@@ -67,6 +72,7 @@ func Load() Config {
 		CookieSecure:       getbool("TUNNEX_COOKIE_SECURE", false),
 		SessionIdleTTL:     getdur("TUNNEX_SESSION_IDLE_TTL", 24*time.Hour),
 		SessionAbsoluteTTL: getdur("TUNNEX_SESSION_ABSOLUTE_TTL", 720*time.Hour),
+		CORSAllowedOrigins: splitList(getenv("TUNNEX_CORS_ALLOWED_ORIGINS", "app://tunnex")),
 		SMTP: SMTP{
 			Host:     getenv("SMTP_HOST", ""),
 			Port:     getenv("SMTP_PORT", "1025"),
@@ -75,6 +81,17 @@ func Load() Config {
 			Password: getenv("SMTP_PASSWORD", ""),
 		},
 	}
+}
+
+// splitList parses a comma-separated env value into a trimmed, non-empty slice.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {

@@ -1,8 +1,9 @@
 // Command server is the Tunnex control-plane API.
 //
 // Boot sequence:
-//   S0.1 — structured logging, /healthz, graceful shutdown.
-//   S0.3 — first-boot secrets bootstrap (fail-loud), crypto self-test, mailer.
+//
+//	S0.1 — structured logging, /healthz, graceful shutdown.
+//	S0.3 — first-boot secrets bootstrap (fail-loud), crypto self-test, mailer.
 //
 // Database, Redis, auth, and the node-agent control protocol layer on later.
 package main
@@ -140,19 +141,20 @@ func main() {
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
-		Orgs:         tenancy.NewService(pool),
-		CliAuth:      cliAuthSvc,
-		Auth:         authSvc,
-		Members:      tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
-		Invites:      invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
-		Nodes:        nodeSvc,
-		Devices:      deviceSvc,
-		Sessions:     sessions,
-		SSO:          apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
-		CookieSecure: cfg.CookieSecure,
-		AppBaseURL:   cfg.AppBaseURL,
-		AuthFn:       apphttp.SessionAuth(sessions, sqlc.New(pool)),
-		BearerFn:     apphttp.BearerAuth(sqlc.New(pool)),
+		Orgs:               tenancy.NewService(pool),
+		CliAuth:            cliAuthSvc,
+		Auth:               authSvc,
+		Members:            tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
+		Invites:            invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
+		Nodes:              nodeSvc,
+		Devices:            deviceSvc,
+		Sessions:           sessions,
+		SSO:                apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
+		CookieSecure:       cfg.CookieSecure,
+		AppBaseURL:         cfg.AppBaseURL,
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
+		AuthFn:             apphttp.SessionAuth(sessions, sqlc.New(pool)),
+		BearerFn:           apphttp.BearerAuth(sqlc.New(pool)),
 	})
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))

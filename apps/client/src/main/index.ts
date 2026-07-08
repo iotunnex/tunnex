@@ -80,6 +80,12 @@ app.whenReady().then(() => {
     };
 
     const url = new URL(request.url);
+    // /api/* is NEVER in the bundle — if it reaches app:// the desktop transport
+    // switch was inert (no server configured), so 404 rather than masking the
+    // misconfig by serving index.html as a "200".
+    if (url.pathname.startsWith("/api/")) {
+      return new Response("not found", { status: 404, headers: { "content-security-policy": csp } });
+    }
     const file = resolveBundlePath(bundleDir(), url.pathname);
     if (!file || !fs.existsSync(file)) {
       return looksLikeAsset(url.pathname) ? new Response("not found", { status: 404, headers: { "content-security-policy": csp } }) : serveIndex();

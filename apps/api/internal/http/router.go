@@ -45,7 +45,10 @@ type Deps struct {
 	SSO          ssoPort // nil => open build (SSO endpoints return edition_required)
 	CookieSecure bool
 	AppBaseURL   string
-	AuthFn       AuthFunc
+	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
+	// (S6.2 desktop; app://tunnex). Empty = no CORS (pure same-origin).
+	CORSAllowedOrigins []string
+	AuthFn             AuthFunc
 	// BearerFn resolves a CLI bearer credential (S5.1). Tried BEFORE the cookie
 	// session; any invalid bearer (unknown/revoked/expired) is one generic 401
 	// (no oracle) — the CLI recognizes expiry from its local expires_at.
@@ -63,6 +66,13 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	// CORS runs early: it answers cross-origin preflights (OPTIONS) for the
+	// allowlisted desktop origin before auth/validation, and never sends
+	// Allow-Credentials (bearer only, cookies never cross) so the same-origin
+	// cookie/CSRF posture is untouched. No-op when the allowlist is empty.
+	if len(d.CORSAllowedOrigins) > 0 {
+		r.Use(corsBearer(d.CORSAllowedOrigins))
+	}
 	r.Use(applog.Requests(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))

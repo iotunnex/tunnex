@@ -25,7 +25,17 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // renderer JS.
 let apiOrigin: string | null = null;
 export function setApiOrigin(origin: string | null): void {
-  apiOrigin = origin && origin.replace(/\/+$/, ""); // trim trailing slash; "" → null
+  // Pin to a bare origin (scheme://host[:port]) — self-defending against a
+  // caller passing a path/garbage. Empty/invalid → disabled (same-origin).
+  if (!origin) {
+    apiOrigin = null;
+    return;
+  }
+  try {
+    apiOrigin = new URL(origin).origin;
+  } catch {
+    apiOrigin = null;
+  }
 }
 
 /**
@@ -43,13 +53,26 @@ export function setApiOrigin(origin: string | null): void {
 export function createTunnexClient(baseUrl = "/"): TunnexClient {
   const client = createClient<paths>({ baseUrl });
   client.use({
-    onRequest({ request }) {
+    async onRequest({ request }) {
       let req = request;
       // Desktop: re-home the request onto the configured server origin (path +
       // query preserved). Rebuild rather than mutate (Request.url is read-only).
+      // The body is BUFFERED (arrayBuffer) rather than passed as a stream:
+      // Blink rejects a streaming body without `duplex: 'half'` (which the
+      // Request object doesn't expose), so `new Request(url, request)` throws in
+      // the Electron renderer for any body-bearing call. Buffering sidesteps it
+      // and works identically in the browser and Node.
       if (apiOrigin) {
         const u = new URL(request.url);
-        req = new Request(apiOrigin + u.pathname + u.search, request);
+        const hasBody = req.method !== "GET" && req.method !== "HEAD";
+        const body = hasBody ? await request.arrayBuffer() : undefined;
+        req = new Request(apiOrigin + u.pathname + u.search, {
+          method: request.method,
+          headers: request.headers,
+          body,
+          signal: request.signal,
+          redirect: request.redirect,
+        });
       }
       if (UNSAFE_METHODS.has(req.method)) {
         req.headers.set("X-Tunnex-CSRF", "1");
