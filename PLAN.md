@@ -49,6 +49,11 @@ an admin (iotunnex) can still push, but the social sign-off gate is now mechaniz
 standard flow: story branch → PR → CI green (required checks) → user sign-off → ff-merge → push.
 CI is the CONTINUOUS invariant proof; the human sign-off is still required on top (CI green ≠ auto-merge).
 
+**Force-push standing authorization (S6.3):** `git push --force-with-lease` is pre-authorized for
+`story/*` branches ONLY (e.g. after a rebase onto main) — no per-push ask needed. `main` is NEVER
+force-pushed (protected + linear). This covers only the working story branches, whose history is
+expected to be rewritten before merge.
+
 ---
 
 ## Story status (re-entry checkpoint)
