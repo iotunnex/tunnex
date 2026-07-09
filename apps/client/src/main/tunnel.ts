@@ -1,4 +1,4 @@
-import { HelperClient, PROTOCOL_VERSION, type TunnelConfig, type TunnelStatus } from "./helperclient";
+import { HelperConnection, PROTOCOL_VERSION, type TunnelConfig, type TunnelStatus } from "./helperclient";
 
 // helperSocketPath is the local endpoint the privileged helper listens on. It is
 // platform-specific (a unix socket on macOS, a named pipe on Windows). The helper
@@ -11,35 +11,81 @@ export function helperSocketPath(platform: NodeJS.Platform = process.platform): 
 
 // ConfigProvider yields the WireGuard TunnelConfig for the current device. It runs
 // in MAIN and fetches via the bearer-injected API — so the WG PRIVATE KEY, like
-// the bearer token, never enters the renderer. Wiring the real provider (create /
-// fetch the device config, mirroring the CLI's atomic device flow) is the next
-// integration step; the transport + control plane below are independent of it.
+// the bearer token, never enters the renderer. (D2: the client OWNS device
+// creation and never re-fetches; see PLAN S6.3 ConfigProvider decisions.)
 export type ConfigProvider = () => Promise<TunnelConfig>;
 
-// TunnelController is MAIN's view of tunnel control: it builds the typed helper
-// requests (always stamping the protocol version + current auth mode) and turns
-// helper error responses into thrown errors the IPC layer surfaces to the UI.
+// HEARTBEAT_MS must stay well under the helper's read deadline (30s): the app holds
+// ONE persistent connection open and this heartbeat is what keeps it the live
+// "owner" (and feeds the UI live stats). Miss enough heartbeats and the helper
+// drops the owner connection and fails the tunnel closed.
+const HEARTBEAT_MS = 10_000;
+
+// TunnelController is MAIN's tunnel control. It holds a PERSISTENT helper
+// connection for the tunnel's lifetime (the liveness signal), builds the typed
+// requests, and heartbeats while up. onStatus lets main forward live status /
+// a fail-closed event to the renderer.
 export class TunnelController {
+  private readonly conn: HelperConnection;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
+
   constructor(
-    private readonly client: HelperClient,
+    socketPath: string,
     private readonly resolveConfig: ConfigProvider,
-  ) {}
+    private readonly onStatus?: (s: TunnelStatus) => void,
+  ) {
+    this.conn = new HelperConnection(socketPath, () => this.onLost());
+  }
 
   async up(): Promise<TunnelStatus> {
     const config = await this.resolveConfig();
-    const r = await this.client.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up", config });
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up", config });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel up failed"));
+    this.startHeartbeat();
     return r.status ?? { state: "up" };
   }
 
   async down(): Promise<void> {
-    const r = await this.client.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_down" });
+    this.stopHeartbeat();
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_down" });
+    // Graceful: the down told the helper to restore routing, so closing the owner
+    // connection now is expected (won't trip fail-closed).
+    this.conn.close();
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel down failed"));
   }
 
   async status(): Promise<TunnelStatus> {
-    const r = await this.client.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel status failed"));
     return r.status ?? { state: "down" };
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeat = setInterval(() => {
+      this.conn
+        .request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" })
+        .then((r) => {
+          if (r.ok && r.status) this.onStatus?.(r.status);
+        })
+        .catch(() => {
+          /* a dropped connection surfaces via onLost */
+        });
+    }, HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+  }
+
+  // onLost fires when the persistent connection drops unexpectedly (helper died):
+  // stop heartbeating and surface a fail-closed status to the UI.
+  private onLost(): void {
+    this.stopHeartbeat();
+    this.onStatus?.({ state: "failed" });
   }
 }

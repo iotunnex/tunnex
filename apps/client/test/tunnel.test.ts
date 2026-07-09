@@ -1,8 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
 
-import { encodeFrame, FrameDecoder, MAX_MESSAGE_BYTES, PROTOCOL_VERSION } from "../src/main/helperclient";
+import { encodeFrame, FrameDecoder, HelperConnection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION } from "../src/main/helperclient";
 import { helperSocketPath } from "../src/main/tunnel";
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The framing MUST match apps/helper/ipc.go (4-byte BE length + JSON body). These
 // tests pin the wire contract on the TS side so the two can't silently diverge.
@@ -43,4 +49,51 @@ test("oversize frames are rejected before allocation, both directions", () => {
 test("helperSocketPath is platform-specific", () => {
   assert.equal(helperSocketPath("win32"), "\\\\.\\pipe\\tunnex-helper");
   assert.equal(helperSocketPath("darwin"), "/var/run/tunnex/helper.sock");
+});
+
+test("HelperConnection: persistent round-trip, intentional close is quiet, unexpected close fires onLost", async () => {
+  const sockPath = path.join(os.tmpdir(), `tnx-helper-test-${process.pid}.sock`);
+  try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
+
+  const serverSockets: net.Socket[] = [];
+  const server = net.createServer((sock) => {
+    serverSockets.push(sock);
+    const dec = new FrameDecoder();
+    sock.on("data", (chunk: Buffer) => {
+      for (const msg of dec.push(chunk)) {
+        const req = msg as { verb: string };
+        const state = req.verb === "tunnel_down" ? "down" : "up";
+        sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: true, status: { state } }));
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(sockPath, r));
+
+  try {
+    // Persistent round-trip: two requests over ONE held connection, FIFO-matched.
+    let lost = false;
+    const conn = new HelperConnection(sockPath, () => { lost = true; });
+    const up = await conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up" });
+    assert.equal(up.ok, true);
+    assert.equal(up.status?.state, "up");
+    const st = await conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
+    assert.equal(st.status?.state, "up");
+
+    // Intentional close → onLost must NOT fire (this is graceful, not app-death).
+    conn.close();
+    await delay(50);
+    assert.equal(lost, false, "intentional close must be quiet");
+
+    // Reconnect, then simulate HELPER DEATH (server destroys the socket) → onLost.
+    let lost2 = false;
+    const conn2 = new HelperConnection(sockPath, () => { lost2 = true; });
+    await conn2.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
+    serverSockets.forEach((s) => s.destroy());
+    await delay(50);
+    assert.equal(lost2, true, "unexpected drop must fire onLost (helper death)");
+    conn2.close();
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    try { fs.unlinkSync(sockPath); } catch { /* gone */ }
+  }
 });

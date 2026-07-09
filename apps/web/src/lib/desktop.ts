@@ -25,6 +25,7 @@ export interface TunnexBridge {
     up(): Promise<TunnelStatus>;
     down(): Promise<void>;
     status(): Promise<TunnelStatus>;
+    onStatusChanged(cb: (s: TunnelStatus) => void): () => void;
   };
 }
 

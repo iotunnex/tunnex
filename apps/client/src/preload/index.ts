@@ -23,6 +23,13 @@ const api = {
     up: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:up"),
     down: (): Promise<void> => ipcRenderer.invoke("tunnel:down"),
     status: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:status"),
+    // Push channel for live status + the LOUD fail-closed signal (main forwards
+    // the helper heartbeat / onLost). Returns an unsubscribe fn. Carries no secret.
+    onStatusChanged: (cb: (s: TunnelStatus) => void): (() => void) => {
+      const listener = (_e: unknown, s: TunnelStatus) => cb(s);
+      ipcRenderer.on("tunnel:status-changed", listener);
+      return () => ipcRenderer.removeListener("tunnel:status-changed", listener);
+    },
   },
 };
 

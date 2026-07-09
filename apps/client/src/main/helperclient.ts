@@ -74,55 +74,102 @@ export class FrameDecoder {
   }
 }
 
-// HelperClient is a single-shot request/response over the helper's local socket
-// (unix socket on macOS, named pipe on Windows — the path is platform-resolved by
-// the caller). The token is never involved here; this channel carries only the
-// typed tunnel protocol.
-export class HelperClient {
-  constructor(private readonly socketPath: string) {}
+// HelperConnection is a PERSISTENT request/response channel to the helper's local
+// socket. It is deliberately NOT single-shot: the connection that brings a tunnel
+// up must stay OPEN for the tunnel's lifetime, because the helper treats the
+// owning connection dropping as app-death and fails the tunnel closed. Responses
+// are matched to requests FIFO (the helper answers one request per connection in
+// order). An UNEXPECTED close (helper died) invokes onLost so the UI can surface
+// it. The token/key are never involved here — only the typed tunnel protocol.
+export class HelperConnection {
+  private sock: net.Socket | null = null;
+  private connecting: Promise<void> | null = null;
+  private decoder = new FrameDecoder();
+  private waiters: Array<{ resolve: (r: HelperResponse) => void; reject: (e: Error) => void }> = [];
+  private closedByUs = false;
 
-  request(req: HelperRequest, timeoutMs = 15000): Promise<HelperResponse> {
-    return new Promise((resolve, reject) => {
+  constructor(
+    private readonly socketPath: string,
+    private readonly onLost?: () => void,
+  ) {}
+
+  private ensure(): Promise<void> {
+    if (this.sock && !this.sock.destroyed) return Promise.resolve();
+    if (this.connecting) return this.connecting;
+    this.closedByUs = false;
+    this.decoder = new FrameDecoder();
+    this.connecting = new Promise((resolve, reject) => {
       const sock = net.connect(this.socketPath);
-      const decoder = new FrameDecoder();
-      let settled = false;
-      const done = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        sock.destroy();
-        fn();
-      };
-      const timer = setTimeout(() => done(() => reject(new Error("helper request timed out"))), timeoutMs);
-
       sock.on("connect", () => {
-        try {
-          sock.write(encodeFrame(req));
-        } catch (e) {
-          clearTimeout(timer);
-          done(() => reject(e as Error));
-        }
+        this.sock = sock;
+        this.connecting = null;
+        resolve();
       });
-      sock.on("data", (chunk: Buffer) => {
-        let msgs: unknown[];
-        try {
-          msgs = decoder.push(chunk);
-        } catch (e) {
-          clearTimeout(timer);
-          return done(() => reject(e as Error));
-        }
-        if (msgs.length > 0) {
-          clearTimeout(timer);
-          done(() => resolve(msgs[0] as HelperResponse));
-        }
-      });
+      sock.on("data", (chunk: Buffer) => this.onData(chunk));
       sock.on("error", (e) => {
-        clearTimeout(timer);
-        done(() => reject(e));
+        this.connecting = null;
+        reject(e);
       });
-      sock.on("close", () => {
-        clearTimeout(timer);
-        done(() => reject(new Error("helper connection closed before a response")));
-      });
+      sock.on("close", () => this.onClose());
     });
+    return this.connecting;
+  }
+
+  private onData(chunk: Buffer): void {
+    let msgs: unknown[];
+    try {
+      msgs = this.decoder.push(chunk);
+    } catch (e) {
+      this.failAll(e as Error);
+      this.sock?.destroy();
+      return;
+    }
+    for (const m of msgs) {
+      this.waiters.shift()?.resolve(m as HelperResponse);
+    }
+  }
+
+  private onClose(): void {
+    const hadSock = this.sock !== null;
+    this.sock = null;
+    this.failAll(new Error("helper connection closed"));
+    if (hadSock && !this.closedByUs) this.onLost?.(); // an UNEXPECTED drop = helper death
+  }
+
+  private failAll(e: Error): void {
+    while (this.waiters.length) this.waiters.shift()!.reject(e);
+  }
+
+  async request(req: HelperRequest, timeoutMs = 15000): Promise<HelperResponse> {
+    await this.ensure();
+    return new Promise<HelperResponse>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("helper request timed out")), timeoutMs);
+      this.waiters.push({
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
+      try {
+        this.sock!.write(encodeFrame(req));
+      } catch (e) {
+        clearTimeout(timer);
+        // Pop the waiter we just pushed and fail it.
+        const w = this.waiters.pop();
+        w?.reject(e as Error);
+      }
+    });
+  }
+
+  // close is the INTENTIONAL teardown (graceful disconnect / app quit): it marks
+  // the close as expected so onLost does NOT fire.
+  close(): void {
+    this.closedByUs = true;
+    this.sock?.destroy();
+    this.sock = null;
   }
 }

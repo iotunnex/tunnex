@@ -2,7 +2,6 @@ import { ipcMain, BrowserWindow } from "electron";
 import { Config } from "./config";
 import { CredentialStore } from "./credential";
 import { runLogin, runLogout } from "./login";
-import { HelperClient } from "./helperclient";
 import { TunnelController, helperSocketPath } from "./tunnel";
 
 // The IPC handlers behind the preload allowlist. VERB-SPECIFIC — there is no
@@ -43,10 +42,11 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
   // fails cleanly with device_config_unavailable, but the full transport path
   // (renderer → ipc → helper framing → privileged helper) is wired and verified.
   const tunnel = new TunnelController(
-    new HelperClient(helperSocketPath()),
+    helperSocketPath(),
     async () => {
       throw new Error("device_config_unavailable: WG config acquisition is the next S6.3 step");
     },
+    (status) => win.webContents.send("tunnel:status-changed", status),
   );
   ipcMain.handle("tunnel:up", () => tunnel.up());
   ipcMain.handle("tunnel:down", () => tunnel.down());

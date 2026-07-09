@@ -24,6 +24,12 @@ type TunnelConfig struct {
 	// AllowedIPs are the CIDRs routed INTO the tunnel (e.g. ["0.0.0.0/0","::/0"]
 	// for full-tunnel, or specific subnets for split).
 	AllowedIPs []string `json:"allowed_ips"`
+	// FullTunnel declares INTENT: when true this is an all-traffic tunnel and
+	// Validate REQUIRES both default routes (0.0.0.0/0 AND ::/0) present, so one
+	// address family can't silently leak on its native default route. When false
+	// (split tunnel) any valid CIDRs are accepted. The helper is the last gate
+	// before routing, so the completeness check lives here.
+	FullTunnel bool `json:"full_tunnel"`
 	// DNS are resolver IPs applied while the tunnel is up (optional).
 	DNS []string `json:"dns,omitempty"`
 	// MTU is the interface MTU (0 = default; else 1280..1500).
@@ -56,10 +62,23 @@ func (c *TunnelConfig) Validate() error {
 	if len(c.AllowedIPs) == 0 {
 		return &ProtocolError{Code: "bad_allowed_ips", Msg: "allowed_ips must not be empty"}
 	}
+	var haveV4Default, haveV6Default bool
 	for _, a := range c.AllowedIPs {
-		if _, err := netip.ParsePrefix(strings.TrimSpace(a)); err != nil {
+		p, err := netip.ParsePrefix(strings.TrimSpace(a))
+		if err != nil {
 			return &ProtocolError{Code: "bad_allowed_ips", Msg: "invalid CIDR in allowed_ips: " + a}
 		}
+		if p.Bits() == 0 { // a default route
+			if p.Addr().Is4() || p.Addr().Is4In6() {
+				haveV4Default = true
+			} else {
+				haveV6Default = true
+			}
+		}
+	}
+	// Full-tunnel MUST cover both families or the missing one leaks in cleartext.
+	if c.FullTunnel && !(haveV4Default && haveV6Default) {
+		return &ProtocolError{Code: "incomplete_full_tunnel", Msg: "full_tunnel requires both 0.0.0.0/0 and ::/0 in allowed_ips"}
 	}
 	for _, d := range c.DNS {
 		if _, err := netip.ParseAddr(strings.TrimSpace(d)); err != nil {
@@ -91,15 +110,55 @@ func validKey(s string) error {
 	return nil
 }
 
-// validEndpoint requires host:port with a numeric port in 1..65535 and a non-empty
-// host. It does not resolve DNS (the helper does that at dial time).
+// validEndpoint requires host:port with a numeric port in 1..65535 and a SAFE
+// host — either a literal IP that is a normal unicast global/private address, or
+// a syntactically valid DNS name. The host is the one config field a backend may
+// hand to a resolver or (worse) interpolate into a command, so it is validated as
+// strictly as the rest: no spaces/metacharacters/control chars, and no
+// loopback/link-local/multicast/unspecified literals (an attacker must not be able
+// to steer where the root helper dials).
 func validEndpoint(s string) bool {
 	host, port, ok := splitHostPort(s)
 	if !ok || host == "" {
 		return false
 	}
-	p, err := strconv.Atoi(port)
-	return err == nil && p >= 1 && p <= 65535
+	if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 {
+		return false
+	}
+	return validHost(host)
+}
+
+// validHost accepts a safe IP literal or a DNS hostname.
+func validHost(host string) bool {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		// IP literal: reject the address classes an endpoint must never be.
+		return !(addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+			addr.IsMulticast() || addr.IsUnspecified())
+	}
+	return validDNSName(host)
+}
+
+// validDNSName enforces RFC-1123-ish hostname syntax (letters/digits/hyphen dot-
+// separated labels, 1..63 chars each, no leading/trailing hyphen, <=253 total).
+// This rejects spaces, shell metacharacters, and control bytes outright.
+func validDNSName(h string) bool {
+	if len(h) == 0 || len(h) > 253 {
+		return false
+	}
+	h = strings.TrimSuffix(h, ".") // a trailing root dot is legal
+	for _, label := range strings.Split(h, ".") {
+		n := len(label)
+		if n == 0 || n > 63 || label[0] == '-' || label[n-1] == '-' {
+			return false
+		}
+		for i := 0; i < n; i++ {
+			c := label[i]
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // splitHostPort splits "host:port" handling bracketed IPv6 ("[::1]:51820"). It

@@ -14,7 +14,7 @@ func untrustedResolver(net.Conn) (string, error) { return "/evil/mal", nil }
 func newServer(t *testing.T, be Backend, resolve PeerResolver) (*Server, *Supervisor) {
 	t.Helper()
 	sup := NewSupervisor(be)
-	return NewServer(sup, PathCheckVerifier{InstallDir: "/app"}, resolve, AuthModePathCheck), sup
+	return NewServer(sup, PathCheckVerifier{InstallDir: "/app"}, resolve), sup
 }
 
 func req(verb Verb, cfg *TunnelConfig) *Request {
@@ -79,6 +79,32 @@ func TestIPCBadConfigRejectedNoTunnel(t *testing.T) {
 	// Nothing touched the backend; still down.
 	if be.up != 0 || sup.State() != StateDown {
 		t.Fatalf("bad config must not reach the backend: up=%d state=%s", be.up, sup.State())
+	}
+}
+
+func TestIPCNonOwnerCloseKeepsTunnel(t *testing.T) {
+	// Connection A owns the tunnel; a benign connection B closing must NOT tear it
+	// down (the owner-tracking fix — any-close-fails-closed was the reported bug).
+	srv, sup := newServer(t, &fakeBackend{}, trustedResolver)
+	ca1, ca2 := net.Pipe()
+	go srv.handle(ca2)
+	defer ca1.Close()
+	if resp, err := Do(ca1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
+		t.Fatalf("A up: %v %+v", err, resp)
+	}
+
+	cb1, cb2 := net.Pipe()
+	go srv.handle(cb2)
+	if resp, err := Do(cb1, req(VerbStatus, nil)); err != nil || !resp.OK {
+		t.Fatalf("B status: %v %+v", err, resp)
+	}
+	cb1.Close()                        // non-owner closes
+	time.Sleep(100 * time.Millisecond) // let B's onClose run
+
+	// A's tunnel must still be up; prove it over A's own still-open connection.
+	resp, err := Do(ca1, req(VerbStatus, nil))
+	if err != nil || !resp.OK || resp.Status.State != "up" {
+		t.Fatalf("owner tunnel must survive a non-owner close: err=%v resp=%+v state=%s", err, resp, sup.State())
 	}
 }
 

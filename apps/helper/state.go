@@ -103,6 +103,7 @@ func (s *Supervisor) OnPeerLost() {
 	}
 	_ = s.be.FailClosed()
 	s.state = StateFailed
+	s.lastCfg = nil // drop the private-key reference, like the graceful Down path
 }
 
 // Status returns live stats. In Failed state it reports "failed" without touching

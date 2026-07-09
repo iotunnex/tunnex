@@ -38,6 +38,13 @@ func TestConfigValidate(t *testing.T) {
 		{"bad dns", "bad_dns", func(c *TunnelConfig) { c.DNS = []string{"not-an-ip"} }},
 		{"bad mtu", "bad_mtu", func(c *TunnelConfig) { c.MTU = 100 }},
 		{"bad keepalive", "bad_keepalive", func(c *TunnelConfig) { c.PersistentKeepalive = -1 }},
+		{"endpoint metachars", "bad_endpoint", func(c *TunnelConfig) { c.Endpoint = "a b;c:51820" }},
+		{"endpoint loopback", "bad_endpoint", func(c *TunnelConfig) { c.Endpoint = "127.0.0.1:51820" }},
+		{"endpoint unspecified", "bad_endpoint", func(c *TunnelConfig) { c.Endpoint = "0.0.0.0:51820" }},
+		{"incomplete full tunnel v6 missing", "incomplete_full_tunnel", func(c *TunnelConfig) {
+			c.FullTunnel = true
+			c.AllowedIPs = []string{"0.0.0.0/0"}
+		}},
 	}
 	for _, tc := range cases {
 		c := goodConfig()
@@ -63,6 +70,24 @@ func TestEndpointIPv6(t *testing.T) {
 	c.Endpoint = "2001:db8::1:51820"
 	if err := c.Validate(); err == nil {
 		t.Fatal("bare IPv6 endpoint should be rejected (ambiguous port)")
+	}
+}
+
+func TestEndpointAndFullTunnel(t *testing.T) {
+	// Valid public IP + both default routes under full-tunnel → accepted.
+	c := goodConfig()
+	c.Endpoint = "203.0.113.10:51820"
+	c.FullTunnel = true
+	c.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid full-tunnel rejected: %v", err)
+	}
+	// Split tunnel (FullTunnel=false) with a single subnet is fine.
+	c = goodConfig()
+	c.FullTunnel = false
+	c.AllowedIPs = []string{"10.0.0.0/8"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid split-tunnel rejected: %v", err)
 	}
 }
 
