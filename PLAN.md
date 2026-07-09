@@ -89,9 +89,14 @@ runnable command incl. `docker compose up -d --force-recreate node-agent`, not j
 the `.env` `cat >>` duplicate-key trap (compose used the first value) — the S6.6 install.sh writes a
 clean `.env` (no append). **Item 8 (NEW, FIXED in S-POC-fixes): invite accept was broken end-to-end —
 the web had no `/accept-invite` route, so the email link dropped the token and the invited user was
-sent to create-org instead of joining the inviting org.** Fixed: web AcceptInvite page + public route;
-api accept handler AUTO-LOGS-IN (mints a session, inbox-control = the auth factor). Decision recorded:
-auto-login into the org (not redirect-to-login).
+sent to create-org instead of joining the inviting org.** Fixed: web AcceptInvite page + public route.
+**Delivery + auth decisions (superseding an initial auto-login attempt):** CreateInvitation returns the
+raw token so the dashboard shows a COPYABLE accept link (shared OneTimeSecretModal) — the SMTP-less
+delivery path (POC hit "no email": dev mailer only tees to logs/Mailpit); email stays best-effort. The
+accept does **NOT auto-login** — because the link is now admin-visible, minting a session from it would
+let a link-holder land in an existing invitee's account (impersonation). Invitee sets a password (new
+user) / keeps existing (never reset), then **signs in explicitly** and lands in the org. Item 3's
+APP_BASE_URL fix still matters for the emailed link; the UI link uses the browser origin.
 **REPO VISIBILITY — DECIDED: stays PRIVATE until the beta milestone.** Rationale: pre-beta there is
 no external audience, and private keeps the unfinished/unsigned client + evolving security surface out
 of public view; the cost is Actions runner QUEUING (private repos share a small pool + a 2000-min/mo
