@@ -1,6 +1,9 @@
 package helper
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // A valid base64-32 WireGuard key for fixtures (32 zero bytes).
 const zeroKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -190,15 +193,23 @@ func TestValidateRequest(t *testing.T) {
 // fakeBackend records calls and can be told to error on Up. fc (optional) is
 // signaled on FailClosed so a test can wait for an async fail-closed.
 type fakeBackend struct {
-	upErr                error
-	up, down, failClosed int
-	fc                   chan struct{}
+	upErr                            error
+	up, down, failClosed, cleanStale int
+	armed                            bool // models the kernel-resident kill-switch
+	fc                               chan struct{}
 }
 
-func (f *fakeBackend) Up(*TunnelConfig) error { f.up++; return f.upErr }
-func (f *fakeBackend) Down() error            { f.down++; return nil }
+func (f *fakeBackend) Up(cfg *TunnelConfig) error {
+	f.up++
+	if f.upErr == nil && cfg.FullTunnel {
+		f.armed = true // full tunnel arms the block
+	}
+	return f.upErr
+}
+func (f *fakeBackend) Down() error { f.down++; f.armed = false; return nil } // graceful: block released
 func (f *fakeBackend) FailClosed() error {
 	f.failClosed++
+	// Fail-closed KEEPS the block armed (death = enforcement) — does NOT release it.
 	if f.fc != nil {
 		select {
 		case f.fc <- struct{}{}:
@@ -207,6 +218,7 @@ func (f *fakeBackend) FailClosed() error {
 	}
 	return nil
 }
+func (f *fakeBackend) CleanStale() error { f.cleanStale++; f.armed = false; return nil } // un-strand
 func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxBytes: 1}, nil }
 
 func TestSupervisorFailClosed(t *testing.T) {
@@ -251,6 +263,70 @@ func TestSupervisorFailClosed(t *testing.T) {
 	}
 	if err := s.Down(); err != nil {
 		t.Fatalf("idempotent down: %v", err)
+	}
+}
+
+func fullConfig() *TunnelConfig {
+	c := goodConfig()
+	c.FullTunnel = true
+	return c
+}
+
+// TestSupervisorSelfHeal proves startup recovery (RC1): a kill-switch stranded by a
+// PRIOR crashed process is released when a fresh Supervisor self-heals before it
+// serves — so a KeepAlive restart un-strands the host instead of re-serving the block.
+func TestSupervisorSelfHeal(t *testing.T) {
+	fb := &fakeBackend{armed: true} // a block survived a prior crash; no live owner
+	s := NewSupervisor(fb)
+	if err := s.SelfHeal(); err != nil {
+		t.Fatalf("self-heal: %v", err)
+	}
+	if fb.cleanStale != 1 || fb.armed {
+		t.Fatalf("self-heal must release the stale block: cleanStale=%d armed=%v", fb.cleanStale, fb.armed)
+	}
+	if s.State() != StateDown {
+		t.Fatalf("post self-heal state = %s, want down", s.State())
+	}
+}
+
+// TestSupervisorDeadMan proves the bounded fail-closed (RC1), INDEPENDENT of the
+// restart path: a full tunnel whose owner stops heartbeating past the window
+// auto-releases the block, so a wedged/crashed app can't strand a live helper's host.
+func TestSupervisorDeadMan(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 90 * time.Second
+
+	if err := s.Up(fullConfig()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if !fb.armed {
+		t.Fatal("full-tunnel up must arm the block")
+	}
+	// A heartbeat (status) within the window refreshes the deadline → no fire.
+	clock = base.Add(60 * time.Second)
+	if _, err := s.Status(); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	clock = base.Add(140 * time.Second) // 80s since the last beat (< 90)
+	if s.CheckDeadMan() {
+		t.Fatal("dead-man must NOT fire while heartbeats are fresh")
+	}
+	// Owner crashes: OnPeerLost fails closed, block STAYS armed (death = enforcement).
+	s.OnPeerLost()
+	if s.State() != StateFailed || !fb.armed {
+		t.Fatalf("peer loss must fail closed with the block armed: state=%s armed=%v", s.State(), fb.armed)
+	}
+	// Past the window with no heartbeat → auto-release (un-strand).
+	clock = base.Add(260 * time.Second) // 200s since the last beat (> 90)
+	if !s.CheckDeadMan() {
+		t.Fatal("dead-man must fire once the owner is gone past the window")
+	}
+	if fb.armed || fb.down != 1 || s.State() != StateDown {
+		t.Fatalf("dead-man must release the block: armed=%v down=%d state=%s", fb.armed, fb.down, s.State())
 	}
 }
 

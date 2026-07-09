@@ -36,8 +36,10 @@ func TestBuildConfigFullTunnel(t *testing.T) {
 		endpoint: "h:51820", allowedIPs: allowedIPsFor(true, "10.99.0.0/24"),
 		dns: dnsFor(true),
 	})
-	if !strings.Contains(conf, "AllowedIPs = 0.0.0.0/0") {
-		t.Fatalf("full-tunnel config must route all traffic:\n%s", conf)
+	// Full-tunnel MUST cover BOTH families or IPv6 leaks (and the client kill-switch
+	// rejects it as incomplete_full_tunnel).
+	if !strings.Contains(conf, "AllowedIPs = 0.0.0.0/0, ::/0") {
+		t.Fatalf("full-tunnel config must route BOTH 0.0.0.0/0 AND ::/0:\n%s", conf)
 	}
 	if !strings.Contains(conf, "DNS = "+fullTunnelDNS) {
 		t.Fatalf("full-tunnel config must set a DNS server:\n%s", conf)

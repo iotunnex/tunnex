@@ -1,6 +1,16 @@
 package helper
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+// DeadManDefault is the conservative window after which an un-heartbeated tunnel
+// auto-releases its kill-switch. This BOUNDS the fail-closed model: a helper that
+// is alive but whose owning app has crashed/wedged (no heartbeats) can't strand the
+// host forever — after this window the block is released. The app heartbeats every
+// ~10s, so this is many missed beats. See PLAN "S6.3 KILL-SWITCH DESIGN" (bounded).
+const DeadManDefault = 90 * time.Second
 
 // TunnelState is the helper's view of the data plane.
 type TunnelState string
@@ -44,6 +54,12 @@ type Backend interface {
 	Down() error
 	FailClosed() error
 	Stats() (TunnelStatus, error)
+	// CleanStale releases any kill-switch state left over from a PRIOR process that
+	// exited without a graceful Down (a crash / kill -9). The helper calls it ONCE
+	// at startup, BEFORE serving, so a KeepAlive-restarted helper self-heals a block
+	// that would otherwise strand the host. Must be safe to call when nothing is
+	// stale (idempotent no-op).
+	CleanStale() error
 }
 
 // Supervisor owns the tunnel lifecycle and enforces the FAIL-CLOSED invariant: any
@@ -57,10 +73,48 @@ type Supervisor struct {
 	be      Backend
 	state   TunnelState
 	lastCfg *TunnelConfig
+	// Dead-man: lastBeat is refreshed on Up + every heartbeat (Status while up); if
+	// the tunnel is up/failed and no beat lands within deadMan, CheckDeadMan releases
+	// the kill-switch. now/deadMan are injectable for tests.
+	lastBeat time.Time
+	deadMan  time.Duration
+	now      func() time.Time
 }
 
 func NewSupervisor(be Backend) *Supervisor {
-	return &Supervisor{be: be, state: StateDown}
+	return &Supervisor{be: be, state: StateDown, deadMan: DeadManDefault, now: time.Now}
+}
+
+// SelfHeal releases any kill-switch state stranded by a prior crashed process. The
+// helper calls it ONCE at startup, before serving. Idempotent.
+func (s *Supervisor) SelfHeal() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = StateDown
+	return s.be.CleanStale()
+}
+
+// beat refreshes the dead-man deadline. Caller holds s.mu.
+func (s *Supervisor) beat() { s.lastBeat = s.now() }
+
+// CheckDeadMan releases the kill-switch if the tunnel is up/failed but no heartbeat
+// has landed within the dead-man window (owner crashed/wedged). Returns whether it
+// fired. A background loop calls it periodically; tests call it directly.
+func (s *Supervisor) CheckDeadMan() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateUp && s.state != StateFailed {
+		return false
+	}
+	if s.now().Sub(s.lastBeat) <= s.deadMan {
+		return false
+	}
+	// Bounded fail-closed: past the window with no owner → release so an unrecovered
+	// crash can't strand the host. Down restores routing + drops the block.
+	_ = s.be.Down()
+	s.state = StateDown
+	s.lastCfg = nil
+	return true
 }
 
 func (s *Supervisor) State() TunnelState {
@@ -89,6 +143,7 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 	}
 	s.state = StateUp
 	s.lastCfg = cfg
+	s.beat() // start the dead-man clock
 	return nil
 }
 
@@ -129,6 +184,9 @@ func (s *Supervisor) OnPeerLost() {
 func (s *Supervisor) Status() (TunnelStatus, error) {
 	s.mu.Lock()
 	state := s.state
+	if state == StateUp {
+		s.beat() // a status call from the app IS the heartbeat — refresh the dead-man
+	}
 	s.mu.Unlock()
 	if state != StateUp {
 		return TunnelStatus{State: string(state)}, nil

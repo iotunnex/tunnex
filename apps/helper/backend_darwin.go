@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -16,9 +17,15 @@ import (
 )
 
 // pfAnchor is the pf anchor name the kill-switch rules load into. It is
-// kernel-resident: it persists if the helper dies (fail-closed), and only Down
-// flushes it. See the S6.3 KILL-SWITCH DESIGN in PLAN.
+// kernel-resident: it persists if the helper dies (fail-closed). It is released by
+// a graceful Down, the dead-man timeout, OR — if the process died abnormally — the
+// next helper's startup CleanStale. See the S6.3 KILL-SWITCH DESIGN in PLAN.
 const pfAnchor = "tunnex"
+
+// pfTokenPath persists the `pfctl -E` enable-reference token so that a FRESH helper
+// process (after a crash / kill -9 lost the in-memory copy) can release the exact
+// reference on startup instead of force-disabling pf for the whole system. Root-only.
+const pfTokenPath = "/var/run/tunnex/pf.token"
 
 // darwinBackend implements Backend on macOS with wireguard-go (userspace WG over a
 // utun) + a pf kill-switch + ifconfig/route for addressing. Ordering invariant:
@@ -87,9 +94,16 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		return fmt.Errorf("assign address: %w", err)
 	}
 	for _, aip := range cfg.AllowedIPs {
-		if err := run("route", "-q", "add", "-net", aip, "-interface", name); err != nil {
-			dev.Close()
-			return fmt.Errorf("route %s: %w", aip, err)
+		for _, target := range routeTargets(aip) {
+			args := []string{"-q", "add"}
+			if strings.Contains(target, ":") {
+				args = append(args, "-inet6")
+			}
+			args = append(args, "-net", target, "-interface", name)
+			if err := run("route", args...); err != nil {
+				dev.Close()
+				return fmt.Errorf("route %s: %w", target, err)
+			}
 		}
 	}
 
@@ -228,18 +242,63 @@ func (b *darwinBackend) armPF(endpoint, ifname string) error {
 				}
 			}
 		}
+		// Persist the token so a crashed-then-restarted helper can release THIS exact
+		// enable-reference (CleanStale) instead of leaking it or force-disabling pf.
+		if b.pfToken != "" {
+			_ = os.MkdirAll("/var/run/tunnex", 0o755)
+			_ = os.WriteFile(pfTokenPath, []byte(b.pfToken), 0o600)
+		}
 	}
 	return nil
 }
 
-// releasePF flushes our anchor rules and releases the pf enable reference.
+// releasePF flushes our anchor rules and releases the pf enable reference (both the
+// in-memory token and any persisted copy).
 func (b *darwinBackend) releasePF() error {
 	err := run("pfctl", "-a", pfAnchor, "-F", "all")
 	if b.pfToken != "" {
 		_ = exec.Command("pfctl", "-X", b.pfToken).Run()
 		b.pfToken = ""
 	}
+	_ = os.Remove(pfTokenPath)
 	return err
+}
+
+// CleanStale releases a kill-switch stranded by a prior process that exited without
+// a graceful Down (crash / kill -9). The crux — flushing the anchor rules — removes
+// the block even if the enable-reference can't be identified; releasing the persisted
+// token additionally restores pf's prior enable state. Idempotent: a missing token /
+// empty anchor is a no-op. This is what un-strands a host after an abnormal exit.
+func (b *darwinBackend) CleanStale() error {
+	// Flush the block rules FIRST — this is the un-strand. Ignore errors (anchor may
+	// be empty / pf disabled — both fine).
+	_ = run("pfctl", "-a", pfAnchor, "-F", "all")
+	// Release the persisted enable-reference if one survived the crash.
+	if tok, err := os.ReadFile(pfTokenPath); err == nil {
+		if t := strings.TrimSpace(string(tok)); t != "" {
+			_ = exec.Command("pfctl", "-X", t).Run()
+		}
+		_ = os.Remove(pfTokenPath)
+	}
+	return nil
+}
+
+// routeTargets maps a route destination to the actual OS routes to install. A
+// full-tunnel default (0.0.0.0/0 or ::/0) is installed as the WG-standard PAIR of
+// half-routes (0.0.0.0/1 + 128.0.0.0/1 ; ::/1 + 8000::/1): they cover all traffic and
+// are MORE SPECIFIC than the physical default, so they take precedence WITHOUT
+// destroying it. When the utun disappears (Down, crash, kill -9), the halves vanish
+// with the interface and the physical default resurfaces automatically — no
+// capture/restore, no stranded host. Non-default destinations pass through unchanged.
+func routeTargets(allowedIP string) []string {
+	switch allowedIP {
+	case "0.0.0.0/0":
+		return []string{"0.0.0.0/1", "128.0.0.0/1"}
+	case "::/0":
+		return []string{"::/1", "8000::/1"}
+	default:
+		return []string{allowedIP}
+	}
 }
 
 // splitEndpoint splits host:port, unwrapping a bracketed IPv6 host.

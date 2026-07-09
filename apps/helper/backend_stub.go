@@ -12,6 +12,7 @@ func (StubBackend) Up(*TunnelConfig) error {
 }
 func (StubBackend) Down() error       { return nil }
 func (StubBackend) FailClosed() error { return nil }
+func (StubBackend) CleanStale() error { return nil }
 func (StubBackend) Stats() (TunnelStatus, error) {
 	return TunnelStatus{}, &ProtocolError{Code: "not_implemented", Msg: "stats not implemented on this build"}
 }

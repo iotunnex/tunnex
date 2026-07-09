@@ -44,10 +44,13 @@ func buildConfig(p configParams) string {
 }
 
 // allowedIPsFor returns the client's AllowedIPs: split-tunnel (the org pool only,
-// the default — zero-trust posture) or full-tunnel (all traffic).
+// the default — zero-trust posture) or full-tunnel (all traffic). Full-tunnel MUST
+// cover BOTH address families (0.0.0.0/0 AND ::/0): capturing only v4 leaves IPv6
+// traffic to leak out the physical interface, and the client kill-switch refuses a
+// full tunnel that doesn't cover both (helper: incomplete_full_tunnel).
 func allowedIPsFor(fullTunnel bool, poolCIDR string) []string {
 	if fullTunnel {
-		return []string{"0.0.0.0/0"}
+		return []string{"0.0.0.0/0", "::/0"}
 	}
 	return []string{poolCIDR}
 }

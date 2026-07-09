@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tunnexio/tunnex/apps/helper"
 )
@@ -38,6 +39,26 @@ func main() {
 	}
 
 	sup := helper.NewSupervisor(helper.NewBackend())
+
+	// Startup self-heal: release any kill-switch stranded by a PRIOR helper that died
+	// without a graceful Down (crash / kill -9). Runs BEFORE serving so a KeepAlive
+	// restart un-strands the host instead of re-serving with the stale block.
+	if err := sup.SelfHeal(); err != nil {
+		log.Printf("tunnex-helper: startup self-heal: %v", err)
+	}
+	// Dead-man loop: bounds the fail-closed model. If the owning app stops
+	// heartbeating past DeadManDefault (crashed/wedged), auto-release the block so an
+	// unrecovered crash can't strand the host indefinitely.
+	go func() {
+		t := time.NewTicker(helper.DeadManDefault / 3)
+		defer t.Stop()
+		for range t.C {
+			if sup.CheckDeadMan() {
+				log.Printf("tunnex-helper: dead-man fired — kill-switch auto-released (owner gone > %s)", helper.DeadManDefault)
+			}
+		}
+	}()
+
 	verify := helper.PathCheckVerifier{InstallDirs: filepath.SplitList(installDir)}
 	srv := helper.NewServer(sup, verify, helper.NewPeerResolver())
 

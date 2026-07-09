@@ -655,6 +655,27 @@ that tears the tun and ASSERTS the block is present (it already is from Up). SMO
 `kill -9` the helper mid-tunnel; a pcap on the physical NIC proves ZERO cleartext to a tunneled dest
 AFTER the kill — with the helper process GONE, so nothing but pre-arranged state can be enforcing it.
 
+**RECOVERY MODEL — BOUNDED FAIL-CLOSED (mini-smoke-surfaced; implemented + tested).** The design above
+("death = enforcement, only graceful Down removes it") is correct for BLOCKING but originally had NO
+RECOVERY PATH: an abnormal exit (kill -9 / crash) left the kernel-resident block with nothing to release
+it, so a FULL-TUNNEL helper death STRANDED THE HOST (reboot required — the first mini-smoke did exactly
+this, against the no-egress parked-S3.7 gateway). Fail-closed is now **"death = enforcement, BOUNDED by
+the dead-man interval."** Three recovery mechanisms, all landed with tests (`TestSupervisorSelfHeal`,
+`TestSupervisorDeadMan`): (1) **STARTUP SELF-HEAL** — the helper flushes a stale `tunnex` anchor +
+releases a PERSISTED (root-only `/var/run/tunnex/pf.token`) `pfctl -E` reference BEFORE serving, so a
+KeepAlive restart un-strands; (2) **DEAD-MAN TIMEOUT** (`DeadManDefault` = 90s) — if the owning app
+stops heartbeating past the window (crashed/wedged), the LIVE helper auto-releases the block; (3)
+graceful `Down` (unchanged). **MAX CLEARTEXT-LEAK WINDOW after an un-recovered crash = the dead-man
+interval (~90s) — a DELIBERATE trade: an UNBOUNDED block bricks the host, worse than a bounded post-crash
+leak window on a machine whose VPN is already down.** ROUTES (RC2): full-tunnel now installs the
+WG-standard SPLIT-DEFAULT (`0.0.0.0/1`+`128.0.0.0/1`, `::/1`+`8000::/1`) — more specific than the
+physical default so it takes precedence WITHOUT destroying it; on teardown/crash the halves vanish with
+the utun and the physical default resurfaces automatically (no capture/restore, no stranding). **WINDOWS
+WFP MUST INHERIT THIS BOUNDED MODEL** — WFP filters have the IDENTICAL latent persist-with-no-releaser
+bug. The WFP backend must implement the same `CleanStale` (startup sweep of stale filters by a well-known
+provider/sublayer GUID) and be driven by the same dead-man, or it will strand Windows hosts identically.
+Build it bounded from day one — do not port only the arming half.
+
 **S6.3 native deps (pinned; license check):** macOS tun/device = `golang.zx2c4.com/wireguard`
 (wireguard-go) — **MIT**, compatible under our Apache-2.0 open edition (permissive → permissive, OK).
 Windows = `golang.zx2c4.com/wireguard/windows` / `wireguard-nt` + `wintun` — WireGuard-NT/Wintun are
