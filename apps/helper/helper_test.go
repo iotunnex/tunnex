@@ -149,15 +149,26 @@ func TestValidateRequest(t *testing.T) {
 	mustCode(t, ValidateRequest(r), "auth_mode_unsupported")
 }
 
-// fakeBackend records calls and can be told to error on Up.
+// fakeBackend records calls and can be told to error on Up. fc (optional) is
+// signaled on FailClosed so a test can wait for an async fail-closed.
 type fakeBackend struct {
 	upErr                error
 	up, down, failClosed int
+	fc                   chan struct{}
 }
 
-func (f *fakeBackend) Up(*TunnelConfig) error       { f.up++; return f.upErr }
-func (f *fakeBackend) Down() error                  { f.down++; return nil }
-func (f *fakeBackend) FailClosed() error            { f.failClosed++; return nil }
+func (f *fakeBackend) Up(*TunnelConfig) error { f.up++; return f.upErr }
+func (f *fakeBackend) Down() error            { f.down++; return nil }
+func (f *fakeBackend) FailClosed() error {
+	f.failClosed++
+	if f.fc != nil {
+		select {
+		case f.fc <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
 func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxBytes: 1}, nil }
 
 func TestSupervisorFailClosed(t *testing.T) {
