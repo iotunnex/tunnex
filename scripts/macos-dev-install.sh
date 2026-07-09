@@ -18,6 +18,11 @@ echo ">> [2/6] install to $DIR (sudo)"
 sudo mkdir -p "$DIR"
 sudo cp /tmp/tunnex-helper /tmp/tunnelctl "$DIR/"
 sudo chmod 0755 "$DIR" "$DIR/tunnex-helper" "$DIR/tunnelctl"
+# Re-apply an ad-hoc signature IN PLACE. On Apple Silicon the sudo cp above
+# invalidates the Go build-time signature, and the kernel then kills the binary on
+# exec ("Killed: 9"). Sign the installed copies so they can run. (Dev-install only;
+# the production SMAppService installer ships a real Developer ID signature — S6.5b.)
+sudo codesign --force --sign - "$DIR/tunnex-helper" "$DIR/tunnelctl"
 
 echo ">> [3/6] STEP ZERO — caller-auth indicator MUST print 'native':"
 "$DIR/tunnex-helper" --version
