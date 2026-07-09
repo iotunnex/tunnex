@@ -676,6 +676,27 @@ bug. The WFP backend must implement the same `CleanStale` (startup sweep of stal
 provider/sublayer GUID) and be driven by the same dead-man, or it will strand Windows hosts identically.
 Build it bounded from day one — do not port only the arming half.
 
+**KILL-SWITCH VALIDATION STATE (2026-07-09, after the POC mini-smoke sessions):**
+- **PROVEN LIVE (real macOS hardware):** (a) full-tunnel routing loop FIXED — endpoint host-route
+  via the physical gateway, `tx` steady not runaway; (b) HOST-STRANDING RECOVERY confirmed live via
+  Ctrl-C graceful Down (network returns, no reboot) — RC1/RC2 work on real hardware, not just in unit
+  tests; (c) generator emits both AFs; (d) dev-install one-shot (codesign + Electron-path auto-detect
+  + stale-config self-heal).
+- **PROVEN (unit):** self-heal + dead-man release, both paths independently (`TestSupervisorSelfHeal`,
+  `TestSupervisorDeadMan`); split-default mapping (`TestRouteTargets`).
+- **UNPROVEN — THE ONE REMAINING LIVE GATE:** the `kill -9` pcap — does the pf block hold with ZERO
+  cleartext leak after helper DEATH (kernel-resident enforcement). Independent of gateway NAT; needs
+  only an `en0` capture. **DEFERRED to a disposable box** (NOT the daily-driver Mac — the POC sessions
+  stranded it repeatedly before recovery landed). **This is macOS-pf-SPECIFIC**: `backend_darwin.go` is
+  `//go:build darwin` and there is NO Linux backend (non-darwin uses `StubBackend`), so a Linux VM
+  cannot run this proof today — it would first require writing a throwaway nftables backend, and even
+  then it validates the PRINCIPLE (kernel-resident state outlives the process) generically, not macOS
+  pf or Windows WFP specifically (different kernel mechanisms). So: pf proof → spare Mac; the principle
+  → optionally a throwaway Linux nftables backend on a cheap VM; **WFP → needs its OWN Windows proof
+  regardless**. **WFP STAYS HELD** behind this pcap, per standing order.
+- **PARKED AS ITS OWN STORY:** gateway NAT / full-tunnel real internet egress (the `rx=92` container
+  double-NAT issue) is **S3.7** — do NOT hand-hack it live; the POC's manual iptables was a throwaway.
+
 **S6.3 native deps (pinned; license check):** macOS tun/device = `golang.zx2c4.com/wireguard`
 (wireguard-go) — **MIT**, compatible under our Apache-2.0 open edition (permissive → permissive, OK).
 Windows = `golang.zx2c4.com/wireguard/windows` / `wireguard-nt` + `wintun` — WireGuard-NT/Wintun are
