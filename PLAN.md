@@ -684,16 +684,15 @@ Build it bounded from day one — do not port only the arming half.
   + stale-config self-heal).
 - **PROVEN (unit):** self-heal + dead-man release, both paths independently (`TestSupervisorSelfHeal`,
   `TestSupervisorDeadMan`); split-default mapping (`TestRouteTargets`).
-- **UNPROVEN — THE ONE REMAINING LIVE GATE:** the `kill -9` pcap — does the pf block hold with ZERO
-  cleartext leak after helper DEATH (kernel-resident enforcement). Independent of gateway NAT; needs
-  only an `en0` capture. **DEFERRED to a disposable box** (NOT the daily-driver Mac — the POC sessions
-  stranded it repeatedly before recovery landed). **This is macOS-pf-SPECIFIC**: `backend_darwin.go` is
-  `//go:build darwin` and there is NO Linux backend (non-darwin uses `StubBackend`), so a Linux VM
-  cannot run this proof today — it would first require writing a throwaway nftables backend, and even
-  then it validates the PRINCIPLE (kernel-resident state outlives the process) generically, not macOS
-  pf or Windows WFP specifically (different kernel mechanisms). So: pf proof → spare Mac; the principle
-  → optionally a throwaway Linux nftables backend on a cheap VM; **WFP → needs its OWN Windows proof
-  regardless**. **WFP STAYS HELD** behind this pcap, per standing order.
+- **PROVEN LIVE (2026-07-09, on real macOS) — GATE CLEARED:** the `kill -9` pcap PASSED. Full-tunnel
+  up, `kill -9` the helper, `en0` capture over the dead window: BOTH pcaps (v4 `1.1.1.1` + v6
+  `2606:4700:4700::1111`) showed **0 packets** while ~30 ping attempts fired — the kernel-resident pf
+  anchor blocked every one with the helper PROCESS GONE ("death = enforcement"). BONUS: the manual
+  recovery command errored (zsh inline-comment), yet the host STILL recovered — the KeepAlive restart +
+  startup `CleanStale` self-healed AUTOMATICALLY (RC1 self-heal now live-proven, not just unit-tested).
+  No strand, no reboot. **WFP is UNBLOCKED.** (Windows WFP still needs its OWN Windows-side proof at its
+  story-end — a macOS proof validates the PATTERN, not WFP's kernel mechanism — but the bounded model
+  is now confirmed sound on real hardware, so WFP is built against a proven pattern.)
 - **PARKED AS ITS OWN STORY:** gateway NAT / full-tunnel real internet egress (the `rx=92` container
   double-NAT issue) is **S3.7** — do NOT hand-hack it live; the POC's manual iptables was a throwaway.
 
