@@ -511,6 +511,56 @@ its architecture must be reported for review BEFORE any code, covering FOUR deci
 Standard protocol otherwise: decide-items reported for review → build → multi-finder + the security
 review → e2e where the harness allows + human smoke for tunnel-up/down.
 
+#### S6.3 COMMIT ONE — privilege-helper architecture (PROPOSED, for review before any code)
+
+**HEADLINE TENSION (decide first):** robust caller-authentication (item 2) and a trusted
+daemon/service (item 3) BOTH rest on code-signing, which is now DEFERRED to S6.5b. So a *cryptographically*
+authenticated helper cannot be fully realized on unsigned builds. Two paths — pick one:
+- **(A) Build now, auth hardens later.** Ship the helper + its typed protocol on unsigned dev/S6.5a
+  builds with an INTERIM caller check (install-time admin consent + client-path/bundle check), and land
+  the crypto identity-pinning when S6.5b signs. Tunnel works early; the helper is only *fully* trusted
+  once signed. RECOMMENDED — keeps EPIC 6 moving; the interim helper is not internet-exposed and is
+  installed only by explicit admin action.
+- **(B) Pull macOS signing early.** Use the individual Apple Developer ID (no legal entity needed) to
+  sign the macOS app+daemon NOW so the macOS helper gets real XPC code-requirement pinning immediately;
+  Windows helper still waits on the entity/EV. Splits the platforms but maximizes macOS security first.
+
+**(1) Minimum surface.** The helper is a SEPARATE privileged process (native Go/Swift/C — NOT Electron,
+NOT Node), exposing a TYPED verb set only: `TunnelUp(cfg)` · `TunnelDown()` · `Status()`. `cfg` is a
+STRUCTURED, VALIDATED WireGuard config passed over IPC (never a file PATH — dodges TOCTOU/arbitrary-read):
+own private key, peer pubkey, endpoint host:port, allowed-IPs, address/CIDR, DNS, MTU — each field parsed
++ rejected if malformed (valid base64-32 keys, parseable CIDRs, well-formed endpoint). REFUSES: arbitrary
+interface name (one app-owned name, e.g. `utun-tunnex` / a fixed wintun adapter), arbitrary routes/DNS
+beyond what the validated cfg implies, any exec/shell/file-path/"run binary", more than one concurrent
+tunnel. The verb set IS the attack surface — same allowlist posture as the S6.1 preload.
+
+**(2) Caller authentication.** macOS: helper = a LaunchDaemon exposing an XPC service; pin the peer with
+`xpc_connection_set_peer_code_signing_requirement` (audit-token → SecCode → Tunnex Team ID + designated
+requirement). Windows: helper = a Windows service; IPC over a named pipe with a tight ACL; resolve the
+client PID (`GetNamedPipeClientProcessId`) → verify the client image is the signed Tunnex exe
+(`WinVerifyTrust` + path). BOTH depend on signing (see the headline tension) — on unsigned builds the
+interim is bundle-path + explicit-install consent, upgraded to crypto pinning at S6.5b. A root helper
+that trusts ANY local caller is a local-EoP primitive; that is the failure mode we design against.
+
+**(3) Install / uninstall lifecycle.** macOS: `SMAppService.daemon` (macOS 13+) registers a LaunchDaemon
+bundled at `Contents/Library/LaunchDaemons/` — one admin auth on first tunnel use; `unregister()` on app
+removal; idempotent; NO deprecated `SMJobBless`. Windows: register the service via the SCM through a
+ONE-TIME elevated install action (runs as LocalSystem); uninstaller STOPS + DELETES the service (no
+orphaned LocalSystem daemon); idempotent check-then-create. Both binaries must be signed/notarized for the
+OS to load them (→ S6.5b).
+
+**(4) Why NOT wireguard-tools-as-root (the rejected baseline).** Not `sudo wg-quick up <file>` because:
+(a) surface — `wg-quick` is a root shell script invoking `ip`/`route`/`resolvconf`; a config file handed
+to root is a fuzzy, injectable surface vs. a fixed typed verb set; (b) UX/security — `sudo` either
+password-prompts every connect (bad) or needs a NOPASSWD sudoers entry (a standing root hole any local
+process can abuse); the helper authenticates the CALLER once at install instead; (c) cross-platform —
+`wg-quick` is unix-only; Windows needs the service/wireguard-nt model regardless, so a unified helper
+abstraction is required anyway; (d) versioning — embedding `wireguard-go`/`wireguard-nt` pins a known-good
+implementation rather than depending on a possibly-absent/old system `wireguard-tools`; (e) TOCTOU — a
+file-path arg to root invites time-of-check/use races; structured IPC config avoids it.
+
+Report: decisions above for review (esp. the A/B signing-tension call) BEFORE any code.
+
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
   `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
