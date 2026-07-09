@@ -24,6 +24,14 @@ const (
 //   - Up(cfg)      bring the tunnel up AND arrange the persistent kill-switch
 //     (block all egress except via the tunnel / to the WG endpoint). The block
 //     outlives the process; only Down removes it.
+//     ORDERING INVARIANT (leak-safety): Up MUST arm the kill-switch backstop
+//     BEFORE it moves any routes onto the tunnel. So if Up is interrupted at any
+//     point after arming, traffic is BLOCKED (fail-closed), never leaked out the
+//     cleartext default route during a half-built setup. Graceful Down is the
+//     inverse — restore normal routing, then drop the backstop LAST — so a
+//     teardown transient is at worst a brief DROP, never a leak. (This is a
+//     contract on each platform Backend's Up/Down; the Supervisor guarantees the
+//     state-level fail-closed, the ordering guarantees the setup/teardown windows.)
 //   - Down()       graceful: remove the interface AND remove the kill-switch —
 //     restore normal routing (the user clicked Disconnect and wants cleartext back).
 //   - FailClosed() alive-process FAST PATH (app died / a mid-up error): tear the
