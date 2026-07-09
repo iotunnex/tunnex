@@ -7,7 +7,8 @@ import { cspFor } from "./csp";
 import { Config } from "./config";
 import { buildCredentialStore, buildTunnelConfigStore } from "./store";
 import { attachBearer } from "./session";
-import { registerIpc } from "./ipc";
+import { registerIpc, type TunnelControls } from "./ipc";
+import { TunnelTray } from "./tray";
 import { initUpdater } from "./updater";
 import { setupPageDataUrl } from "./setup";
 
@@ -22,6 +23,13 @@ function bundleDir(): string {
 protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 const allowInsecure = process.argv.includes("--allow-insecure-credential-storage");
+
+// The tray lives for the app's lifetime; `active` tracks the current window +
+// tunnel controls so the tray's actions always target the live window (which macOS
+// recreates on `activate` after all windows close). One tray, rewired on recreate.
+let tray: TunnelTray | null = null;
+let active: { win: BrowserWindow; controls: TunnelControls } | null = null;
+let unsubscribeTray: (() => void) | null = null;
 
 function createWindow(config: Config): BrowserWindow {
   const win = new BrowserWindow({
@@ -38,7 +46,27 @@ function createWindow(config: Config): BrowserWindow {
   const store = buildCredentialStore(allowInsecure);
   const tunnelStore = buildTunnelConfigStore(allowInsecure);
   attachBearer(session.defaultSession, () => config.getServerUrl(), store);
-  registerIpc(win, config, store, tunnelStore);
+  const controls = registerIpc(win, config, store, tunnelStore);
+
+  // Tray: created once, then rewired to this (possibly recreated) window. Tray
+  // connect uses the split-tunnel default — the full-tunnel toggle is a window-only
+  // affordance. onShow/onQuit target the live window/app.
+  active = { win, controls };
+  if (!tray) {
+    tray = new TunnelTray({
+      onConnect: () => void active?.controls.connect(false).catch(() => {}),
+      onDisconnect: () => void active?.controls.disconnect().catch(() => {}),
+      onShow: () => {
+        active?.win.show();
+        active?.win.focus();
+      },
+      onQuit: () => app.quit(),
+    });
+    tray.init();
+  }
+  unsubscribeTray?.();
+  unsubscribeTray = controls.subscribe((s) => tray?.update(s));
+  tray.update(controls.currentState());
 
   // Navigation lock: the renderer must never leave app:// (a compromised page
   // navigating to an external origin would keep the preload bridge). External

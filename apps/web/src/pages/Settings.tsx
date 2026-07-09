@@ -4,6 +4,7 @@ import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
+import { DesktopSettings } from "../components/DesktopSettings";
 
 const PROVIDERS = ["google", "microsoft"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -53,6 +54,11 @@ export default function Settings() {
       <h1 className="text-xl font-semibold text-white">Settings</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
+
+      {/* Desktop-only: server connection + sign-out for THIS client (renders nothing
+          in the browser build). Above the org sections — it's a device concern, not
+          an org-admin one, so it shows regardless of role. */}
+      <DesktopSettings />
 
       {org && !isAdmin && (
         <Card className="mt-6">

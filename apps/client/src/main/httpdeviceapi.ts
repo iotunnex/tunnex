@@ -1,6 +1,19 @@
 import os from "node:os";
 import type { DeviceApi } from "./deviceconfig";
 
+// createErr surfaces the server's TYPED error code (body.error.code) when present, so
+// a caller can match on it — e.g. the S3.7 `gateway_no_egress` full-tunnel refusal the
+// UI mirrors cleanly. Falls back to the status when the body isn't the typed shape.
+async function createErr(r: Response): Promise<string> {
+  try {
+    const body = (await r.json()) as { error?: { code?: string } };
+    if (body?.error?.code) return `create_device_failed: ${body.error.code}`;
+  } catch {
+    /* non-JSON body — fall through to the status */
+  }
+  return `create_device_failed: ${r.status}`;
+}
+
 // HttpDeviceApi is the concrete DeviceApi over the tenant REST API, called from
 // MAIN with the bearer (never the renderer). It mirrors the CLI's device flow:
 // pick the caller's org + an active gateway node, POST create-device, and capture
@@ -50,7 +63,7 @@ export class HttpDeviceApi implements DeviceApi {
         platform: process.platform,
       }),
     });
-    if (!r.ok) throw new Error(`create_device_failed: ${r.status}`);
+    if (!r.ok) throw new Error(await createErr(r));
     const body = (await r.json()) as { device: { id: string }; config?: string };
     if (!body.config) throw new Error("no_config_returned"); // server-generated flow only
     return { deviceId: body.device.id, confText: body.config };

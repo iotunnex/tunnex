@@ -22,16 +22,19 @@ export interface TunnexBridge {
     setServerUrl(url: string): Promise<{ url: string; reloginRequired: boolean }>;
   };
   tunnel: {
-    up(): Promise<TunnelStatus>;
+    // fullTunnel = the split-tunnel toggle intent (S6.4); effective only when a
+    // device is minted (get-or-create reuses an existing config as-is).
+    up(fullTunnel?: boolean): Promise<TunnelStatus>;
     down(): Promise<void>;
     status(): Promise<TunnelStatus>;
     onStatusChanged(cb: (s: TunnelStatus) => void): () => void;
   };
 }
 
-// TunnelStatus mirrors the helper (no secrets — never key material).
+// TunnelStatus mirrors the helper (no secrets — never key material). "revoked" is
+// client-synthesized by main (proactive revocation monitor) — the helper never emits it.
 export interface TunnelStatus {
-  state: "down" | "up" | "failed";
+  state: "down" | "up" | "failed" | "revoked";
   interface?: string;
   last_handshake_sec?: number;
   rx_bytes?: number;

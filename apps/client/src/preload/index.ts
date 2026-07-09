@@ -20,7 +20,9 @@ const api = {
   // renderer holds NO tunnel secret: main resolves the WG config (bearer-fetched)
   // and forwards it to the privileged helper; the renderer only sees status.
   tunnel: {
-    up: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:up"),
+    // fullTunnel is the split-tunnel toggle INTENT (S6.4); it only takes effect when
+    // a device is minted (get-or-create) — an existing config is reused as-is.
+    up: (fullTunnel = false): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:up", fullTunnel),
     down: (): Promise<void> => ipcRenderer.invoke("tunnel:down"),
     status: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:status"),
     // Push channel for live status + the LOUD fail-closed signal (main forwards
@@ -34,8 +36,10 @@ const api = {
 };
 
 // TunnelStatus mirrors apps/helper (no secrets — never carries key material).
+// "revoked" is CLIENT-synthesized (the helper never emits it): main sets it when the
+// proactive revocation monitor detects this device was revoked/deleted server-side.
 export interface TunnelStatus {
-  state: "down" | "up" | "failed";
+  state: "down" | "up" | "failed" | "revoked";
   interface?: string;
   last_handshake_sec?: number;
   rx_bytes?: number;
