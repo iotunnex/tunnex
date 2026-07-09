@@ -10,10 +10,41 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"strings"
 
 	"golang.zx2c4.com/wireguard/device"
 )
+
+// splitEndpoint splits host:port, unwrapping a bracketed IPv6 host.
+func splitEndpoint(endpoint string) (host, port string) {
+	if i := strings.LastIndex(endpoint, ":"); i > 0 {
+		host, port = endpoint[:i], endpoint[i+1:]
+	} else {
+		host = endpoint
+	}
+	return strings.Trim(host, "[]"), port
+}
+
+// resolveEndpoint replaces a hostname endpoint with a SINGLE resolved IP so the pf/WFP
+// pass rule, the endpoint host-route, AND wireguard-go all pin the SAME address. A
+// multi-address DNS name resolved independently by each could otherwise pin/permit a
+// different IP than the tunnel actually dials → the kill-switch would block the
+// handshake (review #10). Already-IP endpoints pass through unchanged.
+func resolveEndpoint(endpoint string) (string, error) {
+	host, port := splitEndpoint(endpoint)
+	if net.ParseIP(host) != nil {
+		return endpoint, nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return "", &ProtocolError{Code: "endpoint_unresolved", Msg: "cannot resolve WG endpoint " + host + ": " + err.Error()}
+	}
+	if len(ips) == 0 {
+		return "", &ProtocolError{Code: "endpoint_unresolved", Msg: "no addresses for WG endpoint " + host}
+	}
+	return net.JoinHostPort(ips[0].String(), port), nil
+}
 
 func deviceMTU(cfg *TunnelConfig) int {
 	if cfg.MTU > 0 {

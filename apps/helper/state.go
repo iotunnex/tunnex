@@ -79,7 +79,12 @@ type Supervisor struct {
 	// the kill-switch. now/deadMan are injectable for tests.
 	lastBeat time.Time
 	deadMan  time.Duration
-	now      func() time.Time
+	// now MUST stay time.Now (a MONOTONIC source). now()-lastBeat is then monotonic,
+	// and Go's monotonic clock PAUSES during system sleep/suspend on macOS + Windows +
+	// Linux — so a tunnel healthy at sleep is NOT spuriously released on resume before
+	// the app's first post-resume heartbeat (review #9). Do NOT swap this for a
+	// wall-clock source, which would count sleep time and fail the tunnel open.
+	now func() time.Time
 }
 
 func NewSupervisor(be Backend) *Supervisor {
@@ -148,6 +153,11 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 		// half-configured tunnel can't leak.
 		_ = s.be.FailClosed()
 		s.state = StateFailed
+		// CRITICAL: beat NOW. Without this, lastBeat is stale (zero / a prior session)
+		// and the dead-man fires on its very next tick — releasing the kill-switch
+		// ~immediately (fail-OPEN) while the UI still shows "failed/blocked". The block
+		// must hold for the full dead-man window before auto-release.
+		s.beat()
 		return &ProtocolError{Code: "tunnel_up_failed", Msg: err.Error()}
 	}
 	s.state = StateUp
@@ -185,6 +195,7 @@ func (s *Supervisor) OnPeerLost() {
 	}
 	_ = s.be.FailClosed()
 	s.state = StateFailed
+	s.beat()        // dead-man counts the full window from the loss, not the last heartbeat
 	s.lastCfg = nil // drop the private-key reference, like the graceful Down path
 }
 

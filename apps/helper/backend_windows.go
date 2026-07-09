@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sync"
 
+	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
@@ -31,6 +32,12 @@ type windowsBackend struct {
 	tunDev tun.Device
 	luid   uint64
 	armed  bool // WFP kill-switch installed (kernel-resident)
+	// Endpoint host-route pinned on the PHYSICAL interface (so WG's own encrypted
+	// packets don't loop into the tunnel); removed on Down.
+	epDest   netip.Prefix
+	epLUID   winipcfg.LUID
+	epNH     netip.Addr
+	epPinned bool
 }
 
 // NewBackend returns the Windows tunnel backend.
@@ -39,6 +46,21 @@ func NewBackend() Backend { return &windowsBackend{} }
 func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Resolve a hostname endpoint to ONE IP so the WFP pass, the endpoint route, and
+	// wireguard-go all pin the same address (review #10).
+	ep, err := resolveEndpoint(cfg.Endpoint)
+	if err != nil {
+		return err
+	}
+	cfg.Endpoint = ep
+
+	// CLEAN any stale WFP kill-switch from a prior FailClosed/crash before (re)arming:
+	// EnableFirewall on already-registered GUIDs fails ALREADY_EXISTS (review #4), and a
+	// stale full-tunnel block must not persist under a new SPLIT tunnel (review #6).
+	// Idempotent by provider GUID.
+	firewall.DisableFirewall()
+	b.armed = false
 
 	tdev, err := tun.CreateTUN(wintunAdapter, deviceMTU(cfg))
 	if err != nil {
@@ -54,10 +76,11 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	// ARM the kill-switch FIRST (before any routing) — ONLY for a full tunnel (a
 	// split tunnel leaves the rest of the user's traffic on the cleartext default BY
 	// DESIGN). EnableFirewall permits the tunnel adapter, loopback, DHCP/NDP, and THIS
-	// process (so wireguard-go's own encrypted packets to the endpoint egress — no
-	// route-exclusion needed, unlike macOS), and blocks everything else. The filters
-	// are kernel-resident and survive process death; removed by DisableFirewall
-	// (Down / CleanStale) via the well-known provider GUID.
+	// process, and blocks everything else. NOTE: the WFP permit lets our encrypted
+	// packets PASS the filter, but it does NOT stop the routing table from sending them
+	// into the tunnel — so a full tunnel STILL needs the physical endpoint route pinned
+	// below (review #1). The filters are kernel-resident and survive process death;
+	// removed by DisableFirewall (Down / CleanStale) via the well-known provider GUID.
 	if cfg.FullTunnel {
 		if err := firewall.EnableFirewall(luid, false, nil); err != nil {
 			_ = tdev.Close()
@@ -112,7 +135,63 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 		}
 	}
 
+	// Pin the endpoint route on the PHYSICAL interface (review #1): with 0.0.0.0/1 on
+	// the tunnel, wireguard-go's own encrypted packets to the endpoint would otherwise
+	// match the tunnel route and loop — conn.NewDefaultBind() does NOT bind the socket
+	// to the physical NIC, so the loop is real, not merely theoretical.
+	if cfg.FullTunnel {
+		if epHost, _ := splitEndpoint(cfg.Endpoint); epHost != "" {
+			if ip, perr := netip.ParseAddr(epHost); perr == nil {
+				if err := b.pinEndpointRoute(ip, luid); err != nil {
+					dev.Close()
+					return err
+				}
+			}
+		}
+	}
+
 	b.dev, b.tunDev, b.luid = dev, tdev, luid
+	return nil
+}
+
+// pinEndpointRoute installs a host route for the endpoint via the PHYSICAL default
+// next-hop (the lowest-metric default route NOT on the tunnel adapter), so WG's own
+// encrypted packets egress physically instead of matching the tunnel's split-default.
+// Idempotent (a prior FailClosed/crash may have left it — the route is on the physical
+// interface and survives the wintun teardown, like the macOS endpoint route).
+func (b *windowsBackend) pinEndpointRoute(ep netip.Addr, tunnelLUID uint64) error {
+	fam := winipcfg.AddressFamily(windows.AF_INET)
+	bits := 32
+	if ep.Is6() {
+		fam = winipcfg.AddressFamily(windows.AF_INET6)
+		bits = 128
+	}
+	rows, err := winipcfg.GetIPForwardTable2(fam)
+	if err != nil {
+		return fmt.Errorf("read routing table: %w", err)
+	}
+	best := ^uint32(0)
+	var nh netip.Addr
+	var luid winipcfg.LUID
+	found := false
+	for i := range rows {
+		r := &rows[i]
+		if r.DestinationPrefix.PrefixLength != 0 || uint64(r.InterfaceLUID) == tunnelLUID {
+			continue // default routes NOT on the tunnel adapter
+		}
+		if r.Metric < best {
+			best, nh, luid, found = r.Metric, r.NextHop.Addr(), r.InterfaceLUID, true
+		}
+	}
+	if !found {
+		return nil // no physical default — nothing to loop through
+	}
+	dest := netip.PrefixFrom(ep, bits)
+	_ = luid.DeleteRoute(dest, nh) // idempotent
+	if err := luid.AddRoute(dest, nh, 0); err != nil {
+		return fmt.Errorf("pin endpoint route %s: %w", dest, err)
+	}
+	b.epDest, b.epLUID, b.epNH, b.epPinned = dest, luid, nh, true
 	return nil
 }
 
@@ -126,6 +205,10 @@ func (b *windowsBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.luid = nil, nil, 0
+	if b.epPinned {
+		_ = b.epLUID.DeleteRoute(b.epDest, b.epNH) // on the physical iface → not auto-removed
+		b.epPinned = false
+	}
 	if b.armed {
 		firewall.DisableFirewall()
 		b.armed = false

@@ -56,12 +56,26 @@ export class HttpDeviceApi implements DeviceApi {
     return { deviceId: body.device.id, confText: body.config };
   }
 
+  private async orgIds(): Promise<string[]> {
+    const r = await fetch(`${this.origin}/api/v1/organizations`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`list_organizations_failed: ${r.status}`);
+    const orgs = (await r.json()) as Array<{ id: string }>;
+    return orgs.map((o) => o.id);
+  }
+
   async deviceExists(deviceId: string): Promise<boolean> {
-    const orgId = await this.firstOrgId();
-    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
-    if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
-    const devices = (await r.json()) as Array<{ id: string; status: string }>;
-    return devices.some((d) => d.id === deviceId && d.status === "active");
+    // Check EVERY org, not just orgs[0]: the device may have been created under a
+    // different org, and orgs[0] is not stable across list calls — resolving the wrong
+    // org would report a live device as absent and make the self-heal delete a good
+    // config + re-mint a device (review #8). Any read error THROWS so the caller's
+    // fail-safe keeps the config (never nuke on a partial/transient failure).
+    for (const orgId of await this.orgIds()) {
+      const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
+      if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
+      const devices = (await r.json()) as Array<{ id: string; status: string }>;
+      if (devices.some((d) => d.id === deviceId && d.status === "active")) return true;
+    }
+    return false; // checked every org; no active device with this id anywhere → genuinely gone
   }
 
   async revokeDevice(deviceId: string): Promise<void> {

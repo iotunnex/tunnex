@@ -37,8 +37,9 @@ type darwinBackend struct {
 	pfToken string // reference-counted `pfctl -E` token, released (not -d) on Down
 	// endpointHost is the WG endpoint IP for which a full tunnel pins a host route
 	// via the PHYSICAL gateway (so WG's own encrypted packets don't loop back into
-	// the tunnel). Removed on Down.
+	// the tunnel). endpointFam is "-inet"/"-inet6" so Down deletes it correctly.
 	endpointHost string
+	endpointFam  string
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -47,6 +48,22 @@ func NewBackend() Backend { return &darwinBackend{} }
 func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Resolve a hostname endpoint to ONE IP up front so the pf pass rule, the endpoint
+	// host-route, and wireguard-go all pin the same address (review #10).
+	ep, err := resolveEndpoint(cfg.Endpoint)
+	if err != nil {
+		return err
+	}
+	cfg.Endpoint = ep
+
+	// 0) CLEAN stale kill-switch state from a prior FailClosed/crash before (re)arming.
+	//    A SPLIT tunnel must NOT inherit a full tunnel's block-all (it wants cleartext
+	//    routing) — release it. (Full-tunnel re-arm below is idempotent; the stale
+	//    endpoint route is cleared idempotently at the add site in step 3a.)
+	if !cfg.FullTunnel {
+		_ = b.releasePF()
+	}
 
 	// 1) ARM the kill-switch FIRST — but ONLY for a FULL tunnel. A split tunnel
 	//    routes just its allowed-IPs and leaves the rest of the user's traffic on
@@ -101,13 +118,22 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	//     0.0.0.0/1 tunnel route and loop back into the tunnel — tx explodes, nothing
 	//     egresses (what `wg-quick` calls the endpoint route).
 	if cfg.FullTunnel {
-		if epHost, _ := splitEndpoint(cfg.Endpoint); epHost != "" && !strings.Contains(epHost, ":") {
-			if gw := defaultGatewayV4(); gw != "" {
-				if err := run("route", "-q", "add", "-host", epHost, gw); err != nil {
+		if epHost, _ := splitEndpoint(cfg.Endpoint); epHost != "" {
+			v6 := strings.Contains(epHost, ":")
+			fam := "-inet"
+			if v6 {
+				fam = "-inet6"
+			}
+			if gw := gatewayFor(epHost, fam); gw != "" {
+				// Idempotent: a prior FailClosed/crash may have left this route (which
+				// survives the utun since it's via the PHYSICAL gateway) — delete first
+				// so the re-add can't fail "File exists" and block reconnect (review #3).
+				_ = run("route", "-q", "delete", fam, "-host", epHost)
+				if err := run("route", "-q", "add", fam, "-host", epHost, gw); err != nil {
 					dev.Close()
 					return fmt.Errorf("pin endpoint route %s via %s: %w", epHost, gw, err)
 				}
-				b.endpointHost = epHost
+				b.endpointHost, b.endpointFam = epHost, fam
 			}
 		}
 	}
@@ -140,18 +166,18 @@ func (b *darwinBackend) Down() error {
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
 	if b.endpointHost != "" {
-		_ = run("route", "-q", "delete", "-host", b.endpointHost)
-		b.endpointHost = ""
+		_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
+		b.endpointHost, b.endpointFam = "", ""
 	}
 	return b.releasePF()
 }
 
-// defaultGatewayV4 returns the current IPv4 default gateway (the next-hop the
-// physical uplink uses), read BEFORE the tunnel default is installed. Empty if
-// none (e.g. a point-to-point link with no gateway — then no endpoint route is
-// needed because there's nothing to loop through).
-func defaultGatewayV4() string {
-	out, err := exec.Command("route", "-n", "get", "-inet", "default").CombinedOutput()
+// gatewayFor returns the physical next-hop for reaching a SPECIFIC address (v4 or v6
+// via fam "-inet"/"-inet6"), read BEFORE the tunnel default is installed. Using the
+// route to the endpoint itself (not the default) handles an endpoint reached via a
+// non-default route. Empty if on-link / unresolved (then no host route is pinned).
+func gatewayFor(ip, fam string) string {
+	out, err := exec.Command("route", "-n", "get", fam, ip).CombinedOutput()
 	if err != nil {
 		return ""
 	}
@@ -282,15 +308,6 @@ func (b *darwinBackend) CleanStale() error {
 	return nil
 }
 
-// splitEndpoint splits host:port, unwrapping a bracketed IPv6 host.
-func splitEndpoint(endpoint string) (host, port string) {
-	if i := strings.LastIndex(endpoint, ":"); i > 0 {
-		host, port = endpoint[:i], endpoint[i+1:]
-	} else {
-		host = endpoint
-	}
-	return strings.Trim(host, "[]"), port
-}
 
 func ipOnly(cidr string) string {
 	if i := strings.Index(cidr, "/"); i >= 0 {

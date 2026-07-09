@@ -2,6 +2,7 @@ package helper
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -55,13 +56,39 @@ func (v PathCheckVerifier) Verify(peerExePath string) error {
 }
 
 // isWithin reports whether target is dir itself or lies underneath it. Both are
-// Clean'd first; the trailing-separator check defeats the sibling-prefix trap
+// CANONICALIZED first — symlinks resolved (so a symlinked install dir, e.g. a
+// pnpm-linked Electron path, matches the peer's already-realpath'd exe) — and compared
+// case-INSENSITIVELY on case-insensitive filesystems (macOS/Windows), so a legitimate
+// caller whose path differs only in symlink form or case is NOT wrongly rejected
+// (review #5). The trailing-separator check defeats the sibling-prefix trap
 // (…/Tunnex.app must not match …/Tunnex.app-evil).
 func isWithin(dir, target string) bool {
-	dir = filepath.Clean(dir)
-	target = filepath.Clean(target)
-	if target == dir {
+	dir = canonPath(dir)
+	target = canonPath(target)
+	if pathEqual(dir, target) {
 		return true
 	}
-	return strings.HasPrefix(target, dir+string(filepath.Separator))
+	prefix := dir + string(filepath.Separator)
+	if caseInsensitiveFS() {
+		return strings.HasPrefix(strings.ToLower(target), strings.ToLower(prefix))
+	}
+	return strings.HasPrefix(target, prefix)
+}
+
+// canonPath resolves symlinks + Cleans; falls back to Clean when the path can't be
+// resolved (it may not exist exactly as given at check time).
+func canonPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(p)
+}
+
+func caseInsensitiveFS() bool { return runtime.GOOS == "windows" || runtime.GOOS == "darwin" }
+
+func pathEqual(a, b string) bool {
+	if caseInsensitiveFS() {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }

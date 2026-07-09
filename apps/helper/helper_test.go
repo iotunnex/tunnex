@@ -1,6 +1,10 @@
 package helper
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,6 +165,38 @@ func TestNegotiate(t *testing.T) {
 	}
 }
 
+// TestPathCheckVerifierCanonicalization guards review #5: a symlinked install dir
+// (e.g. pnpm-linked Electron) must trust a caller whose exe resolves under the real
+// target, and case must not matter on case-insensitive filesystems.
+func TestPathCheckVerifierCanonicalization(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	// Create the real exe so it resolves (the peer resolver reports a realpath'd, EXISTING exe).
+	exe := filepath.Join(real, "app", "Tunnex")
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Install dir given via a SYMLINK; caller resolves to the real path underneath.
+	if err := (PathCheckVerifier{InstallDirs: []string{link}}).Verify(exe); err != nil {
+		t.Fatalf("symlinked install dir must trust a caller under its resolved target: %v", err)
+	}
+	// Sibling-prefix trap still rejected after canonicalization.
+	if err := (PathCheckVerifier{InstallDirs: []string{real}}).Verify(real + "-evil/x"); err == nil {
+		t.Fatal("sibling-prefix caller must still be rejected")
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		if err := (PathCheckVerifier{InstallDirs: []string{real}}).Verify(filepath.Join(strings.ToUpper(real), "app", "Tunnex")); err != nil {
+			t.Fatalf("case-insensitive FS must trust a case-differing caller path: %v", err)
+		}
+	}
+}
+
 func TestNegotiateVersion(t *testing.T) {
 	if err := NegotiateVersion(1, 1); err != nil {
 		t.Fatalf("equal versions must pass: %v", err)
@@ -211,8 +247,8 @@ type fakeBackend struct {
 
 func (f *fakeBackend) Up(cfg *TunnelConfig) error {
 	f.up++
-	if f.upErr == nil && cfg.FullTunnel {
-		f.armed = true // full tunnel arms the block
+	if cfg.FullTunnel {
+		f.armed = true // full tunnel arms the block FIRST (before the parts that can fail)
 	}
 	return f.upErr
 }
@@ -230,6 +266,39 @@ func (f *fakeBackend) FailClosed() error {
 }
 func (f *fakeBackend) CleanStale() error { f.cleanStale++; f.armed = false; return nil } // un-strand
 func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxBytes: 1}, nil }
+
+// TestDeadManHoldsAfterUpFailure is the guard for the FAIL-OPEN regression (review
+// #2): a full-tunnel Up that arms the block then fails must keep the block for the
+// FULL dead-man window — not release it on the next tick because the failure path
+// forgot to beat() (leaving lastBeat stale/zero).
+func TestDeadManHoldsAfterUpFailure(t *testing.T) {
+	fb := &fakeBackend{upErr: &ProtocolError{Code: "x", Msg: "endpoint unreachable"}}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 90 * time.Second
+
+	if err := s.Up(fullConfig()); err == nil {
+		t.Fatal("expected up failure")
+	}
+	if s.State() != StateFailed || !fb.armed {
+		t.Fatalf("up-failure must fail closed with the block armed: state=%s armed=%v", s.State(), fb.armed)
+	}
+	// A tick WELL within the window must NOT release — the block holds (fail-CLOSED).
+	clock = base.Add(30 * time.Second)
+	if s.CheckDeadMan() {
+		t.Fatal("dead-man must NOT fire 30s after an up-failure (fail-OPEN regression)")
+	}
+	if fb.down != 0 {
+		t.Fatal("no release expected inside the window")
+	}
+	// Past the window → bounded auto-release.
+	clock = base.Add(120 * time.Second)
+	if !s.CheckDeadMan() || fb.down != 1 {
+		t.Fatalf("dead-man must release after the window: fired=%v down=%d", s.State() == StateDown, fb.down)
+	}
+}
 
 func TestSupervisorFailClosed(t *testing.T) {
 	// Backend errors on Up → FailClosed installed, state Failed (NOT Down → no leak).
