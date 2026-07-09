@@ -606,13 +606,21 @@ the config for a device." Proposed decisions:
    AVOIDS the browser flow's mistake (a plaintext key in ~/Downloads) that D2 called out.
 3. **One device per install**, named from the hostname (with a disambiguating suffix); the device id is
    persisted alongside the config.
-4. **Lifecycle on logout.** Clearing the credential (auth:logout) ALSO clears the stored tunnel config
-   and BEST-EFFORT revokes the device server-side (no dangling peer / stale telemetry — honors the
-   revocation-is-a-full-sweep principle). Re-login creates a fresh device on next connect.
+4. **Lifecycle on logout — CONFIRMED DELIBERATE (logout revokes the device).** Clearing the
+   credential (auth:logout) ALSO clears the stored tunnel config and BEST-EFFORT revokes the device
+   server-side. ARGUMENT (one line): the local WG config is cleared on logout exactly like the bearer,
+   so leaving the server-side peer alive would ORPHAN it (dangling peer + stale telemetry) — logout
+   revokes to complete the full-sweep; re-login creates a fresh device (D2: no re-fetch).
 5. **Loss = recreate, never re-fetch.** If safeStorage is cleared/unavailable, a NEW device is created
    (old one is orphaned → the logout/GC sweep or an admin reap handles it); consistent with D2.
-Open question for review: whether to revoke-and-recreate on EVERY server-URL change (a credential/
-device is bound to one tenant — S6.2 already forces re-login on URL change; the device should follow).
+6. **Server-URL change — RESOLVED: NO auto-revoke.** The stored config is ORIGIN-KEYED (like the
+   bearer) and NEVER used cross-origin — a URL change simply means the new origin has no config yet
+   (a fresh device is created on next connect there). The old-origin device is NOT auto-revoked
+   (avoids destroying a working config on a fat-finger URL edit / temporary switch); instead the UI
+   SURFACES the orphaned old-origin device with a "remove or switch back" affordance, and remove does
+   a best-effort revoke against the OLD ORIGIN ONLY (never the current one). This is the deliberate
+   divergence from S6.2's force-relogin-on-URL-change: the credential is discarded, but a device
+   (server-side state + a stored config) is worth preserving/surfacing, not silently reaping.
 
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
