@@ -47,6 +47,10 @@ services:
       TUNNEX_API_ADDR: ${TUNNEX_API_ADDR:-:8080}
       TUNNEX_SECRETS_DIR: /var/lib/tunnex/secrets
       TUNNEX_AUTO_MIGRATE: ${TUNNEX_AUTO_MIGRATE:-true}
+      # Public base URL for email links (verify/reset/invite). MUST be reachable by
+      # your users on a remote deploy — the localhost default only works locally, and
+      # the API warns loudly at boot if left at it. Set APP_BASE_URL in .env.
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
