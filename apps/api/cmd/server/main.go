@@ -120,6 +120,15 @@ func main() {
 		logger.Warn("cookie_insecure",
 			slog.String("warning", "session cookie Secure flag is OFF — development only; set TUNNEX_COOKIE_SECURE=true in production"))
 	}
+	// APP_BASE_URL builds every email link (verify, reset, invite). Left at the
+	// localhost default on a remote deploy, those links point at localhost and are
+	// UNREACHABLE from a user's machine — a silent, confusing failure (POC-surfaced).
+	// Warn loudly so it's caught at boot, not by a user who can't verify their email.
+	if cfg.AppBaseURLLooksLocal() {
+		logger.Warn("app_base_url_local",
+			slog.String("app_base_url", cfg.AppBaseURL),
+			slog.String("warning", "APP_BASE_URL points at localhost — email verification/reset/invite links will be UNREACHABLE from other machines. Set APP_BASE_URL to this server's public URL for any non-local deployment."))
+	}
 
 	// Agent CA (root of trust for tunnex-node mTLS): load-or-create, sealed under
 	// the master key, fail-loud on unusable, self-test at boot.

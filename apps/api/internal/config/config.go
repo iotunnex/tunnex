@@ -56,6 +56,14 @@ type SMTP struct {
 // IsProduction reports whether the process runs in a production environment.
 func (c Config) IsProduction() bool { return c.Env == "production" }
 
+// AppBaseURLLooksLocal reports whether AppBaseURL points at the local host. On a
+// remote deploy this is a misconfiguration: every email link (verify/reset/invite)
+// would point at localhost and be unreachable from the user's machine. Boot warns
+// loudly on it (POC-surfaced: a remote deploy shipped localhost verify links).
+func (c Config) AppBaseURLLooksLocal() bool {
+	return strings.Contains(c.AppBaseURL, "localhost") || strings.Contains(c.AppBaseURL, "127.0.0.1")
+}
+
 // Load reads configuration from the environment, applying sane defaults so the
 // server runs with zero configuration during development.
 func Load() Config {
