@@ -114,6 +114,11 @@ closes BOTH the EV blocker and the copyright cleanup.** (b)
 **Go module path — DECIDED: defer to the VANITY path (`tunnex.io/…`) on domain purchase**; interim
 keep-as-is, now GUARDED by a `-mod=readonly` note in each go.mod + the Makefile so the flag can't be
 innocently dropped pre-rename.
+**SECURITY LIMITATION (S6.3, named):** the privilege helper's INTERIM caller-check on unsigned builds
+is executable-path-inside-install-dir verification — WEAKER than code-signing identity pinning. Blocks
+a non-admin local process from driving the root helper; does NOT stop an already-admin attacker or a
+path-spoofing race. Wire protocol carries `auth_mode` so this upgrades to `code_signing` at S6.5b
+without a break. TRIGGER to retire = S6.5b (signing + notarization).
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
@@ -560,6 +565,30 @@ implementation rather than depending on a possibly-absent/old system `wireguard-
 file-path arg to root invites time-of-check/use races; structured IPC config avoids it.
 
 Report: decisions above for review (esp. the A/B signing-tension call) BEFORE any code.
+
+**COMMIT-ONE AMENDMENTS — PATH A APPROVED (build now, harden at S6.5b), with:**
+- **Interim caller-check (unsigned builds) = executable-path-inside-install-dir verification.** The
+  helper resolves the connecting client's executable path (macOS: audit-token → PID → path; Windows:
+  `GetNamedPipeClientProcessId` → image path) and requires it to live INSIDE the app's install dir
+  (`/Applications/Tunnex.app/…`, `C:\Program Files\Tunnex\…`). RECORDED AS WEAKER-THAN-PINNING —
+  THREAT MODEL: it stops an unrelated local process from driving the helper, but does NOT stop a
+  process that can write into / replace a binary in the install dir (needs admin already) or a
+  path-spoofing race; a non-admin local attacker is blocked, an admin-level one is not. Real crypto
+  identity pinning lands at S6.5b (mode upgrade, below).
+- **Wire protocol carries `version` + `auth_mode` from day one.** Every request/response header
+  includes a protocol version and the auth mode in force (`path_check` now, `code_signing` at S6.5b).
+  So S6.5b hardening is a MODE UPGRADE negotiated on the existing protocol, NOT a breaking change —
+  the app and helper agree on the strongest mutually-supported mode; the helper REFUSES to downgrade
+  below its configured minimum once signed.
+- **Fail-CLOSED on helper death (CONFIRMED, no deviation).** If the helper dies / the IPC channel
+  drops while a tunnel is up, tunnel traffic FAILS CLOSED — the tun interface + its routes are torn
+  down (or a kill-switch route/deny stays installed) so NO traffic silently falls back to the
+  cleartext default route (no leak). The UI surfaces the drop LOUDLY (disconnected + reason), never
+  a silent degrade. Rationale: a VPN client that fails OPEN leaks the exact traffic the user meant to
+  protect; closed-on-failure is the only defensible default. (Any future opt-in "allow fallback" would
+  be an explicit, off-by-default user choice — not in scope here.)
+- **PLAN ledger:** the interim path-check posture is a NAMED SECURITY LIMITATION (below), trigger to
+  retire = S6.5b crypto pinning.
 
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
