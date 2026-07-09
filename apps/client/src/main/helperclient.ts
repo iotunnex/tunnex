@@ -15,6 +15,9 @@ export interface TunnelConfig {
   endpoint: string;
   address: string;
   allowed_ips: string[];
+  // full_tunnel intent: when true the helper requires both 0.0.0.0/0 AND ::/0
+  // present (no single-family leak). Mirrors apps/helper TunnelConfig.
+  full_tunnel?: boolean;
   dns?: string[];
   mtu?: number;
   persistent_keepalive?: number;
