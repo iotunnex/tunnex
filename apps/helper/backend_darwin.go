@@ -37,6 +37,10 @@ type darwinBackend struct {
 	tunDev  tun.Device
 	ifname  string
 	pfToken string // reference-counted `pfctl -E` token, released (not -d) on Down
+	// endpointHost is the WG endpoint IP for which a full tunnel pins a host route
+	// via the PHYSICAL gateway (so WG's own encrypted packets don't loop back into
+	// the tunnel). Removed on Down.
+	endpointHost string
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -93,6 +97,22 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		dev.Close()
 		return fmt.Errorf("assign address: %w", err)
 	}
+	// 3a) FULL TUNNEL: pin a /32 host route for the WG endpoint via the CURRENT
+	//     physical default gateway, BEFORE the default moves onto utun. Without this,
+	//     wireguard-go's own OUTER (encrypted) packets to the gateway match the
+	//     0.0.0.0/1 tunnel route and loop back into the tunnel — tx explodes, nothing
+	//     egresses (what `wg-quick` calls the endpoint route).
+	if cfg.FullTunnel {
+		if epHost, _ := splitEndpoint(cfg.Endpoint); epHost != "" && !strings.Contains(epHost, ":") {
+			if gw := defaultGatewayV4(); gw != "" {
+				if err := run("route", "-q", "add", "-host", epHost, gw); err != nil {
+					dev.Close()
+					return fmt.Errorf("pin endpoint route %s via %s: %w", epHost, gw, err)
+				}
+				b.endpointHost = epHost
+			}
+		}
+	}
 	for _, aip := range cfg.AllowedIPs {
 		for _, target := range routeTargets(aip) {
 			args := []string{"-q", "add"}
@@ -121,7 +141,29 @@ func (b *darwinBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
+	if b.endpointHost != "" {
+		_ = run("route", "-q", "delete", "-host", b.endpointHost)
+		b.endpointHost = ""
+	}
 	return b.releasePF()
+}
+
+// defaultGatewayV4 returns the current IPv4 default gateway (the next-hop the
+// physical uplink uses), read BEFORE the tunnel default is installed. Empty if
+// none (e.g. a point-to-point link with no gateway — then no endpoint route is
+// needed because there's nothing to loop through).
+func defaultGatewayV4() string {
+	out, err := exec.Command("route", "-n", "get", "-inet", "default").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[0] == "gateway:" {
+			return f[1]
+		}
+	}
+	return ""
 }
 
 func (b *darwinBackend) FailClosed() error {

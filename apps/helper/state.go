@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"os"
 	"sync"
 	"time"
 )
@@ -82,7 +83,15 @@ type Supervisor struct {
 }
 
 func NewSupervisor(be Backend) *Supervisor {
-	return &Supervisor{be: be, state: StateDown, deadMan: DeadManDefault, now: time.Now}
+	dm := DeadManDefault
+	// TUNNEX_DEADMAN shortens the window for smoke tests (e.g. "15s") so a forgotten
+	// tunnel auto-releases fast. Never lengthen it silently past the default.
+	if v := os.Getenv("TUNNEX_DEADMAN"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			dm = d
+		}
+	}
+	return &Supervisor{be: be, state: StateDown, deadMan: dm, now: time.Now}
 }
 
 // SelfHeal releases any kill-switch state stranded by a prior crashed process. The
