@@ -80,7 +80,7 @@ func TestInviteCreateAcceptNewUser(t *testing.T) {
 	svc, mailer, org, actor, ctx := newSvc(t)
 	email := "invitee-" + uuid.NewString() + "@example.com"
 
-	if err := svc.Create(ctx, actor, org, email, "member"); err != nil {
+	if _, err := svc.Create(ctx, actor, org, email, "member"); err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
 	// Audit: invite.created is attributed to the acting user (watch-item e —
@@ -126,10 +126,10 @@ func TestInviteCreateAcceptNewUser(t *testing.T) {
 func TestInviteDuplicatePendingRejected(t *testing.T) {
 	svc, _, org, actor, ctx := newSvc(t)
 	email := "dup-" + uuid.NewString() + "@example.com"
-	if err := svc.Create(ctx, actor, org, email, "member"); err != nil {
+	if _, err := svc.Create(ctx, actor, org, email, "member"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := svc.Create(ctx, actor, org, email, "member"); codeOf(err) != "invite_pending" {
+	if _, err := svc.Create(ctx, actor, org, email, "member"); codeOf(err) != "invite_pending" {
 		t.Fatalf("duplicate: want invite_pending, got %v", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestInviteAcceptAttachesExistingAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if err := svc.Create(ctx, actor, org, "exists@example.com", "admin"); err != nil {
+	if _, err := svc.Create(ctx, actor, org, "exists@example.com", "admin"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	uid, _, err := svc.Accept(ctx, mailer.last(), "", "")
@@ -167,7 +167,7 @@ func TestInviteAcceptRejectsDeactivatedAccount(t *testing.T) {
 	if err := svc.q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: u.ID, Status: "deactivated"}); err != nil {
 		t.Fatalf("deactivate: %v", err)
 	}
-	if err := svc.Create(ctx, actor, org, "frozen@example.com", "member"); err != nil {
+	if _, err := svc.Create(ctx, actor, org, "frozen@example.com", "member"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	// Accepting must not resurrect a frozen account into a membership.
@@ -180,7 +180,7 @@ func TestInviteRevokeAndResend(t *testing.T) {
 	svc, mailer, org, actor, ctx := newSvc(t)
 	email := "rr-" + uuid.NewString() + "@example.com"
 
-	if err := svc.Create(ctx, actor, org, email, "member"); err != nil {
+	if _, err := svc.Create(ctx, actor, org, email, "member"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	first := mailer.last()

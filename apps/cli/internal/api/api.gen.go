@@ -357,6 +357,13 @@ type HealthResponse struct {
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
 
+// InviteCreated defines model for InviteCreated.
+type InviteCreated struct {
+	// InviteToken Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later.
+	InviteToken string `json:"invite_token"`
+	Message     string `json:"message"`
+}
+
 // InviteRequest defines model for InviteRequest.
 type InviteRequest struct {
 	Email openapi_types.Email `json:"email"`
@@ -4590,7 +4597,7 @@ func (r VerifyDomainClaimResponse) StatusCode() int {
 type CreateInvitationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON202      *GenericMessage
+	JSON202      *InviteCreated
 	JSONDefault  *Error
 }
 
@@ -6528,7 +6535,7 @@ func ParseCreateInvitationResponse(rsp *http.Response) (*CreateInvitationRespons
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest GenericMessage
+		var dest InviteCreated
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -2,8 +2,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -13,7 +11,6 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
-	"github.com/tunnexio/tunnex/apps/api/internal/session"
 )
 
 // ListMembers GET /api/v1/organizations/{orgId}/members — the org roster
@@ -77,11 +74,14 @@ func (s apiServer) CreateInvitation(ctx context.Context, req api.CreateInvitatio
 		return nil, err
 	}
 	p, _ := authctx.PrincipalFrom(ctx)
-	if err := s.invites.Create(ctx, p.UserID, req.OrgId, string(req.Body.Email), string(req.Body.Role)); err != nil {
+	token, err := s.invites.Create(ctx, p.UserID, req.OrgId, string(req.Body.Email), string(req.Body.Role))
+	if err != nil {
 		return nil, err
 	}
+	// Return the raw token so the dashboard can show a copyable accept link (the
+	// SMTP-less delivery path). Shown once; never retrievable again.
 	return api.CreateInvitation202JSONResponse{
-		Body:    api.GenericMessage{Message: "Invitation sent."},
+		Body:    api.InviteCreated{Message: "Invitation created.", InviteToken: token},
 		Headers: api.CreateInvitation202ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
@@ -98,42 +98,17 @@ func (s apiServer) AcceptInvitation(ctx context.Context, req api.AcceptInvitatio
 	if req.Body.Password != nil {
 		pw = *req.Body.Password
 	}
-	userID, _, err := s.invites.Accept(ctx, req.Body.Token, name, pw)
-	if err != nil {
+	// No auto-login: the invite link is admin-visible (shown in the dashboard for
+	// SMTP-less delivery), so the accept must NOT mint a session — otherwise anyone
+	// holding the link could land in an existing invitee's account. The invitee sets
+	// their password here (new user) or keeps their existing one, then signs in.
+	if _, _, err := s.invites.Accept(ctx, req.Body.Token, name, pw); err != nil {
 		return nil, err
 	}
-	// Auto-login: accepting the invite proves inbox control (and, for a new user,
-	// sets a password), so establish a fresh session here — the user lands directly
-	// in their new org instead of being bounced to a second sign-in (which, with no
-	// org yet, would misroute them into create-org onboarding). Same session-mint +
-	// cookie path as Login; csrfGuard is a no-op here (no prior session cookie).
-	sess, err := s.sessions.Create(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	return acceptInviteResponse{
-		body:      api.GenericMessage{Message: "Invitation accepted."},
-		sess:      sess,
-		secure:    s.cookieSecure,
-		requestID: middleware.GetReqID(ctx),
+	return api.AcceptInvitation200JSONResponse{
+		Body:    api.GenericMessage{Message: "Invitation accepted — you can now sign in."},
+		Headers: api.AcceptInvitation200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
-}
-
-// acceptInviteResponse sets the session cookie on a successful invite accept
-// (auto-login), mirroring loginResponse.
-type acceptInviteResponse struct {
-	body      api.GenericMessage
-	sess      session.Session
-	secure    bool
-	requestID string
-}
-
-func (r acceptInviteResponse) VisitAcceptInvitationResponse(w http.ResponseWriter) error {
-	session.SetCookie(w, r.sess, r.secure)
-	w.Header().Set("X-Request-Id", r.requestID)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	return json.NewEncoder(w).Encode(r.body)
 }
 
 // ResendInvitation POST /api/v1/organizations/{orgId}/invitations/resend.

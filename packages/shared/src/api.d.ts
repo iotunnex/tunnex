@@ -921,6 +921,11 @@ export interface components {
         GenericMessage: {
             message: string;
         };
+        InviteCreated: {
+            message: string;
+            /** @description Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later. */
+            invite_token: string;
+        };
         SsoRedirect: {
             redirect_url: string;
         };
@@ -1956,14 +1961,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Invitation sent. */
+            /** @description Invitation created (accept token returned for the dashboard link). */
             202: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GenericMessage"];
+                    "application/json": components["schemas"]["InviteCreated"];
                 };
             };
             default: components["responses"]["Error"];

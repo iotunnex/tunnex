@@ -1,23 +1,21 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, apiErrorMessage } from "../lib/api";
-import { useAuth } from "../lib/auth";
 import { AuthLayout } from "../components/AuthLayout";
 import { Button, ErrorText, Field, Input } from "../components/ui";
 
 /**
- * AcceptInvite is the landing page for the invitation email link
+ * AcceptInvite is the landing page for the invitation link
  * (/accept-invite?token=…). WITHOUT it the link fell through to `*` → /dashboard →
  * /login and the token was dropped, so an invited user signed up fresh with no org
  * and got bounced into create-org onboarding instead of joining the inviting org.
  *
- * Accepting provisions/links the user, adds the membership, and AUTO-LOGS-IN (the
- * server sets the session cookie), so we hydrate auth from /auth/me and land the
- * user directly in their new org — RequireOrg passes because the membership exists.
+ * Accepting provisions/links the user and adds the membership. It does NOT auto-login
+ * (the link is admin-visible in the dashboard, so a session must never be minted from
+ * it): the invitee sets a password here, then signs in explicitly and lands in the
+ * org (RequireOrg passes — the membership now exists).
  */
 export default function AcceptInvite() {
-  const { setUser } = useAuth();
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   // Capture the token ONCE, then strip it from the URL so the secret doesn't linger
   // in browser history / leak via the Referer header (same hygiene as ResetPassword).
@@ -29,23 +27,19 @@ export default function AcceptInvite() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const { error } = await api.POST("/api/v1/auth/invitations/accept", { body: { token, name, password } });
+    setBusy(false);
     if (error) {
-      setBusy(false);
       setError(apiErrorMessage(error, "This invitation is invalid or has expired."));
       return;
     }
-    // Auto-login: the accept set the session cookie. Hydrate the SPA's auth state
-    // from /auth/me, then route into the org.
-    const { data } = await api.GET("/api/v1/auth/me");
-    setBusy(false);
-    if (data) setUser(data);
-    navigate("/dashboard", { replace: true });
+    setDone(true);
   }
 
   if (!token) {
@@ -56,6 +50,20 @@ export default function AcceptInvite() {
           This link is missing its token. Ask your administrator to resend the invitation.
         </p>
         <Link to="/login" className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200">
+          Go to sign in
+        </Link>
+      </AuthLayout>
+    );
+  }
+
+  if (done) {
+    return (
+      <AuthLayout>
+        <h1 className="text-xl font-semibold text-white">You're in</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Your account is ready. Sign in to open your organization.
+        </p>
+        <Link to="/login" className="mt-5 inline-block text-xs text-accent-400 hover:text-accent-500">
           Go to sign in
         </Link>
       </AuthLayout>

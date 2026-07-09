@@ -673,11 +673,11 @@ paths:
             schema: { $ref: "#/components/schemas/InviteRequest" }
       responses:
         "202":
-          description: Invitation sent.
+          description: Invitation created (accept token returned for the dashboard link).
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/GenericMessage" }
+              schema: { $ref: "#/components/schemas/InviteCreated" }
         default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/invitations/resend:
@@ -1225,6 +1225,20 @@ components:
       additionalProperties: false
       properties:
         message: { type: string }
+
+    InviteCreated:
+      type: object
+      required: [message, invite_token]
+      additionalProperties: false
+      properties:
+        message: { type: string }
+        invite_token:
+          type: string
+          description: >-
+            Raw one-time accept token. The dashboard builds the accept link
+            (origin + /accept-invite?token=…) for the admin to hand to the invitee
+            — the SMTP-less delivery path. Also emailed when SMTP is configured.
+            Shown once; not retrievable later.
 
     SsoRedirect:
       type: object

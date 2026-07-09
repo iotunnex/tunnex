@@ -3,6 +3,7 @@ import { api, apiErrorMessage, type Member, type Org, type Role } from "../lib/a
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
+import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 const ROLES: Role[] = ["owner", "admin", "member"];
 const selectCls =
@@ -172,22 +173,24 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
-    setSent(false);
-    const { error } = await api.POST("/api/v1/organizations/{orgId}/invitations", {
+    const { data, error } = await api.POST("/api/v1/organizations/{orgId}/invitations", {
       params: { path: { orgId } },
       body: { email, role },
     });
     setBusy(false);
-    if (error) return setErr(apiErrorMessage(error, "Could not send the invitation."));
+    if (error || !data) return setErr(apiErrorMessage(error, "Could not create the invitation."));
     setEmail("");
-    setSent(true);
+    // Build the accept link from THIS origin (correct host regardless of the API's
+    // APP_BASE_URL) and show it once for the admin to copy + hand to the invitee —
+    // the delivery path when email isn't configured. The email is best-effort on top.
+    setInviteLink(`${window.location.origin}/accept-invite?token=${data.invite_token}`);
     onInvited();
   }
 
@@ -200,10 +203,7 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
               <Input
                 type="email"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setSent(false); // a fresh address isn't "sent" until submitted
-                }}
+                onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="name@company.com"
               />
@@ -223,9 +223,17 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
         {/* Success uses the accent, not green (green = liveness only, S4.4). The
             copy is deliberately generic — it never reveals whether the address
             already had an account. */}
-        {sent && <p className="mt-3 text-xs text-accent-400">If that person can be invited, an invitation is on its way.</p>}
         <ErrorText>{err}</ErrorText>
       </Card>
+      {inviteLink && (
+        <OneTimeSecretModal
+          title="Invitation link"
+          caption="Copy this link and send it to the invitee. It works once, expires, and won't be shown again. If email is configured, they also received it."
+          secret={inviteLink}
+          copyLabel="Copy link"
+          onDismiss={() => setInviteLink(null)}
+        />
+      )}
     </form>
   );
 }

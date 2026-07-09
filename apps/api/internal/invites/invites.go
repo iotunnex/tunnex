@@ -88,14 +88,17 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 }
 
 // Create issues an invitation and emails the link.
-func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, role string) error {
+// Create mints an invitation and returns the RAW accept token. The caller surfaces
+// it to the inviting admin (the dashboard builds a copyable accept link — the
+// primary delivery for SMTP-less self-hosts); the email is best-effort on top.
+func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, role string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if !rbac.ValidRole(role) {
-		return apierr.BadRequest("invalid_role", "unknown role: "+role)
+		return "", apierr.BadRequest("invalid_role", "unknown role: "+role)
 	}
 	raw, hash, err := newToken()
 	if err != nil {
-		return err
+		return "", err
 	}
 	err = s.withTx(ctx, func(q *sqlc.Queries) error {
 		if _, e := q.CreateInvitation(ctx, sqlc.CreateInvitationParams{
@@ -110,10 +113,10 @@ func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, rol
 		return writeAudit(ctx, q, orgID, &actor, "invite.created", email, map[string]any{"role": role})
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	s.mail(ctx, email, "You're invited to Tunnex", "You've been invited to join an organization on Tunnex: "+s.baseURL+"/accept-invite?token="+raw)
-	return nil
+	return raw, nil
 }
 
 // Accept consumes an invite token, provisions/links the user (verifying the
