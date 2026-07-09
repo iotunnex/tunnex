@@ -102,6 +102,12 @@ services:
     # false + diagnosable if neither is available — no silent success.
     cap_add:
       - NET_ADMIN
+    # IP forwarding in the agent's netns, so a gateway can route decrypted client
+    # traffic toward egress. Harmless without NAT; the actual masquerade/egress
+    # (full-tunnel real internet) is the parked S3.7 story — see scripts/poc-gateway-nat.sh
+    # for the throwaway POC NAT, NOT a production feature.
+    sysctls:
+      - net.ipv4.ip_forward=1
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
