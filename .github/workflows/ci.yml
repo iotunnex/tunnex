@@ -44,6 +44,9 @@ jobs:
       - name: Privilege-helper core — vet + test (S6.3)
         run: make test-helper
 
+      - name: Privilege-helper — cross-compile darwin/amd64+arm64 + windows/amd64 (S6.3)
+        run: make helper-crosscompile
+
       - name: Web — typecheck + build
         run: |
           corepack enable

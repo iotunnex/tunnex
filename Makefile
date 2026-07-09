@@ -148,6 +148,15 @@ test-helper: ## Vet + test the privilege-helper core (S6.3; stdlib-only, no DB)
 	docker run --rm -v "$(PWD)/apps/helper":/src -w /src -e GOFLAGS=-mod=readonly \
 	  $(GO_IMAGE) sh -c "go vet ./... && go test ./..."
 
+.PHONY: helper-crosscompile
+helper-crosscompile: ## Compile-check the helper (incl platform build-tagged files) for all targets
+	@for t in darwin/amd64 darwin/arm64 windows/amd64; do \
+	  goos=$${t%/*}; goarch=$${t#*/}; echo ">> $$goos/$$goarch"; \
+	  docker run --rm -v "$(PWD)/apps/helper":/src -w /src -e GOFLAGS=-mod=readonly \
+	    -e GOOS=$$goos -e GOARCH=$$goarch $(GO_IMAGE) go build ./... || exit 1; \
+	done
+	@echo ">> helper cross-compiles for darwin/amd64+arm64 + windows/amd64."
+
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres

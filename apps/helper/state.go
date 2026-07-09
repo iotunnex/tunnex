@@ -13,14 +13,24 @@ const (
 
 // Backend is the platform tunnel implementation (wireguard-go on macOS,
 // wireguard-nt on Windows). The core dispatches through it; the platform files
-// provide it. Two distinct teardowns encode the fail-open-vs-closed decision:
+// provide it.
 //
-//   - Down()       graceful: remove the interface AND restore normal routing
-//     (the user clicked Disconnect — they WANT their cleartext default route back).
-//   - FailClosed() defensive: remove the interface but INSTALL A KILL-SWITCH
-//     (blackhole the tunneled routes / block the default) so traffic the user
-//     meant to protect does NOT silently fall back to cleartext. Stays until the
-//     app recovers or the user acknowledges.
+// KILL-SWITCH INVARIANT (see PLAN "S6.3 KILL-SWITCH DESIGN"): fail-closed must
+// require NO LIVE CODE to act, because the helper can be `kill -9`'d (no handlers
+// run). So the kill-switch is KERNEL-RESIDENT STATE (pf anchor on macOS, WFP
+// filters on Windows) that Up ARRANGES and that PERSISTS however the process
+// exits. Death itself enforces no-cleartext.
+//
+//   - Up(cfg)      bring the tunnel up AND arrange the persistent kill-switch
+//     (block all egress except via the tunnel / to the WG endpoint). The block
+//     outlives the process; only Down removes it.
+//   - Down()       graceful: remove the interface AND remove the kill-switch —
+//     restore normal routing (the user clicked Disconnect and wants cleartext back).
+//   - FailClosed() alive-process FAST PATH (app died / a mid-up error): tear the
+//     interface and ASSERT the kill-switch is present. It does NOT "install" the
+//     guarantee — Up already did; this is convenience for when code is still
+//     running. On `kill -9` this never runs, and the pre-arranged block is what
+//     holds the line.
 type Backend interface {
 	Up(cfg *TunnelConfig) error
 	Down() error

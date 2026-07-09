@@ -622,6 +622,37 @@ the config for a device." Proposed decisions:
    divergence from S6.2's force-relogin-on-URL-change: the credential is discarded, but a device
    (server-side state + a stored config) is worth preserving/surfacing, not silently reaping.
 
+**S6.3 KILL-SWITCH DESIGN — BEFORE-CODE (review item at story end; pcap-verified smoke step).**
+THE INVARIANT: fail-closed must require NO LIVE CODE to act. The app is unprivileged (can't fix
+routing); the helper can be `kill -9`'d, which runs NO cleanup handlers. So fail-closed CANNOT be a
+`FailClosed()` method that runs on death — it must be KERNEL-RESIDENT STATE the helper ARRANGES AT
+`Up` that BLOCKS cleartext egress and PERSISTS however the process exits. **Death itself is the
+enforcement.** Only a graceful `Down` removes it. This corrects the current Supervisor: `Up` installs
+the persistent block; `Down` removes it; the live `FailClosed()`/`OnPeerLost()` path is a fast-teardown
+CONVENIENCE for the alive-process case, NOT the guarantee. On next helper start a STALE block from a
+prior crash is reconciled (adopt on reconnect, or an explicit user-driven clear so a crash can't
+permanently black-hole the internet — but the DEFAULT post-crash state is blocked).
+- **macOS:** a `pf` (packet filter) anchor installed via `pfctl` at `Up` — rules that block all
+  outbound except to the WG endpoint + via the utun. `pf` rules are kernel-resident and survive helper
+  death; graceful `Down` flushes the anchor. (Route-only blackholing is fragile across utun teardown;
+  pf is the durable mechanism.)
+- **Windows:** WFP (Windows Filtering Platform) filters in a PERSISTENT sublayer at `Up` — the same
+  mechanism the official WireGuard Windows client uses for its kill-switch ("block untunneled
+  traffic"). WFP filters are kernel-resident and persist past process death; graceful `Down` removes
+  the provider/sublayer.
+Backend contract (corrected): `Up(cfg)` = tun + routes + ARRANGE the persistent pf/WFP block;
+`Down()` = remove tun + REMOVE the block (restore routing); `FailClosed()` = alive-process fast path
+that tears the tun and ASSERTS the block is present (it already is from Up). SMOKE (both platforms):
+`kill -9` the helper mid-tunnel; a pcap on the physical NIC proves ZERO cleartext to a tunneled dest
+AFTER the kill — with the helper process GONE, so nothing but pre-arranged state can be enforcing it.
+
+**S6.3 native deps (pinned; license check):** macOS tun/device = `golang.zx2c4.com/wireguard`
+(wireguard-go) — **MIT**, compatible under our Apache-2.0 open edition (permissive → permissive, OK).
+Windows = `golang.zx2c4.com/wireguard/windows` / `wireguard-nt` + `wintun` — WireGuard-NT/Wintun are
+**MIT**-ish (WireGuard) with the Wintun redistribution note; wintun.dll is bundled per its license.
+Exact commit/tag pins recorded in `apps/helper/go.mod` when the backends land; the license check
+(MIT-under-Apache = fine; note Wintun's redistribution terms in NOTICE) is a story-end review item.
+
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
   `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
