@@ -63,3 +63,24 @@ make agent    # run node agent locally
 make web      # run web dev server
 make logs     # tail compose logs
 ```
+
+## Licensing
+
+Tunnex is **open-core**:
+
+- The **Open edition** — everything except the enterprise boundary below — is
+  licensed under the **[Apache License 2.0](./LICENSE)**.
+- The **Enterprise edition** — `apps/api/internal/enterprise/` and any code gated
+  behind the `enterprise` build tag — is **proprietary and source-available**
+  under a separate license (**[`apps/api/internal/enterprise/LICENSE`](./apps/api/internal/enterprise/LICENSE)**):
+  readable for reference/evaluation, but production use requires a commercial
+  agreement and it may not be redistributed.
+
+The two editions are kept from bleeding into each other by the build-tag guard
+`make test-editions`, which compiles + tests BOTH the open build and the
+`-tags enterprise` build so a stray cross-edition import fails CI.
+
+See [`NOTICE`](./NOTICE) for attribution and [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+(external PRs are paused pending a CLA/DCO flow).
+
+Copyright 2026 Tunnex.

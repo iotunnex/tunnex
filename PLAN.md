@@ -69,11 +69,14 @@ redirect URIs / outbound email, and the B2 domain-capture walk item.** S3.7 park
 deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
-**RESOLVED DECISIONS:** (a) **LICENSE — DECIDED:** root **Apache-2.0**; `internal/enterprise/LICENSE`
-= proprietary **source-available** (reference-visible, commercial agreement for production use, NO
-redistribution); README **Licensing** section citing the `test-editions` build-tag guard; `CONTRIBUTING.md`
-deferring external PRs pending CLA/DCO. Lands as a docs commit to `main`. **HELD on the copyright-holder
-name** (awaiting Pawan; the Windows-EV note means no legal entity yet, so likely the individual). (b)
+**RESOLVED DECISIONS:** (a) **LICENSE — LANDED on `main`:** root **Apache-2.0** (Copyright 2026
+Tunnex) + `NOTICE`; `apps/api/internal/enterprise/LICENSE` = proprietary **source-available**
+(reference-visible, commercial agreement for production, NO redistribution); README **Licensing**
+section citing the `test-editions` build-tag guard; `CONTRIBUTING.md` (external PRs paused pending
+CLA/DCO). **Copyright held under the pre-entity project name "Tunnex" — on entity formation, execute
+a written assignment from the individual authors to the entity and reaffirm the notices; TRIGGER =
+entity formation (the SAME event S6.5b already requires for the Windows EV cert). One event now
+closes BOTH the EV blocker and the copyright cleanup.** (b)
 **Go module path — DECIDED: defer to the VANITY path (`tunnex.io/…`) on domain purchase**; interim
 keep-as-is, now GUARDED by a `-mod=readonly` note in each go.mod + the Makefile so the flag can't be
 innocently dropped pre-rename.
