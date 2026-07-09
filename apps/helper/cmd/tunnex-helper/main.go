@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -13,6 +14,13 @@ import (
 )
 
 func main() {
+	// --version prints the build + caller-auth mode (native|stub) so a stub build
+	// is immediately visible (smoke step zero).
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("tunnex-helper %s caller-auth: %s\n", helper.HelperVersion, helper.CallerAuthKind())
+		return
+	}
+
 	// The install dir (for the interim executable-inside-install-dir caller check)
 	// and socket path are provided by the launchd plist / service config.
 	installDir := os.Getenv("TUNNEX_INSTALL_DIR")
@@ -30,7 +38,8 @@ func main() {
 	verify := helper.PathCheckVerifier{InstallDir: installDir}
 	srv := helper.NewServer(sup, verify, helper.NewPeerResolver())
 
-	log.Printf("tunnex-helper: listening on %s (install dir %q)", socketPath, installDir)
+	log.Printf("tunnex-helper %s: listening on %s (install dir %q, caller-auth: %s)",
+		helper.HelperVersion, socketPath, installDir, helper.CallerAuthKind())
 	if err := srv.Serve(ln); err != nil {
 		log.Fatalf("tunnex-helper: serve: %v", err)
 	}

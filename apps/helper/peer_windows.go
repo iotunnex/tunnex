@@ -2,15 +2,50 @@
 
 package helper
 
-import "net"
+import (
+	"net"
+	"syscall"
 
-// NewPeerResolver (Windows) — the real resolver needs the named-pipe handle to
-// call GetNamedPipeClientProcessId → QueryFullProcessImageName, so it lands with
-// the go-winio pipe listener (a net.Conn alone can't reach the pipe handle).
-// Until then it FAILS CLOSED (refuses every caller), matching the pipe listener
-// stub that refuses to start.
+	"golang.org/x/sys/windows"
+)
+
+// peerAuthKind — Windows uses the real GetNamedPipeClientProcessId resolver.
+const peerAuthKind = "native"
+
+// NewPeerResolver (Windows) authenticates the caller via GetNamedPipeClientProcessId
+// on the pipe handle → the client pid → QueryFullProcessImageName. The SDDL on the
+// pipe (listener_windows.go) governs who may CONNECT; this governs which PROCESS is
+// trusted. If the pipe conn does not expose its handle it FAILS CLOSED (refuses).
 func NewPeerResolver() PeerResolver {
-	return func(net.Conn) (string, error) {
-		return "", &ProtocolError{Code: "peer_resolution_unavailable", Msg: "windows caller-path resolution lands with the named-pipe listener (S6.3)"}
+	return func(c net.Conn) (string, error) {
+		sc, ok := c.(syscall.Conn)
+		if !ok {
+			return "", &ProtocolError{Code: "peer_no_handle", Msg: "pipe connection exposes no OS handle"}
+		}
+		raw, err := sc.SyscallConn()
+		if err != nil {
+			return "", err
+		}
+		var pid uint32
+		var cerr error
+		if err := raw.Control(func(fd uintptr) {
+			cerr = windows.GetNamedPipeClientProcessId(windows.Handle(fd), &pid)
+		}); err != nil {
+			return "", err
+		}
+		if cerr != nil {
+			return "", &ProtocolError{Code: "peer_pid_unresolved", Msg: cerr.Error()}
+		}
+		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if err != nil {
+			return "", &ProtocolError{Code: "peer_open_failed", Msg: err.Error()}
+		}
+		defer windows.CloseHandle(h)
+		buf := make([]uint16, windows.MAX_PATH)
+		n := uint32(len(buf))
+		if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+			return "", &ProtocolError{Code: "peer_path_unresolved", Msg: err.Error()}
+		}
+		return windows.UTF16ToString(buf[:n]), nil
 	}
 }

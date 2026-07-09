@@ -4,6 +4,8 @@ package helper
 
 import "net"
 
+const peerAuthKind = "stub"
+
 // NewPeerResolver fallback for unsupported platforms: FAIL CLOSED (refuse every
 // caller). A helper that cannot identify its caller must trust no one.
 func NewPeerResolver() PeerResolver {

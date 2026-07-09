@@ -10,6 +10,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// peerAuthKind marks this as the REAL resolver (surfaced by CallerAuthKind).
+const peerAuthKind = "native"
+
 // NewPeerResolver (Linux) authenticates the caller via SO_PEERCRED on the unix
 // socket → the peer's pid → /proc/<pid>/exe. Linux is not a shipping target (the
 // app runs on macOS/Windows), but this is the CI-testable reference for the
