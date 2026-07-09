@@ -148,6 +148,8 @@ export function TunnelControl() {
 // friendly maps the known helper/config error codes to something a user can act on.
 function friendly(msg?: string): string {
   const m = msg ?? "Could not connect.";
+  if (m.includes("helper_install_canceled")) return "Helper install was canceled. Reconnect and approve the admin prompt to install the Tunnex helper.";
+  if (m.includes("helper_install_failed") || m.includes("helper_asset_missing")) return "Couldn't install the Tunnex helper. Reinstall the app, then reconnect.";
   if (m.includes("device_config_unavailable") || m.includes("not_authenticated")) return "Sign in again, then reconnect.";
   if (m.includes("no_active_gateway")) return "No gateway is enrolled on your organization yet.";
   // Forward-looking: when S3.7 lands the gateway-egress refusal, the server rejects a

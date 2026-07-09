@@ -1,0 +1,60 @@
+# S6.5a UNSIGNED packaging. No codesign identity, no notarization, no auto-update
+# feed — those are S6.5b (trigger: public beta / first outside-circle distribution).
+# electron-builder still ad-hoc-signs the .app (codesign -s -); the bundled Go helper
+# is ad-hoc-signed separately in scripts/stage-helper.sh (extraResources are not signed
+# by the app's codesign pass).
+appId: io.tunnex.desktop
+productName: Tunnex
+copyright: Tunnex
+
+directories:
+  output: release
+  buildResources: build
+
+# The compiled main/preload (tsc → dist) + the manifest. The SPA bundle and the
+# privilege helper ride along as extraResources (read via process.resourcesPath).
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  # apps/web build → Resources/web (index.ts bundleDir() = resourcesPath/web).
+  - from: ../web/dist
+    to: web
+  # The staged, ad-hoc-signed helper binary(ies) → Resources/helper.
+  - from: build/helper
+    to: helper
+
+mac:
+  # UNIVERSAL: one .dmg for Apple Silicon + Intel (helper is lipo'd universal in
+  # stage-helper.sh; Intel slice Rosetta-validated per the S6.5a spike).
+  target:
+    - target: dmg
+      arch: universal
+  category: public.app-category.utilities
+  # Unsigned: no Developer ID. null = ad-hoc sign only, never attempt a real identity.
+  identity: null
+  # The staged helper is ALREADY a universal (fat) mach-o, byte-identical in both the
+  # x64 and arm64 sub-builds. Tell @electron/universal to take it as-is instead of
+  # trying to lipo two per-arch copies (which don't exist — it's one fat binary).
+  x64ArchFiles: "**/tunnex-helper"
+  # No hardened runtime / notarization (that needs a real signature → S6.5b).
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  # Unsigned: no certificate. SmartScreen will warn until S6.5b (documented in install.md).
+
+nsis:
+  oneClick: false
+  # perMachine so the installer elevates (UAC) — needed to register the SCM service +
+  # wintun at install time.
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  # The service/wintun registration + teardown hooks are included from build/nsis.
+  include: build/nsis/installer.nsh
+
+dmg:
+  # A plain drag-to-Applications layout; a branded background/icon is a nicety, not a
+  # blocker for unsigned S6.5a.
+  title: Tunnex ${version}

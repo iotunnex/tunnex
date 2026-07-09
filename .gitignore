@@ -48,3 +48,7 @@ apps/web/vite.config.d.ts
 /apps/api/server
 /apps/api/seed
 /apps/node/agent
+
+# S6.5a packaging build outputs (electron-builder + staged helper)
+apps/client/release/
+apps/client/build/helper/

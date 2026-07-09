@@ -7,6 +7,7 @@ import { TunnelConfigStore } from "./tunnelstore";
 import { HttpDeviceApi } from "./httpdeviceapi";
 import { resolveTunnelConfig, clearTunnelConfigForOrigin } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
+import { ensureHelperInstalled } from "./helperinstall";
 import { notifyTunnel } from "./notify";
 import { trayStateFor, type TrayState } from "./tray";
 import type { TunnelStatus } from "./helperclient";
@@ -119,6 +120,10 @@ export function registerIpc(
   );
 
   const connect = async (fullTunnel: boolean): Promise<TunnelStatus> => {
+    // First-connect on an unsigned macOS build: install the privileged helper via one
+    // GUI admin prompt (no-op if already installed / off macOS). Throws
+    // helper_install_canceled|failed|asset_missing → surfaced by the renderer.
+    await ensureHelperInstalled();
     // Stop any prior monitor FIRST, unconditionally — even if we can't resolve a new
     // deviceId below, the old monitor must not linger and later tear down THIS tunnel.
     stopMonitor();
