@@ -651,10 +651,23 @@ present — detect and warn/refuse rather than silently downgrade.
   so desktop SSO needs no desktop-specific code. Confirmed, no build.
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
-  **POC item 4 folded:** an in-app **"change server / sign out"** path — the client silently reused a
-  stale `localhost` server + credential and the only recovery was deleting userData files by hand
-  (never a customer action). The origin-keyed config already anticipates it; S6.4 adds the UI (surface
-  the current server + a switch/sign-out affordance; `config.setServerUrl` already forces re-login).
+  **SCOPE NOTE (captures the revocation-POC findings so nothing is re-discovered):**
+  - **Base:** connection status, server picker, split-tunnel toggle, tray icon, notifications.
+  - **(item 4) change-server / sign-out UI** — the client silently reused a stale `localhost` server +
+    credential; the only recovery was deleting userData files by hand (never a customer action). The
+    origin-keyed config already anticipates it; S6.4 adds the UI (surface the current server + a
+    switch/sign-out affordance; `config.setServerUrl` already forces re-login).
+  - **Revocation-aware teardown (NEW, from the revocation POC — the real S6.4 work):** when an admin
+    revokes the device, the gateway drops the peer (traffic stops, ↓0 B), but the client keeps its
+    interface up and retries handshakes forever. The client must DETECT peer-gone — persistent
+    handshake failure past a threshold, and/or polling its own device status — then **auto-disconnect +
+    clear the now-dead config** (the config is client-owned per D2, so nothing else tells it). Has its
+    own tests (revoke → client tears down within N s; config cleared; no stale "Connected").
+  - **ALREADY DOWN-PAID on `story/S6.3` (commit 7e99631) — do NOT rebuild:** (a) connection status is
+    derived from HANDSHAKE liveness (no green "Connected" when the last handshake is stale >180s — kills
+    the "Connected — handshaking…" contradiction); (b) the assigned tunnel IP is shown ("Your IP:
+    10.99.0.x") — main caches the config address and attaches it to forwarded status. These two shipped
+    early because a green-but-dead status is misleading even in a demo; S6.4 builds the rest on top.
 - **S6.5a Packaging (unsigned)** — `electron-builder` `.dmg` + `.exe`, `SHA256SUMS`, an install
   script, and DOCUMENTED Gatekeeper (macOS) / SmartScreen (Windows) workarounds for unsigned
   artifacts. Ships in EPIC 6. Auto-update stays OFF (see S6.5b). This is the "friends & self can
