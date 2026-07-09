@@ -87,15 +87,18 @@ test("invite renders identically for an existing account vs a new email", async 
   const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
 
   // The real proof is that BOTH invites reach the success confirmation with NO
-  // error shown. (The confirmation copy is a constant, so comparing the two
-  // strings is vacuous; the meaningful signal is that neither path errors — a
-  // server enumeration tell would 409/error the existing-account invite, leaving
-  // `sent` false so the confirmation never appears and no error is masked.)
+  // error shown. Success now surfaces the one-time invite-link modal (constant
+  // chrome — title "Invitation link"); the meaningful signal is that neither path
+  // errors — a server enumeration tell would 409/error the existing-account invite,
+  // so the modal would never appear and an error would be masked. The modal is
+  // dismissed between invites (it's a fixed overlay covering the form).
   async function inviteSucceedsCleanly(email: string) {
     await page.getByLabel("Invite by email").fill(email);
     await page.getByRole("button", { name: "Send invite" }).click();
-    await expect(page.getByText(/invitation is on its way/i)).toBeVisible();
-    await expect(page.getByText(/could not send the invitation/i)).toHaveCount(0);
+    await expect(page.getByText("Invitation link")).toBeVisible();
+    await expect(page.getByText(/could not create the invitation/i)).toHaveCount(0);
+    await page.getByRole("button", { name: /I.?ve saved it/i }).click();
+    await expect(page.getByText("Invitation link")).toHaveCount(0);
   }
 
   const fresh = `nobody-${Date.now()}@example.com`;
