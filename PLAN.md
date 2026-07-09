@@ -189,6 +189,9 @@ Seed for the eventual SECURITY.md.
   actually reach the internet: the agent enables IP forwarding + source-NAT on the gateway so client
   traffic egresses via the gateway host. Today the config connects but egress dies at the gateway
   (split-tunnel only).
+  **DoD — REMOVE THE CRUTCH: S3.7 replaces and DELETES `scripts/poc-gateway-nat.sh`** (the throwaway
+  POC NAT) and folds the `sysctls: net.ipv4.ip_forward=1` POC line in `docker-compose.yml` into the
+  agent's own probed setup. The hand-hacked POC egress must not outlive the real feature.
   **PARKED at paper (2026-07-08).** The paper decision below stands, unreviewed-for-build; EPIC 6 was
   chosen over pulling this forward. **Ledger trigger: EPIC 6 close OR the beta milestone, whichever
   comes first** — resume with a decision review, then build. Beta was DEFERRED, not rejected.
