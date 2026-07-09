@@ -590,6 +590,30 @@ Report: decisions above for review (esp. the A/B signing-tension call) BEFORE an
 - **PLAN ledger:** the interim path-check posture is a NAMED SECURITY LIMITATION (below), trigger to
   retire = S6.5b crypto pinning.
 
+**S6.3 ConfigProvider — DECIDE-BEFORE-CODE (D2-honoring; report for review before the config commit).**
+The `TunnelController` needs a `ConfigProvider` that yields the device's WireGuard `TunnelConfig` in
+MAIN. It MUST honor Round-2 walk decision **D2**: the config is served EXACTLY ONCE at device creation
+and is NEVER re-fetchable, so the client must OWN device creation (as the CLI does) — it cannot "fetch
+the config for a device." Proposed decisions:
+1. **Own creation, once.** First tunnel-up with no stored device → the desktop CREATES a device via
+   the API (bearer, in MAIN — reusing the S5.1/S3.4 device-create-returns-config flow) and captures
+   the config at that moment. It NEVER attempts to re-fetch an existing device's config (the API
+   forbids it). Subsequent ups reuse the stored config.
+2. **Secure storage, key-never-in-renderer.** The WG PRIVATE KEY + config persist via Electron
+   `safeStorage` (macOS Keychain / Windows DPAPI) — the SAME refuse-by-default posture as the S6.1
+   credential (no plaintext-on-disk unless an explicit `--allow-insecure-credential-storage`). The key
+   flows API → MAIN (safeStorage) → helper (IPC); it NEVER enters the renderer. This deliberately
+   AVOIDS the browser flow's mistake (a plaintext key in ~/Downloads) that D2 called out.
+3. **One device per install**, named from the hostname (with a disambiguating suffix); the device id is
+   persisted alongside the config.
+4. **Lifecycle on logout.** Clearing the credential (auth:logout) ALSO clears the stored tunnel config
+   and BEST-EFFORT revokes the device server-side (no dangling peer / stale telemetry — honors the
+   revocation-is-a-full-sweep principle). Re-login creates a fresh device on next connect.
+5. **Loss = recreate, never re-fetch.** If safeStorage is cleared/unavailable, a NEW device is created
+   (old one is orphaned → the logout/GC sweep or an admin reap handles it); consistent with D2.
+Open question for review: whether to revoke-and-recreate on EVERY server-URL change (a credential/
+device is bound to one tenant — S6.2 already forces re-login on URL change; the device should follow).
+
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;
   `app://` (standard+secure, strict escape+symlink+realpath, CSP) serving the `apps/web` bundle;
