@@ -10,6 +10,15 @@ import { helperSocketPath, TunnelController } from "../src/main/tunnel";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// A platform-appropriate ephemeral IPC endpoint for the socket round-trip tests: a
+// NAMED PIPE on Windows (a unix-socket path errors EACCES there), a unix socket
+// elsewhere. Mirrors helperSocketPath's per-platform choice.
+function testEndpoint(tag: string): string {
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\tnx-test-${tag}-${process.pid}`
+    : path.join(os.tmpdir(), `tnx-test-${tag}-${process.pid}.sock`);
+}
+
 // The framing MUST match apps/helper/ipc.go (4-byte BE length + JSON body). These
 // tests pin the wire contract on the TS side so the two can't silently diverge.
 test("encodeFrame writes a 4-byte big-endian length prefix", () => {
@@ -54,7 +63,7 @@ test("helperSocketPath is platform-specific", () => {
 // The helper reports runtime stats but NOT the tunnel address (it's config), so
 // MAIN attaches it — this is what lets the UI show "Your IP". Guard the plumb.
 test("TunnelController attaches the config's tunnel address to forwarded status", async () => {
-  const sockPath = path.join(os.tmpdir(), `tnx-addr-test-${process.pid}.sock`);
+  const sockPath = testEndpoint("addr");
   try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
   const server = net.createServer((sock) => {
     const dec = new FrameDecoder();
@@ -77,7 +86,7 @@ test("TunnelController attaches the config's tunnel address to forwarded status"
 });
 
 test("HelperConnection: persistent round-trip, intentional close is quiet, unexpected close fires onLost", async () => {
-  const sockPath = path.join(os.tmpdir(), `tnx-helper-test-${process.pid}.sock`);
+  const sockPath = testEndpoint("helper");
   try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
 
   const serverSockets: net.Socket[] = [];
