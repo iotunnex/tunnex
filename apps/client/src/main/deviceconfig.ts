@@ -31,12 +31,25 @@ export async function resolveTunnelConfig(
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
   const existing = store.get(origin);
-  if (existing) {
-    // Self-heal: a stored config whose device was revoked/deleted server-side is
-    // dead — bringing it up yields a tunnel that can never handshake (tonight's POC
-    // pain, which used to need a manual `rm tunnel-config.bin`). Verify the device
-    // still exists (existence check, not a config re-fetch → D2 intact); if it's
-    // gone, drop the dead config and fall through to mint a fresh device. A
+  if (existing && existing.config.full_tunnel !== fullTunnel) {
+    // The requested tunnel MODE (split vs full) differs from the stored profile. A
+    // WireGuard profile's AllowedIPs are baked at mint, so the stored device can't
+    // satisfy the new intent — reusing it would silently keep the old routing (e.g.
+    // unchecking full-tunnel but staying blackholed offline). Drop it + best-effort
+    // revoke the now-orphaned device, then fall through to mint a fresh one for the
+    // new mode so the toggle actually takes effect.
+    store.remove(origin);
+    try {
+      await api.revokeDevice(existing.deviceId);
+    } catch {
+      /* best-effort — the local removal already happened */
+    }
+  } else if (existing) {
+    // Same mode: self-heal. A stored config whose device was revoked/deleted
+    // server-side is dead — bringing it up yields a tunnel that can never handshake
+    // (tonight's POC pain, which used to need a manual `rm tunnel-config.bin`). Verify
+    // the device still exists (existence check, not a config re-fetch → D2 intact); if
+    // it's gone, drop the dead config and fall through to mint a fresh device. A
     // transient API error KEEPS the config — never nuke a possibly-valid one on a blip.
     let stillThere = true;
     try {

@@ -1,10 +1,28 @@
 import { Tray, Menu, nativeImage, type NativeImage } from "electron";
 
-// TrayState is the coarse tunnel state the tray reflects. The tray deliberately does
-// NOT re-derive the window's handshake-liveness nuance (that lives in the renderer);
-// it shows the operable state — is there a tunnel to tear down, did it fail closed,
-// was the device revoked — so the menu's actions are always honest.
-export type TrayState = "disconnected" | "connected" | "failed" | "revoked";
+// TrayState is the tunnel state the tray reflects. It mirrors the renderer's derived
+// state (including handshake-liveness: an interface that is up but has no fresh
+// handshake reads "connecting", not "connected") so the tray never disagrees with the
+// window, plus the operable states — failed (kill-switch) and revoked.
+export type TrayState = "disconnected" | "connecting" | "connected" | "failed" | "revoked";
+
+// HANDSHAKE_STALE_SEC mirrors TunnelControl.tsx: a handshake older than a couple rekey
+// windows (or none) means the link isn't live yet — "connecting", not "connected".
+const HANDSHAKE_STALE_SEC = 180;
+
+// trayStateFor derives the tray state from a forwarded status, matching the renderer's
+// liveness logic so the two never drift. last_handshake_sec is an ABSOLUTE unix
+// timestamp (0/absent = never), so age = now - it.
+export function trayStateFor(s: { state: string; last_handshake_sec?: number }): TrayState {
+  if (s.state === "revoked") return "revoked";
+  if (s.state === "failed") return "failed";
+  if (s.state === "up") {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const age = s.last_handshake_sec ? Math.max(0, nowSec - s.last_handshake_sec) : null;
+    return age != null && age <= HANDSHAKE_STALE_SEC ? "connected" : "connecting";
+  }
+  return "disconnected";
+}
 
 // TrayMenuModel is the pure view-model behind the tray menu, split out so the
 // state→menu mapping is unit-testable without constructing an Electron Tray (which
@@ -19,6 +37,9 @@ export function trayMenuModel(state: TrayState): TrayMenuModel {
   switch (state) {
     case "connected":
       return { statusLabel: "Connected", showConnect: false, showDisconnect: true };
+    case "connecting":
+      // Interface up but no fresh handshake yet — offer only Disconnect (cancel).
+      return { statusLabel: "Connecting…", showConnect: false, showDisconnect: true };
     case "failed":
       // Failed = kill-switch active. Offer BOTH: reconnect (retry) and disconnect
       // (tear down the kill-switch and go back to normal networking).

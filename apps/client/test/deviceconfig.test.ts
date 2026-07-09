@@ -137,3 +137,25 @@ test("resolveTunnelConfig: self-heals a revoked device (clear + mint fresh)", as
   await resolveTunnelConfig(origin, false, flakyApi, store);
   assert.equal(api.creates, 2); // reused — no new create on a transient blip
 });
+
+test("resolveTunnelConfig: re-mints when the split↔full intent changes", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const api = fakeApi();
+  const origin = "https://t.example";
+
+  const split = await resolveTunnelConfig(origin, false, api, store);
+  assert.equal(api.creates, 1);
+  assert.equal(split.full_tunnel, false);
+
+  // Toggling to full-tunnel can't reuse the split profile (AllowedIPs are baked at
+  // mint) — the old device is dropped + revoked and a fresh full-tunnel one is minted,
+  // so the toggle actually takes effect (a reused split profile would silently ignore it).
+  const full = await resolveTunnelConfig(origin, true, api, store);
+  assert.equal(api.creates, 2);
+  assert.equal(full.full_tunnel, true);
+  assert.deepEqual(api.revoked, ["dev-1"]); // the superseded device was revoked
+
+  // Same intent again → reuse (no churn).
+  await resolveTunnelConfig(origin, true, api, store);
+  assert.equal(api.creates, 2);
+});

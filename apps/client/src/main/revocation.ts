@@ -36,6 +36,11 @@ export class RevocationMonitor {
   // (the tests drive it directly). The scheduling loop only runs between start() and
   // stop(); stop() sets this true so an in-flight probe abandons its result.
   private stopped = false;
+  // running guards start() idempotency by INTENT, not by timer presence: during an
+  // in-flight probe this.timer is transiently null (the loop nulls it before awaiting),
+  // so a timer-only guard could arm a second concurrent loop. running stays true for
+  // the whole start→stop lifetime.
+  private running = false;
   private inFlight = false;
   private fired = false;
   private backoff = 0; // 0 = steady state (use baseMs); >0 = current backed-off delay
@@ -59,7 +64,8 @@ export class RevocationMonitor {
   // start begins polling (idempotent). A fresh start resets fire state so the same
   // monitor instance can be reused across reconnects.
   start(): void {
-    if (this.timer) return; // already scheduled — idempotent
+    if (this.running) return; // already running — idempotent (even mid-probe, when timer is null)
+    this.running = true;
     this.stopped = false;
     this.fired = false;
     this.backoff = 0;
@@ -70,6 +76,7 @@ export class RevocationMonitor {
   // resolves after stop() must NOT fire teardown — the tunnel is already going down).
   stop(): void {
     this.stopped = true;
+    this.running = false;
     if (this.timer) {
       this.clearTimer(this.timer);
       this.timer = null;

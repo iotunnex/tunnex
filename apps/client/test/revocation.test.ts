@@ -132,6 +132,37 @@ test("revocation: no probes overlap and none run while stopped (self-scheduling 
   m.stop();
 });
 
+test("revocation: start() is idempotent even mid-probe (no second concurrent loop)", async () => {
+  let scheduled = 0;
+  const pending: Array<() => void> = [];
+  const api = { async deviceExists(): Promise<boolean> { return true; } };
+  const m = new RevocationMonitor(
+    "dev-1",
+    api,
+    () => {},
+    10,
+    100,
+    (cb) => {
+      scheduled++;
+      pending.push(cb);
+      return scheduled as unknown as ReturnType<typeof setTimeout>;
+    },
+    () => {},
+  );
+  m.start();
+  assert.equal(scheduled, 1); // first schedule armed
+  // A second start() while the first probe is in flight (timer transiently null) must
+  // NOT arm a second loop — the running-flag guard, not a timer-presence check.
+  const cb = pending.shift()!; // simulate the timer firing → loop() nulls timer, awaits probe
+  cb();
+  m.start(); // re-entrant start during the in-flight probe
+  await Promise.resolve();
+  await Promise.resolve();
+  // Only the loop's own reschedule should have armed a new timer — not a second start.
+  assert.equal(scheduled, 2);
+  m.stop();
+});
+
 test("revocation: exported cadence constants are the documented values", () => {
   assert.equal(REVOKE_POLL_MS, 30_000);
   assert.equal(REVOKE_BACKOFF_MAX_MS, 300_000);

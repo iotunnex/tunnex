@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { messageFor } from "../src/main/notify";
-import { trayMenuModel } from "../src/main/tray";
+import { trayMenuModel, trayStateFor } from "../src/main/tray";
 
 // notify + tray carry no Electron calls at module load (Notification/Tray are only
 // touched inside methods), so their PURE view-models are unit-testable here without
@@ -37,4 +37,21 @@ test("tray: menu model offers the right actions per state", () => {
   const revoked = trayMenuModel("revoked");
   assert.ok(revoked.showConnect && !revoked.showDisconnect);
   assert.match(revoked.statusLabel, /revoked/i);
+  // Connecting → only Disconnect (cancel), never a spurious Connect.
+  const connecting = trayMenuModel("connecting");
+  assert.equal(connecting.showConnect, false);
+  assert.equal(connecting.showDisconnect, true);
+});
+
+test("tray: trayStateFor mirrors the renderer's handshake-liveness (no drift)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  // up + FRESH handshake → connected.
+  assert.equal(trayStateFor({ state: "up", last_handshake_sec: now - 5 }), "connected");
+  // up but STALE / no handshake → connecting (matches the renderer's amber state, not
+  // a premature "Connected").
+  assert.equal(trayStateFor({ state: "up", last_handshake_sec: now - 600 }), "connecting");
+  assert.equal(trayStateFor({ state: "up" }), "connecting");
+  assert.equal(trayStateFor({ state: "failed" }), "failed");
+  assert.equal(trayStateFor({ state: "revoked" }), "revoked");
+  assert.equal(trayStateFor({ state: "down" }), "disconnected");
 });

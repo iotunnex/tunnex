@@ -7,7 +7,10 @@ import type { DeviceApi } from "./deviceconfig";
 async function createErr(r: Response): Promise<string> {
   try {
     const body = (await r.json()) as { error?: { code?: string } };
-    if (body?.error?.code) return `create_device_failed: ${body.error.code}`;
+    // Keep BOTH the numeric status (diagnosable: 401 vs 403 vs 5xx) AND the typed code
+    // (matchable: e.g. the future S3.7 gateway_no_egress). friendly() uses .includes()
+    // so either substring still matches.
+    if (body?.error?.code) return `create_device_failed: ${r.status} ${body.error.code}`;
   } catch {
     /* non-JSON body — fall through to the status */
   }
@@ -82,7 +85,13 @@ export class HttpDeviceApi implements DeviceApi {
     // org would report a live device as absent and make the self-heal delete a good
     // config + re-mint a device (review #8). Any read error THROWS so the caller's
     // fail-safe keeps the config (never nuke on a partial/transient failure).
-    for (const orgId of await this.orgIds()) {
+    const orgIds = await this.orgIds();
+    // An EMPTY org list for a client that has a running device is anomalous (read-replica
+    // lag, an in-flight membership change, a brief hiccup). Treat it as INCONCLUSIVE and
+    // THROW — a bare 200-with-[] must not slip past the fail-safe and be read as "device
+    // genuinely gone", which would tear down a healthy tunnel + revoke a live device.
+    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
+    for (const orgId of orgIds) {
       const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
       if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
       const devices = (await r.json()) as Array<{ id: string; status: string }>;

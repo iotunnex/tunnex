@@ -7,7 +7,7 @@ import { cspFor } from "./csp";
 import { Config } from "./config";
 import { buildCredentialStore, buildTunnelConfigStore } from "./store";
 import { attachBearer } from "./session";
-import { registerIpc, type TunnelControls } from "./ipc";
+import { registerIpc } from "./ipc";
 import { TunnelTray } from "./tray";
 import { initUpdater } from "./updater";
 import { setupPageDataUrl } from "./setup";
@@ -24,12 +24,15 @@ protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: t
 
 const allowInsecure = process.argv.includes("--allow-insecure-credential-storage");
 
-// The tray lives for the app's lifetime; `active` tracks the current window +
-// tunnel controls so the tray's actions always target the live window (which macOS
-// recreates on `activate` after all windows close). One tray, rewired on recreate.
-let tray: TunnelTray | null = null;
-let active: { win: BrowserWindow; controls: TunnelControls } | null = null;
-let unsubscribeTray: (() => void) | null = null;
+// APP-LEVEL, not per-window. On macOS the app OUTLIVES the window (window-all-closed
+// does not quit on darwin; the tray keeps it alive), so the tunnel, its monitor, the
+// IPC handlers (ipcMain is app-global — registering per-window throws "second handler"
+// on the second window), the tray, and the stores are all app-lifetime singletons.
+// The window is a detachable VIEW: `mainWindow` is the current one (or null when
+// closed); IPC/status resolve it dynamically and no-op when it's gone. The VPN keeps
+// running with no window — reopening re-attaches and re-reads live status.
+let mainWindow: BrowserWindow | null = null;
+let allowInsecureStorage = false; // captured from the store at setup for the setup page
 
 function createWindow(config: Config): BrowserWindow {
   const win = new BrowserWindow({
@@ -42,31 +45,10 @@ function createWindow(config: Config): BrowserWindow {
       sandbox: true,
     },
   });
-
-  const store = buildCredentialStore(allowInsecure);
-  const tunnelStore = buildTunnelConfigStore(allowInsecure);
-  attachBearer(session.defaultSession, () => config.getServerUrl(), store);
-  const controls = registerIpc(win, config, store, tunnelStore);
-
-  // Tray: created once, then rewired to this (possibly recreated) window. Tray
-  // connect uses the split-tunnel default — the full-tunnel toggle is a window-only
-  // affordance. onShow/onQuit target the live window/app.
-  active = { win, controls };
-  if (!tray) {
-    tray = new TunnelTray({
-      onConnect: () => void active?.controls.connect(false).catch(() => {}),
-      onDisconnect: () => void active?.controls.disconnect().catch(() => {}),
-      onShow: () => {
-        active?.win.show();
-        active?.win.focus();
-      },
-      onQuit: () => app.quit(),
-    });
-    tray.init();
-  }
-  unsubscribeTray?.();
-  unsubscribeTray = controls.subscribe((s) => tray?.update(s));
-  tray.update(controls.currentState());
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null; // drop the ref so nothing sends to a destroyed webContents
+  });
 
   // Navigation lock: the renderer must never leave app:// (a compromised page
   // navigating to an external origin would keep the preload bridge). External
@@ -85,15 +67,33 @@ function createWindow(config: Config): BrowserWindow {
   // First run (no server configured) → the shell's setup screen; otherwise the
   // SPA served over app://.
   if (!config.getServerUrl()) {
-    void win.loadURL(setupPageDataUrl(store.available(), allowInsecure));
+    void win.loadURL(setupPageDataUrl(allowInsecureStorage, allowInsecure));
   } else {
     void win.loadURL("app://tunnex/index.html");
   }
   return win;
 }
 
+// showWindow brings the window forward, recreating it if it was closed (macOS). Used
+// by the tray so its "Show Tunnex" always works even after the window was destroyed.
+function showWindow(config: Config): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  createWindow(config);
+}
+
 app.whenReady().then(() => {
   const config = new Config();
+  // App-lifetime singletons — built ONCE, not per-window.
+  const store = buildCredentialStore(allowInsecure);
+  const tunnelStore = buildTunnelConfigStore(allowInsecure);
+  allowInsecureStorage = store.available();
+  // attachBearer registers a webRequest handler on the SHARED default session — must
+  // run exactly once (a per-window call would stack duplicate injectors).
+  attachBearer(session.defaultSession, () => config.getServerUrl(), store);
 
   // Serve the SPA bundle over app://. Every response carries a CSP; every path is
   // (a) lexically contained, (b) symlink-resolved and RE-checked for containment
@@ -135,6 +135,23 @@ app.whenReady().then(() => {
     return new Response(fs.readFileSync(real), { headers: { "content-type": contentTypeFor(real), "content-security-policy": csp } });
   });
   initUpdater();
+
+  // IPC handlers + tunnel controls: registered ONCE. They resolve the live window via
+  // the getter (null-safe) so a closed window never breaks the tunnel, and vice versa.
+  const controls = registerIpc(() => mainWindow, config, store, tunnelStore);
+
+  // Tray: one instance for the app lifetime, subscribed to tunnel state. Its actions
+  // target the singleton controls + showWindow (recreates the window if closed).
+  const tray = new TunnelTray({
+    onConnect: () => void controls.connect(false).catch(() => {}),
+    onDisconnect: () => void controls.disconnect().catch(() => {}),
+    onShow: () => showWindow(config),
+    onQuit: () => app.quit(),
+  });
+  tray.init();
+  controls.subscribe((s) => tray.update(s));
+  tray.update(controls.currentState());
+
   createWindow(config);
 
   app.on("activate", () => {
