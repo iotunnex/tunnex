@@ -87,7 +87,11 @@ item 6 (**join-token env-vars-must-be-inline gotcha**) → the gateway ceremony 
 runnable command incl. `docker compose up -d --force-recreate node-agent`, not just the vars; item 7
 (**client Node >=20 engine warning**) → pin/enforce or fix compat. ALSO surfaced + already fixed:
 the `.env` `cat >>` duplicate-key trap (compose used the first value) — the S6.6 install.sh writes a
-clean `.env` (no append).
+clean `.env` (no append). **Item 8 (NEW, FIXED in S-POC-fixes): invite accept was broken end-to-end —
+the web had no `/accept-invite` route, so the email link dropped the token and the invited user was
+sent to create-org instead of joining the inviting org.** Fixed: web AcceptInvite page + public route;
+api accept handler AUTO-LOGS-IN (mints a session, inbox-control = the auth factor). Decision recorded:
+auto-login into the org (not redirect-to-login).
 **REPO VISIBILITY — DECIDED: stays PRIVATE until the beta milestone.** Rationale: pre-beta there is
 no external audience, and private keeps the unfinished/unsigned client + evolving security surface out
 of public view; the cost is Actions runner QUEUING (private repos share a small pool + a 2000-min/mo
