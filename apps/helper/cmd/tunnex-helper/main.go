@@ -34,7 +34,7 @@ func main() {
 		log.Fatalf("tunnex-helper: listen: %v", err)
 	}
 
-	sup := helper.NewSupervisor(helper.StubBackend{})
+	sup := helper.NewSupervisor(helper.NewBackend())
 	verify := helper.PathCheckVerifier{InstallDir: installDir}
 	srv := helper.NewServer(sup, verify, helper.NewPeerResolver())
 

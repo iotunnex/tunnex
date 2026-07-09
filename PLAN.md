@@ -652,6 +652,16 @@ Windows = `golang.zx2c4.com/wireguard/windows` / `wireguard-nt` + `wintun` — W
 **MIT**-ish (WireGuard) with the Wintun redistribution note; wintun.dll is bundled per its license.
 Exact commit/tag pins recorded in `apps/helper/go.mod` when the backends land; the license check
 (MIT-under-Apache = fine; note Wintun's redistribution terms in NOTICE) is a story-end review item.
+Deps landed so far: `golang.org/x/sys` (caller-path), `github.com/Microsoft/go-winio` v0.6.2 (MIT —
+Windows SDDL pipe).
+
+**S6.3 Windows pipe — TWO-LAYER intent (endorsed):** the pipe SDDL gates CONNECTION (who may open
+the pipe: SYSTEM/Admins full, Authenticated Users connect+rw so the unprivileged app can reach it);
+the caller-path check gates TRUST (which PROCESS may drive the helper: image inside the install dir).
+Access ≠ authorization — both layers required. EDGE (refuse-path): if the client process dies between
+connect and resolution, `OpenProcess`/`QueryFullProcessImageName` error → the resolver returns an
+error → the Server refuses the caller (fail-closed, correct). Add an explicit test when Windows tests
+are runnable.
 
 - **S6.1 Client shell** — Electron app, reuse React renderer, secure IPC, auto-update scaffold.
   **MERGED** (7 commits; smoke-verified on macOS). Delivered: `apps/client` Electron main+preload;

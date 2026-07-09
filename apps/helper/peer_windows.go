@@ -36,6 +36,9 @@ func NewPeerResolver() PeerResolver {
 		if cerr != nil {
 			return "", &ProtocolError{Code: "peer_pid_unresolved", Msg: cerr.Error()}
 		}
+		// EDGE (refuse-path): if the client already died, OpenProcess (or the query
+		// below) errors → we return an error → the Server refuses the caller. Never
+		// trust an unresolvable peer. (Test when Windows tests are runnable.)
 		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 		if err != nil {
 			return "", &ProtocolError{Code: "peer_open_failed", Msg: err.Error()}
