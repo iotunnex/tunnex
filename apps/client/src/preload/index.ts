@@ -16,10 +16,24 @@ const api = {
     getServerUrl: (): Promise<string> => ipcRenderer.invoke("config:getServerUrl"),
     setServerUrl: (url: string): Promise<{ url: string; reloginRequired: boolean }> => ipcRenderer.invoke("config:setServerUrl", url),
   },
-  // Reserved for S6.3 tunnel control — intentionally empty (the namespace is
-  // declared so the shape is stable, but exposes no privileged action yet).
-  tunnel: {} as Record<string, never>,
+  // S6.3 tunnel control. Verb-specific like the rest — up/down/status only. The
+  // renderer holds NO tunnel secret: main resolves the WG config (bearer-fetched)
+  // and forwards it to the privileged helper; the renderer only sees status.
+  tunnel: {
+    up: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:up"),
+    down: (): Promise<void> => ipcRenderer.invoke("tunnel:down"),
+    status: (): Promise<TunnelStatus> => ipcRenderer.invoke("tunnel:status"),
+  },
 };
+
+// TunnelStatus mirrors apps/helper (no secrets — never carries key material).
+export interface TunnelStatus {
+  state: "down" | "up" | "failed";
+  interface?: string;
+  last_handshake_sec?: number;
+  rx_bytes?: number;
+  tx_bytes?: number;
+}
 
 contextBridge.exposeInMainWorld("tunnex", api);
 

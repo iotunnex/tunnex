@@ -2,6 +2,8 @@ import { ipcMain, BrowserWindow } from "electron";
 import { Config } from "./config";
 import { CredentialStore } from "./credential";
 import { runLogin, runLogout } from "./login";
+import { HelperClient } from "./helperclient";
+import { TunnelController, helperSocketPath } from "./tunnel";
 
 // The IPC handlers behind the preload allowlist. VERB-SPECIFIC — there is no
 // generic invoke(channel,args); each channel validates its own inputs in main
@@ -34,6 +36,21 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
       win.webContents.reload();
     }
   });
+
+  // S6.3 tunnel control. The controller speaks the framed helper protocol; the
+  // config provider (bearer-fetch the device WG config in MAIN, keeping the key
+  // out of the renderer) is the next integration step — until it lands, tunnel:up
+  // fails cleanly with device_config_unavailable, but the full transport path
+  // (renderer → ipc → helper framing → privileged helper) is wired and verified.
+  const tunnel = new TunnelController(
+    new HelperClient(helperSocketPath()),
+    async () => {
+      throw new Error("device_config_unavailable: WG config acquisition is the next S6.3 step");
+    },
+  );
+  ipcMain.handle("tunnel:up", () => tunnel.up());
+  ipcMain.handle("tunnel:down", () => tunnel.down());
+  ipcMain.handle("tunnel:status", () => tunnel.status());
 
   ipcMain.handle("config:getServerUrl", () => config.getServerUrl());
 

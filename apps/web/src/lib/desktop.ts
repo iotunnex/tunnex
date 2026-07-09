@@ -21,7 +21,20 @@ export interface TunnexBridge {
     getServerUrl(): Promise<string>;
     setServerUrl(url: string): Promise<{ url: string; reloginRequired: boolean }>;
   };
-  tunnel: Record<string, never>;
+  tunnel: {
+    up(): Promise<TunnelStatus>;
+    down(): Promise<void>;
+    status(): Promise<TunnelStatus>;
+  };
+}
+
+// TunnelStatus mirrors the helper (no secrets — never key material).
+export interface TunnelStatus {
+  state: "down" | "up" | "failed";
+  interface?: string;
+  last_handshake_sec?: number;
+  rx_bytes?: number;
+  tx_bytes?: number;
 }
 
 declare global {
