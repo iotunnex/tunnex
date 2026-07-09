@@ -37,6 +37,18 @@ func (f *fakeBackend) ApplyPeers(_ context.Context, p []Peer) error {
 	f.applyN++
 	return nil
 }
+
+// roam simulates the real device OBSERVING a peer's endpoint change (a client's
+// NAT source port rebinding) — what Peers() would then report back.
+func (f *fakeBackend) roam(pubKey, endpoint string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.peers {
+		if f.peers[i].PublicKey == pubKey {
+			f.peers[i].Endpoint = endpoint
+		}
+	}
+}
 func (f *fakeBackend) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -70,6 +82,36 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 
 var p1 = Peer{PublicKey: "k1", AllowedIPs: []string{"10.0.0.1/32"}}
 var p2 = Peer{PublicKey: "k2", AllowedIPs: []string{"10.0.0.2/32"}}
+
+// TestReconcileIgnoresRoamedEndpoint is the WS1 regression for the POC-surfaced
+// bug: a roaming client's observed endpoint changes every reconcile, and the old
+// dirty-check (canon included the endpoint) re-fired ApplyPeers each time — whose
+// empty-[Interface] syncconf then wiped the interface key + port. After the fix,
+// only stable identity (pubkey + allowed-ips) drives convergence, so consecutive
+// reconciles over a roaming peer are byte-stable no-ops.
+func TestReconcileIgnoresRoamedEndpoint(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	ctx := context.Background()
+	// A control-plane desired peer carries NO endpoint (clients roam).
+	desired := []Peer{{PublicKey: "k1", AllowedIPs: []string{"10.99.0.2/32"}}}
+
+	// Cycle 1 applies.
+	if changed, _ := r.Reconcile(ctx, desired); !changed || b.applyCount() != 1 {
+		t.Fatalf("cycle 1 should apply once, applyN=%d", b.applyCount())
+	}
+	// The device now REPORTS the peer with a roamed NAT endpoint.
+	b.roam("k1", "203.0.113.9:41000")
+	// Cycle 2: only the roamed endpoint differs → MUST be a no-op (no re-apply).
+	if changed, _ := r.Reconcile(ctx, desired); changed || b.applyCount() != 1 {
+		t.Fatalf("roamed endpoint must NOT re-apply (would wipe key+port): changed=%v applyN=%d", changed, b.applyCount())
+	}
+	// Cycle 3: endpoint roams again → still a stable no-op.
+	b.roam("k1", "203.0.113.9:55555")
+	if changed, _ := r.Reconcile(ctx, desired); changed || b.applyCount() != 1 {
+		t.Fatalf("further roam must stay a no-op: applyN=%d", b.applyCount())
+	}
+}
 
 func TestReconcileAppliesAndIdempotent(t *testing.T) {
 	b := &fakeBackend{}

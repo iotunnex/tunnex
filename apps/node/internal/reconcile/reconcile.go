@@ -217,8 +217,22 @@ func peersEqual(a, b []Peer) bool {
 	return true
 }
 
+// canon keys a peer by its STABLE IDENTITY (public key + allowed-ips) for the
+// dirty-check. It deliberately EXCLUDES the endpoint: a roaming client's observed
+// endpoint (NAT source port) changes constantly, so including it made peersEqual
+// perpetually false, firing ApplyPeers on every reconcile (and, with the old
+// empty-[Interface] syncconf, wiping the interface each time). WireGuard tracks
+// roaming endpoints itself, so the desired->actual convergence must not treat the
+// observed endpoint as a diff.
+//
+// BOUNDARY / EPIC 8: this means a legitimate desired ENDPOINT change is not caught
+// by the dirty-check. Today no desired peer carries a meaningful static endpoint
+// (clients roam). When EPIC 8 (site-to-site) adds gateway-DIALED peers whose
+// static endpoint IS control-plane-managed, the dirty-check must distinguish a
+// gateway peer's static endpoint (compare it) from a client's roaming one (ignore
+// it) — e.g. a per-peer "static endpoint" flag. Ledger marker: EPIC 8 site-to-site.
 func canon(p Peer) string {
 	ips := append([]string(nil), p.AllowedIPs...)
 	sort.Strings(ips)
-	return p.PublicKey + "|" + strings.Join(ips, ",") + "|" + p.Endpoint
+	return p.PublicKey + "|" + strings.Join(ips, ",")
 }

@@ -142,7 +142,9 @@ func main() {
 	}()
 
 	logger.Info("agent_reconciling", slog.String("node_name", nodeName))
-	r.Run(ctx, client, 60*time.Second, 5*time.Second)
+	// Interval is env-overridable so the data-plane e2e can sample device stability
+	// across ≥2 reconcile cycles quickly (default 60s in production).
+	r.Run(ctx, client, getdur("TUNNEX_AGENT_RECONCILE_INTERVAL", 60*time.Second), 5*time.Second)
 	logger.Info("agent_stopped")
 }
 

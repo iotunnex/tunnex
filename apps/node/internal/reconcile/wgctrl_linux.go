@@ -20,6 +20,12 @@ import (
 type wgctrlBackend struct {
 	iface  string
 	logger *slog.Logger
+	// Cached from the last Configure so ApplyPeers' `wg syncconf` can echo them in
+	// its [Interface] section. An EMPTY [Interface] makes syncconf CLEAR the
+	// private key (→ "(none)") and reset the listen port to a random value —
+	// silently breaking every tunnel on the next reconcile (POC-surfaced bug).
+	privKey    string
+	listenPort int
 }
 
 func newWGCtrlBackend(iface string, logger *slog.Logger) (WGBackend, error) {
@@ -45,6 +51,8 @@ func (b *wgctrlBackend) Configure(ctx context.Context, cfg InterfaceConfig) erro
 	if err := b.ensureDevice(ctx); err != nil {
 		return err
 	}
+	// Cache for ApplyPeers' syncconf so it echoes (never clears) the key + port.
+	b.privKey, b.listenPort = cfg.PrivateKey, cfg.ListenPort
 	curPub, curPort := b.currentWGInterface(ctx)
 
 	// (Re)set the private key only when the interface's PUBLIC key doesn't already
@@ -239,9 +247,18 @@ func parseWGDump(out string) []Peer {
 
 // buildSyncConf renders a wg config containing only [Peer] sections, for
 // `wg syncconf` (converges to this peer set; unchanged peers keep their session).
-func buildSyncConf(peers []Peer) string {
+func buildSyncConf(privKey string, listenPort int, peers []Peer) string {
 	var sb strings.Builder
-	sb.WriteString("[Interface]\n") // syncconf ignores interface fields but wants the section
+	sb.WriteString("[Interface]\n")
+	// Echo the key + port: `wg syncconf` CLEARS anything ABSENT from [Interface]
+	// (an empty section wipes the private key + randomizes the listen port). Writing
+	// them makes syncconf idempotent on the interface instead of destructive.
+	if privKey != "" {
+		sb.WriteString("PrivateKey = " + privKey + "\n")
+	}
+	if listenPort > 0 {
+		sb.WriteString("ListenPort = " + strconv.Itoa(listenPort) + "\n")
+	}
 	for _, p := range peers {
 		sb.WriteString("\n[Peer]\nPublicKey = " + p.PublicKey + "\n")
 		if len(p.AllowedIPs) > 0 {
@@ -262,7 +279,7 @@ func (b *wgctrlBackend) ApplyPeers(ctx context.Context, peers []Peer) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if _, err := f.WriteString(buildSyncConf(peers)); err != nil {
+	if _, err := f.WriteString(buildSyncConf(b.privKey, b.listenPort, peers)); err != nil {
 		return err
 	}
 	_ = f.Close()

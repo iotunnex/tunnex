@@ -138,6 +138,11 @@ test-editions: ## Run the suite in BOTH editions against the live DB
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go test -tags enterprise ./...
 
+.PHONY: test-node
+test-node: ## Run the node-agent data-plane tests (reconcile idempotence, no DB)
+	docker run --rm -v "$(PWD)/apps/node":/src -w /src -e GOFLAGS=-mod=readonly \
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go test ./..."
+
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres

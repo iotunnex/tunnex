@@ -86,7 +86,7 @@ func TestSyncConfRoundTrip(t *testing.T) {
 		{PublicKey: "k1", AllowedIPs: []string{"10.0.0.2/32"}, Endpoint: "198.51.100.7:51820"},
 		{PublicKey: "k2", AllowedIPs: []string{"10.0.0.3/32"}},
 	}
-	conf := buildSyncConf(peers)
+	conf := buildSyncConf("privkeybase64", 51820, peers)
 	if !strings.Contains(conf, "PublicKey = k1") || !strings.Contains(conf, "Endpoint = 198.51.100.7:51820") {
 		t.Fatalf("k1 not rendered: %s", conf)
 	}
@@ -96,5 +96,10 @@ func TestSyncConfRoundTrip(t *testing.T) {
 	// A peer with no endpoint must not emit an Endpoint line.
 	if strings.Count(conf, "Endpoint = ") != 1 {
 		t.Fatalf("expected exactly one Endpoint line: %s", conf)
+	}
+	// The [Interface] MUST carry the key + port, or `wg syncconf` clears them
+	// (the POC-surfaced wipe). This is the regression guard for Fault A.
+	if !strings.Contains(conf, "PrivateKey = privkeybase64") || !strings.Contains(conf, "ListenPort = 51820") {
+		t.Fatalf("syncconf [Interface] must echo key + port to avoid wiping them: %s", conf)
 	}
 }

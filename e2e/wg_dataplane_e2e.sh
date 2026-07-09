@@ -54,7 +54,9 @@ tok=$(capi -s -b /j/cookies -H 'X-Tunnex-CSRF: 1' -H 'Content-Type: application/
 [ -n "$tok" ] && [ "$tok" != null ] || fail "no join token minted"
 
 say "Start node-agent with the real wgctrl backend + the join token"
-TUNNEX_JOIN_TOKEN="$tok" TUNNEX_WG_BACKEND=wgctrl docker compose up -d --build node-agent
+# Short reconcile interval so the stability check below spans several cycles fast.
+TUNNEX_JOIN_TOKEN="$tok" TUNNEX_WG_BACKEND=wgctrl TUNNEX_AGENT_RECONCILE_INTERVAL=2s \
+  docker compose up -d --build node-agent
 
 say "Wait for agent readiness (enrolled + control session + backend converged)"
 ready=""
@@ -78,6 +80,21 @@ say "READ-BACK: ip addr show wg0 (interface address from control plane)"
 ipout=$(docker compose exec -T node-agent ip addr show wg0)
 echo "$ipout"
 echo "$ipout" | grep -q "10.99.0.1" || fail "wg0 missing control-plane address 10.99.0.1"
+
+say "STABILITY: wg0 key + port must survive ≥2 reconcile intervals (WS1 regression)"
+# The bug wiped the private key + randomized the port on the SECOND reconcile —
+# invisible to a single post-enrollment read. Sample the interface line twice,
+# > 2 reconcile intervals apart, and require the key + port to be byte-stable.
+d1=$(docker compose exec -T node-agent wg show wg0 dump | head -1)
+sleep 7 # > 3 × the 2s reconcile interval
+d2=$(docker compose exec -T node-agent wg show wg0 dump | head -1)
+k1=$(printf '%s' "$d1" | cut -f1); p1=$(printf '%s' "$d1" | cut -f3)
+k2=$(printf '%s' "$d2" | cut -f1); p2=$(printf '%s' "$d2" | cut -f3)
+printf 't0 : port=%s key_present=%s\n' "$p1" "$([ "$k1" != '(none)' ] && [ -n "$k1" ] && echo yes || echo NO)"
+printf 't+7: port=%s key_present=%s\n' "$p2" "$([ "$k2" != '(none)' ] && [ -n "$k2" ] && echo yes || echo NO)"
+[ "$k1" != "(none)" ] && [ -n "$k1" ] || fail "wg0 private key was wiped to (none) — syncconf regression"
+[ "$k1" = "$k2" ]                    || fail "wg0 private key changed across reconciles"
+[ "$p1" = "51820" ] && [ "$p2" = "51820" ] || fail "wg0 listen port not stable at 51820 ($p1 -> $p2)"
 
 say "READ-BACK: control plane persisted the node-reported WG public key"
 pk=$(docker compose exec -T -e PGPASSWORD=tunnex_dev_password postgres \

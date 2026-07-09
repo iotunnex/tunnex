@@ -38,6 +38,9 @@ jobs:
           make migrate
           make test-editions
 
+      - name: Node agent — data-plane tests (reconcile idempotence)
+        run: make test-node
+
       - name: Web — typecheck + build
         run: |
           corepack enable
