@@ -54,7 +54,11 @@ export function TunnelControl() {
   // the subtext says "handshaking…") is the defect this fixes.
   const HANDSHAKE_STALE_SEC = 180;
   const isUp = status.state === "up";
-  const live = isUp && status.last_handshake_sec != null && status.last_handshake_sec <= HANDSHAKE_STALE_SEC;
+  // last_handshake_sec is an ABSOLUTE unix timestamp (0 = never), NOT an age — and
+  // wireguard-go runs client-side, so it's on THIS machine's clock. Age = now - it.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const handshakeAgeSec = status.last_handshake_sec ? Math.max(0, nowSec - status.last_handshake_sec) : null;
+  const live = isUp && handshakeAgeSec != null && handshakeAgeSec <= HANDSHAKE_STALE_SEC;
   const connecting = isUp && !live; // interface up but no fresh handshake — not "Connected"
   const failed = status.state === "failed";
 
@@ -88,7 +92,7 @@ export function TunnelControl() {
           <div className="grid grid-cols-3 gap-2">
             <span>↓ {fmtBytes(status.rx_bytes)}</span>
             <span>↑ {fmtBytes(status.tx_bytes)}</span>
-            <span>{status.last_handshake_sec != null ? `handshake ${status.last_handshake_sec}s` : "handshaking…"}</span>
+            <span>{handshakeAgeSec != null ? `handshake ${handshakeAgeSec}s ago` : "handshaking…"}</span>
           </div>
         </div>
       )}
