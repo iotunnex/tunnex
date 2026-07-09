@@ -705,6 +705,35 @@ Windows = `golang.zx2c4.com/wireguard/windows` / `wireguard-nt` + `wintun` — W
 **MIT**-ish (WireGuard) with the Wintun redistribution note; wintun.dll is bundled per its license.
 Exact commit/tag pins recorded in `apps/helper/go.mod` when the backends land; the license check
 (MIT-under-Apache = fine; note Wintun's redistribution terms in NOTICE) is a story-end review item.
+
+**S6.3 NATIVE LIFECYCLE — DESIGN (install/UPGRADE/UNINSTALL; uninstall is first-class).**
+- **Mechanism per platform.** macOS: **SMAppService** — the app bundle ships
+  `Contents/Library/LaunchDaemons/io.tunnex.helper.plist`; the Electron main calls
+  `SMAppService.daemon(...).register()` (install/upgrade) and `.unregister()` (uninstall). Windows: the
+  helper is a **Windows service** (SCM) — the packaged installer registers/starts it; uninstall stops +
+  `sc delete`s it. Both REQUIRE the packaged app (signed `.app` / installer) — see substitutes below.
+- **UNINSTALL IS A FIRST-CLASS, VERIFIED DELIVERABLE (steer).** The dev-install left `/etc/pf.conf`
+  modified with no restorer — the production lifecycle must NOT repeat that class. Uninstall removes,
+  per platform, ALL of: the daemon/service registration; the helper binaries; the socket/pipe; on
+  macOS the `pf.conf` anchor reference **RESTORED FROM THE INSTALL BACKUP** (`/etc/pf.conf.tunnex-bak`)
+  + the pf token file; on Windows **all WFP objects by our provider GUID** (`firewall.DisableFirewall`);
+  and leaves **zero routes/rules**. The **story-end smoke's uninstall-residue checks are the acceptance
+  test** — the lifecycle is built to pass them. Dev path already updated: `macos-dev-uninstall.sh`
+  restores the pf.conf backup + cleans the token + checks split-default-route residue.
+- **VERSION UPGRADE PATH (steer).** The helper is the long-lived root daemon; the app upgrades it (a new
+  app version registers its bundled helper). `NegotiateVersion` (protocol.go, tested) makes the handshake
+  actionable: **app newer than helper → `helper_outdated`** (app re-registers/upgrades the helper via
+  the lifecycle, then retries — the normal path); **app older than helper → `client_outdated`** (REFUSE;
+  a stale app must not drive a newer helper — a downgrade-refused ratchet mirroring the auth-mode one).
+- **SUBSTITUTES vs SATISFIES (steer — honest split).** PROVABLE NOW (pre-packaging, this story):
+  uninstall COMPLETENESS + residue logic (pf.conf restore, WFP `DisableFirewall`-by-GUID, socket/token
+  removal); the version-handshake upgrade errors (unit-tested); the backend `CleanStale`/`Down` removal
+  ops the uninstall relies on. DEFERS TO S6.5a (needs the packaged `.app`/installer): SMAppService
+  `register`/`unregister` and the Windows-service install exercised END-TO-END, and the packaged
+  install→run→UNINSTALL residue smoke on each real platform. **The dev-install scripts remain the
+  unpackaged-dev mechanism ALONGSIDE SMAppService** — SMAppService can't fully replace them until S6.5a
+  packaging exists; S6.5a is where SMAppService gets its live end-to-end exercise (same Windows/mac
+  session that runs the deferred kill-switch pcaps).
 Deps landed so far: `golang.org/x/sys` (caller-path), `github.com/Microsoft/go-winio` v0.6.2 (MIT —
 Windows SDDL pipe).
 

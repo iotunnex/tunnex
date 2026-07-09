@@ -161,6 +161,16 @@ func TestNegotiate(t *testing.T) {
 	}
 }
 
+func TestNegotiateVersion(t *testing.T) {
+	if err := NegotiateVersion(1, 1); err != nil {
+		t.Fatalf("equal versions must pass: %v", err)
+	}
+	// App newer than the installed helper → the helper is stale (normal upgrade path).
+	mustCode(t, NegotiateVersion(2, 1), "helper_outdated")
+	// App older than a newer helper → refuse (downgrade-refused ratchet).
+	mustCode(t, NegotiateVersion(1, 2), "client_outdated")
+}
+
 func TestValidateRequest(t *testing.T) {
 	base := func() *Request {
 		return &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbStatus}
@@ -168,10 +178,10 @@ func TestValidateRequest(t *testing.T) {
 	if err := ValidateRequest(base()); err != nil {
 		t.Fatalf("valid status request rejected: %v", err)
 	}
-	// Version mismatch.
+	// Version mismatch — a newer app vs an older helper reports helper_outdated.
 	r := base()
-	r.Version = 999
-	mustCode(t, ValidateRequest(r), "version_mismatch")
+	r.Version = ProtocolVersion + 1
+	mustCode(t, ValidateRequest(r), "helper_outdated")
 	// Unknown verb.
 	r = base()
 	r.Verb = "delete_everything"

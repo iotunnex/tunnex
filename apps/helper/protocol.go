@@ -50,6 +50,28 @@ func authRank(m AuthMode) int {
 // (no silent downgrade): once the helper is signed and enforces code_signing, a
 // stale path_check-only app is rejected and must update. That one-way ratchet is
 // the whole point of carrying auth_mode from day one.
+// NegotiateVersion checks wire-protocol compatibility and, on mismatch, names WHICH
+// side is stale so the app can act. The helper is the long-lived root daemon; the app
+// upgrades it (a new app version installs its bundled helper via the lifecycle —
+// SMAppService / the Windows service). So:
+//   - client > helper → the installed helper is OLD (app upgraded, helper didn't):
+//     "helper_outdated" — the app should (re)install its bundled helper via the
+//     lifecycle, then retry. This is the NORMAL upgrade path.
+//   - client < helper → the app is OLD relative to a newer helper: "client_outdated" —
+//     REFUSE (a stale app must not drive a newer helper; a downgrade-refused ratchet,
+//     mirroring the auth-mode ratchet in Negotiate). Update the app.
+// v1 is the only version today; this is the framework the first bump uses.
+func NegotiateVersion(client, helper int) error {
+	switch {
+	case client == helper:
+		return nil
+	case client > helper:
+		return &ProtocolError{Code: "helper_outdated", Msg: "the Tunnex helper is older than this app — reinstall to upgrade it"}
+	default:
+		return &ProtocolError{Code: "client_outdated", Msg: "this app is older than the installed Tunnex helper — update the app"}
+	}
+}
+
 func Negotiate(clientMax, enforced AuthMode) (AuthMode, error) {
 	if authRank(enforced) == 0 {
 		return "", &ProtocolError{Code: "auth_mode_unsupported", Msg: "helper enforced auth mode is unknown"}
@@ -120,8 +142,8 @@ func ValidateRequest(r *Request) error {
 	if r == nil {
 		return &ProtocolError{Code: "empty_request", Msg: "request is nil"}
 	}
-	if r.Version != ProtocolVersion {
-		return &ProtocolError{Code: "version_mismatch", Msg: "unsupported protocol version"}
+	if err := NegotiateVersion(r.Version, ProtocolVersion); err != nil {
+		return err
 	}
 	if authRank(r.AuthMode) == 0 {
 		return &ProtocolError{Code: "auth_mode_unsupported", Msg: "unknown auth mode"}
