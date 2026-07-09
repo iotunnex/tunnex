@@ -69,16 +69,14 @@ redirect URIs / outbound email, and the B2 domain-capture walk item.** S3.7 park
 deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
-**OPEN DECISIONS (Pawan):** (a) **LICENSE — none exists** → the public repo is currently
-all-rights-reserved (nobody may legally use/fork it despite being public), which contradicts the
-open-core intent. Needs an OSS license for the open parts (e.g. Apache-2.0 / AGPL-3.0 / BSL-1.1) +
-a distinct license note over `internal/enterprise/**`. Decision pending. (b) **Go module path** —
-all three modules are `github.com/tunnexio/tunnex/*` but the repo is `github.com/iotunnex/tunnex`
-(the mismatch already bit CI). Safe today ONLY because `-mod=readonly` never remote-resolves. Options:
-keep-as-is (guarded), switch to `github.com/iotunnex/tunnex/*` (match repo; `go install` works), or —
-enabled once tunnex.io lands — a VANITY import `tunnex.io/...` (go-import meta at the domain).
-Recommendation: defer to the vanity path on domain purchase to avoid double-churn; interim keep-as-is.
-Decision pending.
+**RESOLVED DECISIONS:** (a) **LICENSE — DECIDED:** root **Apache-2.0**; `internal/enterprise/LICENSE`
+= proprietary **source-available** (reference-visible, commercial agreement for production use, NO
+redistribution); README **Licensing** section citing the `test-editions` build-tag guard; `CONTRIBUTING.md`
+deferring external PRs pending CLA/DCO. Lands as a docs commit to `main`. **HELD on the copyright-holder
+name** (awaiting Pawan; the Windows-EV note means no legal entity yet, so likely the individual). (b)
+**Go module path — DECIDED: defer to the VANITY path (`tunnex.io/…`) on domain purchase**; interim
+keep-as-is, now GUARDED by a `-mod=readonly` note in each go.mod + the Makefile so the flag can't be
+innocently dropped pre-rename.
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1

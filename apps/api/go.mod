@@ -1,5 +1,12 @@
 module github.com/tunnexio/tunnex/apps/api
 
+// GUARD: this module path (tunnexio/tunnex) intentionally does NOT match the repo
+// (github.com/iotunnex/tunnex). All go build/test MUST run with GOFLAGS=-mod=readonly
+// so go trusts go.mod/go.sum and never remote-resolves this path — otherwise it
+// git-ls-remotes a nonexistent repo and fails on every fresh clone / CI. DO NOT
+// drop -mod=readonly until the planned vanity-import rename (tunnex.io/…) on domain
+// purchase. See PLAN.md "OPEN DECISIONS (b) Go module path".
+
 go 1.25.0
 
 toolchain go1.25.11

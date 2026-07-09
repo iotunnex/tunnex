@@ -57,6 +57,12 @@ sqlc: ## Regenerate typed query code from db/queries
 
 # --- Code generation (OpenAPI-first: the spec is the single source of truth) ---
 # Pin the exact Go patch so local and container builds produce identical codegen.
+# GUARD: the Go build/test recipes below pass GOFLAGS=-mod=readonly deliberately.
+# The module path (github.com/tunnexio/tunnex/*) does NOT match the repo
+# (github.com/iotunnex/tunnex); -mod=readonly keeps go from remote-resolving that
+# path (which git-ls-remotes a nonexistent repo → fails on every fresh clone / CI).
+# Do NOT switch these back to -mod=mod until the vanity-import rename on domain
+# purchase (see PLAN.md "OPEN DECISIONS (b)" + the GUARD note in each go.mod).
 GO_IMAGE := golang:1.25.11-alpine
 NODE_IMAGE := node:20-alpine
 PW_IMAGE := mcr.microsoft.com/playwright:v1.48.2-jammy
