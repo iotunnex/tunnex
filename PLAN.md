@@ -67,10 +67,17 @@ UI + dev-install/uninstall (first-class uninstall) + native-lifecycle design. Wh
 review folded (10 findings, 2 deliberate-reds). macOS kill-switch **PROVEN LIVE** (kill -9 pcap: zero
 cleartext + auto-recover). DEFERRED live proofs (ledgered): Windows WFP pcap + windows endpoint paths →
 **S6.5a**; packaged residue smoke → Windows **S6.5a** / macOS-SMAppService **S6.5b** (needs signing);
-gateway-NAT/full-tunnel egress → **S3.7** (parked, deletes poc-gateway-nat.sh). **NEXT: S6.4 (Connection
-UX)** — folds POC item 4 (in-app change-server/sign-out) + revocation-teardown (proper version of the
-stopgap self-heal). App-side UX, no privileged/kernel surface: decision-first, then build-through-to-
-story-end-review pre-authorized once commit-one matches scope.** First green run went 4/4 (gates + client mac + client
+gateway-NAT/full-tunnel egress → **S3.7** (parked, deletes poc-gateway-nat.sh). **S6.4 CONNECTION UX MERGED
+(PR#5, 011bb09)** — app-side only (helper/kill-switch untouched): revocation-aware teardown
+(`RevocationMonitor` — self-scheduling poll, only-while-up, throw→keep+capped-backoff, fire-once → loud
+banner/tray/notification), change-server/sign-out (`DesktopSettings` via existing verb allowlist),
+split-tunnel toggle (re-mints on split↔full with full-sweep revoke; `gateway_no_egress` pre-mapped for
+S3.7), tray + notifications. High-effort multi-finder folded — ROOT FIX: per-window services → **app-level
+singletons, window a detachable null-safe view** (tunnel now SURVIVES window close — the point of a tray;
+kills the macOS dock-reopen "second handler" crash + closed-window controller/monitor leak); + #1
+`deviceExists` throws on empty-orgs 200 (a replica-lag blip no longer false-revokes a live device). Client
+51 tests. **NEXT: S6.5a (UNSIGNED packaging — .dmg/.exe + Gatekeeper/SmartScreen workarounds; needs NO
+certs, nothing ops-side blocks it).** First green run went 4/4 (gates + client mac + client
 win + e2e) after fixing: `.env` in CI, a Windows path-fixture, `-mod=readonly`, and THE real gates
 bug — `.gitignore`'s unanchored `secrets/` had silently kept apps/api/internal/secrets SOURCE out of
 git (fine locally, broken on every fresh clone). Remote: github.com/iotunnex/tunnex (public); pushed
