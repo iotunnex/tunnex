@@ -58,14 +58,19 @@ expected to be rewritten before merge.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 6 IN PROGRESS. Merged to main: S6.1/S6.2/S6.0b + the reconcile-idempotence hotfix
-(a8c5344 — node-agent `wg syncconf` was wiping wg0 key+port every reconcile; found via a live cloud
-POC). S6.3 (tunnel control) is on `story/S6.3-tunnel-control`, NOT yet merged: client + helper +
-macOS wireguard-go/pf backend + caller-auth are DONE and PROVEN LIVE (a real desktop-client → Azure
-VM gateway tunnel reached a private service over the internet). REMAINING on S6.3: Windows WFP
-backend, native lifecycle (SMAppService/service), multi-finder, story-end. NEXT UP before that:
-S-POC-fixes hotfix (copy button + APP_BASE_URL loud-warn). S6.3's kill-switch mini-smoke (full-tunnel
-device) runs before/alongside the Windows WFP work (standing requirement).** First green run went 4/4 (gates + client mac + client
+Current: **EPIC 6 IN PROGRESS. Merged to main: S6.1/S6.2/S6.0b · reconcile-idempotence hotfix
+(a8c5344) · S-POC-fixes (copy-button/APP_BASE_URL/invite-rework, PR#3) · **S6.3 TUNNEL CONTROL MERGED
+(PR#4, 1b36067)** — root privilege helper (typed protocol, canonicalized caller-auth, version-upgrade
+handshake) + macOS **pf** & Windows **WFP** kill-switch backends + **bounded fail-closed** (startup
+self-heal + 90s dead-man + graceful Down) + split-default/endpoint-exclusion routing + desktop Connect
+UI + dev-install/uninstall (first-class uninstall) + native-lifecycle design. Whole-branch multi-finder
+review folded (10 findings, 2 deliberate-reds). macOS kill-switch **PROVEN LIVE** (kill -9 pcap: zero
+cleartext + auto-recover). DEFERRED live proofs (ledgered): Windows WFP pcap + windows endpoint paths →
+**S6.5a**; packaged residue smoke → Windows **S6.5a** / macOS-SMAppService **S6.5b** (needs signing);
+gateway-NAT/full-tunnel egress → **S3.7** (parked, deletes poc-gateway-nat.sh). **NEXT: S6.4 (Connection
+UX)** — folds POC item 4 (in-app change-server/sign-out) + revocation-teardown (proper version of the
+stopgap self-heal). App-side UX, no privileged/kernel surface: decision-first, then build-through-to-
+story-end-review pre-authorized once commit-one matches scope.** First green run went 4/4 (gates + client mac + client
 win + e2e) after fixing: `.env` in CI, a Windows path-fixture, `-mod=readonly`, and THE real gates
 bug — `.gitignore`'s unanchored `secrets/` had silently kept apps/api/internal/secrets SOURCE out of
 git (fine locally, broken on every fresh clone). Remote: github.com/iotunnex/tunnex (public); pushed
