@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import AcceptInvite from "./pages/AcceptInvite";
 import VerifyEmail from "./pages/VerifyEmail";
 import VerifyPending from "./pages/VerifyPending";
 import CreateOrg from "./pages/CreateOrg";
@@ -41,6 +42,7 @@ export default function App() {
         {/* Reset + verify are reached from emailed links; usable while logged out
             and harmless while logged in, so they are not auth-gated. */}
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/accept-invite" element={<AcceptInvite />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
         {/* Authenticated area. The onboarding funnel (S4.7) lives BETWEEN auth and
             the shell: /create-org and /verify-pending are reachable while
