@@ -61,7 +61,15 @@ func (c Config) IsProduction() bool { return c.Env == "production" }
 // would point at localhost and be unreachable from the user's machine. Boot warns
 // loudly on it (POC-surfaced: a remote deploy shipped localhost verify links).
 func (c Config) AppBaseURLLooksLocal() bool {
-	return strings.Contains(c.AppBaseURL, "localhost") || strings.Contains(c.AppBaseURL, "127.0.0.1")
+	if c.AppBaseURL == "" {
+		return true // unset is not a reachable remote URL either
+	}
+	for _, local := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
+		if strings.Contains(c.AppBaseURL, local) {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads configuration from the environment, applying sane defaults so the
