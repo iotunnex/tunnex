@@ -64,17 +64,21 @@ test("TunnelConfigStore is origin-keyed and refuses insecure by default", () => 
   assert.throws(() => insecure.put(sc), (e) => e instanceof InsecureStorageError);
 });
 
-// fakeApi counts creates/revokes.
-function fakeApi(): DeviceApi & { creates: number; revoked: string[] } {
+// fakeApi counts creates/revokes; `exists` drives the self-heal existence check.
+function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: boolean } {
   return {
     creates: 0,
     revoked: [],
+    exists: true,
     async createDevice() {
       this.creates++;
       return { deviceId: "dev-" + this.creates, confText: CONF };
     },
     async revokeDevice(id: string) {
       this.revoked.push(id);
+    },
+    async deviceExists() {
+      return this.exists;
     },
   };
 }
@@ -104,7 +108,32 @@ test("clearTunnelConfigForOrigin: removes + best-effort revokes that origin's de
 
   // Best-effort: a revoke that throws is swallowed, local removal still happens.
   await resolveTunnelConfig("https://u.example", false, api, store);
-  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); } };
+  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true };
   await clearTunnelConfigForOrigin("https://u.example", throwingApi, store); // must not throw
   assert.equal(store.get("https://u.example"), null);
+});
+
+test("resolveTunnelConfig: self-heals a revoked device (clear + mint fresh)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const api = fakeApi();
+  const origin = "https://t.example";
+
+  await resolveTunnelConfig(origin, false, api, store);
+  assert.equal(api.creates, 1); // dev-1 minted + stored
+
+  // The device is revoked server-side → the existence check fails on next resolve,
+  // so the dead config is dropped and a FRESH device is minted (no manual rm).
+  api.exists = false;
+  await resolveTunnelConfig(origin, false, api, store);
+  assert.equal(api.creates, 2);
+
+  // Fail-safe: a transient existence-check error must NOT nuke a possibly-valid
+  // config — reuse it, don't re-create.
+  const flakyApi: DeviceApi = {
+    createDevice: api.createDevice.bind(api),
+    revokeDevice: api.revokeDevice.bind(api),
+    deviceExists: async () => { throw new Error("network"); },
+  };
+  await resolveTunnelConfig(origin, false, flakyApi, store);
+  assert.equal(api.creates, 2); // reused — no new create on a transient blip
 });

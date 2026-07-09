@@ -28,24 +28,30 @@ type CallerVerifier interface {
 // upgrades to code_signing pinning without a break. See PLAN.md SECURITY
 // LIMITATION (S6.3).
 type PathCheckVerifier struct {
-	// InstallDir is the app's absolute install directory (already realpath'd by
+	// InstallDirs are the app's absolute install directories (already realpath'd by
 	// the platform caller — e.g. /Applications/Tunnex.app, C:\Program Files\Tunnex).
-	InstallDir string
+	// A caller is trusted if its exe lies within ANY of them. Production sets a
+	// single dir; a DEV install sets several (e.g. /usr/local/tunnex for the
+	// tunnelctl driver AND the dev Electron binary dir for the desktop app), so the
+	// same helper serves both callers without a manual repoint.
+	InstallDirs []string
 }
 
 func (v PathCheckVerifier) Mode() AuthMode { return AuthModePathCheck }
 
 func (v PathCheckVerifier) Verify(peerExePath string) error {
-	if v.InstallDir == "" {
+	if len(v.InstallDirs) == 0 {
 		return &ProtocolError{Code: "install_dir_unset", Msg: "helper has no install dir configured"}
 	}
 	if peerExePath == "" {
 		return &ProtocolError{Code: "peer_unresolved", Msg: "could not resolve the caller's executable"}
 	}
-	if !isWithin(v.InstallDir, peerExePath) {
-		return &ProtocolError{Code: "caller_untrusted", Msg: "caller executable is not inside the Tunnex install dir"}
+	for _, dir := range v.InstallDirs {
+		if dir != "" && isWithin(dir, peerExePath) {
+			return nil
+		}
 	}
-	return nil
+	return &ProtocolError{Code: "caller_untrusted", Msg: "caller executable is not inside a Tunnex install dir"}
 }
 
 // isWithin reports whether target is dir itself or lies underneath it. Both are

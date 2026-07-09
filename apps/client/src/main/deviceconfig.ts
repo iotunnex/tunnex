@@ -13,6 +13,10 @@ export interface DeviceApi {
   createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string }>;
   // revokeDevice best-effort revokes a device against the origin it belongs to.
   revokeDevice(deviceId: string): Promise<void>;
+  // deviceExists reports whether a device is still present + ACTIVE server-side.
+  // Used to self-heal a stale cached config (device revoked by an admin, or GC'd) —
+  // an EXISTENCE check, NOT a config re-fetch, so D2 (never re-fetch the config) holds.
+  deviceExists(deviceId: string): Promise<boolean>;
 }
 
 // resolveTunnelConfig is the ConfigProvider body: GET-OR-CREATE, origin-keyed.
@@ -27,7 +31,22 @@ export async function resolveTunnelConfig(
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
   const existing = store.get(origin);
-  if (existing) return existing.config;
+  if (existing) {
+    // Self-heal: a stored config whose device was revoked/deleted server-side is
+    // dead — bringing it up yields a tunnel that can never handshake (tonight's POC
+    // pain, which used to need a manual `rm tunnel-config.bin`). Verify the device
+    // still exists (existence check, not a config re-fetch → D2 intact); if it's
+    // gone, drop the dead config and fall through to mint a fresh device. A
+    // transient API error KEEPS the config — never nuke a possibly-valid one on a blip.
+    let stillThere = true;
+    try {
+      stillThere = await api.deviceExists(existing.deviceId);
+    } catch {
+      stillThere = true;
+    }
+    if (stillThere) return existing.config;
+    store.remove(origin);
+  }
 
   const { deviceId, confText } = await api.createDevice(fullTunnel);
   const config: TunnelConfig = { ...parseWgConf(confText), full_tunnel: fullTunnel };

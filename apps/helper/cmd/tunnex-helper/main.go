@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/tunnexio/tunnex/apps/helper"
 )
@@ -21,8 +22,10 @@ func main() {
 		return
 	}
 
-	// The install dir (for the interim executable-inside-install-dir caller check)
+	// The install dir(s) (for the interim executable-inside-install-dir caller check)
 	// and socket path are provided by the launchd plist / service config.
+	// TUNNEX_INSTALL_DIR may list several dirs, os.PathListSeparator-joined (a dev
+	// install trusts BOTH /usr/local/tunnex and the Electron binary dir).
 	installDir := os.Getenv("TUNNEX_INSTALL_DIR")
 	socketPath := os.Getenv("TUNNEX_HELPER_SOCKET")
 	if socketPath == "" {
@@ -35,10 +38,10 @@ func main() {
 	}
 
 	sup := helper.NewSupervisor(helper.NewBackend())
-	verify := helper.PathCheckVerifier{InstallDir: installDir}
+	verify := helper.PathCheckVerifier{InstallDirs: filepath.SplitList(installDir)}
 	srv := helper.NewServer(sup, verify, helper.NewPeerResolver())
 
-	log.Printf("tunnex-helper %s: listening on %s (install dir %q, caller-auth: %s)",
+	log.Printf("tunnex-helper %s: listening on %s (install dirs %q, caller-auth: %s)",
 		helper.HelperVersion, socketPath, installDir, helper.CallerAuthKind())
 	if err := srv.Serve(ln); err != nil {
 		log.Fatalf("tunnex-helper: serve: %v", err)

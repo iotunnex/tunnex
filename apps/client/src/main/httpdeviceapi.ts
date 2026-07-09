@@ -56,6 +56,14 @@ export class HttpDeviceApi implements DeviceApi {
     return { deviceId: body.device.id, confText: body.config };
   }
 
+  async deviceExists(deviceId: string): Promise<boolean> {
+    const orgId = await this.firstOrgId();
+    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
+    const devices = (await r.json()) as Array<{ id: string; status: string }>;
+    return devices.some((d) => d.id === deviceId && d.status === "active");
+  }
+
   async revokeDevice(deviceId: string): Promise<void> {
     // Re-resolve the org (the device is on the caller's first org, as created).
     const orgId = await this.firstOrgId();

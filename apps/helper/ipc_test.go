@@ -14,7 +14,7 @@ func untrustedResolver(net.Conn) (string, error) { return "/evil/mal", nil }
 func newServer(t *testing.T, be Backend, resolve PeerResolver) (*Server, *Supervisor) {
 	t.Helper()
 	sup := NewSupervisor(be)
-	return NewServer(sup, PathCheckVerifier{InstallDir: "/app"}, resolve), sup
+	return NewServer(sup, PathCheckVerifier{InstallDirs: []string{"/app"}}, resolve), sup
 }
 
 func req(verb Verb, cfg *TunnelConfig) *Request {

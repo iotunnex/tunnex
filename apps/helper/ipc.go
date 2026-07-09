@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -141,6 +142,9 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 	if err := s.verify.Verify(exe); err != nil {
+		// Log the rejected caller's exe path so an install can self-correct its
+		// trusted dirs (dev) and so untrusted-caller attempts are auditable.
+		log.Printf("caller_untrusted: caller exe %q not inside any trusted install dir", exe)
 		_ = WriteMessage(conn, errorResponse(codeOf(err), "caller not trusted"))
 		return
 	}

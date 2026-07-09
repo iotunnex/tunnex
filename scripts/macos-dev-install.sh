@@ -7,7 +7,34 @@ set -euo pipefail
 DIR=/usr/local/tunnex
 PLIST=/Library/LaunchDaemons/io.tunnex.helper.plist
 SOCK=/var/run/tunnex/helper.sock
-HELPER_SRC="$(cd "$(dirname "$0")/../apps/helper" && pwd)"
+LOG=/tmp/tunnex-helper.log
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HELPER_SRC="$REPO/apps/helper"
+
+# TRUSTED CALLER DIRS (colon-joined; the helper trusts a caller in ANY of them).
+# $DIR holds the tunnelctl driver (mini-smoke). The dev Electron app runs from
+# node_modules, so AUTO-DETECT its binary dir and trust it too — this is what stops
+# `caller_untrusted` recurring for the desktop-app POC (item-5 pt 2), so no manual
+# PlistBuddy repoint is ever needed.
+detect_electron_dir() {
+  local bin=""
+  bin="$( (cd "$REPO/apps/client" && node -e "process.stdout.write(require('electron'))") 2>/dev/null )" || bin=""
+  if [ -n "$bin" ]; then dirname "$bin"; fi
+}
+# Self-correct: if an earlier run logged a caller_untrusted with the rejected exe,
+# trust that binary's dir too (covers a hoisted/renamed Electron path require()
+# resolution might miss).
+rejected_dir() {
+  local p=""
+  p="$(grep -o 'caller exe "[^"]*"' "$LOG" 2>/dev/null | tail -1 | sed 's/caller exe "//; s/"$//')" || p=""
+  if [ -n "$p" ]; then dirname "$p"; fi
+}
+TRUST_DIRS="$DIR"
+ELDIR="$(detect_electron_dir)"
+if [ -n "$ELDIR" ]; then TRUST_DIRS="$TRUST_DIRS:$ELDIR"; fi
+REJDIR="$(rejected_dir)"
+if [ -n "$REJDIR" ] && [ "$REJDIR" != "$DIR" ] && [ "$REJDIR" != "$ELDIR" ]; then TRUST_DIRS="$TRUST_DIRS:$REJDIR"; fi
+echo ">> trusted caller dirs: $TRUST_DIRS"
 
 echo ">> [1/6] build helper (CGO_ENABLED=1 → native caller-auth) + tunnelctl driver"
 ( cd "$HELPER_SRC"
@@ -42,7 +69,7 @@ sudo tee "$PLIST" >/dev/null <<PL
   <key>Label</key><string>io.tunnex.helper</string>
   <key>ProgramArguments</key><array><string>$DIR/tunnex-helper</string></array>
   <key>EnvironmentVariables</key><dict>
-    <key>TUNNEX_INSTALL_DIR</key><string>$DIR</string>
+    <key>TUNNEX_INSTALL_DIR</key><string>$TRUST_DIRS</string>
     <key>TUNNEX_HELPER_SOCKET</key><string>$SOCK</string>
   </dict>
   <key>RunAtLoad</key><true/>

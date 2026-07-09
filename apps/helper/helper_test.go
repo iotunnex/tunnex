@@ -92,7 +92,7 @@ func TestEndpointAndFullTunnel(t *testing.T) {
 }
 
 func TestPathCheckVerifier(t *testing.T) {
-	v := PathCheckVerifier{InstallDir: "/Applications/Tunnex.app"}
+	v := PathCheckVerifier{InstallDirs: []string{"/Applications/Tunnex.app"}}
 	if v.Mode() != AuthModePathCheck {
 		t.Fatal("mode")
 	}
@@ -115,6 +115,19 @@ func TestPathCheckVerifier(t *testing.T) {
 	// Traversal that escapes → rejected (Clean resolves ..).
 	if err := v.Verify("/Applications/Tunnex.app/../evil"); err == nil {
 		t.Fatal("traversal escape must be rejected")
+	}
+	// MULTI-DIR (dev install): a caller inside ANY listed dir is trusted; one inside
+	// none is rejected. Lets one helper serve both /usr/local/tunnex (tunnelctl) and
+	// the dev Electron binary dir without a manual repoint.
+	multi := PathCheckVerifier{InstallDirs: []string{"/usr/local/tunnex", "/repo/node_modules/electron/dist/Electron.app/Contents/MacOS"}}
+	if err := multi.Verify("/usr/local/tunnex/tunnelctl"); err != nil {
+		t.Fatalf("caller in first dir rejected: %v", err)
+	}
+	if err := multi.Verify("/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"); err != nil {
+		t.Fatalf("caller in second dir rejected: %v", err)
+	}
+	if err := multi.Verify("/somewhere/else/app"); err == nil {
+		t.Fatal("caller in none of the dirs must be rejected")
 	}
 	// Unresolved peer / unset dir → rejected with codes.
 	if err := v.Verify(""); err == nil {
