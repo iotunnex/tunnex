@@ -42,6 +42,13 @@ rebase the active story branch onto it to keep the ff-merge clean.
 receives it, or is RE-CONFIRMED at re-entry — a sign-off read out of a summary/handoff is not
 authorization to merge. (Codified after S4.8's merge waited on an explicit re-confirmation.)
 
+**Merge mechanics (confirmed S6.0b):** merges to `main` are ff-only + linear history. As of S6.0b,
+`main` has GitHub branch protection REQUIRING the CI checks `gates` + `client (macos-latest)` +
+`client (windows-latest)` (the `e2e` job is opportunistic, NOT required); `enforce_admins=false` so
+an admin (iotunnex) can still push, but the social sign-off gate is now mechanized for PRs. The
+standard flow: story branch → PR → CI green (required checks) → user sign-off → ff-merge → push.
+CI is the CONTINUOUS invariant proof; the human sign-off is still required on top (CI green ≠ auto-merge).
+
 ---
 
 ## Story status (re-entry checkpoint)
@@ -53,10 +60,25 @@ win + e2e) after fixing: `.env` in CI, a Windows path-fixture, `-mod=readonly`, 
 bug — `.gitignore`'s unanchored `secrets/` had silently kept apps/api/internal/secrets SOURCE out of
 git (fine locally, broken on every fresh clone). Remote: github.com/iotunnex/tunnex (public); pushed
 as the iotunnex account. Merged in EPIC 6: S6.1 (client shell) + S6.2 (renderer transport — desktop
-tenant-functional) + S6.0b (CI). **Signing: NOT yet confirmed filed (Pawan — Apple Dev ID + Windows
-EV this week; S6.5 gate).** S3.7 parked at paper. Beta deferred — re-decide at EPIC 6 close.
+tenant-functional) + S6.0b (CI). **Distribution: S6.5 SPLIT — S6.5a (unsigned packaging) ships in
+EPIC 6; S6.5b (code-signing + notarization + auto-update ON) is DEFERRED, trigger = public beta OR
+first outside-circle distribution (NOT a calendar clock). Windows EV needs a legal entity that does
+not yet exist → entity formation is additive lead time; interim = individual Apple Developer ID.**
+**Ops (Pawan): domain purchase tunnex.io PENDING — blocks real-deployment APP_BASE_URL / SSO
+redirect URIs / outbound email, and the B2 domain-capture walk item.** S3.7 parked at paper. Beta
+deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
+**OPEN DECISIONS (Pawan):** (a) **LICENSE — none exists** → the public repo is currently
+all-rights-reserved (nobody may legally use/fork it despite being public), which contradicts the
+open-core intent. Needs an OSS license for the open parts (e.g. Apache-2.0 / AGPL-3.0 / BSL-1.1) +
+a distinct license note over `internal/enterprise/**`. Decision pending. (b) **Go module path** —
+all three modules are `github.com/tunnexio/tunnex/*` but the repo is `github.com/iotunnex/tunnex`
+(the mismatch already bit CI). Safe today ONLY because `-mod=readonly` never remote-resolves. Options:
+keep-as-is (guarded), switch to `github.com/iotunnex/tunnex/*` (match repo; `go install` works), or —
+enabled once tunnex.io lands — a VANITY import `tunnex.io/...` (go-import meta at the domain).
+Recommendation: defer to the vanity path on domain purchase to avoid double-churn; interim keep-as-is.
+Decision pending.
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
@@ -492,11 +514,14 @@ configured server, get/refresh the bearer, trigger login/logout — and later th
 up/down/status calls). No remote module. This allowlist IS the S6.3 tunnel-control precursor: privileged
 WireGuard actions will be added as explicit IPC channels, never direct renderer access.
 
-**(d) Auto-update = electron-updater SCAFFOLDED but INERT until S6.5 signing.** Wire `electron-updater`
-(config + a placeholder feed URL) so the plumbing exists, but do NOT call `checkForUpdates` / enable
-it: macOS auto-update (Squirrel.Mac) requires a signed + notarized app and simply cannot function
-unsigned, and shipping an unsigned auto-updater is a security anti-pattern. Scaffold-don't-enable;
-S6.5 flips it on once the certs land.
+**(d) Auto-update = electron-updater SCAFFOLDED but INERT until S6.5b — inertness now INDEFINITE by
+design.** Wire `electron-updater` (config + a placeholder feed URL) so the plumbing exists, but do
+NOT call `checkForUpdates` / enable it: macOS auto-update (Squirrel.Mac) requires a signed + notarized
+app and simply cannot function unsigned, and shipping an unsigned auto-updater is a security
+anti-pattern. Scaffold-don't-enable. Because signing moved to the DEFERRED S6.5b (trigger = public
+beta / first outside distribution), the updater — and macOS auto-update specifically — stays inert
+INDEFINITELY until that trigger fires; S6.5a ships unsigned with NO auto-update. This is deliberate,
+not an oversight.
 
 **(e) Credential storage = OS keychain via Electron `safeStorage`, NOT the CLI's 0600 file.** The
 desktop client stores the `tnx_` credential encrypted through `safeStorage.encryptString`
@@ -585,7 +610,17 @@ present — detect and warn/refuse rather than silently downgrade.
   so desktop SSO needs no desktop-specific code. Confirmed, no build.
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
-- **S6.5 Packaging & signing** — `electron-builder` `.dmg` + `.exe`/msi, code-signing + notarization (certs from EPIC 5).
+- **S6.5a Packaging (unsigned)** — `electron-builder` `.dmg` + `.exe`, `SHA256SUMS`, an install
+  script, and DOCUMENTED Gatekeeper (macOS) / SmartScreen (Windows) workarounds for unsigned
+  artifacts. Ships in EPIC 6. Auto-update stays OFF (see S6.5b). This is the "friends & self can
+  install it" milestone.
+- **S6.5b Code-signing + notarization + auto-update — DEFERRED.** Apple notarization + Windows
+  Authenticode, then flip `electron-updater` ON (the scaffold is inert until here — see S6.1 (d)).
+  **Trigger = public beta OR first outside-the-inner-circle distribution** (not a calendar clock).
+  **Windows EV blocker:** an EV cert requires a LEGAL ENTITY that does not yet exist — entity
+  formation is additive lead time on top of the 1–3 wk EV validation, so start it when the trigger
+  approaches. **Interim recorded:** an INDIVIDUAL Apple Developer ID (no entity needed) can sign +
+  notarize macOS early if only macOS distribution is wanted first; Windows waits on the entity.
 
 ## EPIC 7 — Zero Trust Access *(enterprise)*
 
