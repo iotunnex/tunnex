@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { messageFor } from "../src/main/notify";
-import { trayMenuModel, trayStateFor } from "../src/main/tray";
+import { messageFor } from "../src/main/notifyview";
+import { trayMenuModel, trayStateFor } from "../src/main/trayview";
 
-// notify + tray carry no Electron calls at module load (Notification/Tray are only
-// touched inside methods), so their PURE view-models are unit-testable here without
-// an Electron main process — the wiring itself is live-verified at S6.5a packaging.
+// The PURE view-models live in electron-free modules (notifyview / trayview) so they
+// import cleanly in CI, where ELECTRON_SKIP_BINARY_DOWNLOAD makes require("electron")
+// throw. The Electron wiring (notify.ts / tray.ts) is live-verified at S6.5a packaging.
 
 test("notify: every tunnel event has non-empty, distinct copy", () => {
   const events = ["connected", "disconnected", "failed", "revoked"] as const;
