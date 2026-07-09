@@ -3,6 +3,14 @@ import { Config } from "./config";
 import { CredentialStore } from "./credential";
 import { runLogin, runLogout } from "./login";
 import { TunnelController, helperSocketPath } from "./tunnel";
+import { TunnelConfigStore } from "./tunnelstore";
+import { HttpDeviceApi } from "./httpdeviceapi";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin } from "./deviceconfig";
+
+// Desktop default: split-tunnel (org network only), matching the CLI default. A
+// full-tunnel toggle is a later UX affordance; the helper enforces both-family
+// completeness when it IS full.
+const DEFAULT_FULL_TUNNEL = false;
 
 // The IPC handlers behind the preload allowlist. VERB-SPECIFIC — there is no
 // generic invoke(channel,args); each channel validates its own inputs in main
@@ -11,7 +19,11 @@ import { TunnelController, helperSocketPath } from "./tunnel";
 //
 // Channels: auth:{login,logout,status}, config:{getServerUrl,setServerUrl}.
 // tunnel:* is reserved for S6.3 and deliberately registers NOTHING yet.
-export function registerIpc(win: BrowserWindow, config: Config, store: CredentialStore): void {
+export function registerIpc(win: BrowserWindow, config: Config, store: CredentialStore, tunnelStore: TunnelConfigStore): void {
+  // The bearer is bound to the origin it was minted against (store.load().server);
+  // build the device API + resolve config against exactly that origin so a config
+  // is never fetched/used cross-origin.
+  const deviceApiFor = (origin: string) => new HttpDeviceApi(origin, () => store.load()?.token ?? null);
   ipcMain.handle("auth:status", () => {
     const cred = store.load();
     if (!cred) return { loggedIn: false, secureStorage: store.available() };
@@ -27,8 +39,16 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
   });
 
   ipcMain.handle("auth:logout", async () => {
-    // Reload REGARDLESS of a logout error so the renderer re-syncs auth state
-    // (never leave the user on an authed UI with no feedback).
+    // Full-sweep on logout (BEFORE the token is cleared, while it can still revoke):
+    // stop the tunnel gracefully, then clear the stored config + best-effort revoke
+    // the device for this origin (the local config is discarded like the bearer, so
+    // the server peer must not be orphaned). All best-effort — logout must proceed.
+    const cred = store.load();
+    await tunnel.down().catch(() => {});
+    if (cred) {
+      await clearTunnelConfigForOrigin(cred.server, deviceApiFor(cred.server), tunnelStore).catch(() => {});
+    }
+    // Reload REGARDLESS of a logout error so the renderer re-syncs auth state.
     try {
       await runLogout(store);
     } finally {
@@ -37,14 +57,14 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
   });
 
   // S6.3 tunnel control. The controller speaks the framed helper protocol; the
-  // config provider (bearer-fetch the device WG config in MAIN, keeping the key
-  // out of the renderer) is the next integration step — until it lands, tunnel:up
-  // fails cleanly with device_config_unavailable, but the full transport path
-  // (renderer → ipc → helper framing → privileged helper) is wired and verified.
+  // ConfigProvider runs in MAIN — GET-OR-CREATE the device config, origin-keyed,
+  // so the WG private key (like the bearer) never enters the renderer.
   const tunnel = new TunnelController(
     helperSocketPath(),
     async () => {
-      throw new Error("device_config_unavailable: WG config acquisition is the next S6.3 step");
+      const cred = store.load();
+      if (!cred) throw new Error("not_authenticated");
+      return resolveTunnelConfig(cred.server, DEFAULT_FULL_TUNNEL, deviceApiFor(cred.server), tunnelStore);
     },
     (status) => win.webContents.send("tunnel:status-changed", status),
   );
@@ -64,6 +84,10 @@ export function registerIpc(win: BrowserWindow, config: Config, store: Credentia
     // change, revoke + clear the old credential BEFORE the new URL is persisted,
     // so there is no window where (origin=new, credential=old) can attach.
     if (reloginRequired) {
+      // Stop the tunnel (it belongs to the OLD origin). Per the signed-off
+      // amendment we do NOT auto-revoke the old-origin device/config — it stays
+      // origin-keyed in the store for the UI to surface (remove-or-switch-back).
+      await tunnel.down().catch(() => {});
       await runLogout(store);
     }
     config.commitServerUrl(accepted);

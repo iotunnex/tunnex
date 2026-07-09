@@ -5,7 +5,7 @@ import { resolveBundlePath, looksLikeAsset, contained } from "./bundle";
 import { contentTypeFor } from "./mime";
 import { cspFor } from "./csp";
 import { Config } from "./config";
-import { buildCredentialStore } from "./store";
+import { buildCredentialStore, buildTunnelConfigStore } from "./store";
 import { attachBearer } from "./session";
 import { registerIpc } from "./ipc";
 import { initUpdater } from "./updater";
@@ -36,8 +36,9 @@ function createWindow(config: Config): BrowserWindow {
   });
 
   const store = buildCredentialStore(allowInsecure);
+  const tunnelStore = buildTunnelConfigStore(allowInsecure);
   attachBearer(session.defaultSession, () => config.getServerUrl(), store);
-  registerIpc(win, config, store);
+  registerIpc(win, config, store, tunnelStore);
 
   // Navigation lock: the renderer must never leave app:// (a compromised page
   // navigating to an external origin would keep the preload bridge). External
