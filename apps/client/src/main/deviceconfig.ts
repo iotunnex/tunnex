@@ -36,8 +36,10 @@ export async function resolveTunnelConfig(
     // WireGuard profile's AllowedIPs are baked at mint, so the stored device can't
     // satisfy the new intent — reusing it would silently keep the old routing (e.g.
     // unchecking full-tunnel but staying blackholed offline). Drop it + best-effort
-    // revoke the now-orphaned device, then fall through to mint a fresh one for the
-    // new mode so the toggle actually takes effect.
+    // revoke the SUPERSEDED device (the standard full-sweep revoke, so it is not left
+    // orphaned server-side), then mint a fresh device for the new mode so the toggle
+    // actually takes effect. NOTE: this cycles device identity — a deliberate toggle
+    // replaces the peer; the UI caveat makes that consequence visible.
     store.remove(origin);
     try {
       await api.revokeDevice(existing.deviceId);

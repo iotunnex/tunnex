@@ -119,7 +119,10 @@ export function TunnelControl() {
           ) : (
             <p className="mt-1 text-xs text-slate-500">Split tunnel: only your organization&rsquo;s network is routed through Tunnex.</p>
           )}
-          <p className="mt-1 text-[11px] text-slate-600">Takes effect when a new device profile is created.</p>
+          <p className="mt-1 text-[11px] text-slate-600">
+            Changing this replaces your device profile — the current device is revoked and a new one is created on your
+            next connect.
+          </p>
         </div>
       )}
 
