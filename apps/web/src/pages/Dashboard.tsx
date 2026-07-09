@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, apiErrorMessage, type OrgOverview } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Card, ErrorText } from "../components/ui";
+import { TunnelControl } from "../components/TunnelControl";
 
 export default function Dashboard() {
   const [orgName, setOrgName] = useState("");
@@ -39,6 +40,9 @@ export default function Dashboard() {
       <h1 className="text-xl font-semibold text-white">Overview</h1>
       <p className="text-sm text-slate-400">{orgName || "…"}</p>
       <ErrorText>{error}</ErrorText>
+
+      {/* Desktop only: the VPN connect surface (no-op/hidden in the browser). */}
+      <TunnelControl />
 
       {data && (
         <>
