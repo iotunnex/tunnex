@@ -58,9 +58,14 @@ expected to be rewritten before merge.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S6.0b MERGED — CI LIVE on GitHub Actions (Linux gates + mac/win client matrix, red blocks
-merge; e2e opportunistic/ledgered). Remote established. S6.3 (tunnel control) next — decision-first,
-privilege helper is the heavyweight item.** First green run went 4/4 (gates + client mac + client
+Current: **EPIC 6 IN PROGRESS. Merged to main: S6.1/S6.2/S6.0b + the reconcile-idempotence hotfix
+(a8c5344 — node-agent `wg syncconf` was wiping wg0 key+port every reconcile; found via a live cloud
+POC). S6.3 (tunnel control) is on `story/S6.3-tunnel-control`, NOT yet merged: client + helper +
+macOS wireguard-go/pf backend + caller-auth are DONE and PROVEN LIVE (a real desktop-client → Azure
+VM gateway tunnel reached a private service over the internet). REMAINING on S6.3: Windows WFP
+backend, native lifecycle (SMAppService/service), multi-finder, story-end. NEXT UP before that:
+S-POC-fixes hotfix (copy button + APP_BASE_URL loud-warn). S6.3's kill-switch mini-smoke (full-tunnel
+device) runs before/alongside the Windows WFP work (standing requirement).** First green run went 4/4 (gates + client mac + client
 win + e2e) after fixing: `.env` in CI, a Windows path-fixture, `-mod=readonly`, and THE real gates
 bug — `.gitignore`'s unanchored `secrets/` had silently kept apps/api/internal/secrets SOURCE out of
 git (fine locally, broken on every fresh clone). Remote: github.com/iotunnex/tunnex (public); pushed
@@ -74,6 +79,21 @@ redirect URIs / outbound email, and the B2 domain-capture walk item.** S3.7 park
 deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
+**POC FRICTION LEDGER (WS2, triaged 2026-07-09):** item 1 → **S6.6 zero-build deploy** (SB.1/SB.2
+shrink); items 2+3 → **S-POC-fixes** (started next); item 4 → **S6.4** (in-app change-server/sign-out);
+item 5 (**dev-install: codesign-after-cp on Apple Silicon fixing Killed:9 + auto-detect the Electron
+path for `TUNNEX_INSTALL_DIR`**) → fold into `scripts/macos-dev-install.sh` (not customer-facing);
+item 6 (**join-token env-vars-must-be-inline gotcha**) → the gateway ceremony shows the COMPLETE
+runnable command incl. `docker compose up -d --force-recreate node-agent`, not just the vars; item 7
+(**client Node >=20 engine warning**) → pin/enforce or fix compat. ALSO surfaced + already fixed:
+the `.env` `cat >>` duplicate-key trap (compose used the first value) — the S6.6 install.sh writes a
+clean `.env` (no append).
+**REPO VISIBILITY — DECIDED: stays PRIVATE until the beta milestone.** Rationale: pre-beta there is
+no external audience, and private keeps the unfinished/unsigned client + evolving security surface out
+of public view; the cost is Actions runner QUEUING (private repos share a small pool + a 2000-min/mo
+budget, macOS 10×/Windows 2×) — accepted for now. History is already secret-clean + Entra IDs scrubbed,
+so flipping public is safe whenever the beta trigger (same as S6.5b) fires. TRIGGER to go public =
+public beta.
 **RESOLVED DECISIONS:** (a) **LICENSE — LANDED on `main`:** root **Apache-2.0** (Copyright 2026
 Tunnex) + `NOTICE`; `apps/api/internal/enterprise/LICENSE` = proprietary **source-available**
 (reference-visible, commercial agreement for production, NO redistribution); README **Licensing**
@@ -104,6 +124,12 @@ Seed for the eventual SECURITY.md.
 - **e2e correlation** (Playwright) — SPA→API `X-Request-Id` chain asserted end-to-end.
 - **RBAC matrix** (`rbac_test.go`) — executable privilege-escalation spec.
 - **Restart-persistence + fail-loud secrets** (S0.3) — master key never silently regenerates.
+- **Reconcile idempotence** (`reconcile_test.go` `TestReconcileIgnoresRoamedEndpoint` + `wg_dataplane_e2e.sh`
+  stability sample across ≥2 intervals) — the node-agent dirty-check keys on stable identity (pubkey +
+  allowed-ips), NOT the roaming endpoint, so steady-state reconcile is a byte-stable no-op; and
+  `wg syncconf` echoes the key + port so it can never wipe the interface. Demonstrated-red: the POC
+  itself (wg0 key→`(none)`, port randomized every cycle) was the failing case. Gated in CI via
+  `make test-node`.
 
 ## Edition Model — Open-core (resolved)
 - **Schema is multi-tenant in core.** Everything carries `org_id`; the open edition simply **does not expose creating a second org** — an API/UI limit, not a schema fork. No migration or code move later.
@@ -616,6 +642,10 @@ present — detect and warn/refuse rather than silently downgrade.
   so desktop SSO needs no desktop-specific code. Confirmed, no build.
 - **S6.3 Tunnel control** — start/stop WireGuard, embed `wireguard-go`/wintun (mac/win), privilege helper.
 - **S6.4 Connection UX** — status, server picker, split-tunnel toggle, tray icon, notifications.
+  **POC item 4 folded:** an in-app **"change server / sign out"** path — the client silently reused a
+  stale `localhost` server + credential and the only recovery was deleting userData files by hand
+  (never a customer action). The origin-keyed config already anticipates it; S6.4 adds the UI (surface
+  the current server + a switch/sign-out affordance; `config.setServerUrl` already forces re-login).
 - **S6.5a Packaging (unsigned)** — `electron-builder` `.dmg` + `.exe`, `SHA256SUMS`, an install
   script, and DOCUMENTED Gatekeeper (macOS) / SmartScreen (Windows) workarounds for unsigned
   artifacts. Ships in EPIC 6. Auto-update stays OFF (see S6.5b). This is the "friends & self can
@@ -627,6 +657,19 @@ present — detect and warn/refuse rather than silently downgrade.
   formation is additive lead time on top of the 1–3 wk EV validation, so start it when the trigger
   approaches. **Interim recorded:** an INDIVIDUAL Apple Developer ID (no entity needed) can sign +
   notarize macOS early if only macOS distribution is wanted first; Windows waits on the entity.
+- **S6.6 Zero-build deploy (EPIC-6 epic-end) — from the POC's #1 friction.** PRINCIPLE: a customer
+  must NEVER clone the repo, build from source, edit files, or run diagnostics to get a working
+  tunnel. The POC required building on BOTH server and VM. Minimum-customer-effort =
+  **published prebuilt images (ghcr.io)** + a **hosted compose file** + an **`install.sh` that asks
+  for exactly two things** (public address; SMTP-or-skip) and writes a clean `.env`. This pulls most
+  of **SB.1/SB.2 forward into reality** — those stories **shrink accordingly** (SB.1 Helm / SB.2
+  hardening keep only what S6.6 doesn't cover). Depends on the CI publishing images (extend S6.0b) +
+  S6.5a for the client side.
+- **S-POC-fixes (hotfix story — STARTED NEXT, before resuming S6.3 remaining).** POC friction items
+  2 + 3: **(2) ceremony one-time-secret COPY BUTTON didn't work** (manual copy needed) — a real UX
+  failure; **(3) verify-email link emitted `localhost` on a REMOTE deploy** (`APP_BASE_URL` left at
+  its default) — bootstrap must FAIL LOUD or warn when `APP_BASE_URL` is the localhost default while
+  the process is clearly non-local. Both are immediate customer-facing bugs.
 
 ## EPIC 7 — Zero Trust Access *(enterprise)*
 
