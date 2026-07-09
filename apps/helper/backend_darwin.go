@@ -25,10 +25,11 @@ const pfAnchor = "tunnex"
 // Up arms the pf backstop BEFORE moving routes; Down restores routing then flushes
 // pf LAST.
 type darwinBackend struct {
-	mu     sync.Mutex
-	dev    *device.Device
-	tunDev tun.Device
-	ifname string
+	mu      sync.Mutex
+	dev     *device.Device
+	tunDev  tun.Device
+	ifname  string
+	pfToken string // reference-counted `pfctl -E` token, released (not -d) on Down
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -39,8 +40,10 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	defer b.mu.Unlock()
 
 	// 1) ARM the kill-switch FIRST — before any route moves, so a failure below
-	//    leaves traffic BLOCKED, never leaked.
-	if err := armPF(cfg.Endpoint); err != nil {
+	//    leaves traffic BLOCKED, never leaked. The tunnel interface isn't known
+	//    yet, so this first ruleset blocks everything except the WG endpoint +
+	//    loopback + DHCP/NDP.
+	if err := b.armPF(cfg.Endpoint, ""); err != nil {
 		return fmt.Errorf("arm kill-switch: %w", err)
 	}
 
@@ -63,6 +66,13 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	if err := dev.Up(); err != nil {
 		_ = tdev.Close()
 		return fmt.Errorf("device up: %w", err)
+	}
+
+	// 2b) Reload the anchor now that the tunnel exists so traffic may leave on it
+	//     (still BEFORE routes — a failure here keeps everything blocked).
+	if err := b.armPF(cfg.Endpoint, name); err != nil {
+		dev.Close()
+		return fmt.Errorf("allow tunnel in kill-switch: %w", err)
 	}
 
 	// 3) ONLY NOW move routes onto the tunnel (address + allowed-IPs).
@@ -91,7 +101,7 @@ func (b *darwinBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
-	return flushPF()
+	return b.releasePF()
 }
 
 func (b *darwinBackend) FailClosed() error {
@@ -162,26 +172,78 @@ func b64ToHex(k string) (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// armPF loads the kill-switch anchor: block all outbound except to the WG endpoint
-// (so handshakes flow) + on the tunnel itself. Loaded via pfctl into a named
-// anchor and enabled; it persists in-kernel until flushPF.
-func armPF(endpoint string) error {
-	host := endpoint
-	if i := strings.LastIndex(endpoint, ":"); i > 0 {
-		host = endpoint[:i]
+// buildPFRules is the kill-switch ruleset loaded into the anchor. Requirements:
+//   - (2) loopback is EXEMPT (set skip on lo0) — also protects the app's own
+//     127.0.0.1 loopback callback flow.
+//   - (4) `block drop out all` covers BOTH inet and inet6 (unqualified = all AFs);
+//     NDP is explicitly passed for v6.
+//   - the WG endpoint passes (so handshakes/data reach the gateway); once the
+//     tunnel exists, its interface is skipped so user traffic may leave on it.
+//   - (3) DHCP/NDP pass — a DELIBERATE, threat-model-argued exception so long
+//     sessions don't lose their lease/neighbor state. Risk: these are local-link
+//     UDP/ICMPv6 protocols; the exposure is a local attacker on the same segment
+//     spoofing DHCP/RA, which is out of scope for a VPN egress kill-switch (and
+//     already a risk pre-VPN). Worth it to avoid the tunnel silently dying on a
+//     DHCP renew.
+func buildPFRules(endpoint, ifname string) string {
+	host, port := splitEndpoint(endpoint)
+	var b strings.Builder
+	b.WriteString("set skip on lo0\n")
+	if ifname != "" {
+		fmt.Fprintf(&b, "set skip on %s\n", ifname)
 	}
-	host = strings.Trim(host, "[]")
-	rules := fmt.Sprintf("block drop out all\npass out proto udp to %s\npass out on utun0\n", host)
-	// Load rules into the anchor from stdin, then ensure pf is enabled.
-	if err := runStdin(rules, "pfctl", "-a", pfAnchor, "-f", "-"); err != nil {
+	b.WriteString("block drop out all\n")
+	fmt.Fprintf(&b, "pass out proto udp to %s port %s\n", host, port)
+	b.WriteString("pass out proto udp from any port 68 to any port 67\n")   // DHCPv4
+	b.WriteString("pass out proto udp from any port 546 to any port 547\n") // DHCPv6
+	b.WriteString("pass out inet6 proto icmp6 all\n")                       // NDP
+	return b.String()
+}
+
+// armPF loads the ruleset into the anchor and enables pf with a REFERENCE-COUNTED
+// token (`pfctl -E`), captured once so Down can RELEASE it (`pfctl -X <token>`)
+// rather than force-disabling pf for the whole system.
+//
+// NOTE (lifecycle): a named anchor is only evaluated if the main ruleset
+// references it (`anchor "tunnex"` in pf.conf). The SMAppService/installer adds
+// that reference (removed on uninstall). The smoke asserts ENFORCEMENT (a blocked
+// ping), not rule presence — so a non-referenced anchor is caught.
+func (b *darwinBackend) armPF(endpoint, ifname string) error {
+	if err := runStdin(buildPFRules(endpoint, ifname), "pfctl", "-a", pfAnchor, "-f", "-"); err != nil {
 		return err
 	}
-	_ = run("pfctl", "-E") // enable pf if not already (ignore "already enabled")
+	if b.pfToken == "" {
+		out, _ := exec.Command("pfctl", "-E").CombinedOutput() // "Token : NNN" (stderr)
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, "Token") {
+				f := strings.Fields(line)
+				if len(f) > 0 {
+					b.pfToken = f[len(f)-1]
+				}
+			}
+		}
+	}
 	return nil
 }
 
-func flushPF() error {
-	return run("pfctl", "-a", pfAnchor, "-F", "all")
+// releasePF flushes our anchor rules and releases the pf enable reference.
+func (b *darwinBackend) releasePF() error {
+	err := run("pfctl", "-a", pfAnchor, "-F", "all")
+	if b.pfToken != "" {
+		_ = exec.Command("pfctl", "-X", b.pfToken).Run()
+		b.pfToken = ""
+	}
+	return err
+}
+
+// splitEndpoint splits host:port, unwrapping a bracketed IPv6 host.
+func splitEndpoint(endpoint string) (host, port string) {
+	if i := strings.LastIndex(endpoint, ":"); i > 0 {
+		host, port = endpoint[:i], endpoint[i+1:]
+	} else {
+		host = endpoint
+	}
+	return strings.Trim(host, "[]"), port
 }
 
 func ipOnly(cidr string) string {

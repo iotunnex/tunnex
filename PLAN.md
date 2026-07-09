@@ -635,7 +635,16 @@ permanently black-hole the internet — but the DEFAULT post-crash state is bloc
 - **macOS:** a `pf` (packet filter) anchor installed via `pfctl` at `Up` — rules that block all
   outbound except to the WG endpoint + via the utun. `pf` rules are kernel-resident and survive helper
   death; graceful `Down` flushes the anchor. (Route-only blackholing is fragile across utun teardown;
-  pf is the durable mechanism.)
+  pf is the durable mechanism.) RULESET REQUIREMENTS (folded, S6.3-17): (1) pf enabled via
+  reference-counted `pfctl -E`, token RELEASED with `pfctl -X` on Down (never a global `pfctl -d`) —
+  smoke asserts ENFORCEMENT (a blocked ping), not rule presence; (2) `set skip on lo0` (loopback
+  exempt — also protects the app's own 127.0.0.1 callback); (3) DHCP + NDP pass (UDP 67/68, DHCPv6
+  546/547, ICMPv6/NDP) — a DELIBERATE, threat-model-argued exception so a long session doesn't lose
+  its lease/neighbor state (exposure = a local-segment attacker spoofing DHCP/RA, out of scope for an
+  egress kill-switch and a pre-VPN risk anyway); (4) `block drop out all` covers inet AND inet6 (NDP
+  explicitly passed) — the smoke kill-switch pcap includes a v6 probe. The named anchor must be
+  REFERENCED from pf.conf to be evaluated — the SMAppService/installer adds `anchor "tunnex"` (removed
+  on uninstall); the enforcement-based smoke catches a non-referenced anchor.
 - **Windows:** WFP (Windows Filtering Platform) filters in a PERSISTENT sublayer at `Up` — the same
   mechanism the official WireGuard Windows client uses for its kill-switch ("block untunneled
   traffic"). WFP filters are kernel-resident and persist past process death; graceful `Down` removes
