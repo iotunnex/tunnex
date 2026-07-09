@@ -143,6 +143,11 @@ test-node: ## Run the node-agent data-plane tests (reconcile idempotence, no DB)
 	docker run --rm -v "$(PWD)/apps/node":/src -w /src -e GOFLAGS=-mod=readonly \
 	  $(GO_IMAGE) sh -c "apk add --no-cache git && go test ./..."
 
+.PHONY: test-helper
+test-helper: ## Vet + test the privilege-helper core (S6.3; stdlib-only, no DB)
+	docker run --rm -v "$(PWD)/apps/helper":/src -w /src -e GOFLAGS=-mod=readonly \
+	  $(GO_IMAGE) sh -c "go vet ./... && go test ./..."
+
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres

@@ -41,6 +41,9 @@ jobs:
       - name: Node agent — data-plane tests (reconcile idempotence)
         run: make test-node
 
+      - name: Privilege-helper core — vet + test (S6.3)
+        run: make test-helper
+
       - name: Web — typecheck + build
         run: |
           corepack enable
