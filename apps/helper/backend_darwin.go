@@ -39,12 +39,16 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// 1) ARM the kill-switch FIRST — before any route moves, so a failure below
-	//    leaves traffic BLOCKED, never leaked. The tunnel interface isn't known
-	//    yet, so this first ruleset blocks everything except the WG endpoint +
-	//    loopback + DHCP/NDP.
-	if err := b.armPF(cfg.Endpoint, ""); err != nil {
-		return fmt.Errorf("arm kill-switch: %w", err)
+	// 1) ARM the kill-switch FIRST — but ONLY for a FULL tunnel. A split tunnel
+	//    routes just its allowed-IPs and leaves the rest of the user's traffic on
+	//    the normal cleartext default route BY DESIGN, so there is nothing to
+	//    kill-switch (block-all would wrongly kill the user's internet). Full
+	//    tunnel: block everything except the WG endpoint + loopback + DHCP/NDP,
+	//    before any route moves.
+	if cfg.FullTunnel {
+		if err := b.armPF(cfg.Endpoint, ""); err != nil {
+			return fmt.Errorf("arm kill-switch: %w", err)
+		}
 	}
 
 	// 2) Create the utun + wireguard-go device, configure it.
@@ -68,11 +72,13 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		return fmt.Errorf("device up: %w", err)
 	}
 
-	// 2b) Reload the anchor now that the tunnel exists so traffic may leave on it
-	//     (still BEFORE routes — a failure here keeps everything blocked).
-	if err := b.armPF(cfg.Endpoint, name); err != nil {
-		dev.Close()
-		return fmt.Errorf("allow tunnel in kill-switch: %w", err)
+	// 2b) Full tunnel: reload the anchor now that the tunnel exists so traffic may
+	//     leave on it (still BEFORE routes — a failure here keeps everything blocked).
+	if cfg.FullTunnel {
+		if err := b.armPF(cfg.Endpoint, name); err != nil {
+			dev.Close()
+			return fmt.Errorf("allow tunnel in kill-switch: %w", err)
+		}
 	}
 
 	// 3) ONLY NOW move routes onto the tunnel (address + allowed-IPs).
