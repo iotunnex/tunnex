@@ -730,10 +730,15 @@ Exact commit/tag pins recorded in `apps/helper/go.mod` when the backends land; t
   removal); the version-handshake upgrade errors (unit-tested); the backend `CleanStale`/`Down` removal
   ops the uninstall relies on. DEFERS TO S6.5a (needs the packaged `.app`/installer): SMAppService
   `register`/`unregister` and the Windows-service install exercised END-TO-END, and the packaged
-  install→run→UNINSTALL residue smoke on each real platform. **The dev-install scripts remain the
-  unpackaged-dev mechanism ALONGSIDE SMAppService** — SMAppService can't fully replace them until S6.5a
-  packaging exists; S6.5a is where SMAppService gets its live end-to-end exercise (same Windows/mac
-  session that runs the deferred kill-switch pcaps).
+  install→run→UNINSTALL residue smoke. **The dev-install scripts remain the unpackaged-dev mechanism
+  ALONGSIDE the production lifecycle.** **TRIGGER SPLIT (resolved at S6.3 sign-off — a proof's trigger
+  must be a milestone that can actually RUN it):** the **Windows** service install→run→uninstall residue
+  smoke runs on the UNSIGNED S6.5a package (a user-mode service installs without code-signing; SmartScreen
+  click-through) → **trigger = S6.5a**. **macOS SMAppService** register/unregister REQUIRES a code-signed
+  app bundle (SMAppService validates the signature) → it cannot run on the unsigned S6.5a package →
+  **trigger = S6.5b** (signing). The uninstall REMOVAL/residue LOGIC (pf.conf restore, WFP
+  DisableFirewall-by-GUID, socket/token removal, zero routes) is already dev-proven and rides S6.5a on
+  both platforms; only the macOS SMAppService *registration* e2e waits for S6.5b.
 Deps landed so far: `golang.org/x/sys` (caller-path), `github.com/Microsoft/go-winio` v0.6.2 (MIT —
 Windows SDDL pipe).
 

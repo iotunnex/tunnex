@@ -15,3 +15,20 @@ Copyright is currently held under the pre-entity project name "Tunnex". Upon
 formation of the operating legal entity, copyright will be assigned to that
 entity by written assignment from the individual authors and these notices
 reaffirmed.
+
+---
+
+Third-party components (desktop client privilege helper, S6.3):
+
+  wireguard-go            golang.zx2c4.com/wireguard
+  WireGuard-Windows       golang.zx2c4.com/wireguard/windows
+                          (tunnel/firewall — WFP kill-switch; tunnel/winipcfg — routes)
+  Wintun                  golang.zx2c4.com/wintun
+
+Copyright (C) Jason A. Donenfeld <Jason@zx2c4.com> / WireGuard LLC. Licensed
+under the MIT License (compatible with this product's Apache-2.0 open edition).
+
+Wintun additionally carries its own redistribution terms: the bundled wintun.dll
+is redistributed with the desktop client under those terms (prebuilt, unmodified);
+see the Wintun license (https://git.zx2c4.com/wintun/about/) for the redistribution
+conditions the packaged artifacts (S6.5a) inherit.

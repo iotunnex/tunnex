@@ -63,6 +63,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # Native Windows build+vet+test of the privilege helper — the WFP backend pulls
+      # wireguard/windows + wintun, which the linux cross-compile can't fully exercise.
+      # RED BLOCKS MERGE. (macOS helper build stays on the cross-compile gate.)
+      - uses: actions/setup-go@v5
+        if: matrix.os == 'windows-latest'
+        with:
+          go-version: '1.25'
+          cache-dependency-path: apps/helper/go.sum
+      - name: Helper — native Windows build + vet + test (WFP deps)
+        if: matrix.os == 'windows-latest'
+        working-directory: apps/helper
+        env:
+          GOFLAGS: -mod=readonly
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
       - uses: actions/setup-node@v4
         with:
           node-version: 20
