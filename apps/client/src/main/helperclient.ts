@@ -36,6 +36,9 @@ export interface TunnelStatus {
   last_handshake_sec?: number;
   rx_bytes?: number;
   tx_bytes?: number;
+  // The device's assigned tunnel address (from the loaded config, e.g.
+  // "10.99.0.2/32"). MAIN attaches it — it's config, not a helper runtime stat.
+  address?: string;
 }
 
 export interface HelperResponse {

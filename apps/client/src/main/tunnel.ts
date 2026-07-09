@@ -28,6 +28,16 @@ const HEARTBEAT_MS = 10_000;
 export class TunnelController {
   private readonly conn: HelperConnection;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  // The active device's tunnel address, cached from the config on `up`. The helper
+  // reports runtime stats (rx/tx/handshake) but not the address (it's config), so
+  // main attaches it to every status it forwards. Cleared on down / fail-closed.
+  private address?: string;
+
+  // withAddress decorates a helper status with the cached tunnel address so the UI
+  // can show "Your IP" without the address ever needing to round-trip the helper.
+  private withAddress(s: TunnelStatus): TunnelStatus {
+    return this.address ? { ...s, address: this.address } : s;
+  }
 
   constructor(
     socketPath: string,
@@ -39,14 +49,16 @@ export class TunnelController {
 
   async up(): Promise<TunnelStatus> {
     const config = await this.resolveConfig();
+    this.address = config.address;
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up", config });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel up failed"));
     this.startHeartbeat();
-    return r.status ?? { state: "up" };
+    return this.withAddress(r.status ?? { state: "up" });
   }
 
   async down(): Promise<void> {
     this.stopHeartbeat();
+    this.address = undefined;
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_down" });
     // Graceful: the down told the helper to restore routing, so closing the owner
     // connection now is expected (won't trip fail-closed).
@@ -57,7 +69,7 @@ export class TunnelController {
   async status(): Promise<TunnelStatus> {
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel status failed"));
-    return r.status ?? { state: "down" };
+    return this.withAddress(r.status ?? { state: "down" });
   }
 
   private startHeartbeat(): void {
@@ -66,7 +78,7 @@ export class TunnelController {
       this.conn
         .request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" })
         .then((r) => {
-          if (r.ok && r.status) this.onStatus?.(r.status);
+          if (r.ok && r.status) this.onStatus?.(this.withAddress(r.status));
         })
         .catch(() => {
           /* a dropped connection surfaces via onLost */
@@ -86,6 +98,7 @@ export class TunnelController {
   // stop heartbeating and surface a fail-closed status to the UI.
   private onLost(): void {
     this.stopHeartbeat();
+    this.address = undefined;
     this.onStatus?.({ state: "failed" });
   }
 }

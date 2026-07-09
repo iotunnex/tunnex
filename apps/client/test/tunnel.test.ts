@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-import { encodeFrame, FrameDecoder, HelperConnection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION } from "../src/main/helperclient";
-import { helperSocketPath } from "../src/main/tunnel";
+import { encodeFrame, FrameDecoder, HelperConnection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, type TunnelConfig } from "../src/main/helperclient";
+import { helperSocketPath, TunnelController } from "../src/main/tunnel";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -49,6 +49,31 @@ test("oversize frames are rejected before allocation, both directions", () => {
 test("helperSocketPath is platform-specific", () => {
   assert.equal(helperSocketPath("win32"), "\\\\.\\pipe\\tunnex-helper");
   assert.equal(helperSocketPath("darwin"), "/var/run/tunnex/helper.sock");
+});
+
+// The helper reports runtime stats but NOT the tunnel address (it's config), so
+// MAIN attaches it — this is what lets the UI show "Your IP". Guard the plumb.
+test("TunnelController attaches the config's tunnel address to forwarded status", async () => {
+  const sockPath = path.join(os.tmpdir(), `tnx-addr-test-${process.pid}.sock`);
+  try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
+  const server = net.createServer((sock) => {
+    const dec = new FrameDecoder();
+    sock.on("data", (chunk: Buffer) => {
+      // The helper never sends `address`; main must add it.
+      for (const _ of dec.push(chunk)) sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: true, status: { state: "up", last_handshake_sec: 3 } }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(sockPath, r));
+  try {
+    const cfg = { address: "10.99.0.2/32" } as unknown as TunnelConfig;
+    const ctrl = new TunnelController(sockPath, async () => cfg);
+    const up = await ctrl.up();
+    assert.equal(up.address, "10.99.0.2/32", "main must attach the config's tunnel address");
+    await ctrl.down();
+  } finally {
+    server.close();
+    try { fs.unlinkSync(sockPath); } catch { /* gone */ }
+  }
 });
 
 test("HelperConnection: persistent round-trip, intentional close is quiet, unexpected close fires onLost", async () => {

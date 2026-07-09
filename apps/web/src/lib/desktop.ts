@@ -36,6 +36,7 @@ export interface TunnelStatus {
   last_handshake_sec?: number;
   rx_bytes?: number;
   tx_bytes?: number;
+  address?: string; // the device's assigned tunnel address, e.g. "10.99.0.2/32"
 }
 
 declare global {

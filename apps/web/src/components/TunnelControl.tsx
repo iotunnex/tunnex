@@ -47,7 +47,15 @@ export function TunnelControl() {
     }
   }
 
-  const up = status.state === "up";
+  // Connection status is derived from HANDSHAKE LIVENESS, not just the interface
+  // being up. WireGuard rekeys roughly every 2 min, so a handshake older than this
+  // (or none at all) means the link is dead — revoked, gateway unreachable — even
+  // though the interface is still up. Showing green "Connected" in that state (while
+  // the subtext says "handshaking…") is the defect this fixes.
+  const HANDSHAKE_STALE_SEC = 180;
+  const isUp = status.state === "up";
+  const live = isUp && status.last_handshake_sec != null && status.last_handshake_sec <= HANDSHAKE_STALE_SEC;
+  const connecting = isUp && !live; // interface up but no fresh handshake — not "Connected"
   const failed = status.state === "failed";
 
   return (
@@ -55,11 +63,11 @@ export function TunnelControl() {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-medium text-white">VPN tunnel</div>
-          <div className={`mt-1 text-xs ${up ? "text-emerald-400" : failed ? "text-red-400" : "text-slate-400"}`}>
-            {up ? "Connected" : failed ? "Disconnected — tunnel failed (kill-switch active)" : "Not connected"}
+          <div className={`mt-1 text-xs ${live ? "text-emerald-400" : connecting ? "text-amber-400" : failed ? "text-red-400" : "text-slate-400"}`}>
+            {live ? "Connected" : connecting ? "Connecting…" : failed ? "Disconnected — tunnel failed (kill-switch active)" : "Not connected"}
           </div>
         </div>
-        {up ? (
+        {isUp ? (
           <Button variant="ghost" onClick={disconnect} disabled={busy}>
             {busy ? "…" : "Disconnect"}
           </Button>
@@ -70,11 +78,18 @@ export function TunnelControl() {
         )}
       </div>
 
-      {up && (
-        <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
-          <span>↓ {fmtBytes(status.rx_bytes)}</span>
-          <span>↑ {fmtBytes(status.tx_bytes)}</span>
-          <span>{status.last_handshake_sec ? `handshake ${status.last_handshake_sec}s` : "handshaking…"}</span>
+      {isUp && (
+        <div className="mt-3 space-y-1 text-xs text-slate-400">
+          {status.address && (
+            <div>
+              Your IP: <span className="text-slate-300">{status.address.split("/")[0]}</span>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-2">
+            <span>↓ {fmtBytes(status.rx_bytes)}</span>
+            <span>↑ {fmtBytes(status.tx_bytes)}</span>
+            <span>{status.last_handshake_sec != null ? `handshake ${status.last_handshake_sec}s` : "handshaking…"}</span>
+          </div>
         </div>
       )}
       <ErrorText>{error}</ErrorText>
