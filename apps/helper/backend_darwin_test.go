@@ -4,6 +4,7 @@ package helper
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +27,46 @@ func TestRouteTargets(t *testing.T) {
 		if got := routeTargets(c.in); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("routeTargets(%q) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+// TestBuildPFRulesUsesPassQuickNotSetSkip guards the kill-switch data-plane fix:
+// `set skip on <iface>` is SILENTLY IGNORED inside a pf anchor (set options are
+// main-ruleset-only), which left every packet routed onto the tunnel falling through
+// `block drop out all` — the tunnel handshook but carried no data. The rules MUST use
+// `pass quick on <iface>` (honored in an anchor) so loopback + the tunnel interface
+// bypass the block. This pins that regression without a live pf.
+func TestBuildPFRulesUsesPassQuickNotSetSkip(t *testing.T) {
+	rules := buildPFRules("40.65.63.141:51820", "utun4")
+
+	// `set skip` must NEVER appear — pf drops it in an anchor, silently disarming the bypass.
+	if strings.Contains(rules, "set skip") {
+		t.Errorf("buildPFRules must not use `set skip` (ignored inside a pf anchor):\n%s", rules)
+	}
+	// Loopback + the tunnel interface must be passed quick ABOVE the block.
+	wants := []string{
+		"pass quick on lo0 all",
+		"pass quick on utun4 all",
+		"block drop out all",
+		"pass out proto udp to 40.65.63.141 port 51820", // WG endpoint (handshake + data)
+	}
+	for _, w := range wants {
+		if !strings.Contains(rules, w) {
+			t.Errorf("buildPFRules missing %q\n---\n%s", w, rules)
+		}
+	}
+	// The quick passes must come BEFORE `block drop out all` (quick = first-match-wins).
+	if i, j := strings.Index(rules, "pass quick on utun4"), strings.Index(rules, "block drop out all"); i < 0 || i > j {
+		t.Errorf("`pass quick on utun4` must precede `block drop out all`:\n%s", rules)
+	}
+
+	// Before the tunnel exists (ifname ""), only loopback is passed — no tunnel iface,
+	// so the initial arm blocks everything except the endpoint (fail-closed).
+	initial := buildPFRules("40.65.63.141:51820", "")
+	if strings.Contains(initial, "pass quick on utun") {
+		t.Errorf("no tunnel-iface pass should be emitted before the tunnel exists:\n%s", initial)
+	}
+	if !strings.Contains(initial, "pass quick on lo0 all") {
+		t.Errorf("loopback must always be passed:\n%s", initial)
 	}
 }

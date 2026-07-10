@@ -3,7 +3,9 @@
 package helper
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -24,6 +26,11 @@ const pfAnchor = "tunnex"
 // process (after a crash / kill -9 lost the in-memory copy) can release the exact
 // reference on startup instead of force-disabling pf for the whole system. Root-only.
 const pfTokenPath = "/var/run/tunnex/pf.token"
+
+// dnsBackupPath persists each network service's PRIOR DNS setting while a full tunnel
+// has hijacked the system resolver, so Down (or a crashed-then-restarted helper's
+// CleanStale) can restore it. Same crash-safe pattern as pfTokenPath. Root-only.
+const dnsBackupPath = "/var/run/tunnex/dns.json"
 
 // darwinBackend implements Backend on macOS with wireguard-go (userspace WG over a
 // utun) + a pf kill-switch + ifconfig/route for addressing. Ordering invariant:
@@ -151,6 +158,17 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		}
 	}
 
+	// 4) FULL TUNNEL: move the system resolver onto the tunnel. Full-tunnel captures
+	//    ALL traffic (0.0.0.0/0) AND the kill-switch blocks every non-tunnel egress —
+	//    so the machine's existing DHCP/LAN resolver is now UNREACHABLE and name
+	//    resolution would die (ping-by-IP works, everything by-name fails). Point every
+	//    network service at the config's DNS (reachable through the tunnel), saving the
+	//    prior setting so Down/CleanStale restores it. Split tunnel keeps its own DNS
+	//    (cfg.DNS is empty there — config.go dnsFor), so this is scoped to full-tunnel.
+	if cfg.FullTunnel && len(cfg.DNS) > 0 {
+		applyDNS(cfg.DNS)
+	}
+
 	b.dev, b.tunDev, b.ifname = dev, tdev, name
 	return nil
 }
@@ -169,6 +187,8 @@ func (b *darwinBackend) Down() error {
 		_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
 		b.endpointHost, b.endpointFam = "", ""
 	}
+	// Restore the system resolver a full tunnel hijacked (no-op if none was saved).
+	restoreDNS()
 	return b.releasePF()
 }
 
@@ -218,12 +238,12 @@ func (b *darwinBackend) Stats() (TunnelStatus, error) {
 // --- helpers (shared uapi/MTU/stats/routeTargets live in wgcommon.go) ---
 
 // buildPFRules is the kill-switch ruleset loaded into the anchor. Requirements:
-//   - (2) loopback is EXEMPT (set skip on lo0) — also protects the app's own
-//     127.0.0.1 loopback callback flow.
+//   - (2) loopback is EXEMPT (pass quick on lo0) — also protects the app's own
+//     127.0.0.1 loopback callback flow. (pass quick, NOT set skip — see below.)
 //   - (4) `block drop out all` covers BOTH inet and inet6 (unqualified = all AFs);
 //     NDP is explicitly passed for v6.
 //   - the WG endpoint passes (so handshakes/data reach the gateway); once the
-//     tunnel exists, its interface is skipped so user traffic may leave on it.
+//     tunnel exists, its interface is passed quick so user traffic may leave on it.
 //   - (3) DHCP/NDP pass — a DELIBERATE, threat-model-argued exception so long
 //     sessions don't lose their lease/neighbor state. Risk: these are local-link
 //     UDP/ICMPv6 protocols; the exposure is a local attacker on the same segment
@@ -233,9 +253,18 @@ func (b *darwinBackend) Stats() (TunnelStatus, error) {
 func buildPFRules(endpoint, ifname string) string {
 	host, port := splitEndpoint(endpoint)
 	var b strings.Builder
-	b.WriteString("set skip on lo0\n")
+	// `set skip on <iface>` is REJECTED inside a pf anchor — `set` options are
+	// main-ruleset-only, so pfctl silently DROPS these lines when we load them via
+	// `pfctl -a tunnex -f -`. The interface is then NOT skipped: every packet the
+	// kernel routes onto utun (i.e. ALL of the user's tunnelled traffic) falls through
+	// to `block drop out all` and is dropped BEFORE wireguard-go can read+encrypt it —
+	// the tunnel handshakes (that's the outer socket on the physical iface hitting the
+	// endpoint pass) but carries no data. Use `pass quick` instead: quick short-circuits
+	// ABOVE the block, giving loopback + the tunnel interface the exact bypass that
+	// `set skip` was meant to, but in a form an anchor honors.
+	b.WriteString("pass quick on lo0 all\n")
 	if ifname != "" {
-		fmt.Fprintf(&b, "set skip on %s\n", ifname)
+		fmt.Fprintf(&b, "pass quick on %s all\n", ifname)
 	}
 	b.WriteString("block drop out all\n")
 	fmt.Fprintf(&b, "pass out proto udp to %s port %s\n", host, port)
@@ -305,9 +334,91 @@ func (b *darwinBackend) CleanStale() error {
 		}
 		_ = os.Remove(pfTokenPath)
 	}
+	// Restore the system resolver if a crashed full tunnel left it pointed at the
+	// tunnel DNS (same un-strand intent as flushing the pf block above).
+	restoreDNS()
 	return nil
 }
 
+
+// networkServices returns the ENABLED macOS network services (Wi-Fi, Ethernet, …).
+// networksetup's first output line is a header; disabled services are '*'-prefixed.
+func networkServices() []string {
+	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	if err != nil {
+		return nil
+	}
+	var svcs []string
+	for i, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if i == 0 || line == "" || strings.HasPrefix(line, "*") {
+			continue // header, blank, or disabled service
+		}
+		svcs = append(svcs, line)
+	}
+	return svcs
+}
+
+// currentDNS returns the EXPLICIT DNS servers set on a service, or nil when it is on
+// automatic/DHCP ("There aren't any DNS Servers set on <svc>."). nil is meaningful:
+// restoreDNS maps it back to `-setdnsservers <svc> empty` (return to automatic).
+func currentDNS(svc string) []string {
+	out, err := exec.Command("networksetup", "-getdnsservers", svc).Output()
+	if err != nil {
+		return nil
+	}
+	var servers []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ip := strings.TrimSpace(line); net.ParseIP(ip) != nil {
+			servers = append(servers, ip)
+		}
+	}
+	return servers
+}
+
+// applyDNS points EVERY enabled network service at the tunnel resolver, first saving
+// each service's prior setting to dnsBackupPath so Down/CleanStale can restore it. The
+// backup is written BEFORE any mutation, so a crash mid-apply is still recoverable.
+// macOS resolves via the primary service's configured DNS regardless of the utun
+// default route, so the resolver must be set on the real services, not the utun.
+func applyDNS(servers []string) {
+	svcs := networkServices()
+	if len(svcs) == 0 {
+		return
+	}
+	backup := make(map[string][]string, len(svcs))
+	for _, svc := range svcs {
+		backup[svc] = currentDNS(svc) // nil = was automatic/DHCP
+	}
+	if data, err := json.Marshal(backup); err == nil {
+		_ = os.MkdirAll("/var/run/tunnex", 0o755)
+		_ = os.WriteFile(dnsBackupPath, data, 0o600)
+	}
+	for _, svc := range svcs {
+		_ = run("networksetup", append([]string{"-setdnsservers", svc}, servers...)...)
+	}
+}
+
+// restoreDNS puts every service's DNS back to what applyDNS saved (automatic when the
+// prior list was empty), then removes the backup. Idempotent: no backup = no-op.
+func restoreDNS() {
+	data, err := os.ReadFile(dnsBackupPath)
+	if err != nil {
+		return
+	}
+	var backup map[string][]string
+	if json.Unmarshal(data, &backup) == nil {
+		for svc, servers := range backup {
+			args := []string{"-setdnsservers", svc}
+			if len(servers) == 0 {
+				args = append(args, "empty") // back to automatic/DHCP
+			} else {
+				args = append(args, servers...)
+			}
+			_ = run("networksetup", args...)
+		}
+	}
+	_ = os.Remove(dnsBackupPath)
+}
 
 func ipOnly(cidr string) string {
 	if i := strings.Index(cidr, "/"); i >= 0 {
