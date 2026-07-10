@@ -326,7 +326,7 @@ func TestSupervisorFailClosed(t *testing.T) {
 	if err := s.Up(goodConfig()); err == nil {
 		t.Fatal("second up must be already_up")
 	}
-	s.OnPeerLost()
+	s.OnPeerLost(true)
 	if s.State() != StateFailed || fb.failClosed != 1 {
 		t.Fatalf("peer loss must fail closed: state=%s failClosed=%d", s.State(), fb.failClosed)
 	}
@@ -394,13 +394,14 @@ func TestSupervisorDeadMan(t *testing.T) {
 	if s.CheckDeadMan() {
 		t.Fatal("dead-man must NOT fire while heartbeats are fresh")
 	}
-	// Owner crashes: OnPeerLost fails closed, block STAYS armed (death = enforcement).
-	s.OnPeerLost()
+	// Owner socket CLOSES (crash/kill): OnPeerLost(true) fails closed, block STAYS armed
+	// (death = enforcement).
+	s.OnPeerLost(true)
 	if s.State() != StateFailed || !fb.armed {
 		t.Fatalf("peer loss must fail closed with the block armed: state=%s armed=%v", s.State(), fb.armed)
 	}
 	// Past the window with no heartbeat → auto-release (un-strand).
-	clock = base.Add(260 * time.Second) // 200s since the last beat (> 90)
+	clock = base.Add(260 * time.Second) // well past any window since the last beat
 	if !s.CheckDeadMan() {
 		t.Fatal("dead-man must fire once the owner is gone past the window")
 	}
@@ -424,7 +425,7 @@ func TestDeadManOrphanVsWedge(t *testing.T) {
 	if err := s.Up(fullConfig()); err != nil {
 		t.Fatalf("up: %v", err)
 	}
-	s.OnPeerLost() // owner definitively gone → orphaned; beat resets from here
+	s.OnPeerLost(true) // socket CLOSED → definitively gone → orphaned; beat resets here
 	clock = base.Add(6 * time.Second)
 	if s.CheckDeadMan() {
 		t.Fatal("orphan must NOT release within the short window (6s < 12s)")
@@ -437,7 +438,10 @@ func TestDeadManOrphanVsWedge(t *testing.T) {
 		t.Fatalf("orphan release must drop the block: armed=%v state=%s", fb.armed, s.State())
 	}
 
-	// --- wedge (socket still open, no beats): waits the FULL window ---
+	// --- wedge (READ-TIMEOUT, socket still open): OnPeerLost(false) → FULL window ---
+	// A wedged-but-alive app trips the helper's 30s read deadline, so OnPeerLost DOES
+	// fire — but with definitive=false (the socket did not close). It must NOT be treated
+	// as orphaned, or a merely-slow app would be released to cleartext early (review #1).
 	fb = &fakeBackend{}
 	s = NewSupervisor(fb)
 	clock = base
@@ -446,10 +450,13 @@ func TestDeadManOrphanVsWedge(t *testing.T) {
 	if err := s.Up(fullConfig()); err != nil {
 		t.Fatalf("up: %v", err)
 	}
-	// No OnPeerLost — the app is just slow. Past the short window it must STILL hold.
+	s.OnPeerLost(false) // read-deadline timeout, NOT a close → not orphaned
+	if s.orphaned {
+		t.Fatal("a read-timeout (definitive=false) must NOT set orphaned")
+	}
 	clock = base.Add(30 * time.Second) // > orphan (12), < full (90)
 	if s.CheckDeadMan() {
-		t.Fatal("a still-open connection must NOT release on the short orphan window")
+		t.Fatal("a wedged-but-connected owner must NOT release on the short orphan window")
 	}
 	clock = base.Add(100 * time.Second) // > full (90)
 	if !s.CheckDeadMan() {
@@ -463,7 +470,7 @@ func TestDeadManOrphanVsWedge(t *testing.T) {
 	s.now = func() time.Time { return clock }
 	s.deadMan, s.deadManOrphan = 90*time.Second, 12*time.Second
 	_ = s.Up(fullConfig())
-	s.OnPeerLost() // orphaned = true
+	s.OnPeerLost(true) // orphaned = true
 	if err := s.Up(fullConfig()); err != nil {
 		t.Fatalf("re-up from failed: %v", err)
 	}

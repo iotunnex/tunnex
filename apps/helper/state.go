@@ -132,13 +132,18 @@ func NewSupervisor(be Backend) *Supervisor {
 
 // TickInterval is how often the dead-man loop should poll: a fraction of the SHORTER of
 // the two windows, so the orphan window is honored with fine granularity rather than
-// only firing on the next coarse tick. (min(deadMan, deadManOrphan)/3.)
+// only firing on the next coarse tick. (min(deadMan, deadManOrphan)/3.) FLOORED at 100ms
+// so a pathologically small env override (e.g. TUNNEX_DEADMAN=2ns) can't yield 0 — a
+// zero/negative interval panics time.NewTicker and would crash the helper at startup.
 func (s *Supervisor) TickInterval() time.Duration {
 	w := s.deadMan
 	if s.deadManOrphan < w {
 		w = s.deadManOrphan
 	}
-	return w / 3
+	if t := w / 3; t > 100*time.Millisecond {
+		return t
+	}
+	return 100 * time.Millisecond
 }
 
 // SelfHeal releases any kill-switch state stranded by a prior crashed process. The
@@ -235,21 +240,33 @@ func (s *Supervisor) Down() error {
 	return nil
 }
 
-// OnPeerLost is invoked when the IPC channel to the app drops while a tunnel is
-// up (the app crashed or was killed). It FAILS CLOSED — the user's protected
-// traffic must not silently revert to cleartext just because the UI went away.
-// A no-op when already down/failed.
-func (s *Supervisor) OnPeerLost() {
+// OnPeerLost is invoked when the IPC channel to the owning app drops — either the tunnel
+// is up (crash/kill) or it already failed closed on a partial bring-up. It FAILS CLOSED:
+// the user's protected traffic must not silently revert to cleartext just because the UI
+// went away. A no-op when already cleanly down.
+//
+// `definitive` distinguishes HOW the connection ended (ipc.go classifies it):
+//   - true  — the owner socket was CLOSED (EOF/reset): the app process is GONE. Select the
+//     SHORT orphan window so a force-quit/crash un-strands the host in ~5s.
+//   - false — the owner connection merely hit its READ-DEADLINE timeout: the app may be
+//     wedged but is STILL CONNECTED. Keep the CONSERVATIVE full window — we must NOT
+//     release a possibly-still-wanted tunnel to cleartext early (fail-open). This is the
+//     case the 30s liveness timeout produces for a slow-but-alive app.
+func (s *Supervisor) OnPeerLost(definitive bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state != StateUp {
+	if s.state != StateUp && s.state != StateFailed {
 		return
 	}
-	_ = s.be.FailClosed()
-	s.state = StateFailed
-	s.orphaned = true // owner socket definitively closed → CheckDeadMan uses the SHORT window
-	s.beat()          // count the (short) window from the loss, not the last heartbeat
-	s.lastCfg = nil   // drop the private-key reference, like the graceful Down path
+	if s.state == StateUp {
+		_ = s.be.FailClosed()
+		s.state = StateFailed
+	}
+	if definitive {
+		s.orphaned = true // owner process gone → CheckDeadMan uses the SHORT window
+	}
+	s.beat()        // count the window from the loss, not the last heartbeat
+	s.lastCfg = nil // drop the private-key reference, like the graceful Down path
 }
 
 // Status returns live stats. In Failed state it reports "failed" without touching

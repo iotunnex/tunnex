@@ -130,3 +130,85 @@ func TestIPCPeerLossFailsClosed(t *testing.T) {
 		t.Fatalf("want failed after peer loss, got %s", sup.State())
 	}
 }
+
+// orphanedForTest reads the orphan flag under the lock (race-safe). The lock also
+// serializes against an in-flight OnPeerLost, so a caller that first waits on the fc
+// signal is guaranteed to observe the flag OnPeerLost set after FailClosed.
+func (s *Supervisor) orphanedForTest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.orphaned
+}
+
+// TestIPCClosedSocketIsDefinitive: a CLOSED owner socket (app process gone) must mark
+// the supervisor orphaned → the SHORT dead-man window (review #1's definitive path).
+func TestIPCClosedSocketIsDefinitive(t *testing.T) {
+	be := &fakeBackend{fc: make(chan struct{}, 1)}
+	srv, sup := newServer(t, be, trustedResolver)
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	if resp, err := Do(c1, req(VerbTunnelUp, fullConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: %v %+v", err, resp)
+	}
+	c1.Close() // socket closes → EOF on the server read → definitive
+	select {
+	case <-be.fc:
+	case <-time.After(2 * time.Second):
+		t.Fatal("close did not fail closed within 2s")
+	}
+	if !sup.orphanedForTest() {
+		t.Fatal("a closed owner socket must mark orphaned (short window)")
+	}
+}
+
+// TestIPCReadTimeoutIsNotDefinitive: a wedged-but-connected owner trips the read
+// deadline WITHOUT closing the socket — it must fail closed but NOT be orphaned, so it
+// keeps the conservative full window (the fail-open the review flagged as #1).
+func TestIPCReadTimeoutIsNotDefinitive(t *testing.T) {
+	be := &fakeBackend{fc: make(chan struct{}, 1)}
+	srv, sup := newServer(t, be, trustedResolver)
+	srv.readTimeout = 50 * time.Millisecond // wedge trips fast for the test
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	go srv.handle(c2)
+	if resp, err := Do(c1, req(VerbTunnelUp, fullConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: %v %+v", err, resp)
+	}
+	// Do NOT send anything more + do NOT close: the server's next read times out.
+	select {
+	case <-be.fc:
+	case <-time.After(2 * time.Second):
+		t.Fatal("read timeout did not fail closed within 2s")
+	}
+	if sup.State() != StateFailed {
+		t.Fatalf("timeout must fail closed, got %s", sup.State())
+	}
+	if sup.orphanedForTest() {
+		t.Fatal("a read-timeout (socket still open) must NOT be orphaned — keep the full window")
+	}
+}
+
+// TestIPCFailedUpOwnsConnection: a bring-up that FAILS still arms the kill-switch, so the
+// attempting connection must be OWNED — a later force-quit (socket close) then gets the
+// short orphan window instead of blackholing for the full window (review #3).
+func TestIPCFailedUpOwnsConnection(t *testing.T) {
+	be := &fakeBackend{upErr: &ProtocolError{Code: "x", Msg: "endpoint down"}}
+	srv, sup := newServer(t, be, trustedResolver)
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	// Up FAILS → StateFailed, kill-switch armed, but the response is not OK.
+	if resp, err := Do(c1, req(VerbTunnelUp, fullConfig())); err != nil || resp.OK {
+		t.Fatalf("expected a failed up: err=%v resp=%+v", err, resp)
+	}
+	if sup.State() != StateFailed {
+		t.Fatalf("failed up must be StateFailed, got %s", sup.State())
+	}
+	c1.Close() // force-quit after a failed connect → definitive close
+	deadline := time.Now().Add(2 * time.Second)
+	for !sup.orphanedForTest() {
+		if time.Now().After(deadline) {
+			t.Fatal("closing a failed-up owner must mark orphaned (short window), not wait the full one")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
