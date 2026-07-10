@@ -42,27 +42,46 @@ only; mirrors the two macOS fixes.
 
 1. **DNS apply (the confirmed gap).** `Up()` never applies `cfg.DNS`, so the resolver stays on the
    WFP-blocked LAN DNS → names don't resolve (ping-by-IP works, everything else fails — the exact
-   macOS symptom). Fix, using the OFFICIAL mechanisms (cleaner than macOS):
-   - `winipcfg.LUID(luid).SetDNS(family, cfg.DNS)` on the wintun adapter — adapter-scoped, so it
-     **auto-vanishes when the adapter is torn down**. No `/var/run` backup, no crash-restore, no
-     strand (unlike macOS `networksetup`).
-   - Change `firewall.EnableFirewall(luid, false, nil)` → `EnableFirewall(luid, true, dnsAddrs)`.
-     The 2nd param is `restrictDNS`; `false` lets Windows leak DNS out other interfaces (smart
-     multi-homed resolution) even with the block armed. `true` + the tunnel resolver forces DNS
-     through the tunnel only — closes the leak the same way the official WG Windows client does.
-   - IPv6: pass v6 DNS iff a v6 default is in AllowedIPs; otherwise v6 stays dropped (matches the
-     macOS "no NAT66 → drop, don't leak" posture).
-2. **Kill-switch over-block (verify, likely already correct).** Unlike macOS's hand-rolled pf
-   anchor, Windows uses the official `firewall.EnableFirewall`, which permits the tunnel adapter
-   LUID — so the macOS `set skip` class of bug should NOT exist. Do NOT assume: PROVE it with the
-   live egress test (the macOS bug was invisible in code review too).
-3. **Proof (live, real Windows box, against the S3.7 gateway):** full tunnel → `Resolve-DnsName`
-   works, `curl ifconfig.me` = the GATEWAY's public IP (egress via gateway NAT), a browser loads.
-   Deliberate-red carries over (flush the gateway masquerade → egress dies). Record like
-   `docs/S3.7-egress-proof.md`.
+   macOS symptom). API-VERIFIED fix (wireguard/windows@v1.0.1):
+   - **`winipcfg.LUID(luid).SetDNS(family, servers, nil)`** on the wintun adapter (signature:
+     `SetDNS(family AddressFamily, servers []netip.Addr, domains []string)`) — adapter-scoped, so
+     it **auto-vanishes when the adapter is torn down**. No backup, no crash-restore, no strand
+     (unlike macOS `networksetup`). `domains=nil` (full tunnel = all DNS to the resolver, no split
+     search list).
+   - **`firewall.EnableFirewall(luid, false, dnsAddrs)`** — CORRECTION to the earlier draft: the
+     signature is `EnableFirewall(luid uint64, doNotRestrict bool, restrictToDNSServers []netip.Addr)`.
+     The 2nd param is `doNotRestrict` and MUST stay **`false`** (true would disarm the whole
+     kill-switch!). The current call passes `restrictToDNSServers = nil`, so `blockDNS` is SKIPPED
+     (blocker.go:122) → DNS leaks out other NICs even with the block armed. Passing the tunnel
+     resolver as the 3rd arg runs `blockDNS(dnsAddrs)` → DNS is forced through the tunnel only.
+   - IPv6: include a v6 DNS server + v6 SetDNS ONLY if `::/0` is in AllowedIPs; otherwise no v6 DNS
+     (v6 egress stays dropped — matches macOS "no NAT66 → drop, don't leak").
+2. **Kill-switch over-block: CONFIRMED FINE (no fix needed).** `EnableFirewall`'s blocking path
+   (blocker.go:120-165) runs `permitTunInterface(luid)` before `blockAll`, so tunnel traffic is
+   permitted — the macOS `set skip` class of bug does NOT exist here. Still egress-prove it live
+   (the macOS bug was invisible in code review too).
+3. **Proof (live, real Windows box, against the S3.7 gateway):** full tunnel → `Resolve-DnsName
+   example.com` works, `curl ifconfig.me` = the GATEWAY's public IP (egress via gateway NAT), a
+   browser loads. **DNS-leak check:** a query aimed at the LAN resolver (not the tunnel one) is
+   BLOCKED (proves `blockDNS`). Deliberate-red carries over (flush the gateway masquerade → egress
+   dies). Record like `docs/S3.7-egress-proof.md`.
 
-Story A alone makes Windows full-tunnel WORK, but it does NOT make it SAFE — the block still
-evaporates on process death (Story B). So the guard does not lift on A alone.
+**Testing with the guard UP (decision):** the S6.9 guard refuses Windows full-tunnel at both the
+helper and the server, so Story A can't be exercised without a bypass. Add TWO **default-OFF, loudly-
+named** dev bypasses: helper `TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL=1` (skips the backend_windows.go
+guard) and API `TUNNEX_ALLOW_WINDOWS_FULLTUNNEL=1` (skips the devices.Create win32 refusal). With
+both set on the test box, the normal app flow brings up a real Windows full tunnel to prove
+egress+DNS; with them UNSET (production default) users stay guarded. Story A thus MERGES BEHIND THE
+GUARD — the DNS code is present but unreachable by users until the guard lifts. The bypass flags +
+both guards are all removed together when Story B's `kill -9` pcap passes.
+
+**Coupling with Story B (CONFIRMED — createWfpSession uses `cFWPM_SESSION_FLAG_DYNAMIC`, blocker.go:34):**
+Story A rides the UPSTREAM `firewall.EnableFirewall` (dynamic session), so its block — including the
+new `blockDNS` restrict — still evaporates on process death. Story B REPLACES the upstream arming
+with a persistent fixed-GUID session and will RE-HOME this DNS-restrict into that implementation. So
+A proves traffic correctness (does DNS/egress even work?) on the dynamic session; B makes it
+crash-safe and carries the DNS-restrict forward. A alone makes full tunnel WORK, not SAFE — the guard
+does NOT lift on A.
 
 ---
 
