@@ -60,6 +60,7 @@ win:
   # Unsigned: no certificate. SmartScreen will warn until S6.5b (documented in install.md).
 
 nsis:
+  artifactName: ${productName}-Setup-${version}.${ext}   # no spaces (Tunnex-Setup-0.1.0.exe)
   oneClick: false
   # perMachine so the installer elevates (UAC) — needed to register the SCM service +
   # wintun at install time.
