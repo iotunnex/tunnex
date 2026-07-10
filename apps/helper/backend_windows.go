@@ -47,6 +47,15 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// DEFENSE-IN-DEPTH (S6.9): full tunnel is NOT yet safe on Windows (no adapter DNS +
+	// WFP restrictDNS, and the WFP block does not survive process death — see
+	// docs/windows-fulltunnel-decisions.md). The Supervisor already refuses it up front;
+	// this backstops a direct backend call so nothing is EVER armed for a Windows full
+	// tunnel. Remove BOTH guards together when Story A + Story B land and the pcap passes.
+	if cfg.FullTunnel {
+		return &ProtocolError{Code: "full_tunnel_unsupported", Msg: "full tunnel is not available on Windows yet"}
+	}
+
 	// Resolve a hostname endpoint to ONE IP so the WFP pass, the endpoint route, and
 	// wireguard-go all pin the same address (review #10).
 	ep, err := resolveEndpoint(cfg.Endpoint)
