@@ -148,6 +148,21 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		if node.Endpoint == "" || node.WgPublicKey == "" {
 			return apierr.Conflict("node_not_ready", "the node has not reported its endpoint/key yet; ensure the agent is enrolled and TUNNEX_NODE_ENDPOINT is set")
 		}
+		// S3.7: a full-tunnel device routes ALL traffic to the gateway, so the gateway
+		// MUST be able to source-NAT it to the internet. Refuse rather than mint a
+		// config that silently blackholes everything. The agent probes + reports this
+		// capability every reconcile; split-tunnel is always allowed.
+		if in.FullTunnel {
+			var caps struct {
+				EgressNAT bool `json:"egress_nat"`
+			}
+			if len(node.Capabilities) > 0 {
+				_ = json.Unmarshal(node.Capabilities, &caps)
+			}
+			if !caps.EgressNAT {
+				return apierr.Conflict("gateway_no_egress", "this gateway can't route full-tunnel internet traffic yet; use split tunnel")
+			}
+		}
 		// Per-user cap (0 = unlimited, per the org setting).
 		org, e := q.GetOrganizationByID(ctx, in.OrgID)
 		if e != nil {

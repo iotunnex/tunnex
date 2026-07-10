@@ -118,7 +118,7 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 }
 
 const getOrgNode = `-- name: GetOrgNode :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
 WHERE id = $1 AND org_id = $2 AND status = 'active'
 `
 
@@ -145,6 +145,7 @@ func (q *Queries) GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, e
 		&i.UpdatedAt,
 		&i.WgPublicKey,
 		&i.Endpoint,
+		&i.Capabilities,
 	)
 	return i, err
 }

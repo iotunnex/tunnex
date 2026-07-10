@@ -64,6 +64,7 @@ WHERE id = $1;
 UPDATE nodes
 SET wg_public_key = @wg_public_key,
     endpoint = COALESCE(NULLIF(@endpoint::text, ''), nodes.endpoint),
+    capabilities = @capabilities::jsonb,
     last_seen_at = now()
 WHERE id = @id AND status = 'active';
 

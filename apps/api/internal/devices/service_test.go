@@ -480,3 +480,28 @@ func TestCreatePushesGateway(t *testing.T) {
 		t.Fatal("gateway was not pushed on device create")
 	}
 }
+
+// S3.7: a full-tunnel device is REFUSED against a gateway that can't source-NAT egress
+// (gateway_no_egress), and ALLOWED once the gateway reports egress_nat=true. Split-tunnel
+// is always allowed regardless.
+func TestFullTunnelRequiresGatewayEgress(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	// Default node capabilities are '{}' → egress_nat false → full-tunnel refused.
+	_, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "ft-deny", FullTunnel: true})
+	if code(err) != "gateway_no_egress" {
+		t.Fatalf("full-tunnel on no-egress gateway: want gateway_no_egress, got %v", err)
+	}
+	// Split-tunnel is always allowed.
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "split-ok", FullTunnel: false}); err != nil {
+		t.Fatalf("split-tunnel should be allowed: %v", err)
+	}
+	// Once the gateway reports egress capability, full-tunnel is allowed.
+	if _, err := tx.Exec(ctx, `UPDATE nodes SET capabilities = '{"egress_nat":true}'::jsonb WHERE id = $1`, node); err != nil {
+		t.Fatalf("set capability: %v", err)
+	}
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "ft-ok", FullTunnel: true}); err != nil {
+		t.Fatalf("full-tunnel on egress-capable gateway should be allowed: %v", err)
+	}
+}
