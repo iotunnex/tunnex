@@ -309,7 +309,7 @@ func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []Peer
 // the endpoint (if present) is a clean host:port — a malformed value would poison
 // the .conf of every peer on this node. A zero-row update (e.g. the node was
 // revoked mid-report) is an error, not a silent no-op.
-func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, endpoint string) error {
+func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, endpoint string, egressNAT bool) error {
 	if !wgkey.Valid(publicKey) {
 		return apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
 	}
@@ -321,7 +321,15 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	if endpoint != "" && !validEndpoint(endpoint) {
 		return apierr.BadRequest("invalid_endpoint", "endpoint must be a host:port with no whitespace")
 	}
-	n, err := s.q.SetNodeWGInfo(ctx, sqlc.SetNodeWGInfoParams{ID: node.ID, WgPublicKey: publicKey, Endpoint: endpoint})
+	// Gateway capabilities the agent probes + re-reports every reconcile (S3.7). The
+	// column is a forward-compat JSONB map; we build it server-side from the typed
+	// report so a compromised agent can't inject arbitrary JSON. egress_nat gates
+	// full-tunnel device creation (see devices.Create → gateway_no_egress).
+	caps, err := json.Marshal(map[string]bool{"egress_nat": egressNAT})
+	if err != nil {
+		return err
+	}
+	n, err := s.q.SetNodeWGInfo(ctx, sqlc.SetNodeWGInfoParams{ID: node.ID, WgPublicKey: publicKey, Endpoint: endpoint, Capabilities: caps})
 	if err != nil {
 		return err
 	}
@@ -329,6 +337,22 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		return apierr.Conflict("node_not_active", "node is no longer active; key not stored")
 	}
 	return nil
+}
+
+// NodeCapabilities is the typed view of a node's capabilities JSONB, read where the
+// control plane gates on a gateway's abilities (e.g. full-tunnel egress).
+type NodeCapabilities struct {
+	EgressNAT bool `json:"egress_nat"`
+}
+
+// Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all
+// false, the safe default: no capability claimed).
+func Capabilities(raw []byte) NodeCapabilities {
+	var c NodeCapabilities
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &c)
+	}
+	return c
 }
 
 // Revoke marks a node revoked (renewal will then be refused).

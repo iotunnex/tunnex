@@ -138,6 +138,7 @@ type Node struct {
 	UpdatedAt    time.Time          `json:"updated_at"`
 	WgPublicKey  string             `json:"wg_public_key"`
 	Endpoint     string             `json:"endpoint"`
+	Capabilities []byte             `json:"capabilities"`
 }
 
 type NodeJoinToken struct {
