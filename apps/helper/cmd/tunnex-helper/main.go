@@ -65,6 +65,12 @@ func serveHelper(stop <-chan struct{}) error {
 	if err := sup.SelfHeal(); err != nil {
 		log.Printf("tunnex-helper: startup self-heal: %v", err)
 	}
+	// Self-uninstall watchdog (macOS packaged install): if the owning /Applications
+	// app is trashed, the helper releases its kill-switch + removes itself, so
+	// drag-to-Trash is fully clean without a script. No-op on the dev/multi-dir install
+	// and off macOS.
+	startUninstallWatchdog(installDir, sup)
+
 	// Dead-man loop: bounds the fail-closed model. If the owning app stops
 	// heartbeating past DeadManDefault (crashed/wedged), auto-release the block so an
 	// unrecovered crash can't strand the host indefinitely.

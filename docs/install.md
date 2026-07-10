@@ -60,14 +60,10 @@ through Tunnex. Use the **tray/menu-bar icon** to connect/disconnect without the
 
 ## 5. Uninstall (clean removal)
 
-- **macOS:** quit Tunnex, drag **Tunnex.app** to the Trash, then remove the helper:
-  ```
-  sudo scripts/macos-uninstall.sh     # from the repo, or the steps it runs:
-  # sudo launchctl bootout system /Library/LaunchDaemons/io.tunnex.helper.plist
-  # sudo rm -f /Library/LaunchDaemons/io.tunnex.helper.plist
-  # sudo rm -rf /usr/local/tunnex /var/run/tunnex
-  # sudo cp /etc/pf.conf.tunnex-bak /etc/pf.conf   # restore pf (if present)
-  ```
+- **macOS:** quit Tunnex and drag **Tunnex.app** to the Trash — that's it. The helper
+  notices its app is gone and **removes itself within ~90 seconds** (releases the
+  kill-switch, restores `pf.conf`, deletes its files, unloads the daemon). No script.
+  - Immediate removal (optional): `sudo bash scripts/macos-uninstall.sh` (from the repo).
 - **Windows:** Settings → Apps → **Tunnex** → Uninstall. The uninstaller stops and removes
   the helper service.
 
