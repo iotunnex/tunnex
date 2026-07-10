@@ -7,6 +7,10 @@
 
 !macro customInstall
   DetailPrint "Registering the Tunnex helper service..."
+  ; Remove any prior instance first (a reinstall, or a leftover from manual testing) so
+  ; `sc create` can't fail with "service already exists".
+  nsExec::ExecToLog 'sc stop tunnex-helper'
+  nsExec::ExecToLog 'sc delete tunnex-helper'
   ; The Go helper speaks the SCM control protocol (svc.Run), so it runs as a real service.
   nsExec::ExecToLog 'sc create tunnex-helper binPath= "$INSTDIR\resources\helper\tunnex-helper.exe" start= auto DisplayName= "Tunnex Helper"'
   ; Per-service environment (the SCM passes it to the service at start): trust the installed

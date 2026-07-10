@@ -138,7 +138,16 @@ func (s *Server) handle(conn net.Conn) {
 
 	exe, err := s.resolve(conn)
 	if err != nil {
-		_ = WriteMessage(conn, errorResponse("peer_unresolved", "could not identify the caller"))
+		// Surface the resolver's SPECIFIC code (peer_no_handle / peer_pid_unresolved /
+		// peer_open_failed / peer_path_unresolved) instead of masking every failure as a
+		// generic "peer_unresolved" — the specific code is what makes a caller-auth
+		// failure diagnosable in the field.
+		code, msg := "peer_unresolved", "could not identify the caller"
+		var pe *ProtocolError
+		if errors.As(err, &pe) {
+			code, msg = pe.Code, pe.Msg
+		}
+		_ = WriteMessage(conn, errorResponse(code, msg))
 		return
 	}
 	if err := s.verify.Verify(exe); err != nil {
