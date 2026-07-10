@@ -54,16 +54,22 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	if err := ensureIPForward(); err != nil {
 		return false, err
 	}
+	// The masquerade is scoped by SOURCE (the WG pool CIDR), read from the wg interface
+	// address — `iifname` is NOT reliable in the nat postrouting hook, whereas `ip saddr`
+	// is (and it restores the pool-source scoping the POC had). Until wg0 exists (the WG
+	// backend brings it up), there is no pool to scope, so egress isn't ready yet.
+	subnet := wgSubnet(ctx, m.wgIface)
 	// Apply the tables (add;flush;redefine = atomic replace, so this also self-heals a
-	// table a prior crashed agent left, and heals a manual flush). This installs the
-	// IPv4 NAT + forward and the IPv6 forward-DROP (v6 full-tunnel is blocked at the
-	// gateway — no NAT66 yet, so no v6 leak; the client kill-switch also blocks it).
-	if err := nftApply(ctx, m.ruleset()); err != nil {
+	// table a prior crashed agent left, and heals a manual flush). Forward rules use
+	// `iifname` (reliable in the forward hook). The masquerade is present only once the
+	// pool subnet is known. IPv6 gets a forward-DROP (no NAT66 → v6 egress dropped, not
+	// leaked; the client kill-switch also blocks it).
+	if err := nftApply(ctx, m.ruleset(subnet)); err != nil {
 		return false, err // no nftables / IPv4 NAT support on this host → not egress-capable
 	}
-	// Capability = an egress path exists. Without a default route, full-tunnel would
-	// blackhole even though nft applied, so report NOT capable.
-	if !hasDefaultRoute(ctx) {
+	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
+	// (default route) — otherwise full-tunnel would blackhole, so report NOT capable.
+	if subnet == "" || !hasDefaultRoute(ctx) {
 		return false, nil
 	}
 	return true, nil
@@ -81,22 +87,27 @@ func (m *Manager) Teardown(ctx context.Context) {
 // ruleset is the atomic desired state. IPv4 (table ip): masquerade tunnel→egress + a
 // forward chain with policy DROP so the ct-state return-path guard is real (review #0) —
 // only spoke-initiated (iifname wg0) new flows + established return traffic are accepted,
-// so the egress LAN can NEVER initiate into spokes. Egress is scoped `oifname != wg0`
-// (masquerade/forward tunnel traffic out ANY non-tunnel iface — handles multi-homed / ECMP
-// gateways, review #8; never masquerades spoke↔spoke, which stays wg0→wg0). Source scoping
-// to the pool is enforced UPSTREAM by WireGuard cryptokey routing (each spoke's AllowedIPs
-// pin its pool /32, so only pool-sourced packets ever reach wg0 — review #5). IPv6 (table
-// ip6): forward policy DROP with only spoke↔spoke allowed — v6 full-tunnel egress is
-// dropped (no NAT66 yet), never leaked (review #1/#7).
-func (m *Manager) ruleset() string {
+// so the egress LAN can NEVER initiate into spokes. The masquerade is scoped by SOURCE
+// (`ip saddr <pool>` — reliable in the postrouting hook, unlike `iifname`) out ANY
+// non-tunnel iface (`oifname != wg0` — multi-homed/ECMP-safe, review #8), so it never
+// masquerades spoke↔spoke (which stays wg0→wg0) or off-pool sources (review #5). IPv6
+// (table ip6): forward policy DROP with only spoke↔spoke allowed — v6 full-tunnel egress
+// is dropped (no NAT66 yet), never leaked (review #1/#7).
+func (m *Manager) ruleset(subnet string) string {
 	wg := m.wgIface
+	// Masquerade line present only when the pool subnet is known (wg0 up). Scoped by
+	// SOURCE (ip saddr) — reliable in postrouting, unlike iifname — out ANY non-tunnel
+	// iface (ECMP/multi-homed-safe). nft masks e.g. 10.99.0.1/24 to the /24 network.
+	masq := ""
+	if subnet != "" {
+		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
+	}
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
   chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
-    iifname "%[1]s" oifname != "%[1]s" masquerade
-  }
+%[2]s  }
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
@@ -113,7 +124,7 @@ table ip6 tunnex {
     iifname "%[1]s" oifname "%[1]s" accept
   }
 }
-`, wg)
+`, wg, masq)
 }
 
 // nftApply pipes a ruleset to `nft -f -` (atomic transaction).
@@ -124,6 +135,23 @@ func nftApply(ctx context.Context, ruleset string) error {
 		return fmt.Errorf("nft apply: %w: %s", err, bytes.TrimSpace(out))
 	}
 	return nil
+}
+
+// wgSubnet returns the WG interface's IPv4 address+prefix (e.g. "10.99.0.1/24"), used to
+// scope the masquerade by SOURCE (nft masks it to the network). Empty if the interface
+// isn't up yet (the WG backend brings it up shortly after enrollment).
+func wgSubnet(ctx context.Context, iface string) string {
+	out, err := exec.CommandContext(ctx, "ip", "-o", "-4", "addr", "show", "dev", iface).Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out)) // "N: wg0    inet 10.99.0.1/24 scope global wg0 ..."
+	for i, f := range fields {
+		if f == "inet" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
 }
 
 // hasDefaultRoute reports whether the host has an IPv4 default route (an egress path).
