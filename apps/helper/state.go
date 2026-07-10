@@ -11,7 +11,19 @@ import (
 // is alive but whose owning app has crashed/wedged (no heartbeats) can't strand the
 // host forever — after this window the block is released. The app heartbeats every
 // ~10s, so this is many missed beats. See PLAN "S6.3 KILL-SWITCH DESIGN" (bounded).
+// Used when the owner IPC connection is STILL OPEN but heartbeats stopped — we can't
+// tell a wedged app from a briefly-slow one, so stay conservative (S6.8).
 const DeadManDefault = 90 * time.Second
+
+// DeadManOrphan is the SHORTER window used when the owner IPC connection was
+// DEFINITIVELY LOST (the socket closed — OnPeerLost), as opposed to merely missing
+// heartbeats on a still-open connection. A closed socket means the app is truly gone
+// (crash / force-quit), so the conservative full window is unnecessary — but we keep a
+// brief grace so a transient owner hiccup doesn't drop the kill-switch (releasing it
+// too eagerly would fail OPEN — a moment of cleartext). This cuts the force-quit/crash
+// blackhole from ~90s to ~5s while STILL failing closed in the interim. A CLEAN quit
+// (Cmd-Q / tray Quit) uses graceful Down and recovers in ~0s, never reaching here (S6.8).
+const DeadManOrphan = 5 * time.Second
 
 // TunnelState is the helper's view of the data plane.
 type TunnelState string
@@ -75,10 +87,17 @@ type Supervisor struct {
 	state   TunnelState
 	lastCfg *TunnelConfig
 	// Dead-man: lastBeat is refreshed on Up + every heartbeat (Status while up); if
-	// the tunnel is up/failed and no beat lands within deadMan, CheckDeadMan releases
-	// the kill-switch. now/deadMan are injectable for tests.
-	lastBeat time.Time
-	deadMan  time.Duration
+	// the tunnel is up/failed and no beat lands within the effective window,
+	// CheckDeadMan releases the kill-switch. now/deadMan/deadManOrphan are injectable
+	// for tests. deadManOrphan is the SHORTER window applied once the owner connection
+	// was definitively lost (orphaned); deadMan is the conservative heartbeat-silence one.
+	lastBeat      time.Time
+	deadMan       time.Duration
+	deadManOrphan time.Duration
+	// orphaned is set when OnPeerLost fired (the owner IPC socket closed) — a definitive
+	// owner death, distinct from a still-open connection that merely stopped beating. It
+	// selects deadManOrphan in CheckDeadMan. Cleared by a fresh Up / Down / release.
+	orphaned bool
 	// now MUST stay time.Now (a MONOTONIC source). now()-lastBeat is then monotonic,
 	// and Go's monotonic clock PAUSES during system sleep/suspend on macOS + Windows +
 	// Linux — so a tunnel healthy at sleep is NOT spuriously released on resume before
@@ -96,7 +115,30 @@ func NewSupervisor(be Backend) *Supervisor {
 			dm = d
 		}
 	}
-	return &Supervisor{be: be, state: StateDown, deadMan: dm, now: time.Now}
+	orphan := DeadManOrphan
+	if v := os.Getenv("TUNNEX_DEADMAN_ORPHAN"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			orphan = d
+		}
+	}
+	// The orphan (definitive-death) window must never EXCEED the conservative one — if an
+	// operator shortened deadMan below it, clamp so the "we know the owner is gone" path is
+	// never SLOWER than the "maybe just slow" path.
+	if orphan > dm {
+		orphan = dm
+	}
+	return &Supervisor{be: be, state: StateDown, deadMan: dm, deadManOrphan: orphan, now: time.Now}
+}
+
+// TickInterval is how often the dead-man loop should poll: a fraction of the SHORTER of
+// the two windows, so the orphan window is honored with fine granularity rather than
+// only firing on the next coarse tick. (min(deadMan, deadManOrphan)/3.)
+func (s *Supervisor) TickInterval() time.Duration {
+	w := s.deadMan
+	if s.deadManOrphan < w {
+		w = s.deadManOrphan
+	}
+	return w / 3
 }
 
 // SelfHeal releases any kill-switch state stranded by a prior crashed process. The
@@ -120,7 +162,13 @@ func (s *Supervisor) CheckDeadMan() bool {
 	if s.state != StateUp && s.state != StateFailed {
 		return false
 	}
-	if s.now().Sub(s.lastBeat) <= s.deadMan {
+	// Definitive owner death (socket closed) releases on the SHORT window; a still-open
+	// connection that merely stopped beating gets the conservative full window.
+	window := s.deadMan
+	if s.orphaned {
+		window = s.deadManOrphan
+	}
+	if s.now().Sub(s.lastBeat) <= window {
 		return false
 	}
 	// Bounded fail-closed: past the window with no owner → release so an unrecovered
@@ -128,6 +176,7 @@ func (s *Supervisor) CheckDeadMan() bool {
 	_ = s.be.Down()
 	s.state = StateDown
 	s.lastCfg = nil
+	s.orphaned = false
 	return true
 }
 
@@ -157,12 +206,14 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 		// and the dead-man fires on its very next tick — releasing the kill-switch
 		// ~immediately (fail-OPEN) while the UI still shows "failed/blocked". The block
 		// must hold for the full dead-man window before auto-release.
+		s.orphaned = false // the owner is present (it made this Up call + got the error)
 		s.beat()
 		return &ProtocolError{Code: "tunnel_up_failed", Msg: err.Error()}
 	}
 	s.state = StateUp
 	s.lastCfg = cfg
-	s.beat() // start the dead-man clock
+	s.orphaned = false // fresh owner-driven bring-up clears any prior orphan flag
+	s.beat()           // start the dead-man clock
 	return nil
 }
 
@@ -177,6 +228,7 @@ func (s *Supervisor) Down() error {
 	err := s.be.Down()
 	s.state = StateDown
 	s.lastCfg = nil
+	s.orphaned = false
 	if err != nil {
 		return &ProtocolError{Code: "tunnel_down_failed", Msg: err.Error()}
 	}
@@ -195,8 +247,9 @@ func (s *Supervisor) OnPeerLost() {
 	}
 	_ = s.be.FailClosed()
 	s.state = StateFailed
-	s.beat()        // dead-man counts the full window from the loss, not the last heartbeat
-	s.lastCfg = nil // drop the private-key reference, like the graceful Down path
+	s.orphaned = true // owner socket definitively closed → CheckDeadMan uses the SHORT window
+	s.beat()          // count the (short) window from the loss, not the last heartbeat
+	s.lastCfg = nil   // drop the private-key reference, like the graceful Down path
 }
 
 // Status returns live stats. In Failed state it reports "failed" without touching

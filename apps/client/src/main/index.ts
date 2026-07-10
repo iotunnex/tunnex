@@ -8,6 +8,7 @@ import { Config } from "./config";
 import { buildCredentialStore, buildTunnelConfigStore } from "./store";
 import { attachBearer } from "./session";
 import { registerIpc } from "./ipc";
+import { gracefulQuit } from "./quitguard";
 import { TunnelTray } from "./tray";
 import { initUpdater } from "./updater";
 import { setupPageDataUrl } from "./setup";
@@ -151,6 +152,19 @@ app.whenReady().then(() => {
   tray.init();
   controls.subscribe((s) => tray.update(s));
   tray.update(controls.currentState());
+
+  // Graceful quit (S6.8): on a CLEAN exit, bring the tunnel Down BEFORE dying so the
+  // helper restores routing + releases the kill-switch instantly — instead of the app
+  // vanishing, the helper seeing OnPeerLost, and the internet staying blocked for the
+  // dead-man window. Bounded so a hung helper can't wedge quit; the re-entry guard lets
+  // the second (post-teardown) before-quit proceed to actually exit.
+  let quitting = false;
+  app.on("before-quit", (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    quitting = true;
+    void gracefulQuit(() => controls.disconnect(), () => app.quit());
+  });
 
   createWindow(config);
 
