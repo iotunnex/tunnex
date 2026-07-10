@@ -156,14 +156,25 @@ app.whenReady().then(() => {
   // Graceful quit (S6.8): on a CLEAN exit, bring the tunnel Down BEFORE dying so the
   // helper restores routing + releases the kill-switch instantly — instead of the app
   // vanishing, the helper seeing OnPeerLost, and the internet staying blocked for the
-  // dead-man window. Bounded so a hung helper can't wedge quit; the re-entry guard lets
-  // the second (post-teardown) before-quit proceed to actually exit.
+  // dead-man window. Bounded (gracefulQuit's timeout) so a hung helper can't wedge quit.
+  // teardownDone gates the REAL exit: EVERY before-quit is prevented until the graceful
+  // Down actually completes, so a second Cmd-Q mid-teardown can't bypass it and quit
+  // early (which would drop us onto the orphan window — review #2). `quitting` ensures the
+  // teardown runs once.
   let quitting = false;
+  let teardownDone = false;
   app.on("before-quit", (e) => {
-    if (quitting) return;
-    e.preventDefault();
+    if (teardownDone) return; // teardown finished → let the app actually exit
+    e.preventDefault(); // block EVERY quit attempt until Down completes
+    if (quitting) return; // teardown already in flight — just keep blocking
     quitting = true;
-    void gracefulQuit(() => controls.disconnect(), () => app.quit());
+    void gracefulQuit(
+      () => controls.disconnect(),
+      () => {
+        teardownDone = true;
+        app.quit();
+      },
+    );
   });
 
   createWindow(config);

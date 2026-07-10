@@ -21,6 +21,14 @@ export function gracefulQuit(
   const down = Promise.resolve()
     .then(disconnect)
     .catch(() => {});
-  const timer = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
-  return Promise.race([down, timer]).finally(() => quit());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  // clearTimeout in finally so a fast happy-path disconnect doesn't leave the timer
+  // pending for the full timeoutMs (a dangling handle that keeps the event loop alive).
+  return Promise.race([down, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    quit();
+  });
 }

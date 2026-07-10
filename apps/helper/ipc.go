@@ -132,8 +132,14 @@ func (s *Server) Serve(ln net.Listener) error {
 // closed IFF this connection OWNED a live tunnel.
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
+	// definitive records HOW this connection ended, for the owner-loss path: a CLOSED
+	// socket (EOF/reset — the app process is gone) is definitive → short orphan window;
+	// a READ-DEADLINE timeout (a wedged-but-still-connected app) is NOT → conservative
+	// full window (no early fail-open). Default true: anything but an explicit read
+	// timeout (close, write error, panic) is treated as a real loss of the owner.
+	definitive := true
 	// recover first (runs last, catching panics from the loop), then owner cleanup.
-	defer s.onClose(conn)
+	defer func() { s.onClose(conn, definitive) }()
 	defer func() { _ = recover() }()
 
 	exe, err := s.resolve(conn)
@@ -162,15 +168,27 @@ func (s *Server) handle(conn net.Conn) {
 		_ = conn.SetReadDeadline(time.Now().Add(s.readTimeout))
 		var req Request
 		if err := ReadMessage(conn, &req); err != nil {
+			// A read-deadline timeout means the app is silent but the socket is STILL
+			// OPEN (possibly just wedged) — NOT a definitive death. Any other read error
+			// (EOF/reset) is the owner socket closing = the process is gone.
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				definitive = false
+			}
 			return // deferred onClose fails closed if this conn owned the tunnel
 		}
 		resp := s.dispatch(&req)
-		// Ownership follows a successful up/down so only the owner's loss matters.
-		if resp.OK {
-			switch req.Verb {
-			case VerbTunnelUp:
+		switch req.Verb {
+		case VerbTunnelUp:
+			// Own the connection if the up left the kill-switch ARMED — StateUp on
+			// success, OR StateFailed on a partial bring-up that fail-closed. Either way
+			// THIS connection's loss must drive teardown (else a force-quit after a failed
+			// connect would wait the full window with no orphan signal — review #3).
+			if st := s.sup.State(); st == StateUp || st == StateFailed {
 				s.setOwner(conn)
-			case VerbTunnelDown:
+			}
+		case VerbTunnelDown:
+			if resp.OK {
 				s.clearOwner(conn)
 			}
 		}
@@ -198,7 +216,7 @@ func (s *Server) clearOwner(conn net.Conn) {
 // onClose fails the tunnel closed only if the closing connection is the owner —
 // app death (crash/hang/close-without-down) must not silently drop protection, but
 // a non-owner connection closing must not disturb a live tunnel.
-func (s *Server) onClose(conn net.Conn) {
+func (s *Server) onClose(conn net.Conn, definitive bool) {
 	s.mu.Lock()
 	isOwner := s.owner == conn
 	if isOwner {
@@ -206,7 +224,9 @@ func (s *Server) onClose(conn net.Conn) {
 	}
 	s.mu.Unlock()
 	if isOwner {
-		s.sup.OnPeerLost() // no-op unless a tunnel is actually up
+		// definitive=true (socket closed → process gone) selects the short orphan window;
+		// false (read-deadline timeout → wedged-but-connected) keeps the full window.
+		s.sup.OnPeerLost(definitive) // no-op unless a tunnel is up/failed
 	}
 }
 
