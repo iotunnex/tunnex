@@ -12,13 +12,13 @@ import (
 // and the egress side can't initiate into spokes), and DROP IPv6 full-tunnel egress (no
 // NAT66 → no leak). This pins the generated rules without a live kernel.
 func TestRuleset(t *testing.T) {
-	rs := New("wg0").ruleset()
+	rs := New("wg0").ruleset("10.99.0.1/24")
 
 	wants := []string{
 		"table ip tunnex",
 		"flush table ip tunnex", // atomic replace (idempotent reconcile / self-heal)
 		"type nat hook postrouting",
-		`iifname "wg0" oifname != "wg0" masquerade`, // egress NAT, any non-tunnel iface (ECMP-safe)
+		`ip saddr 10.99.0.1/24 oifname != "wg0" masquerade`, // SOURCE-scoped NAT, any non-tunnel iface
 		"type filter hook forward priority filter; policy drop;", // DROP policy → guards are real
 		"ct state established,related accept",
 		`iifname "wg0" oifname "wg0" accept`,     // device-to-device (spoke↔spoke)
@@ -30,10 +30,18 @@ func TestRuleset(t *testing.T) {
 			t.Errorf("ruleset missing %q\n---\n%s", w, rs)
 		}
 	}
+	// No masquerade uses iifname (unreliable in postrouting) — scope is ip saddr only.
+	if strings.Contains(rs, "iifname \"wg0\" oifname != \"wg0\" masquerade") {
+		t.Error("masquerade must be source-scoped (ip saddr), not iifname (unreliable in postrouting)")
+	}
 	// The v6 table must NOT masquerade (no NAT66 yet — v6 full-tunnel is dropped, not leaked).
 	v6 := rs[strings.Index(rs, "table ip6 tunnex"):]
 	if strings.Contains(v6, "masquerade") {
 		t.Errorf("ip6 table must not masquerade (would risk a v6 leak):\n%s", v6)
+	}
+	// Before wg0 is up (no subnet), the postrouting chain has NO masquerade rule.
+	if strings.Contains(New("wg0").ruleset(""), "masquerade") {
+		t.Error("no masquerade should be emitted when the pool subnet is unknown")
 	}
 }
 
