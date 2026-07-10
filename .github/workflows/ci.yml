@@ -94,6 +94,31 @@ jobs:
       - name: Client — build
         run: pnpm --filter @tunnex/client build
 
+      # Package the Windows installer NATIVELY on Windows. A macOS-cross-built NSIS
+      # uninstaller fails its integrity check on Windows ("Installer integrity check has
+      # failed") — a Windows-native build fixes it, so Add/Remove Programs → Uninstall
+      # works from the UI. Uploaded as a downloadable artifact (unsigned; S6.5b signs).
+      - name: Client — package Windows installer (native)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          GOFLAGS: -mod=readonly
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          pnpm --filter @tunnex/web build
+          bash apps/client/scripts/stage-helper.sh win
+          pnpm --filter @tunnex/client exec electron-builder --win --x64 --config electron-builder.yml
+          bash apps/client/scripts/sha256sums.sh
+      - name: Upload Windows installer
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnex-windows-installer
+          path: |
+            apps/client/release/*.exe
+            apps/client/release/SHA256SUMS
+          if-no-files-found: error
+
   # Full stack + Playwright. OPPORTUNISTIC: kept green when it can be, but if it
   # resists (resource limits / flakiness) demote to nightly (PLAN ledger) rather
   # than block merges on infra noise.
