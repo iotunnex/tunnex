@@ -153,6 +153,15 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		// config that silently blackholes everything. The agent probes + reports this
 		// capability every reconcile; split-tunnel is always allowed.
 		if in.FullTunnel {
+			// S6.9: full tunnel is not yet SAFE on Windows — traffic correctness (adapter
+			// DNS + WFP restrictDNS) and a fail-closed-on-death kill-switch (persistent WFP
+			// session) are not landed/proven, so a Windows client must not mint a
+			// full-tunnel device. Refused create-side for a clean client error; the desktop
+			// helper ALSO refuses (un-bypassable — Platform here is client-supplied). Lifts
+			// with the Windows work — see docs/windows-fulltunnel-decisions.md.
+			if in.Platform == "win32" {
+				return apierr.Conflict("full_tunnel_unsupported", "full tunnel isn't available on Windows yet; use split tunnel")
+			}
 			var caps struct {
 				EgressNAT bool `json:"egress_nat"`
 			}
