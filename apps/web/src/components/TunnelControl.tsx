@@ -93,6 +93,16 @@ export function TunnelControl() {
         )}
       </div>
 
+      {/* S6.10: loud, unmissable warning while a Windows full tunnel runs under the dev
+          bypass — the WFP kill-switch does NOT survive a crash yet (Story B pending), so a
+          hard kill can leak cleartext. Never shown in production (the guard refuses). */}
+      {status.unsafe_dev_mode && (
+        <div className="mt-3 rounded-md border-2 border-red-500/60 bg-red-600/20 px-3 py-2 text-xs font-semibold text-red-200">
+          ⚠ UNSAFE DEV MODE — the Windows full-tunnel kill-switch does <strong>not</strong> persist on crash. If this
+          process is hard-killed, your traffic can leak in cleartext. Development only — not a shipping configuration.
+        </div>
+      )}
+
       {revoked && (
         <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
           Your device was revoked or removed on the server. The local profile has been cleared — reconnecting will
