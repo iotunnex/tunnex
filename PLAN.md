@@ -58,7 +58,22 @@ expected to be rewritten before merge.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **EPIC 6 IN PROGRESS. Merged to main: S6.1/S6.2/S6.0b · reconcile-idempotence hotfix
+Current: **S6.5a PACKAGING MERGED (PR#6, 7228d29)** — unsigned macOS `.pkg` (install-time helper via
+postinstall, /Applications-pinned, self-uninstall watchdog) + Windows NSIS `.exe` (SCM service, sidtype
+unrestricted, Add/Remove uninstall); universal helper; Gatekeeper/SmartScreen install docs; SHA256SUMS;
+CI packages the win `.exe` NATIVELY (fixes the cross-built uninstaller). macOS proofs ALL PASS live
+(install/connect/ping, residue, tray); Windows install/connect/device-to-device PASS live. Full review
+folded (10 findings: 2 security-critical — pf-anchor double-escape defeating the kill-switch + apostrophe
+root-shell-injection in the in-app install; + teardown/lifecycle). **NEW GAP LEDGERED → S6.6:** the
+Windows WFP full-tunnel kill-switch is **NOT fail-closed on process death** (pcap leaked — wireguard-windows
+uses `FWPM_SESSION_FLAG_DYNAMIC`, filters auto-delete on process exit). macOS pf is persistent (proven);
+Windows is not. **NEXT: S6.7 (Windows kill-switch persistence)** (the merged S6.5a docs call this "S6.6" — RENAMED to
+S6.7 because S6.6 is already Zero-build deploy) — non-dynamic WFP session + fixed provider
+GUID + explicit enumerate-and-delete DisableFirewall + reboot/CleanStale recovery, decision-first + box-
+proven + reviewed; AND **S3.7 (gateway egress NAT) APPROVED, build after S6.5a merge** (nftables-via-Go-
+netlink, probe-every-reconcile, JSONB nodes.capabilities, gateway_no_egress refuse, IPv6 NAT66 best-effort,
+device-to-device productized, DoD deletes poc-gateway-nat.sh + compose ip_forward). Full-tunnel usability
+needs BOTH S3.7 (egress) + S6.6 (kill-switch). **Prior: EPIC 6: S6.1/S6.2/S6.0b · reconcile-idempotence hotfix
 (a8c5344) · S-POC-fixes (copy-button/APP_BASE_URL/invite-rework, PR#3) · **S6.3 TUNNEL CONTROL MERGED
 (PR#4, 1b36067)** — root privilege helper (typed protocol, canonicalized caller-auth, version-upgrade
 handshake) + macOS **pf** & Windows **WFP** kill-switch backends + **bounded fail-closed** (startup
@@ -952,6 +967,19 @@ present — detect and warn/refuse rather than silently downgrade.
   of **SB.1/SB.2 forward into reality** — those stories **shrink accordingly** (SB.1 Helm / SB.2
   hardening keep only what S6.6 doesn't cover). Depends on the CI publishing images (extend S6.0b) +
   S6.5a for the client side.
+- **S6.7 Windows kill-switch persistence (from S6.5a's live-found gap)** — the Windows WFP full-tunnel
+  kill-switch is NOT fail-closed on process death: wireguard-windows opens its WFP engine with
+  `FWPM_SESSION_FLAG_DYNAMIC`, so filters auto-delete when the process exits → a hard-killed helper
+  releases the block → traffic leaks (pcap-confirmed on the box 2026-07-10). macOS pf is persistent
+  (proven); Windows is not. **Fix:** a NON-DYNAMIC WFP session (persistent filters) + a FIXED provider
+  GUID + an explicit enumerate-and-delete `DisableFirewall` (the dynamic session did all cleanup for
+  free — remove it and nothing does), reusing wireguard's proven filter set. **Recovery safety net**
+  (bounds the blind-implementation risk): startup `CleanStale` removes any stuck block before re-arming,
+  the dead-man still bounds it, service auto-start makes reboot a recovery, + a documented `netsh wfp`
+  manual escape. **Decision-first, box-proven (pcap), reviewed** — a root kill-switch primitive, treated
+  like S6.3. **Trigger: before Windows full-tunnel is offered to real users** (pairs with S3.7, since
+  full-tunnel usability needs BOTH gateway egress + a real kill-switch). Until then the client gates/
+  caveats Windows full-tunnel.
 - **S-POC-fixes (hotfix story — STARTED NEXT, before resuming S6.3 remaining).** POC friction items
   2 + 3: **(2) ceremony one-time-secret COPY BUTTON didn't work** (manual copy needed) — a real UX
   failure; **(3) verify-email link emitted `localhost` on a REMOTE deploy** (`APP_BASE_URL` left at
