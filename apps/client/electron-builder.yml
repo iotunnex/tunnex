@@ -25,10 +25,13 @@ extraResources:
     to: helper
 
 mac:
-  # UNIVERSAL: one .dmg for Apple Silicon + Intel (helper is lipo'd universal in
-  # stage-helper.sh; Intel slice Rosetta-validated per the S6.5a spike).
+  # UNIVERSAL .pkg (Apple Silicon + Intel). A .pkg (not .dmg) so the privileged helper
+  # is installed at INSTALL time by the root postinstall — one admin prompt during
+  # install, no first-Connect prompt — and the app lands at the FIXED /Applications path
+  # (pkg-installed files aren't quarantined → no App Translocation → stable path-based
+  # caller-auth). helper is lipo'd universal in stage-helper.sh (Intel Rosetta-validated).
   target:
-    - target: dmg
+    - target: pkg
       arch: universal
   category: public.app-category.utilities
   # Unsigned: no Developer ID. null = ad-hoc sign only, never attempt a real identity.
@@ -37,6 +40,17 @@ mac:
   # x64 and arm64 sub-builds. Tell @electron/universal to take it as-is instead of
   # trying to lipo two per-arch copies (which don't exist — it's one fat binary).
   x64ArchFiles: "**/tunnex-helper"
+
+pkg:
+  # Relative to the build-resources dir (`build`) → build/pkg-scripts. (NOT project-root
+  # relative — `build/pkg-scripts` here would resolve to build/build/pkg-scripts and be
+  # silently dropped.) Contains the root postinstall that installs the LaunchDaemon.
+  scripts: pkg-scripts
+  installLocation: /Applications
+  # Pin the install location: a relocated app would break the postinstall's fixed
+  # TUNNEX_INSTALL_DIR caller-auth trust path.
+  isRelocatable: false
+  isVersionChecked: false
   # No hardened runtime / notarization (that needs a real signature → S6.5b).
 
 win:

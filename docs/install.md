@@ -19,28 +19,25 @@ Compare the output to the matching line in `SHA256SUMS`. If it doesn't match, do
 
 ---
 
-## 2. macOS — get past Gatekeeper
+## 2. macOS — install the `.pkg`
 
-Double-clicking an unsigned `.dmg`/app shows **"Tunnex can't be opened because Apple
-cannot check it for malicious software."** Pick whichever applies:
+Tunnex ships as a **`.pkg` installer**. It installs the app to **/Applications** and sets up
+the privileged helper during install (one admin prompt) — so you are NOT prompted on first
+Connect, and the app runs from a fixed path (no "caller not trusted" issues).
 
-- **Recommended (no warning at all): install via `curl`.** Files downloaded with `curl`
-  aren't quarantined, so they open normally:
-  ```
-  curl -L -o Tunnex.dmg "<release-download-url>"
-  open Tunnex.dmg          # drag Tunnex to Applications
-  ```
-- **macOS 14 (Sonoma) and earlier:** right-click (Control-click) the app in Applications
-  → **Open** → **Open** in the dialog. Approves this one app permanently.
-- **macOS 15 (Sequoia) and later:** the Control-click bypass was removed. Try to open it
-  once (it will be blocked), then go **System Settings → Privacy & Security**, scroll to
-  **"Tunnex was blocked…"**, click **Open Anyway**, and confirm.
-- **Escape hatch (terminal):** `xattr -dr com.apple.quarantine /Applications/Tunnex.app`
+1. Open **`Tunnex-<version>.pkg`**. Unsigned, so Gatekeeper warns:
+   - **macOS 14 and earlier:** right-click the `.pkg` → **Open** → **Open**.
+   - **macOS 15 (Sequoia)+:** try to open it once (blocked), then **System Settings →
+     Privacy & Security** → **"Tunnex… was blocked"** → **Open Anyway**.
+   - **No-warning path:** download the `.pkg` with `curl -LO "<url>"` (curl downloads aren't
+     quarantined), then `open Tunnex-<version>.pkg`.
+2. Step through the installer. It asks for your **password once** — that's Tunnex installing
+   its VPN helper (a small root component that manages the WireGuard tunnel + kill-switch).
+3. Launch **Tunnex** from **/Applications**.
 
-### First connect: the helper install prompt
-The first time you click **Connect**, macOS shows a **password prompt** — Tunnex is
-installing its VPN helper (a small root component that manages the WireGuard tunnel and
-the kill-switch). Enter your password once; it won't ask again on later connects.
+> Always install with the `.pkg` and run from /Applications. Running the `.app` from
+> Downloads/Desktop can trigger macOS App Translocation (a random read-only path), which
+> breaks the helper's caller check — the app will tell you to move it to Applications.
 
 ---
 

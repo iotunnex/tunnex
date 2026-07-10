@@ -94,12 +94,24 @@ function runPrivileged(script: string, prompt: string): Promise<void> {
   });
 }
 
+// isTranslocated reports whether macOS is running the app from a randomized read-only
+// App Translocation mount (unsigned + quarantined app launched from outside /Applications).
+// The exec path there is EPHEMERAL — different every launch — so installing a helper that
+// trusts it produces caller_untrusted on the next launch. The .pkg install path avoids
+// this entirely (installs to /Applications, unquarantined); this guard catches the
+// stray "ran the .app from Downloads" case with an actionable error instead.
+function isTranslocated(): boolean {
+  return process.platform === "darwin" && process.execPath.includes("/AppTranslocation/");
+}
+
 // ensureHelperInstalled installs the privileged helper if it isn't already. Idempotent
-// and a no-op off macOS. Throws helper_install_canceled / helper_install_failed /
-// helper_asset_missing so connect() can surface an actionable message.
+// and a no-op off macOS (and after the .pkg postinstall already installed it). Throws
+// app_translocated / helper_install_canceled / helper_install_failed / helper_asset_missing
+// so connect() can surface an actionable message.
 export async function ensureHelperInstalled(): Promise<void> {
   if (process.platform !== "darwin") return;
-  if (helperInstalled()) return;
+  if (helperInstalled()) return; // the .pkg postinstall (or a prior run) already did it
+  if (isTranslocated()) throw new Error("app_translocated"); // move to /Applications, reopen
   const staged = stagedHelperPath();
   if (!fs.existsSync(staged)) throw new Error("helper_asset_missing");
   await runPrivileged(installScript(staged, callerTrustDir()), "Tunnex needs to install its VPN helper.");

@@ -9,9 +9,9 @@ cd "$REL"
 
 # Only the user-facing installers (skip electron-builder's blockmap/yml internals).
 shopt -s nullglob
-FILES=(*.dmg *.exe)
+FILES=(*.pkg *.dmg *.exe)
 if [ ${#FILES[@]} -eq 0 ]; then
-  echo "no .dmg/.exe artifacts in $REL — did electron-builder run?" >&2
+  echo "no .pkg/.dmg/.exe artifacts in $REL — did electron-builder run?" >&2
   exit 1
 fi
 
