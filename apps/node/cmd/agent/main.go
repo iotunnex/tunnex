@@ -100,20 +100,29 @@ func main() {
 	// probed by the egress loop and reported to the control plane so it can refuse
 	// full-tunnel devices against a no-egress gateway (gateway_no_egress).
 	var egressNAT atomic.Bool
-	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
-	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, &keyReported, reportEvery, logger)
 
 	// Backend selection: "wgctrl" drives a real WireGuard device (Linux + NET_ADMIN,
 	// used in compose/prod); anything else uses the in-memory backend (dev/CI).
 	wgBackend := getenv("TUNNEX_WG_BACKEND", "mem")
 	wgIface := getenv("TUNNEX_WG_INTERFACE", "wg0")
 
-	// Egress NAT + forwarding (S3.7): reconcile the nftables tunnex table every interval
-	// (heals a flushed table) + probe the egress_nat capability. Torn down on shutdown
-	// (full-sweep). No-op / not-capable off Linux.
+	// Egress NAT + forwarding (S3.7): probe+arm ONCE synchronously so the very first
+	// capability report is accurate (not a spurious egress_nat=false for one interval —
+	// review #6), then reconcile on an interval (heals a flushed table). Torn down on
+	// shutdown (full-sweep). No-op / not-capable off Linux.
 	egressMgr := egress.New(wgIface)
 	defer egressMgr.Teardown(context.Background())
+	if ok, err := egressMgr.Reconcile(ctx); err != nil {
+		logger.Warn("egress_initial_degraded", slog.String("error", err.Error()))
+		egressNAT.Store(ok)
+	} else {
+		egressNAT.Store(ok)
+	}
 	go egressLoop(ctx, egressMgr, &egressNAT, getdur("TUNNEX_AGENT_EGRESS_INTERVAL", 30*time.Second), logger)
+
+	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
+	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, &keyReported, reportEvery, logger)
+
 	backend, err := reconcile.SelectBackend(wgBackend, wgIface, logger)
 	if err != nil {
 		logger.Error("agent_backend_failed", slog.String("backend", wgBackend), slog.String("error", err.Error()))
@@ -285,7 +294,8 @@ func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool
 			logger.Warn("egress_reconcile_degraded", slog.String("error", err.Error()))
 		}
 	}
-	apply() // initial probe/arm
+	// The initial probe/arm ran synchronously in main() before the first report — this
+	// loop only re-reconciles on the interval (heals a flushed table, tracks capability).
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
