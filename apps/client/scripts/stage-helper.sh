@@ -7,6 +7,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 HELPER_SRC="$(cd "$HERE/../../helper" && pwd)"
 OUT="$(cd "$HERE/.." && pwd)/build/helper"
+# Hermetic: wipe any prior target's artifacts so a win pack never bundles the mac
+# helper (or vice versa) — extraResources copies the whole build/helper dir.
+rm -rf "$OUT"
 mkdir -p "$OUT"
 export GOFLAGS=-mod=readonly
 
@@ -30,9 +33,13 @@ case "$TARGET" in
     echo ">> building windows amd64 helper (pure Go — WFP/wintun via x/sys/windows)"
     CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -C "$HELPER_SRC" -o "$OUT/tunnex-helper.exe" ./cmd/tunnex-helper
     echo ">> staged: $OUT/tunnex-helper.exe"
-    if [ ! -f "$OUT/wintun.dll" ]; then
-      echo "!! wintun.dll NOT present at $OUT/wintun.dll — place the amd64 wintun.dll there"
-      echo "!! (MIT, https://www.wintun.net/ — record it in NOTICE) before packing win."
+    # Bundle the vendored wintun.dll (committed, MIT — see vendor/wintun/README.md).
+    VENDORED="$(cd "$HERE/.." && pwd)/vendor/wintun/wintun.dll"
+    if [ -f "$VENDORED" ]; then
+      cp "$VENDORED" "$OUT/wintun.dll"
+      echo ">> staged: $OUT/wintun.dll"
+    else
+      echo "!! vendor/wintun/wintun.dll missing — Windows data plane needs it."
     fi
     ;;
   *)
