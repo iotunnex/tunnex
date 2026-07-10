@@ -23,8 +23,26 @@ func main() {
 		return
 	}
 
+	// Under the Windows SCM the process must speak the service control protocol
+	// (svc.Run), not just run as a console program — else `sc start` times out (1053).
+	// isWindowsService is false on macOS (LaunchDaemon runs the plain executable) and
+	// false when the helper is run from a console, so both fall through to serveHelper.
+	if isWindowsService() {
+		runService() // service_windows.go — wraps serveHelper in the SCM dispatcher
+		return
+	}
+	if err := serveHelper(nil); err != nil {
+		log.Fatalf("tunnex-helper: %v", err)
+	}
+}
+
+// serveHelper sets up the listener + supervisor + server and serves until stop is
+// closed (the Windows service Stop path) or the process is killed (stop == nil, the
+// LaunchDaemon / console path). Returns the first fatal error instead of exiting, so
+// the service dispatcher can report a clean Stopped state.
+func serveHelper(stop <-chan struct{}) error {
 	// The install dir(s) (for the interim executable-inside-install-dir caller check)
-	// and socket path are provided by the launchd plist / service config.
+	// and socket path are provided by the launchd plist / Windows service env.
 	// TUNNEX_INSTALL_DIR may list several dirs, os.PathListSeparator-joined (a dev
 	// install trusts BOTH /usr/local/tunnex and the Electron binary dir).
 	installDir := os.Getenv("TUNNEX_INSTALL_DIR")
@@ -35,14 +53,15 @@ func main() {
 
 	ln, err := helper.NewListener(socketPath)
 	if err != nil {
-		log.Fatalf("tunnex-helper: listen: %v", err)
+		return fmt.Errorf("listen: %w", err)
 	}
 
 	sup := helper.NewSupervisor(helper.NewBackend())
 
 	// Startup self-heal: release any kill-switch stranded by a PRIOR helper that died
-	// without a graceful Down (crash / kill -9). Runs BEFORE serving so a KeepAlive
-	// restart un-strands the host instead of re-serving with the stale block.
+	// without a graceful Down (crash / kill -9). Runs BEFORE serving so a restart
+	// (launchd KeepAlive / SCM restart) un-strands the host instead of re-serving with
+	// the stale block.
 	if err := sup.SelfHeal(); err != nil {
 		log.Printf("tunnex-helper: startup self-heal: %v", err)
 	}
@@ -59,12 +78,23 @@ func main() {
 		}
 	}()
 
+	// Service Stop → close the listener so Serve returns and the dispatcher reports
+	// Stopped. The kill-switch is NOT torn down here (death = enforcement); the next
+	// owner's graceful Down, a restart's self-heal, or the dead-man releases it.
+	if stop != nil {
+		go func() {
+			<-stop
+			_ = ln.Close()
+		}()
+	}
+
 	verify := helper.PathCheckVerifier{InstallDirs: filepath.SplitList(installDir)}
 	srv := helper.NewServer(sup, verify, helper.NewPeerResolver())
 
 	log.Printf("tunnex-helper %s: listening on %s (install dirs %q, caller-auth: %s)",
 		helper.HelperVersion, socketPath, installDir, helper.CallerAuthKind())
 	if err := srv.Serve(ln); err != nil {
-		log.Fatalf("tunnex-helper: serve: %v", err)
+		return fmt.Errorf("serve: %w", err)
 	}
+	return nil
 }
