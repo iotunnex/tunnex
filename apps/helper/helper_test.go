@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -497,6 +498,28 @@ func TestDeadManOrphanClampedToFull(t *testing.T) {
 	s := NewSupervisor(&fakeBackend{})
 	if s.deadManOrphan > s.deadMan {
 		t.Fatalf("orphan window %s must be clamped to <= deadMan %s", s.deadManOrphan, s.deadMan)
+	}
+}
+
+// TestUpUnsupportedFullTunnelIsCleanReject (S6.9b): a backend that refuses full-tunnel
+// with full_tunnel_unsupported (the Windows guard, which returns BEFORE arming anything)
+// must be a CLEAN rejection — the Supervisor returns the code as-is, stays StateDown, and
+// does NOT fail-closed. Otherwise the UI shows a phantom "failed / kill-switch active" for
+// a request that blocked nothing.
+func TestUpUnsupportedFullTunnelIsCleanReject(t *testing.T) {
+	fb := &fakeBackend{upErr: &ProtocolError{Code: "full_tunnel_unsupported", Msg: "not on windows"}}
+	s := NewSupervisor(fb)
+
+	err := s.Up(fullConfig())
+	var pe *ProtocolError
+	if !errors.As(err, &pe) || pe.Code != "full_tunnel_unsupported" {
+		t.Fatalf("want raw full_tunnel_unsupported (not wrapped as tunnel_up_failed), got %v", err)
+	}
+	if fb.failClosed != 0 {
+		t.Fatalf("a pre-arm refusal must NOT fail closed: failClosed=%d", fb.failClosed)
+	}
+	if s.State() != StateDown {
+		t.Fatalf("state must stay down after a clean refusal, got %s", s.State())
 	}
 }
 

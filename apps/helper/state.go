@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -203,6 +204,16 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 		return &ProtocolError{Code: "already_up", Msg: "a tunnel is already up"}
 	}
 	if err := s.be.Up(cfg); err != nil {
+		// A PRE-ARM rejection (the backend refused before touching anything — the S6.9
+		// Windows full-tunnel guard, code full_tunnel_unsupported) is a CLEAN rejection,
+		// NOT a fail-closed: nothing was armed, so leave the state Down and surface the
+		// code as-is. Otherwise the UI would falsely show "failed / kill-switch active"
+		// for a request that blocked nothing. Any OTHER error may have half-built the
+		// tunnel → fail closed.
+		var pe *ProtocolError
+		if errors.As(err, &pe) && pe.Code == "full_tunnel_unsupported" {
+			return err
+		}
 		// Partial bring-up may have created an interface/routes: fail closed so a
 		// half-configured tunnel can't leak.
 		_ = s.be.FailClosed()
