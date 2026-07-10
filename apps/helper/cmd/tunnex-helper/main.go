@@ -75,11 +75,14 @@ func serveHelper(stop <-chan struct{}) error {
 	// heartbeating past DeadManDefault (crashed/wedged), auto-release the block so an
 	// unrecovered crash can't strand the host indefinitely.
 	go func() {
-		t := time.NewTicker(helper.DeadManDefault / 3)
+		// Tick on the SHORTER window (min of the wedge/orphan windows) so the fast
+		// orphan release (definitive owner death) is honored with fine granularity, not
+		// deferred to a coarse 30s tick (S6.8).
+		t := time.NewTicker(sup.TickInterval())
 		defer t.Stop()
 		for range t.C {
 			if sup.CheckDeadMan() {
-				log.Printf("tunnex-helper: dead-man fired — kill-switch auto-released (owner gone > %s)", helper.DeadManDefault)
+				log.Printf("tunnex-helper: dead-man fired — kill-switch auto-released (owner gone)")
 			}
 		}
 	}()

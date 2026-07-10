@@ -409,6 +409,90 @@ func TestSupervisorDeadMan(t *testing.T) {
 	}
 }
 
+// TestDeadManOrphanVsWedge pins the S6.8 split: a DEFINITIVELY-lost owner (OnPeerLost →
+// socket closed) releases on the SHORT orphan window, while a still-open connection that
+// merely stopped heartbeating waits the full conservative window.
+func TestDeadManOrphanVsWedge(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+
+	// --- orphan (socket closed): releases fast, on the SHORT window ---
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan, s.deadManOrphan = 90*time.Second, 12*time.Second
+	if err := s.Up(fullConfig()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	s.OnPeerLost() // owner definitively gone → orphaned; beat resets from here
+	clock = base.Add(6 * time.Second)
+	if s.CheckDeadMan() {
+		t.Fatal("orphan must NOT release within the short window (6s < 12s)")
+	}
+	clock = base.Add(20 * time.Second) // > orphan (12) but < full (90)
+	if !s.CheckDeadMan() {
+		t.Fatal("orphan MUST release once past the short window, without waiting the full one")
+	}
+	if fb.armed || s.State() != StateDown {
+		t.Fatalf("orphan release must drop the block: armed=%v state=%s", fb.armed, s.State())
+	}
+
+	// --- wedge (socket still open, no beats): waits the FULL window ---
+	fb = &fakeBackend{}
+	s = NewSupervisor(fb)
+	clock = base
+	s.now = func() time.Time { return clock }
+	s.deadMan, s.deadManOrphan = 90*time.Second, 12*time.Second
+	if err := s.Up(fullConfig()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	// No OnPeerLost — the app is just slow. Past the short window it must STILL hold.
+	clock = base.Add(30 * time.Second) // > orphan (12), < full (90)
+	if s.CheckDeadMan() {
+		t.Fatal("a still-open connection must NOT release on the short orphan window")
+	}
+	clock = base.Add(100 * time.Second) // > full (90)
+	if !s.CheckDeadMan() {
+		t.Fatal("wedge must release once past the full window")
+	}
+
+	// --- a fresh Up after an orphan clears the flag (back to the full window) ---
+	fb = &fakeBackend{}
+	s = NewSupervisor(fb)
+	clock = base
+	s.now = func() time.Time { return clock }
+	s.deadMan, s.deadManOrphan = 90*time.Second, 12*time.Second
+	_ = s.Up(fullConfig())
+	s.OnPeerLost() // orphaned = true
+	if err := s.Up(fullConfig()); err != nil {
+		t.Fatalf("re-up from failed: %v", err)
+	}
+	clock = base.Add(30 * time.Second) // > orphan, < full
+	if s.CheckDeadMan() {
+		t.Fatal("a fresh Up must clear the orphan flag → full window applies again")
+	}
+}
+
+// TestTickIntervalUsesShorterWindow: the loop must poll fine enough to honor the short
+// orphan window (min of the two windows / 3), else a 12s release waits for a 30s tick.
+func TestTickIntervalUsesShorterWindow(t *testing.T) {
+	s := NewSupervisor(&fakeBackend{})
+	s.deadMan, s.deadManOrphan = 90*time.Second, 12*time.Second
+	if got, want := s.TickInterval(), 4*time.Second; got != want {
+		t.Fatalf("TickInterval = %s, want %s (min(90,12)/3)", got, want)
+	}
+}
+
+// TestDeadManOrphanClampedToFull: an operator who shortens deadMan below the orphan
+// default must not end up with the "definitely gone" path SLOWER than the "maybe slow" one.
+func TestDeadManOrphanClampedToFull(t *testing.T) {
+	t.Setenv("TUNNEX_DEADMAN", "8s")
+	s := NewSupervisor(&fakeBackend{})
+	if s.deadManOrphan > s.deadMan {
+		t.Fatalf("orphan window %s must be clamped to <= deadMan %s", s.deadManOrphan, s.deadMan)
+	}
+}
+
 func mustCode(t *testing.T, err error, code string) {
 	t.Helper()
 	pe, ok := err.(*ProtocolError)
