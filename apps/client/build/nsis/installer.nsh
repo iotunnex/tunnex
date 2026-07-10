@@ -19,6 +19,10 @@
   ; Restart-on-failure — parity with the macOS LaunchDaemon KeepAlive so a crashed helper
   ; comes back and its startup self-heal releases any stranded WFP kill-switch.
   nsExec::ExecToLog 'sc failure tunnex-helper reset= 0 actions= restart/5000/restart/5000/restart/5000'
+  ; failureflag=1 so the restart actions ALSO fire when the service reports STOPPED with
+  ; a non-zero exit (serveHelper error path) — not only on an uncontrolled crash. Without
+  ; it the "restart on failure" policy is dead for our controlled error exit (review #5).
+  nsExec::ExecToLog 'sc failureflag tunnex-helper 1'
   nsExec::ExecToLog 'sc start tunnex-helper'
 !macroend
 

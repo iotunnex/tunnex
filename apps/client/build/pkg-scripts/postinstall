@@ -43,7 +43,7 @@ cat > "$PLIST" <<PL
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/tmp/tunnex-helper.log</string>
+  <key>StandardErrorPath</key><string>/var/run/tunnex/helper.log</string>
 </dict></plist>
 PL
 chown root:wheel "$PLIST"

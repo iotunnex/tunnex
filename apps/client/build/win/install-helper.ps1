@@ -28,6 +28,9 @@ New-ItemProperty -Path $reg -Name Environment -PropertyType MultiString -Force -
 # Restart-on-failure — parity with the macOS LaunchDaemon KeepAlive, so a crashed
 # helper comes back and its startup self-heal releases any stranded WFP kill-switch.
 sc.exe failure $Svc reset= 0 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+# failureflag=1 so the restart actions also fire on a STOPPED-with-nonzero-exit (our
+# serveHelper error path), not only an uncontrolled crash (review #5).
+sc.exe failureflag $Svc 1 | Out-Null
 
 Write-Host ">> starting"
 sc.exe start $Svc | Out-Null

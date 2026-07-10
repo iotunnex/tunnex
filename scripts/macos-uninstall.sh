@@ -16,12 +16,13 @@ echo ">> remove installed files"
 rm -f "$PLIST"
 rm -rf "$DIR" "$RUN"
 
-echo ">> restore pf.conf (remove the tunnex anchor reference)"
-if [ -f /etc/pf.conf.tunnex-bak ]; then
-  cp /etc/pf.conf.tunnex-bak /etc/pf.conf
-  rm -f /etc/pf.conf.tunnex-bak
+echo ">> remove the tunnex anchor line from /etc/pf.conf (surgical — never clobber the user's file)"
+if grep -q '^[[:space:]]*anchor "tunnex"[[:space:]]*$' /etc/pf.conf 2>/dev/null; then
+  # Delete ONLY our anchor reference; leave any rules the user/another tool added intact.
+  grep -v '^[[:space:]]*anchor "tunnex"[[:space:]]*$' /etc/pf.conf > /etc/pf.conf.tunnex-tmp && mv /etc/pf.conf.tunnex-tmp /etc/pf.conf
   pfctl -f /etc/pf.conf 2>/dev/null || true
 fi
+rm -f /etc/pf.conf.tunnex-bak
 pfctl -a tunnex -F all 2>/dev/null || true
 
 echo

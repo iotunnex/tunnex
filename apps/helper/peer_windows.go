@@ -61,16 +61,20 @@ func pipeServerHandle(c net.Conn) (windows.Handle, bool) {
 	return searchHandle(rv.Elem(), 0)
 }
 
-// searchHandle walks an addressable struct (bounded depth) for a `handle` field of
-// uintptr kind (windows.Handle), reading unexported fields via unsafe.
+// searchHandle walks an addressable struct (bounded depth) for the go-winio pipe's
+// server handle: a `handle` field of uintptr kind INSIDE a struct named `win32File`.
+// Requiring the enclosing type to be win32File avoids grabbing some other struct's
+// unrelated `handle` field and resolving the WRONG process (review #6) — if go-winio's
+// layout ever changes, this returns false → the caller FAILS CLOSED (refuses).
 func searchHandle(v reflect.Value, depth int) (windows.Handle, bool) {
 	if depth > 4 || !v.IsValid() || v.Kind() != reflect.Struct || !v.CanAddr() {
 		return 0, false
 	}
 	t := v.Type()
+	inWin32File := t.Name() == "win32File"
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
-		if t.Field(i).Name == "handle" && f.Kind() == reflect.Uintptr {
+		if inWin32File && t.Field(i).Name == "handle" && f.Kind() == reflect.Uintptr {
 			return windows.Handle(bypass(f).Uint()), true
 		}
 		switch f.Kind() {
