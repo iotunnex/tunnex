@@ -102,11 +102,13 @@ services:
     # false + diagnosable if neither is available — no silent success.
     cap_add:
       - NET_ADMIN
-    # S3.7: the agent OWNS ip_forward + the nftables egress NAT now (it sets ip_forward
-    # itself as part of its probed setup, so a locked-down host reports egress_nat=false
-    # instead of half-working). The compose sysctl crutch + the throwaway
-    # scripts/poc-gateway-nat.sh are both removed — the agent's reconciled tunnex table
-    # is the real thing.
+    # ip_forward MUST be declared here: a Docker container's /proc/sys is READ-ONLY, so the
+    # agent can't write it from inside — the sysctl sets it at boot and the agent verifies
+    # it (egress_linux.go ensureIPForward). S3.7: the agent OWNS the real thing — the
+    # reconciled nftables `tunnex` egress NAT + forwarding — replacing the throwaway
+    # scripts/poc-gateway-nat.sh (deleted). Only the ip_forward toggle stays declarative.
+    sysctls:
+      - net.ipv4.ip_forward=1
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:

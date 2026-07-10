@@ -47,10 +47,12 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	if !ifaceRE.MatchString(m.wgIface) {
 		return false, fmt.Errorf("invalid wg interface name %q", m.wgIface)
 	}
-	// ip_forward is the agent's to own now (removed from the compose sysctl). Set it
-	// FIRST + unconditionally: a later egress failure must not leave forwarding off.
-	if err := writeSysctl("net/ipv4/ip_forward", "1"); err != nil {
-		return false, fmt.Errorf("ip_forward: %w", err)
+	// Ensure ip_forward FIRST + unconditionally: a later egress failure must not leave
+	// forwarding off. In a Docker container /proc/sys is READ-ONLY, so the agent can't
+	// write it — the compose `sysctls: net.ipv4.ip_forward=1` sets it at boot and we just
+	// VERIFY here; on a bare-metal agent we write it directly.
+	if err := ensureIPForward(); err != nil {
+		return false, err
 	}
 	// Apply the tables (add;flush;redefine = atomic replace, so this also self-heals a
 	// table a prior crashed agent left, and heals a manual flush). This installs the
@@ -131,6 +133,21 @@ func hasDefaultRoute(ctx context.Context) bool {
 		return false
 	}
 	return strings.Contains(string(out), "default")
+}
+
+// ensureIPForward enables IPv4 forwarding. It tries to WRITE the sysctl (bare-metal
+// agent); if /proc/sys is read-only (Docker default — the container can't write it), it
+// falls back to VERIFYING it's already 1 (set by the compose sysctl at boot). Only a
+// not-writable-AND-not-already-enabled state is a real failure.
+func ensureIPForward() error {
+	if err := writeSysctl("net/ipv4/ip_forward", "1"); err == nil {
+		return nil
+	}
+	v, rerr := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if rerr == nil && strings.TrimSpace(string(v)) == "1" {
+		return nil // already enabled (compose/host set it) — read-only fs is expected in a container
+	}
+	return fmt.Errorf("ip_forward not enabled and not writable (set sysctls net.ipv4.ip_forward=1 on the node-agent)")
 }
 
 func writeSysctl(key, val string) error {
