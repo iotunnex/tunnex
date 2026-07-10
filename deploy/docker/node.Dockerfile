@@ -14,7 +14,7 @@ FROM alpine:3.20
 # WireGuard module (present in most modern kernels incl. Docker's LinuxKit VM).
 # ca-certificates for the control channel. If a host lacks the module the agent
 # fails readiness with a diagnosable error rather than pretending success.
-RUN apk add --no-cache ca-certificates wireguard-tools iproute2
+RUN apk add --no-cache ca-certificates wireguard-tools iproute2 nftables
 COPY --from=build /out/tunnex-node /usr/local/bin/tunnex-node
 EXPOSE 9091
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \

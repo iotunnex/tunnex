@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/control"
+	"github.com/tunnexio/tunnex/apps/node/internal/egress"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
 
@@ -95,12 +96,24 @@ func main() {
 	// The endpoint (host:port peer configs dial) is operator-provided; it cannot
 	// be discovered from inside the container.
 	wgEndpoint := os.Getenv("TUNNEX_NODE_ENDPOINT")
-	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &keyReported, logger)
+	// egressNAT holds whether this gateway can source-NAT full-tunnel egress (S3.7),
+	// probed by the egress loop and reported to the control plane so it can refuse
+	// full-tunnel devices against a no-egress gateway (gateway_no_egress).
+	var egressNAT atomic.Bool
+	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
+	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, &keyReported, reportEvery, logger)
 
 	// Backend selection: "wgctrl" drives a real WireGuard device (Linux + NET_ADMIN,
 	// used in compose/prod); anything else uses the in-memory backend (dev/CI).
 	wgBackend := getenv("TUNNEX_WG_BACKEND", "mem")
 	wgIface := getenv("TUNNEX_WG_INTERFACE", "wg0")
+
+	// Egress NAT + forwarding (S3.7): reconcile the nftables tunnex table every interval
+	// (heals a flushed table) + probe the egress_nat capability. Torn down on shutdown
+	// (full-sweep). No-op / not-capable off Linux.
+	egressMgr := egress.New(wgIface)
+	defer egressMgr.Teardown(context.Background())
+	go egressLoop(ctx, egressMgr, &egressNAT, getdur("TUNNEX_AGENT_EGRESS_INTERVAL", 30*time.Second), logger)
 	backend, err := reconcile.SelectBackend(wgBackend, wgIface, logger)
 	if err != nil {
 		logger.Error("agent_backend_failed", slog.String("backend", wgBackend), slog.String("error", err.Error()))
@@ -224,23 +237,64 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 // with backoff until it succeeds (then sets reported and returns). The report is
 // idempotent server-side, so retrying is safe. Until it succeeds the agent stays
 // not-ready, so no orchestrator routes to a node the control plane can't peer.
-func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, reported *atomic.Bool, logger *slog.Logger) {
+func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, egressNAT, reported *atomic.Bool, every time.Duration, logger *slog.Logger) {
 	const maxBackoff = 30 * time.Second
-	backoff := time.Second
-	for {
-		if err := client.ReportInfo(ctx, pubKey, endpoint); err != nil {
+	report := func() bool {
+		if err := client.ReportInfo(ctx, pubKey, endpoint, egressNAT.Load()); err != nil {
 			logger.Warn("agent_report_key_failed", slog.String("error", err.Error()))
-			if !sleepCtx(ctx, backoff) {
-				return
-			}
-			if backoff *= 2; backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-			continue
+			return false
 		}
-		reported.Store(true)
-		logger.Info("agent_wg_key_reported", slog.String("public_key", pubKey))
-		return
+		if reported.CompareAndSwap(false, true) {
+			logger.Info("agent_wg_key_reported", slog.String("public_key", pubKey))
+		}
+		return true
+	}
+	// Retry fast until the FIRST success (readiness is gated on it).
+	backoff := time.Second
+	for !report() {
+		if !sleepCtx(ctx, backoff) {
+			return
+		}
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+	// Then re-report on an interval so a CHANGED egress_nat capability (host state can
+	// shift) propagates to the control plane — the decision was "report every reconcile".
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			report()
+		}
+	}
+}
+
+// egressLoop reconciles the gateway egress NAT (the tunnex nft table) every interval —
+// idempotent, so it heals a flushed table — and updates the egress_nat capability that
+// reportKeyLoop advertises. A degraded reconcile (locked-down host) sets egress_nat=false
+// and logs, never crashing the agent.
+func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool, every time.Duration, logger *slog.Logger) {
+	apply := func() {
+		ok, err := mgr.Reconcile(ctx)
+		egressNAT.Store(ok)
+		if err != nil {
+			logger.Warn("egress_reconcile_degraded", slog.String("error", err.Error()))
+		}
+	}
+	apply() // initial probe/arm
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			apply()
+		}
 	}
 }
 

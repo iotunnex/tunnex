@@ -141,10 +141,11 @@ func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, ne
 	return body, keyPEM, nil
 }
 
-// ReportInfo reports the node's locally-generated WireGuard public key and its
-// public endpoint (host:port that peer configs dial).
-func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string) error {
-	body, _ := json.Marshal(map[string]string{"public_key": publicKey, "endpoint": endpoint})
+// ReportInfo reports the node's locally-generated WireGuard public key, its public
+// endpoint (host:port that peer configs dial), and its egress_nat capability (whether
+// the gateway can source-NAT full-tunnel traffic — S3.7; probed every reconcile).
+func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egressNAT bool) error {
+	body, _ := json.Marshal(map[string]any{"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
