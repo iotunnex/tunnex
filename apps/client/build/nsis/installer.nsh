@@ -13,6 +13,11 @@
   nsExec::ExecToLog 'sc delete tunnex-helper'
   ; The Go helper speaks the SCM control protocol (svc.Run), so it runs as a real service.
   nsExec::ExecToLog 'sc create tunnex-helper binPath= "$INSTDIR\resources\helper\tunnex-helper.exe" start= auto DisplayName= "Tunnex Helper"'
+  ; sidtype=unrestricted so the service token carries its NT SERVICE\tunnex-helper SID.
+  ; The WFP kill-switch (wireguard firewall) looks up the running service's SID to permit
+  ; its own encrypted packets; without a service SID, arming fails "The specified group
+  ; does not exist" and full-tunnel can't connect. (Confirmed live on the box.)
+  nsExec::ExecToLog 'sc sidtype tunnex-helper unrestricted'
   ; Per-service environment (the SCM passes it to the service at start): trust the installed
   ; app dir for the helper's caller-auth + pin the named-pipe socket. REG_MULTI_SZ, \0-sep.
   nsExec::ExecToLog 'reg add "HKLM\SYSTEM\CurrentControlSet\Services\tunnex-helper" /v Environment /t REG_MULTI_SZ /d "TUNNEX_INSTALL_DIR=$INSTDIR\0TUNNEX_HELPER_SOCKET=\\.\pipe\tunnex-helper" /f'

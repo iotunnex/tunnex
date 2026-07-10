@@ -17,6 +17,11 @@ sc.exe delete $Svc 2>$null | Out-Null
 Start-Sleep -Milliseconds 500
 sc.exe create $Svc binPath= "`"$Helper`"" start= auto DisplayName= "Tunnex Helper" | Out-Null
 
+# sidtype=unrestricted so the service token carries its NT SERVICE\tunnex-helper SID —
+# the WFP kill-switch permits the service's own encrypted packets by that SID; without it
+# arming fails "The specified group does not exist" and full-tunnel can't connect.
+sc.exe sidtype $Svc unrestricted | Out-Null
+
 # Per-service environment (the SCM passes this to the service at start): trust the
 # packaged app's dir for the helper's caller-auth, and pin the named-pipe socket.
 $reg = "HKLM:\SYSTEM\CurrentControlSet\Services\$Svc"
