@@ -158,6 +158,20 @@ Seed for the eventual SECURITY.md.
   `make test-node`.
 
 ## Edition Model — Open-core (resolved)
+
+> **⚠️ SUPERSEDED (pending EPIC 12 / S12.1 decision review):** the build-tag edition split
+> below is **superseded IF the commercial-upgrade flow (EPIC 12) is built.** Requirement: an
+> open-build customer pastes a license key into the RUNNING deployment and enterprise features
+> unlock — **no rebuild, no redeploy.** That is impossible with the build-tag split (enterprise
+> code isn't compiled into the open binary), so **EPIC 12/S12.1 refactors to a single binary,
+> runtime license-gated** (GitLab-EE model). **CONSEQUENCE, accepted knowingly:** enterprise
+> source then ships inside the open binary — readable, and the license check is patchable (it's
+> open source). Piracy isn't prevented; honest commercial compliance is made easy, backed by
+> license law. This **invalidates the test-editions "enterprise-not-in-open-binary" property** —
+> S12.1 replaces that guard with a runtime-gating guard. **PARKED:** not built until after the
+> public beta; decide-before-code review required at S12.1. Until then the build-tag model below
+> stands as-is.
+
 - **Schema is multi-tenant in core.** Everything carries `org_id`; the open edition simply **does not expose creating a second org** — an API/UI limit, not a schema fork. No migration or code move later.
 - **Enterprise features** (gated behind an `internal/enterprise/**` package + build tag): SSO (Google/Microsoft), Zero Trust policies, Kubernetes operator, and the multi-org limit-lift.
 - **The enterprise boundary is established in S1.1**, because the first gated decision (org-creation limit) lives there — not at SSO. SSO/policies/operator plug into the same boundary as they arrive.
@@ -976,10 +990,23 @@ present — detect and warn/refuse rather than silently downgrade.
 - **S11.3 Rate limiting & security headers** — API abuse protection, TLS via nginx, secrets hygiene.
 - **S11.4 Docs & install guide** — self-host quickstart, upgrade path.
 
+## EPIC 12 — Commercial / Licensing Infrastructure *(PARKED — trigger: post-public-beta; needs a sellable product + users first)*
+
+**Positioning guard:** licensing MUST NOT break the "self-hosted, no SaaS in the trust path" differentiator. License verification is **OFFLINE** — the customer's deployment verifies a signed key locally against a baked-in public key; it works air-gapped and **NEVER calls Tunnex infra to function.** Any phone-home (renewal reminders, telemetry) is optional, async, and degrades gracefully — a lapsed connection to Tunnex infra **NEVER hard-fails a running VPN.** This is the sovereignty/Tailscale-differentiator constraint; a call-home validation model is explicitly **REJECTED**.
+
+- **S12.1 Edition Model refactor (build-tag → runtime license-gate)** — decide-before-code, **supersedes the S1.1 model**. Single binary; enterprise code compiled in; a `LicenseManager` gates enterprise features at runtime on a verified key. Replace the test-editions build-tag guard with a **runtime-gating guard** (open-by-default; features light up only with a valid enterprise key). **The load-bearing story — everything else depends on it.**
+- **S12.2 License key format + offline verification** — **Ed25519-signed** key (private key in the issuance service; public key baked into the binary). Key encodes `{company_domain, tier, seats, issued_at, expires_at, license_id}`. Binary verifies signature + expiry **offline**. Expiry → grace period + UI warning → revert to open features; **never a hard VPN cutoff.** In-app "paste your license key" UI + a `POST /admin/license` endpoint (owner/admin-gated, audited).
+- **S12.3 In-app upgrade + trial-request affordance** — "Upgrade to Enterprise" in the open build; "Start 30-day trial" flow that requests a key from the issuance service.
+- **S12.4 License issuance service** *(Tunnex-hosted infra — the ONLY hosted piece; holds billing + entitlement data ONLY, never VPN traffic/configs/user data)* — signing service (guards the private key), issues keys on paid purchase or validated trial, emails the key (support-flow delivery). Trial-per-company-domain anti-abuse: a `domain → trial_issued_at` table refuses a second trial for the same domain. **DECIDE-BEFORE-CODE:** trial gating = **DNS-TXT domain-ownership proof** (STRONG — reuses the S2.5 domain-capture verifier) vs email-domain best-effort (weak, gameable). *[Leaning DNS-TXT — S2.5 already built it; confirm at story open.]*
+- **S12.5 Landing + payment** — pricing/landing page; **Stripe (US) + Razorpay (India)** — both markets from launch; purchase → issuance.
+- **S12.6 Compliance pass** *(needs a real lawyer per market — NOT hand-waved)* — India **DPDP Act 2023** + US state privacy; data-residency review. **Architectural compliance win to preserve:** the hosted infra holds only billing + license data; all VPN traffic, configs, and user data stay entirely on the customer's self-hosted deployment — minimizing hosted-infra data footprint is the single biggest compliance lever. ToS/privacy policy; export-control check on crypto distribution (US EAR) for the US+India launch.
+
+**Build-order note:** EPIC 12 slots **AFTER the public beta** (EPIC 6 → beta → 7/8/9… with 12 inserted when monetization is wanted). It is **NOT** in the near-term path. Recorded now so the S12.1 Edition-Model consequence is known before S6.6/beta build in a way that assumes build-tag permanence.
+
 ---
 
 ## Recommended Build Order
-EPIC 0 → 1 → 2 → 3 (WG core loop) → 4 (dashboard) → 5 (CLI) → 6 (Electron) → 7 → 8 → 9 → 10 → 11.
+EPIC 0 → 1 → 2 → 3 (WG core loop) → 4 (dashboard) → 5 (CLI) → 6 (Electron) → 7 → 8 → 9 → 10 → 11. **(EPIC 12 = commercial/licensing, PARKED — inserted post-public-beta when monetization is wanted, NOT in the near-term path.)**
 
 ## First Story to Execute: **S0.1 + S0.2 (Foundation + one-command boot)**
 Deliverable: a `git`-ready monorepo where `docker compose up` brings up postgres, redis, a Go API `/healthz` (structured logging + request IDs), a node-agent stub (`NET_ADMIN`, WG UDP port), Mailpit, and a React dashboard shell reachable through nginx.
