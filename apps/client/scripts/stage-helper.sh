@@ -41,6 +41,34 @@ case "$TARGET" in
     else
       echo "!! vendor/wintun/wintun.dll missing — Windows data plane needs it."
     fi
+    # S6.7: on-box recovery note next to the helper. The full-tunnel WFP kill-switch is
+    # PERSISTENT (survives process death by design) — so a locked-out operator must be able to
+    # find the escape hatch WITHOUT network access. This file ships in the install dir; the same
+    # command is in the app's failed/unsafe state, the WFP provider description (netsh wfp show
+    # state), and the install docs.
+    cat > "$OUT/README-RECOVERY.txt" <<'RECOV'
+Tunnex — Windows full-tunnel kill-switch: RECOVERY
+===================================================
+
+The Tunnex full-tunnel kill-switch is a PERSISTENT Windows Filtering Platform (WFP) block: it
+deliberately SURVIVES the helper process dying, so your traffic cannot leak in cleartext if the
+tunnel crashes. If networking is stuck BLOCKED after a crash and does not recover on its own:
+
+  1) EASIEST — REBOOT. The Tunnex helper service auto-starts and clears any stale block before
+     it does anything else. After the reboot, networking is back.
+
+  2) IMMEDIATE — run this from an ADMINISTRATOR command prompt, in THIS folder:
+
+         tunnex-helper.exe --wfp-clean
+
+     It removes the Tunnex WFP block and restores networking. Safe to run any time (it does
+     nothing if no block is present).
+
+To INSPECT what WFP objects exist:  netsh wfp show state   (look for provider "Tunnex").
+
+You will NOT be permanently blocked: a bug means "reboot to recover", never a bricked machine.
+RECOV
+    echo ">> staged: $OUT/README-RECOVERY.txt"
     ;;
   *)
     echo "usage: stage-helper.sh [mac|win]" >&2; exit 2 ;;

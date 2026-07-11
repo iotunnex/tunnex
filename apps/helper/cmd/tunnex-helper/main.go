@@ -23,6 +23,29 @@ func main() {
 		return
 	}
 
+	// --wfp-clean (S6.7): the ESCAPE HATCH. Remove the persistent Tunnex WFP kill-switch from an
+	// admin prompt, even if the service is dead and networking is blocked. Same code path as the
+	// startup self-heal. This is the exact command printed in README-RECOVERY.txt / the event log
+	// / the app's failed state.
+	if len(os.Args) > 1 && os.Args[1] == "--wfp-clean" {
+		if err := wfpClean(); err != nil {
+			log.Fatalf("tunnex-helper --wfp-clean: %v", err)
+		}
+		fmt.Println("tunnex-helper: Tunnex WFP kill-switch removed (or none was present). Networking restored.")
+		return
+	}
+
+	// --wfp-arm-test (S6.7, DEV): deliberately arm a persistent block-all to wedge the box, so the
+	// escape hatch can be proven to un-wedge a genuinely dead box (the deliberate-red gate).
+	if len(os.Args) > 1 && os.Args[1] == "--wfp-arm-test" {
+		if err := wfpArmTest(); err != nil {
+			log.Fatalf("tunnex-helper --wfp-arm-test: %v", err)
+		}
+		fmt.Println("tunnex-helper: DEV — armed a PERSISTENT block-all WFP kill-switch; networking is now BLOCKED.")
+		fmt.Println("  Recover:  tunnex-helper.exe --wfp-clean   (or reboot — the service self-heals on start)")
+		return
+	}
+
 	// Under the Windows SCM the process must speak the service control protocol
 	// (svc.Run), not just run as a console program — else `sc start` times out (1053).
 	// isWindowsService is false on macOS (LaunchDaemon runs the plain executable) and

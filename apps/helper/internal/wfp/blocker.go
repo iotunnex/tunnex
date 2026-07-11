@@ -8,7 +8,6 @@
 package wfp
 
 import (
-	"errors"
 	"net/netip"
 	"unsafe"
 
@@ -23,17 +22,16 @@ type baseObjects struct {
 	filters  windows.GUID
 }
 
-var wfpSession uintptr
-
 func createWfpSession() (uintptr, error) {
-	sessionDisplayData, err := createWtFwpmDisplayData0("WireGuard", "WireGuard dynamic session")
+	sessionDisplayData, err := createWtFwpmDisplayData0("Tunnex", "Tunnex persistent WFP session")
 	if err != nil {
 		return 0, wrapErr(err)
 	}
 
 	session := wtFwpmSession0{
-		displayData:          *sessionDisplayData,
-		flags:                cFWPM_SESSION_FLAG_DYNAMIC,
+		displayData: *sessionDisplayData,
+		// S6.7 delta: NON-dynamic (dropped cFWPM_SESSION_FLAG_DYNAMIC) so BFE keeps the objects
+		// after this engine handle / the process closes — the kill-switch survives process death.
 		txnWaitTimeoutInMSec: windows.INFINITE,
 	}
 
@@ -49,21 +47,18 @@ func createWfpSession() (uintptr, error) {
 
 func registerBaseObjects(session uintptr) (*baseObjects, error) {
 	bo := &baseObjects{}
-	var err error
-	bo.provider, err = windows.GenerateGUID()
-	if err != nil {
-		return nil, wrapErr(err)
-	}
-	bo.filters, err = windows.GenerateGUID()
-	if err != nil {
-		return nil, wrapErr(err)
-	}
+	// S6.7 delta: FIXED keys (was windows.GenerateGUID() — random per arm, which made a crashed
+	// persistent block unfindable). These are the durable anchor CleanStale/--wfp-clean delete by.
+	bo.provider = tunnexProviderGUID
+	bo.filters = tunnexSublayerGUID
 
 	//
 	// Register provider.
 	//
 	{
-		displayData, err := createWtFwpmDisplayData0("WireGuard", "WireGuard provider")
+		// S6.7: the provider DESCRIPTION carries the recovery command so `netsh wfp show state`
+		// self-documents the escape hatch ON a locked-out box (discoverability requirement).
+		displayData, err := createWtFwpmDisplayData0("Tunnex", providerRecoveryHint)
 		if err != nil {
 			return nil, wrapErr(err)
 		}
@@ -82,7 +77,7 @@ func registerBaseObjects(session uintptr) (*baseObjects, error) {
 	// Register filters sublayer.
 	//
 	{
-		displayData, err := createWtFwpmDisplayData0("WireGuard filters", "Permissive and blocking filters")
+		displayData, err := createWtFwpmDisplayData0("Tunnex filters", "Tunnex kill-switch filters")
 		if err != nil {
 			return nil, wrapErr(err)
 		}
@@ -102,9 +97,10 @@ func registerBaseObjects(session uintptr) (*baseObjects, error) {
 }
 
 func EnableFirewall(luid uint64, doNotRestrict bool, restrictToDNSServers []netip.Addr) error {
-	if wfpSession != 0 {
-		return errors.New("The firewall has already been enabled")
-	}
+	// S6.7 delta: a persistent block from a prior arm/crash would make our fixed-GUID provider
+	// Add fail ALREADY_EXISTS — so clean any stale Tunnex objects first (idempotent). This is
+	// also what makes a re-arm self-heal after an un-clean prior arm.
+	_ = removePersistentObjects()
 
 	session, err := createWfpSession()
 	if err != nil {
@@ -178,13 +174,16 @@ func EnableFirewall(luid uint64, doNotRestrict bool, restrictToDNSServers []neti
 		return wrapErr(err)
 	}
 
-	wfpSession = session
+	// S6.7 delta: CLOSE the session now — the objects are non-dynamic, so they PERSIST in BFE
+	// independent of this handle/process (that IS the point). Upstream kept the session open
+	// because DYNAMIC objects die when it closes; ours must survive death.
+	fwpmEngineClose0(session)
 	return nil
 }
 
+// DisableFirewall removes the persistent Tunnex WFP block (graceful teardown). Because the block
+// no longer auto-dies with the session, it must be explicitly deleted — the SAME enumerate-and-
+// delete as CleanStale and the --wfp-clean escape hatch. Idempotent (nothing armed → no-op).
 func DisableFirewall() {
-	if wfpSession != 0 {
-		fwpmEngineClose0(wfpSession)
-		wfpSession = 0
-	}
+	_ = removePersistentObjects()
 }
