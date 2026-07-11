@@ -4,6 +4,16 @@ import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
 
+// enrollCommand builds the COMPLETE, copy-paste command an operator runs in their Tunnex install
+// folder to bring a gateway online (S6.6 / POC ledger item 6): the join-token env INLINE plus the
+// full `docker compose … up -d --force-recreate node-agent` — the piece a POC operator had to know
+// by heart. A pinned node_name is shell-quoted (arbitrary charset) so a space can't silently
+// truncate it and resurrect the node_name_mismatch loop.
+export function enrollCommand(token: string, pinnedName: string | null): string {
+  const name = pinnedName ? ` TUNNEX_NODE_NAME="${pinnedName.replace(/(["\\$`])/g, "\\$1")}"` : "";
+  return `TUNNEX_JOIN_TOKEN=${token}${name} docker compose -f tunnex.yml up -d --force-recreate node-agent`;
+}
+
 /**
  * Gateways renders a org's enrolled tunnex-node agents and the enroll ceremony
  * (S4.7). Enrolling mints a ONE-TIME join token — a secret with the same handling
@@ -101,12 +111,13 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
           token on first connect. */}
       {token && (
         <OneTimeSecretModal
-          title="Join token — shown once"
+          title="Enroll your gateway — run this once"
           caption={
             <>
-              Start a <span className="font-mono">tunnex-node</span> agent with this environment. It is shown{" "}
-              <span className="font-semibold">exactly once</span>, is single-use, and cannot be retrieved again — save it
-              now.
+              Run this command in your Tunnex install folder (where <span className="font-mono">tunnex.yml</span> lives)
+              to bring the gateway online — it re-creates the <span className="font-mono">node-agent</span> with this join
+              token. It is shown <span className="font-semibold">exactly once</span>, is single-use, and cannot be
+              retrieved again — copy it now.
               {pinnedName && (
                 <>
                   {" "}
@@ -117,11 +128,9 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               )}
             </>
           }
-          // The name is shell-quoted: node_name has no charset restriction, so an
-          // unquoted space would silently truncate the value on paste and resurrect
-          // the exact node_name_mismatch loop this line exists to prevent.
-          secret={pinnedName ? `TUNNEX_JOIN_TOKEN=${token} TUNNEX_NODE_NAME="${pinnedName.replace(/(["\\$`])/g, "\\$1")}"` : `TUNNEX_JOIN_TOKEN=${token}`}
-          copyLabel="Copy"
+          // The COMPLETE runnable command (env inline + the compose line) — see enrollCommand.
+          secret={enrollCommand(token, pinnedName)}
+          copyLabel="Copy command"
           onDismiss={() => {
             setToken(null);
             setPinnedName(null);
