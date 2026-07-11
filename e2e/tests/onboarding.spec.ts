@@ -206,7 +206,9 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   // the previous (named) ceremony.
   await page.getByRole("button", { name: "Enroll gateway" }).click();
   await page.getByRole("button", { name: "Generate join token" }).click();
-  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN}`);
+  await expect(page.locator("pre")).toHaveText(
+    `TUNNEX_JOIN_TOKEN=${TOKEN} docker compose -f tunnex.yml up -d --force-recreate node-agent`,
+  );
   await expect(page.getByText(/pinned to the name/)).toHaveCount(0);
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   expect(issued).toBe(2);

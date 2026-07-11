@@ -11,21 +11,46 @@ Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open al
 
 ## Deploy (self-host)
 
-On a server with **Docker Engine + the Compose v2 plugin** installed:
+**Prerequisite: any VPS with Docker Engine + the Compose v2 plugin and a public address** (a DNS name
+or public IP that users and gateways can reach). `install.sh` installs the *software* — it does not
+provision the server; a laptop with no public IP is not a deploy target.
+
+**Recommended — download, verify, inspect, then run** (our audience is sovereignty/security-conscious;
+never pipe a script you haven't read into a root shell):
+
+```bash
+url=https://raw.githubusercontent.com/iotunnex/tunnex/main/deploy
+curl -fsSL "$url/install.sh" -o install.sh
+curl -fsSL "$url/install.sh.sha256" -o install.sh.sha256 && sha256sum -c install.sh.sha256
+less install.sh
+sudo sh install.sh
+```
+
+**Convenience — one-liner:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iotunnex/tunnex/main/deploy/install.sh | sh
 ```
 
-It asks exactly two things — your **public address** (the DNS name / public IP users and gateways
-reach) and **SMTP** (or skip) — generates the DB secret, writes a clean `./tunnex/.env`, pins a
-released version, and starts the stack from `ghcr.io/iotunnex/tunnex-*` images. No `git clone`, no
-`--build`, no editing compose. When it finishes it prints your dashboard URL and how to enroll a
-gateway.
+Either way it asks exactly two things — your **public address** and **SMTP** (or skip) — generates
+the DB secret, writes a clean `./tunnex/.env`, pins a released version, and starts the stack from
+`ghcr.io/iotunnex/tunnex-*` images. No `git clone`, no `--build`, no editing compose. It is
+idempotent (re-running reuses the DB password) and prints your dashboard URL + how to enroll a
+gateway when done.
+
+Non-interactive (CI / no terminal) — pass the two inputs as env vars:
+
+```bash
+curl -fsSL <url>/install.sh | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_SMTP=skip sh
+```
 
 - Dashboard → `http://<your-address>/`
 - Config lives in `./tunnex/.env` (edit values there; never hand-edit `tunnex.yml`).
 - Upgrade: bump `TUNNEX_VERSION` to a newer tag, then `docker compose -f tunnex.yml pull && up -d`.
+
+> The `install.sh` in this repo is the **single source of truth** — the marketing site (and any
+> `get.tunnex.io` shortcut) only *serves* this exact file as a release asset; it must never fork or
+> hand-maintain its own copy.
 
 ## Develop locally
 
