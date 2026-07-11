@@ -174,17 +174,14 @@ func removePersistentObjects() error {
 	return nil
 }
 
-// collectTunnexFilterIDs enumerates every filter under the Tunnex provider and returns their
-// runtime IDs. Best-effort: any enum failure returns what was collected so far (the caller's
-// sublayer/provider delete still runs).
+// collectTunnexFilterIDs returns the runtime IDs of every filter under the Tunnex provider. It
+// enumerates ALL filters with a NIL template and matches our provider IN GO — deliberately
+// avoiding the FWPM_FILTER_ENUM_TEMPLATE0 layout (an OVERLAPPING template with a null layer
+// returned nothing in testing, so cleanup deleted nothing). Best-effort: an enum failure returns
+// what was collected so far.
 func collectTunnexFilterIDs(engine uintptr) []uint64 {
-	template := wtFwpmFilterEnumTemplate0{
-		providerKey: &tunnexProviderGUID,
-		enumType:    cFWP_FILTER_ENUM_OVERLAPPING,
-		actionMask:  0xffffffff,
-	}
 	var enumHandle uintptr
-	if err := fwpmFilterCreateEnumHandle0(engine, &template, &enumHandle); err != nil {
+	if err := fwpmFilterCreateEnumHandle0(engine, nil, &enumHandle); err != nil {
 		return nil
 	}
 	defer fwpmFilterDestroyEnumHandle0(engine, enumHandle)
@@ -193,14 +190,16 @@ func collectTunnexFilterIDs(engine uintptr) []uint64 {
 	for {
 		var entries **wtFwpmFilter0
 		var num uint32
-		if err := fwpmFilterEnum0(engine, enumHandle, 64, &entries, &num); err != nil || num == 0 {
+		if err := fwpmFilterEnum0(engine, enumHandle, 128, &entries, &num); err != nil || num == 0 {
 			return ids
 		}
 		for _, f := range unsafe.Slice(entries, num) {
-			ids = append(ids, f.filterID)
+			if f.providerKey != nil && *f.providerKey == tunnexProviderGUID {
+				ids = append(ids, f.filterID)
+			}
 		}
 		fwpmFreeMemory0(unsafe.Pointer(&entries))
-		if num < 64 {
+		if num < 128 {
 			return ids
 		}
 	}
