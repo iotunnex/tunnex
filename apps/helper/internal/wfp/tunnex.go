@@ -111,11 +111,34 @@ func fwpmProviderDeleteByKey0(engine uintptr, key *windows.GUID) error {
 // startup self-heal does. Idempotent (nothing armed → nil).
 func Clean() error { return removePersistentObjects() }
 
-// ArmBlockAll arms a PERSISTENT block-all kill-switch that permits NO tunnel (luid 0) — DEV ONLY.
-// `tunnex-helper --wfp-arm-test` uses it to deliberately wedge the box (kill egress) so the escape
-// hatch can be PROVEN to un-wedge a genuinely dead box before the persistent arming is trusted
-// (S6.7 deliberate-red). Recover with Clean() / `--wfp-clean` / reboot.
-func ArmBlockAll() error { return EnableFirewall(0, false, nil) }
+// ArmBlockAll arms a MINIMAL persistent block-all under the Tunnex fixed provider/sublayer —
+// DEV ONLY, for the S6.7 deliberate-red: `tunnex-helper --wfp-arm-test` wedges the box (kills
+// egress) so the escape hatch can be PROVEN to un-wedge a genuinely dead box before the persistent
+// arming is trusted. It deliberately SKIPS permitWireGuardService (which needs the SERVICE's own
+// SID in the token — absent in a standalone admin CLI, giving "specified group does not exist"),
+// so it can run outside the service. It uses the SAME non-dynamic session + fixed GUID as the live
+// arm, so it exercises the identical persistence + cleanup path. Recover with Clean() /
+// `--wfp-clean` / reboot.
+func ArmBlockAll() error {
+	_ = removePersistentObjects() // clean any prior block first (self-heal)
+	session, err := createWfpSession()
+	if err != nil {
+		return wrapErr(err)
+	}
+	err = runTransaction(session, func(session uintptr) error {
+		bo, err := registerBaseObjects(session) // provider + sublayer, fixed GUID
+		if err != nil {
+			return wrapErr(err)
+		}
+		return blockAll(session, bo, 0) // block everything — no permits
+	})
+	if err != nil {
+		fwpmEngineClose0(session)
+		return wrapErr(err)
+	}
+	fwpmEngineClose0(session) // close — non-dynamic objects persist
+	return nil
+}
 
 // removePersistentObjects is the crash-safe cleanup: it deletes EVERY WFP object under the
 // Tunnex fixed provider/sublayer — our filters (enumerated by provider), then the sublayer and
