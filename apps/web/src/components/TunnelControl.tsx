@@ -93,18 +93,6 @@ export function TunnelControl() {
         )}
       </div>
 
-      {/* S6.7: shown while a Windows full tunnel runs under the dev bypass. The kill-switch is a
-          PERSISTENT WFP block (survives a crash — fail-closed). Carries the on-box recovery command
-          so a stuck block is never a mystery. Never shown in production (the guard refuses). */}
-      {status.unsafe_dev_mode && (
-        <div className="mt-3 rounded-md border-2 border-amber-500/60 bg-amber-600/15 px-3 py-2 text-xs font-semibold text-amber-200">
-          ⚠ DEV PREVIEW — Windows full tunnel (behind the dev bypass; guard not yet lifted). The
-          kill-switch is a <strong>persistent</strong> WFP block that survives a crash (fail-closed).
-          If networking is ever stuck blocked, recover as admin with{" "}
-          <code className="rounded bg-black/30 px-1">tunnex-helper.exe --wfp-clean</code> (or reboot). Not yet a shipping configuration.
-        </div>
-      )}
-
       {revoked && (
         <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
           Your device was revoked or removed on the server. The local profile has been cleared — reconnecting will
@@ -170,9 +158,6 @@ function friendly(msg?: string): string {
   // full-tunnel device with this typed code — the UI mirrors it cleanly rather than
   // showing a raw status. (The refusal itself is S3.7; this is just the mapping.)
   if (m.includes("gateway_no_egress")) return "This gateway can't route full-tunnel internet traffic yet. Turn off full tunnel and reconnect.";
-  // S6.9: full tunnel isn't available on Windows yet (refused server-side at create AND
-  // by the Windows helper). Split tunnel works — this maps both refusals to one message.
-  if (m.includes("full_tunnel_unsupported")) return "Full tunnel isn't available on Windows yet. Turn off full tunnel and reconnect (split tunnel works).";
   if (m.includes("peer_resolution_needs_cgo") || m.includes("caller-auth")) return "The Tunnex helper is a dev/stub build — reinstall the signed helper.";
   if (m.includes("ECONNREFUSED") || m.includes("connect")) return "The Tunnex helper isn't running. Install/start it and try again.";
   return m;

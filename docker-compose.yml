@@ -53,10 +53,6 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
-      # S6.10 DEV-ONLY: lift the Windows full-tunnel create refusal to box-prove Story A.
-      # Default EMPTY = guard ON (production). Set to 1 only on a test box; the helper needs
-      # its own TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL too. Removed with the guard (Story B).
-      TUNNEX_ALLOW_WINDOWS_FULLTUNNEL: ${TUNNEX_ALLOW_WINDOWS_FULLTUNNEL:-}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_FROM: ${SMTP_FROM:-no-reply@tunnex.local}

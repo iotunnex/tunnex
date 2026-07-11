@@ -35,16 +35,6 @@ func main() {
 		return
 	}
 
-	// --wfp-arm-test (S6.7, DEV): deliberately arm a persistent block-all to wedge the box, so the
-	// escape hatch can be proven to un-wedge a genuinely dead box (the deliberate-red gate).
-	if len(os.Args) > 1 && os.Args[1] == "--wfp-arm-test" {
-		if err := wfpArmTest(); err != nil {
-			log.Fatalf("tunnex-helper --wfp-arm-test: %v", err)
-		}
-		fmt.Println("tunnex-helper: DEV — armed a PERSISTENT block-all WFP kill-switch; networking is now BLOCKED.")
-		fmt.Println("  Recover:  tunnex-helper.exe --wfp-clean   (or reboot — the service self-heals on start)")
-		return
-	}
 
 	// Under the Windows SCM the process must speak the service control protocol
 	// (svc.Run), not just run as a console program — else `sc start` times out (1053).

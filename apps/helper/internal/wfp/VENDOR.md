@@ -33,7 +33,7 @@ Behavioral deltas (S6.7 — the three approved changes; **filter set / `rules.go
    `netsh wfp show state` self-documents the escape hatch on a locked-out box. No filter effect.
 
 New Tunnex-only file: `tunnex.go` (fixed GUIDs, the delete/enum syscalls, `removePersistentObjects`,
-and the exported `Clean()` / `ArmBlockAll()`). `rules.go` (the filter set) is untouched.
+and the exported `Clean()`). `rules.go` (the filter set) is untouched.
 
 ## Upstream-sync obligation
 On any bump of `golang.zx2c4.com/wireguard/windows`, re-diff this copy against the new upstream

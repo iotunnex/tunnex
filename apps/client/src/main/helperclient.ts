@@ -39,10 +39,6 @@ export interface TunnelStatus {
   // The device's assigned tunnel address (from the loaded config, e.g.
   // "10.99.0.2/32"). MAIN attaches it — it's config, not a helper runtime stat.
   address?: string;
-  // S6.10: TRUE only when a Windows full tunnel is running under the dev bypass — the
-  // WFP kill-switch does NOT survive process death yet (Story B pending), so the box can
-  // leak on a hard kill. The renderer shows a LOUD banner. Never set in production.
-  unsafe_dev_mode?: boolean;
 }
 
 export interface HelperResponse {

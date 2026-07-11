@@ -124,11 +124,6 @@ type TunnelStatus struct {
 	LastHandshakeSec int64  `json:"last_handshake_sec,omitempty"` // unix seconds, 0 = never
 	RxBytes          uint64 `json:"rx_bytes,omitempty"`
 	TxBytes          uint64 `json:"tx_bytes,omitempty"`
-	// UnsafeDevMode is TRUE only when a Windows full tunnel is running under the S6.10
-	// dev bypass (TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL) — the WFP kill-switch does NOT yet
-	// survive process death (Story B / S6.7 pending), so the box can leak on a hard kill.
-	// The app surfaces this as a LOUD banner. Never set in production (the guard refuses).
-	UnsafeDevMode bool `json:"unsafe_dev_mode,omitempty"`
 }
 
 // ProtocolError is a typed helper error carrying a stable machine code.

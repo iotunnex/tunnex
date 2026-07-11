@@ -40,9 +40,6 @@ export interface TunnelStatus {
   rx_bytes?: number;
   tx_bytes?: number;
   address?: string; // the device's assigned tunnel address, e.g. "10.99.0.2/32"
-  // S6.10: TRUE only when a Windows full tunnel runs under the dev bypass — the WFP
-  // kill-switch does not survive a crash yet (Story B pending). Shows a loud banner.
-  unsafe_dev_mode?: boolean;
 }
 
 declare global {

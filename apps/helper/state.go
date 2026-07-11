@@ -204,14 +204,13 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 		return &ProtocolError{Code: "already_up", Msg: "a tunnel is already up"}
 	}
 	if err := s.be.Up(cfg); err != nil {
-		// A PRE-ARM rejection (the backend refused before touching anything — the S6.9
-		// Windows full-tunnel guard, code full_tunnel_unsupported) is a CLEAN rejection,
-		// NOT a fail-closed: nothing was armed, so leave the state Down and surface the
-		// code as-is. Otherwise the UI would falsely show "failed / kill-switch active"
-		// for a request that blocked nothing. Any OTHER error may have half-built the
-		// tunnel → fail closed.
+		// A PRE-ARM rejection (the backend refused BEFORE touching anything — e.g.
+		// full_tunnel_requires_dns) is a CLEAN rejection, NOT a fail-closed: nothing was
+		// armed, so leave the state Down and surface the code as-is. Otherwise the UI would
+		// falsely show "failed / kill-switch active" for a request that blocked nothing. Any
+		// OTHER error may have half-built the tunnel → fail closed.
 		var pe *ProtocolError
-		if errors.As(err, &pe) && pe.Code == "full_tunnel_unsupported" {
+		if errors.As(err, &pe) && (pe.Code == "full_tunnel_requires_dns" || pe.Code == "full_tunnel_unsupported") {
 			return err
 		}
 		// Partial bring-up may have created an interface/routes: fail closed so a
@@ -294,9 +293,7 @@ func (s *Supervisor) Status() (TunnelStatus, error) {
 	}
 	st, err := s.be.Stats()
 	if err != nil {
-		// Preserve the backend's status fields on error — notably UnsafeDevMode, so the
-		// loud dev-mode banner is not dropped when a transient stats read fails right after
-		// connect (review). The backend sets it even on its error return.
+		// Preserve the backend's status fields on a transient stats-read error.
 		st.State = string(StateUp)
 		return st, &ProtocolError{Code: "stats_failed", Msg: err.Error()}
 	}
