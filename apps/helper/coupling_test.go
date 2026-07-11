@@ -19,8 +19,14 @@ func TestWindowsBypassFlagRequiresGuard(t *testing.T) {
 	}
 	s := string(src)
 	hasFlag := strings.Contains(s, "TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL")
-	hasGuard := strings.Contains(s, `Code: "full_tunnel_unsupported"`)
+	// Require BOTH the refusal code AND the negated gating condition — so a logic-only
+	// weakening (guard code left in place but no longer gating the arm on the flag) is more
+	// likely to trip this too, not just a clean removal. The DEFINITIVE semantic check is
+	// the behavioral TestWindowsBackendRefusesFullTunnel (flag unset → refused), which runs
+	// on windows-latest and FAILS if the guard is disabled by default; this is the coupling
+	// backstop that ties the flag's existence to the guard's.
+	hasGuard := strings.Contains(s, `Code: "full_tunnel_unsupported"`) && strings.Contains(s, "!windowsFullTunnelAllowed()")
 	if hasFlag && !hasGuard {
-		t.Fatal("S6.10 coupling: the dev bypass flag is present without the full_tunnel_unsupported guard — the flag and guard must be removed TOGETHER (Story B lift), never the guard alone")
+		t.Fatal("S6.10 coupling: the dev bypass flag is present without the full_tunnel_unsupported guard gated on !windowsFullTunnelAllowed() — the flag and guard must be removed TOGETHER (Story B lift), never the guard alone")
 	}
 }
