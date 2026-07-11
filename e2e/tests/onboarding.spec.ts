@@ -187,11 +187,14 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   await page.getByLabel(/Gateway name/).fill("walk-gw");
   await page.getByRole("button", { name: "Generate join token" }).click();
 
-  // The one-time ceremony: amber modal, token shown, must be acknowledged.
-  await expect(page.getByText("Join token — shown once")).toBeVisible();
-  // The COMPLETE env line for a name-pinned token: token AND the (shell-quoted)
-  // pinned name — an unquoted space would truncate the value on paste.
-  await expect(page.locator("pre")).toHaveText(`TUNNEX_JOIN_TOKEN=${TOKEN} TUNNEX_NODE_NAME="walk-gw"`);
+  // The one-time ceremony: amber modal, command shown, must be acknowledged.
+  await expect(page.getByText("Enroll your gateway — run this once")).toBeVisible();
+  // The COMPLETE runnable command (S6.6 item 6): the token env AND the (shell-quoted)
+  // pinned name — an unquoted space would truncate the value on paste — followed by the
+  // `docker compose … --force-recreate node-agent` line the operator ran by heart in the POC.
+  await expect(page.locator("pre")).toHaveText(
+    `TUNNEX_JOIN_TOKEN=${TOKEN} TUNNEX_NODE_NAME="walk-gw" docker compose -f tunnex.yml up -d --force-recreate node-agent`,
+  );
   await expect(page.getByText(/pinned to the name/)).toBeVisible();
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   // Dismissed → the token is gone from the page (never re-served).
