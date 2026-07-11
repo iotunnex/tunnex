@@ -5,14 +5,33 @@ Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open al
 - **WireGuard** management (OpenVPN later), with a control-plane / data-plane split.
 - **Auth**: local users, Google & Microsoft SSO.
 - **Clients**: CLI first, then Electron for Windows & macOS.
-- **One command up**: `docker compose up` boots the whole stack and auto-generates every secret/key on first boot.
+- **One-command install**: a single `install.sh` brings up the whole stack from **prebuilt images** — no source build, no file edits — and auto-generates every secret/key on first boot.
 
 > The full product roadmap — every epic and story — lives in [`PLAN.md`](./PLAN.md). Point any session at it and name the current story (e.g. "we're on S1.3").
 
-## Quickstart
+## Deploy (self-host)
+
+On a server with **Docker Engine + the Compose v2 plugin** installed:
 
 ```bash
-cp .env.example .env      # or just run `make up`, which does this for you
+curl -fsSL https://raw.githubusercontent.com/iotunnex/tunnex/main/deploy/install.sh | sh
+```
+
+It asks exactly two things — your **public address** (the DNS name / public IP users and gateways
+reach) and **SMTP** (or skip) — generates the DB secret, writes a clean `./tunnex/.env`, pins a
+released version, and starts the stack from `ghcr.io/iotunnex/tunnex-*` images. No `git clone`, no
+`--build`, no editing compose. When it finishes it prints your dashboard URL and how to enroll a
+gateway.
+
+- Dashboard → `http://<your-address>/`
+- Config lives in `./tunnex/.env` (edit values there; never hand-edit `tunnex.yml`).
+- Upgrade: bump `TUNNEX_VERSION` to a newer tag, then `docker compose -f tunnex.yml pull && up -d`.
+
+## Develop locally
+
+The dev stack builds from source (Mailpit for email, no public address):
+
+```bash
 make up                   # build + start postgres, redis, api, web, nginx, node-agent, mailpit
 ```
 
@@ -21,6 +40,8 @@ Then:
 - App shell → http://localhost
 - API health → http://localhost/healthz
 - Mailpit (dev email inbox) → http://localhost:8025
+
+Node ≥20 is required for the web/client workspaces (pinned via `.nvmrc` + `engine-strict`).
 
 Tear down:
 
