@@ -204,13 +204,14 @@ func (s *Supervisor) Up(cfg *TunnelConfig) error {
 		return &ProtocolError{Code: "already_up", Msg: "a tunnel is already up"}
 	}
 	if err := s.be.Up(cfg); err != nil {
-		// A PRE-ARM rejection (the backend refused BEFORE touching anything — e.g.
-		// full_tunnel_requires_dns) is a CLEAN rejection, NOT a fail-closed: nothing was
-		// armed, so leave the state Down and surface the code as-is. Otherwise the UI would
-		// falsely show "failed / kill-switch active" for a request that blocked nothing. Any
-		// OTHER error may have half-built the tunnel → fail closed.
+		// A PRE-ARM rejection (the backend refused/failed BEFORE arming anything, so NOTHING is
+		// blocking — full_tunnel_requires_dns, or wfp_arm_failed when the Windows WFP arm's
+		// transaction aborted) is a CLEAN rejection, NOT a fail-closed: leave the state Down and
+		// surface the code as-is. Otherwise the UI would falsely show "failed / kill-switch
+		// active" for a request that blocked nothing (a false fail-closed while traffic flows
+		// cleartext). Any OTHER error may have half-built an ARMED tunnel → fail closed.
 		var pe *ProtocolError
-		if errors.As(err, &pe) && (pe.Code == "full_tunnel_requires_dns" || pe.Code == "full_tunnel_unsupported") {
+		if errors.As(err, &pe) && (pe.Code == "full_tunnel_requires_dns" || pe.Code == "wfp_arm_failed") {
 			return err
 		}
 		// Partial bring-up may have created an interface/routes: fail closed so a

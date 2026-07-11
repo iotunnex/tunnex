@@ -3,6 +3,7 @@
 package wfp
 
 import (
+	"errors"
 	"syscall"
 	"unsafe"
 
@@ -29,24 +30,12 @@ const providerRecoveryHint = "Tunnex full-tunnel kill-switch — to remove, run 
 
 // ── S6.7 delta: enumerate-and-delete cleanup + the FWPM delete/enum syscalls upstream lacked ─
 
-// wtFwpmFilterEnumTemplate0 mirrors FWPM_FILTER_ENUM_TEMPLATE0 (amd64/arm64 layout — the Windows
-// client is x64). Only providerKey is set: a null layerKey enumerates that provider's filters
-// across all layers. actionMask 0xFFFFFFFF matches any action.
-type wtFwpmFilterEnumTemplate0 struct {
-	providerKey             *windows.GUID
-	layerKey                windows.GUID
-	enumType                int32 // FWP_FILTER_ENUM_TYPE; FWP_FILTER_ENUM_OVERLAPPING == 0
-	flags                   uint32
-	providerContextTemplate uintptr
-	numFilterConditions     uint32
-	_                       uint32 // pad so the next pointer is 8-aligned (64-bit)
-	filterCondition         uintptr
-	actionMask              uint32
-	_                       uint32 // pad
-	calloutKey              *windows.GUID
-}
-
-const cFWP_FILTER_ENUM_OVERLAPPING = 0
+// WFP status codes treated as the idempotent "already gone" case by cleanup (not a failure).
+const (
+	cFWP_E_FILTER_NOT_FOUND   = 0x80320003
+	cFWP_E_SUBLAYER_NOT_FOUND = 0x80320007
+	cFWP_E_PROVIDER_NOT_FOUND = 0x80320008
+)
 
 var (
 	procFwpmFilterCreateEnumHandle0  = modfwpuclnt.NewProc("FwpmFilterCreateEnumHandle0")
@@ -57,8 +46,24 @@ var (
 	procFwpmProviderDeleteByKey0     = modfwpuclnt.NewProc("FwpmProviderDeleteByKey0")
 )
 
-func fwpmFilterCreateEnumHandle0(engine uintptr, template *wtFwpmFilterEnumTemplate0, enumHandle *uintptr) error {
-	r1, _, e1 := syscall.SyscallN(procFwpmFilterCreateEnumHandle0.Addr(), engine, uintptr(unsafe.Pointer(template)), uintptr(unsafe.Pointer(enumHandle)))
+// isWfpNotFound reports whether err is a WFP "object not found" status — the idempotent case
+// (already deleted / never existed), which is SUCCESS for cleanup. Any other delete error means
+// the object is still present (e.g. still referenced) → cleanup must surface it, not swallow it.
+func isWfpNotFound(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		switch uint32(errno) {
+		case cFWP_E_FILTER_NOT_FOUND, cFWP_E_SUBLAYER_NOT_FOUND, cFWP_E_PROVIDER_NOT_FOUND:
+			return true
+		}
+	}
+	return false
+}
+
+// fwpmFilterCreateEnumHandle0 is called only with a NIL template (enumerate ALL filters; we match
+// our provider in Go — see collectTunnexFilterIDs), so template is a raw pointer (0 = NULL).
+func fwpmFilterCreateEnumHandle0(engine, template uintptr, enumHandle *uintptr) error {
+	r1, _, e1 := syscall.SyscallN(procFwpmFilterCreateEnumHandle0.Addr(), engine, template, uintptr(unsafe.Pointer(enumHandle)))
 	if r1 != 0 {
 		return errnoErr(e1)
 	}
@@ -129,18 +134,31 @@ func removePersistentObjects() error {
 	ids := collectTunnexFilterIDs(engine)
 
 	// Phase 2 (write): delete filters, then sublayer, then provider, in one transaction. Order
-	// matters — WFP refuses to delete a sublayer/provider still referenced by filters.
+	// matters — WFP refuses to delete a sublayer/provider still referenced by filters. Errors
+	// are TRACKED (not swallowed): "not found" is idempotent success, but any OTHER error means
+	// an object is still present (e.g. the sublayer is still referenced because a filter delete
+	// failed) → the block is NOT fully removed and the caller must know (else a silent strand /
+	// orphaned provider that wedges the next arm).
 	if err := fwpmTransactionBegin0(engine, 0); err != nil {
 		return wrapErr(err)
 	}
-	for _, id := range ids {
-		_ = fwpmFilterDeleteById0(engine, id) // ignore not-found
+	var firstErr error
+	note := func(err error) {
+		if err != nil && !isWfpNotFound(err) && firstErr == nil {
+			firstErr = err
+		}
 	}
-	_ = fwpmSubLayerDeleteByKey0(engine, &tunnexSublayerGUID)
-	_ = fwpmProviderDeleteByKey0(engine, &tunnexProviderGUID)
+	for _, id := range ids {
+		note(fwpmFilterDeleteById0(engine, id))
+	}
+	note(fwpmSubLayerDeleteByKey0(engine, &tunnexSublayerGUID))
+	note(fwpmProviderDeleteByKey0(engine, &tunnexProviderGUID))
 	if err := fwpmTransactionCommit0(engine); err != nil {
 		_ = fwpmTransactionAbort0(engine)
 		return wrapErr(err)
+	}
+	if firstErr != nil {
+		return wrapErr(firstErr)
 	}
 	return nil
 }
@@ -152,7 +170,7 @@ func removePersistentObjects() error {
 // what was collected so far.
 func collectTunnexFilterIDs(engine uintptr) []uint64 {
 	var enumHandle uintptr
-	if err := fwpmFilterCreateEnumHandle0(engine, nil, &enumHandle); err != nil {
+	if err := fwpmFilterCreateEnumHandle0(engine, 0, &enumHandle); err != nil {
 		return nil
 	}
 	defer fwpmFilterDestroyEnumHandle0(engine, enumHandle)

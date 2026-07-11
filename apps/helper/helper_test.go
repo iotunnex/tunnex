@@ -501,25 +501,27 @@ func TestDeadManOrphanClampedToFull(t *testing.T) {
 	}
 }
 
-// TestUpUnsupportedFullTunnelIsCleanReject (S6.9b): a backend that refuses full-tunnel
-// with full_tunnel_unsupported (the Windows guard, which returns BEFORE arming anything)
-// must be a CLEAN rejection — the Supervisor returns the code as-is, stays StateDown, and
-// does NOT fail-closed. Otherwise the UI shows a phantom "failed / kill-switch active" for
-// a request that blocked nothing.
-func TestUpUnsupportedFullTunnelIsCleanReject(t *testing.T) {
-	fb := &fakeBackend{upErr: &ProtocolError{Code: "full_tunnel_unsupported", Msg: "not on windows"}}
-	s := NewSupervisor(fb)
+// TestUpPreArmRejectIsCleanReject (S6.9b/S6.7): a backend that fails BEFORE arming anything
+// (e.g. full_tunnel_requires_dns, or wfp_arm_failed when the Windows WFP arm transaction aborts)
+// must be a CLEAN rejection — the Supervisor returns the code as-is, stays StateDown, and does
+// NOT fail-closed. Otherwise the UI shows a phantom "failed / kill-switch active" for a request
+// that blocked nothing (a false fail-closed while traffic flows cleartext).
+func TestUpPreArmRejectIsCleanReject(t *testing.T) {
+	for _, code := range []string{"full_tunnel_requires_dns", "wfp_arm_failed"} {
+		fb := &fakeBackend{upErr: &ProtocolError{Code: code, Msg: "pre-arm"}}
+		s := NewSupervisor(fb)
 
-	err := s.Up(fullConfig())
-	var pe *ProtocolError
-	if !errors.As(err, &pe) || pe.Code != "full_tunnel_unsupported" {
-		t.Fatalf("want raw full_tunnel_unsupported (not wrapped as tunnel_up_failed), got %v", err)
-	}
-	if fb.failClosed != 0 {
-		t.Fatalf("a pre-arm refusal must NOT fail closed: failClosed=%d", fb.failClosed)
-	}
-	if s.State() != StateDown {
-		t.Fatalf("state must stay down after a clean refusal, got %s", s.State())
+		err := s.Up(fullConfig())
+		var pe *ProtocolError
+		if !errors.As(err, &pe) || pe.Code != code {
+			t.Fatalf("%s: want the raw code (not wrapped as tunnel_up_failed), got %v", code, err)
+		}
+		if fb.failClosed != 0 {
+			t.Fatalf("%s: a pre-arm reject must NOT fail closed: failClosed=%d", code, fb.failClosed)
+		}
+		if s.State() != StateDown {
+			t.Fatalf("%s: state must stay down after a clean reject, got %s", code, s.State())
+		}
 	}
 }
 

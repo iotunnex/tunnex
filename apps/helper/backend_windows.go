@@ -131,17 +131,21 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	// process, and blocks everything else. NOTE: the WFP permit lets our encrypted
 	// packets PASS the filter, but it does NOT stop the routing table from sending them
 	// into the tunnel — so a full tunnel STILL needs the physical endpoint route pinned
-	// below (review #1). The filters are kernel-resident and survive process death;
-	// removed by DisableFirewall (Down / CleanStale) via the well-known provider GUID.
-	// Parse the tunnel DNS once (used for BOTH the WFP DNS-restrict below and SetDNS after
-	// addressing). Story A: passing these as EnableFirewall's restrictToDNSServers runs its
-	// blockDNS so DNS can ONLY egress to the tunnel resolver (the current nil skipped it →
-	// a leak out other NICs). The 2nd param STAYS false (doNotRestrict — true would disarm
-	// the whole kill-switch); the fix is the 3rd param.
+	// below (review #1). The filters are kernel-resident and survive process death; removed by
+	// wfp.DisableFirewall (Down / CleanStale / --wfp-clean) by enumerate-and-delete under our
+	// fixed provider GUID. dnsRestrict (parsed up front) is EnableFirewall's restrictToDNSServers
+	// so blockDNS forces DNS to the tunnel resolver only; the 2nd param STAYS false (doNotRestrict
+	// — true would disarm the whole kill-switch).
 	if cfg.FullTunnel {
 		if err := wfp.EnableFirewall(luid, false, dnsRestrict); err != nil {
 			_ = tdev.Close()
-			return fmt.Errorf("arm kill-switch (WFP): %w", err)
+			// The kill-switch DID NOT arm → NOTHING is blocking (EnableFirewall's transaction
+			// aborts on failure, so there's no partial block). This must NOT be reported as
+			// fail-closed: FailClosed() here would be a no-op (b.dev is unset) and the Supervisor
+			// would set StateFailed = "kill-switch installed" while the box is on cleartext
+			// routing (review — false fail-closed). Surface a CLEAN pre-arm code so the Supervisor
+			// stays Down and the UI honestly says "not connected", not "protected".
+			return &ProtocolError{Code: "wfp_arm_failed", Msg: fmt.Sprintf("could not arm the Windows kill-switch: %v", err)}
 		}
 		b.armed = true
 	}
@@ -288,7 +292,13 @@ func (b *windowsBackend) Down() error {
 		b.epPinned = false
 	}
 	if b.armed {
-		wfp.DisableFirewall()
+		// SURFACE a cleanup failure (review): the persistent block does NOT auto-release with a
+		// session anymore, so if enumerate-and-delete fails the block stays armed and the host
+		// has zero egress while the UI shows "Disconnected". Report it (with the recovery hint)
+		// instead of a silent strand; keep b.armed=true so a later CleanStale/reboot still targets it.
+		if err := wfp.Clean(); err != nil {
+			return fmt.Errorf("removing the kill-switch failed — networking may be blocked; recover with `tunnex-helper --wfp-clean` (or reboot): %w", err)
+		}
 		b.armed = false
 	}
 	return nil
@@ -309,18 +319,17 @@ func (b *windowsBackend) FailClosed() error {
 }
 
 func (b *windowsBackend) CleanStale() error {
-	// Release a WFP kill-switch stranded by a PRIOR process that exited without a
-	// graceful Down (crash / kill). DisableFirewall removes every object under our
-	// well-known provider GUID — idempotent, no persisted token needed. This is the
-	// startup self-heal that un-strands a Windows host after an abnormal exit.
+	// Release a PERSISTENT Tunnex WFP block stranded by a PRIOR process that exited without a
+	// graceful Down (crash / kill). wfp.Clean enumerate-and-deletes every object under our fixed
+	// provider GUID — idempotent (not-found = success). This is the reboot/startup RECOVERY: the
+	// service is auto-start, so a boot runs it before serving and un-wedges the host (same code
+	// path as --wfp-clean). RETURN the error — a boot-time self-heal that FAILS must not be
+	// silent; the Supervisor's SelfHeal logs it (main.go), so a wedged host is diagnosable.
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// S6.7: remove the PERSISTENT Tunnex WFP block a prior crash left. This is the
-	// reboot/startup RECOVERY — the service is auto-start, so a boot runs this before serving and
-	// un-wedges the host. Same code path as the --wfp-clean escape hatch.
-	_ = wfp.Clean()
+	err := wfp.Clean()
 	b.armed = false
-	return nil
+	return err
 }
 
 func (b *windowsBackend) Stats() (TunnelStatus, error) {
