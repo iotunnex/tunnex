@@ -93,13 +93,15 @@ export function TunnelControl() {
         )}
       </div>
 
-      {/* S6.10: loud, unmissable warning while a Windows full tunnel runs under the dev
-          bypass — the WFP kill-switch does NOT survive a crash yet (Story B pending), so a
-          hard kill can leak cleartext. Never shown in production (the guard refuses). */}
+      {/* S6.7: shown while a Windows full tunnel runs under the dev bypass. The kill-switch is a
+          PERSISTENT WFP block (survives a crash — fail-closed). Carries the on-box recovery command
+          so a stuck block is never a mystery. Never shown in production (the guard refuses). */}
       {status.unsafe_dev_mode && (
-        <div className="mt-3 rounded-md border-2 border-red-500/60 bg-red-600/20 px-3 py-2 text-xs font-semibold text-red-200">
-          ⚠ UNSAFE DEV MODE — the Windows full-tunnel kill-switch does <strong>not</strong> persist on crash. If this
-          process is hard-killed, your traffic can leak in cleartext. Development only — not a shipping configuration.
+        <div className="mt-3 rounded-md border-2 border-amber-500/60 bg-amber-600/15 px-3 py-2 text-xs font-semibold text-amber-200">
+          ⚠ DEV PREVIEW — Windows full tunnel (behind the dev bypass; guard not yet lifted). The
+          kill-switch is a <strong>persistent</strong> WFP block that survives a crash (fail-closed).
+          If networking is ever stuck blocked, recover as admin with{" "}
+          <code className="rounded bg-black/30 px-1">tunnex-helper.exe --wfp-clean</code> (or reboot). Not yet a shipping configuration.
         </div>
       )}
 

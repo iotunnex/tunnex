@@ -14,7 +14,6 @@ import (
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
-	"golang.zx2c4.com/wireguard/windows/tunnel/firewall"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
@@ -60,14 +59,14 @@ func hasV6Default(allowedIPs []string) bool {
 	return false
 }
 
-// windowsBackend implements Backend on Windows: wireguard-go over a wintun adapter,
-// a WFP kill-switch (the official wireguard-windows `firewall` package — the exact
-// mechanism the WireGuard Windows client uses for "block untunneled traffic"), and
-// winipcfg for addressing/routes. It mirrors backend_darwin's ordering and the
-// BOUNDED fail-closed model: the WFP sublayer is KERNEL-RESIDENT (survives process
-// death); Down and CleanStale remove it by the well-known provider GUID
-// (firewall.DisableFirewall — idempotent, no persisted token needed, the GUID IS the
-// durable key); the Supervisor's dead-man bounds an un-recovered crash.
+// windowsBackend implements Backend on Windows: wireguard-go over a wintun adapter, a WFP
+// kill-switch (the vendored internal/wfp — the wireguard-windows filter set on a S6.7 PERSISTENT
+// non-dynamic session + fixed provider GUID, so the block genuinely survives process death), and
+// winipcfg for addressing/routes. It mirrors backend_darwin's ordering and the BOUNDED
+// fail-closed model: the WFP objects are KERNEL-RESIDENT and outlive the process; Down / CleanStale
+// / `tunnex-helper --wfp-clean` remove them by enumerate-and-delete under our fixed provider GUID
+// (idempotent, no persisted token — the GUID IS the durable key); the Supervisor's dead-man + the
+// auto-start service's startup CleanStale + reboot bound an un-recovered crash.
 type windowsBackend struct {
 	mu     sync.Mutex
 	dev    *device.Device
@@ -126,11 +125,10 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	}
 	cfg.Endpoint = ep
 
-	// CLEAN any stale WFP kill-switch from a prior FailClosed/crash before (re)arming:
-	// EnableFirewall on already-registered GUIDs fails ALREADY_EXISTS (review #4), and a
-	// stale full-tunnel block must not persist under a new SPLIT tunnel (review #6).
-	// Idempotent by provider GUID.
-	firewall.DisableFirewall()
+	// CLEAN any stale Tunnex WFP kill-switch (S6.7: PERSISTENT — survives a prior crash) before
+	// (re)arming: a re-arm with our fixed GUID would else fail ALREADY_EXISTS, and a stale
+	// full-tunnel block must not persist under a new SPLIT tunnel. Idempotent enumerate-and-delete.
+	wfp.DisableFirewall()
 	b.armed = false
 
 	tdev, err := tun.CreateTUN(wintunAdapter, deviceMTU(cfg))
@@ -158,7 +156,7 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	// a leak out other NICs). The 2nd param STAYS false (doNotRestrict — true would disarm
 	// the whole kill-switch); the fix is the 3rd param.
 	if cfg.FullTunnel {
-		if err := firewall.EnableFirewall(luid, false, dnsRestrict); err != nil {
+		if err := wfp.EnableFirewall(luid, false, dnsRestrict); err != nil {
 			_ = tdev.Close()
 			return fmt.Errorf("arm kill-switch (WFP): %w", err)
 		}
@@ -307,7 +305,7 @@ func (b *windowsBackend) Down() error {
 		b.epPinned = false
 	}
 	if b.armed {
-		firewall.DisableFirewall()
+		wfp.DisableFirewall()
 		b.armed = false
 	}
 	return nil
@@ -334,7 +332,6 @@ func (b *windowsBackend) CleanStale() error {
 	// startup self-heal that un-strands a Windows host after an abnormal exit.
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	firewall.DisableFirewall() // upstream DYNAMIC block (live full-tunnel, Phase A) — no-op if none
 	// S6.7: remove the PERSISTENT Tunnex WFP block a prior crash / --wfp-arm-test left. This is the
 	// reboot/startup RECOVERY — the service is auto-start, so a boot runs this before serving and
 	// un-wedges the host. Same code path as the --wfp-clean escape hatch.
