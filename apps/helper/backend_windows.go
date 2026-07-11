@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tunnexio/tunnex/apps/helper/internal/wfp"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -333,7 +334,11 @@ func (b *windowsBackend) CleanStale() error {
 	// startup self-heal that un-strands a Windows host after an abnormal exit.
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	firewall.DisableFirewall()
+	firewall.DisableFirewall() // upstream DYNAMIC block (live full-tunnel, Phase A) — no-op if none
+	// S6.7: remove the PERSISTENT Tunnex WFP block a prior crash / --wfp-arm-test left. This is the
+	// reboot/startup RECOVERY — the service is auto-start, so a boot runs this before serving and
+	// un-wedges the host. Same code path as the --wfp-clean escape hatch.
+	_ = wfp.Clean()
 	b.armed = false
 	return nil
 }

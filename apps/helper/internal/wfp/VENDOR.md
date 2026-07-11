@@ -25,7 +25,15 @@ Behavioral deltas (S6.7 — the three approved changes; **filter set / `rules.go
    `windows.GenerateGUID()` (the durable key cleanup enumerates by).
 3. **Enumerate-and-delete cleanup** — `DisableFirewall` deletes our filters (enumerated by provider),
    then the sublayer + provider by key, instead of just closing the session. Adds the FWPM
-   delete/enum syscall wrappers upstream never had.
+   delete/enum syscall wrappers upstream never had (`tunnex.go`). `EnableFirewall` cleans first
+   (so re-arm self-heals past ALREADY_EXISTS) and CLOSES the session after commit (objects persist);
+   the `wfpSession` global + the "already enabled" `errors.New` are removed.
+4. **Display names (discoverability, non-logic)** — provider/sublayer/session display data renamed
+   `WireGuard*` → `Tunnex*`, and the provider DESCRIPTION carries the literal recovery command so
+   `netsh wfp show state` self-documents the escape hatch on a locked-out box. No filter effect.
+
+New Tunnex-only file: `tunnex.go` (fixed GUIDs, the delete/enum syscalls, `removePersistentObjects`,
+and the exported `Clean()` / `ArmBlockAll()`). `rules.go` (the filter set) is untouched.
 
 ## Upstream-sync obligation
 On any bump of `golang.zx2c4.com/wireguard/windows`, re-diff this copy against the new upstream
