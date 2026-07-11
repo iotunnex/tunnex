@@ -192,3 +192,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # S6.6 pipe-safe install: on a v* release tag, attach install.sh + its SHA256 as release assets so
+  # the docs can offer a download-verify-inspect-run path (the security-conscious default) and the
+  # marketing site can serve the SAME single script — it must never fork or hand-maintain a copy.
+  release-assets:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [gates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checksum install.sh (bare filename so `sha256sum -c` works in the download dir)
+        working-directory: deploy
+        run: sha256sum install.sh > install.sh.sha256
+      - name: Attach install.sh + checksum to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" deploy/install.sh deploy/install.sh.sha256 --clobber

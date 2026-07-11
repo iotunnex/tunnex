@@ -966,7 +966,16 @@ present — detect and warn/refuse rather than silently downgrade.
   for exactly two things** (public address; SMTP-or-skip) and writes a clean `.env`. This pulls most
   of **SB.1/SB.2 forward into reality** — those stories **shrink accordingly** (SB.1 Helm / SB.2
   hardening keep only what S6.6 doesn't cover). Depends on the CI publishing images (extend S6.0b) +
-  S6.5a for the client side.
+  S6.5a for the client side. **Pipe-safe from day one** (marketing's landing-page hero is
+  `curl -fsSL https://get.tunnex.io | sh` serving THIS script): `install.sh` is safe to pipe blind
+  into a root shell — idempotent (re-run reuses the DB password), write-then-move `.env` (never
+  half-written), non-TTY env-var overrides (`TUNNEX_PUBLIC_ADDR` / `TUNNEX_SMTP`), loopback refused at
+  the source, and a **SHA256 shipped alongside the release assets** so the docs offer a
+  download-verify-inspect-run path (the security-conscious default) beside the one-liner.
+  **OWNERSHIP (must not drift): there is exactly ONE `install.sh` — it lives in THIS repo (produced by
+  S6.6). The marketing site only SERVES it (release asset / static file); it must NEVER fork or
+  hand-maintain its own copy.** `get.tunnex.io` waits on the pending domain purchase — S6.6 does not
+  block on it; the script just gets a URL later.
 - **S6.7 Windows kill-switch persistence (from S6.5a's live-found gap)** — the Windows WFP full-tunnel
   kill-switch is NOT fail-closed on process death: wireguard-windows opens its WFP engine with
   `FWPM_SESSION_FLAG_DYNAMIC`, so filters auto-delete when the process exits → a hard-killed helper
