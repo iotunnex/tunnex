@@ -98,6 +98,25 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 		return &ProtocolError{Code: "full_tunnel_unsupported", Msg: "full tunnel is not available on Windows yet"}
 	}
 
+	// Parse the tunnel DNS UP FRONT (before creating any adapter/WFP state, so an invalid
+	// config fails cleanly). Used for BOTH EnableFirewall's restrictToDNSServers (blockDNS)
+	// and the adapter SetDNS below. useV6DNS gates the v6 SetDNS AND the v6 WFP-permit
+	// together, so the permitted resolver set exactly matches what the adapter uses (no v6
+	// resolver permitted-but-never-set); v6 DNS only when v6 is tunnelled.
+	dnsV4, dnsV6, _ := dnsAddrs(cfg.DNS)
+	useV6DNS := len(dnsV6) > 0 && hasV6Default(cfg.AllowedIPs)
+	dnsRestrict := append([]netip.Addr{}, dnsV4...)
+	if useV6DNS {
+		dnsRestrict = append(dnsRestrict, dnsV6...)
+	}
+	// A full tunnel with NO usable DNS server would block ALL DNS (the base WFP block drops
+	// port 53) with no tunnel resolver set → a silent, total resolution outage. Refuse up
+	// front. config.go always supplies one; this guards the invariant so a future or
+	// hand-crafted empty-DNS full-tunnel config can't blackhole resolution (review).
+	if cfg.FullTunnel && len(dnsRestrict) == 0 {
+		return &ProtocolError{Code: "full_tunnel_requires_dns", Msg: "full tunnel requires a DNS server"}
+	}
+
 	// Resolve a hostname endpoint to ONE IP so the WFP pass, the endpoint route, and
 	// wireguard-go all pin the same address (review #10).
 	ep, err := resolveEndpoint(cfg.Endpoint)
@@ -137,9 +156,8 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	// blockDNS so DNS can ONLY egress to the tunnel resolver (the current nil skipped it →
 	// a leak out other NICs). The 2nd param STAYS false (doNotRestrict — true would disarm
 	// the whole kill-switch); the fix is the 3rd param.
-	dnsV4, dnsV6, dnsAll := dnsAddrs(cfg.DNS)
 	if cfg.FullTunnel {
-		if err := firewall.EnableFirewall(luid, false, dnsAll); err != nil {
+		if err := firewall.EnableFirewall(luid, false, dnsRestrict); err != nil {
 			_ = tdev.Close()
 			return fmt.Errorf("arm kill-switch (WFP): %w", err)
 		}
@@ -220,7 +238,7 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 				return fmt.Errorf("set tunnel DNS (v4): %w", err)
 			}
 		}
-		if len(dnsV6) > 0 && hasV6Default(cfg.AllowedIPs) {
+		if useV6DNS {
 			if err := wl.SetDNS(winipcfg.AddressFamily(windows.AF_INET6), dnsV6, nil); err != nil {
 				dev.Close()
 				return fmt.Errorf("set tunnel DNS (v6): %w", err)
@@ -326,14 +344,15 @@ func (b *windowsBackend) Stats() (TunnelStatus, error) {
 	if b.dev == nil {
 		return TunnelStatus{State: string(StateDown)}, nil
 	}
+	// UnsafeDevMode reflects a STANDING condition (a full tunnel armed under the dev flag),
+	// not a per-stat value — so it must be reported even when IpcGet fails, or the loud
+	// banner would be missing right after connect if the first stats read errors (review).
+	unsafe := b.armed && windowsFullTunnelAllowed()
 	get, err := b.dev.IpcGet()
 	if err != nil {
-		return TunnelStatus{Interface: wintunAdapter}, err
+		return TunnelStatus{Interface: wintunAdapter, UnsafeDevMode: unsafe}, err
 	}
 	st := parseStats(get, wintunAdapter)
-	// Surface the UNSAFE dev bypass so the app shows a loud banner: a full tunnel armed
-	// (b.armed) under the dev flag has a kill-switch that does NOT survive a hard kill
-	// (Story B pending). Never true in production (the guard refuses full tunnel).
-	st.UnsafeDevMode = b.armed && windowsFullTunnelAllowed()
+	st.UnsafeDevMode = unsafe
 	return st, nil
 }

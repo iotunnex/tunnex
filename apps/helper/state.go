@@ -294,7 +294,11 @@ func (s *Supervisor) Status() (TunnelStatus, error) {
 	}
 	st, err := s.be.Stats()
 	if err != nil {
-		return TunnelStatus{State: string(StateUp)}, &ProtocolError{Code: "stats_failed", Msg: err.Error()}
+		// Preserve the backend's status fields on error — notably UnsafeDevMode, so the
+		// loud dev-mode banner is not dropped when a transient stats read fails right after
+		// connect (review). The backend sets it even on its error return.
+		st.State = string(StateUp)
+		return st, &ProtocolError{Code: "stats_failed", Msg: err.Error()}
 	}
 	st.State = string(StateUp)
 	return st, nil
