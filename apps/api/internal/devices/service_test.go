@@ -505,28 +505,3 @@ func TestFullTunnelRequiresGatewayEgress(t *testing.T) {
 		t.Fatalf("full-tunnel on egress-capable gateway should be allowed: %v", err)
 	}
 }
-
-// S6.9: full tunnel is refused for a WINDOWS client (full_tunnel_unsupported) until the
-// Windows parity + kill-switch-persistence work lands — even on an egress-capable gateway
-// (the platform guard precedes gateway_no_egress). Split-tunnel and non-Windows are fine.
-func TestFullTunnelRefusedOnWindows(t *testing.T) {
-	ctx, tx := txOrSkip(t)
-	svc, org, user, node := setup(t, tx, 10)
-	// Make the gateway egress-capable so the ONLY reason to refuse is the client platform.
-	if _, err := tx.Exec(ctx, `UPDATE nodes SET capabilities = '{"egress_nat":true}'::jsonb WHERE id = $1`, node); err != nil {
-		t.Fatalf("set capability: %v", err)
-	}
-	// Windows + full tunnel → full_tunnel_unsupported (NOT gateway_no_egress, NOT allowed).
-	_, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "win-ft", Platform: "win32", FullTunnel: true})
-	if code(err) != "full_tunnel_unsupported" {
-		t.Fatalf("windows full-tunnel: want full_tunnel_unsupported, got %v", err)
-	}
-	// Windows + split tunnel → allowed.
-	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "win-split", Platform: "win32", FullTunnel: false}); err != nil {
-		t.Fatalf("windows split-tunnel should be allowed: %v", err)
-	}
-	// macOS + full tunnel on the egress-capable gateway → allowed (guard is Windows-only).
-	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "mac-ft", Platform: "darwin", FullTunnel: true}); err != nil {
-		t.Fatalf("macOS full-tunnel on egress-capable gateway should be allowed: %v", err)
-	}
-}

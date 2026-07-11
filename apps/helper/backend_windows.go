@@ -5,7 +5,6 @@ package helper
 import (
 	"fmt"
 	"net/netip"
-	"os"
 	"strings"
 	"sync"
 
@@ -19,17 +18,6 @@ import (
 
 // wintunAdapter is the wintun adapter name the client tunnel uses.
 const wintunAdapter = "tunnex"
-
-// windowsFullTunnelAllowed reports whether the S6.9 Windows full-tunnel guard is bypassed
-// by the LOUD dev flag TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL=1. This exists ONLY to box-prove
-// Story A (traffic correctness) while the guard keeps production users safe. It is UNSAFE:
-// the WFP kill-switch does NOT survive process death until Story B (S6.7) lands, so a hard
-// kill can leak. Stats() reports unsafe_dev_mode when active so the app shows a banner. This
-// flag AND the guard are removed together when Story B's kill -9 pcap passes — enforced by
-// TestWindowsBypassFlagRequiresGuard so the flag can't silently outlive the guard.
-func windowsFullTunnelAllowed() bool {
-	return os.Getenv("TUNNEX_DANGEROUS_WINDOWS_FULLTUNNEL") == "1"
-}
 
 // dnsAddrs parses the config DNS strings into netip.Addr, split by family (v4/v6) plus a
 // combined list. Invalid entries are skipped (Validate already accepted the config).
@@ -88,15 +76,10 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// S6.9 GUARD (+ S6.10 dev bypass): full tunnel is NOT yet safe on Windows — Story A
-	// adds the DNS correctness below, but the WFP block still does not survive process
-	// death until Story B (S6.7). So refuse full tunnel UNLESS the loud dev flag is set
-	// (box-proving Story A while production users stay guarded — see
-	// docs/windows-fulltunnel-decisions.md). Remove the flag AND this guard together when
-	// Story B's kill -9 pcap passes.
-	if cfg.FullTunnel && !windowsFullTunnelAllowed() {
-		return &ProtocolError{Code: "full_tunnel_unsupported", Msg: "full tunnel is not available on Windows yet"}
-	}
+	// Full tunnel is supported on Windows (S6.7): the WFP kill-switch is a PERSISTENT block
+	// that survives process death — proven live (taskkill /F mid-tunnel → zero cleartext
+	// egress v4+v6 on a physical-NIC pcap → recovery restores). The S6.9 guard + both dev
+	// bypass flags were removed together when that gate passed.
 
 	// Parse the tunnel DNS UP FRONT (before creating any adapter/WFP state, so an invalid
 	// config fails cleanly). Used for BOTH EnableFirewall's restrictToDNSServers (blockDNS)
@@ -332,7 +315,7 @@ func (b *windowsBackend) CleanStale() error {
 	// startup self-heal that un-strands a Windows host after an abnormal exit.
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// S6.7: remove the PERSISTENT Tunnex WFP block a prior crash / --wfp-arm-test left. This is the
+	// S6.7: remove the PERSISTENT Tunnex WFP block a prior crash left. This is the
 	// reboot/startup RECOVERY — the service is auto-start, so a boot runs this before serving and
 	// un-wedges the host. Same code path as the --wfp-clean escape hatch.
 	_ = wfp.Clean()
@@ -346,15 +329,9 @@ func (b *windowsBackend) Stats() (TunnelStatus, error) {
 	if b.dev == nil {
 		return TunnelStatus{State: string(StateDown)}, nil
 	}
-	// UnsafeDevMode reflects a STANDING condition (a full tunnel armed under the dev flag),
-	// not a per-stat value — so it must be reported even when IpcGet fails, or the loud
-	// banner would be missing right after connect if the first stats read errors (review).
-	unsafe := b.armed && windowsFullTunnelAllowed()
 	get, err := b.dev.IpcGet()
 	if err != nil {
-		return TunnelStatus{Interface: wintunAdapter, UnsafeDevMode: unsafe}, err
+		return TunnelStatus{Interface: wintunAdapter}, err
 	}
-	st := parseStats(get, wintunAdapter)
-	st.UnsafeDevMode = unsafe
-	return st, nil
+	return parseStats(get, wintunAdapter), nil
 }
