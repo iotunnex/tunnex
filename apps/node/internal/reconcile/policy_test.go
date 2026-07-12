@@ -88,3 +88,51 @@ func TestRunOnceDeliversPolicyToSink(t *testing.T) {
 		t.Fatalf("policy must be delivered even when the backend converge fails: %+v", got)
 	}
 }
+
+// THE CONVERSE INDEPENDENCE DIRECTION: a policy/nftables apply FAILURE must not block
+// or abort the WG peer converge — a revocation (peer removal) still lands on the
+// interface while the egress leg is in persistent apply-failure. Structurally,
+// OnPolicy has no error path into runOnce (the sink swallows downstream failure, as
+// the real wiring does: SetPolicy + non-blocking kick; the nft apply errors in the
+// egress goroutine and surfaces via AppliedStatus, never back into this loop). This
+// test pins that CONTRACT so a refactor can't thread an error return through and
+// freeze one data-plane leg on the other's failure.
+func TestPolicyApplyFailureDoesNotBlockPeerConverge(t *testing.T) {
+	be := &fakeBackend{}
+	cl := &fakeClient{}
+	r := New(be, "priv", "pub", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// The sink simulates the real wiring with the egress leg PERSISTENTLY FAILING:
+	// every delivery runs a downstream apply that errors; the sink swallows it
+	// (exactly like SetPolicy+kick — failure surfaces via status, not a return).
+	applyAttempts := 0
+	r.OnPolicy(func(p *nodepolicy.Compiled) {
+		applyAttempts++
+		_ = errors.New("nft apply: rejected") // downstream failure, no path back
+	})
+
+	// Baseline: two peers converged.
+	cl.set(DesiredState{Version: 1,
+		Peers:  []Peer{{PublicKey: "A", AllowedIPs: []string{"10.99.0.10/32"}}, {PublicKey: "B", AllowedIPs: []string{"10.99.0.20/32"}}},
+		Policy: &nodepolicy.Compiled{Version: 1, Mode: nodepolicy.ModeEnforcing}})
+	if _, err := r.runOnce(context.Background(), cl); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if be.count() != 2 {
+		t.Fatalf("baseline peers = %d, want 2", be.count())
+	}
+
+	// REVOCATION while the policy leg fails: B is removed from desired state.
+	cl.set(DesiredState{Version: 2,
+		Peers:  []Peer{{PublicKey: "A", AllowedIPs: []string{"10.99.0.10/32"}}},
+		Policy: &nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing}})
+	if _, err := r.runOnce(context.Background(), cl); err != nil {
+		t.Fatalf("revocation converge must SUCCEED despite the failing policy leg: %v", err)
+	}
+	if be.count() != 1 {
+		t.Fatalf("revocation did not land: peers = %d, want 1 (B removed)", be.count())
+	}
+	if applyAttempts != 2 {
+		t.Fatalf("policy leg should have been attempted on both fetches, got %d", applyAttempts)
+	}
+}
