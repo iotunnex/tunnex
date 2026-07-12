@@ -14,6 +14,8 @@ type Querier interface {
 	// lint:cross-org — authorized by the invitation id obtained via its token, not
 	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
+	// ── group_members ───────────────────────────────────────────────────────────────
+	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) error
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
@@ -60,11 +62,23 @@ type Querier interface {
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
+	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
+	// ── resources (static destinations) ─────────────────────────────────────────────
+	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// Zero Trust policy model (S7.1). Enterprise feature; model-only (no data plane).
+	// All tenant tables scope by org_id (tenant-lint). Policy objects are hard-deleted
+	// (FK ON DELETE CASCADE), so there is no deleted_at filter here.
+	// ── user_groups (the rule SUBJECT) ──────────────────────────────────────────────
+	CreateUserGroup(ctx context.Context, arg CreateUserGroupParams) (UserGroup, error)
 	// lint:cross-org — keyed by device_id (the caller already authorized the device
 	// via its org). Clears a device's live status (on revoke) so a revoked device
 	// never reports stale online/handshake via the API.
 	DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error
+	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
+	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
+	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -92,9 +106,11 @@ type Querier interface {
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
+	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	GetUserGroup(ctx context.Context, arg GetUserGroupParams) (UserGroup, error)
 	// lint:cross-org — JIT resolves the capturing org from an email domain before an
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
@@ -114,6 +130,10 @@ type Querier interface {
 	// there are no two filtered reads to drift apart. Read under the org advisory
 	// lock so allocation and resize serialize on the same snapshot.
 	ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error)
+	// ── compiler inputs ─────────────────────────────────────────────────────────────
+	// Every active device owned by an active user, org-wide (all nodes) — the compiler
+	// resolves group destinations to these devices' /32s and keys allows by src /32.
+	ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops
@@ -129,6 +149,9 @@ type Querier interface {
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
+	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
+	// Compiler input: every (group, user) pair in the org.
+	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
@@ -148,6 +171,9 @@ type Querier interface {
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
+	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
 	// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
 	// deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
@@ -164,6 +190,7 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
@@ -192,6 +219,8 @@ type Querier interface {
 	// endpoint uses COALESCE(NULLIF(...)) so an agent that reports an empty endpoint
 	// (env unset on a restart) never clobbers a previously-good value.
 	SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (int64, error)
+	// ── org enforcement mode ────────────────────────────────────────────────────────
+	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
@@ -211,6 +240,8 @@ type Querier interface {
 	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)
 	// Slug is immutable after creation (S1.2); only name is updatable here.
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
+	UpdateResource(ctx context.Context, arg UpdateResourceParams) (Resource, error)
+	UpdateUserGroup(ctx context.Context, arg UpdateUserGroupParams) (UserGroup, error)
 	// lint:cross-org — keyed by node_id (agent is cert-authorized) + pubkey. Batched
 	// (pgx.Batch) so a whole report is a single round-trip; no per-peer write
 	// amplification and the write lands on the lean status table, not the devices
