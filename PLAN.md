@@ -1030,6 +1030,17 @@ present — detect and warn/refuse rather than silently downgrade.
 
 ## EPIC 8 — Site-to-Site Networking
 
+**LEDGERED at S7.2 (decide-before-code for S8.1/S8.2): Zero Trust policy MUST govern site-to-site
+traffic.** Sites/subnets become a policy DESTINATION KIND — extending the S7.1 model through the
+VERSIONED `policyspec.Compiled` artifact (bump the version; agents gate on it), not a side channel.
+**S8.2's propagated routes are compiled-policy OUTPUT, never a parallel enforcement path:** under
+`enforcing`, a site subnet is reachable ONLY via an explicit grant; under `off`, the legacy mesh —
+the same mode-as-compiler-input principle S7.1 locked (one code path, one artifact, mode selects
+what's compiled). **Deliberate-red at S8.2:** enforcing + zero grants → a propagated site subnet is
+ROUTED but DROPPED at the gateway forward chain (routing ≠ permission). Note **S10.3 already
+presumes this seam** ("expose in-cluster services via Zero Trust policies") — it is load-bearing for
+EPIC 10 too; do not build S8 routing without it.
+
 - **S8.1 Gateway/site model** — register site gateways (each a `tunnex-node` agent), subnet routing.
 - **S8.2 Route propagation** — advertise/accept routes between sites via WireGuard, reconciled by agents.
 - **S8.3 Site management UI** — add site, topology view, health.
@@ -1048,7 +1059,7 @@ present — detect and warn/refuse rather than silently downgrade.
   diverge from the S6.6 ledger (see docs/S6.6-decisions.md "external DB/Redis"); the master-key
   externalization decide-item is load-bearing here (external DB customers).
 - **S10.2 Operator + CRDs** *(enterprise)* — `TunnexPeer`, `TunnexRoute`; reconcile WG peers/routes as k8s resources — **reuses the S3.1 reconcile loop design**.
-- **S10.3 Cluster gateway** — expose in-cluster services to tunnex clients via Zero Trust policies (agent as in-cluster gateway).
+- **S10.3 Cluster gateway** — expose in-cluster services to tunnex clients via Zero Trust policies (agent as in-cluster gateway). **Depends on the EPIC 8 ledger seam** (sites/subnets as a policy destination kind in the versioned `Compiled` artifact) — in-cluster service exposure is the same "subnet reachable only via grant" mechanism.
 
 ## EPIC 11 — Production Hardening
 
