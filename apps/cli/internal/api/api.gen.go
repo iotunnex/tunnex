@@ -30,6 +30,12 @@ const (
 	ChangeRoleRequestRoleOwner  ChangeRoleRequestRole = "owner"
 )
 
+// Defines values for CreatePolicyRuleRequestDstKind.
+const (
+	CreatePolicyRuleRequestDstKindGroup    CreatePolicyRuleRequestDstKind = "group"
+	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -85,10 +91,36 @@ const (
 	ReservedCollision OrphanReason = "reserved_collision"
 )
 
+// Defines values for PolicyRuleDstKind.
+const (
+	PolicyRuleDstKindGroup    PolicyRuleDstKind = "group"
+	PolicyRuleDstKindResource PolicyRuleDstKind = "resource"
+)
+
+// Defines values for ResourceProtocol.
+const (
+	ResourceProtocolAny ResourceProtocol = "any"
+	ResourceProtocolTcp ResourceProtocol = "tcp"
+	ResourceProtocolUdp ResourceProtocol = "udp"
+)
+
+// Defines values for ResourceRequestProtocol.
+const (
+	ResourceRequestProtocolAny ResourceRequestProtocol = "any"
+	ResourceRequestProtocolTcp ResourceRequestProtocol = "tcp"
+	ResourceRequestProtocolUdp ResourceRequestProtocol = "udp"
+)
+
 // Defines values for SsoConfigViewProvider.
 const (
 	SsoConfigViewProviderGoogle    SsoConfigViewProvider = "google"
 	SsoConfigViewProviderMicrosoft SsoConfigViewProvider = "microsoft"
+)
+
+// Defines values for ZeroTrustModeMode.
+const (
+	Enforcing ZeroTrustModeMode = "enforcing"
+	Off       ZeroTrustModeMode = "off"
 )
 
 // Defines values for SsoCallbackParamsProvider.
@@ -117,6 +149,11 @@ type ActivityEntry struct {
 	CreatedAt  time.Time           `json:"created_at"`
 	TargetId   *string             `json:"target_id,omitempty"`
 	TargetType *string             `json:"target_type,omitempty"`
+}
+
+// AddGroupMemberRequest defines model for AddGroupMemberRequest.
+type AddGroupMemberRequest struct {
+	UserId openapi_types.UUID `json:"user_id"`
 }
 
 // AuditLogEntry defines model for AuditLogEntry.
@@ -247,6 +284,20 @@ type CreateOrganizationRequest struct {
 	Slug string `json:"slug"`
 }
 
+// CreatePolicyRuleRequest defines model for CreatePolicyRuleRequest.
+type CreatePolicyRuleRequest struct {
+	// DstGroupId Required when dst_kind=group.
+	DstGroupId *openapi_types.UUID            `json:"dst_group_id"`
+	DstKind    CreatePolicyRuleRequestDstKind `json:"dst_kind"`
+
+	// DstResourceId Required when dst_kind=resource.
+	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+}
+
+// CreatePolicyRuleRequestDstKind defines model for CreatePolicyRuleRequest.DstKind.
+type CreatePolicyRuleRequestDstKind string
+
 // Device defines model for Device.
 type Device struct {
 	AssignedIp      *string            `json:"assigned_ip,omitempty"`
@@ -340,6 +391,20 @@ type ErrorDetail struct {
 // GenericMessage defines model for GenericMessage.
 type GenericMessage struct {
 	Message string `json:"message"`
+}
+
+// GroupMember defines model for GroupMember.
+type GroupMember struct {
+	AddedAt time.Time          `json:"added_at"`
+	Email   string             `json:"email"`
+	Name    string             `json:"name"`
+	UserId  openapi_types.UUID `json:"user_id"`
+}
+
+// GroupRequest defines model for GroupRequest.
+type GroupRequest struct {
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
 }
 
 // HealthResponse defines model for HealthResponse.
@@ -474,6 +539,20 @@ type PasswordResetRequest struct {
 	Email openapi_types.Email `json:"email"`
 }
 
+// PolicyRule defines model for PolicyRule.
+type PolicyRule struct {
+	CreatedAt     time.Time           `json:"created_at"`
+	DstGroupId    *openapi_types.UUID `json:"dst_group_id"`
+	DstKind       PolicyRuleDstKind   `json:"dst_kind"`
+	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	Id            openapi_types.UUID  `json:"id"`
+	OrgId         openapi_types.UUID  `json:"org_id"`
+	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+}
+
+// PolicyRuleDstKind defines model for PolicyRule.DstKind.
+type PolicyRuleDstKind string
+
 // PoolCidrRequest defines model for PoolCidrRequest.
 type PoolCidrRequest struct {
 	// Cidr New pool CIDR (IPv4). Must contain or be contained by the current range.
@@ -485,6 +564,35 @@ type ResizeConflict struct {
 	OrphanCount int      `json:"orphan_count"`
 	Orphans     []Orphan `json:"orphans"`
 }
+
+// Resource defines model for Resource.
+type Resource struct {
+	// Cidr Destination prefix (e.g. 10.0.5.0/24, 0.0.0.0/0).
+	Cidr      string             `json:"cidr"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	OrgId     openapi_types.UUID `json:"org_id"`
+	PortHigh  *int               `json:"port_high"`
+	PortLow   *int               `json:"port_low"`
+	Protocol  ResourceProtocol   `json:"protocol"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// ResourceProtocol defines model for Resource.Protocol.
+type ResourceProtocol string
+
+// ResourceRequest defines model for ResourceRequest.
+type ResourceRequest struct {
+	Cidr     string                  `json:"cidr"`
+	Name     string                  `json:"name"`
+	PortHigh *int                    `json:"port_high"`
+	PortLow  *int                    `json:"port_low"`
+	Protocol ResourceRequestProtocol `json:"protocol"`
+}
+
+// ResourceRequestProtocol defines model for ResourceRequest.Protocol.
+type ResourceRequestProtocol string
 
 // SignupRequest defines model for SignupRequest.
 type SignupRequest struct {
@@ -530,6 +638,25 @@ type TokenRequest struct {
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
 }
+
+// UserGroup defines model for UserGroup.
+type UserGroup struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+	OrgId       openapi_types.UUID `json:"org_id"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+// ZeroTrustMode defines model for ZeroTrustMode.
+type ZeroTrustMode struct {
+	// Mode off = legacy blanket mesh; enforcing = default-deny + compiled allows.
+	Mode ZeroTrustModeMode `json:"mode"`
+}
+
+// ZeroTrustModeMode off = legacy blanket mesh; enforcing = default-deny + compiled allows.
+type ZeroTrustModeMode string
 
 // SsoCallbackParams defines parameters for SsoCallback.
 type SsoCallbackParams struct {
@@ -613,6 +740,15 @@ type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 // VerifyDomainClaimJSONRequestBody defines body for VerifyDomainClaim for application/json ContentType.
 type VerifyDomainClaimJSONRequestBody = DomainVerifyRequest
 
+// CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
+type CreateGroupJSONRequestBody = GroupRequest
+
+// UpdateGroupJSONRequestBody defines body for UpdateGroup for application/json ContentType.
+type UpdateGroupJSONRequestBody = GroupRequest
+
+// AddGroupMemberJSONRequestBody defines body for AddGroupMember for application/json ContentType.
+type AddGroupMemberJSONRequestBody = AddGroupMemberRequest
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = InviteRequest
 
@@ -628,11 +764,23 @@ type ChangeMemberRoleJSONRequestBody = ChangeRoleRequest
 // IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
 type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
+// CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
+type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
+
 // ResizePoolJSONRequestBody defines body for ResizePool for application/json ContentType.
 type ResizePoolJSONRequestBody = PoolCidrRequest
 
+// CreateResourceJSONRequestBody defines body for CreateResource for application/json ContentType.
+type CreateResourceJSONRequestBody = ResourceRequest
+
+// UpdateResourceJSONRequestBody defines body for UpdateResource for application/json ContentType.
+type UpdateResourceJSONRequestBody = ResourceRequest
+
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
+
+// SetZeroTrustModeJSONRequestBody defines body for SetZeroTrustMode for application/json ContentType.
+type SetZeroTrustModeJSONRequestBody = ZeroTrustMode
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -832,6 +980,33 @@ type ClientInterface interface {
 
 	VerifyDomainClaim(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListGroups request
+	ListGroups(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateGroupWithBody request with any body
+	CreateGroupWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateGroup(ctx context.Context, orgId openapi_types.UUID, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteGroup request
+	DeleteGroup(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateGroupWithBody request with any body
+	UpdateGroupWithBody(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateGroup(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListGroupMembers request
+	ListGroupMembers(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AddGroupMemberWithBody request with any body
+	AddGroupMemberWithBody(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AddGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body AddGroupMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RemoveGroupMember request
+	RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateInvitationWithBody request with any body
 	CreateInvitationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -875,10 +1050,37 @@ type ClientInterface interface {
 	// GetOrgOverview request
 	GetOrgOverview(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListPolicyRules request
+	ListPolicyRules(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePolicyRuleWithBody request with any body
+	CreatePolicyRuleWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreatePolicyRule(ctx context.Context, orgId openapi_types.UUID, body CreatePolicyRuleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeletePolicyRule request
+	DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ResizePoolWithBody request with any body
 	ResizePoolWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ResizePool(ctx context.Context, orgId openapi_types.UUID, body ResizePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListResources request
+	ListResources(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateResourceWithBody request with any body
+	CreateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateResource(ctx context.Context, orgId openapi_types.UUID, body CreateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteResource request
+	DeleteResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateResourceWithBody request with any body
+	UpdateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSsoConfig request
 	GetSsoConfig(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -887,6 +1089,14 @@ type ClientInterface interface {
 	SetSsoConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SetSsoConfig(ctx context.Context, orgId openapi_types.UUID, provider string, body SetSsoConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetZeroTrustMode request
+	GetZeroTrustMode(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetZeroTrustModeWithBody request with any body
+	SetZeroTrustModeWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetZeroTrustMode(ctx context.Context, orgId openapi_types.UUID, body SetZeroTrustModeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetHealth request
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1456,6 +1666,126 @@ func (c *Client) VerifyDomainClaim(ctx context.Context, orgId openapi_types.UUID
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListGroups(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListGroupsRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateGroupWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGroupRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateGroup(ctx context.Context, orgId openapi_types.UUID, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGroupRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteGroup(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteGroupRequest(c.Server, orgId, groupId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateGroupWithBody(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateGroupRequestWithBody(c.Server, orgId, groupId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateGroup(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateGroupRequest(c.Server, orgId, groupId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListGroupMembers(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListGroupMembersRequest(c.Server, orgId, groupId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddGroupMemberWithBody(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddGroupMemberRequestWithBody(c.Server, orgId, groupId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body AddGroupMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddGroupMemberRequest(c.Server, orgId, groupId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveGroupMemberRequest(c.Server, orgId, groupId, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) CreateInvitationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateInvitationRequestWithBody(c.Server, orgId, contentType, body)
 	if err != nil {
@@ -1648,6 +1978,54 @@ func (c *Client) GetOrgOverview(ctx context.Context, orgId openapi_types.UUID, r
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListPolicyRules(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPolicyRulesRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePolicyRuleWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePolicyRuleRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePolicyRule(ctx context.Context, orgId openapi_types.UUID, body CreatePolicyRuleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePolicyRuleRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeletePolicyRuleRequest(c.Server, orgId, ruleId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ResizePoolWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewResizePoolRequestWithBody(c.Server, orgId, contentType, body)
 	if err != nil {
@@ -1662,6 +2040,78 @@ func (c *Client) ResizePoolWithBody(ctx context.Context, orgId openapi_types.UUI
 
 func (c *Client) ResizePool(ctx context.Context, orgId openapi_types.UUID, body ResizePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewResizePoolRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListResources(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListResourcesRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateResourceRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateResource(ctx context.Context, orgId openapi_types.UUID, body CreateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateResourceRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteResourceRequest(c.Server, orgId, resourceId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateResourceRequestWithBody(c.Server, orgId, resourceId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateResourceRequest(c.Server, orgId, resourceId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1698,6 +2148,42 @@ func (c *Client) SetSsoConfigWithBody(ctx context.Context, orgId openapi_types.U
 
 func (c *Client) SetSsoConfig(ctx context.Context, orgId openapi_types.UUID, provider string, body SetSsoConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetSsoConfigRequest(c.Server, orgId, provider, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetZeroTrustMode(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetZeroTrustModeRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetZeroTrustModeWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetZeroTrustModeRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetZeroTrustMode(ctx context.Context, orgId openapi_types.UUID, body SetZeroTrustModeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetZeroTrustModeRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3022,6 +3508,325 @@ func NewVerifyDomainClaimRequestWithBody(server string, orgId openapi_types.UUID
 	return req, nil
 }
 
+// NewListGroupsRequest generates requests for ListGroups
+func NewListGroupsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateGroupRequest calls the generic CreateGroup builder with application/json body
+func NewCreateGroupRequest(server string, orgId openapi_types.UUID, body CreateGroupJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateGroupRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewCreateGroupRequestWithBody generates requests for CreateGroup with any type of body
+func NewCreateGroupRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteGroupRequest generates requests for DeleteGroup
+func NewDeleteGroupRequest(server string, orgId openapi_types.UUID, groupId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateGroupRequest calls the generic UpdateGroup builder with application/json body
+func NewUpdateGroupRequest(server string, orgId openapi_types.UUID, groupId openapi_types.UUID, body UpdateGroupJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateGroupRequestWithBody(server, orgId, groupId, "application/json", bodyReader)
+}
+
+// NewUpdateGroupRequestWithBody generates requests for UpdateGroup with any type of body
+func NewUpdateGroupRequestWithBody(server string, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListGroupMembersRequest generates requests for ListGroupMembers
+func NewListGroupMembersRequest(server string, orgId openapi_types.UUID, groupId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups/%s/members", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewAddGroupMemberRequest calls the generic AddGroupMember builder with application/json body
+func NewAddGroupMemberRequest(server string, orgId openapi_types.UUID, groupId openapi_types.UUID, body AddGroupMemberJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAddGroupMemberRequestWithBody(server, orgId, groupId, "application/json", bodyReader)
+}
+
+// NewAddGroupMemberRequestWithBody generates requests for AddGroupMember with any type of body
+func NewAddGroupMemberRequestWithBody(server string, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups/%s/members", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRemoveGroupMemberRequest generates requests for RemoveGroupMember
+func NewRemoveGroupMemberRequest(server string, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "userId", runtime.ParamLocationPath, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/groups/%s/members/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewCreateInvitationRequest calls the generic CreateInvitation builder with application/json body
 func NewCreateInvitationRequest(server string, orgId openapi_types.UUID, body CreateInvitationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -3489,6 +4294,128 @@ func NewGetOrgOverviewRequest(server string, orgId openapi_types.UUID) (*http.Re
 	return req, nil
 }
 
+// NewListPolicyRulesRequest generates requests for ListPolicyRules
+func NewListPolicyRulesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/policies", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreatePolicyRuleRequest calls the generic CreatePolicyRule builder with application/json body
+func NewCreatePolicyRuleRequest(server string, orgId openapi_types.UUID, body CreatePolicyRuleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreatePolicyRuleRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewCreatePolicyRuleRequestWithBody generates requests for CreatePolicyRule with any type of body
+func NewCreatePolicyRuleRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/policies", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeletePolicyRuleRequest generates requests for DeletePolicyRule
+func NewDeletePolicyRuleRequest(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ruleId", runtime.ParamLocationPath, ruleId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/policies/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewResizePoolRequest calls the generic ResizePool builder with application/json body
 func NewResizePoolRequest(server string, orgId openapi_types.UUID, body ResizePoolJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -3527,6 +4454,182 @@ func NewResizePoolRequestWithBody(server string, orgId openapi_types.UUID, conte
 	}
 
 	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListResourcesRequest generates requests for ListResources
+func NewListResourcesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/resources", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateResourceRequest calls the generic CreateResource builder with application/json body
+func NewCreateResourceRequest(server string, orgId openapi_types.UUID, body CreateResourceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateResourceRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewCreateResourceRequestWithBody generates requests for CreateResource with any type of body
+func NewCreateResourceRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/resources", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteResourceRequest generates requests for DeleteResource
+func NewDeleteResourceRequest(server string, orgId openapi_types.UUID, resourceId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "resourceId", runtime.ParamLocationPath, resourceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/resources/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateResourceRequest calls the generic UpdateResource builder with application/json body
+func NewUpdateResourceRequest(server string, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateResourceRequestWithBody(server, orgId, resourceId, "application/json", bodyReader)
+}
+
+// NewUpdateResourceRequestWithBody generates requests for UpdateResource with any type of body
+func NewUpdateResourceRequestWithBody(server string, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "resourceId", runtime.ParamLocationPath, resourceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/resources/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -3612,6 +4715,87 @@ func NewSetSsoConfigRequestWithBody(server string, orgId openapi_types.UUID, pro
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sso/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetZeroTrustModeRequest generates requests for GetZeroTrustMode
+func NewGetZeroTrustModeRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/zero-trust-mode", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetZeroTrustModeRequest calls the generic SetZeroTrustMode builder with application/json body
+func NewSetZeroTrustModeRequest(server string, orgId openapi_types.UUID, body SetZeroTrustModeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetZeroTrustModeRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewSetZeroTrustModeRequestWithBody generates requests for SetZeroTrustMode with any type of body
+func NewSetZeroTrustModeRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/zero-trust-mode", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -3826,6 +5010,33 @@ type ClientWithResponsesInterface interface {
 
 	VerifyDomainClaimWithResponse(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*VerifyDomainClaimResponse, error)
 
+	// ListGroupsWithResponse request
+	ListGroupsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListGroupsResponse, error)
+
+	// CreateGroupWithBodyWithResponse request with any body
+	CreateGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error)
+
+	CreateGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error)
+
+	// DeleteGroupWithResponse request
+	DeleteGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteGroupResponse, error)
+
+	// UpdateGroupWithBodyWithResponse request with any body
+	UpdateGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error)
+
+	UpdateGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error)
+
+	// ListGroupMembersWithResponse request
+	ListGroupMembersWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListGroupMembersResponse, error)
+
+	// AddGroupMemberWithBodyWithResponse request with any body
+	AddGroupMemberWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddGroupMemberResponse, error)
+
+	AddGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body AddGroupMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*AddGroupMemberResponse, error)
+
+	// RemoveGroupMemberWithResponse request
+	RemoveGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveGroupMemberResponse, error)
+
 	// CreateInvitationWithBodyWithResponse request with any body
 	CreateInvitationWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInvitationResponse, error)
 
@@ -3869,10 +5080,37 @@ type ClientWithResponsesInterface interface {
 	// GetOrgOverviewWithResponse request
 	GetOrgOverviewWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetOrgOverviewResponse, error)
 
+	// ListPolicyRulesWithResponse request
+	ListPolicyRulesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPolicyRulesResponse, error)
+
+	// CreatePolicyRuleWithBodyWithResponse request with any body
+	CreatePolicyRuleWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePolicyRuleResponse, error)
+
+	CreatePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreatePolicyRuleJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePolicyRuleResponse, error)
+
+	// DeletePolicyRuleWithResponse request
+	DeletePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePolicyRuleResponse, error)
+
 	// ResizePoolWithBodyWithResponse request with any body
 	ResizePoolWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResizePoolResponse, error)
 
 	ResizePoolWithResponse(ctx context.Context, orgId openapi_types.UUID, body ResizePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*ResizePoolResponse, error)
+
+	// ListResourcesWithResponse request
+	ListResourcesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListResourcesResponse, error)
+
+	// CreateResourceWithBodyWithResponse request with any body
+	CreateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateResourceResponse, error)
+
+	CreateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResourceResponse, error)
+
+	// DeleteResourceWithResponse request
+	DeleteResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteResourceResponse, error)
+
+	// UpdateResourceWithBodyWithResponse request with any body
+	UpdateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
+
+	UpdateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
 
 	// GetSsoConfigWithResponse request
 	GetSsoConfigWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*GetSsoConfigResponse, error)
@@ -3881,6 +5119,14 @@ type ClientWithResponsesInterface interface {
 	SetSsoConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSsoConfigResponse, error)
 
 	SetSsoConfigWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, body SetSsoConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSsoConfigResponse, error)
+
+	// GetZeroTrustModeWithResponse request
+	GetZeroTrustModeWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetZeroTrustModeResponse, error)
+
+	// SetZeroTrustModeWithBodyWithResponse request with any body
+	SetZeroTrustModeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetZeroTrustModeResponse, error)
+
+	SetZeroTrustModeWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetZeroTrustModeJSONRequestBody, reqEditors ...RequestEditorFn) (*SetZeroTrustModeResponse, error)
 
 	// GetHealthWithResponse request
 	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
@@ -4594,6 +5840,164 @@ func (r VerifyDomainClaimResponse) StatusCode() int {
 	return 0
 }
 
+type ListGroupsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]UserGroup
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListGroupsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListGroupsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *UserGroup
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *UserGroup
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListGroupMembersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]GroupMember
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListGroupMembersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListGroupMembersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AddGroupMemberResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AddGroupMemberResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AddGroupMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RemoveGroupMemberResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveGroupMemberResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveGroupMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type CreateInvitationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4842,6 +6246,74 @@ func (r GetOrgOverviewResponse) StatusCode() int {
 	return 0
 }
 
+type ListPolicyRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]PolicyRule
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPolicyRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPolicyRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreatePolicyRuleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *PolicyRule
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r CreatePolicyRuleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreatePolicyRuleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeletePolicyRuleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeletePolicyRuleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeletePolicyRuleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ResizePoolResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4860,6 +6332,97 @@ func (r ResizePoolResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ResizePoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListResourcesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Resource
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListResourcesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListResourcesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateResourceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *Resource
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateResourceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateResourceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteResourceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteResourceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteResourceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateResourceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *Resource
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateResourceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateResourceResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -4905,6 +6468,52 @@ func (r SetSsoConfigResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r SetSsoConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetZeroTrustModeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ZeroTrustMode
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetZeroTrustModeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetZeroTrustModeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SetZeroTrustModeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ZeroTrustMode
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetZeroTrustModeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetZeroTrustModeResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -5341,6 +6950,93 @@ func (c *ClientWithResponses) VerifyDomainClaimWithResponse(ctx context.Context,
 	return ParseVerifyDomainClaimResponse(rsp)
 }
 
+// ListGroupsWithResponse request returning *ListGroupsResponse
+func (c *ClientWithResponses) ListGroupsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListGroupsResponse, error) {
+	rsp, err := c.ListGroups(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListGroupsResponse(rsp)
+}
+
+// CreateGroupWithBodyWithResponse request with arbitrary body returning *CreateGroupResponse
+func (c *ClientWithResponses) CreateGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error) {
+	rsp, err := c.CreateGroupWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGroupResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGroupResponse, error) {
+	rsp, err := c.CreateGroup(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGroupResponse(rsp)
+}
+
+// DeleteGroupWithResponse request returning *DeleteGroupResponse
+func (c *ClientWithResponses) DeleteGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteGroupResponse, error) {
+	rsp, err := c.DeleteGroup(ctx, orgId, groupId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteGroupResponse(rsp)
+}
+
+// UpdateGroupWithBodyWithResponse request with arbitrary body returning *UpdateGroupResponse
+func (c *ClientWithResponses) UpdateGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error) {
+	rsp, err := c.UpdateGroupWithBody(ctx, orgId, groupId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateGroupResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error) {
+	rsp, err := c.UpdateGroup(ctx, orgId, groupId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateGroupResponse(rsp)
+}
+
+// ListGroupMembersWithResponse request returning *ListGroupMembersResponse
+func (c *ClientWithResponses) ListGroupMembersWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListGroupMembersResponse, error) {
+	rsp, err := c.ListGroupMembers(ctx, orgId, groupId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListGroupMembersResponse(rsp)
+}
+
+// AddGroupMemberWithBodyWithResponse request with arbitrary body returning *AddGroupMemberResponse
+func (c *ClientWithResponses) AddGroupMemberWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddGroupMemberResponse, error) {
+	rsp, err := c.AddGroupMemberWithBody(ctx, orgId, groupId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddGroupMemberResponse(rsp)
+}
+
+func (c *ClientWithResponses) AddGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, body AddGroupMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*AddGroupMemberResponse, error) {
+	rsp, err := c.AddGroupMember(ctx, orgId, groupId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddGroupMemberResponse(rsp)
+}
+
+// RemoveGroupMemberWithResponse request returning *RemoveGroupMemberResponse
+func (c *ClientWithResponses) RemoveGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveGroupMemberResponse, error) {
+	rsp, err := c.RemoveGroupMember(ctx, orgId, groupId, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveGroupMemberResponse(rsp)
+}
+
 // CreateInvitationWithBodyWithResponse request with arbitrary body returning *CreateInvitationResponse
 func (c *ClientWithResponses) CreateInvitationWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInvitationResponse, error) {
 	rsp, err := c.CreateInvitationWithBody(ctx, orgId, contentType, body, reqEditors...)
@@ -5480,6 +7176,41 @@ func (c *ClientWithResponses) GetOrgOverviewWithResponse(ctx context.Context, or
 	return ParseGetOrgOverviewResponse(rsp)
 }
 
+// ListPolicyRulesWithResponse request returning *ListPolicyRulesResponse
+func (c *ClientWithResponses) ListPolicyRulesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPolicyRulesResponse, error) {
+	rsp, err := c.ListPolicyRules(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPolicyRulesResponse(rsp)
+}
+
+// CreatePolicyRuleWithBodyWithResponse request with arbitrary body returning *CreatePolicyRuleResponse
+func (c *ClientWithResponses) CreatePolicyRuleWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePolicyRuleResponse, error) {
+	rsp, err := c.CreatePolicyRuleWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePolicyRuleResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreatePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreatePolicyRuleJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePolicyRuleResponse, error) {
+	rsp, err := c.CreatePolicyRule(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePolicyRuleResponse(rsp)
+}
+
+// DeletePolicyRuleWithResponse request returning *DeletePolicyRuleResponse
+func (c *ClientWithResponses) DeletePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePolicyRuleResponse, error) {
+	rsp, err := c.DeletePolicyRule(ctx, orgId, ruleId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeletePolicyRuleResponse(rsp)
+}
+
 // ResizePoolWithBodyWithResponse request with arbitrary body returning *ResizePoolResponse
 func (c *ClientWithResponses) ResizePoolWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResizePoolResponse, error) {
 	rsp, err := c.ResizePoolWithBody(ctx, orgId, contentType, body, reqEditors...)
@@ -5495,6 +7226,58 @@ func (c *ClientWithResponses) ResizePoolWithResponse(ctx context.Context, orgId 
 		return nil, err
 	}
 	return ParseResizePoolResponse(rsp)
+}
+
+// ListResourcesWithResponse request returning *ListResourcesResponse
+func (c *ClientWithResponses) ListResourcesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListResourcesResponse, error) {
+	rsp, err := c.ListResources(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListResourcesResponse(rsp)
+}
+
+// CreateResourceWithBodyWithResponse request with arbitrary body returning *CreateResourceResponse
+func (c *ClientWithResponses) CreateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateResourceResponse, error) {
+	rsp, err := c.CreateResourceWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateResourceResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResourceResponse, error) {
+	rsp, err := c.CreateResource(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateResourceResponse(rsp)
+}
+
+// DeleteResourceWithResponse request returning *DeleteResourceResponse
+func (c *ClientWithResponses) DeleteResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteResourceResponse, error) {
+	rsp, err := c.DeleteResource(ctx, orgId, resourceId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteResourceResponse(rsp)
+}
+
+// UpdateResourceWithBodyWithResponse request with arbitrary body returning *UpdateResourceResponse
+func (c *ClientWithResponses) UpdateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error) {
+	rsp, err := c.UpdateResourceWithBody(ctx, orgId, resourceId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateResourceResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error) {
+	rsp, err := c.UpdateResource(ctx, orgId, resourceId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateResourceResponse(rsp)
 }
 
 // GetSsoConfigWithResponse request returning *GetSsoConfigResponse
@@ -5521,6 +7304,32 @@ func (c *ClientWithResponses) SetSsoConfigWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseSetSsoConfigResponse(rsp)
+}
+
+// GetZeroTrustModeWithResponse request returning *GetZeroTrustModeResponse
+func (c *ClientWithResponses) GetZeroTrustModeWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetZeroTrustModeResponse, error) {
+	rsp, err := c.GetZeroTrustMode(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetZeroTrustModeResponse(rsp)
+}
+
+// SetZeroTrustModeWithBodyWithResponse request with arbitrary body returning *SetZeroTrustModeResponse
+func (c *ClientWithResponses) SetZeroTrustModeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetZeroTrustModeResponse, error) {
+	rsp, err := c.SetZeroTrustModeWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetZeroTrustModeResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetZeroTrustModeWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetZeroTrustModeJSONRequestBody, reqEditors ...RequestEditorFn) (*SetZeroTrustModeResponse, error) {
+	rsp, err := c.SetZeroTrustMode(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetZeroTrustModeResponse(rsp)
 }
 
 // GetHealthWithResponse request returning *GetHealthResponse
@@ -6520,6 +8329,216 @@ func ParseVerifyDomainClaimResponse(rsp *http.Response) (*VerifyDomainClaimRespo
 	return response, nil
 }
 
+// ParseListGroupsResponse parses an HTTP response from a ListGroupsWithResponse call
+func ParseListGroupsResponse(rsp *http.Response) (*ListGroupsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListGroupsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []UserGroup
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateGroupResponse parses an HTTP response from a CreateGroupWithResponse call
+func ParseCreateGroupResponse(rsp *http.Response) (*CreateGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest UserGroup
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteGroupResponse parses an HTTP response from a DeleteGroupWithResponse call
+func ParseDeleteGroupResponse(rsp *http.Response) (*DeleteGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateGroupResponse parses an HTTP response from a UpdateGroupWithResponse call
+func ParseUpdateGroupResponse(rsp *http.Response) (*UpdateGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UserGroup
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListGroupMembersResponse parses an HTTP response from a ListGroupMembersWithResponse call
+func ParseListGroupMembersResponse(rsp *http.Response) (*ListGroupMembersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListGroupMembersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []GroupMember
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAddGroupMemberResponse parses an HTTP response from a AddGroupMemberWithResponse call
+func ParseAddGroupMemberResponse(rsp *http.Response) (*AddGroupMemberResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AddGroupMemberResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveGroupMemberResponse parses an HTTP response from a RemoveGroupMemberWithResponse call
+func ParseRemoveGroupMemberResponse(rsp *http.Response) (*RemoveGroupMemberResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveGroupMemberResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseCreateInvitationResponse parses an HTTP response from a CreateInvitationWithResponse call
 func ParseCreateInvitationResponse(rsp *http.Response) (*CreateInvitationResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6848,6 +8867,98 @@ func ParseGetOrgOverviewResponse(rsp *http.Response) (*GetOrgOverviewResponse, e
 	return response, nil
 }
 
+// ParseListPolicyRulesResponse parses an HTTP response from a ListPolicyRulesWithResponse call
+func ParseListPolicyRulesResponse(rsp *http.Response) (*ListPolicyRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPolicyRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []PolicyRule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreatePolicyRuleResponse parses an HTTP response from a CreatePolicyRuleWithResponse call
+func ParseCreatePolicyRuleResponse(rsp *http.Response) (*CreatePolicyRuleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreatePolicyRuleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest PolicyRule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeletePolicyRuleResponse parses an HTTP response from a DeletePolicyRuleWithResponse call
+func ParseDeletePolicyRuleResponse(rsp *http.Response) (*DeletePolicyRuleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeletePolicyRuleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseResizePoolResponse parses an HTTP response from a ResizePoolWithResponse call
 func ParseResizePoolResponse(rsp *http.Response) (*ResizePoolResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6875,6 +8986,131 @@ func ParseResizePoolResponse(rsp *http.Response) (*ResizePoolResponse, error) {
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListResourcesResponse parses an HTTP response from a ListResourcesWithResponse call
+func ParseListResourcesResponse(rsp *http.Response) (*ListResourcesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListResourcesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Resource
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateResourceResponse parses an HTTP response from a CreateResourceWithResponse call
+func ParseCreateResourceResponse(rsp *http.Response) (*CreateResourceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateResourceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Resource
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteResourceResponse parses an HTTP response from a DeleteResourceWithResponse call
+func ParseDeleteResourceResponse(rsp *http.Response) (*DeleteResourceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteResourceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateResourceResponse parses an HTTP response from a UpdateResourceWithResponse call
+func ParseUpdateResourceResponse(rsp *http.Response) (*UpdateResourceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateResourceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Resource
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -6935,6 +9171,72 @@ func ParseSetSsoConfigResponse(rsp *http.Response) (*SetSsoConfigResponse, error
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetZeroTrustModeResponse parses an HTTP response from a GetZeroTrustModeWithResponse call
+func ParseGetZeroTrustModeResponse(rsp *http.Response) (*GetZeroTrustModeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetZeroTrustModeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ZeroTrustMode
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetZeroTrustModeResponse parses an HTTP response from a SetZeroTrustModeWithResponse call
+func ParseSetZeroTrustModeResponse(rsp *http.Response) (*SetZeroTrustModeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetZeroTrustModeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ZeroTrustMode
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -17,6 +17,12 @@ const (
 	// PermMemberManage is the base capability to change roles / remove members.
 	// Relational limits (who may touch whom) are applied by CanManageMembership.
 	PermMemberManage Permission = "member:manage"
+	// Zero Trust policy (S7.1, enterprise). PermPolicyView reads the model
+	// (groups/resources/rules/mode); PermPolicyManage mutates it AND flips the
+	// enforcement mode — disabling re-opens the mesh, so it is the same
+	// (owner/admin) capability, deliberately not a members-level read.
+	PermPolicyView   Permission = "policy:view"
+	PermPolicyManage Permission = "policy:manage"
 )
 
 // Roles.
@@ -46,6 +52,8 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermOrgUpdate:    true,
 		PermMemberInvite: true,
 		PermMemberManage: true,
+		PermPolicyView:   true,
+		PermPolicyManage: true,
 	},
 	RoleOwner: {
 		PermOrgView:      true,
@@ -54,6 +62,8 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermOrgDelete:    true,
 		PermMemberInvite: true,
 		PermMemberManage: true,
+		PermPolicyView:   true,
+		PermPolicyManage: true,
 	},
 }
 
@@ -93,7 +103,7 @@ func IsMutating(p Permission) bool {
 	// unverified user slipping through a mutation. Do NOT invert this into a
 	// mutating-allowlist.
 	switch p {
-	case PermOrgView, PermMemberList:
+	case PermOrgView, PermMemberList, PermPolicyView:
 		return false
 	default:
 		return true

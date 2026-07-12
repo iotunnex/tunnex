@@ -4,7 +4,9 @@
     "member:list",
     "member:manage",
     "org:update",
-    "org:view"
+    "org:view",
+    "policy:manage",
+    "policy:view"
   ],
   "member": [
     "member:list",
@@ -16,6 +18,8 @@
     "member:manage",
     "org:delete",
     "org:update",
-    "org:view"
+    "org:view",
+    "policy:manage",
+    "policy:view"
   ]
 }

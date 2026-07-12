@@ -93,7 +93,8 @@ type apiServer struct {
 	nodes        *nodes.Service
 	devices      *devices.Service
 	sessions     *session.Store
-	sso          ssoPort // nil in the open build
+	sso          ssoPort    // nil in the open build
+	policy       policyPort // nil in the open build (Zero Trust, S7.1)
 	cookieSecure bool
 	appBaseURL   string
 }
