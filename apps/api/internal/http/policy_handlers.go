@@ -10,7 +10,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
-	"github.com/tunnexio/tunnex/apps/api/internal/enterprise/policy"
+	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -26,11 +26,11 @@ type policyPort interface {
 	AddGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
 	RemoveGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
 	ListResources(ctx context.Context, orgID uuid.UUID) ([]sqlc.Resource, error)
-	CreateResource(ctx context.Context, orgID uuid.UUID, in policy.ResourceInput) (sqlc.Resource, error)
-	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policy.ResourceInput) (sqlc.Resource, error)
+	CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
+	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
 	DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
-	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policy.RuleInput) (sqlc.PolicyRule, error)
+	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
 	SetMode(ctx context.Context, orgID uuid.UUID, mode string) (string, error)
@@ -256,7 +256,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, policy.RuleInput{
+	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, policyspec.RuleInput{
 		SrcGroupID:    req.Body.SrcGroupId,
 		DstKind:       string(req.Body.DstKind),
 		DstResourceID: req.Body.DstResourceId,
@@ -353,8 +353,8 @@ func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 	return out
 }
 
-func resourceInput(b api.ResourceRequest) policy.ResourceInput {
-	return policy.ResourceInput{Name: b.Name, CIDR: b.Cidr, Protocol: string(b.Protocol), PortLow: b.PortLow, PortHigh: b.PortHigh}
+func resourceInput(b api.ResourceRequest) policyspec.ResourceInput {
+	return policyspec.ResourceInput{Name: b.Name, CIDR: b.Cidr, Protocol: string(b.Protocol), PortLow: b.PortLow, PortHigh: b.PortHigh}
 }
 
 func deref(p *string) string {

@@ -33,7 +33,13 @@ CREATE TABLE group_members (
     group_id   uuid NOT NULL REFERENCES user_groups (id) ON DELETE CASCADE,
     user_id    uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (group_id, user_id)
+    PRIMARY KEY (group_id, user_id),
+    -- A group member MUST be a current org member: this composite FK both refuses
+    -- adding a non-member AND — the load-bearing part — CASCADES on membership
+    -- removal, so revoking a member instantly drops their group grants. Without it,
+    -- RemoveMember deletes only the memberships row and a removed user would retain
+    -- scoped network access under enforcing mode (their device still reachable).
+    FOREIGN KEY (org_id, user_id) REFERENCES memberships (org_id, user_id) ON DELETE CASCADE
 );
 CREATE INDEX group_members_org_id_idx ON group_members (org_id);
 CREATE INDEX group_members_user_idx ON group_members (org_id, user_id);
