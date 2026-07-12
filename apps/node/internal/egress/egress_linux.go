@@ -18,8 +18,6 @@ package egress
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/netip"
 	"os"
@@ -114,7 +112,8 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	// agent left or a manual flush, and a FAILED apply is rejected wholesale by the
 	// kernel → the PREVIOUS ruleset stays in force (decision 4a/4b). On failure we DO NOT
 	// update applied* (staleness stays visible); on success we record what is in force.
-	if err := m.applyAndTrack(ctx, m.ruleset(subnet), m.desiredVersion()); err != nil {
+	pol := m.policy.Load() // load ONCE: the ruleset rendered and the status recorded are the same policy
+	if err := m.applyAndTrack(ctx, m.rulesetWith(subnet, pol), pol); err != nil {
 		return false, err // no nftables / IPv4 NAT support, or a bad ruleset → not egress-capable
 	}
 	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
@@ -144,6 +143,13 @@ func (m *Manager) Teardown(ctx context.Context) {
 // (table ip6): forward policy DROP with only spoke↔spoke allowed — v6 full-tunnel egress
 // is dropped (no NAT66 yet), never leaked (review #1/#7).
 func (m *Manager) ruleset(subnet string) string {
+	return m.rulesetWith(subnet, m.policy.Load())
+}
+
+// rulesetWith renders the ruleset for an EXPLICIT policy — Reconcile loads the policy
+// once and passes it here AND to applyAndTrack, so the rendered rules and the recorded
+// status can never be two different policies (no torn read across a SetPolicy).
+func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
 	wg := m.wgIface
 	// Masquerade line present only when the pool subnet is known (wg0 up). Scoped by
 	// SOURCE (ip saddr) — reliable in postrouting, unlike iifname — out ANY non-tunnel
@@ -152,7 +158,7 @@ func (m *Manager) ruleset(subnet string) string {
 	if subnet != "" {
 		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
 	}
-	v4fwd, v6fwd := m.forwardRules(m.policy.Load())
+	v4fwd, v6fwd := m.forwardRules(pol)
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
@@ -235,32 +241,35 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 }
 
 // applyAndTrack performs the atomic apply and records the fail-closed status: on
-// SUCCESS it records the applied version + content hash (what is in force); on FAILURE
-// it records only the error and leaves applied version/hash UNCHANGED — so the kernel's
-// preserved previous ruleset is reflected as applied != desired (STALE), never as a
-// silent success. Extracted from Reconcile so the fail-closed behavior is unit-testable
-// with an injected applier (the kernel-level rollback itself is a box proof).
-func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, version int) error {
+// SUCCESS it records the applied policy's version + CANONICAL content hash (what is in
+// force); on FAILURE it records only the error and leaves applied version/hash
+// UNCHANGED — so the kernel's preserved previous ruleset is reflected as
+// applied != desired (STALE), never as a silent success. Extracted from Reconcile so
+// the fail-closed behavior is unit-testable with an injected applier (the kernel-level
+// rollback itself is a box proof).
+//
+// HASH DISCIPLINE: the hash is nodepolicy.CanonicalHash(pol) — SHA-256 over the
+// canonical Compiled JSON, the SAME bytes the control plane hashes on its side
+// (policyspec.CanonicalHash, twin-golden-pinned). NEVER hash the rendered ruleset
+// text: it contains node-local state (the masquerade subnet line) the control plane
+// cannot reproduce, which would false-positive the staleness alarm permanently.
+func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepolicy.Compiled) error {
 	if err := m.apply(ctx, ruleset); err != nil {
 		m.mu.Lock()
 		m.applyErr = err
 		m.mu.Unlock()
 		return err
 	}
+	version := 0
+	if pol != nil {
+		version = pol.Version
+	}
 	m.mu.Lock()
 	m.appliedVersion = version
-	m.appliedHash = shortHash(ruleset)
+	m.appliedHash = nodepolicy.CanonicalHash(pol)
 	m.applyErr = nil
 	m.mu.Unlock()
 	return nil
-}
-
-// shortHash is a stable 12-hex content fingerprint of the applied ruleset — put on the
-// status channel so the control plane can detect a gateway running a ruleset that
-// doesn't match what it pushed (staleness), independent of the version counter.
-func shortHash(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:6])
 }
 
 // nftApply pipes a ruleset to `nft -f -` (a single atomic netlink transaction: every

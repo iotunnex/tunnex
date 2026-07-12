@@ -304,12 +304,23 @@ func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []Peer
 	return firstErr
 }
 
+// AppliedPolicy is the agent-reported Zero Trust policy IN FORCE on the gateway
+// (S7.2 staleness): the version + canonical hash of the last successfully applied
+// Compiled, and the last apply error if any. Stored in the capabilities JSONB;
+// the control plane compares it against what it pushed — a gateway running stale
+// policy must be VISIBLE (a policy violation in slow motion), never silent.
+type AppliedPolicy struct {
+	Version int    `json:"policy_version"`
+	Hash    string `json:"policy_hash"`
+	Error   string `json:"policy_error"`
+}
+
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
 // public endpoint. It validates the key is a well-formed 32-byte base64 value and
 // the endpoint (if present) is a clean host:port — a malformed value would poison
 // the .conf of every peer on this node. A zero-row update (e.g. the node was
 // revoked mid-report) is an error, not a silent no-op.
-func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, endpoint string, egressNAT bool) error {
+func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, endpoint string, egressNAT bool, applied AppliedPolicy) error {
 	if !wgkey.Valid(publicKey) {
 		return apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
 	}
@@ -321,11 +332,24 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	if endpoint != "" && !validEndpoint(endpoint) {
 		return apierr.BadRequest("invalid_endpoint", "endpoint must be a host:port with no whitespace")
 	}
-	// Gateway capabilities the agent probes + re-reports every reconcile (S3.7). The
-	// column is a forward-compat JSONB map; we build it server-side from the typed
-	// report so a compromised agent can't inject arbitrary JSON. egress_nat gates
-	// full-tunnel device creation (see devices.Create → gateway_no_egress).
-	caps, err := json.Marshal(map[string]bool{"egress_nat": egressNAT})
+	// Bound the agent-supplied policy-status strings (they land in a JSONB column and
+	// in dashboards) — a compromised agent must not stuff megabytes or control bytes.
+	if len(applied.Hash) > 64 {
+		applied.Hash = applied.Hash[:64]
+	}
+	if len(applied.Error) > 512 {
+		applied.Error = applied.Error[:512]
+	}
+	// Gateway capabilities the agent probes + re-reports every reconcile (S3.7 +
+	// S7.2 applied-policy status). The column is a forward-compat JSONB map; we build
+	// it server-side from the typed report so a compromised agent can't inject
+	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
+	caps, err := json.Marshal(map[string]any{
+		"egress_nat":     egressNAT,
+		"policy_version": applied.Version,
+		"policy_hash":    applied.Hash,
+		"policy_error":   applied.Error,
+	})
 	if err != nil {
 		return err
 	}
@@ -340,9 +364,13 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 }
 
 // NodeCapabilities is the typed view of a node's capabilities JSONB, read where the
-// control plane gates on a gateway's abilities (e.g. full-tunnel egress).
+// control plane gates on a gateway's abilities (e.g. full-tunnel egress) or surfaces
+// its applied-policy status (S7.2 staleness).
 type NodeCapabilities struct {
-	EgressNAT bool `json:"egress_nat"`
+	EgressNAT     bool   `json:"egress_nat"`
+	PolicyVersion int    `json:"policy_version"`
+	PolicyHash    string `json:"policy_hash"`
+	PolicyError   string `json:"policy_error"`
 }
 
 // Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all

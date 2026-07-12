@@ -24,6 +24,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/node/internal/control"
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
+	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
 
@@ -118,10 +119,15 @@ func main() {
 	} else {
 		egressNAT.Store(ok)
 	}
-	go egressLoop(ctx, egressMgr, &egressNAT, getdur("TUNNEX_AGENT_EGRESS_INTERVAL", 30*time.Second), logger)
+	// policyKick wakes the egress loop IMMEDIATELY when a desired-state fetch carries a
+	// changed policy — enforcement rides the push path (<5s revocation spec), not the
+	// egress interval. Buffered(1) + non-blocking send: coalesces bursts, never stalls
+	// the reconcile loop.
+	policyKick := make(chan struct{}, 1)
+	go egressLoop(ctx, egressMgr, &egressNAT, getdur("TUNNEX_AGENT_EGRESS_INTERVAL", 30*time.Second), policyKick, logger)
 
 	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
-	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, &keyReported, reportEvery, logger)
+	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, egressMgr, &keyReported, reportEvery, logger)
 
 	backend, err := reconcile.SelectBackend(wgBackend, wgIface, logger)
 	if err != nil {
@@ -130,6 +136,15 @@ func main() {
 	}
 	logger.Info("agent_backend_selected", slog.String("backend", wgBackend), slog.String("interface", wgIface))
 	r := reconcile.New(backend, wgPriv, wgPub, logger)
+	// Every desired-state fetch hands the compiled Zero Trust policy (nil = legacy
+	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
+	r.OnPolicy(func(p *nodepolicy.Compiled) {
+		egressMgr.SetPolicy(p)
+		select {
+		case policyKick <- struct{}{}:
+		default: // a kick is already pending — the apply reads the latest policy anyway
+		}
+	})
 
 	// Renew the cert at half-life (default 24h; the cert lives 48h) and hot-swap
 	// it. Persist the rotated cert so a restart uses the current one. If renewal
@@ -246,10 +261,18 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 // with backoff until it succeeds (then sets reported and returns). The report is
 // idempotent server-side, so retrying is safe. Until it succeeds the agent stays
 // not-ready, so no orchestrator routes to a node the control plane can't peer.
-func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, egressNAT, reported *atomic.Bool, every time.Duration, logger *slog.Logger) {
+func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, egressNAT *atomic.Bool, egressMgr *egress.Manager, reported *atomic.Bool, every time.Duration, logger *slog.Logger) {
 	const maxBackoff = 30 * time.Second
 	report := func() bool {
-		if err := client.ReportInfo(ctx, pubKey, endpoint, egressNAT.Load()); err != nil {
+		// Applied-policy status rides the capability report (S7.2 staleness): version +
+		// canonical hash of what is IN FORCE, plus the last apply error. The control
+		// plane compares against what it pushed — a stale gateway must be visible.
+		v, h, applyErr := egressMgr.AppliedStatus()
+		ps := control.PolicyStatus{Version: v, Hash: h}
+		if applyErr != nil {
+			ps.Error = applyErr.Error()
+		}
+		if err := client.ReportInfo(ctx, pubKey, endpoint, egressNAT.Load(), ps); err != nil {
 			logger.Warn("agent_report_key_failed", slog.String("error", err.Error()))
 			return false
 		}
@@ -282,11 +305,13 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 	}
 }
 
-// egressLoop reconciles the gateway egress NAT (the tunnex nft table) every interval —
-// idempotent, so it heals a flushed table — and updates the egress_nat capability that
-// reportKeyLoop advertises. A degraded reconcile (locked-down host) sets egress_nat=false
-// and logs, never crashing the agent.
-func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool, every time.Duration, logger *slog.Logger) {
+// egressLoop reconciles the gateway egress NAT + the Zero Trust forward chain (the
+// tunnex nft tables) every interval — idempotent, so it heals a flushed table — and
+// updates the egress_nat capability that reportKeyLoop advertises. It ALSO applies
+// immediately on a policy kick (a pushed policy change must land within the <5s
+// revocation spec, not wait out the interval). A degraded reconcile (locked-down
+// host) sets egress_nat=false and logs, never crashing the agent.
+func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool, every time.Duration, kick <-chan struct{}, logger *slog.Logger) {
 	apply := func() {
 		ok, err := mgr.Reconcile(ctx)
 		egressNAT.Store(ok)
@@ -295,13 +320,16 @@ func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool
 		}
 	}
 	// The initial probe/arm ran synchronously in main() before the first report — this
-	// loop only re-reconciles on the interval (heals a flushed table, tracks capability).
+	// loop only re-reconciles on the interval (heals a flushed table, tracks capability)
+	// and on policy kicks (push-path enforcement).
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-kick:
+			apply()
 		case <-t.C:
 			apply()
 		}

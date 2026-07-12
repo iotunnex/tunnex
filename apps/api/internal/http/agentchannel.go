@@ -122,12 +122,18 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		PublicKey string `json:"public_key"`
 		Endpoint  string `json:"endpoint"`
 		EgressNAT bool   `json:"egress_nat"` // S3.7: gateway can source-NAT full-tunnel egress
+		// S7.2 staleness: the policy IN FORCE on the gateway (version + canonical hash
+		// of the last successfully applied Compiled) + the last apply error, if any.
+		PolicyVersion int    `json:"policy_version"`
+		PolicyHash    string `json:"policy_hash"`
+		PolicyError   string `json:"policy_error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT); err != nil {
+	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError}
+	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {
 			http.Error(w, ae.Message, ae.Status)

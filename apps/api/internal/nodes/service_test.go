@@ -150,13 +150,13 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 
 	// WG key reporting: a malformed key is rejected; a well-formed 32-byte base64
 	// key is stored on the active node.
-	if err := svc.ReportWGInfo(ctx, node, "not-a-key", "", false); code(err) != "invalid_wg_key" {
+	if err := svc.ReportWGInfo(ctx, node, "not-a-key", "", false, AppliedPolicy{}); code(err) != "invalid_wg_key" {
 		t.Fatalf("malformed key: want invalid_wg_key, got %v", err)
 	}
 	wgKeyBytes := make([]byte, 32)
 	wgKeyBytes[0] = 1 // non-zero: an all-zero key is a degenerate point (rejected)
 	wgKey := base64.StdEncoding.EncodeToString(wgKeyBytes)
-	if err := svc.ReportWGInfo(ctx, node, wgKey, "1.2.3.4:51820", true); err != nil {
+	if err := svc.ReportWGInfo(ctx, node, wgKey, "1.2.3.4:51820", true, AppliedPolicy{}); err != nil {
 		t.Fatalf("report valid key: %v", err)
 	}
 	if stored, _ := q.GetNodeByCertSerial(ctx, newSerial); stored.WgPublicKey != wgKey || stored.Endpoint != "1.2.3.4:51820" {
@@ -166,11 +166,11 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Fatalf("egress_nat capability not stored: %s", stored.Capabilities)
 	}
 	// A malformed endpoint (newline injection) is rejected.
-	if err := svc.ReportWGInfo(ctx, node, wgKey, "1.2.3.4:51820\nInject = x", false); code(err) != "invalid_endpoint" {
+	if err := svc.ReportWGInfo(ctx, node, wgKey, "1.2.3.4:51820\nInject = x", false, AppliedPolicy{}); code(err) != "invalid_endpoint" {
 		t.Fatalf("injection endpoint: want invalid_endpoint, got %v", err)
 	}
 	// An empty endpoint report does NOT clobber the previously-stored good value.
-	if err := svc.ReportWGInfo(ctx, node, wgKey, "", true); err != nil {
+	if err := svc.ReportWGInfo(ctx, node, wgKey, "", true, AppliedPolicy{}); err != nil {
 		t.Fatalf("empty-endpoint report: %v", err)
 	}
 	if stored, _ := q.GetNodeByCertSerial(ctx, newSerial); stored.Endpoint != "1.2.3.4:51820" {
@@ -190,7 +190,7 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	}
 	// Reporting a key for a revoked node is a zero-row update -> surfaced as a
 	// conflict, not a silent 204/no-op.
-	if err := svc.ReportWGInfo(ctx, revoked, wgKey, "1.2.3.4:51820", false); code(err) != "node_not_active" {
+	if err := svc.ReportWGInfo(ctx, revoked, wgKey, "1.2.3.4:51820", false, AppliedPolicy{}); code(err) != "node_not_active" {
 		t.Fatalf("report on revoked: want node_not_active, got %v", err)
 	}
 
