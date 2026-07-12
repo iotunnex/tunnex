@@ -141,11 +141,26 @@ func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, ne
 	return body, keyPEM, nil
 }
 
+// PolicyStatus is the APPLIED Zero Trust policy status (S7.2 staleness reporting):
+// the version + CANONICAL hash of the policy actually in force on the gateway's
+// forward chain (last successful nft apply), plus the last apply error if any. The
+// control plane compares this against what it pushed — applied != pushed means the
+// gateway is running STALE policy, which must be visible, never silent.
+type PolicyStatus struct {
+	Version int
+	Hash    string
+	Error   string
+}
+
 // ReportInfo reports the node's locally-generated WireGuard public key, its public
-// endpoint (host:port that peer configs dial), and its egress_nat capability (whether
-// the gateway can source-NAT full-tunnel traffic — S3.7; probed every reconcile).
-func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egressNAT bool) error {
-	body, _ := json.Marshal(map[string]any{"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT})
+// endpoint (host:port that peer configs dial), its egress_nat capability (whether
+// the gateway can source-NAT full-tunnel traffic — S3.7; probed every reconcile),
+// and the applied Zero Trust policy status (S7.2 staleness).
+func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egressNAT bool, ps PolicyStatus) error {
+	body, _ := json.Marshal(map[string]any{
+		"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT,
+		"policy_version": ps.Version, "policy_hash": ps.Hash, "policy_error": ps.Error,
+	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)

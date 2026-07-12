@@ -20,21 +20,25 @@ func TestApplyFailureLeavesAppliedStale(t *testing.T) {
 	m := New("wg0")
 	m.apply = func(context.Context, string) error { return nil } // inject: nft not present in CI unit env
 
-	// First: a good apply of policy version 1 records applied=1.
-	m.SetPolicy(&nodepolicy.Compiled{Version: 1, Mode: nodepolicy.ModeEnforcing, Mesh: false})
-	if err := m.applyAndTrack(context.Background(), m.ruleset(""), m.desiredVersion()); err != nil {
+	// First: a good apply of policy version 1 records applied=1 + the CANONICAL policy
+	// hash (nodepolicy.CanonicalHash — the same bytes the control plane hashes; NEVER
+	// the ruleset text, which carries node-local subnet state).
+	v1 := &nodepolicy.Compiled{Version: 1, Mode: nodepolicy.ModeEnforcing, Mesh: false}
+	m.SetPolicy(v1)
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), v1); err != nil {
 		t.Fatalf("good apply: %v", err)
 	}
-	if v, h, e := m.AppliedStatus(); v != 1 || h == "" || e != nil {
-		t.Fatalf("after good apply want v=1,hash,nil; got v=%d h=%q e=%v", v, h, e)
+	if v, h, e := m.AppliedStatus(); v != 1 || h != nodepolicy.CanonicalHash(v1) || e != nil {
+		t.Fatalf("after good apply want v=1, canonical hash, nil err; got v=%d h=%q e=%v", v, h, e)
 	}
-	goodHash := func() string { _, h, _ := m.AppliedStatus(); return h }()
+	goodHash := nodepolicy.CanonicalHash(v1)
 
 	// Now: desired advances to version 2, but the apply FAILS (bad ruleset / no nft).
 	boom := errors.New("nft apply: rejected")
 	m.apply = func(context.Context, string) error { return boom }
-	m.SetPolicy(&nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing, Mesh: false})
-	if err := m.applyAndTrack(context.Background(), m.ruleset(""), m.desiredVersion()); !errors.Is(err, boom) {
+	v2 := &nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing, Mesh: false}
+	m.SetPolicy(v2)
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), v2); !errors.Is(err, boom) {
 		t.Fatalf("failed apply must return the error; got %v", err)
 	}
 	v, h, e := m.AppliedStatus()

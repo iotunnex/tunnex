@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
 // Peer mirrors the control plane's peer shape (JSON contract).
@@ -30,6 +32,12 @@ type DesiredState struct {
 	// next Watch so a change during the fetch/apply gap is not missed.
 	Version uint64 `json:"version"`
 	Peers   []Peer `json:"peers"`
+	// Policy is the compiled Zero Trust policy (S7.2). ABSENT/NULL => nil => the
+	// agent keeps the legacy blanket MESH — so an open-build control plane (which
+	// never sends the field) or an older control plane mid-upgrade can never make
+	// a newer agent accidentally enforce OR open by omission. This decode default
+	// is ASSERTED by TestAbsentPolicyDecodesToMesh; don't change it casually.
+	Policy *nodepolicy.Compiled `json:"policy,omitempty"`
 }
 
 // InterfaceConfig is the device-level configuration. The PrivateKey is supplied
@@ -88,7 +96,16 @@ type Reconciler struct {
 	logger     *slog.Logger
 	healthy    atomic.Bool
 	version    atomic.Uint64 // last desired-state version, echoed on Watch
+	// onPolicy (optional) receives the compiled Zero Trust policy from EVERY
+	// desired-state fetch — including nil (absent => legacy mesh). main wires it
+	// to egress.Manager.SetPolicy + an immediate egress kick, so a pushed policy
+	// change reaches the forward chain on the push path (<5s), not the next
+	// egress tick.
+	onPolicy func(*nodepolicy.Compiled)
 }
+
+// OnPolicy registers the policy sink. Call before Run (not synchronized).
+func (r *Reconciler) OnPolicy(fn func(*nodepolicy.Compiled)) { r.onPolicy = fn }
 
 // New builds a Reconciler with the node's WireGuard key pair (public key is used
 // only for the clamp-safe "is the interface key already set" check).
@@ -129,6 +146,14 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 		return false, err
 	}
 	r.version.Store(ds.Version) // echoed on the next Watch to close the fetch-gap
+	// Deliver the compiled policy BEFORE the WG converge (and regardless of its
+	// outcome): enforcement is orthogonal to interface config, and a policy pushed
+	// for revocation must not wait on an unrelated backend failure. nil (absent
+	// field) is delivered too — it means "legacy mesh" and must be able to unset a
+	// previous policy (mode enforcing -> off recovery path).
+	if r.onPolicy != nil {
+		r.onPolicy(ds.Policy)
+	}
 	// Idempotently ensure the interface config, then converge peers.
 	if err := r.backend.Configure(ctx, InterfaceConfig{
 		PrivateKey: r.privateKey, PublicKey: r.publicKey,
