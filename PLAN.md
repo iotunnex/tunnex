@@ -58,7 +58,23 @@ expected to be rewritten before merge.
 
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
-Current: **S6.5a PACKAGING MERGED (PR#6, 7228d29)** — unsigned macOS `.pkg` (install-time helper via
+
+**CURRENT (2026-07-12): EPIC 6 COMPLETE + `v0.1.0` CUT; NOW IN EPIC 7 (Zero Trust Access).**
+- **EPIC 6 done:** S6.1–S6.6 + S6.7 + S6.8/9/10 (+ S3.7) all MERGED. **S6.6 (zero-build deploy) MERGED
+  (PR#13) and `v0.1.0` tagged** → multi-arch ghcr images + `install.sh`/`.sha256` release assets published.
+  Only **S6.5b** (signing/notarization/auto-update) deferred — named trigger, not a gap. Remaining S6.6
+  proof: the clean-VPS acceptance box-proof (`docs/S6.6-acceptance.md`), Pawan's box test.
+- **EPIC 7 PULLED AHEAD DELIBERATELY** (chosen over EPIC 8/11 after EPIC 6 closed). Sequential:
+  **S7.1 policy model → S7.2 enforcement → S7.3 device posture → S7.4 policy UI.** S7.1 in review
+  (PR#14): allow-only default-deny model + pure deterministic compiler; enforcement + on-the-wire proof
+  are S7.2. See `docs/S7.1-decisions.md`.
+- **LEDGER re-points (recorded at S7.1 sign-off):** triggers formerly anchored to **"EPIC 6 close"**
+  (S3.7 decision-review revisit; beta re-decide) are re-pointed to the named trigger **"public-beta
+  readiness"** (never calendar clocks). **EPIC 7 is the trigger to build the deferred ENTERPRISE-E2E
+  STACK** → unblocks the **S4.5** secret-payload Playwright assertion (GET sso payload carries no
+  client_secret material) + the **S4.5b** orphan-render check; both **ledgered into S7.x scope**.
+
+**History (EPIC 6 detail):** **S6.5a PACKAGING MERGED (PR#6, 7228d29)** — unsigned macOS `.pkg` (install-time helper via
 postinstall, /Applications-pinned, self-uninstall watchdog) + Windows NSIS `.exe` (SCM service, sidtype
 unrestricted, Add/Remove uninstall); universal helper; Gatekeeper/SmartScreen install docs; SHA256SUMS;
 CI packages the win `.exe` NATIVELY (fixes the cross-built uninstaller). macOS proofs ALL PASS live
