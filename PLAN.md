@@ -125,6 +125,13 @@ redirect URIs / outbound email, and the B2 domain-capture walk item.** S3.7 park
 deferred — re-decide at EPIC 6 close.
 Ledgered: CLI-code GC → S11, rate limits → S11.3, user-scoped credential surface → security review /
 CLI-sessions panel; S3.7 gateway-NAT parked (trigger = EPIC 6 close or beta).
+**External DB/Redis support (DECIDE-BEFORE-CODE, parked; see docs/S6.6-decisions.md):** install.sh
+accepts `TUNNEX_DATABASE_URL`/`TUNNEX_REDIS_URL` (URL-wins; bundled compose stores move behind a
+profile), bootstrap skips credential-gen + validates/migrates/fails-loud when externally set. **Decide-
+item = master-key externalization** (env override vs volume) — the master key NOT being in the DB is the
+durability trap an RDS customer hits (lose the volume → lose the key → DB-encrypted data undecryptable).
+The env seam MUST be SHARED with the **S10.1 Helm values** (compose + K8s must not diverge). Full polish
+(TLS/sslmode docs, profiles, RDS runbook) parked, **trigger = first customer request OR S10.1**.
 **POC FRICTION LEDGER (WS2, triaged 2026-07-09):** item 1 → **S6.6 zero-build deploy** (SB.1/SB.2
 shrink); items 2+3 → **S-POC-fixes** (started next); item 4 → **S6.4** (in-app change-server/sign-out);
 item 5 (**dev-install: codesign-after-cp on Apple Silicon fixing Killed:9 + auto-detect the Electron
@@ -1036,6 +1043,10 @@ present — detect and warn/refuse rather than silently downgrade.
 ## EPIC 10 — Kubernetes Integration
 
 - **S10.1 Helm chart** — deploy full tunnex stack to a cluster; values for secrets, ingress, storage.
+  **Shared seam obligation:** the external DB/Redis + master-key env contract
+  (`TUNNEX_DATABASE_URL`/`TUNNEX_REDIS_URL`/master-key source) is the SAME one install.sh uses — do not
+  diverge from the S6.6 ledger (see docs/S6.6-decisions.md "external DB/Redis"); the master-key
+  externalization decide-item is load-bearing here (external DB customers).
 - **S10.2 Operator + CRDs** *(enterprise)* — `TunnexPeer`, `TunnexRoute`; reconcile WG peers/routes as k8s resources — **reuses the S3.1 reconcile loop design**.
 - **S10.3 Cluster gateway** — expose in-cluster services to tunnex clients via Zero Trust policies (agent as in-cluster gateway).
 
