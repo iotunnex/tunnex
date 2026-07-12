@@ -65,9 +65,12 @@ expected to be rewritten before merge.
   Only **S6.5b** (signing/notarization/auto-update) deferred — named trigger, not a gap. Remaining S6.6
   proof: the clean-VPS acceptance box-proof (`docs/S6.6-acceptance.md`), Pawan's box test.
 - **EPIC 7 PULLED AHEAD DELIBERATELY** (chosen over EPIC 8/11 after EPIC 6 closed). Sequential:
-  **S7.1 policy model → S7.2 enforcement → S7.3 device posture → S7.4 policy UI.** S7.1 in review
-  (PR#14): allow-only default-deny model + pure deterministic compiler; enforcement + on-the-wire proof
-  are S7.2. See `docs/S7.1-decisions.md`.
+  **S7.1 policy model → S7.2 enforcement → S7.3 device posture → S7.4 policy UI.** **S7.1 MERGED
+  (PR#14, fe67e28)** — allow-only default-deny model + pure deterministic compiler (`policyspec.Compiled`),
+  enterprise-gated CRUD, migration 0018 (incl. the group_members→memberships cascade FK from the F1 fix).
+  Enforcement + the on-the-wire default-deny proof are S7.2 (ledgered: AffectedNodeIDs direct test +
+  member-removal as the 4th recompile+push trigger). **NEXT: S7.2 (enforcement) decision-first.**
+  See `docs/S7.1-decisions.md`.
 - **LEDGER re-points (recorded at S7.1 sign-off):** triggers formerly anchored to **"EPIC 6 close"**
   (S3.7 decision-review revisit; beta re-decide) are re-pointed to the named trigger **"public-beta
   readiness"** (never calendar clocks). **EPIC 7 is the trigger to build the deferred ENTERPRISE-E2E
