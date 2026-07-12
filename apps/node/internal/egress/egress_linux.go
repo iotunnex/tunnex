@@ -18,12 +18,15 @@ package egress
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/netip"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
@@ -43,14 +46,45 @@ var ifaceRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,15}$`)
 type Manager struct {
 	wgIface string
 	policy  atomic.Pointer[nodepolicy.Compiled]
+	// apply performs the atomic nft transaction; injectable so the fail-closed +
+	// staleness behavior is unit-testable without a real nft/kernel.
+	apply func(context.Context, string) error
+
+	mu sync.Mutex
+	// applied* is the status of the LAST SUCCESSFUL apply — what is actually in force
+	// on the wire. On an apply FAILURE these are left unchanged (the kernel keeps the
+	// previous ruleset), so applied != desired signals STALE policy to the control
+	// plane (decision 4b / staleness-visible, chunk-1 status field).
+	appliedVersion int
+	appliedHash    string
+	applyErr       error
 }
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
-func New(wgIface string) *Manager { return &Manager{wgIface: wgIface} }
+func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply} }
 
 // SetPolicy stores the latest compiled policy for the next Reconcile to render. A nil
 // policy (open build / no Zero Trust) keeps the legacy blanket mesh.
 func (m *Manager) SetPolicy(p *nodepolicy.Compiled) { m.policy.Store(p) }
+
+// AppliedStatus reports the version + short content hash of the policy CURRENTLY IN
+// FORCE (last successful apply), and the last apply error if any. The reconcile loop
+// puts this on the status channel so the control plane can compare pushed-vs-applied
+// and surface a gateway running STALE policy (a policy violation in slow motion).
+func (m *Manager) AppliedStatus() (version int, hash string, applyErr error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.appliedVersion, m.appliedHash, m.applyErr
+}
+
+// desiredVersion returns the version of the policy the loop last handed us (0 = mesh/
+// none). The control plane compares this to AppliedStatus to detect staleness.
+func (m *Manager) desiredVersion() int {
+	if p := m.policy.Load(); p != nil {
+		return p.Version
+	}
+	return 0
+}
 
 // Reconcile is idempotent (safe to call every interval) and DOUBLES as the egress_nat
 // capability probe. Ordering matters: it enables ip_forward FIRST and unconditionally, so
@@ -74,13 +108,14 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	// is (and it restores the pool-source scoping the POC had). Until wg0 exists (the WG
 	// backend brings it up), there is no pool to scope, so egress isn't ready yet.
 	subnet := wgSubnet(ctx, m.wgIface)
-	// Apply the tables (add;flush;redefine = atomic replace, so this also self-heals a
-	// table a prior crashed agent left, and heals a manual flush). Forward rules use
-	// `iifname` (reliable in the forward hook). The masquerade is present only once the
-	// pool subnet is known. IPv6 gets a forward-DROP (no NAT66 → v6 egress dropped, not
-	// leaked; the client kill-switch also blocks it).
-	if err := nftApply(ctx, m.ruleset(subnet)); err != nil {
-		return false, err // no nftables / IPv4 NAT support on this host → not egress-capable
+	// Apply the tables. The whole ruleset is ONE `nft -f -` transaction (add;flush;
+	// redefine per family) — an atomic full-chain replace, so there is no empty-chain
+	// window (flush + repopulate commit together), it self-heals a table a prior crashed
+	// agent left or a manual flush, and a FAILED apply is rejected wholesale by the
+	// kernel → the PREVIOUS ruleset stays in force (decision 4a/4b). On failure we DO NOT
+	// update applied* (staleness stays visible); on success we record what is in force.
+	if err := m.applyAndTrack(ctx, m.ruleset(subnet), m.desiredVersion()); err != nil {
+		return false, err // no nftables / IPv4 NAT support, or a bad ruleset → not egress-capable
 	}
 	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
 	// (default route) — otherwise full-tunnel would blackhole, so report NOT capable.
@@ -199,7 +234,37 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 	return fmt.Sprintf("    ip saddr %s ip daddr %s%s accept\n", src.String(), dst.Masked().String(), clause), true
 }
 
-// nftApply pipes a ruleset to `nft -f -` (atomic transaction).
+// applyAndTrack performs the atomic apply and records the fail-closed status: on
+// SUCCESS it records the applied version + content hash (what is in force); on FAILURE
+// it records only the error and leaves applied version/hash UNCHANGED — so the kernel's
+// preserved previous ruleset is reflected as applied != desired (STALE), never as a
+// silent success. Extracted from Reconcile so the fail-closed behavior is unit-testable
+// with an injected applier (the kernel-level rollback itself is a box proof).
+func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, version int) error {
+	if err := m.apply(ctx, ruleset); err != nil {
+		m.mu.Lock()
+		m.applyErr = err
+		m.mu.Unlock()
+		return err
+	}
+	m.mu.Lock()
+	m.appliedVersion = version
+	m.appliedHash = shortHash(ruleset)
+	m.applyErr = nil
+	m.mu.Unlock()
+	return nil
+}
+
+// shortHash is a stable 12-hex content fingerprint of the applied ruleset — put on the
+// status channel so the control plane can detect a gateway running a ruleset that
+// doesn't match what it pushed (staleness), independent of the version counter.
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:6])
+}
+
+// nftApply pipes a ruleset to `nft -f -` (a single atomic netlink transaction: every
+// command in the input commits together or the whole batch is rejected).
 func nftApply(ctx context.Context, ruleset string) error {
 	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(ruleset)
