@@ -275,6 +275,49 @@ func TestGrantsPartitionedByNode(t *testing.T) {
 	}
 }
 
+// Recompile-invalidation (D4), model layer: the compiled output is a pure function
+// of the device set — ADDING a device changes it, so a device-create must trigger a
+// recompile (the push is S7.2). New device for an admin gains the admin's grants.
+func TestDeviceAddChangesOutput(t *testing.T) {
+	base := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Resources:   []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+		Rules:       []policy.Rule{{SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB}},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Devices:     []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	}
+	before := allowsFor(policy.Compile(base), nodeA)
+	withNew := base
+	withNew.Devices = append([]policy.Device{}, base.Devices...)
+	withNew.Devices = append(withNew.Devices, policy.Device{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.99"})
+	after := allowsFor(policy.Compile(withNew), nodeA)
+	if len(after) <= len(before) || !hasAllow(after, "10.99.0.99", "10.0.5.0/24") {
+		t.Fatalf("adding a device must add its grants (recompile needed): before=%d after=%+v", len(before), after)
+	}
+}
+
+// Recompile-invalidation (D4), model layer: the output depends on group MEMBERSHIP,
+// so a membership change must trigger a recompile. Granting Alice the admins group
+// gives her device the DB grant it did not have before.
+func TestMembershipChangeChangesOutput(t *testing.T) {
+	base := policy.Snapshot{
+		Mode:      policy.ModeEnforcing,
+		Resources: []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+		Rules:     []policy.Rule{{SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB}},
+		Devices:   []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+		// no memberships yet
+	}
+	if a := allowsFor(policy.Compile(base), nodeA); len(a) != 0 {
+		t.Fatalf("no membership => no grants, got %+v", a)
+	}
+	withMember := base
+	withMember.Memberships = []policy.Membership{{GroupID: gAdmins, UserID: uAlice}}
+	after := allowsFor(policy.Compile(withMember), nodeA)
+	if !hasAllow(after, "10.99.0.10", "10.0.5.0/24") {
+		t.Fatalf("adding a membership must grant access (recompile needed), got %+v", after)
+	}
+}
+
 func leAllow(a, b policyspec.AllowEntry) bool {
 	if a.SrcIP != b.SrcIP {
 		return a.SrcIP <= b.SrcIP
