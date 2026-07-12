@@ -35,6 +35,12 @@ const (
 	ChangeRoleRequestRoleOwner  ChangeRoleRequestRole = "owner"
 )
 
+// Defines values for CreatePolicyRuleRequestDstKind.
+const (
+	CreatePolicyRuleRequestDstKindGroup    CreatePolicyRuleRequestDstKind = "group"
+	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -90,10 +96,36 @@ const (
 	ReservedCollision OrphanReason = "reserved_collision"
 )
 
+// Defines values for PolicyRuleDstKind.
+const (
+	PolicyRuleDstKindGroup    PolicyRuleDstKind = "group"
+	PolicyRuleDstKindResource PolicyRuleDstKind = "resource"
+)
+
+// Defines values for ResourceProtocol.
+const (
+	ResourceProtocolAny ResourceProtocol = "any"
+	ResourceProtocolTcp ResourceProtocol = "tcp"
+	ResourceProtocolUdp ResourceProtocol = "udp"
+)
+
+// Defines values for ResourceRequestProtocol.
+const (
+	ResourceRequestProtocolAny ResourceRequestProtocol = "any"
+	ResourceRequestProtocolTcp ResourceRequestProtocol = "tcp"
+	ResourceRequestProtocolUdp ResourceRequestProtocol = "udp"
+)
+
 // Defines values for SsoConfigViewProvider.
 const (
 	SsoConfigViewProviderGoogle    SsoConfigViewProvider = "google"
 	SsoConfigViewProviderMicrosoft SsoConfigViewProvider = "microsoft"
+)
+
+// Defines values for ZeroTrustModeMode.
+const (
+	Enforcing ZeroTrustModeMode = "enforcing"
+	Off       ZeroTrustModeMode = "off"
 )
 
 // Defines values for SsoCallbackParamsProvider.
@@ -122,6 +154,11 @@ type ActivityEntry struct {
 	CreatedAt  time.Time           `json:"created_at"`
 	TargetId   *string             `json:"target_id,omitempty"`
 	TargetType *string             `json:"target_type,omitempty"`
+}
+
+// AddGroupMemberRequest defines model for AddGroupMemberRequest.
+type AddGroupMemberRequest struct {
+	UserId openapi_types.UUID `json:"user_id"`
 }
 
 // AuditLogEntry defines model for AuditLogEntry.
@@ -252,6 +289,20 @@ type CreateOrganizationRequest struct {
 	Slug string `json:"slug"`
 }
 
+// CreatePolicyRuleRequest defines model for CreatePolicyRuleRequest.
+type CreatePolicyRuleRequest struct {
+	// DstGroupId Required when dst_kind=group.
+	DstGroupId *openapi_types.UUID            `json:"dst_group_id"`
+	DstKind    CreatePolicyRuleRequestDstKind `json:"dst_kind"`
+
+	// DstResourceId Required when dst_kind=resource.
+	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+}
+
+// CreatePolicyRuleRequestDstKind defines model for CreatePolicyRuleRequest.DstKind.
+type CreatePolicyRuleRequestDstKind string
+
 // Device defines model for Device.
 type Device struct {
 	AssignedIp      *string            `json:"assigned_ip,omitempty"`
@@ -345,6 +396,20 @@ type ErrorDetail struct {
 // GenericMessage defines model for GenericMessage.
 type GenericMessage struct {
 	Message string `json:"message"`
+}
+
+// GroupMember defines model for GroupMember.
+type GroupMember struct {
+	AddedAt time.Time          `json:"added_at"`
+	Email   string             `json:"email"`
+	Name    string             `json:"name"`
+	UserId  openapi_types.UUID `json:"user_id"`
+}
+
+// GroupRequest defines model for GroupRequest.
+type GroupRequest struct {
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
 }
 
 // HealthResponse defines model for HealthResponse.
@@ -479,6 +544,20 @@ type PasswordResetRequest struct {
 	Email openapi_types.Email `json:"email"`
 }
 
+// PolicyRule defines model for PolicyRule.
+type PolicyRule struct {
+	CreatedAt     time.Time           `json:"created_at"`
+	DstGroupId    *openapi_types.UUID `json:"dst_group_id"`
+	DstKind       PolicyRuleDstKind   `json:"dst_kind"`
+	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	Id            openapi_types.UUID  `json:"id"`
+	OrgId         openapi_types.UUID  `json:"org_id"`
+	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+}
+
+// PolicyRuleDstKind defines model for PolicyRule.DstKind.
+type PolicyRuleDstKind string
+
 // PoolCidrRequest defines model for PoolCidrRequest.
 type PoolCidrRequest struct {
 	// Cidr New pool CIDR (IPv4). Must contain or be contained by the current range.
@@ -490,6 +569,35 @@ type ResizeConflict struct {
 	OrphanCount int      `json:"orphan_count"`
 	Orphans     []Orphan `json:"orphans"`
 }
+
+// Resource defines model for Resource.
+type Resource struct {
+	// Cidr Destination prefix (e.g. 10.0.5.0/24, 0.0.0.0/0).
+	Cidr      string             `json:"cidr"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	OrgId     openapi_types.UUID `json:"org_id"`
+	PortHigh  *int               `json:"port_high"`
+	PortLow   *int               `json:"port_low"`
+	Protocol  ResourceProtocol   `json:"protocol"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// ResourceProtocol defines model for Resource.Protocol.
+type ResourceProtocol string
+
+// ResourceRequest defines model for ResourceRequest.
+type ResourceRequest struct {
+	Cidr     string                  `json:"cidr"`
+	Name     string                  `json:"name"`
+	PortHigh *int                    `json:"port_high"`
+	PortLow  *int                    `json:"port_low"`
+	Protocol ResourceRequestProtocol `json:"protocol"`
+}
+
+// ResourceRequestProtocol defines model for ResourceRequest.Protocol.
+type ResourceRequestProtocol string
 
 // SignupRequest defines model for SignupRequest.
 type SignupRequest struct {
@@ -535,6 +643,25 @@ type TokenRequest struct {
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
 }
+
+// UserGroup defines model for UserGroup.
+type UserGroup struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+	OrgId       openapi_types.UUID `json:"org_id"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+// ZeroTrustMode defines model for ZeroTrustMode.
+type ZeroTrustMode struct {
+	// Mode off = legacy blanket mesh; enforcing = default-deny + compiled allows.
+	Mode ZeroTrustModeMode `json:"mode"`
+}
+
+// ZeroTrustModeMode off = legacy blanket mesh; enforcing = default-deny + compiled allows.
+type ZeroTrustModeMode string
 
 // SsoCallbackParams defines parameters for SsoCallback.
 type SsoCallbackParams struct {
@@ -618,6 +745,15 @@ type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 // VerifyDomainClaimJSONRequestBody defines body for VerifyDomainClaim for application/json ContentType.
 type VerifyDomainClaimJSONRequestBody = DomainVerifyRequest
 
+// CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
+type CreateGroupJSONRequestBody = GroupRequest
+
+// UpdateGroupJSONRequestBody defines body for UpdateGroup for application/json ContentType.
+type UpdateGroupJSONRequestBody = GroupRequest
+
+// AddGroupMemberJSONRequestBody defines body for AddGroupMember for application/json ContentType.
+type AddGroupMemberJSONRequestBody = AddGroupMemberRequest
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = InviteRequest
 
@@ -633,11 +769,23 @@ type ChangeMemberRoleJSONRequestBody = ChangeRoleRequest
 // IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
 type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
+// CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
+type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
+
 // ResizePoolJSONRequestBody defines body for ResizePool for application/json ContentType.
 type ResizePoolJSONRequestBody = PoolCidrRequest
 
+// CreateResourceJSONRequestBody defines body for CreateResource for application/json ContentType.
+type CreateResourceJSONRequestBody = ResourceRequest
+
+// UpdateResourceJSONRequestBody defines body for UpdateResource for application/json ContentType.
+type UpdateResourceJSONRequestBody = ResourceRequest
+
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
+
+// SetZeroTrustModeJSONRequestBody defines body for SetZeroTrustMode for application/json ContentType.
+type SetZeroTrustModeJSONRequestBody = ZeroTrustMode
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -734,6 +882,27 @@ type ServerInterface interface {
 	// Verify a claimed domain via its DNS TXT record (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains/verify)
 	VerifyDomainClaim(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// List user-groups (enterprise)
+	// (GET /api/v1/organizations/{orgId}/groups)
+	ListGroups(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Create a user-group (enterprise)
+	// (POST /api/v1/organizations/{orgId}/groups)
+	CreateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Delete a user-group (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId})
+	DeleteGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID)
+	// Rename / re-describe a user-group (enterprise)
+	// (PATCH /api/v1/organizations/{orgId}/groups/{groupId})
+	UpdateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID)
+	// List a group's members (enterprise)
+	// (GET /api/v1/organizations/{orgId}/groups/{groupId}/members)
+	ListGroupMembers(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID)
+	// Add a member to a group (enterprise)
+	// (POST /api/v1/organizations/{orgId}/groups/{groupId}/members)
+	AddGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID)
+	// Remove a member from a group (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
+	RemoveGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID)
 	// Invite a user to the organization
 	// (POST /api/v1/organizations/{orgId}/invitations)
 	CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
@@ -767,15 +936,42 @@ type ServerInterface interface {
 	// Dashboard overview — counts + recent activity
 	// (GET /api/v1/organizations/{orgId}/overview)
 	GetOrgOverview(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// List allow-rules (enterprise)
+	// (GET /api/v1/organizations/{orgId}/policies)
+	ListPolicyRules(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Create an allow-rule (enterprise)
+	// (POST /api/v1/organizations/{orgId}/policies)
+	CreatePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Delete an allow-rule (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/policies/{ruleId})
+	DeletePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, ruleId openapi_types.UUID)
 	// Resize the org's WireGuard address pool (grow-superset or shrink-subset)
 	// (PUT /api/v1/organizations/{orgId}/pool-cidr)
 	ResizePool(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// List policy resources (enterprise)
+	// (GET /api/v1/organizations/{orgId}/resources)
+	ListResources(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Create a policy resource (enterprise)
+	// (POST /api/v1/organizations/{orgId}/resources)
+	CreateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Delete a policy resource (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/resources/{resourceId})
+	DeleteResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID)
+	// Update a policy resource (enterprise)
+	// (PATCH /api/v1/organizations/{orgId}/resources/{resourceId})
+	UpdateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID)
 	// Read an SSO provider's config (enterprise) — never returns the secret
 	// (GET /api/v1/organizations/{orgId}/sso/{provider})
 	GetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
+	// Get the org enforcement mode (enterprise)
+	// (GET /api/v1/organizations/{orgId}/zero-trust-mode)
+	GetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Set the org enforcement mode — enabling turns on default-deny (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/zero-trust-mode)
+	SetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -971,6 +1167,48 @@ func (_ Unimplemented) VerifyDomainClaim(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List user-groups (enterprise)
+// (GET /api/v1/organizations/{orgId}/groups)
+func (_ Unimplemented) ListGroups(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a user-group (enterprise)
+// (POST /api/v1/organizations/{orgId}/groups)
+func (_ Unimplemented) CreateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete a user-group (enterprise)
+// (DELETE /api/v1/organizations/{orgId}/groups/{groupId})
+func (_ Unimplemented) DeleteGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Rename / re-describe a user-group (enterprise)
+// (PATCH /api/v1/organizations/{orgId}/groups/{groupId})
+func (_ Unimplemented) UpdateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List a group's members (enterprise)
+// (GET /api/v1/organizations/{orgId}/groups/{groupId}/members)
+func (_ Unimplemented) ListGroupMembers(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add a member to a group (enterprise)
+// (POST /api/v1/organizations/{orgId}/groups/{groupId}/members)
+func (_ Unimplemented) AddGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove a member from a group (enterprise)
+// (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
+func (_ Unimplemented) RemoveGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Invite a user to the organization
 // (POST /api/v1/organizations/{orgId}/invitations)
 func (_ Unimplemented) CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
@@ -1037,9 +1275,51 @@ func (_ Unimplemented) GetOrgOverview(w http.ResponseWriter, r *http.Request, or
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List allow-rules (enterprise)
+// (GET /api/v1/organizations/{orgId}/policies)
+func (_ Unimplemented) ListPolicyRules(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create an allow-rule (enterprise)
+// (POST /api/v1/organizations/{orgId}/policies)
+func (_ Unimplemented) CreatePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete an allow-rule (enterprise)
+// (DELETE /api/v1/organizations/{orgId}/policies/{ruleId})
+func (_ Unimplemented) DeletePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, ruleId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Resize the org's WireGuard address pool (grow-superset or shrink-subset)
 // (PUT /api/v1/organizations/{orgId}/pool-cidr)
 func (_ Unimplemented) ResizePool(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List policy resources (enterprise)
+// (GET /api/v1/organizations/{orgId}/resources)
+func (_ Unimplemented) ListResources(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a policy resource (enterprise)
+// (POST /api/v1/organizations/{orgId}/resources)
+func (_ Unimplemented) CreateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete a policy resource (enterprise)
+// (DELETE /api/v1/organizations/{orgId}/resources/{resourceId})
+func (_ Unimplemented) DeleteResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update a policy resource (enterprise)
+// (PATCH /api/v1/organizations/{orgId}/resources/{resourceId})
+func (_ Unimplemented) UpdateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1052,6 +1332,18 @@ func (_ Unimplemented) GetSsoConfig(w http.ResponseWriter, r *http.Request, orgI
 // Configure an SSO provider for an organization (enterprise)
 // (PUT /api/v1/organizations/{orgId}/sso/{provider})
 func (_ Unimplemented) SetSsoConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the org enforcement mode (enterprise)
+// (GET /api/v1/organizations/{orgId}/zero-trust-mode)
+func (_ Unimplemented) GetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Set the org enforcement mode — enabling turns on default-deny (enterprise)
+// (PUT /api/v1/organizations/{orgId}/zero-trust-mode)
+func (_ Unimplemented) SetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1887,6 +2179,291 @@ func (siw *ServerInterfaceWrapper) VerifyDomainClaim(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGroups(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateGroup operation middleware
+func (siw *ServerInterfaceWrapper) CreateGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateGroup(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteGroup operation middleware
+func (siw *ServerInterfaceWrapper) DeleteGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", chi.URLParam(r, "groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groupId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteGroup(w, r, orgId, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateGroup operation middleware
+func (siw *ServerInterfaceWrapper) UpdateGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", chi.URLParam(r, "groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groupId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateGroup(w, r, orgId, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGroupMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListGroupMembers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", chi.URLParam(r, "groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groupId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGroupMembers(w, r, orgId, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddGroupMember operation middleware
+func (siw *ServerInterfaceWrapper) AddGroupMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", chi.URLParam(r, "groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groupId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddGroupMember(w, r, orgId, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveGroupMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "groupId" -------------
+	var groupId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "groupId", chi.URLParam(r, "groupId"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "groupId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveGroupMember(w, r, orgId, groupId, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateInvitation operation middleware
 func (siw *ServerInterfaceWrapper) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 
@@ -2286,6 +2863,114 @@ func (siw *ServerInterfaceWrapper) GetOrgOverview(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListPolicyRules operation middleware
+func (siw *ServerInterfaceWrapper) ListPolicyRules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPolicyRules(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePolicyRule operation middleware
+func (siw *ServerInterfaceWrapper) CreatePolicyRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePolicyRule(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePolicyRule operation middleware
+func (siw *ServerInterfaceWrapper) DeletePolicyRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "ruleId" -------------
+	var ruleId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ruleId", chi.URLParam(r, "ruleId"), &ruleId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ruleId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePolicyRule(w, r, orgId, ruleId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ResizePool operation middleware
 func (siw *ServerInterfaceWrapper) ResizePool(w http.ResponseWriter, r *http.Request) {
 
@@ -2310,6 +2995,156 @@ func (siw *ServerInterfaceWrapper) ResizePool(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResizePool(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListResources operation middleware
+func (siw *ServerInterfaceWrapper) ListResources(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListResources(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateResource operation middleware
+func (siw *ServerInterfaceWrapper) CreateResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateResource(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", chi.URLParam(r, "resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resourceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteResource(w, r, orgId, resourceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateResource operation middleware
+func (siw *ServerInterfaceWrapper) UpdateResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", chi.URLParam(r, "resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resourceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateResource(w, r, orgId, resourceId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2394,6 +3229,72 @@ func (siw *ServerInterfaceWrapper) SetSsoConfig(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetSsoConfig(w, r, orgId, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetZeroTrustMode operation middleware
+func (siw *ServerInterfaceWrapper) GetZeroTrustMode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZeroTrustMode(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZeroTrustMode operation middleware
+func (siw *ServerInterfaceWrapper) SetZeroTrustMode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZeroTrustMode(w, r, orgId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2624,6 +3525,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/domains/verify", wrapper.VerifyDomainClaim)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/groups", wrapper.ListGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/groups", wrapper.CreateGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}", wrapper.DeleteGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}", wrapper.UpdateGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}/members", wrapper.ListGroupMembers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}/members", wrapper.AddGroupMember)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}/members/{userId}", wrapper.RemoveGroupMember)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/invitations", wrapper.CreateInvitation)
 	})
 	r.Group(func(r chi.Router) {
@@ -2657,13 +3579,40 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/overview", wrapper.GetOrgOverview)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/policies", wrapper.ListPolicyRules)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/policies", wrapper.CreatePolicyRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/policies/{ruleId}", wrapper.DeletePolicyRule)
+	})
+	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/pool-cidr", wrapper.ResizePool)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/resources", wrapper.ListResources)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/resources", wrapper.CreateResource)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/resources/{resourceId}", wrapper.DeleteResource)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/organizations/{orgId}/resources/{resourceId}", wrapper.UpdateResource)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.GetSsoConfig)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/sso/{provider}", wrapper.SetSsoConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/zero-trust-mode", wrapper.GetZeroTrustMode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/zero-trust-mode", wrapper.SetZeroTrustMode)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealth)
@@ -3876,6 +4825,279 @@ func (response VerifyDomainClaimdefaultJSONResponse) VisitVerifyDomainClaimRespo
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListGroupsRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListGroupsResponseObject interface {
+	VisitListGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListGroups200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListGroups200JSONResponse struct {
+	Body    []UserGroup
+	Headers ListGroups200ResponseHeaders
+}
+
+func (response ListGroups200JSONResponse) VisitListGroupsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListGroupsdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListGroupsdefaultJSONResponse) VisitListGroupsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateGroupRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreateGroupJSONRequestBody
+}
+
+type CreateGroupResponseObject interface {
+	VisitCreateGroupResponse(w http.ResponseWriter) error
+}
+
+type CreateGroup201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateGroup201JSONResponse struct {
+	Body    UserGroup
+	Headers CreateGroup201ResponseHeaders
+}
+
+func (response CreateGroup201JSONResponse) VisitCreateGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateGroupdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateGroupdefaultJSONResponse) VisitCreateGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteGroupRequestObject struct {
+	OrgId   openapi_types.UUID `json:"orgId"`
+	GroupId openapi_types.UUID `json:"groupId"`
+}
+
+type DeleteGroupResponseObject interface {
+	VisitDeleteGroupResponse(w http.ResponseWriter) error
+}
+
+type DeleteGroup204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeleteGroup204Response struct {
+	Headers DeleteGroup204ResponseHeaders
+}
+
+func (response DeleteGroup204Response) VisitDeleteGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteGroupdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteGroupdefaultJSONResponse) VisitDeleteGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateGroupRequestObject struct {
+	OrgId   openapi_types.UUID `json:"orgId"`
+	GroupId openapi_types.UUID `json:"groupId"`
+	Body    *UpdateGroupJSONRequestBody
+}
+
+type UpdateGroupResponseObject interface {
+	VisitUpdateGroupResponse(w http.ResponseWriter) error
+}
+
+type UpdateGroup200ResponseHeaders struct {
+	XRequestId string
+}
+
+type UpdateGroup200JSONResponse struct {
+	Body    UserGroup
+	Headers UpdateGroup200ResponseHeaders
+}
+
+func (response UpdateGroup200JSONResponse) VisitUpdateGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateGroupdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response UpdateGroupdefaultJSONResponse) VisitUpdateGroupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListGroupMembersRequestObject struct {
+	OrgId   openapi_types.UUID `json:"orgId"`
+	GroupId openapi_types.UUID `json:"groupId"`
+}
+
+type ListGroupMembersResponseObject interface {
+	VisitListGroupMembersResponse(w http.ResponseWriter) error
+}
+
+type ListGroupMembers200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListGroupMembers200JSONResponse struct {
+	Body    []GroupMember
+	Headers ListGroupMembers200ResponseHeaders
+}
+
+func (response ListGroupMembers200JSONResponse) VisitListGroupMembersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListGroupMembersdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListGroupMembersdefaultJSONResponse) VisitListGroupMembersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type AddGroupMemberRequestObject struct {
+	OrgId   openapi_types.UUID `json:"orgId"`
+	GroupId openapi_types.UUID `json:"groupId"`
+	Body    *AddGroupMemberJSONRequestBody
+}
+
+type AddGroupMemberResponseObject interface {
+	VisitAddGroupMemberResponse(w http.ResponseWriter) error
+}
+
+type AddGroupMember204ResponseHeaders struct {
+	XRequestId string
+}
+
+type AddGroupMember204Response struct {
+	Headers AddGroupMember204ResponseHeaders
+}
+
+func (response AddGroupMember204Response) VisitAddGroupMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type AddGroupMemberdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response AddGroupMemberdefaultJSONResponse) VisitAddGroupMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RemoveGroupMemberRequestObject struct {
+	OrgId   openapi_types.UUID `json:"orgId"`
+	GroupId openapi_types.UUID `json:"groupId"`
+	UserId  openapi_types.UUID `json:"userId"`
+}
+
+type RemoveGroupMemberResponseObject interface {
+	VisitRemoveGroupMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveGroupMember204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RemoveGroupMember204Response struct {
+	Headers RemoveGroupMember204ResponseHeaders
+}
+
+func (response RemoveGroupMember204Response) VisitRemoveGroupMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveGroupMemberdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RemoveGroupMemberdefaultJSONResponse) VisitRemoveGroupMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type CreateInvitationRequestObject struct {
 	OrgId openapi_types.UUID `json:"orgId"`
 	Body  *CreateInvitationJSONRequestBody
@@ -4299,6 +5521,122 @@ func (response GetOrgOverviewdefaultJSONResponse) VisitGetOrgOverviewResponse(w 
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListPolicyRulesRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListPolicyRulesResponseObject interface {
+	VisitListPolicyRulesResponse(w http.ResponseWriter) error
+}
+
+type ListPolicyRules200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListPolicyRules200JSONResponse struct {
+	Body    []PolicyRule
+	Headers ListPolicyRules200ResponseHeaders
+}
+
+func (response ListPolicyRules200JSONResponse) VisitListPolicyRulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListPolicyRulesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListPolicyRulesdefaultJSONResponse) VisitListPolicyRulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreatePolicyRuleRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreatePolicyRuleJSONRequestBody
+}
+
+type CreatePolicyRuleResponseObject interface {
+	VisitCreatePolicyRuleResponse(w http.ResponseWriter) error
+}
+
+type CreatePolicyRule201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreatePolicyRule201JSONResponse struct {
+	Body    PolicyRule
+	Headers CreatePolicyRule201ResponseHeaders
+}
+
+func (response CreatePolicyRule201JSONResponse) VisitCreatePolicyRuleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreatePolicyRuledefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreatePolicyRuledefaultJSONResponse) VisitCreatePolicyRuleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeletePolicyRuleRequestObject struct {
+	OrgId  openapi_types.UUID `json:"orgId"`
+	RuleId openapi_types.UUID `json:"ruleId"`
+}
+
+type DeletePolicyRuleResponseObject interface {
+	VisitDeletePolicyRuleResponse(w http.ResponseWriter) error
+}
+
+type DeletePolicyRule204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeletePolicyRule204Response struct {
+	Headers DeletePolicyRule204ResponseHeaders
+}
+
+func (response DeletePolicyRule204Response) VisitDeletePolicyRuleResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePolicyRuledefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeletePolicyRuledefaultJSONResponse) VisitDeletePolicyRuleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ResizePoolRequestObject struct {
 	OrgId openapi_types.UUID `json:"orgId"`
 	Body  *ResizePoolJSONRequestBody
@@ -4349,6 +5687,163 @@ type ResizePooldefaultJSONResponse struct {
 }
 
 func (response ResizePooldefaultJSONResponse) VisitResizePoolResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListResourcesRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListResourcesResponseObject interface {
+	VisitListResourcesResponse(w http.ResponseWriter) error
+}
+
+type ListResources200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListResources200JSONResponse struct {
+	Body    []Resource
+	Headers ListResources200ResponseHeaders
+}
+
+func (response ListResources200JSONResponse) VisitListResourcesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListResourcesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListResourcesdefaultJSONResponse) VisitListResourcesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateResourceRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *CreateResourceJSONRequestBody
+}
+
+type CreateResourceResponseObject interface {
+	VisitCreateResourceResponse(w http.ResponseWriter) error
+}
+
+type CreateResource201ResponseHeaders struct {
+	XRequestId string
+}
+
+type CreateResource201JSONResponse struct {
+	Body    Resource
+	Headers CreateResource201ResponseHeaders
+}
+
+func (response CreateResource201JSONResponse) VisitCreateResourceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateResourcedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response CreateResourcedefaultJSONResponse) VisitCreateResourceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteResourceRequestObject struct {
+	OrgId      openapi_types.UUID `json:"orgId"`
+	ResourceId openapi_types.UUID `json:"resourceId"`
+}
+
+type DeleteResourceResponseObject interface {
+	VisitDeleteResourceResponse(w http.ResponseWriter) error
+}
+
+type DeleteResource204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeleteResource204Response struct {
+	Headers DeleteResource204ResponseHeaders
+}
+
+func (response DeleteResource204Response) VisitDeleteResourceResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteResourcedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteResourcedefaultJSONResponse) VisitDeleteResourceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateResourceRequestObject struct {
+	OrgId      openapi_types.UUID `json:"orgId"`
+	ResourceId openapi_types.UUID `json:"resourceId"`
+	Body       *UpdateResourceJSONRequestBody
+}
+
+type UpdateResourceResponseObject interface {
+	VisitUpdateResourceResponse(w http.ResponseWriter) error
+}
+
+type UpdateResource200ResponseHeaders struct {
+	XRequestId string
+}
+
+type UpdateResource200JSONResponse struct {
+	Body    Resource
+	Headers UpdateResource200ResponseHeaders
+}
+
+func (response UpdateResource200JSONResponse) VisitUpdateResourceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateResourcedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response UpdateResourcedefaultJSONResponse) VisitUpdateResourceResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -4427,6 +5922,85 @@ type SetSsoConfigdefaultJSONResponse struct {
 }
 
 func (response SetSsoConfigdefaultJSONResponse) VisitSetSsoConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetZeroTrustModeRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type GetZeroTrustModeResponseObject interface {
+	VisitGetZeroTrustModeResponse(w http.ResponseWriter) error
+}
+
+type GetZeroTrustMode200ResponseHeaders struct {
+	XRequestId string
+}
+
+type GetZeroTrustMode200JSONResponse struct {
+	Body    ZeroTrustMode
+	Headers GetZeroTrustMode200ResponseHeaders
+}
+
+func (response GetZeroTrustMode200JSONResponse) VisitGetZeroTrustModeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetZeroTrustModedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetZeroTrustModedefaultJSONResponse) VisitGetZeroTrustModeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetZeroTrustModeRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *SetZeroTrustModeJSONRequestBody
+}
+
+type SetZeroTrustModeResponseObject interface {
+	VisitSetZeroTrustModeResponse(w http.ResponseWriter) error
+}
+
+type SetZeroTrustMode200ResponseHeaders struct {
+	XRequestId string
+}
+
+type SetZeroTrustMode200JSONResponse struct {
+	Body    ZeroTrustMode
+	Headers SetZeroTrustMode200ResponseHeaders
+}
+
+func (response SetZeroTrustMode200JSONResponse) VisitSetZeroTrustModeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetZeroTrustModedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SetZeroTrustModedefaultJSONResponse) VisitSetZeroTrustModeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -4567,6 +6141,27 @@ type StrictServerInterface interface {
 	// Verify a claimed domain via its DNS TXT record (enterprise)
 	// (POST /api/v1/organizations/{orgId}/domains/verify)
 	VerifyDomainClaim(ctx context.Context, request VerifyDomainClaimRequestObject) (VerifyDomainClaimResponseObject, error)
+	// List user-groups (enterprise)
+	// (GET /api/v1/organizations/{orgId}/groups)
+	ListGroups(ctx context.Context, request ListGroupsRequestObject) (ListGroupsResponseObject, error)
+	// Create a user-group (enterprise)
+	// (POST /api/v1/organizations/{orgId}/groups)
+	CreateGroup(ctx context.Context, request CreateGroupRequestObject) (CreateGroupResponseObject, error)
+	// Delete a user-group (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId})
+	DeleteGroup(ctx context.Context, request DeleteGroupRequestObject) (DeleteGroupResponseObject, error)
+	// Rename / re-describe a user-group (enterprise)
+	// (PATCH /api/v1/organizations/{orgId}/groups/{groupId})
+	UpdateGroup(ctx context.Context, request UpdateGroupRequestObject) (UpdateGroupResponseObject, error)
+	// List a group's members (enterprise)
+	// (GET /api/v1/organizations/{orgId}/groups/{groupId}/members)
+	ListGroupMembers(ctx context.Context, request ListGroupMembersRequestObject) (ListGroupMembersResponseObject, error)
+	// Add a member to a group (enterprise)
+	// (POST /api/v1/organizations/{orgId}/groups/{groupId}/members)
+	AddGroupMember(ctx context.Context, request AddGroupMemberRequestObject) (AddGroupMemberResponseObject, error)
+	// Remove a member from a group (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
+	RemoveGroupMember(ctx context.Context, request RemoveGroupMemberRequestObject) (RemoveGroupMemberResponseObject, error)
 	// Invite a user to the organization
 	// (POST /api/v1/organizations/{orgId}/invitations)
 	CreateInvitation(ctx context.Context, request CreateInvitationRequestObject) (CreateInvitationResponseObject, error)
@@ -4600,15 +6195,42 @@ type StrictServerInterface interface {
 	// Dashboard overview — counts + recent activity
 	// (GET /api/v1/organizations/{orgId}/overview)
 	GetOrgOverview(ctx context.Context, request GetOrgOverviewRequestObject) (GetOrgOverviewResponseObject, error)
+	// List allow-rules (enterprise)
+	// (GET /api/v1/organizations/{orgId}/policies)
+	ListPolicyRules(ctx context.Context, request ListPolicyRulesRequestObject) (ListPolicyRulesResponseObject, error)
+	// Create an allow-rule (enterprise)
+	// (POST /api/v1/organizations/{orgId}/policies)
+	CreatePolicyRule(ctx context.Context, request CreatePolicyRuleRequestObject) (CreatePolicyRuleResponseObject, error)
+	// Delete an allow-rule (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/policies/{ruleId})
+	DeletePolicyRule(ctx context.Context, request DeletePolicyRuleRequestObject) (DeletePolicyRuleResponseObject, error)
 	// Resize the org's WireGuard address pool (grow-superset or shrink-subset)
 	// (PUT /api/v1/organizations/{orgId}/pool-cidr)
 	ResizePool(ctx context.Context, request ResizePoolRequestObject) (ResizePoolResponseObject, error)
+	// List policy resources (enterprise)
+	// (GET /api/v1/organizations/{orgId}/resources)
+	ListResources(ctx context.Context, request ListResourcesRequestObject) (ListResourcesResponseObject, error)
+	// Create a policy resource (enterprise)
+	// (POST /api/v1/organizations/{orgId}/resources)
+	CreateResource(ctx context.Context, request CreateResourceRequestObject) (CreateResourceResponseObject, error)
+	// Delete a policy resource (enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/resources/{resourceId})
+	DeleteResource(ctx context.Context, request DeleteResourceRequestObject) (DeleteResourceResponseObject, error)
+	// Update a policy resource (enterprise)
+	// (PATCH /api/v1/organizations/{orgId}/resources/{resourceId})
+	UpdateResource(ctx context.Context, request UpdateResourceRequestObject) (UpdateResourceResponseObject, error)
 	// Read an SSO provider's config (enterprise) — never returns the secret
 	// (GET /api/v1/organizations/{orgId}/sso/{provider})
 	GetSsoConfig(ctx context.Context, request GetSsoConfigRequestObject) (GetSsoConfigResponseObject, error)
 	// Configure an SSO provider for an organization (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/sso/{provider})
 	SetSsoConfig(ctx context.Context, request SetSsoConfigRequestObject) (SetSsoConfigResponseObject, error)
+	// Get the org enforcement mode (enterprise)
+	// (GET /api/v1/organizations/{orgId}/zero-trust-mode)
+	GetZeroTrustMode(ctx context.Context, request GetZeroTrustModeRequestObject) (GetZeroTrustModeResponseObject, error)
+	// Set the org enforcement mode — enabling turns on default-deny (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/zero-trust-mode)
+	SetZeroTrustMode(ctx context.Context, request SetZeroTrustModeRequestObject) (SetZeroTrustModeResponseObject, error)
 	// Liveness probe
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -5527,6 +7149,215 @@ func (sh *strictHandler) VerifyDomainClaim(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// ListGroups operation middleware
+func (sh *strictHandler) ListGroups(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListGroupsRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListGroups(ctx, request.(ListGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListGroupsResponseObject); ok {
+		if err := validResponse.VisitListGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateGroup operation middleware
+func (sh *strictHandler) CreateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreateGroupRequestObject
+
+	request.OrgId = orgId
+
+	var body CreateGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateGroup(ctx, request.(CreateGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateGroupResponseObject); ok {
+		if err := validResponse.VisitCreateGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteGroup operation middleware
+func (sh *strictHandler) DeleteGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	var request DeleteGroupRequestObject
+
+	request.OrgId = orgId
+	request.GroupId = groupId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteGroup(ctx, request.(DeleteGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteGroupResponseObject); ok {
+		if err := validResponse.VisitDeleteGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateGroup operation middleware
+func (sh *strictHandler) UpdateGroup(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	var request UpdateGroupRequestObject
+
+	request.OrgId = orgId
+	request.GroupId = groupId
+
+	var body UpdateGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateGroup(ctx, request.(UpdateGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateGroupResponseObject); ok {
+		if err := validResponse.VisitUpdateGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListGroupMembers operation middleware
+func (sh *strictHandler) ListGroupMembers(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	var request ListGroupMembersRequestObject
+
+	request.OrgId = orgId
+	request.GroupId = groupId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListGroupMembers(ctx, request.(ListGroupMembersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListGroupMembers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListGroupMembersResponseObject); ok {
+		if err := validResponse.VisitListGroupMembersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddGroupMember operation middleware
+func (sh *strictHandler) AddGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID) {
+	var request AddGroupMemberRequestObject
+
+	request.OrgId = orgId
+	request.GroupId = groupId
+
+	var body AddGroupMemberJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddGroupMember(ctx, request.(AddGroupMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddGroupMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddGroupMemberResponseObject); ok {
+		if err := validResponse.VisitAddGroupMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveGroupMember operation middleware
+func (sh *strictHandler) RemoveGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID) {
+	var request RemoveGroupMemberRequestObject
+
+	request.OrgId = orgId
+	request.GroupId = groupId
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveGroupMember(ctx, request.(RemoveGroupMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveGroupMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveGroupMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveGroupMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateInvitation operation middleware
 func (sh *strictHandler) CreateInvitation(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	var request CreateInvitationRequestObject
@@ -5852,6 +7683,92 @@ func (sh *strictHandler) GetOrgOverview(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// ListPolicyRules operation middleware
+func (sh *strictHandler) ListPolicyRules(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListPolicyRulesRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPolicyRules(ctx, request.(ListPolicyRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPolicyRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPolicyRulesResponseObject); ok {
+		if err := validResponse.VisitListPolicyRulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePolicyRule operation middleware
+func (sh *strictHandler) CreatePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreatePolicyRuleRequestObject
+
+	request.OrgId = orgId
+
+	var body CreatePolicyRuleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePolicyRule(ctx, request.(CreatePolicyRuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePolicyRule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePolicyRuleResponseObject); ok {
+		if err := validResponse.VisitCreatePolicyRuleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeletePolicyRule operation middleware
+func (sh *strictHandler) DeletePolicyRule(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, ruleId openapi_types.UUID) {
+	var request DeletePolicyRuleRequestObject
+
+	request.OrgId = orgId
+	request.RuleId = ruleId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePolicyRule(ctx, request.(DeletePolicyRuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePolicyRule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePolicyRuleResponseObject); ok {
+		if err := validResponse.VisitDeletePolicyRuleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ResizePool operation middleware
 func (sh *strictHandler) ResizePool(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	var request ResizePoolRequestObject
@@ -5878,6 +7795,126 @@ func (sh *strictHandler) ResizePool(w http.ResponseWriter, r *http.Request, orgI
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResizePoolResponseObject); ok {
 		if err := validResponse.VisitResizePoolResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListResources operation middleware
+func (sh *strictHandler) ListResources(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListResourcesRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListResources(ctx, request.(ListResourcesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListResources")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListResourcesResponseObject); ok {
+		if err := validResponse.VisitListResourcesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateResource operation middleware
+func (sh *strictHandler) CreateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request CreateResourceRequestObject
+
+	request.OrgId = orgId
+
+	var body CreateResourceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateResource(ctx, request.(CreateResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateResourceResponseObject); ok {
+		if err := validResponse.VisitCreateResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteResource operation middleware
+func (sh *strictHandler) DeleteResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID) {
+	var request DeleteResourceRequestObject
+
+	request.OrgId = orgId
+	request.ResourceId = resourceId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteResource(ctx, request.(DeleteResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteResourceResponseObject); ok {
+		if err := validResponse.VisitDeleteResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateResource operation middleware
+func (sh *strictHandler) UpdateResource(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, resourceId openapi_types.UUID) {
+	var request UpdateResourceRequestObject
+
+	request.OrgId = orgId
+	request.ResourceId = resourceId
+
+	var body UpdateResourceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateResource(ctx, request.(UpdateResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateResourceResponseObject); ok {
+		if err := validResponse.VisitUpdateResourceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5946,6 +7983,65 @@ func (sh *strictHandler) SetSsoConfig(w http.ResponseWriter, r *http.Request, or
 	}
 }
 
+// GetZeroTrustMode operation middleware
+func (sh *strictHandler) GetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request GetZeroTrustModeRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetZeroTrustMode(ctx, request.(GetZeroTrustModeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetZeroTrustMode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetZeroTrustModeResponseObject); ok {
+		if err := validResponse.VisitGetZeroTrustModeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetZeroTrustMode operation middleware
+func (sh *strictHandler) SetZeroTrustMode(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request SetZeroTrustModeRequestObject
+
+	request.OrgId = orgId
+
+	var body SetZeroTrustModeJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetZeroTrustMode(ctx, request.(SetZeroTrustModeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetZeroTrustMode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetZeroTrustModeResponseObject); ok {
+		if err := validResponse.VisitSetZeroTrustModeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealth operation middleware
 func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthRequestObject
@@ -5973,128 +8069,144 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"fP73AAAA///mH485Zq4AAA==",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

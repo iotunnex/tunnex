@@ -636,6 +636,308 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  # ── Zero Trust policy (S7.1, ENTERPRISE) ────────────────────────────────────
+  # Model only (groups, resources, allow-rules, org mode). Enforcement is S7.2.
+  # Every endpoint is edition-gated: the open build returns 403 edition_required.
+  /api/v1/organizations/{orgId}/groups:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listGroups
+      summary: List user-groups (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Groups.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/UserGroup" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createGroup
+      summary: Create a user-group (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupRequest" }
+      responses:
+        "201":
+          description: Created group.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/groups/{groupId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateGroup
+      summary: Rename / re-describe a user-group (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupRequest" }
+      responses:
+        "200":
+          description: Updated group.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteGroup
+      summary: Delete a user-group (enterprise)
+      tags: [policy]
+      responses:
+        "204":
+          description: Deleted.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/groups/{groupId}/members:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listGroupMembers
+      summary: List a group's members (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Members.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/GroupMember" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addGroupMember
+      summary: Add a member to a group (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddGroupMemberRequest" }
+      responses:
+        "204":
+          description: Added (idempotent).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: removeGroupMember
+      summary: Remove a member from a group (enterprise)
+      tags: [policy]
+      responses:
+        "204":
+          description: Removed.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/resources:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listResources
+      summary: List policy resources (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Resources.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Resource" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createResource
+      summary: Create a policy resource (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceRequest" }
+      responses:
+        "201":
+          description: Created resource.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Resource" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/resources/{resourceId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: resourceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateResource
+      summary: Update a policy resource (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceRequest" }
+      responses:
+        "200":
+          description: Updated resource.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Resource" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteResource
+      summary: Delete a policy resource (enterprise)
+      tags: [policy]
+      responses:
+        "204":
+          description: Deleted.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/policies:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listPolicyRules
+      summary: List allow-rules (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Rules.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PolicyRule" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPolicyRule
+      summary: Create an allow-rule (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePolicyRuleRequest" }
+      responses:
+        "201":
+          description: Created rule.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyRule" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/policies/{ruleId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: ruleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: deletePolicyRule
+      summary: Delete an allow-rule (enterprise)
+      tags: [policy]
+      responses:
+        "204":
+          description: Deleted.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/zero-trust-mode:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getZeroTrustMode
+      summary: Get the org enforcement mode (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Current mode.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZeroTrustMode" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setZeroTrustMode
+      summary: Set the org enforcement mode — enabling turns on default-deny (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZeroTrustMode" }
+      responses:
+        "200":
+          description: Updated mode.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZeroTrustMode" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/invitations/accept:
     post:
       operationId: acceptInvitation
@@ -1064,6 +1366,103 @@ components:
       additionalProperties: false
       properties:
         cidr: { type: string, description: New pool CIDR (IPv4). Must contain or be contained by the current range. }
+
+    # ── Zero Trust policy (S7.1, enterprise) ──────────────────────────────────
+    UserGroup:
+      type: object
+      required: [id, org_id, name, description, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    GroupRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+
+    GroupMember:
+      type: object
+      required: [user_id, email, name, added_at]
+      additionalProperties: false
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string }
+        name: { type: string }
+        added_at: { type: string, format: date-time }
+
+    AddGroupMemberRequest:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id: { type: string, format: uuid }
+
+    Resource:
+      type: object
+      required: [id, org_id, name, cidr, protocol, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        name: { type: string }
+        cidr: { type: string, description: "Destination prefix (e.g. 10.0.5.0/24, 0.0.0.0/0)." }
+        protocol: { type: string, enum: [any, tcp, udp] }
+        port_low: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+        port_high: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ResourceRequest:
+      type: object
+      required: [name, cidr, protocol]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        cidr: { type: string }
+        protocol: { type: string, enum: [any, tcp, udp] }
+        port_low: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+        port_high: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+
+    PolicyRule:
+      type: object
+      required: [id, org_id, src_group_id, dst_kind, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        src_group_id: { type: string, format: uuid }
+        dst_kind: { type: string, enum: [resource, group] }
+        dst_resource_id: { type: string, format: uuid, nullable: true }
+        dst_group_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    CreatePolicyRuleRequest:
+      type: object
+      required: [src_group_id, dst_kind]
+      additionalProperties: false
+      properties:
+        src_group_id: { type: string, format: uuid }
+        dst_kind: { type: string, enum: [resource, group] }
+        dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
+        dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }
+
+    ZeroTrustMode:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [off, enforcing]
+          description: "off = legacy blanket mesh; enforcing = default-deny + compiled allows."
 
     # One stranded allocation. reason distinguishes out_of_range (visibly outside
     # the new range) from reserved_collision (numerically INSIDE it but on the new

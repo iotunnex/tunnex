@@ -35,6 +35,14 @@ var walkBodies = map[string]string{
 	// S5.1 CLI-auth gated ops (cliToken/cliDeviceStart/cliDeviceToken are public).
 	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,
+	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
+	"creategroup":      `{"name":"Walk"}`,
+	"updategroup":      `{"name":"Walk"}`,
+	"addgroupmember":   `{"user_id":"00000000-0000-0000-0000-000000000000"}`,
+	"createresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"updateresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"createpolicyrule": `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
+	"setzerotrustmode": `{"mode":"off"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
@@ -67,6 +75,9 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 			reqPath = strings.ReplaceAll(reqPath, "{nodeId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{deviceId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{credentialId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{groupId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{resourceId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{ruleId}", uuid.NewString())
 
 			var body io.Reader
 			if b, ok := walkBodies[strings.ToLower(op.OperationID)]; ok {

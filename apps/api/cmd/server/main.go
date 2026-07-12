@@ -159,6 +159,7 @@ func main() {
 		Devices:            deviceSvc,
 		Sessions:           sessions,
 		SSO:                apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
+		Policy:             apphttp.NewPolicyPort(pool),
 		CookieSecure:       cfg.CookieSecure,
 		AppBaseURL:         cfg.AppBaseURL,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,

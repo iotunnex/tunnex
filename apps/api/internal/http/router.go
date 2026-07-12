@@ -42,7 +42,8 @@ type Deps struct {
 	Nodes        *nodes.Service
 	Devices      *devices.Service
 	Sessions     *session.Store
-	SSO          ssoPort // nil => open build (SSO endpoints return edition_required)
+	SSO          ssoPort    // nil => open build (SSO endpoints return edition_required)
+	Policy       policyPort // nil => open build (policy endpoints return edition_required)
 	CookieSecure bool
 	AppBaseURL   string
 	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
@@ -144,7 +145,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, policy: d.Policy, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,
