@@ -10,6 +10,30 @@
 // reconcile-idempotence guard). Allow entries are sorted + de-duplicated.
 package policyspec
 
+import "github.com/google/uuid"
+
+// ResourceInput and RuleInput are the NEUTRAL CRUD payload DTOs for the policy
+// API. They live here (not in internal/enterprise/policy) so the open-build http
+// port + handlers can reference them WITHOUT importing the enterprise package —
+// which would link the enterprise compiler into the open binary and break the
+// edition boundary (the SSO port takes primitives for the same reason). The
+// enterprise service consumes these and does the validation.
+type ResourceInput struct {
+	Name     string
+	CIDR     string
+	Protocol string // any | tcp | udp
+	PortLow  *int
+	PortHigh *int
+}
+
+// RuleInput is a policy allow-rule create payload.
+type RuleInput struct {
+	SrcGroupID    uuid.UUID
+	DstKind       string // resource | group
+	DstResourceID *uuid.UUID
+	DstGroupID    *uuid.UUID
+}
+
 // ProtocolVersion is the compiled-artifact wire version. Bump on any breaking
 // shape change so a mismatched agent can reject rather than misapply a ruleset.
 const ProtocolVersion = 1

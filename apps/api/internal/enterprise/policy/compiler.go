@@ -1,3 +1,5 @@
+//go:build enterprise
+
 // Package policy is the enterprise Zero Trust policy engine (S7.1): the CRUD
 // service plus the pure Compile function that turns the stored model (groups,
 // resources, allow-rules, org mode) into the per-node compiled artifact
@@ -134,13 +136,13 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 				continue
 			}
 			for g := range userGroups[d.UserID] {
-				s := seen[g]
-				if s == nil {
-					s = map[string]bool{}
-					seen[g] = s
+				gs := seen[g]
+				if gs == nil {
+					gs = map[string]bool{}
+					seen[g] = gs
 				}
-				if !s[d.AssignedIP] {
-					s[d.AssignedIP] = true
+				if !gs[d.AssignedIP] {
+					gs[d.AssignedIP] = true
 					groupDeviceIPs[g] = append(groupDeviceIPs[g], d.AssignedIP)
 				}
 			}

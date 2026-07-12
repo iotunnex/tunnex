@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addGroupMember = `-- name: AddGroupMember :exec
+const addGroupMember = `-- name: AddGroupMember :execrows
 INSERT INTO group_members (org_id, group_id, user_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (group_id, user_id) DO NOTHING
@@ -26,9 +26,14 @@ type AddGroupMemberParams struct {
 }
 
 // ── group_members ───────────────────────────────────────────────────────────────
-func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) error {
-	_, err := q.db.Exec(ctx, addGroupMember, arg.OrgID, arg.GroupID, arg.UserID)
-	return err
+// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
+// the audit event for a no-op re-add (idempotent, still 204).
+func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addGroupMember, arg.OrgID, arg.GroupID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createPolicyRule = `-- name: CreatePolicyRule :one
@@ -247,6 +252,7 @@ const listActiveDevicesForOrg = `-- name: ListActiveDevicesForOrg :many
 SELECT d.id, d.user_id, d.node_id, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
+JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
 WHERE d.org_id = $1
   AND d.status = 'active' AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
@@ -262,8 +268,11 @@ type ListActiveDevicesForOrgRow struct {
 }
 
 // ── compiler inputs ─────────────────────────────────────────────────────────────
-// Every active device owned by an active user, org-wide (all nodes) — the compiler
-// resolves group destinations to these devices' /32s and keys allows by src /32.
+// Every active device whose owner is an active, CURRENT org member, org-wide (all
+// nodes) — the compiler resolves group destinations to these devices' /32s and keys
+// allows by src /32. The memberships join is load-bearing: a removed member's device
+// must not participate in policy (as a source OR a destination) even if the device
+// itself was never revoked.
 func (q *Queries) ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listActiveDevicesForOrg, orgID)
 	if err != nil {

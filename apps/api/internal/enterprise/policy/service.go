@@ -1,3 +1,5 @@
+//go:build enterprise
+
 package policy
 
 import (
@@ -17,6 +19,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 )
 
 // Service is the enterprise Zero Trust policy CRUD + snapshot service. Every
@@ -116,8 +119,12 @@ func (s *Service) AddGroupMember(ctx context.Context, orgID, groupID, userID uui
 			}
 			return e
 		}
-		if e := q.AddGroupMember(ctx, sqlc.AddGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID}); e != nil {
+		n, e := q.AddGroupMember(ctx, sqlc.AddGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID})
+		if e != nil {
 			return e
+		}
+		if n == 0 {
+			return nil // already a member — no state change, so no audit event (idempotent)
 		}
 		return writeAudit(ctx, q, orgID, "group.member_added", "group", groupID.String(), map[string]any{"user_id": userID.String()})
 	})
@@ -138,16 +145,9 @@ func (s *Service) RemoveGroupMember(ctx context.Context, orgID, groupID, userID 
 
 // ── resources ───────────────────────────────────────────────────────────────────
 
-// ResourceInput is a validated resource create/update payload.
-type ResourceInput struct {
-	Name     string
-	CIDR     string
-	Protocol string
-	PortLow  *int
-	PortHigh *int
-}
-
-func (in ResourceInput) validate() error {
+// validateResource validates a resource payload (the DTO lives in policyspec so
+// the open build's http port can reference it without importing this package).
+func validateResource(in policyspec.ResourceInput) error {
 	if strings.TrimSpace(in.Name) == "" {
 		return apierr.BadRequest("invalid_request", "resource name is required")
 	}
@@ -178,10 +178,11 @@ func (s *Service) ListResources(ctx context.Context, orgID uuid.UUID) ([]sqlc.Re
 	return s.q.ListResourcesByOrg(ctx, orgID)
 }
 
-func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in ResourceInput) (sqlc.Resource, error) {
-	if err := in.validate(); err != nil {
+func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error) {
+	if err := validateResource(in); err != nil {
 		return sqlc.Resource{}, err
 	}
+	in.CIDR = canonicalCIDR(in.CIDR) // store the masked prefix, never host-bits-set
 	var r sqlc.Resource
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		var e error
@@ -198,10 +199,11 @@ func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in Resour
 	return r, err
 }
 
-func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in ResourceInput) (sqlc.Resource, error) {
-	if err := in.validate(); err != nil {
+func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error) {
+	if err := validateResource(in); err != nil {
 		return sqlc.Resource{}, err
 	}
+	in.CIDR = canonicalCIDR(in.CIDR)
 	var r sqlc.Resource
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		var e error
@@ -236,19 +238,11 @@ func (s *Service) DeleteResource(ctx context.Context, orgID, resourceID uuid.UUI
 
 // ── rules ───────────────────────────────────────────────────────────────────────
 
-// RuleInput is a validated allow-rule payload.
-type RuleInput struct {
-	SrcGroupID    uuid.UUID
-	DstKind       string
-	DstResourceID *uuid.UUID
-	DstGroupID    *uuid.UUID
-}
-
 func (s *Service) ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error) {
 	return s.q.ListPolicyRulesByOrg(ctx, orgID)
 }
 
-func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in RuleInput) (sqlc.PolicyRule, error) {
+func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error) {
 	// Shape validation: exactly one dst_* set, matching dst_kind (the DB CHECKs
 	// this too; we return a clean 400 rather than a raw constraint error).
 	switch in.DstKind {
@@ -472,6 +466,18 @@ func conflictIfDup(err error, msg string) error {
 		return apierr.New(http.StatusConflict, "conflict", msg)
 	}
 	return err
+}
+
+// canonicalCIDR returns the masked (host-bits-zeroed) form of a prefix already
+// validated by validateResource, so the stored + compiled DstCIDR is canonical
+// (e.g. 10.0.5.5/24 -> 10.0.5.0/24) and never rejected/mis-read by the S7.2
+// nftables/ipset apply.
+func canonicalCIDR(s string) string {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		return s // unreachable after validateResource; keep input rather than panic
+	}
+	return p.Masked().String()
 }
 
 func toPgUUID(id *uuid.UUID) pgtype.UUID {

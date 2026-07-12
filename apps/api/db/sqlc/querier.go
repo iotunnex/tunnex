@@ -15,7 +15,9 @@ type Querier interface {
 	// by org scope. Single-use: only transitions a pending, unexpired invite.
 	AcceptInvitation(ctx context.Context, id uuid.UUID) (Invitation, error)
 	// ── group_members ───────────────────────────────────────────────────────────────
-	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) error
+	// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
+	// the audit event for a no-op re-add (idempotent, still 204).
+	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
@@ -131,8 +133,11 @@ type Querier interface {
 	// lock so allocation and resize serialize on the same snapshot.
 	ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error)
 	// ── compiler inputs ─────────────────────────────────────────────────────────────
-	// Every active device owned by an active user, org-wide (all nodes) — the compiler
-	// resolves group destinations to these devices' /32s and keys allows by src /32.
+	// Every active device whose owner is an active, CURRENT org member, org-wide (all
+	// nodes) — the compiler resolves group destinations to these devices' /32s and keys
+	// allows by src /32. The memberships join is load-bearing: a removed member's device
+	// must not participate in policy (as a source OR a destination) even if the device
+	// itself was never revoked.
 	ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
