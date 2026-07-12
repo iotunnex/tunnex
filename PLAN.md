@@ -60,7 +60,13 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-12): EPIC 6 COMPLETE + `v0.1.0` CUT; NOW IN EPIC 7 (Zero Trust Access).**
-- **EPIC 6 done:** S6.1–S6.6 + S6.7 + S6.8/9/10 (+ S3.7) all MERGED. **S6.6 (zero-build deploy) MERGED
+- **EPIC 6 done:** S6.1–S6.6 + S6.7 + S6.8/9/10 (+ S3.7) all MERGED. The mid-epic stories were spun
+  up live during full-tunnel hardening and are defined ONLY here (reconciled against git log, so the
+  checkpoint never points at ghosts): **S6.8 = quit continuity** (graceful helper Down on app quit +
+  fast orphan dead-man — internet no longer dead ~60s after quit); **S6.9/S6.9b = Windows full-tunnel
+  guard** (server-side CLEAN refusal of Windows full-tunnel until DNS parity + kill-switch persistence
+  landed — LIFTED at S6.7); **S6.10 = Windows full-tunnel DNS parity** (API-verified DNS on the wintun
+  adapter, empty-DNS refusal, atomic DNS↔kill-switch coupling). **S6.6 (zero-build deploy) MERGED
   (PR#13) and `v0.1.0` tagged** → multi-arch ghcr images + `install.sh`/`.sha256` release assets published.
   Only **S6.5b** (signing/notarization/auto-update) deferred — named trigger, not a gap. Remaining S6.6
   proof: the clean-VPS acceptance box-proof (`docs/S6.6-acceptance.md`), Pawan's box test.
