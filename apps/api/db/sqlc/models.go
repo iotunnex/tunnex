@@ -101,6 +101,13 @@ type DomainClaim struct {
 	UpdatedAt         time.Time          `json:"updated_at"`
 }
 
+type GroupMember struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	GroupID   uuid.UUID `json:"group_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Invitation struct {
 	ID              uuid.UUID          `json:"id"`
 	OrgID           uuid.UUID          `json:"org_id"`
@@ -161,6 +168,7 @@ type Organization struct {
 	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
 	MaxDevicesPerUser int32              `json:"max_devices_per_user"`
 	PoolCidr          string             `json:"pool_cidr"`
+	ZeroTrustMode     string             `json:"zero_trust_mode"`
 }
 
 type PlatformSecret struct {
@@ -169,6 +177,28 @@ type PlatformSecret struct {
 	PublicPem    *string   `json:"public_pem"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type PolicyRule struct {
+	ID            uuid.UUID   `json:"id"`
+	OrgID         uuid.UUID   `json:"org_id"`
+	SrcGroupID    uuid.UUID   `json:"src_group_id"`
+	DstKind       string      `json:"dst_kind"`
+	DstResourceID pgtype.UUID `json:"dst_resource_id"`
+	DstGroupID    pgtype.UUID `json:"dst_group_id"`
+	CreatedAt     time.Time   `json:"created_at"`
+}
+
+type Resource struct {
+	ID        uuid.UUID `json:"id"`
+	OrgID     uuid.UUID `json:"org_id"`
+	Name      string    `json:"name"`
+	Cidr      string    `json:"cidr"`
+	Protocol  string    `json:"protocol"`
+	PortLow   *int32    `json:"port_low"`
+	PortHigh  *int32    `json:"port_high"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type SsoConfig struct {
@@ -194,4 +224,13 @@ type User struct {
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type UserGroup struct {
+	ID          uuid.UUID `json:"id"`
+	OrgID       uuid.UUID `json:"org_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
