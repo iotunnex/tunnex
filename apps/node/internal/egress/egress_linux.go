@@ -19,10 +19,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync/atomic"
+
+	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
 // ifaceRE bounds an interface name to what the kernel allows (Linux IFNAMSIZ-1 = 15,
@@ -31,11 +35,22 @@ import (
 // statements (review #4).
 var ifaceRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,15}$`)
 
-// Manager reconciles the tunnex nft tables for one WG interface.
-type Manager struct{ wgIface string }
+// Manager reconciles the tunnex nft tables for one WG interface. It also holds the
+// latest compiled Zero Trust policy (S7.2): the reconcile loop feeds it via SetPolicy
+// on every desired-state fetch, and the forward chain is rendered from it — nil or
+// Mesh=true keeps the legacy blanket mesh, enforcing renders default-deny + the
+// compiled allow rules.
+type Manager struct {
+	wgIface string
+	policy  atomic.Pointer[nodepolicy.Compiled]
+}
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager { return &Manager{wgIface: wgIface} }
+
+// SetPolicy stores the latest compiled policy for the next Reconcile to render. A nil
+// policy (open build / no Zero Trust) keeps the legacy blanket mesh.
+func (m *Manager) SetPolicy(p *nodepolicy.Compiled) { m.policy.Store(p) }
 
 // Reconcile is idempotent (safe to call every interval) and DOUBLES as the egress_nat
 // capability probe. Ordering matters: it enables ip_forward FIRST and unconditionally, so
@@ -102,6 +117,7 @@ func (m *Manager) ruleset(subnet string) string {
 	if subnet != "" {
 		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
 	}
+	v4fwd, v6fwd := m.forwardRules(m.policy.Load())
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
@@ -111,9 +127,7 @@ table ip tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
-    iifname "%[1]s" oifname "%[1]s" accept
-    iifname "%[1]s" oifname != "%[1]s" accept
-  }
+%[3]s  }
 }
 add table ip6 tunnex
 flush table ip6 tunnex
@@ -121,10 +135,68 @@ table ip6 tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
-    iifname "%[1]s" oifname "%[1]s" accept
-  }
+%[4]s  }
 }
-`, wg, masq)
+`, wg, masq, v4fwd, v6fwd)
+}
+
+// forwardRules renders the forward-chain accept lines (after the base policy-drop +
+// ct-accept) for the ip and ip6 tables, from the compiled policy:
+//
+//   - nil policy or Mesh=true (Zero Trust off / open build): the LEGACY blanket mesh —
+//     wg0<->wg0 (device↔device) + wg0→egress in v4, wg0<->wg0 in v6. No behavior change.
+//   - enforcing: DEFAULT-DENY. Only the compiled allows are emitted, in the compiler's
+//     already-sorted order (byte-stable → steady-state reconcile is a no-op). There is
+//     NO wg0<->wg0 blanket — device↔device is permitted only by an explicit rule (the
+//     S7.1 structural guard, now on the wire). Egress is likewise gated: a device reaches
+//     off-pool/internet only via an allow whose dst covers it (e.g. a 0.0.0.0/0 resource),
+//     which the masquerade then NATs. v6 is left as pure default-deny (drop + ct only):
+//     spokes are v4 (the pool is v4), so there is no v6 device traffic to permit, and
+//     dropping it is strictly safer than the blanket mesh.
+func (m *Manager) forwardRules(pol *nodepolicy.Compiled) (v4, v6 string) {
+	wg := m.wgIface
+	if pol == nil || pol.Mesh {
+		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" accept\n", wg)
+		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" accept\n", wg)
+		return v4, v6
+	}
+	var b strings.Builder
+	for _, e := range pol.Allow {
+		if line, ok := renderAllow(e); ok {
+			b.WriteString(line)
+		}
+	}
+	return b.String(), "" // enforcing v6 = default-deny (drop + ct only, no blanket)
+}
+
+// renderAllow turns one compiled allow into an nft accept line for the ip (v4) forward
+// chain, or reports ok=false to SKIP it. Every field is re-emitted through netip as a
+// canonical NUMERIC string (never the raw control-plane string) so nothing can inject
+// nft statements into this root ruleset — the same hardening as ifaceRE. Ports are
+// integers. A v6 destination is skipped (v4 spokes have no route to it; v6 stays
+// default-deny).
+func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
+	src, err := netip.ParseAddr(e.SrcIP)
+	if err != nil || !src.Is4() {
+		return "", false
+	}
+	dst, err := netip.ParsePrefix(e.DstCIDR)
+	if err != nil || !dst.Addr().Is4() {
+		return "", false
+	}
+	clause := ""
+	switch e.Protocol {
+	case "tcp", "udp":
+		switch {
+		case e.PortLow <= 0:
+			clause = fmt.Sprintf(" ip protocol %s", e.Protocol)
+		case e.PortHigh > e.PortLow:
+			clause = fmt.Sprintf(" %s dport %d-%d", e.Protocol, e.PortLow, e.PortHigh)
+		default:
+			clause = fmt.Sprintf(" %s dport %d", e.Protocol, e.PortLow)
+		}
+	}
+	return fmt.Sprintf("    ip saddr %s ip daddr %s%s accept\n", src.String(), dst.Masked().String(), clause), true
 }
 
 // nftApply pipes a ruleset to `nft -f -` (atomic transaction).
