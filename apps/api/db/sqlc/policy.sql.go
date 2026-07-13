@@ -501,7 +501,7 @@ const setOrgZeroTrustMode = `-- name: SetOrgZeroTrustMode :one
 UPDATE organizations
 SET zero_trust_mode = $2
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
 `
 
 type SetOrgZeroTrustModeParams struct {
@@ -523,6 +523,7 @@ func (q *Queries) SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustMo
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }

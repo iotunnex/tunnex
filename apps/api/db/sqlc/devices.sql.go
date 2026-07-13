@@ -32,7 +32,7 @@ func (q *Queries) CountActiveDevicesForUser(ctx context.Context, arg CountActive
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by
 `
 
 type CreateDeviceParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.RevokedAt,
 		&i.DeletedAt,
 		&i.FullTunnel,
+		&i.ApprovedBy,
 	)
 	return i, err
 }
@@ -90,7 +91,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -117,6 +118,7 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.RevokedAt,
 		&i.DeletedAt,
 		&i.FullTunnel,
+		&i.ApprovedBy,
 	)
 	return i, err
 }
@@ -279,7 +281,7 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
@@ -317,6 +319,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.RevokedAt,
 			&i.Device.DeletedAt,
 			&i.Device.FullTunnel,
+			&i.Device.ApprovedBy,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -332,7 +335,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
@@ -375,6 +378,7 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.RevokedAt,
 			&i.Device.DeletedAt,
 			&i.Device.FullTunnel,
+			&i.Device.ApprovedBy,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,

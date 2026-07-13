@@ -92,7 +92,7 @@ func (q *Queries) CountOrganizations(ctx context.Context) (int64, error) {
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (name, slug)
 VALUES ($1, $2)
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
 `
 
 type CreateOrganizationParams struct {
@@ -113,12 +113,13 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
 
 const getOrganizationByID = `-- name: GetOrganizationByID :one
-SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode FROM organizations
+SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval FROM organizations
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -135,12 +136,13 @@ func (q *Queries) GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organi
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode FROM organizations
+SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval FROM organizations
 WHERE slug = $1 AND deleted_at IS NULL
 `
 
@@ -157,12 +159,13 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode FROM organizations
+SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at
 `
@@ -188,6 +191,7 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 			&i.MaxDevicesPerUser,
 			&i.PoolCidr,
 			&i.ZeroTrustMode,
+			&i.DeviceApproval,
 		); err != nil {
 			return nil, err
 		}
@@ -200,7 +204,7 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 }
 
 const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
-SELECT o.id, o.name, o.slug, o.created_at, o.updated_at, o.deleted_at, o.max_devices_per_user, o.pool_cidr, o.zero_trust_mode FROM organizations o
+SELECT o.id, o.name, o.slug, o.created_at, o.updated_at, o.deleted_at, o.max_devices_per_user, o.pool_cidr, o.zero_trust_mode, o.device_approval FROM organizations o
 JOIN memberships m ON m.org_id = o.id
 WHERE m.user_id = $1 AND o.deleted_at IS NULL
 ORDER BY o.created_at
@@ -225,6 +229,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID uuid.UUID
 			&i.MaxDevicesPerUser,
 			&i.PoolCidr,
 			&i.ZeroTrustMode,
+			&i.DeviceApproval,
 		); err != nil {
 			return nil, err
 		}
@@ -254,7 +259,7 @@ const updateOrgPoolCidr = `-- name: UpdateOrgPoolCidr :one
 UPDATE organizations
 SET pool_cidr = $2
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
 `
 
 type UpdateOrgPoolCidrParams struct {
@@ -277,6 +282,7 @@ func (q *Queries) UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrPa
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
@@ -285,7 +291,7 @@ const updateOrganizationName = `-- name: UpdateOrganizationName :one
 UPDATE organizations
 SET name = $2
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
 `
 
 type UpdateOrganizationNameParams struct {
@@ -307,6 +313,7 @@ func (q *Queries) UpdateOrganizationName(ctx context.Context, arg UpdateOrganiza
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
@@ -316,7 +323,7 @@ INSERT INTO organizations (id, name, slug)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE
     SET name = EXCLUDED.name, slug = EXCLUDED.slug, deleted_at = NULL
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
 `
 
 type UpsertOrganizationParams struct {
@@ -340,6 +347,7 @@ func (q *Queries) UpsertOrganization(ctx context.Context, arg UpsertOrganization
 		&i.MaxDevicesPerUser,
 		&i.PoolCidr,
 		&i.ZeroTrustMode,
+		&i.DeviceApproval,
 	)
 	return i, err
 }
