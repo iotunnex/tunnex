@@ -232,3 +232,68 @@ var errFail = fmtErr("nft apply: rejected")
 type fmtErr string
 
 func (e fmtErr) Error() string { return string(e) }
+
+// Finding #2 (three states): a Manager that has NEVER received a policy renders
+// DENY-ALL (drop + ct only), NOT the blanket mesh — fail-closed cold start. This is
+// distinct from nil-in-received (= mesh, asserted by TestRulesetMeshIsBlanket, which
+// calls SetPolicy). The absent=Mesh contract is thus SPLIT: nil-in-received=mesh,
+// never-received=deny.
+func TestNeverReceivedIsDenyAllNotMesh(t *testing.T) {
+	m := New("wg0") // no SetPolicy call -> policyReceived is false
+	rs := m.ruleset("10.99.0.1/24")
+	if strings.Contains(rs, blanketV4) {
+		t.Fatalf("cold start (no policy received) must NOT render the blanket mesh; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, "policy drop") || !strings.Contains(rs, "tunnex_default_drop") {
+		t.Fatal("cold start must be deny-all (policy drop + default_drop counter)")
+	}
+	if strings.Contains(rs, "ip daddr") {
+		t.Fatal("cold start must emit no allow rules")
+	}
+	// Once a nil policy is RECEIVED (an off org's first fetch), it becomes the mesh.
+	m.SetPolicy(nil)
+	if !strings.Contains(m.ruleset("10.99.0.1/24"), blanketV4) {
+		t.Fatal("nil-in-received must render the blanket mesh")
+	}
+}
+
+// Finding #1: a half-set / inverted port range fails CLOSED (rule skipped), never
+// widening to all-ports.
+func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {
+	// only port_high set (port_low == 0) -> the old bug emitted `ip protocol tcp` (all ports).
+	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortHigh: 443}); ok {
+		t.Fatal("port_high without port_low must be SKIPPED (fail-closed), not widened to all-ports")
+	}
+	// only port_low set -> also skipped.
+	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 443}); ok {
+		t.Fatal("port_low without port_high must be skipped")
+	}
+	// inverted range -> skipped.
+	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 500, PortHigh: 400}); ok {
+		t.Fatal("inverted range must be skipped")
+	}
+	// both unset -> any-port (valid).
+	if line, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp"}); !ok || !strings.Contains(line, "ip protocol tcp") {
+		t.Fatalf("both-unset must be any-port, got %q ok=%v", line, ok)
+	}
+}
+
+// Finding #6: an apply failure while the policy is NOT enforcing (mesh/nil/off/open)
+// is an egress-arm problem, NOT policy staleness -> must not set failingSince/applyErr.
+func TestNonEnforcingApplyFailureIsNotPolicyStale(t *testing.T) {
+	m := New("wg0")
+	m.apply = func(context.Context, string) error { return errFail }
+	// mesh policy (off org) whose nft apply fails:
+	mesh := &nodepolicy.Compiled{Mode: nodepolicy.ModeOff, Mesh: true}
+	m.SetPolicy(mesh)
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), mesh)
+	if _, _, fs, e := m.AppliedStatus(); !fs.IsZero() || e != nil {
+		t.Fatalf("non-enforcing apply failure must NOT set policy failingSince/err; got fs=%v e=%v", fs, e)
+	}
+	// nil policy (open build) apply failure: same.
+	m.SetPolicy(nil)
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), nil)
+	if _, _, fs, e := m.AppliedStatus(); !fs.IsZero() || e != nil {
+		t.Fatalf("nil-policy apply failure must NOT set policy failingSince/err; got fs=%v e=%v", fs, e)
+	}
+}

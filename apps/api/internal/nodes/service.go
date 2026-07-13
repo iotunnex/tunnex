@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -261,17 +262,22 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		Peers:            peers,
 	}
 	if s.policy != nil {
-		// FAIL-CLOSED on a compile error: erroring the whole fetch means the agent
-		// backs off and keeps its LAST APPLIED policy in force (data-plane
-		// independence: a fetch error never touches the data plane). Omitting the
-		// field instead would decode as nil = LEGACY MESH on the agent -- silently
-		// fail-OPEN under enforcing. Peer updates are delayed too; that is the
-		// accepted cost of a control-plane-side compile failure.
 		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
 		if err != nil {
-			return DesiredState{}, err
+			// A policy-subsystem error must NOT fail the whole desired state — the PEERS
+			// are already built above, and a policy compile failure must never block peer
+			// convergence / revocation (finding #3: the <5s revocation SLA is independent
+			// of the policy engine). Serve the peers, and FAIL THE POLICY CLOSED: a
+			// deny-all enforcing artifact so the gateway locks down rather than reverting
+			// to the open mesh. (nil here would decode as mesh = fail-OPEN.)
+			slog.Warn("policy_compile_failed_failing_closed",
+				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
+			ds.Policy = &policyspec.Compiled{
+				Version: ProtocolVersion, NodeID: node.ID.String(), Mode: "enforcing", Mesh: false,
+			}
+		} else {
+			ds.Policy = pol
 		}
-		ds.Policy = pol
 	}
 	return ds, nil
 }
@@ -423,6 +429,30 @@ type NodeCapabilities struct {
 // older than 90s cannot be a normal window). policy_error is surfaced IMMEDIATELY,
 // regardless of hash state -- an apply failure is never smoothed by this window.
 const PolicyStaleAfter = 90 * time.Second
+
+// PolicyStatus surfaces a node's Zero Trust policy health for the API (finding #5/#7):
+//   - stale:  apply has been FAILING longer than PolicyStaleAfter (from failingSince) —
+//     the alarm-worthy case (a gateway that cannot apply the pushed policy).
+//   - synced: the policy IN FORCE (reported applied hash) equals what the control plane
+//     would push right now (freshly compiled canonical hash). synced=false catches
+//     SILENT staleness — a gateway that never fetched the new policy — which the
+//     failing-apply signal alone misses. The dashboard BADGE (debounce/UX) is S7.4;
+//     this raw field is S7.2 so proof-7's observed surface reaches production.
+//
+// Open build / no policy provider: stale=false, synced=true (no policy to be out of sync).
+func (s *Service) PolicyStatus(ctx context.Context, node sqlc.Node, now time.Time) (stale, synced bool) {
+	caps := Capabilities(node.Capabilities)
+	stale = caps.PolicyStale(now)
+	synced = true
+	if s.policy != nil {
+		pushed := ""
+		if pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID); err == nil && pol != nil {
+			pushed = policyspec.CanonicalHash(*pol)
+		}
+		synced = pushed == caps.PolicyHash
+	}
+	return stale, synced
+}
 
 // PolicyStale reports whether this node is running STALE policy: apply has been
 // FAILING (applied != desired) for longer than PolicyStaleAfter. Measured from the
