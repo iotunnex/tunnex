@@ -27,7 +27,7 @@ parse_conf() {
 	case "$field" in
 	PrivateKey)    grep -iE '^\s*PrivateKey'  "$f" | head -1 | cut -d= -f2- | tr -d ' ' ;;
 	Address)       grep -iE '^\s*Address'     "$f" | head -1 | cut -d= -f2- | tr -d ' ' | cut -d, -f1 ;;
-	PeerPublicKey) awk 'BEGIN{p=0} /^\[Peer\]/{p=1} p&&/^\s*PublicKey/{sub(/.*=[ ]*/,"",$0); print $1; exit}' "$f" ;;
+	PeerPublicKey) awk '/^\[Peer\]/{p=1} p&&/^[[:space:]]*PublicKey/{print; exit}' "$f" | cut -d= -f2- | tr -d ' ' ;;
 	esac
 }
 
