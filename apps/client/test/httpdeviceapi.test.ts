@@ -52,3 +52,33 @@ test("deviceExists: true when the device is active in some org, false when absen
   ]);
   assert.equal(await api().deviceExists("dev-1"), false); // checked every org, no ACTIVE match
 });
+
+test("deviceStatus: maps active/pending/gone + throws on empty orgs (S7.3)", async () => {
+  // active
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1"), "active");
+  // pending
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "pending" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1"), "pending");
+  // revoked -> gone
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "revoked" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1"), "gone");
+  // absent everywhere -> gone
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "other", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1"), "gone");
+  // empty org list -> THROWS (inconclusive, never a false "gone"/rejected)
+  stubFetch([{ match: "/organizations", body: [] }]);
+  await assert.rejects(api().deviceStatus("dev-1"), /inconclusive/);
+});

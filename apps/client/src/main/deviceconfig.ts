@@ -8,15 +8,31 @@ import type { TunnelConfig } from "./helperclient";
 // get-or-create + logout-revoke logic below is unit-tested without a live server.
 export interface DeviceApi {
   // createDevice creates a device for the current tenant and returns the one-time
-  // config text + the new device id. It is called ONLY when no config is stored
-  // for the origin (D2: never a re-fetch).
-  createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string }>;
+  // config text + the new device id. pendingApproval is true when the org requires
+  // device approval (S7.3): the device is enrolled but BLOCKED until an admin approves.
+  // It is called ONLY when no config is stored for the origin (D2: never a re-fetch).
+  createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string; pendingApproval: boolean }>;
   // revokeDevice best-effort revokes a device against the origin it belongs to.
   revokeDevice(deviceId: string): Promise<void>;
   // deviceExists reports whether a device is still present + ACTIVE server-side.
   // Used to self-heal a stale cached config (device revoked by an admin, or GC'd) —
   // an EXISTENCE check, NOT a config re-fetch, so D2 (never re-fetch the config) holds.
   deviceExists(deviceId: string): Promise<boolean>;
+  // deviceStatus is the definitive server status for the awaiting-approval poll (S7.3):
+  // "pending" | "active" | "gone". Throws on any read error (inconclusive fail-safe).
+  deviceStatus(deviceId: string): Promise<"active" | "pending" | "gone">;
+}
+
+// PendingApprovalError aborts the ConfigProvider (resolveTunnelConfig) when the device
+// is awaiting approval (S7.3): the helper is NEVER armed for a pending device (no dead
+// tunnel, no spurious "revoked" from the RevocationMonitor). connect() catches it, shows
+// the stable "awaiting approval" state, and starts the ApprovalMonitor. The deviceId is
+// carried so the poll knows what to watch.
+export class PendingApprovalError extends Error {
+  constructor(public readonly deviceId: string) {
+    super("device is awaiting admin approval");
+    this.name = "PendingApprovalError";
+  }
 }
 
 // resolveTunnelConfig is the ConfigProvider body: GET-OR-CREATE, origin-keyed.
@@ -31,6 +47,13 @@ export async function resolveTunnelConfig(
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
   const existing = store.get(origin);
+  // S7.3: a stored device still AWAITING approval must NOT be re-created (that would mint
+  // a duplicate pending device on every connect attempt — deviceExists returns false for
+  // pending and would false-heal). Re-signal pending; connect() keeps the awaiting state
+  // and the ApprovalMonitor (which flips this flag on approval) running.
+  if (existing && existing.pending) {
+    throw new PendingApprovalError(existing.deviceId);
+  }
   if (existing && existing.config.full_tunnel !== fullTunnel) {
     // The requested tunnel MODE (split vs full) differs from the stored profile. A
     // WireGuard profile's AllowedIPs are baked at mint, so the stored device can't
@@ -63,9 +86,14 @@ export async function resolveTunnelConfig(
     store.remove(origin);
   }
 
-  const { deviceId, confText } = await api.createDevice(fullTunnel);
+  const { deviceId, confText, pendingApproval } = await api.createDevice(fullTunnel);
   const config: TunnelConfig = { ...parseWgConf(confText), full_tunnel: fullTunnel };
-  store.put({ origin, deviceId, config });
+  // Persist BEFORE the pending gate so the ApprovalMonitor + a later connect have the
+  // device (config is valid now; the gateway just won't serve the peer until approved).
+  store.put({ origin, deviceId, config, pending: pendingApproval });
+  if (pendingApproval) {
+    throw new PendingApprovalError(deviceId); // S7.3: abort — do NOT arm the helper
+  }
   return config;
 }
 
