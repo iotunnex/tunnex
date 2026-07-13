@@ -20,6 +20,10 @@ type Querier interface {
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
+	// S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
+	// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
+	// Returns the owner so the caller can distinguish self-approval for the audit.
+	ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
 	// given purpose. A reset token therefore cannot be consumed as a verification
@@ -33,6 +37,9 @@ type Querier interface {
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
+	// S7.3 D4 — existing active devices stay active, not retro-pended).
+	CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountActiveDevicesForUser(ctx context.Context, arg CountActiveDevicesForUserParams) (int64, error)
 	CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Org roster size. Joins users to exclude soft-deleted accounts (whose
@@ -58,6 +65,9 @@ type Querier interface {
 	// code can never be redeemed twice (no check-then-consume window).
 	CreateCliCredential(ctx context.Context, arg CreateCliCredentialParams) (CliCredential, error)
 	CreateCliDeviceCode(ctx context.Context, arg CreateCliDeviceCodeParams) (CliDeviceCode, error)
+	// status is 'active' normally, or 'pending' when the org requires device approval
+	// (S7.3). A pending device holds its assigned_ip from creation (excluded from every
+	// status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
 	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
@@ -131,6 +141,12 @@ type Querier interface {
 	// device-create's lowest-free choice AND resize's orphan check/409 objects, so
 	// there are no two filtered reads to drift apart. Read under the org advisory
 	// lock so allocation and resize serialize on the same snapshot.
+	//
+	// INCLUDES 'pending' (S7.3): a pending device HOLDS its assigned_ip from creation, so it
+	// is IN-FLIGHT — create must not hand its IP to another device (silent duplicate; the
+	// org_ip unique index is likewise widened to active+pending), and resize's orphan check
+	// must see it (else a shrink silently strands a pending device's allocation). Revoked/
+	// rejected devices have assigned_ip=NULL and never appear.
 	ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error)
 	// ── compiler inputs ─────────────────────────────────────────────────────────────
 	// Every active device whose owner is an active, CURRENT org member, org-wide (all
@@ -186,6 +202,8 @@ type Querier interface {
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	// The approval queue (S7.3): devices awaiting admin approval, oldest first.
+	ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error)
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
@@ -205,6 +223,10 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
+	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
+	// can be rejected. Returns node_id for the (own-node) push.
+	RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — keyed by node id after the caller authorized via the current
@@ -234,6 +256,9 @@ type Querier interface {
 	// endpoint uses COALESCE(NULLIF(...)) so an agent that reports an empty endpoint
 	// (env unset on a restart) never clobbers a previously-good value.
 	SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (int64, error)
+	// S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
+	// build can never set it 'on', so enrollment there stays immediately-active.
+	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error

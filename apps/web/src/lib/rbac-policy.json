@@ -1,5 +1,6 @@
 {
   "admin": [
+    "device:approve",
     "member:invite",
     "member:list",
     "member:manage",
@@ -13,6 +14,7 @@
     "org:view"
   ],
   "owner": [
+    "device:approve",
     "member:invite",
     "member:list",
     "member:manage",

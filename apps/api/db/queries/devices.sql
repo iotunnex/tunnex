@@ -1,6 +1,48 @@
 -- name: CreateDevice :one
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+-- status is 'active' normally, or 'pending' when the org requires device approval
+-- (S7.3). A pending device holds its assigned_ip from creation (excluded from every
+-- status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ApproveDevice :one
+-- S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
+-- can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
+-- Returns the owner so the caller can distinguish self-approval for the audit.
+UPDATE devices
+SET status = 'active', approved_by = $3, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND status = 'pending' AND deleted_at IS NULL
+RETURNING user_id;
+
+-- name: RejectDevice :one
+-- S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
+-- the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
+-- can be rejected. Returns node_id for the (own-node) push.
+UPDATE devices
+SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+WHERE id = $1 AND org_id = $2 AND status = 'pending' AND deleted_at IS NULL
+RETURNING node_id;
+
+-- name: ListPendingDevicesByOrg :many
+-- The approval queue (S7.3): devices awaiting admin approval, oldest first.
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
+ORDER BY d.created_at;
+
+-- name: CountActiveDevicesForOrg :one
+-- Grandfathered count when flipping device_approval off->on (best-effort blast radius,
+-- S7.3 D4 — existing active devices stay active, not retro-pended).
+SELECT count(*) FROM devices
+WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL;
+
+-- name: SetOrgDeviceApproval :one
+-- S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
+-- build can never set it 'on', so enrollment there stays immediately-active.
+UPDATE organizations SET device_approval = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
 
 -- name: ListActiveFullTunnelDevices :many
@@ -85,8 +127,14 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 -- device-create's lowest-free choice AND resize's orphan check/409 objects, so
 -- there are no two filtered reads to drift apart. Read under the org advisory
 -- lock so allocation and resize serialize on the same snapshot.
+--
+-- INCLUDES 'pending' (S7.3): a pending device HOLDS its assigned_ip from creation, so it
+-- is IN-FLIGHT — create must not hand its IP to another device (silent duplicate; the
+-- org_ip unique index is likewise widened to active+pending), and resize's orphan check
+-- must see it (else a shrink silently strands a pending device's allocation). Revoked/
+-- rejected devices have assigned_ip=NULL and never appear.
 SELECT id, name, assigned_ip FROM devices
-WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status IN ('active', 'pending') AND deleted_at IS NULL
 ORDER BY assigned_ip;
 
 -- name: ListActivePeersForNode :many
