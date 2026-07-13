@@ -71,30 +71,29 @@ export async function resolveTunnelConfig(
     // state + the ApprovalMonitor (which flips this flag on approval) running.
     throw new PendingApprovalError(existing.deviceId);
   } else if (existing) {
-    // Same mode: self-heal a dead (revoked/deleted) config. First, if this is a LEGACY
-    // config with no persisted orgId (installed base / v0.1.0), opportunistically resolve +
-    // STAMP the org so it migrates onto the hardened direct-query path (the scan retires). A
-    // resolve blip leaves it unstamped — deviceExists then falls back to the scan, so the
-    // check still works either way.
-    let orgId = existing.orgId;
-    if (!orgId) {
+    // Same mode: self-heal a dead (revoked/deleted) config — an EXISTENCE check, NOT a config
+    // re-fetch (D2 intact); a transient error KEEPS the config (never nuke on a blip).
+    let stillThere = true;
+    if (!existing.orgId) {
+      // LEGACY config (no persisted orgId — installed base / v0.1.0): ONE scan both resolves
+      // the org (to STAMP, migrating onto the hardened direct path so the scan retires) AND
+      // serves as the existence check (finding #3 — no double fetch). A non-null result means
+      // the device exists; null means the scan completed and it is genuinely gone; a throw is
+      // an inconclusive blip → keep.
       try {
         const resolved = await api.resolveDeviceOrg(existing.deviceId);
-        if (resolved) {
-          orgId = resolved;
-          store.put({ ...existing, orgId });
-        }
+        if (resolved) store.put({ ...existing, orgId: resolved });
+        else stillThere = false;
       } catch {
-        /* blip — leave unstamped; the fallback scan below still works */
+        stillThere = true;
       }
-    }
-    // Existence check against the device's OWN org (or the scan fallback when unstamped) —
-    // NOT a config re-fetch (D2 intact); a transient error KEEPS the config (never nuke on a blip).
-    let stillThere = true;
-    try {
-      stillThere = await api.deviceExists(existing.deviceId, orgId);
-    } catch {
-      stillThere = true;
+    } else {
+      // Stamped: direct existence check against the device's OWN org.
+      try {
+        stillThere = await api.deviceExists(existing.deviceId, existing.orgId);
+      } catch {
+        stillThere = true;
+      }
     }
     if (stillThere) return existing.config;
     store.remove(origin);
