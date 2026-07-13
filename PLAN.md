@@ -1044,7 +1044,13 @@ present — detect and warn/refuse rather than silently downgrade.
 - **S7.1 Policy model** — resources, groups, access rules (who → what), default-deny.
 - **S7.2 Policy enforcement** — evaluate on connection + per-peer route filtering (via agent).
 - **S7.3 Device posture (basic)** — require known device, block untrusted.
-- **S7.4 Policy UI** — rule builder in dashboard.
+- **S7.4 Policy UI** — rule builder in dashboard. **LEDGERED (from S7.2): the DIFFERENTIATED policy-health
+  surface.** S7.2 collapsed the gateway health signal to ONE conservative `policy_degraded` boolean
+  (the 3-signal→2-field mapping produced gap states across 3 review passes; see docs/S7.2-decisions.md).
+  The rich agent signals (`policy_error`, `policy_failing_since`, `policy_hash`) still land in the node
+  capabilities JSONB. S7.4 designs the differentiated read (which-KIND-of-degraded: apply-failing vs
+  stuck-enforcing vs silent-desync) + the debounced badge UX, reading that JSONB — and MAY re-introduce a
+  windowed silent-desync signal (needs a server-side desync-onset, deferred out of S7.2 as new state).
 
 ## EPIC 8 — Site-to-Site Networking
 

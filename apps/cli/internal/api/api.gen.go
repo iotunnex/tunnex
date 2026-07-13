@@ -497,12 +497,9 @@ type Node struct {
 	LastSeenAt   *time.Time         `json:"last_seen_at,omitempty"`
 	Name         string             `json:"name"`
 
-	// PolicyStale Zero Trust (enterprise): the gateway's policy apply has been FAILING beyond the stale window — it is enforcing an out-of-date ruleset. Alarm-worthy.
-	PolicyStale *bool `json:"policy_stale,omitempty"`
-
-	// PolicySynced Zero Trust (enterprise): the policy IN FORCE matches what the control plane would push now. false = the gateway hasn't applied the latest policy yet (syncing, or silently stale).
-	PolicySynced *bool      `json:"policy_synced,omitempty"`
-	Status       NodeStatus `json:"status"`
+	// PolicyDegraded Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field may only err toward OVER-reporting — a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class. The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB.
+	PolicyDegraded *bool      `json:"policy_degraded,omitempty"`
+	Status         NodeStatus `json:"status"`
 }
 
 // NodeStatus defines model for Node.Status.

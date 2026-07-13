@@ -444,105 +444,65 @@ type NodeCapabilities struct {
 	PolicyFailingSince string `json:"policy_failing_since"`
 }
 
-// PolicyStaleAfter is the staleness alarm window (S7.2 decision): pushed != applied
-// is an ALARM only when it persists longer than this -- 3 report intervals (the
-// report loop runs every 30s; a normal apply window is <=2s of push->fetch->apply
-// plus up to one 30s report cycle before the new applied hash lands, so a mismatch
-// older than 90s cannot be a normal window). policy_error is surfaced IMMEDIATELY,
-// regardless of hash state -- an apply failure is never smoothed by this window.
-const PolicyStaleAfter = 90 * time.Second
-
 // zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
 // Kept as a neutral local const so the open build never imports enterprise/policy.
 const zeroTrustOff = "off"
 
-// PolicyStatus surfaces a node's Zero Trust policy health for the API (finding #5/#7):
-//   - stale:  apply has been FAILING longer than PolicyStaleAfter (from failingSince) —
-//     the alarm-worthy case (a gateway that cannot apply the pushed policy).
-//   - synced: the policy IN FORCE (reported applied hash) equals what the control plane
-//     would push right now (freshly compiled canonical hash). synced=false catches
-//     SILENT staleness — a gateway that never fetched the new policy — which the
-//     failing-apply signal alone misses. The dashboard BADGE (debounce/UX) is S7.4;
-//     this raw field is S7.2 so proof-7's observed surface reaches production.
+// PolicyDegradedForNodes computes ONE conservative Zero Trust health signal per node for
+// the API — the COLLAPSED staleness surface (S7.2 design change; see docs/S7.2-decisions.md
+// for the 3-signal→2-field→gap-states→3→1-disjunction history). All nodes must belong to
+// orgID. A node is DEGRADED iff any of:
 //
-// Open build / no policy provider: stale=false, synced=true (no policy to be out of sync).
-func (s *Service) PolicyStatus(ctx context.Context, node sqlc.Node, now time.Time) (stale, synced bool) {
-	caps := Capabilities(node.Capabilities)
-	stale = caps.PolicyStale(now)
-	synced = true
-	if s.policy != nil {
-		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
-		switch {
-		case err != nil:
-			// COULD NOT DETERMINE what we'd push right now (transient compile/DB error).
-			// Not evidence of a desync — reporting synced=false would raise a false alarm on
-			// a HEALTHY gateway, the same class as the #3 false-staleness. synced stays true;
-			// a genuine desync still surfaces on the next successful compile (finding #4).
-		case pol == nil || pol.Mesh:
-			// No ENFORCEMENT in force (off / open / device-less mesh). There is no policy
-			// boundary to be "out of sync" with, so synced is meaningless here — comparing a
-			// mesh/nil hash produces false out-of-sync alarms on off-mode orgs (finding #C).
-			// synced stays true; the sync signal is defined ONLY under enforcing.
-		default:
-			// Enforcing: the applied policy IN FORCE must match what we'd push now.
-			synced = policyspec.CanonicalHash(*pol) == caps.PolicyHash
-		}
-	}
-	return stale, synced
-}
-
-// PolicyStatusForNodes is the batch read-path form of PolicyStatus (finding #5): it
-// computes every node's (stale, synced) with a SINGLE org policy compile instead of one
-// per node. All nodes must belong to orgID. Same signals as PolicyStatus — stale is pure
-// (from caps), synced compares the node's applied hash to the pushed hash computed once —
-// and the same #4 rule: an errored/unknown compile reports synced=true (never a false
-// desync), because a transient control-plane hiccup is not a gateway fault.
-func (s *Service) PolicyStatusForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node, now time.Time) (stale, synced map[uuid.UUID]bool) {
-	stale = make(map[uuid.UUID]bool, len(nodes))
-	synced = make(map[uuid.UUID]bool, len(nodes))
+//	(1) caps.PolicyError != ""          — an apply is failing right now. This is ALSO the
+//	                                      stuck-enforcing case: a gateway that failed to
+//	                                      apply a mesh/off ruleset and is still enforcing a
+//	                                      disabled policy sets applyErr (the "silent stale
+//	                                      policy = violation in slow motion" case found live
+//	                                      across passes 2–4).
+//	(2) caps.PolicyFailingSince != ""   — an enforcing apply has been failing since its
+//	                                      onset (any duration — conservative).
+//	(3) enforcing AND pushed != applied — a silent desync: the policy IN FORCE differs from
+//	                                      what the control plane would push now. "" pushed
+//	                                      means non-enforcing (off/mesh), which has no
+//	                                      boundary and never degrades. INSTANTANEOUS compare
+//	                                      (no silent-desync onset is tracked server-side —
+//	                                      that would be new state, against the reduce goal),
+//	                                      so it may briefly over-report during a normal
+//	                                      push's converge window; that is intentional per the
+//	                                      OVER-report principle below.
+//
+// The field may only err toward OVER-reporting: a false "degraded" is an annoyance; a
+// false "healthy" is the silent-blackhole class we hit three times. The rich agent signals
+// (failingSince / hash / applyErr) still land in the capabilities JSONB unchanged; the
+// DIFFERENTIATED surface (which-kind-of-degraded + badge UX) is S7.4, reading that JSONB.
+//
+// Open build / no policy provider: nothing degrades (no policy engine).
+func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]bool {
+	out := make(map[uuid.UUID]bool, len(nodes))
 	var pushed map[uuid.UUID]string
 	if s.policy != nil {
 		ids := make([]uuid.UUID, len(nodes))
 		for i, n := range nodes {
 			ids[i] = n.ID
 		}
-		// err (transient) -> pushed stays nil -> synced=true for all (finding #4: unknown
-		// is not a desync).
+		// err (transient compile/DB) -> pushed stays nil: term (3) can't be evaluated, but
+		// the agent-reported terms (1)+(2) still apply. A transient control-plane hiccup is
+		// not on its own a gateway fault, so it does not manufacture a degraded signal.
 		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
 			pushed = h
 		}
 	}
 	for _, n := range nodes {
 		caps := Capabilities(n.Capabilities)
-		stale[n.ID] = caps.PolicyStale(now)
-		if pushed == nil {
-			synced[n.ID] = true // provider errored -> unknown != desync (finding #4)
-			continue
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" // terms (1) + (2)
+		if !deg && pushed != nil {
+			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
+				deg = true
+			}
 		}
-		// CompiledHashesForNodes returns "" for a non-enforcing node (off / mesh): there is
-		// no enforcement boundary to diverge from, so it is always in sync (finding #C —
-		// mirrors the single-node pol==nil||Mesh rule). Only a non-empty (enforcing) pushed
-		// hash is compared against the applied hash.
-		h := pushed[n.ID]
-		synced[n.ID] = h == "" || h == caps.PolicyHash
+		out[n.ID] = deg
 	}
-	return stale, synced
-}
-
-// PolicyStale reports whether this node is running STALE policy: apply has been
-// FAILING (applied != desired) for longer than PolicyStaleAfter. Measured from the
-// mismatch ONSET (PolicyFailingSince), so a healthy node (no failing_since) is never
-// stale and a normal push that applies within the window never false-alarms (#3).
-// policy_error is surfaced IMMEDIATELY elsewhere; this is the persistent alarm.
-func (c NodeCapabilities) PolicyStale(now time.Time) bool {
-	if c.PolicyFailingSince == "" {
-		return false // apply is healthy -> not stale
-	}
-	t, err := time.Parse(time.RFC3339, c.PolicyFailingSince)
-	if err != nil {
-		return true // corrupt mark while failing: fail toward visibility
-	}
-	return now.Sub(t) > PolicyStaleAfter
+	return out
 }
 
 // Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all

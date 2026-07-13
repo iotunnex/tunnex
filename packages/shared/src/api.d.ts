@@ -1240,10 +1240,8 @@ export interface components {
             enrolled_at: string;
             /** Format: date-time */
             last_seen_at?: string;
-            /** @description Zero Trust (enterprise): the gateway's policy apply has been FAILING beyond the stale window — it is enforcing an out-of-date ruleset. Alarm-worthy. */
-            policy_stale?: boolean;
-            /** @description Zero Trust (enterprise): the policy IN FORCE matches what the control plane would push now. false = the gateway hasn't applied the latest policy yet (syncing, or silently stale). */
-            policy_synced?: boolean;
+            /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field may only err toward OVER-reporting — a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class. The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
+            policy_degraded?: boolean;
         };
         JoinTokenRequest: {
             node_name?: string;

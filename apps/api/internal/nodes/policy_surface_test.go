@@ -28,8 +28,10 @@ func (f fakeProvider) CompiledHashesForNodes(_ context.Context, _ uuid.UUID, ids
 	if f.err != nil {
 		return nil, f.err
 	}
+	// Mirror the real CompiledHashesForNodes: only ENFORCING nodes get a non-empty pushed
+	// hash; off / mesh -> "" (no enforcement boundary).
 	h := ""
-	if f.pol != nil {
+	if f.pol != nil && !f.pol.Mesh {
 		h = policyspec.CanonicalHash(*f.pol)
 	}
 	out := make(map[uuid.UUID]string, len(ids))
@@ -41,100 +43,70 @@ func (f fakeProvider) CompiledHashesForNodes(_ context.Context, _ uuid.UUID, ids
 
 func capsJSON(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
 
-// PolicyStatus surfaces both signals (finding #5/#7): synced from the restored
-// pushed-vs-applied hash compare (catches SILENT staleness — never fetched), stale
-// from failingSince (apply failing past the window). Pure — no DB.
-func TestPolicyStatusSyncedAndStale(t *testing.T) {
-	pol := &policyspec.Compiled{Version: 1, Mode: "enforcing", Mesh: false,
+// PolicyDegraded is the collapsed single health signal (S7.2 design change). It is a
+// CONSERVATIVE disjunction of three terms; the field may only err toward OVER-reporting.
+// Pure — no DB (fakeProvider).
+func TestPolicyDegraded(t *testing.T) {
+	enf := &policyspec.Compiled{Version: 1, Mode: "enforcing", Mesh: false,
 		Allow: []policyspec.AllowEntry{{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: policyspec.ProtoAny}}}
-	pushed := policyspec.CanonicalHash(*pol)
-	svc := &Service{policy: fakeProvider{pol: pol}}
-	now := time.Now()
-
-	// Applied hash == pushed -> synced, not stale.
-	n := sqlc.Node{Capabilities: capsJSON(map[string]any{"policy_hash": pushed})}
-	if stale, synced := svc.PolicyStatus(context.Background(), n, now); stale || !synced {
-		t.Fatalf("in-sync node: want stale=false synced=true, got %v %v", stale, synced)
-	}
-	// Applied hash != pushed (never fetched the new policy) -> NOT synced (silent staleness).
-	n2 := sqlc.Node{Capabilities: capsJSON(map[string]any{"policy_hash": "deadbeef0000"})}
-	if _, synced := svc.PolicyStatus(context.Background(), n2, now); synced {
-		t.Fatal("out-of-sync node must report synced=false (silent staleness catchable)")
-	}
-	// Apply failing past the window -> stale.
-	n3 := sqlc.Node{Capabilities: capsJSON(map[string]any{
-		"policy_hash": pushed, "policy_failing_since": now.Add(-2 * time.Minute).UTC().Format(time.RFC3339)})}
-	if stale, _ := svc.PolicyStatus(context.Background(), n3, now); !stale {
-		t.Fatal("a node failing apply for 2m must report stale")
-	}
-	// Open build (no provider) -> never stale, always synced.
-	if stale, synced := (&Service{}).PolicyStatus(context.Background(), n2, now); stale || !synced {
-		t.Fatalf("open build: want stale=false synced=true, got %v %v", stale, synced)
+	pushed := policyspec.CanonicalHash(*enf)
+	org := uuid.New()
+	node := func(caps map[string]any) sqlc.Node { return sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(caps)} }
+	deg := func(s *Service, n sqlc.Node) bool {
+		return s.PolicyDegradedForNodes(context.Background(), org, []sqlc.Node{n})[n.ID]
 	}
 
-	// Finding #4: a transient compile error must NOT render as out-of-sync. A healthy,
-	// in-sync gateway (applied hash == pushed) whose compile momentarily errors must still
-	// report synced=true — "couldn't determine" is not "desynced".
+	enfSvc := &Service{policy: fakeProvider{pol: enf}}
+	// Healthy enforcing, in sync -> NOT degraded.
+	if deg(enfSvc, node(map[string]any{"policy_hash": pushed})) {
+		t.Fatal("healthy in-sync enforcing gateway must not be degraded")
+	}
+	// Term 3: enforcing, applied != pushed -> degraded (silent desync).
+	if !deg(enfSvc, node(map[string]any{"policy_hash": "deadbeef0000"})) {
+		t.Fatal("enforcing desync (applied != pushed) must be degraded")
+	}
+	// Term 2: failingSince set (any duration) -> degraded.
+	if !deg(enfSvc, node(map[string]any{"policy_hash": pushed, "policy_failing_since": time.Now().UTC().Format(time.RFC3339)})) {
+		t.Fatal("a failing enforcing apply (failingSince set) must be degraded")
+	}
+	// Term 1: applyErr set -> degraded even when otherwise in-sync.
+	if !deg(enfSvc, node(map[string]any{"policy_hash": pushed, "policy_error": "nft: apply rejected"})) {
+		t.Fatal("an apply error must be degraded")
+	}
+
+	// OFF org (provider returns "" pushed): a healthy off gateway is NOT degraded, whatever
+	// its leftover applied hash — no enforcement boundary (kills #C's false alarm).
+	offSvc := &Service{policy: fakeProvider{pol: nil}}
+	if deg(offSvc, node(map[string]any{"policy_hash": "leftover_mesh_hash"})) {
+		t.Fatal("healthy off-mode gateway must not be degraded")
+	}
+
+	// THE RED TEST (finding #1 — the gap state that survived passes 2, 3 AND 4): a
+	// STUCK-ENFORCING gateway — off org, failed mesh apply so applyErr is set, failingSince
+	// empty, and synced-would-be-true (off -> pushed "") — MUST be degraded via term 1. This
+	// is the exact green-while-blackholing state the collapse exists to close.
+	stuck := node(map[string]any{"policy_hash": "old_enforcing_hash", "policy_error": "nft: apply failed"})
+	if !deg(offSvc, stuck) {
+		t.Fatal("stuck-enforcing off gateway (applyErr set) MUST be degraded — the silent-blackhole class")
+	}
+
+	// A transient PROVIDER error (pushed unknown) must not manufacture a degraded signal on
+	// an otherwise-clean node: term 3 is skipped, terms 1/2 are clean -> not degraded.
 	errSvc := &Service{policy: fakeProvider{err: errors.New("db blip")}}
-	if _, synced := errSvc.PolicyStatus(context.Background(), n, now); !synced {
-		t.Fatal("a transient compile error must report synced=true, not a false out-of-sync alarm")
+	if deg(errSvc, node(map[string]any{"policy_hash": "anything"})) {
+		t.Fatal("a transient provider error alone must not degrade a clean gateway")
 	}
-}
-
-// Finding #5: the batch PolicyStatusForNodes yields the same per-node signals as the
-// single-node PolicyStatus (one org compile instead of N), and #4 holds in the batch —
-// a compile error reports every node synced=true, never a false desync.
-func TestPolicyStatusForNodesBatchParityAndErrorNotDesync(t *testing.T) {
-	pol := &policyspec.Compiled{Version: 1, Mode: "enforcing", Mesh: false,
-		Allow: []policyspec.AllowEntry{{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: policyspec.ProtoAny}}}
-	pushed := policyspec.CanonicalHash(*pol)
-	now := time.Now()
-	inSync := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": pushed})}
-	desynced := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": "deadbeef0000"})}
-
-	svc := &Service{policy: fakeProvider{pol: pol}}
-	stale, synced := svc.PolicyStatusForNodes(context.Background(), uuid.New(), []sqlc.Node{inSync, desynced}, now)
-	if stale[inSync.ID] || !synced[inSync.ID] {
-		t.Fatalf("in-sync node: want stale=false synced=true, got %v %v", stale[inSync.ID], synced[inSync.ID])
-	}
-	if synced[desynced.ID] {
-		t.Fatal("desynced node must report synced=false in the batch")
+	// ...but the agent-reported terms still apply through a provider error.
+	if !deg(errSvc, node(map[string]any{"policy_error": "nft: apply failed"})) {
+		t.Fatal("an agent-reported apply error must degrade even when the provider errored")
 	}
 
-	// Error path: every node synced=true (unknown != desync).
-	errSvc := &Service{policy: fakeProvider{err: errors.New("db blip")}}
-	_, synced2 := errSvc.PolicyStatusForNodes(context.Background(), uuid.New(), []sqlc.Node{inSync, desynced}, now)
-	if !synced2[inSync.ID] || !synced2[desynced.ID] {
-		t.Fatal("a batch compile error must report all nodes synced=true, never a false desync")
+	// Open build (no provider): nothing to compare, a clean node is not degraded.
+	if (&Service{}).PolicyDegradedForNodes(context.Background(), org, []sqlc.Node{node(map[string]any{"policy_hash": "x"})}) == nil {
+		t.Fatal("open build must return a map, not nil")
 	}
-}
-
-// Finding #C: a DEVICE-LESS off-mode node (CompiledForNode returns nil) must report
-// synced=true even when its applied hash is non-empty — e.g. after a transient error
-// where the fallback (older code) pushed a mesh artifact the agent applied. synced is
-// meaningful ONLY under enforcing; off/mesh/nil has no boundary to diverge from. This is
-// the exact case the earlier device-having-only test missed.
-func TestPolicyStatusOffModeNeverDesyncs(t *testing.T) {
-	now := time.Now()
-	// Device-less off node: provider returns (nil, nil). Applied hash is some leftover mesh
-	// hash. Must still be synced (no enforcement boundary).
-	svcNil := &Service{policy: fakeProvider{pol: nil}}
-	nDeviceless := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": "leftover_mesh_hash"})}
-	if _, synced := svcNil.PolicyStatus(context.Background(), nDeviceless, now); !synced {
-		t.Fatal("device-less off node (pushed nil) must be synced=true regardless of applied hash")
-	}
-	// Device-having off node: provider returns a mesh artifact (Mesh=true). Also always synced.
-	mesh := &policyspec.Compiled{Version: 1, Mode: "off", Mesh: true}
-	svcMesh := &Service{policy: fakeProvider{pol: mesh}}
-	nMesh := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": "anything"})}
-	if _, synced := svcMesh.PolicyStatus(context.Background(), nMesh, now); !synced {
-		t.Fatal("off-mode mesh node must be synced=true (no enforcement boundary)")
-	}
-	// Batch: an off org (fake returns "" for every node via a nil pol) is all-synced even
-	// with mismatched applied hashes.
-	_, syncedB := svcNil.PolicyStatusForNodes(context.Background(), uuid.New(), []sqlc.Node{nDeviceless, nMesh}, now)
-	if !syncedB[nDeviceless.ID] || !syncedB[nMesh.ID] {
-		t.Fatal("batch: off-mode nodes must all be synced=true")
+	if deg(&Service{}, node(map[string]any{"policy_hash": "x"})) {
+		t.Fatal("open build clean node must not be degraded")
 	}
 }
 

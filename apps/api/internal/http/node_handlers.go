@@ -3,8 +3,6 @@ package http
 import (
 	"context"
 
-	"time"
-
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
@@ -48,17 +46,14 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	// Zero Trust policy health surface (S7.2 finding #5/#7): stale = apply failing past
-	// the window; synced = policy in force matches what we'd push now. Computed in ONE
-	// batch (a single org policy compile) rather than per node — the per-node form
-	// rebuilt the whole org snapshot N times on this read path (finding #5).
-	stale, synced := s.nodes.PolicyStatusForNodes(ctx, req.OrgId, ns, now)
+	// Zero Trust policy health (S7.2 collapsed surface): ONE conservative degraded signal
+	// per node, from a single org policy compile (see nodes.PolicyDegradedForNodes).
+	degraded := s.nodes.PolicyDegradedForNodes(ctx, req.OrgId, ns)
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)
-		st, sy := stale[n.ID], synced[n.ID]
-		an.PolicyStale, an.PolicySynced = &st, &sy
+		d := degraded[n.ID]
+		an.PolicyDegraded = &d
 		out = append(out, an)
 	}
 	return api.ListNodes200JSONResponse{
