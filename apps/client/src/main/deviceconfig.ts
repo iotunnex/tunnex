@@ -21,11 +21,8 @@ export interface DeviceApi {
   deviceStatus(deviceId: string, orgId: string): Promise<"active" | "pending" | "gone">;
   // deviceExists = deviceStatus === "active" (finding #6: ONE fail-safe, no divergence).
   // Self-heals a stale cached config (device revoked/GC'd) — an EXISTENCE check, not a
-  // config re-fetch, so D2 holds.
+  // config re-fetch, so D2 holds. orgId is always known (legacy configs re-mint, never query).
   deviceExists(deviceId: string, orgId: string): Promise<boolean>;
-  // resolveDeviceOrg scans for the device's org (null = gone; throws on a blip) — used to
-  // STAMP a legacy config (persisted before orgId existed) onto the hardened direct path.
-  resolveDeviceOrg(deviceId: string): Promise<string | null>;
 }
 
 // PendingApprovalError aborts the ConfigProvider (resolveTunnelConfig) when the device
@@ -52,7 +49,20 @@ export async function resolveTunnelConfig(
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
   const existing = store.get(origin);
-  if (existing && existing.config.full_tunnel !== fullTunnel) {
+  if (existing && !existing.orgId) {
+    // LEGACY config (persisted before orgId existed — v0.1.0). It can't use the direct-query
+    // monitors, and we NEVER query a no-orgId config (the reduction invariant — the scan path
+    // + its fault surface are deleted). Migrate it ONCE: drop + best-effort revoke against its
+    // origin (S6.3 origin-keying), then fall through to re-mint a fresh device that carries
+    // orgId. connect() surfaces the loud "migrated" notice. Revoke failure is fine — the
+    // orphan is the admin-reap/GC case (loss=recreate doctrine); proceed with the re-mint.
+    store.remove(origin);
+    try {
+      await api.revokeDevice(existing.deviceId);
+    } catch {
+      /* orphan left for GC/admin-reap — re-mint proceeds regardless */
+    }
+  } else if (existing && existing.config.full_tunnel !== fullTunnel) {
     // MODE CHANGED (split↔full): the stored profile's AllowedIPs are baked at mint, so it
     // can't satisfy the new intent — reusing it would silently keep the old routing. Drop +
     // best-effort revoke the superseded device (now also CANCELS a still-pending one —
@@ -71,29 +81,15 @@ export async function resolveTunnelConfig(
     // state + the ApprovalMonitor (which flips this flag on approval) running.
     throw new PendingApprovalError(existing.deviceId);
   } else if (existing) {
-    // Same mode: self-heal a dead (revoked/deleted) config — an EXISTENCE check, NOT a config
-    // re-fetch (D2 intact); a transient error KEEPS the config (never nuke on a blip).
+    // Same mode: self-heal a dead (revoked/deleted) config — a direct EXISTENCE check against
+    // the device's OWN org (a legacy no-orgId config was already re-minted above, so orgId is
+    // present here). NOT a config re-fetch (D2 intact); a transient error KEEPS the config
+    // (never nuke on a blip).
     let stillThere = true;
-    if (!existing.orgId) {
-      // LEGACY config (no persisted orgId — installed base / v0.1.0): ONE scan both resolves
-      // the org (to STAMP, migrating onto the hardened direct path so the scan retires) AND
-      // serves as the existence check (finding #3 — no double fetch). A non-null result means
-      // the device exists; null means the scan completed and it is genuinely gone; a throw is
-      // an inconclusive blip → keep.
-      try {
-        const resolved = await api.resolveDeviceOrg(existing.deviceId);
-        if (resolved) store.put({ ...existing, orgId: resolved });
-        else stillThere = false;
-      } catch {
-        stillThere = true;
-      }
-    } else {
-      // Stamped: direct existence check against the device's OWN org.
-      try {
-        stillThere = await api.deviceExists(existing.deviceId, existing.orgId);
-      } catch {
-        stillThere = true;
-      }
+    try {
+      stillThere = await api.deviceExists(existing.deviceId, existing.orgId);
+    } catch {
+      stillThere = true;
     }
     if (stillThere) return existing.config;
     store.remove(origin);

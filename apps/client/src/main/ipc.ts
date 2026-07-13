@@ -160,6 +160,16 @@ export function registerIpc(
     stopApprovalMonitor();
     lastSynth = null; // a fresh connect clears any stale revoked/pending state
     requestedFullTunnel = fullTunnel;
+    // LEGACY MIGRATION notice (reduction): a stored config from before the orgId field is
+    // about to be re-minted by resolveTunnelConfig (drop + best-effort revoke + a fresh
+    // device that carries orgId). Surface it LOUDLY once — never a silent identity swap. If
+    // the fresh device is pending (device_approval on), the gate below also raises the
+    // awaiting-approval state.
+    const preCred = store.load();
+    const preSc = preCred ? tunnelStore.get(preCred.server) : undefined;
+    if (preSc && !preSc.orgId) {
+      notifyTunnel("migrated");
+    }
     let status: TunnelStatus;
     try {
       status = await tunnel.up(); // resolves + persists the device, arms the helper
