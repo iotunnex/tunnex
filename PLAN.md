@@ -1140,8 +1140,12 @@ EPIC 10 too; do not build S8 routing without it.
 ## EPIC 9 — OpenVPN Support (port from existing Bolster stack, not greenfield)
 
 - **S9.1 OpenVPN server mgmt in node agent** — port `openvpn-auth-oauth2` patterns + `genclient`-style PKI into the agent; managed process, cert/PKI, config gen. Reference the Bolster handover doc as the spec.
-- **S9.2 OpenVPN profiles** — `.ovpn` export, per-user certs, revocation (CRL) — same identity-binding rule as S3.3.
-- **S9.3 Protocol selection** — org/server chooses WireGuard or OpenVPN; clients support both.
+- **S9.2 OpenVPN profiles** — `.ovpn` export, per-user certs, revocation (CRL) — same identity-binding rule as S3.3. **The `.ovpn` export is the OpenVPN client story (made first-class here + S9.3): per-OS import instructions + a QR on the download page, consumed by the OFFICIAL OpenVPN clients (OpenVPN Connect / Tunnelblick / mobile). Revocation guarantees hold FULLY (CRL + the full-sweep of §Cross-Cutting: cert/CRL revoke + address release + status clear).**
+- **S9.3 Protocol selection** — org/server chooses WireGuard or OpenVPN. **"Clients support both" — DECIDED (not open), so it isn't re-litigated:**
+  - **Path (a), delivered:** OpenVPN is consumed via the `.ovpn` export (S9.2) by the standard OpenVPN clients. The **Tunnex desktop client stays WireGuard-ONLY** — it is WireGuard-only BY CONSTRUCTION (embedded wireguard-go/nt, WG-typed helper verbs, pf/WFP kill-switches, WG ConfigProvider, handshake-based revocation detection); nothing in EPIC 6 or 9 builds an OpenVPN engine into it.
+  - **Optional S9.x (decide-at-open):** the `tunnex` CLI wraps `openvpn` as it already wraps `wg-quick`. Small, sandboxed, no privilege-helper blast radius.
+  - **Positioning line (pinned):** "both protocols" = both **server-managed with full revocation**; **WireGuard gets the native Tunnex client, OpenVPN uses standard OpenVPN clients.** NEVER "our desktop app runs OpenVPN."
+  - **REJECTED (strongest deferral tier — the rejected-call-home-licensing class, NOT parked-with-trigger): native OpenVPN INSIDE the Tunnex desktop client,** unless a paying customer makes it a hard deal condition. Rationale (recorded so it isn't re-argued): a second data-plane engine inside the privilege helper — the most security-critical, most expensively-verified component (S6.3 decide-before-code + live-pcap kill-switch proofs ×2 platforms + S6.7) — would need a managed-process `TunnelUp` path (exactly the injectable-surface class S6.3 rejected), OVPN-specific kill-switch semantics, cert-based config storage, CRL revocation detection, and a permanent **2× proof burden on every future helper change** — all for a population whose migration endgame is the WireGuard client we already ship. Reference competitor (Tailscale) ships ZERO OpenVPN and wins those migrations anyway.
 
 ## EPIC 10 — Kubernetes Integration
 
