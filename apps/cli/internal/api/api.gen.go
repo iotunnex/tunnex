@@ -156,6 +156,12 @@ type AddGroupMemberRequest struct {
 	UserId openapi_types.UUID `json:"user_id"`
 }
 
+// AffectedDevice defines model for AffectedDevice.
+type AffectedDevice struct {
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+}
+
 // AuditLogEntry defines model for AuditLogEntry.
 type AuditLogEntry struct {
 	Action     string                 `json:"action"`
@@ -651,6 +657,9 @@ type UserGroup struct {
 
 // ZeroTrustMode defines model for ZeroTrustMode.
 type ZeroTrustMode struct {
+	// AffectedFullTunnelDevices On ENABLING enforcing (PUT only), the full-tunnel devices whose internet egress becomes policy-governed by the flip — the blast radius for the warn-and-confirm. The server obeys regardless; this is the honest count + names. Absent/empty when disabling or when none are affected. State name for these = egress_policy_denied (distinct from gateway_no_egress: the gateway CAN egress, policy is denying it).
+	AffectedFullTunnelDevices *[]AffectedDevice `json:"affected_full_tunnel_devices,omitempty"`
+
 	// Mode off = legacy blanket mesh; enforcing = default-deny + compiled allows.
 	Mode ZeroTrustModeMode `json:"mode"`
 }
