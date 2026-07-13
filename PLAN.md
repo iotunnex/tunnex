@@ -194,8 +194,12 @@ Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMP
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
 (tunnex CLI) · EPIC 6 S6.1 (client shell) + S6.2 (renderer transport — tenant-functional).**
-Current epic: EPIC 6, S6.3 next (S6.0b CI recommended first). If this pointer disagrees with the
-handoff doc / git log, TRUST GIT (`git log --oneline -15`) and update this line.
+**RE-ENTRY CHECKPOINT — S7.2 MERGED (PR#16, merge sha ac74123)** — enforcement box-proven 8/8 on the
+wire; 4 review passes + 1 scoped folded (6+4+2 correctness findings, incl. 3 fail-opens the box proof
+missed and the staleness-surface collapse to `policy_degraded`); F1-part-2 lesson (proven at one layer ≠
+proven end-to-end). EPICs 0–6 COMPLETE + EPIC 7: S7.1 (policy model) + S7.2 (enforcement) MERGED.
+**NEXT: S7.3 (device posture) decision-first.** If this pointer disagrees with the git log, TRUST GIT
+(`git log --oneline -15`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -215,6 +219,40 @@ Seed for the eventual SECURITY.md.
   `wg syncconf` echoes the key + port so it can never wipe the interface. Demonstrated-red: the POC
   itself (wg0 key→`(none)`, port randomized every cycle) was the failing case. Gated in CI via
   `make test-node`.
+- **Edition build-constraint isolation** (S7.1; `go list -deps ./apps/api/cmd/server | grep -c
+  enterprise/policy` == 0, asserted in CI) — the open build's server binary must NEVER link the
+  `//go:build enterprise`-tagged policy engine. Demonstrated-red: the enterprise policy package linking
+  into the open `cmd/server` (neutral DTOs live in `internal/policyspec`; the boundary is the guard).
+- **Policy schema cascade FK** (S7.1) — deleting a group / resource / membership cleans its dependent
+  policy rules + group memberships via `ON DELETE CASCADE`, so no rule can reference a vanished subject
+  or destination (no dangling grant). Demonstrated-red in the S7.1 policy-model tests.
+- **Canonical-hash twin goldens** (S7.2; `policyspec` hash_test.go ≡ `nodepolicy` nodepolicy_test.go,
+  identical fixtures + expected hex in BOTH modules — the cross-module drift guard) — the compiled-policy
+  hash the control plane computes must byte-match what the agent computes. Demonstrated-red: the first
+  impl hashed the RULESET TEXT (node-local masquerade subnet the control plane can't reproduce) →
+  permanent false staleness.
+- **Multi-node push-target** (S7.2; `TestDeactivatePushesOrgWideNotJustUserNodes`) — a member
+  deactivation must push EVERY active org gateway, not just the ex-member's own device-nodes.
+  Demonstrated-red (F1-part-2): the /32-sweep was proven at the model layer but the push TARGETING was
+  not — on a multi-gateway org a node hosting another user's device that referenced the ex-member as a
+  policy destination wouldn't be pushed <5s.
+- **Fail-closed cold-start** (S7.2; `TestNeverReceivedIsDenyAllNotMesh`) — a gateway that has never
+  received a policy renders DENY-ALL regardless of mode, never the blanket mesh. Demonstrated-red: a
+  restart re-armed the blanket mesh under enforcing (fail-OPEN) until the first fetch.
+- **Refuse unknown / half-spec, never widen** (S7.2; `TestRenderAllowHalfSetPortRangeFailsClosed` +
+  `TestRenderAllowUnknownProtocolFailsClosed` + `TestValidateResourcePortsBothOrNeither`) — the
+  compiler/renderer skip a malformed AllowEntry (→ default-deny), never widen on it; validation rejects
+  it at the API. Demonstrated-red TWICE: a half-set port range widened to all-ports; an unknown protocol
+  widened to all-protocols. (Checklist line for every new AllowEntry field.)
+- **ProtocolVersion equality** (S7.2; `TestProtocolVersionConstantsAgree`) — `nodes.ProtocolVersion` ==
+  `policyspec.ProtocolVersion`, so a fail-closed fallback artifact's canonical hash can't fork from the
+  compiler's. Demonstrated-red: the two independent constants (both 1) diverging would false-alarm every
+  enforcing gateway on the fallback path.
+- **policy_degraded gap-state red** (S7.2; `TestPolicyDegraded` stuck-enforcing case) — a gateway that
+  failed to apply an off/mesh ruleset and is still enforcing a DISABLED policy (applyErr set,
+  failingSince empty, synced-would-be-true) MUST read `policy_degraded=true`. Demonstrated-red: this
+  exact green-while-blackholing state survived review passes 2, 3 AND 4 across the 3→2-field staleness
+  surface before the collapse to one conservative field closed it.
 
 ## Edition Model — Open-core (resolved)
 

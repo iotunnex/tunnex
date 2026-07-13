@@ -471,10 +471,15 @@ const zeroTrustOff = "off"
 //	                                      push's converge window; that is intentional per the
 //	                                      OVER-report principle below.
 //
-// The field may only err toward OVER-reporting: a false "degraded" is an annoyance; a
-// false "healthy" is the silent-blackhole class we hit three times. The rich agent signals
-// (failingSince / hash / applyErr) still land in the capabilities JSONB unchanged; the
-// DIFFERENTIATED surface (which-kind-of-degraded + badge UX) is S7.4, reading that JSONB.
+// The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false
+// "healthy" is the silent-blackhole class we hit three times) — EXCEPT in the provider
+// CAN'T-DETERMINE window: when the compile transiently errors (pushed nil), term (3) is
+// skipped, so an enforcing gateway already desynced reads not-degraded for that window.
+// This is bounded + safe: the gateway is guaranteed on its LAST-GOOD fail-closed policy
+// (never open, never blackholing-from-this-cause), and it matches the couldn't-determine
+// disposition (a transient control-plane fault is not a gateway fault). The rich agent
+// signals (failingSince / hash / applyErr) still land in the capabilities JSONB unchanged;
+// the DIFFERENTIATED surface (which-kind-of-degraded + badge UX) is S7.4, reading that JSONB.
 //
 // Open build / no policy provider: nothing degrades (no policy engine).
 func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]bool {

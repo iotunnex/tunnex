@@ -1240,7 +1240,7 @@ export interface components {
             enrolled_at: string;
             /** Format: date-time */
             last_seen_at?: string;
-            /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field may only err toward OVER-reporting — a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class. The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
+            /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
             policy_degraded?: boolean;
         };
         JoinTokenRequest: {
