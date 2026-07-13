@@ -316,3 +316,45 @@ func TestNonEnforcingApplyFailureIsNotPolicyStale(t *testing.T) {
 		t.Fatalf("nil-policy apply failure must NOT set policy failingSince/err; got fs=%v e=%v", fs, e)
 	}
 }
+
+// Finding #B: a gateway that WAS enforcing and then fails to apply the new mesh/off
+// ruleset is STUCK enforcing a disabled policy — the kernel keeps the enforcing chain.
+// That must be VISIBLE (applyErr surfaced), unlike a never-enforced gateway's egress-arm
+// failure (#6). "silent stale policy = violation in slow motion", found live.
+func TestFailedEnforcingToOffApplySurfacesStuckEnforcing(t *testing.T) {
+	m := New("wg0")
+	m.apply = func(context.Context, string) error { return nil }
+	// Enforcing is applied and in force.
+	enf := &nodepolicy.Compiled{Version: 1, Mode: nodepolicy.ModeEnforcing, Mesh: false}
+	m.SetPolicy(enf)
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), enf); err != nil {
+		t.Fatalf("enforcing apply: %v", err)
+	}
+
+	// Admin disables ZT -> control plane pushes mesh (off) -> but the apply FAILS.
+	m.apply = func(context.Context, string) error { return errFail }
+	mesh := &nodepolicy.Compiled{Mode: nodepolicy.ModeOff, Mesh: true}
+	m.SetPolicy(mesh)
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), mesh)
+
+	// The kernel still enforces the disabled policy -> applyErr MUST be surfaced (not
+	// silently cleared as a benign non-enforcing apply).
+	if _, _, _, e := m.AppliedStatus(); e == nil {
+		t.Fatal("a failed enforcing->off apply must surface applyErr (gateway stuck enforcing a disabled policy)")
+	}
+
+	// Once the mesh apply SUCCEEDS, the gateway is no longer enforcing -> status clears,
+	// and a later mesh-apply failure is quiet again (no longer stuck-enforcing).
+	m.apply = func(context.Context, string) error { return nil }
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), mesh); err != nil {
+		t.Fatalf("mesh apply recovery: %v", err)
+	}
+	if _, _, _, e := m.AppliedStatus(); e != nil {
+		t.Fatalf("successful mesh apply must clear applyErr; got %v", e)
+	}
+	m.apply = func(context.Context, string) error { return errFail }
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), mesh)
+	if _, _, fs, e := m.AppliedStatus(); !fs.IsZero() || e != nil {
+		t.Fatalf("a non-enforcing gateway's later apply failure must stay quiet; got fs=%v e=%v", fs, e)
+	}
+}

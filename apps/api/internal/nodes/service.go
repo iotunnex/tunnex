@@ -275,26 +275,29 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			// A policy-subsystem error must NOT fail the whole desired state — the PEERS
 			// are already built above, so revocation still converges (the <5s SLA is
 			// independent of the policy engine, finding #3). Scoping (finding #2): when we
-			// can CONFIRM the org has Zero Trust OFF, serve the mesh (an explicit blanket
-			// artifact) — a policy-subsystem blip must not blackhole an org that never
-			// opted into enforcement, imposing an availability dependency on a subsystem it
-			// doesn't use. The mesh artifact mirrors the compiler's off-mode output so the
-			// applied-hash stays consistent with a normal off push.
+			// can CONFIRM the org has Zero Trust OFF, serve the mesh — a policy-subsystem
+			// blip must not blackhole an org that never opted into enforcement. We leave
+			// ds.Policy nil (the agent decodes nil = blanket mesh, and onPolicy fires on nil
+			// to unset any prior policy). nil matches the compiler's off-mode output for a
+			// DEVICE-LESS node exactly (CompiledForNode returns nil there), so the pushed/
+			// applied hashes stay "" and PolicyStatus never false-alarms (finding #C — a
+			// non-nil mesh artifact here diverged from that nil and read as out-of-sync).
 			slog.Warn("policy_compile_failed_org_off_serving_mesh",
 				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
-			ds.Policy = &policyspec.Compiled{
-				Version: ProtocolVersion, NodeID: node.ID.String(), Mode: zeroTrustOff, Mesh: true,
-			}
+			// ds.Policy stays nil.
 		default:
 			// Enforcing, OR the org mode is UNKNOWN (org row unreadable): FAIL CLOSED. An
 			// enforcing org must never revert to the open mesh on a policy error, and if we
 			// cannot confirm the mode we assume the boundary is in force. Serve the peers;
-			// lock the policy to a deny-all enforcing artifact. (nil would decode as mesh =
-			// fail-OPEN.)
+			// lock the policy to a deny-all enforcing artifact identical to the compiler's
+			// device-less enforcing fallback — SAME policyspec.ProtocolVersion (finding #D:
+			// nodes.ProtocolVersion is a different constant; using it would fork the hash
+			// from CompiledForNode's and false-alarm every fail-closed gateway). (nil would
+			// decode as mesh = fail-OPEN.)
 			slog.Warn("policy_compile_failed_failing_closed",
 				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
 			ds.Policy = &policyspec.Compiled{
-				Version: ProtocolVersion, NodeID: node.ID.String(), Mode: "enforcing", Mesh: false,
+				Version: policyspec.ProtocolVersion, NodeID: node.ID.String(), Mode: "enforcing", Mesh: false,
 			}
 		}
 	}
@@ -469,20 +472,21 @@ func (s *Service) PolicyStatus(ctx context.Context, node sqlc.Node, now time.Tim
 	synced = true
 	if s.policy != nil {
 		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
-		if err != nil {
+		switch {
+		case err != nil:
 			// COULD NOT DETERMINE what we'd push right now (transient compile/DB error).
-			// That is NOT evidence of a desync — reporting synced=false here would raise a
-			// false out-of-sync alarm on a HEALTHY gateway, training operators to ignore
-			// the signal (the same class of false alarm as the #3 false-staleness). Leave
-			// synced=true (unknown != desynced); a genuine desync still surfaces on the
-			// next successful compile (finding #4).
-			return stale, true
+			// Not evidence of a desync — reporting synced=false would raise a false alarm on
+			// a HEALTHY gateway, the same class as the #3 false-staleness. synced stays true;
+			// a genuine desync still surfaces on the next successful compile (finding #4).
+		case pol == nil || pol.Mesh:
+			// No ENFORCEMENT in force (off / open / device-less mesh). There is no policy
+			// boundary to be "out of sync" with, so synced is meaningless here — comparing a
+			// mesh/nil hash produces false out-of-sync alarms on off-mode orgs (finding #C).
+			// synced stays true; the sync signal is defined ONLY under enforcing.
+		default:
+			// Enforcing: the applied policy IN FORCE must match what we'd push now.
+			synced = policyspec.CanonicalHash(*pol) == caps.PolicyHash
 		}
-		pushed := ""
-		if pol != nil {
-			pushed = policyspec.CanonicalHash(*pol)
-		}
-		synced = pushed == caps.PolicyHash
 	}
 	return stale, synced
 }
@@ -512,10 +516,15 @@ func (s *Service) PolicyStatusForNodes(ctx context.Context, orgID uuid.UUID, nod
 		caps := Capabilities(n.Capabilities)
 		stale[n.ID] = caps.PolicyStale(now)
 		if pushed == nil {
-			synced[n.ID] = true
+			synced[n.ID] = true // provider errored -> unknown != desync (finding #4)
 			continue
 		}
-		synced[n.ID] = pushed[n.ID] == caps.PolicyHash
+		// CompiledHashesForNodes returns "" for a non-enforcing node (off / mesh): there is
+		// no enforcement boundary to diverge from, so it is always in sync (finding #C —
+		// mirrors the single-node pol==nil||Mesh rule). Only a non-empty (enforcing) pushed
+		// hash is compared against the applied hash.
+		h := pushed[n.ID]
+		synced[n.ID] = h == "" || h == caps.PolicyHash
 	}
 	return stale, synced
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -363,14 +364,22 @@ func (s *Service) SetMode(ctx context.Context, orgID uuid.UUID, mode string) (st
 	if err != nil {
 		return "", nil, err
 	}
+	// The mode is committed + the gateways pushed the instant mutate() returned nil —
+	// the enforcement change is ALREADY live. The affected-device list is advisory
+	// blast-radius info for the caller / S7.4 warn-and-confirm; it is BEST-EFFORT and
+	// must NEVER fail the call (finding #A). A failure here returning 500 would tell the
+	// admin "failed to enable" while the org is in fact live-enforcing and blocking — a
+	// UX-to-breach path. On its error we log and return success with no list (S4.7
+	// server-is-truth: the mutation is truth; everything after is advisory).
 	var affected []policyspec.AffectedDevice
 	if mode == ModeEnforcing {
-		rows, e := s.q.ListActiveFullTunnelDevices(ctx, orgID)
-		if e != nil {
-			return "", nil, e
-		}
-		for _, r := range rows {
-			affected = append(affected, policyspec.AffectedDevice{ID: r.ID, Name: r.Name})
+		if rows, e := s.q.ListActiveFullTunnelDevices(ctx, orgID); e != nil {
+			slog.Warn("affected_full_tunnel_enumeration_failed_after_mode_commit",
+				slog.String("org_id", orgID.String()), slog.String("error", e.Error()))
+		} else {
+			for _, r := range rows {
+				affected = append(affected, policyspec.AffectedDevice{ID: r.ID, Name: r.Name})
+			}
 		}
 	}
 	return mode, affected, nil
@@ -461,21 +470,29 @@ func (s *Service) CompiledHashesForNodes(ctx context.Context, orgID uuid.UUID, n
 	if err != nil {
 		return nil, err
 	}
-	compiled := Compile(snap)
 	out := make(map[uuid.UUID]string, len(nodeIDs))
+	// OFF mode: there is no enforcement boundary, so no node has a meaningful pushed hash
+	// — return "" for every node. The status layer reads "" as "in sync" (finding #C: an
+	// off org must never show policy-out-of-sync, and a device-having off node whose agent
+	// applied a mesh artifact must not compare against it).
+	if snap.Mode != ModeEnforcing {
+		for _, id := range nodeIDs {
+			out[id] = ""
+		}
+		return out, nil
+	}
+	compiled := Compile(snap)
 	for _, id := range nodeIDs {
 		if c, ok := compiled[id]; ok {
 			out[id] = policyspec.CanonicalHash(c)
 			continue
 		}
-		if snap.Mode == ModeEnforcing {
-			out[id] = policyspec.CanonicalHash(policyspec.Compiled{
-				Version: policyspec.ProtocolVersion, NodeID: id.String(),
-				Mode: ModeEnforcing, Mesh: false,
-			})
-			continue
-		}
-		out[id] = "" // off / no policy -> CompiledForNode returns nil -> pushed hash "".
+		// Enforcing node with no active devices -> the deny-all fallback CompiledForNode
+		// serves (SAME policyspec.ProtocolVersion the DesiredState fail-closed path uses).
+		out[id] = policyspec.CanonicalHash(policyspec.Compiled{
+			Version: policyspec.ProtocolVersion, NodeID: id.String(),
+			Mode: ModeEnforcing, Mesh: false,
+		})
 	}
 	return out, nil
 }
