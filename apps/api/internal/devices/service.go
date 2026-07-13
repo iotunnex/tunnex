@@ -461,11 +461,14 @@ func (s *Service) Get(ctx context.Context, orgID, deviceID uuid.UUID) (sqlc.Devi
 // from the device within the <5s bound. A no-op (already revoked) is a conflict.
 func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		// Read the PRIOR status (in-tx) so the audit distinguishes an owner CANCELLING their
-		// own pending enrollment (device.cancelled) from a revocation of an active device
-		// (device.revoked) — the queue history separates user-withdrew from admin-refused
-		// (finding #3). RevokeDevice itself now accepts active OR pending (owner-cancel path).
-		prior, ge := q.GetDevice(ctx, sqlc.GetDeviceParams{ID: deviceID, OrgID: orgID})
+		// Read the PRIOR status (in-tx, ROW-LOCKED) so the audit distinguishes an owner
+		// CANCELLING their own pending enrollment (device.cancelled) from a revocation of an
+		// active device (device.revoked) — the queue history separates user-withdrew from
+		// admin-refused (finding #3). FOR UPDATE serializes against a concurrent Approve so
+		// the label can't be stale (finding #6; audit_logs is append-only). This in-tx locked
+		// read is DISTINCT from the handler's pre-tx ownership read (a different layer —
+		// authorization vs the atomic label); do not couple them (finding #7 accepted).
+		prior, ge := q.GetDeviceForUpdate(ctx, sqlc.GetDeviceForUpdateParams{ID: deviceID, OrgID: orgID})
 		if errors.Is(ge, pgx.ErrNoRows) {
 			return apierr.Conflict("already_revoked", "device is not active")
 		} else if ge != nil {

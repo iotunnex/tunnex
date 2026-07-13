@@ -169,6 +169,44 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 	return i, err
 }
 
+const getDeviceForUpdate = `-- name: GetDeviceForUpdate :one
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by FROM devices
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetDeviceForUpdateParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// Row-locking read (S7.3 finding #6): Revoke reads the PRIOR status in-tx to label the
+// audit (device.cancelled for pending vs device.revoked for active). FOR UPDATE serializes
+// against a concurrently-committing Approve (pending->active) so the label can't be stale —
+// audit_logs is APPEND-ONLY, so a mislabel is a permanent error in the forensic record.
+func (q *Queries) GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdateParams) (Device, error) {
+	row := q.db.QueryRow(ctx, getDeviceForUpdate, arg.ID, arg.OrgID)
+	var i Device
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.NodeID,
+		&i.Name,
+		&i.Platform,
+		&i.PublicKey,
+		&i.AssignedIp,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RevokedAt,
+		&i.DeletedAt,
+		&i.FullTunnel,
+		&i.ApprovedBy,
+	)
+	return i, err
+}
+
 const getOrgNode = `-- name: GetOrgNode :one
 SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
 WHERE id = $1 AND org_id = $2 AND status = 'active'

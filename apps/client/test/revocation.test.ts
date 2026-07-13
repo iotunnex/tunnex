@@ -176,3 +176,22 @@ function backoffOf(m: RevocationMonitor): number {
   // @ts-expect-error — private field read for the test.
   return m.backoff as number;
 }
+
+// THE REGRESSION RED (S7.3 fold #4/#6 → #1/#2): a LEGACY config (blank orgId, from a
+// pre-orgId build) must still detect a revocation. The monitor passes "" through; device
+// (deviceStatus) falls back to the all-orgs scan, so a gone device fires teardown — instead
+// of the malformed-URL throw that would have made revocation SILENTLY never fire.
+test("revocation: legacy blank-orgId config still tears down via the scan fallback", async () => {
+  let sawOrgId: string | undefined;
+  const api = {
+    async deviceExists(_id: string, orgId: string): Promise<boolean> {
+      sawOrgId = orgId; // proves the monitor passes the (blank) orgId through, no crash
+      return false; // scan-found-gone
+    },
+  };
+  let teardowns = 0;
+  const m = new RevocationMonitor("dev-1", "", api, () => { teardowns++; });
+  assert.equal(await m.checkOnce(), "torn-down");
+  assert.equal(teardowns, 1);
+  assert.equal(sawOrgId, "");
+});

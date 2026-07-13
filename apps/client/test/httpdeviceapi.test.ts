@@ -50,3 +50,33 @@ test("deviceExists = deviceStatus === 'active' (#6: one fail-safe, no divergence
   stubFetch([{ match: "/organizations/o1/devices", ok: false, status: 500, body: {} }]);
   await assert.rejects(api().deviceExists("dev-1", "o1"), /list_devices_failed/); // inherits the throw
 });
+
+test("deviceStatus: blank orgId (legacy config) falls back to the all-orgs scan (#1-#5)", async () => {
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1", ""), "active");
+  // scan empty-org-list -> THROWS inconclusive (never a malformed /organizations//devices URL).
+  stubFetch([{ match: "/organizations", body: [] }]);
+  await assert.rejects(api().deviceStatus("dev-1", ""), /inconclusive/);
+  // revoked, found via scan -> "gone" (the revocation IS detected for legacy configs).
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "revoked" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1", ""), "gone");
+});
+
+test("resolveDeviceOrg: returns the found org (for stamping), null when gone", async () => {
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "dev-1", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().resolveDeviceOrg("dev-1"), "o1");
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [] },
+    { match: "/organizations", body: [{ id: "o1" }] },
+  ]);
+  assert.equal(await api().resolveDeviceOrg("dev-1"), null);
+});
