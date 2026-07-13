@@ -5,8 +5,9 @@ import { runLogin, runLogout } from "./login";
 import { TunnelController, helperSocketPath } from "./tunnel";
 import { TunnelConfigStore } from "./tunnelstore";
 import { HttpDeviceApi } from "./httpdeviceapi";
-import { resolveTunnelConfig, clearTunnelConfigForOrigin } from "./deviceconfig";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin, PendingApprovalError } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
+import { ApprovalMonitor } from "./approvalmonitor";
 import { ensureHelperInstalled } from "./helperinstall";
 import { notifyTunnel } from "./notify";
 import { trayStateFor, type TrayState } from "./tray";
@@ -19,14 +20,15 @@ import type { TunnelStatus } from "./helperclient";
 const DEFAULT_FULL_TUNNEL = false;
 
 // ClientTunnelStatus is what main forwards: the helper's TunnelStatus plus the
-// client-synthesized "revoked" state (the helper never emits it).
-type ClientTunnelStatus = TunnelStatus | { state: "revoked" };
+// client-synthesized states the helper never emits — "revoked" and "pending_approval"
+// (S7.3: enrolled but awaiting admin approval; the helper is never armed for it).
+type ClientTunnelStatus = TunnelStatus | { state: "revoked" } | { state: "pending_approval" };
 
 // TunnelControls is what registerIpc returns so the tray (built in index.ts) can drive
 // the SAME connect/disconnect path the renderer uses — no duplicated tunnel logic, one
 // source of truth for monitor + notification + state emission.
 export interface TunnelControls {
-  connect(fullTunnel: boolean): Promise<TunnelStatus>;
+  connect(fullTunnel: boolean): Promise<ClientTunnelStatus>;
   disconnect(): Promise<void>;
   currentState(): TrayState;
   subscribe(cb: (s: TrayState) => void): () => void;
@@ -53,7 +55,7 @@ export function registerIpc(
   // lastSynth holds a CLIENT-synthesized state (currently only "revoked") so it
   // survives a renderer remount/reload: the helper can't report "revoked", so
   // tunnel:status returns this until the next connect/disconnect clears it.
-  let lastSynth: { state: "revoked" } | null = null;
+  let lastSynth: { state: "revoked" } | { state: "pending_approval" } | null = null;
 
   const emitTray = (s: TrayState): void => {
     trayState = s;
@@ -98,6 +100,34 @@ export function registerIpc(
     notifyTunnel("revoked");
   };
 
+  // --- awaiting-approval poll (S7.3 — sibling of the revocation monitor) ----------
+  // App-level SINGLETON (never per-window, the S6.4 root-fix class). Runs only while a
+  // pending device is awaiting approval for the current origin; stops on resolution.
+  let approvalMonitor: ApprovalMonitor | null = null;
+  const stopApprovalMonitor = (): void => {
+    approvalMonitor?.stop();
+    approvalMonitor = null;
+  };
+  // onApproved: the admin approved the device. Clear the pending flag so a user-initiated
+  // connect reuses the SAME stored config (no re-mint), surface it, notify. Deliberately
+  // does NOT auto-connect — a background poll must never arm the kill-switch / trigger the
+  // helper privilege flow; the human clicks Connect.
+  const onApproved = (origin: string): void => {
+    stopApprovalMonitor();
+    const sc = tunnelStore.get(origin);
+    if (sc?.pending) tunnelStore.put({ ...sc, pending: false });
+    lastSynth = null;
+    emit({ state: "down" }); // now connectable
+    notifyTunnel("approved");
+  };
+  // onRejected: the pending device was rejected/deleted — a genuine revocation. Route
+  // through the ONE teardown path (onRevoked): clear the dead config + best-effort revoke
+  // + the loud revoked notification. (No tunnel is up; tunnel.down is a no-op.)
+  const onRejected = async (origin: string): Promise<void> => {
+    stopApprovalMonitor();
+    await onRevoked(origin);
+  };
+
   // --- the tunnel controller -----------------------------------------------------
   let requestedFullTunnel = DEFAULT_FULL_TUNNEL; // set by connect() before up()
   const tunnel = new TunnelController(
@@ -119,17 +149,43 @@ export function registerIpc(
     },
   );
 
-  const connect = async (fullTunnel: boolean): Promise<TunnelStatus> => {
+  const connect = async (fullTunnel: boolean): Promise<ClientTunnelStatus> => {
     // First-connect on an unsigned macOS build: install the privileged helper via one
     // GUI admin prompt (no-op if already installed / off macOS). Throws
     // helper_install_canceled|failed|asset_missing → surfaced by the renderer.
     await ensureHelperInstalled();
-    // Stop any prior monitor FIRST, unconditionally — even if we can't resolve a new
-    // deviceId below, the old monitor must not linger and later tear down THIS tunnel.
+    // Stop any prior monitors FIRST, unconditionally — even if we can't resolve a new
+    // deviceId below, an old monitor must not linger and later tear down THIS tunnel.
     stopMonitor();
-    lastSynth = null; // a fresh connect clears any stale revoked state
+    stopApprovalMonitor();
+    lastSynth = null; // a fresh connect clears any stale revoked/pending state
     requestedFullTunnel = fullTunnel;
-    const status = await tunnel.up(); // resolves + persists the device, arms the helper
+    let status: TunnelStatus;
+    try {
+      status = await tunnel.up(); // resolves + persists the device, arms the helper
+    } catch (e) {
+      // S7.3 GATE: the device is awaiting admin approval. resolveTunnelConfig threw BEFORE
+      // arming the helper (no dead tunnel, no RevocationMonitor that would misread pending
+      // as revoked). Show the stable awaiting state + start the ApprovalMonitor instead.
+      if (e instanceof PendingApprovalError) {
+        const cred = store.load();
+        const pending: ClientTunnelStatus = { state: "pending_approval" };
+        lastSynth = pending;
+        emit(pending);
+        notifyTunnel("pending");
+        if (cred) {
+          approvalMonitor = new ApprovalMonitor(
+            e.deviceId,
+            deviceApiFor(cred.server),
+            () => onApproved(cred.server),
+            () => onRejected(cred.server),
+          );
+          approvalMonitor.start();
+        }
+        return pending;
+      }
+      throw e;
+    }
     // Start the proactive revocation monitor for the device we just brought up.
     const cred = store.load();
     const deviceId = cred ? tunnelStore.get(cred.server)?.deviceId : undefined;
@@ -144,6 +200,7 @@ export function registerIpc(
 
   const disconnect = async (): Promise<void> => {
     stopMonitor();
+    stopApprovalMonitor(); // also cancel any awaiting-approval poll (disconnect = stop waiting)
     lastSynth = null;
     await tunnel.down();
     emit({ state: "down" });
@@ -172,6 +229,7 @@ export function registerIpc(
     // so the server peer must not be orphaned). All best-effort — logout must proceed.
     const cred = store.load();
     stopMonitor();
+    stopApprovalMonitor();
     lastSynth = null;
     await tunnel.down().catch(() => {});
     emitTray("disconnected");

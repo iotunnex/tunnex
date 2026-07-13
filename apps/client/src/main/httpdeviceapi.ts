@@ -53,7 +53,7 @@ export class HttpDeviceApi implements DeviceApi {
     return active.id;
   }
 
-  async createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string }> {
+  async createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string; pendingApproval: boolean }> {
     const orgId = await this.firstOrgId();
     const nodeId = await this.activeNodeId(orgId);
     const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, {
@@ -67,9 +67,29 @@ export class HttpDeviceApi implements DeviceApi {
       }),
     });
     if (!r.ok) throw new Error(await createErr(r));
-    const body = (await r.json()) as { device: { id: string }; config?: string };
+    // The config is issued at enrollment even when pending (S7.3 D2) — the peer just
+    // isn't served by the gateway until approved. pending_approval tells the caller to
+    // hold: gate the tunnel + start the awaiting-approval poll, don't arm the helper.
+    const body = (await r.json()) as { device: { id: string }; config?: string; pending_approval?: boolean };
     if (!body.config) throw new Error("no_config_returned"); // server-generated flow only
-    return { deviceId: body.device.id, confText: body.config };
+    return { deviceId: body.device.id, confText: body.config, pendingApproval: body.pending_approval === true };
+  }
+
+  async deviceStatus(deviceId: string): Promise<"active" | "pending" | "gone"> {
+    // The definitive server status for the awaited device. Same empty-orgs fail-safe as
+    // deviceExists: an anomalous empty org list (replica lag / in-flight membership change)
+    // THROWS (inconclusive) so a blip never reads as a transition (rejected). "gone" is
+    // returned ONLY when a real device list was read and the id is absent / revoked.
+    const orgIds = await this.orgIds();
+    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
+    for (const orgId of orgIds) {
+      const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
+      if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
+      const devices = (await r.json()) as Array<{ id: string; status: string }>;
+      const d = devices.find((x) => x.id === deviceId);
+      if (d) return d.status === "active" ? "active" : d.status === "pending" ? "pending" : "gone";
+    }
+    return "gone"; // checked every org; the id is absent -> genuinely gone
   }
 
   private async orgIds(): Promise<string[]> {

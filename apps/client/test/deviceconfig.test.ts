@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { parseWgConf } from "../src/main/wgconf";
 import { TunnelConfigStore } from "../src/main/tunnelstore";
-import { resolveTunnelConfig, clearTunnelConfigForOrigin, type DeviceApi } from "../src/main/deviceconfig";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin, PendingApprovalError, type DeviceApi } from "../src/main/deviceconfig";
 import { InsecureStorageError, type Persistence, type SafeStorageLike } from "../src/main/credential";
 
 const CONF = `[Interface]
@@ -65,20 +65,24 @@ test("TunnelConfigStore is origin-keyed and refuses insecure by default", () => 
 });
 
 // fakeApi counts creates/revokes; `exists` drives the self-heal existence check.
-function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: boolean } {
+function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: boolean; pending: boolean } {
   return {
     creates: 0,
     revoked: [],
     exists: true,
+    pending: false, // S7.3: when true, createDevice returns pendingApproval
     async createDevice() {
       this.creates++;
-      return { deviceId: "dev-" + this.creates, confText: CONF };
+      return { deviceId: "dev-" + this.creates, confText: CONF, pendingApproval: this.pending };
     },
     async revokeDevice(id: string) {
       this.revoked.push(id);
     },
     async deviceExists() {
       return this.exists;
+    },
+    async deviceStatus() {
+      return this.pending ? "pending" : this.exists ? "active" : "gone";
     },
   };
 }
@@ -108,7 +112,7 @@ test("clearTunnelConfigForOrigin: removes + best-effort revokes that origin's de
 
   // Best-effort: a revoke that throws is swallowed, local removal still happens.
   await resolveTunnelConfig("https://u.example", false, api, store);
-  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true };
+  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true, deviceStatus: async () => "active" };
   await clearTunnelConfigForOrigin("https://u.example", throwingApi, store); // must not throw
   assert.equal(store.get("https://u.example"), null);
 });
@@ -133,6 +137,7 @@ test("resolveTunnelConfig: self-heals a revoked device (clear + mint fresh)", as
     createDevice: api.createDevice.bind(api),
     revokeDevice: api.revokeDevice.bind(api),
     deviceExists: async () => { throw new Error("network"); },
+    deviceStatus: async () => { throw new Error("network"); },
   };
   await resolveTunnelConfig(origin, false, flakyApi, store);
   assert.equal(api.creates, 2); // reused — no new create on a transient blip
@@ -158,4 +163,34 @@ test("resolveTunnelConfig: re-mints when the split↔full intent changes", async
   // Same intent again → reuse (no churn).
   await resolveTunnelConfig(origin, true, api, store);
   assert.equal(api.creates, 2);
+});
+
+// S7.3: a pending device GATES the tunnel — resolveTunnelConfig throws PendingApprovalError
+// (so tunnel.up() never arms the helper), persists the device with pending=true, and a
+// re-resolve while still pending RE-THROWS instead of minting a duplicate (deviceExists
+// returns false for pending and would otherwise false-heal into a second create).
+test("resolveTunnelConfig: pending device gates (throws, no duplicate re-mint)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const api = fakeApi();
+  api.pending = true;
+  const origin = "https://p.example";
+
+  await assert.rejects(
+    () => resolveTunnelConfig(origin, false, api, store),
+    (e: unknown) => e instanceof PendingApprovalError && (e as PendingApprovalError).deviceId === "dev-1",
+  );
+  assert.equal(api.creates, 1); // device minted once
+  assert.equal(store.get(origin)?.pending, true); // persisted as pending
+
+  // Re-resolve while STILL pending → re-throws, does NOT mint a second device.
+  await assert.rejects(() => resolveTunnelConfig(origin, false, api, store), PendingApprovalError);
+  assert.equal(api.creates, 1); // NO duplicate create
+
+  // Once approved (pending flag cleared, device now active) → reuse the stored config.
+  const sc = store.get(origin)!;
+  store.put({ ...sc, pending: false });
+  api.pending = false;
+  const cfg = await resolveTunnelConfig(origin, false, api, store);
+  assert.ok(cfg); // returned the stored config
+  assert.equal(api.creates, 1); // still no re-mint (existence check passes for active)
 });

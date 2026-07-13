@@ -5,7 +5,7 @@
 // TunnelEvent is the set of tunnel transitions worth a desktop notification. These
 // mirror the states the renderer already reacts to (up / down / kill-switch fail /
 // revoked) — a revoked device in particular must disconnect LOUDLY, not silently.
-export type TunnelEvent = "connected" | "disconnected" | "failed" | "revoked";
+export type TunnelEvent = "connected" | "disconnected" | "failed" | "revoked" | "pending" | "approved";
 
 // messageFor is the pure copy map. The wording matches the renderer's TunnelControl
 // states so the tray/notification and the window agree.
@@ -22,5 +22,9 @@ export function messageFor(ev: TunnelEvent): { title: string; body: string } {
       };
     case "revoked":
       return { title: "Tunnex device revoked", body: "This device was revoked. Reconnect to re-enroll." };
+    case "pending":
+      return { title: "Tunnex — awaiting approval", body: "This device is waiting for an admin to approve it." };
+    case "approved":
+      return { title: "Tunnex device approved", body: "Your device was approved — click Connect to start the tunnel." };
   }
 }

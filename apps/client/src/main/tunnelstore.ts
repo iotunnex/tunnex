@@ -9,6 +9,10 @@ export interface StoredTunnelConfig {
   origin: string; // the server origin this config/device belongs to
   deviceId: string; // for best-effort revoke (against THIS origin only)
   config: TunnelConfig;
+  // pending (S7.3) = the device is AWAITING admin approval: the config is valid but the
+  // gateway won't serve the peer yet, so resolveTunnelConfig refuses to arm the helper and
+  // re-signals PendingApprovalError. Cleared by the ApprovalMonitor on approval.
+  pending?: boolean;
 }
 
 type ConfigMap = Record<string, StoredTunnelConfig>;
