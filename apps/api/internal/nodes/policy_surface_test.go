@@ -109,6 +109,47 @@ func TestPolicyStatusForNodesBatchParityAndErrorNotDesync(t *testing.T) {
 	}
 }
 
+// Finding #C: a DEVICE-LESS off-mode node (CompiledForNode returns nil) must report
+// synced=true even when its applied hash is non-empty — e.g. after a transient error
+// where the fallback (older code) pushed a mesh artifact the agent applied. synced is
+// meaningful ONLY under enforcing; off/mesh/nil has no boundary to diverge from. This is
+// the exact case the earlier device-having-only test missed.
+func TestPolicyStatusOffModeNeverDesyncs(t *testing.T) {
+	now := time.Now()
+	// Device-less off node: provider returns (nil, nil). Applied hash is some leftover mesh
+	// hash. Must still be synced (no enforcement boundary).
+	svcNil := &Service{policy: fakeProvider{pol: nil}}
+	nDeviceless := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": "leftover_mesh_hash"})}
+	if _, synced := svcNil.PolicyStatus(context.Background(), nDeviceless, now); !synced {
+		t.Fatal("device-less off node (pushed nil) must be synced=true regardless of applied hash")
+	}
+	// Device-having off node: provider returns a mesh artifact (Mesh=true). Also always synced.
+	mesh := &policyspec.Compiled{Version: 1, Mode: "off", Mesh: true}
+	svcMesh := &Service{policy: fakeProvider{pol: mesh}}
+	nMesh := sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(map[string]any{"policy_hash": "anything"})}
+	if _, synced := svcMesh.PolicyStatus(context.Background(), nMesh, now); !synced {
+		t.Fatal("off-mode mesh node must be synced=true (no enforcement boundary)")
+	}
+	// Batch: an off org (fake returns "" for every node via a nil pol) is all-synced even
+	// with mismatched applied hashes.
+	_, syncedB := svcNil.PolicyStatusForNodes(context.Background(), uuid.New(), []sqlc.Node{nDeviceless, nMesh}, now)
+	if !syncedB[nDeviceless.ID] || !syncedB[nMesh.ID] {
+		t.Fatal("batch: off-mode nodes must all be synced=true")
+	}
+}
+
+// Finding #D guard: the DesiredState fail-closed/off fallbacks and the compiler stamp the
+// policy artifact Version from TWO independent constants. They must stay equal, or a
+// fallback artifact's canonical hash forks from the compiler's and false-alarms every
+// enforcing gateway. This test fails CI loudly the moment a future bump breaks the tie.
+func TestProtocolVersionConstantsAgree(t *testing.T) {
+	if ProtocolVersion != policyspec.ProtocolVersion {
+		t.Fatalf("nodes.ProtocolVersion (%d) != policyspec.ProtocolVersion (%d): the fail-closed "+
+			"policy fallback would fork its hash from the compiler and false-alarm every enforcing "+
+			"gateway. Reconcile them (or collapse to one constant).", ProtocolVersion, policyspec.ProtocolVersion)
+	}
+}
+
 // Finding #3 + #2 (control-plane isolation, scoped): a policy-compile error must NOT fail
 // the desired state — peers are still served (revocation converges within the <5s SLA,
 // independent of the policy engine). The policy signal is SCOPED by the org's mode
@@ -128,12 +169,12 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 	defer pool.Close()
 
 	cases := []struct {
-		mode         string
-		wantMesh     bool // true => serve mesh; false => fail closed (enforcing deny-all)
-		wantEnforced string
+		mode     string
+		wantNil  bool // off => serve mesh via nil (agent decodes nil = blanket mesh)
+		wantMode string
 	}{
-		{"off", true, "off"},
-		{"enforcing", false, "enforcing"},
+		{"off", true, ""},                 // nil policy = mesh; matches device-less steady state (#C)
+		{"enforcing", false, "enforcing"}, // fail closed: explicit deny-all enforcing artifact
 	}
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -168,16 +209,23 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 			if len(ds.Peers) == 0 {
 				t.Fatal("peers must still be served when the policy compile fails (revocation must converge)")
 			}
-			if ds.Policy == nil {
-				t.Fatalf("policy must be an explicit artifact, never nil (fail-OPEN); got nil")
+			if tc.wantNil {
+				// OFF: served as nil (= blanket mesh on the agent), matching the compiler's
+				// device-less off output so PolicyStatus never false-alarms (#C).
+				if ds.Policy != nil {
+					t.Fatalf("off-mode policy error must serve nil (mesh), not an explicit artifact; got %+v", ds.Policy)
+				}
+				return
 			}
-			if ds.Policy.Mesh != tc.wantMesh {
-				t.Fatalf("mode=%s: want Mesh=%v, got %+v", tc.mode, tc.wantMesh, ds.Policy)
+			// ENFORCING: explicit deny-all, and the SAME policyspec.ProtocolVersion the
+			// compiler stamps (#D) so its hash matches CompiledForNode's fallback.
+			if ds.Policy == nil || ds.Policy.Mesh || ds.Policy.Mode != tc.wantMode {
+				t.Fatalf("enforcing error must fail closed (deny-all enforcing); got %+v", ds.Policy)
 			}
-			if ds.Policy.Mode != tc.wantEnforced {
-				t.Fatalf("mode=%s: want Mode=%q, got %+v", tc.mode, tc.wantEnforced, ds.Policy)
+			if ds.Policy.Version != policyspec.ProtocolVersion {
+				t.Fatalf("fail-closed artifact must use policyspec.ProtocolVersion (%d); got %d", policyspec.ProtocolVersion, ds.Policy.Version)
 			}
-			if !tc.wantMesh && len(ds.Policy.Allow) != 0 {
+			if len(ds.Policy.Allow) != 0 {
 				t.Fatalf("enforcing fail-closed must be deny-all (no allows); got %+v", ds.Policy.Allow)
 			}
 		})

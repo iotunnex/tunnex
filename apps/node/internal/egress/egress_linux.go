@@ -67,7 +67,14 @@ type Manager struct {
 	// plane (decision 4b / staleness-visible, chunk-1 status field).
 	appliedVersion int
 	appliedHash    string
-	applyErr       error
+	// appliedEnforcing is whether the policy CURRENTLY IN FORCE (last successful apply) is
+	// an ENFORCING one. It distinguishes the two non-enforcing apply-failure cases
+	// (finding #B): a gateway that was enforcing and FAILS to apply the new mesh/off
+	// ruleset is STUCK enforcing a disabled policy (surface it — silent stale policy is a
+	// violation in slow motion), whereas a gateway that was never enforcing (open build /
+	// off) whose egress-NAT arm fails is not a policy concern (#6 — stays quiet).
+	appliedEnforcing bool
+	applyErr         error
 	// failingSince is the instant apply FIRST started failing (the mismatch onset),
 	// cleared the moment an apply SUCCEEDS. The control plane's stale alarm measures
 	// (now - failingSince), NOT the applied-hash age — so a NORMAL push that applies
@@ -325,14 +332,32 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !isPolicy {
-		// No enforcing policy in force: clear any prior policy status; the error (if any)
-		// still returns for the egress-capability path.
-		m.applyErr = nil
-		m.failingSince = time.Time{}
+		// Desired state is NON-enforcing (mesh / off / open build).
 		if err == nil {
+			// Applied cleanly: mesh/off is now in force. Clear all policy status.
 			m.appliedVersion = 0
 			m.appliedHash = nodepolicy.CanonicalHash(pol) // "" for nil, mesh hash otherwise
+			m.appliedEnforcing = false
+			m.applyErr = nil
+			m.failingSince = time.Time{}
+			return nil
 		}
+		// The apply FAILED, so the kernel keeps the PREVIOUS ruleset in force.
+		if m.appliedEnforcing {
+			// STUCK ENFORCING: the org disabled Zero Trust (or reverted to mesh) but the
+			// gateway could not swap out the enforcing chain — it is still enforcing a
+			// DISABLED policy, invisibly denying traffic. Surface it via applyErr (an
+			// immediate policy_error), the "silent stale policy = violation in slow motion"
+			// DoD (finding #B). appliedHash/appliedEnforcing stay (enforcing is what's in
+			// force). failingSince stays enforcing-scoped — applyErr is the signal here.
+			m.applyErr = err
+			return err
+		}
+		// Never enforcing (open build / off egress-arm failure): NOT a policy concern —
+		// the egress-capability path (egress_nat=false + logs) carries this. Stay quiet so
+		// a nftless open-build gateway never reports itself policy-stale (finding #6).
+		m.applyErr = nil
+		m.failingSince = time.Time{}
 		return err
 	}
 	if err != nil {
@@ -344,6 +369,7 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	}
 	m.appliedVersion = pol.Version
 	m.appliedHash = nodepolicy.CanonicalHash(pol)
+	m.appliedEnforcing = true
 	m.applyErr = nil
 	m.failingSince = time.Time{} // apply succeeded -> no mismatch -> not stale
 	return nil
