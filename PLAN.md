@@ -1047,9 +1047,39 @@ ROUTED but DROPPED at the gateway forward chain (routing ≠ permission). Note *
 presumes this seam** ("expose in-cluster services via Zero Trust policies") — it is load-bearing for
 EPIC 10 too; do not build S8 routing without it.
 
+**LEDGERED at S7.2 (more S8.1/S8.2 decide-before-code + a promoted story):**
+- **Site-link TRANSPORT is a modeled enum field from day one** (S8.1 schema), with **wireguard the
+  only implemented value**. This RESERVES the parked IPsec-interop seam (for agent-impossible
+  endpoints: managed cloud VPN gateways — AWS TGW / Azure VPN GW — hardware appliances, partner
+  networks) without a later migration. **IPsec itself stays PARKED** — trigger = a real
+  customer/prospect with an agent-impossible endpoint AND **after EPIC 9 ships** (no third protocol
+  before the second is proven). If ever built: **strongSwan managed by the node agent per the S9.1
+  pattern, site-to-site ONLY** (no IPsec end-user clients), and the **tested-interop matrix is bounded
+  at story-open** (strongSwan↔strongSwan + AWS/Azure managed endpoints; arbitrary-appliance interop
+  explicitly best-effort — an unbounded vendor matrix is REJECTED in advance). **Routing + Zero Trust
+  enforcement are transport-agnostic by design — state this in S8.1.**
+- **Subnet-advertisement decisions (S8.1/S8.2):** (a) **overlapping advertisements across sites →
+  REFUSE the second** (typed clean error, `gateway_no_egress`-style) in v1; precedence/longest-prefix
+  semantics DEFERRED (trigger = first real customer need). **Silent ambiguity is the one forbidden
+  outcome.** (b) **Advertisements require control-plane/admin APPROVAL before propagation** — a
+  compromised site gateway must not hijack routes by advertising subnets it doesn't own; **approved ≠
+  reachable** (Zero Trust grants still gate reachability, per the ledger above / d21cf19). (c) Manual
+  route pinning DEFERRED alongside (a).
+- **S8.4 Cross-site DNS — PROMOTED to an in-scope story** (below). Rationale: subnet reachability
+  without name resolution is half a feature for real users, and it is the #1 competitor-comparison
+  line. The device config's DNS field (S3.4) is the client-side seam; **S8.1's schema RESERVES the
+  site-carries-DNS-forwarding-entries seam** as S8.4's foundation.
+
 - **S8.1 Gateway/site model** — register site gateways (each a `tunnex-node` agent), subnet routing.
+  **Reserves: link transport enum (wireguard only), site DNS-forwarding entries (S8.4). Routing + ZT
+  enforcement transport-agnostic.**
 - **S8.2 Route propagation** — advertise/accept routes between sites via WireGuard, reconciled by agents.
+  **Advertisements need admin approval; overlaps refused (typed); approved ≠ reachable (ZT gates).**
 - **S8.3 Site management UI** — add site, topology view, health.
+- **S8.4 Cross-site DNS** *(promoted from candidate, S7.2 review)* — mesh name resolution (devices +
+  site hosts resolvable by name across the mesh) + **split-horizon per-site forwarding** (a domain →
+  that site's existing internal resolver, queries routed over that site's tunnel). Decision-first,
+  **sequenced after S8.2**. Reference design: MagicDNS + split-DNS.
 
 ## EPIC 9 — OpenVPN Support (port from existing Bolster stack, not greenfield)
 
