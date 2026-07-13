@@ -271,6 +271,9 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		ps := control.PolicyStatus{Version: v, Hash: h}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
+			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)
+				ps.Error = ps.Error[:300]
+			}
 		}
 		if !failingSince.IsZero() {
 			ps.FailingSince = failingSince.UTC().Format(time.RFC3339)

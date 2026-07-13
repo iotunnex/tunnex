@@ -1240,6 +1240,10 @@ export interface components {
             enrolled_at: string;
             /** Format: date-time */
             last_seen_at?: string;
+            /** @description Zero Trust (enterprise): the gateway's policy apply has been FAILING beyond the stale window — it is enforcing an out-of-date ruleset. Alarm-worthy. */
+            policy_stale?: boolean;
+            /** @description Zero Trust (enterprise): the policy IN FORCE matches what the control plane would push now. false = the gateway hasn't applied the latest policy yet (syncing, or silently stale). */
+            policy_synced?: boolean;
         };
         JoinTokenRequest: {
             node_name?: string;

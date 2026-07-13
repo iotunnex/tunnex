@@ -129,7 +129,7 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		PolicyError   string `json:"policy_error"`
 		PolicyFailing string `json:"policy_failing_since"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.PublicKey == "" {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}

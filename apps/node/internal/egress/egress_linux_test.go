@@ -12,7 +12,9 @@ import (
 // and the egress side can't initiate into spokes), and DROP IPv6 full-tunnel egress (no
 // NAT66 → no leak). This pins the generated rules without a live kernel.
 func TestRuleset(t *testing.T) {
-	rs := New("wg0").ruleset("10.99.0.1/24")
+	m := New("wg0")
+	m.SetPolicy(nil) // received nil = legacy mesh (cold-start with no policy is now deny-all, finding #2)
+	rs := m.ruleset("10.99.0.1/24")
 
 	wants := []string{
 		"table ip tunnex",

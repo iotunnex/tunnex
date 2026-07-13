@@ -3,6 +3,8 @@ package http
 import (
 	"context"
 
+	"time"
+
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
@@ -46,9 +48,15 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
-		out = append(out, toAPINode(n))
+		an := toAPINode(n)
+		// Zero Trust policy health surface (S7.2 finding #5/#7): stale = apply failing
+		// past the window; synced = policy in force matches what we'd push now.
+		stale, synced := s.nodes.PolicyStatus(ctx, n, now)
+		an.PolicyStale, an.PolicySynced = &stale, &synced
+		out = append(out, an)
 	}
 	return api.ListNodes200JSONResponse{
 		Body:    out,

@@ -1113,6 +1113,15 @@ delete the conntrack entries matching the removed allow. **Trigger = first custo
 immediate flow termination on grant change.** Pairs naturally with the flow-logs candidate (S7.2 already
 emits per-rule `counter`s) — the same per-rule identity drives both. Documented in docs/S7.2-decisions.md.
 
+**LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
+throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
+policy version instead. (#9) no off-mode fast-path — off-mode orgs still walk the compile path to
+produce a mesh artifact; short-circuit to the blanket-mesh artifact. (#10) redundant re-apply per
+fetch — an identical `Compiled` re-renders + re-applies each cycle (the idempotence guard makes it a
+kernel no-op, but it still burns an `nft` transaction); skip apply when the applied hash already
+matches. None change behavior; all are throughput optimizations. **Trigger = policy-fetch load becomes
+measurable.** Documented in docs/S7.2-decisions.md.
+
 ## EPIC 12 — Commercial / Licensing Infrastructure *(PARKED — trigger: post-public-beta; needs a sellable product + users first)*
 
 **Positioning guard:** licensing MUST NOT break the "self-hosted, no SaaS in the trust path" differentiator. License verification is **OFFLINE** — the customer's deployment verifies a signed key locally against a baked-in public key; it works air-gapped and **NEVER calls Tunnex infra to function.** Any phone-home (renewal reminders, telemetry) is optional, async, and degrades gracefully — a lapsed connection to Tunnex infra **NEVER hard-fails a running VPN.** This is the sovereignty/Tailscale-differentiator constraint; a call-home validation model is explicitly **REJECTED**.

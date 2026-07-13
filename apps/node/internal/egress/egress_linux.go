@@ -45,6 +45,17 @@ var ifaceRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,15}$`)
 type Manager struct {
 	wgIface string
 	policy  atomic.Pointer[nodepolicy.Compiled]
+	// policyReceived distinguishes "no policy fetched YET" (cold start, before the first
+	// desired-state delivery) from "policy fetched, value nil = legacy mesh". THREE states
+	// (finding #2): (a) received + mesh/nil -> blanket; (b) received + enforcing -> grants;
+	// (c) NEVER received -> DENY-ALL regardless of mode. The initial synchronous Reconcile
+	// runs before OnPolicy is wired, so without this the forward chain would render the
+	// blanket mesh (fail-OPEN) on every restart of an enforcing gateway until the first
+	// fetch lands. Deny-until-first-policy is fail-CLOSED; an off-mode org's brief
+	// restart blip (denied until the first fetch) is the correct trade for a security
+	// boundary. This SPLITS the chunk-1 absent=Mesh decision: nil-WITHIN-a-received-policy
+	// = mesh (unchanged); NEVER-received != mesh = deny.
+	policyReceived atomic.Bool
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
@@ -69,9 +80,13 @@ type Manager struct {
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now} }
 
-// SetPolicy stores the latest compiled policy for the next Reconcile to render. A nil
-// policy (open build / no Zero Trust) keeps the legacy blanket mesh.
-func (m *Manager) SetPolicy(p *nodepolicy.Compiled) { m.policy.Store(p) }
+// SetPolicy stores the latest compiled policy (nil = legacy mesh) and marks that a
+// policy has now been received — flipping the forward chain out of the cold-start
+// deny-all state. Called on EVERY desired-state delivery (including nil for off orgs).
+func (m *Manager) SetPolicy(p *nodepolicy.Compiled) {
+	m.policy.Store(p)
+	m.policyReceived.Store(true)
+}
 
 // AppliedStatus reports the version + canonical hash of the policy CURRENTLY IN FORCE
 // (last successful apply), the last apply error, and failingSince — the mismatch
@@ -166,7 +181,7 @@ func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
 	if subnet != "" {
 		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
 	}
-	v4fwd, v6fwd := m.forwardRules(pol)
+	v4fwd, v6fwd := m.forwardRules(pol, m.policyReceived.Load())
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
@@ -211,8 +226,14 @@ table ip6 tunnex {
 // untouched (no version bump, twin goldens unchanged).
 const dropCounter = "    counter comment \"tunnex_default_drop\"\n" // counts unmatched -> policy drop
 
-func (m *Manager) forwardRules(pol *nodepolicy.Compiled) (v4, v6 string) {
+func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 string) {
 	wg := m.wgIface
+	if !received {
+		// COLD START, no policy fetched yet -> DENY-ALL (drop + ct only, no accepts).
+		// Fail-closed until the first desired-state delivery, so an enforcing gateway is
+		// never briefly wide-open on restart (finding #2). NOT the same as nil-in-received.
+		return dropCounter, dropCounter
+	}
 	if pol == nil || pol.Mesh {
 		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" counter accept\n", wg)
 		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n", wg)
@@ -246,13 +267,23 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 	clause := ""
 	switch e.Protocol {
 	case "tcp", "udp":
+		lowSet, highSet := e.PortLow > 0, e.PortHigh > 0
 		switch {
-		case e.PortLow <= 0:
+		case !lowSet && !highSet:
+			// Both unset = any port of this protocol (the validated "no port range" case).
 			clause = fmt.Sprintf(" ip protocol %s", e.Protocol)
-		case e.PortHigh > e.PortLow:
-			clause = fmt.Sprintf(" %s dport %d-%d", e.Protocol, e.PortLow, e.PortHigh)
+		case lowSet && highSet && e.PortHigh >= e.PortLow:
+			if e.PortHigh > e.PortLow {
+				clause = fmt.Sprintf(" %s dport %d-%d", e.Protocol, e.PortLow, e.PortHigh)
+			} else {
+				clause = fmt.Sprintf(" %s dport %d", e.Protocol, e.PortLow)
+			}
 		default:
-			clause = fmt.Sprintf(" %s dport %d", e.Protocol, e.PortLow)
+			// A HALF-SET or inverted range (only low, only high, or high<low) is
+			// malformed (validateResource requires both-or-neither, but a compromised
+			// control plane or a future path could still emit it). FAIL CLOSED: skip
+			// the rule -> no match -> default-deny, NEVER widen to all-ports (finding #1).
+			return "", false
 		}
 	}
 	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter accept\n", src.String(), dst.Masked().String(), clause), true
@@ -272,25 +303,36 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 // text: it contains node-local state (the masquerade subnet line) the control plane
 // cannot reproduce, which would false-positive the staleness alarm permanently.
 func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepolicy.Compiled) error {
-	if err := m.apply(ctx, ruleset); err != nil {
-		m.mu.Lock()
+	// POLICY staleness applies ONLY to an ENFORCING policy. A failure while rendering the
+	// mesh/off/open ruleset is an S3.7 EGRESS-NAT arm problem (surfaced via egress_nat=false
+	// + logs), NOT Zero Trust policy staleness — so it must NOT set policy_error/failingSince
+	// (finding #6: a nftless open-build gateway must not report itself policy-stale).
+	isPolicy := pol != nil && pol.Mode == nodepolicy.ModeEnforcing
+	err := m.apply(ctx, ruleset)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !isPolicy {
+		// No enforcing policy in force: clear any prior policy status; the error (if any)
+		// still returns for the egress-capability path.
+		m.applyErr = nil
+		m.failingSince = time.Time{}
+		if err == nil {
+			m.appliedVersion = 0
+			m.appliedHash = nodepolicy.CanonicalHash(pol) // "" for nil, mesh hash otherwise
+		}
+		return err
+	}
+	if err != nil {
 		m.applyErr = err
 		if m.failingSince.IsZero() { // stamp the mismatch ONSET, once
 			m.failingSince = m.now()
 		}
-		m.mu.Unlock()
 		return err
 	}
-	version := 0
-	if pol != nil {
-		version = pol.Version
-	}
-	m.mu.Lock()
-	m.appliedVersion = version
+	m.appliedVersion = pol.Version
 	m.appliedHash = nodepolicy.CanonicalHash(pol)
 	m.applyErr = nil
 	m.failingSince = time.Time{} // apply succeeded -> no mismatch -> not stale
-	m.mu.Unlock()
 	return nil
 }
 

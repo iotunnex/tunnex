@@ -1694,6 +1694,12 @@ components:
         agent_version: { type: string }
         enrolled_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
+        policy_stale:
+          type: boolean
+          description: "Zero Trust (enterprise): the gateway's policy apply has been FAILING beyond the stale window — it is enforcing an out-of-date ruleset. Alarm-worthy."
+        policy_synced:
+          type: boolean
+          description: "Zero Trust (enterprise): the policy IN FORCE matches what the control plane would push now. false = the gateway hasn't applied the latest policy yet (syncing, or silently stale)."
 
     JoinTokenRequest:
       type: object

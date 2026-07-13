@@ -496,7 +496,13 @@ type Node struct {
 	Id           openapi_types.UUID `json:"id"`
 	LastSeenAt   *time.Time         `json:"last_seen_at,omitempty"`
 	Name         string             `json:"name"`
-	Status       NodeStatus         `json:"status"`
+
+	// PolicyStale Zero Trust (enterprise): the gateway's policy apply has been FAILING beyond the stale window — it is enforcing an out-of-date ruleset. Alarm-worthy.
+	PolicyStale *bool `json:"policy_stale,omitempty"`
+
+	// PolicySynced Zero Trust (enterprise): the policy IN FORCE matches what the control plane would push now. false = the gateway hasn't applied the latest policy yet (syncing, or silently stale).
+	PolicySynced *bool      `json:"policy_synced,omitempty"`
+	Status       NodeStatus `json:"status"`
 }
 
 // NodeStatus defines model for Node.Status.
