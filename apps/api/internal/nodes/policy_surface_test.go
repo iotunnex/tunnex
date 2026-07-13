@@ -183,7 +183,7 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 			}
 			if tc.wantNil {
 				// OFF: served as nil (= blanket mesh on the agent), matching the compiler's
-				// device-less off output so PolicyStatus never false-alarms (#C).
+				// device-less off output so PolicyDegradedForNodes never false-alarms (#C).
 				if ds.Policy != nil {
 					t.Fatalf("off-mode policy error must serve nil (mesh), not an explicit artifact; got %+v", ds.Policy)
 				}

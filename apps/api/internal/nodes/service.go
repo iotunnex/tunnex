@@ -280,8 +280,8 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			// ds.Policy nil (the agent decodes nil = blanket mesh, and onPolicy fires on nil
 			// to unset any prior policy). nil matches the compiler's off-mode output for a
 			// DEVICE-LESS node exactly (CompiledForNode returns nil there), so the pushed/
-			// applied hashes stay "" and PolicyStatus never false-alarms (finding #C — a
-			// non-nil mesh artifact here diverged from that nil and read as out-of-sync).
+			// applied hashes stay "" and PolicyDegradedForNodes never false-alarms (finding
+			// #C — a non-nil mesh artifact here diverged from that nil and read as degraded).
 			slog.Warn("policy_compile_failed_org_off_serving_mesh",
 				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
 			// ds.Policy stays nil.
