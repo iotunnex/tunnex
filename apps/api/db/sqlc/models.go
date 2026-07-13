@@ -81,6 +81,7 @@ type Device struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 	FullTunnel bool               `json:"full_tunnel"`
+	ApprovedBy pgtype.UUID        `json:"approved_by"`
 }
 
 type DeviceStatus struct {
@@ -170,6 +171,7 @@ type Organization struct {
 	MaxDevicesPerUser int32              `json:"max_devices_per_user"`
 	PoolCidr          string             `json:"pool_cidr"`
 	ZeroTrustMode     string             `json:"zero_trust_mode"`
+	DeviceApproval    string             `json:"device_approval"`
 }
 
 type PlatformSecret struct {
