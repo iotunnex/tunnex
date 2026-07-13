@@ -242,7 +242,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	if err != nil {
 		return CreateResult{}, err
 	}
-	s.push(dev.NodeID)
+	// PUSH ORG-WIDE (F1-part-3): a new device's /32 can enter compiled allow-sets as a
+	// group-resolved DESTINATION on gateways that do NOT host it (its owner in a policy
+	// dst-group), so the grant must land <5s on those source gateways too — own-node push
+	// would land it only on the reconcile interval. (For a pending device this is a no-op
+	// nudge — it is excluded from every allow-set until approved.)
+	s.PushOrgNodes(ctx, in.OrgID)
 
 	res := CreateResult{Device: dev, PrivateKeyOneTime: oneTimePriv, PendingApproval: dev.Status == "pending"}
 	// Only the server-generated flow can produce a complete config (it holds the
@@ -452,16 +457,12 @@ func (s *Service) Get(ctx context.Context, orgID, deviceID uuid.UUID) (sqlc.Devi
 // Revoke marks a device revoked and pushes its gateway so the peer is removed
 // from the device within the <5s bound. A no-op (already revoked) is a conflict.
 func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
-	var nodeID uuid.UUID
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		n, e := q.RevokeDevice(ctx, sqlc.RevokeDeviceParams{ID: deviceID, OrgID: orgID})
-		if errors.Is(e, pgx.ErrNoRows) {
+		if _, e := q.RevokeDevice(ctx, sqlc.RevokeDeviceParams{ID: deviceID, OrgID: orgID}); errors.Is(e, pgx.ErrNoRows) {
 			return apierr.Conflict("already_revoked", "device is not active")
-		}
-		if e != nil {
+		} else if e != nil {
 			return e
 		}
-		nodeID = n
 		// Release the device's live status so a revoked device can't report stale
 		// online/handshake via the API.
 		if e := q.DeleteDeviceStatus(ctx, deviceID); e != nil {
@@ -472,7 +473,14 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 	if err != nil {
 		return err
 	}
-	s.push(nodeID)
+	// PUSH ORG-WIDE (F1-part-3, a CORRECTNESS/SECURITY fix — not mere consistency): a
+	// revoked device's /32 may be a group-resolved DESTINATION in compiled allow-sets on
+	// gateways that do NOT host it. Own-node push would leave that stale allow rule on the
+	// OTHER gateways for up to the reconcile interval — and revoke FREES the IP (S3.5/D1b),
+	// so a reallocation inside that window would hand the new holder the old device's
+	// group-dst grants on the unreconciled gateways: the address-reuse privilege leak
+	// (F1-part-2's fail-OPEN sibling at the push layer). Org-wide strips it everywhere <5s.
+	s.PushOrgNodes(ctx, orgID)
 	return nil
 }
 

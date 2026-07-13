@@ -166,6 +166,45 @@ func TestApprovePushesOrgWideRejectOwnNode(t *testing.T) {
 	}
 }
 
+// F1-part-3: every device-lifecycle event that changes compiled membership pushes ORG-WIDE.
+// Create and Revoke each nudge a node that does NOT host the device — its /32 can be a
+// group-resolved DESTINATION there. Revoke is the SECURITY case: a stale group-dst allow
+// rule left on a non-hosting gateway + the freed IP (S3.5/D1b) = an address-reuse privilege
+// leak if not stripped <5s (F1-part-2's fail-open sibling at the push layer).
+func TestCreateAndRevokePushOrgWide(t *testing.T) {
+	dsn := postureDSN(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	org, owner, node := seedPostureOrg(t, pool, "off") // off -> devices are active
+	other := uuid.New()
+	if _, err := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint) VALUES ($1,$2,'gw2',$3,$4,$5)",
+		other, org, "serial-"+other.String(), "c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0=", "gw2.example.com:51820"); err != nil {
+		t.Fatalf("seed node2: %v", err)
+	}
+	hub := nodepush.New()
+	svc := NewService(pool, hub, nil)
+
+	// CREATE nudges the non-hosting node (group-dst reachability must land <5s there too).
+	before := hub.Version(other)
+	d := mkDevice(t, svc, org, owner, owner, node, "A") // on `node`, active
+	if hub.Version(other) <= before {
+		t.Fatal("create must push ORG-WIDE: a node NOT hosting the device must be nudged")
+	}
+	// REVOKE nudges the non-hosting node — strip any stale group-dst grant before the freed
+	// IP can be reallocated (the privilege-leak fix).
+	before = hub.Version(other)
+	if err := svc.Revoke(ctx, org, owner, d.Device.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if hub.Version(other) <= before {
+		t.Fatal("revoke must push ORG-WIDE: a stale group-dst grant on a non-hosting gateway + freed-IP reuse = privilege leak")
+	}
+}
+
 // PIN 4: a pending device is excluded from BOTH enforcement layers by construction (the
 // status='active' filter) — the peer desired-state AND the compiler's device input.
 func TestPendingExcludedFromPeersAndCompilerInput(t *testing.T) {
