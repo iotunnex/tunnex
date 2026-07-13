@@ -21,8 +21,8 @@ func TestRuleset(t *testing.T) {
 		`ip saddr 10.99.0.1/24 oifname != "wg0" masquerade`, // SOURCE-scoped NAT, any non-tunnel iface
 		"type filter hook forward priority filter; policy drop;", // DROP policy → guards are real
 		"ct state established,related accept",
-		`iifname "wg0" oifname "wg0" accept`,     // device-to-device (spoke↔spoke)
-		`iifname "wg0" oifname != "wg0" accept`,  // full-tunnel egress out
+		`iifname "wg0" oifname "wg0" counter accept`,    // device-to-device (spoke↔spoke); counter=flow-log seam (S7.2)
+		`iifname "wg0" oifname != "wg0" counter accept`, // full-tunnel egress out
 		"table ip6 tunnex",                       // IPv6: forward DROP, no NAT
 	}
 	for _, w := range wants {

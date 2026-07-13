@@ -54,7 +54,7 @@ func TestApplyFailureLeavesAppliedStale(t *testing.T) {
 	}
 }
 
-const blanketV4 = `iifname "wg0" oifname "wg0" accept`
+const blanketV4 = `iifname "wg0" oifname "wg0" counter accept`
 
 // Mesh / nil policy renders the LEGACY blanket mesh — no behavior change when Zero
 // Trust is off (or in the open build, which never sets a policy).
@@ -66,7 +66,7 @@ func TestRulesetMeshIsBlanket(t *testing.T) {
 		if !strings.Contains(rs, blanketV4) {
 			t.Fatalf("mesh must keep the wg0<->wg0 blanket accept; got:\n%s", rs)
 		}
-		if !strings.Contains(rs, `iifname "wg0" oifname != "wg0" accept`) {
+		if !strings.Contains(rs, `iifname "wg0" oifname != "wg0" counter accept`) {
 			t.Fatalf("mesh must keep the egress blanket accept; got:\n%s", rs)
 		}
 	}
@@ -91,10 +91,10 @@ func TestRulesetEnforcingDefaultDenyNoBlanket(t *testing.T) {
 	if !strings.Contains(rs, "policy drop") {
 		t.Fatal("enforcing must keep the forward policy drop base")
 	}
-	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24 tcp dport 5432 accept") {
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
 		t.Fatalf("missing the resource allow; got:\n%s", rs)
 	}
-	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.99.0.20/32 accept") {
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.99.0.20/32 counter accept") {
 		t.Fatalf("missing the device-to-device allow; got:\n%s", rs)
 	}
 	// The masquerade still NATs allowed egress.
@@ -162,7 +162,7 @@ func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	}
 	// Valid any-proto egress grant.
 	line, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "0.0.0.0/0", Protocol: "any"})
-	if !ok || !strings.Contains(line, "ip saddr 10.99.0.7 ip daddr 0.0.0.0/0 accept") {
+	if !ok || !strings.Contains(line, "ip saddr 10.99.0.7 ip daddr 0.0.0.0/0 counter accept") {
 		t.Fatalf("valid egress grant mis-rendered: %q", line)
 	}
 	// Host bits in dst are masked (defense-in-depth; the service already canonicalizes).
@@ -172,12 +172,12 @@ func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	}
 	// tcp with no ports -> ip protocol clause.
 	line, _ = renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp"})
-	if !strings.Contains(line, "ip protocol tcp accept") {
+	if !strings.Contains(line, "ip protocol tcp counter accept") {
 		t.Fatalf("tcp-no-ports mis-rendered: %q", line)
 	}
 	// port range.
 	line, _ = renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 8000, PortHigh: 9000})
-	if !strings.Contains(line, "tcp dport 8000-9000 accept") {
+	if !strings.Contains(line, "tcp dport 8000-9000 counter accept") {
 		t.Fatalf("port range mis-rendered: %q", line)
 	}
 }
