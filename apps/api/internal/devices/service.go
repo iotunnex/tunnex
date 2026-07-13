@@ -91,6 +91,10 @@ type CreateResult struct {
 	Device            sqlc.Device
 	PrivateKeyOneTime string // non-empty only when the server generated the key
 	Config            string // full .conf, only for the server-generated flow
+	// PendingApproval is true when the org requires device approval (S7.3): the device
+	// is enrolled but BLOCKED (no tunnel) until an admin approves. The client shows a
+	// stable "awaiting approval" state — never an error loop (the spine).
+	PendingApproval bool
 }
 
 // Create issues a device/peer for OwnerID, enforcing owner membership and the
@@ -169,6 +173,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			return e
 		}
 		poolCIDR = org.PoolCidr
+		// S7.3 device posture: when the org requires approval, the device enrolls as
+		// PENDING (blocked — excluded from every status='active' reader, so no peer + no
+		// grants) until an admin approves. Default 'off' -> 'active', zero behavior change.
+		deviceStatus := "active"
+		if org.DeviceApproval == "on" {
+			deviceStatus = "pending"
+		}
 		if org.MaxDevicesPerUser > 0 {
 			count, ce := q.CountActiveDevicesForUser(ctx, sqlc.CountActiveDevicesForUserParams{OrgID: in.OrgID, UserID: in.OwnerID})
 			if ce != nil {
@@ -209,6 +220,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			// Persisted (0019) so the S7.2 mode-enable can enumerate the full-tunnel
 			// devices whose egress the enforcing flip governs.
 			FullTunnel: in.FullTunnel,
+			Status:     deviceStatus, // S7.3: 'pending' when the org requires approval
 		})
 		if e != nil {
 			if c := pgerr.UniqueConstraint(e); c != "" {
@@ -232,7 +244,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	}
 	s.push(dev.NodeID)
 
-	res := CreateResult{Device: dev, PrivateKeyOneTime: oneTimePriv}
+	res := CreateResult{Device: dev, PrivateKeyOneTime: oneTimePriv, PendingApproval: dev.Status == "pending"}
 	// Only the server-generated flow can produce a complete config (it holds the
 	// one-time private key); the client-generated flow assembles its own.
 	if oneTimePriv != "" {
@@ -462,6 +474,124 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 	}
 	s.push(nodeID)
 	return nil
+}
+
+// Approve flips a pending device to active (S7.3), recording the approver. A newly-trusted
+// device enters the compiled allow-sets, so it PUSHES ORG-WIDE (pin 3): the device's /32
+// appears as a source grant on its own gateway AND, if its owner is in a group that is a
+// policy DESTINATION, as a /32 dst on OTHER gateways — an own-node push would land that
+// grant only on the interval, not <5s (the F1-part-2 shape in reverse). Self-approval
+// (actor == owner) is ALLOWED but distinctly audited (device.self_approved) — the
+// designed-against case is approving your OWN device without a second-party vouch; four-eyes
+// is advanced posture (D3).
+func (s *Service) Approve(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		owner, e := q.ApproveDevice(ctx, sqlc.ApproveDeviceParams{
+			ID: deviceID, OrgID: orgID, ApprovedBy: pgtype.UUID{Bytes: actorID, Valid: true},
+		})
+		if errors.Is(e, pgx.ErrNoRows) {
+			return apierr.Conflict("not_pending", "device is not awaiting approval")
+		}
+		if e != nil {
+			return e
+		}
+		action := "device.approved"
+		if owner == actorID {
+			action = "device.self_approved"
+		}
+		return audit(ctx, q, orgID, &actorID, action, "device", deviceID.String(),
+			map[string]any{"owner": owner.String()})
+	})
+	if err != nil {
+		return err
+	}
+	s.PushOrgNodes(ctx, orgID)
+	return nil
+}
+
+// Reject flips a pending device to revoked (S7.3), FREEING its held pool IP for reuse
+// (D1b — the same release Revoke does). Only a pending device can be rejected. A pending
+// device was never a peer / never in any allow-set (status-filtered out), so reject is
+// data-plane-INERT — the own-node push is for convergence consistency, not a live change.
+func (s *Service) Reject(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
+	var nodeID uuid.UUID
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, e := q.RejectDevice(ctx, sqlc.RejectDeviceParams{ID: deviceID, OrgID: orgID})
+		if errors.Is(e, pgx.ErrNoRows) {
+			return apierr.Conflict("not_pending", "device is not awaiting approval")
+		}
+		if e != nil {
+			return e
+		}
+		nodeID = n
+		return audit(ctx, q, orgID, &actorID, "device.rejected", "device", deviceID.String(), map[string]any{})
+	})
+	if err != nil {
+		return err
+	}
+	s.push(nodeID)
+	return nil
+}
+
+// ListPending returns the org's device-approval queue (S7.3).
+func (s *Service) ListPending(ctx context.Context, orgID uuid.UUID) ([]DeviceWithStatus, error) {
+	rows, err := s.q.ListPendingDevicesByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DeviceWithStatus, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+	}
+	return out, nil
+}
+
+// GetDeviceApproval reads the org's device-approval mode ('off' | 'on').
+func (s *Service) GetDeviceApproval(ctx context.Context, orgID uuid.UUID) (string, error) {
+	org, err := s.q.GetOrganizationByID(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	return org.DeviceApproval, nil
+}
+
+// SetDeviceApproval flips the org device-approval gate (S7.3), mirroring the
+// zero_trust_mode SetMode ceremony EXACTLY: audited both directions, actor-attributed,
+// in ONE transaction. Existing active devices are GRANDFATHERED (D4 — never retro-pended;
+// a flip must not mass-blackhole a fleet, the S7.2 cold-start lesson). The grandfathered
+// COUNT is BEST-EFFORT AFTER commit (the pass-4 #A lesson: never fail a committed setting
+// flip because the count query blipped) and is meaningful only when turning ON.
+func (s *Service) SetDeviceApproval(ctx context.Context, actor, orgID uuid.UUID, mode string) (grandfathered int64, err error) {
+	if mode != "off" && mode != "on" {
+		return 0, apierr.BadRequest("invalid_request", "device_approval must be off or on")
+	}
+	err = s.withTx(ctx, func(q *sqlc.Queries) error {
+		org, e := q.SetOrgDeviceApproval(ctx, sqlc.SetOrgDeviceApprovalParams{ID: orgID, DeviceApproval: mode})
+		if errors.Is(e, pgx.ErrNoRows) {
+			return apierr.NotFound("org_not_found", "organization not found")
+		}
+		if e != nil {
+			return e
+		}
+		action := "org.device_approval_disabled"
+		if org.DeviceApproval == "on" {
+			action = "org.device_approval_enabled"
+		}
+		return audit(ctx, q, orgID, &actor, action, "organization", orgID.String(),
+			map[string]any{"device_approval": mode})
+	})
+	if err != nil {
+		return 0, err
+	}
+	if mode == "on" {
+		if n, e := s.q.CountActiveDevicesForOrg(ctx, orgID); e != nil {
+			s.logger.Warn("grandfathered_count_failed_after_device_approval_commit",
+				slog.String("org_id", orgID.String()), slog.String("error", e.Error()))
+		} else {
+			grandfathered = n
+		}
+	}
+	return grandfathered, nil
 }
 
 // PushUserNodes nudges every node carrying one of a user's active devices to

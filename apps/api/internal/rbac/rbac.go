@@ -23,6 +23,13 @@ const (
 	// (owner/admin) capability, deliberately not a members-level read.
 	PermPolicyView   Permission = "policy:view"
 	PermPolicyManage Permission = "policy:manage"
+	// PermDeviceApprove governs device posture (S7.3, enterprise): approving/rejecting a
+	// pending device AND flipping the org device-approval gate. A distinct capability from
+	// policy:manage because device-trust is its own governance domain (an org may require
+	// device approval without Zero Trust policy, or vice versa) — but at the SAME
+	// owner/admin grain, since approving a device GRANTS network access (security-sensitive,
+	// above org:update).
+	PermDeviceApprove Permission = "device:approve"
 )
 
 // Roles.
@@ -51,19 +58,21 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermMemberList:   true,
 		PermOrgUpdate:    true,
 		PermMemberInvite: true,
-		PermMemberManage: true,
-		PermPolicyView:   true,
-		PermPolicyManage: true,
+		PermMemberManage:  true,
+		PermPolicyView:    true,
+		PermPolicyManage:  true,
+		PermDeviceApprove: true,
 	},
 	RoleOwner: {
-		PermOrgView:      true,
-		PermMemberList:   true,
-		PermOrgUpdate:    true,
-		PermOrgDelete:    true,
-		PermMemberInvite: true,
-		PermMemberManage: true,
-		PermPolicyView:   true,
-		PermPolicyManage: true,
+		PermOrgView:       true,
+		PermMemberList:    true,
+		PermOrgUpdate:     true,
+		PermOrgDelete:     true,
+		PermMemberInvite:  true,
+		PermMemberManage:  true,
+		PermPolicyView:    true,
+		PermPolicyManage:  true,
+		PermDeviceApprove: true,
 	},
 }
 

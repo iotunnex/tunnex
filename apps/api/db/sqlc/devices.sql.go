@@ -12,6 +12,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const approveDevice = `-- name: ApproveDevice :one
+UPDATE devices
+SET status = 'active', approved_by = $3, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND status = 'pending' AND deleted_at IS NULL
+RETURNING user_id
+`
+
+type ApproveDeviceParams struct {
+	ID         uuid.UUID   `json:"id"`
+	OrgID      uuid.UUID   `json:"org_id"`
+	ApprovedBy pgtype.UUID `json:"approved_by"`
+}
+
+// S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
+// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
+// Returns the owner so the caller can distinguish self-approval for the audit.
+func (q *Queries) ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, approveDevice, arg.ID, arg.OrgID, arg.ApprovedBy)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const countActiveDevicesForOrg = `-- name: CountActiveDevicesForOrg :one
+SELECT count(*) FROM devices
+WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL
+`
+
+// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
+// S7.3 D4 — existing active devices stay active, not retro-pended).
+func (q *Queries) CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveDevicesForOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countActiveDevicesForUser = `-- name: CountActiveDevicesForUser :one
 SELECT count(*) FROM devices
 WHERE org_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL
@@ -30,8 +67,8 @@ func (q *Queries) CountActiveDevicesForUser(ctx context.Context, arg CountActive
 }
 
 const createDevice = `-- name: CreateDevice :one
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by
 `
 
@@ -44,8 +81,12 @@ type CreateDeviceParams struct {
 	PublicKey  string    `json:"public_key"`
 	AssignedIp *string   `json:"assigned_ip"`
 	FullTunnel bool      `json:"full_tunnel"`
+	Status     string    `json:"status"`
 }
 
+// status is 'active' normally, or 'pending' when the org requires device approval
+// (S7.3). A pending device holds its assigned_ip from creation (excluded from every
+// status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
 	row := q.db.QueryRow(ctx, createDevice,
 		arg.OrgID,
@@ -56,6 +97,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		arg.PublicKey,
 		arg.AssignedIp,
 		arg.FullTunnel,
+		arg.Status,
 	)
 	var i Device
 	err := row.Scan(
@@ -158,7 +200,7 @@ func (q *Queries) GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, e
 
 const listActiveDeviceAllocations = `-- name: ListActiveDeviceAllocations :many
 SELECT id, name, assigned_ip FROM devices
-WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status = 'active' AND deleted_at IS NULL
+WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status IN ('active', 'pending') AND deleted_at IS NULL
 ORDER BY assigned_ip
 `
 
@@ -173,6 +215,12 @@ type ListActiveDeviceAllocationsRow struct {
 // device-create's lowest-free choice AND resize's orphan check/409 objects, so
 // there are no two filtered reads to drift apart. Read under the org advisory
 // lock so allocation and resize serialize on the same snapshot.
+//
+// INCLUDES 'pending' (S7.3): a pending device HOLDS its assigned_ip from creation, so it
+// is IN-FLIGHT — create must not hand its IP to another device (silent duplicate; the
+// org_ip unique index is likewise widened to active+pending), and resize's orphan check
+// must see it (else a shrink silently strands a pending device's allocation). Revoked/
+// rejected devices have assigned_ip=NULL and never appear.
 func (q *Queries) ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UUID) ([]ListActiveDeviceAllocationsRow, error) {
 	rows, err := q.db.Query(ctx, listActiveDeviceAllocations, orgID)
 	if err != nil {
@@ -421,6 +469,61 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 	return items, nil
 }
 
+const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+FROM devices d
+LEFT JOIN device_status ds ON ds.device_id = d.id
+WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
+ORDER BY d.created_at
+`
+
+type ListPendingDevicesByOrgRow struct {
+	Device          Device             `json:"device"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes         *int64             `json:"rx_bytes"`
+	TxBytes         *int64             `json:"tx_bytes"`
+}
+
+// The approval queue (S7.3): devices awaiting admin approval, oldest first.
+func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error) {
+	rows, err := q.db.Query(ctx, listPendingDevicesByOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingDevicesByOrgRow{}
+	for rows.Next() {
+		var i ListPendingDevicesByOrgRow
+		if err := rows.Scan(
+			&i.Device.ID,
+			&i.Device.OrgID,
+			&i.Device.UserID,
+			&i.Device.NodeID,
+			&i.Device.Name,
+			&i.Device.Platform,
+			&i.Device.PublicKey,
+			&i.Device.AssignedIp,
+			&i.Device.Status,
+			&i.Device.CreatedAt,
+			&i.Device.UpdatedAt,
+			&i.Device.RevokedAt,
+			&i.Device.DeletedAt,
+			&i.Device.FullTunnel,
+			&i.Device.ApprovedBy,
+			&i.LastHandshakeAt,
+			&i.RxBytes,
+			&i.TxBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockDeviceKey = `-- name: LockDeviceKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
@@ -441,6 +544,28 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 func (q *Queries) LockDeviceKey(ctx context.Context, dollar_1 string) error {
 	_, err := q.db.Exec(ctx, lockDeviceKey, dollar_1)
 	return err
+}
+
+const rejectDevice = `-- name: RejectDevice :one
+UPDATE devices
+SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+WHERE id = $1 AND org_id = $2 AND status = 'pending' AND deleted_at IS NULL
+RETURNING node_id
+`
+
+type RejectDeviceParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
+// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
+// can be rejected. Returns node_id for the (own-node) push.
+func (q *Queries) RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, rejectDevice, arg.ID, arg.OrgID)
+	var node_id uuid.UUID
+	err := row.Scan(&node_id)
+	return node_id, err
 }
 
 const revokeDevice = `-- name: RevokeDevice :one
@@ -480,4 +605,35 @@ func (q *Queries) RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (i
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setOrgDeviceApproval = `-- name: SetOrgDeviceApproval :one
+UPDATE organizations SET device_approval = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval
+`
+
+type SetOrgDeviceApprovalParams struct {
+	ID             uuid.UUID `json:"id"`
+	DeviceApproval string    `json:"device_approval"`
+}
+
+// S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
+// build can never set it 'on', so enrollment there stays immediately-active.
+func (q *Queries) SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error) {
+	row := q.db.QueryRow(ctx, setOrgDeviceApproval, arg.ID, arg.DeviceApproval)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.MaxDevicesPerUser,
+		&i.PoolCidr,
+		&i.ZeroTrustMode,
+		&i.DeviceApproval,
+	)
+	return i, err
 }

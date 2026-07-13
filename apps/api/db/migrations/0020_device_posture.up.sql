@@ -23,3 +23,14 @@ ALTER TABLE devices ADD COLUMN approved_by uuid REFERENCES users (id) ON DELETE 
 -- zero_trust_mode: enterprise-gated, a desired-state/compiler INPUT, not a special-case.
 ALTER TABLE organizations ADD COLUMN device_approval text NOT NULL DEFAULT 'off'
     CHECK (device_approval IN ('off', 'on'));
+
+-- A pending device HOLDS its assigned pool IP from creation, so the org-wide address
+-- uniqueness backstop must cover it too — the old index was partial on status='active'
+-- ONLY, which would let a new ACTIVE device silently take a pending device's IP (the
+-- partial index can't see the pending row), producing a duplicate that only surfaces
+-- (as a hard failure) when the pending device is approved. Widen to active+pending so
+-- the DB backstops what the allocator (ListActiveDeviceAllocations, also widened) already
+-- prevents. Revoked/rejected devices have assigned_ip=NULL, so they never contend.
+DROP INDEX IF EXISTS devices_org_ip_key;
+CREATE UNIQUE INDEX devices_org_ip_key ON devices (org_id, assigned_ip)
+    WHERE assigned_ip IS NOT NULL AND status IN ('active', 'pending') AND deleted_at IS NULL;
