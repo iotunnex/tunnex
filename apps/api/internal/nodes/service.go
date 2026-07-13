@@ -73,6 +73,10 @@ type DesiredState struct {
 // mesh); the enterprise build wires the policy engine via SetPolicyProvider.
 type PolicyProvider interface {
 	CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error)
+	// CompiledHashesForNodes returns each node's canonical pushed-hash with a SINGLE
+	// org snapshot build — the batch read-path counterpart to CompiledForNode that the
+	// node-list status uses to avoid an N+1 recompile per node (finding #5).
+	CompiledHashesForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // Service provides node control-plane operations.
@@ -248,7 +252,8 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	// the default pool rather than failing the whole fetch — the agent must still
 	// be able to converge (e.g. to drop peers), not spin on errors.
 	gatewayCIDR := defaultGatewayCIDR
-	if org, oerr := s.q.GetOrganizationByID(ctx, node.OrgID); oerr == nil {
+	org, orgErr := s.q.GetOrganizationByID(ctx, node.OrgID)
+	if orgErr == nil {
 		if gw, gerr := ipalloc.GatewayCIDR(org.PoolCidr); gerr == nil {
 			gatewayCIDR = gw
 		}
@@ -263,20 +268,34 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	}
 	if s.policy != nil {
 		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
-		if err != nil {
+		switch {
+		case err == nil:
+			ds.Policy = pol
+		case orgErr == nil && org.ZeroTrustMode == zeroTrustOff:
 			// A policy-subsystem error must NOT fail the whole desired state — the PEERS
-			// are already built above, and a policy compile failure must never block peer
-			// convergence / revocation (finding #3: the <5s revocation SLA is independent
-			// of the policy engine). Serve the peers, and FAIL THE POLICY CLOSED: a
-			// deny-all enforcing artifact so the gateway locks down rather than reverting
-			// to the open mesh. (nil here would decode as mesh = fail-OPEN.)
+			// are already built above, so revocation still converges (the <5s SLA is
+			// independent of the policy engine, finding #3). Scoping (finding #2): when we
+			// can CONFIRM the org has Zero Trust OFF, serve the mesh (an explicit blanket
+			// artifact) — a policy-subsystem blip must not blackhole an org that never
+			// opted into enforcement, imposing an availability dependency on a subsystem it
+			// doesn't use. The mesh artifact mirrors the compiler's off-mode output so the
+			// applied-hash stays consistent with a normal off push.
+			slog.Warn("policy_compile_failed_org_off_serving_mesh",
+				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
+			ds.Policy = &policyspec.Compiled{
+				Version: ProtocolVersion, NodeID: node.ID.String(), Mode: zeroTrustOff, Mesh: true,
+			}
+		default:
+			// Enforcing, OR the org mode is UNKNOWN (org row unreadable): FAIL CLOSED. An
+			// enforcing org must never revert to the open mesh on a policy error, and if we
+			// cannot confirm the mode we assume the boundary is in force. Serve the peers;
+			// lock the policy to a deny-all enforcing artifact. (nil would decode as mesh =
+			// fail-OPEN.)
 			slog.Warn("policy_compile_failed_failing_closed",
 				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
 			ds.Policy = &policyspec.Compiled{
 				Version: ProtocolVersion, NodeID: node.ID.String(), Mode: "enforcing", Mesh: false,
 			}
-		} else {
-			ds.Policy = pol
 		}
 	}
 	return ds, nil
@@ -430,6 +449,10 @@ type NodeCapabilities struct {
 // regardless of hash state -- an apply failure is never smoothed by this window.
 const PolicyStaleAfter = 90 * time.Second
 
+// zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
+// Kept as a neutral local const so the open build never imports enterprise/policy.
+const zeroTrustOff = "off"
+
 // PolicyStatus surfaces a node's Zero Trust policy health for the API (finding #5/#7):
 //   - stale:  apply has been FAILING longer than PolicyStaleAfter (from failingSince) —
 //     the alarm-worthy case (a gateway that cannot apply the pushed policy).
@@ -445,11 +468,54 @@ func (s *Service) PolicyStatus(ctx context.Context, node sqlc.Node, now time.Tim
 	stale = caps.PolicyStale(now)
 	synced = true
 	if s.policy != nil {
+		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
+		if err != nil {
+			// COULD NOT DETERMINE what we'd push right now (transient compile/DB error).
+			// That is NOT evidence of a desync — reporting synced=false here would raise a
+			// false out-of-sync alarm on a HEALTHY gateway, training operators to ignore
+			// the signal (the same class of false alarm as the #3 false-staleness). Leave
+			// synced=true (unknown != desynced); a genuine desync still surfaces on the
+			// next successful compile (finding #4).
+			return stale, true
+		}
 		pushed := ""
-		if pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID); err == nil && pol != nil {
+		if pol != nil {
 			pushed = policyspec.CanonicalHash(*pol)
 		}
 		synced = pushed == caps.PolicyHash
+	}
+	return stale, synced
+}
+
+// PolicyStatusForNodes is the batch read-path form of PolicyStatus (finding #5): it
+// computes every node's (stale, synced) with a SINGLE org policy compile instead of one
+// per node. All nodes must belong to orgID. Same signals as PolicyStatus — stale is pure
+// (from caps), synced compares the node's applied hash to the pushed hash computed once —
+// and the same #4 rule: an errored/unknown compile reports synced=true (never a false
+// desync), because a transient control-plane hiccup is not a gateway fault.
+func (s *Service) PolicyStatusForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node, now time.Time) (stale, synced map[uuid.UUID]bool) {
+	stale = make(map[uuid.UUID]bool, len(nodes))
+	synced = make(map[uuid.UUID]bool, len(nodes))
+	var pushed map[uuid.UUID]string
+	if s.policy != nil {
+		ids := make([]uuid.UUID, len(nodes))
+		for i, n := range nodes {
+			ids[i] = n.ID
+		}
+		// err (transient) -> pushed stays nil -> synced=true for all (finding #4: unknown
+		// is not a desync).
+		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
+			pushed = h
+		}
+	}
+	for _, n := range nodes {
+		caps := Capabilities(n.Capabilities)
+		stale[n.ID] = caps.PolicyStale(now)
+		if pushed == nil {
+			synced[n.ID] = true
+			continue
+		}
+		synced[n.ID] = pushed[n.ID] == caps.PolicyHash
 	}
 	return stale, synced
 }

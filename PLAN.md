@@ -178,6 +178,18 @@ is executable-path-inside-install-dir verification — WEAKER than code-signing 
 a non-admin local process from driving the root helper; does NOT stop an already-admin attacker or a
 path-spoofing race. Wire protocol carries `auth_mode` so this upgrades to `code_signing` at S6.5b
 without a break. TRIGGER to retire = S6.5b (signing + notarization).
+
+**AVAILABILITY LIMITATION (S7.2, named — gateway cold-start deny-until-first-fetch):** a gateway that
+starts (crash / upgrade / reboot) BEFORE its first successful desired-state fetch renders a deny-all
+forward chain regardless of the org's Zero Trust mode — including for OFF / open-build orgs. This is
+INHERENT to the boundary, not a bug: the gateway cannot learn its mode without reaching the control
+plane, so the only safe default before it knows is fail-closed. The alternative (serve blanket mesh on
+cold start) would let a reboot-during-CP-outage turn an ENFORCING org into an open mesh — a breach, not
+an outage. **Exposure:** a gateway reboot that COINCIDES with a control-plane outage → an off-mode org's
+forwarded traffic is denied until the CP returns. **Bounded + self-healing:** the very first successful
+fetch flips the state (`policyReceived`) and restores mesh/grants; no manual step. NB this is scoped to
+the NODE cold-start only — the control-plane policy-error path IS scoped by mode (finding #2: off orgs
+served mesh), so a CP/DB blip does not blackhole off-mode orgs while their gateway is already running.
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1

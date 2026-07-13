@@ -165,6 +165,14 @@ func validateResource(in policyspec.ResourceInput) error {
 			return apierr.BadRequest("invalid_request", "protocol 'any' cannot carry ports")
 		}
 	case "tcp", "udp":
+		// Ports are both-or-neither (finding #3). A half-set range (only low OR only
+		// high) is rejected here so it can never reach the gateway, where renderAllow
+		// fails it closed (skips the rule) — which would SILENTLY break a grant the API
+		// reported as created. The renderer's fail-closed and this validation are the
+		// two halves of the same invariant; neither alone is sufficient.
+		if (in.PortLow == nil) != (in.PortHigh == nil) {
+			return apierr.BadRequest("invalid_request", "port_low and port_high must be set together (both or neither)")
+		}
 	default:
 		return apierr.BadRequest("invalid_request", "protocol must be any, tcp, or udp")
 	}
@@ -440,6 +448,36 @@ func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) 
 		}, nil
 	}
 	return nil, nil // off / no policy -> agent keeps the legacy mesh
+}
+
+// CompiledHashesForNodes returns each requested node's canonical PUSHED hash, building
+// the org snapshot ONCE (finding #5: the ListNodes read path called CompiledForNode per
+// node, rebuilding the whole snapshot — 6 queries + a compile — N times for one org).
+// Per node it reproduces CompiledForNode's pick-or-fallback exactly, so the hash a node
+// is compared against here is identical to the one it would be served. A node with no
+// compiled entry maps to the enforcing deny-all hash (fail-closed) or "" when off.
+func (s *Service) CompiledHashesForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+	snap, err := s.BuildSnapshot(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	compiled := Compile(snap)
+	out := make(map[uuid.UUID]string, len(nodeIDs))
+	for _, id := range nodeIDs {
+		if c, ok := compiled[id]; ok {
+			out[id] = policyspec.CanonicalHash(c)
+			continue
+		}
+		if snap.Mode == ModeEnforcing {
+			out[id] = policyspec.CanonicalHash(policyspec.Compiled{
+				Version: policyspec.ProtocolVersion, NodeID: id.String(),
+				Mode: ModeEnforcing, Mesh: false,
+			})
+			continue
+		}
+		out[id] = "" // off / no policy -> CompiledForNode returns nil -> pushed hash "".
+	}
+	return out, nil
 }
 
 // AffectedNodeIDs returns the nodes whose compiled policy could change for this

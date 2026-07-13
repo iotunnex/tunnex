@@ -49,13 +49,16 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 		return nil, err
 	}
 	now := time.Now()
+	// Zero Trust policy health surface (S7.2 finding #5/#7): stale = apply failing past
+	// the window; synced = policy in force matches what we'd push now. Computed in ONE
+	// batch (a single org policy compile) rather than per node — the per-node form
+	// rebuilt the whole org snapshot N times on this read path (finding #5).
+	stale, synced := s.nodes.PolicyStatusForNodes(ctx, req.OrgId, ns, now)
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)
-		// Zero Trust policy health surface (S7.2 finding #5/#7): stale = apply failing
-		// past the window; synced = policy in force matches what we'd push now.
-		stale, synced := s.nodes.PolicyStatus(ctx, n, now)
-		an.PolicyStale, an.PolicySynced = &stale, &synced
+		st, sy := stale[n.ID], synced[n.ID]
+		an.PolicyStale, an.PolicySynced = &st, &sy
 		out = append(out, an)
 	}
 	return api.ListNodes200JSONResponse{

@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
@@ -275,6 +275,25 @@ func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {
 	// both unset -> any-port (valid).
 	if line, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "tcp"}); !ok || !strings.Contains(line, "ip protocol tcp") {
 		t.Fatalf("both-unset must be any-port, got %q ok=%v", line, ok)
+	}
+}
+
+// Finding #6: an unknown/empty protocol fails CLOSED (rule skipped), never a silent
+// all-protocol widen — symmetric with the half-set-port refusal. "any" is the only
+// intended all-protocol grant.
+func TestRenderAllowUnknownProtocolFailsClosed(t *testing.T) {
+	// empty protocol -> the old switch left clause="" and emitted an all-protocol accept.
+	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: ""}); ok {
+		t.Fatal("empty protocol must be SKIPPED (fail-closed), not widened to all-protocols")
+	}
+	// garbage / future protocol -> skipped.
+	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "sctp"}); ok {
+		t.Fatal("unrecognized protocol must be skipped")
+	}
+	// "any" -> the intended all-protocol accept (no protocol clause).
+	line, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "any"})
+	if !ok || strings.Contains(line, "ip protocol") || strings.Contains(line, "dport") {
+		t.Fatalf("'any' must render an all-protocol accept with no protocol clause, got %q ok=%v", line, ok)
 	}
 }
 
