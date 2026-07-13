@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 )
 
@@ -345,5 +346,113 @@ func TestSetDeviceApprovalGrandfathersAndCounts(t *testing.T) {
 	c := mkDevice(t, svc, org, owner, owner, node, "C")
 	if !c.PendingApproval {
 		t.Fatal("a device enrolled after approval=on must be pending")
+	}
+}
+
+// Finding #1: the per-user cap counts PENDING devices (each reserves a pool /32). Under
+// approval=on with cap=2, the 3rd enrollment is refused device_limit — no unbounded pending
+// creation (the cap bypass + org-pool DoS the review found).
+func TestPendingDevicesCountAgainstCap(t *testing.T) {
+	dsn := postureDSN(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	org, owner, node := seedPostureOrg(t, pool, "on")
+	if _, err := pool.Exec(ctx, "UPDATE organizations SET max_devices_per_user=2 WHERE id=$1", org); err != nil {
+		t.Fatalf("set cap: %v", err)
+	}
+	svc := NewService(pool, nil, nil)
+
+	mkDevice(t, svc, org, owner, owner, node, "A") // pending, counts
+	mkDevice(t, svc, org, owner, owner, node, "B") // pending, counts (now at cap 2)
+	_, err = svc.Create(ctx, CreateInput{OrgID: org, ActorID: owner, OwnerID: owner, NodeID: node, Name: "C"})
+	var ae *apierr.Error
+	if !errors.As(err, &ae) || ae.Code != "device_limit" {
+		t.Fatalf("3rd enrollment must be refused device_limit (pending counts against the cap); got %v", err)
+	}
+}
+
+// Finding #2: revoking a node sweeps its PENDING devices too (active+pending) and frees
+// their IPs — else a pending device leaks its /32 forever + lingers in the queue on a dead node.
+func TestNodeRevokeSweepsPendingAndFreesIP(t *testing.T) {
+	dsn := postureDSN(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	org, owner, node := seedPostureOrg(t, pool, "on")
+	svc := NewService(pool, nil, nil)
+	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending, holds an IP
+	if a.Device.Status != "pending" || a.Device.AssignedIp == nil {
+		t.Fatalf("precondition: A must be pending with an IP; got %+v", a.Device)
+	}
+
+	if _, err := sqlc.New(pool).RevokeDevicesForNode(ctx, node); err != nil {
+		t.Fatalf("revoke node: %v", err)
+	}
+	var status string
+	var ip *string
+	if err := pool.QueryRow(ctx, "SELECT status, assigned_ip FROM devices WHERE id=$1", a.Device.ID).Scan(&status, &ip); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if status != "revoked" {
+		t.Fatalf("pending device on a revoked node must be swept to revoked; got %q", status)
+	}
+	if ip != nil {
+		t.Fatalf("the swept device's IP must be freed (null); got %v", *ip)
+	}
+}
+
+// Finding #3 (server half): an owner CANCELLING their own pending device revokes it, frees
+// the IP, and is audited as device.cancelled (≠ device.revoked for an active device).
+func TestOwnerCancelPendingAuditedDistinctly(t *testing.T) {
+	dsn := postureDSN(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+	org, owner, node := seedPostureOrg(t, pool, "on")
+	svc := NewService(pool, nil, nil)
+
+	// Cancel a PENDING device -> device.cancelled + IP freed.
+	a := mkDevice(t, svc, org, owner, owner, node, "A")
+	if err := svc.Revoke(ctx, org, owner, a.Device.ID); err != nil {
+		t.Fatalf("cancel pending: %v", err)
+	}
+	var status, action string
+	var ip *string
+	if err := pool.QueryRow(ctx, "SELECT status, assigned_ip FROM devices WHERE id=$1", a.Device.ID).Scan(&status, &ip); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if status != "revoked" || ip != nil {
+		t.Fatalf("cancel must revoke + free IP; got status=%q ip=%v", status, ip)
+	}
+	if err := pool.QueryRow(ctx, "SELECT action FROM audit_logs WHERE org_id=$1 AND target_id=$2 ORDER BY created_at DESC LIMIT 1", org, a.Device.ID.String()).Scan(&action); err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	if action != "device.cancelled" {
+		t.Fatalf("cancelling a pending device must audit device.cancelled; got %q", action)
+	}
+
+	// Contrast: revoking an ACTIVE device -> device.revoked.
+	b := mkDevice(t, svc, org, owner, owner, node, "B")
+	if err := svc.Approve(ctx, org, owner, b.Device.ID); err != nil {
+		t.Fatalf("approve B: %v", err)
+	}
+	if err := svc.Revoke(ctx, org, owner, b.Device.ID); err != nil {
+		t.Fatalf("revoke active B: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT action FROM audit_logs WHERE org_id=$1 AND target_id=$2 ORDER BY created_at DESC LIMIT 1", org, b.Device.ID.String()).Scan(&action); err != nil {
+		t.Fatalf("audit B: %v", err)
+	}
+	if action != "device.revoked" {
+		t.Fatalf("revoking an active device must audit device.revoked; got %q", action)
 	}
 }

@@ -31,8 +31,10 @@ export type ApprovalOutcome = "waiting" | "approved" | "rejected" | "inconclusiv
 //
 // Poll discipline (inherited from RevocationMonitor S6.4, verbatim): app-level SINGLETON
 // (never per-window), runs only between start()/stop(), SELF-SCHEDULING (recursive
-// setTimeout — no overlap, no wake-from-sleep backlog), and fire-ONCE on a terminal
-// transition (approved/rejected).
+// setTimeout — no overlap, no wake-from-sleep backlog), fire-ONCE on a terminal transition
+// (approved/rejected), and ORIGIN-LIFECYCLE STOP: it is stopped when its origin context
+// dies (a server-URL change / logout — finding #5), not just on connect/disconnect, so an
+// old-origin poll never lingers against a stale bearer.
 export class ApprovalMonitor {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -43,6 +45,7 @@ export class ApprovalMonitor {
 
   constructor(
     private readonly deviceId: string,
+    private readonly orgId: string, // the device's own org — queried directly (S7.3 #4)
     private readonly api: Pick<DeviceApi, "deviceStatus">,
     private readonly onApproved: () => void | Promise<void>,
     private readonly onRejected: () => void | Promise<void>,
@@ -79,7 +82,7 @@ export class ApprovalMonitor {
     if (this.stopped || this.fired || this.inFlight) return "skipped";
     this.inFlight = true;
     try {
-      const status = await this.api.deviceStatus(this.deviceId);
+      const status = await this.api.deviceStatus(this.deviceId, this.orgId);
       // A stop() during the await means the awaiting UI is already dismissed — abandon.
       if (this.stopped) return "skipped";
       if (status === "pending") {

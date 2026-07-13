@@ -40,8 +40,12 @@ type Querier interface {
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
 	CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
-	CountActiveDevicesForUser(ctx context.Context, arg CountActiveDevicesForUserParams) (int64, error)
 	CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// The per-user device cap counts ACTIVE + PENDING (S7.3 finding #1): a pending device
+	// reserves a real pool /32 and is a real enrollment, so excluding it let a user create
+	// unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending
+	// is EXCLUDED from enforcement but INCLUDED in resource accounting (caps, pools, sweeps).
+	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Org roster size. Joins users to exclude soft-deleted accounts (whose
 	// membership row survives a soft-delete); deactivated members are still on the
 	// roster, so they are intentionally counted.
@@ -239,13 +243,16 @@ type Querier interface {
 	// Self-scoped: the WHERE user_id makes another user's credential unreachable
 	// (idempotent 204 semantics; no existence leak).
 	RevokeCliCredential(ctx context.Context, arg RevokeCliCredentialParams) (int64, error)
-	// Returns the gateway node_id (for the push) so the caller needs no extra read;
-	// pgx.ErrNoRows means the device was not active (already revoked / wrong org).
-	// Clears assigned_ip to release the address explicitly (rather than relying on
-	// every reader to also filter status='active').
+	// Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
+	// their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
+	// pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
+	// (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+	// device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
 	RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error)
-	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no
-	// longer reach a gateway, so they are revoked too (no dangling active devices).
+	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
+	// gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
+	// finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
+	// linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error

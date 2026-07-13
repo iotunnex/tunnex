@@ -174,8 +174,10 @@ export function registerIpc(
         emit(pending);
         notifyTunnel("pending");
         if (cred) {
+          const orgId = tunnelStore.get(cred.server)?.orgId ?? ""; // persisted before the throw
           approvalMonitor = new ApprovalMonitor(
             e.deviceId,
+            orgId,
             deviceApiFor(cred.server),
             () => onApproved(cred.server),
             () => onRejected(cred.server),
@@ -188,9 +190,9 @@ export function registerIpc(
     }
     // Start the proactive revocation monitor for the device we just brought up.
     const cred = store.load();
-    const deviceId = cred ? tunnelStore.get(cred.server)?.deviceId : undefined;
-    if (cred && deviceId) {
-      monitor = new RevocationMonitor(deviceId, deviceApiFor(cred.server), () => onRevoked(cred.server));
+    const sc = cred ? tunnelStore.get(cred.server) : undefined;
+    if (cred && sc?.deviceId) {
+      monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
     }
     emit(status);
@@ -267,10 +269,12 @@ export function registerIpc(
     // change, revoke + clear the old credential BEFORE the new URL is persisted,
     // so there is no window where (origin=new, credential=old) can attach.
     if (reloginRequired) {
-      // Stop the monitor + tunnel (they belong to the OLD origin). Per the signed-off
-      // amendment we do NOT auto-revoke the old-origin device/config — it stays
-      // origin-keyed in the store for the UI to surface (remove-or-switch-back).
+      // Stop BOTH monitors + tunnel (they belong to the OLD origin) — the awaiting-approval
+      // poll must also stop, else it keeps polling the old origin with a stale bearer
+      // (finding #5: origin-lifecycle stop). Per the signed-off amendment we do NOT
+      // auto-revoke the old-origin device/config — it stays origin-keyed for the UI.
       stopMonitor();
+      stopApprovalMonitor();
       lastSynth = null;
       await tunnel.down().catch(() => {});
       emitTray("disconnected");

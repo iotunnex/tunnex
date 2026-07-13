@@ -53,7 +53,7 @@ export class HttpDeviceApi implements DeviceApi {
     return active.id;
   }
 
-  async createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string; pendingApproval: boolean }> {
+  async createDevice(fullTunnel: boolean): Promise<{ deviceId: string; confText: string; pendingApproval: boolean; orgId: string }> {
     const orgId = await this.firstOrgId();
     const nodeId = await this.activeNodeId(orgId);
     const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, {
@@ -72,52 +72,28 @@ export class HttpDeviceApi implements DeviceApi {
     // hold: gate the tunnel + start the awaiting-approval poll, don't arm the helper.
     const body = (await r.json()) as { device: { id: string }; config?: string; pending_approval?: boolean };
     if (!body.config) throw new Error("no_config_returned"); // server-generated flow only
-    return { deviceId: body.device.id, confText: body.config, pendingApproval: body.pending_approval === true };
+    return { deviceId: body.device.id, confText: body.config, pendingApproval: body.pending_approval === true, orgId };
   }
 
-  async deviceStatus(deviceId: string): Promise<"active" | "pending" | "gone"> {
-    // The definitive server status for the awaited device. Same empty-orgs fail-safe as
-    // deviceExists: an anomalous empty org list (replica lag / in-flight membership change)
-    // THROWS (inconclusive) so a blip never reads as a transition (rejected). "gone" is
-    // returned ONLY when a real device list was read and the id is absent / revoked.
-    const orgIds = await this.orgIds();
-    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
-    for (const orgId of orgIds) {
-      const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
-      if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
-      const devices = (await r.json()) as Array<{ id: string; status: string }>;
-      const d = devices.find((x) => x.id === deviceId);
-      if (d) return d.status === "active" ? "active" : d.status === "pending" ? "pending" : "gone";
-    }
-    return "gone"; // checked every org; the id is absent -> genuinely gone
+  async deviceStatus(deviceId: string, orgId: string): Promise<"active" | "pending" | "gone"> {
+    // The definitive server status, queried against the device's OWN org (persisted at
+    // create) — NOT a scan of all orgs. Scanning risked a false "gone" when a transient
+    // list omitted the device's org (finding #4); querying the one org means a fetch error
+    // THROWS (inconclusive — a blip never reads as a transition), and "gone" is returned
+    // ONLY when that org's real device list omits the id.
+    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
+    const devices = (await r.json()) as Array<{ id: string; status: string }>;
+    const d = devices.find((x) => x.id === deviceId);
+    if (!d) return "gone";
+    return d.status === "active" ? "active" : d.status === "pending" ? "pending" : "gone";
   }
 
-  private async orgIds(): Promise<string[]> {
-    const r = await fetch(`${this.origin}/api/v1/organizations`, { headers: this.headers() });
-    if (!r.ok) throw new Error(`list_organizations_failed: ${r.status}`);
-    const orgs = (await r.json()) as Array<{ id: string }>;
-    return orgs.map((o) => o.id);
-  }
-
-  async deviceExists(deviceId: string): Promise<boolean> {
-    // Check EVERY org, not just orgs[0]: the device may have been created under a
-    // different org, and orgs[0] is not stable across list calls — resolving the wrong
-    // org would report a live device as absent and make the self-heal delete a good
-    // config + re-mint a device (review #8). Any read error THROWS so the caller's
-    // fail-safe keeps the config (never nuke on a partial/transient failure).
-    const orgIds = await this.orgIds();
-    // An EMPTY org list for a client that has a running device is anomalous (read-replica
-    // lag, an in-flight membership change, a brief hiccup). Treat it as INCONCLUSIVE and
-    // THROW — a bare 200-with-[] must not slip past the fail-safe and be read as "device
-    // genuinely gone", which would tear down a healthy tunnel + revoke a live device.
-    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
-    for (const orgId of orgIds) {
-      const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
-      if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
-      const devices = (await r.json()) as Array<{ id: string; status: string }>;
-      if (devices.some((d) => d.id === deviceId && d.status === "active")) return true;
-    }
-    return false; // checked every org; no active device with this id anywhere → genuinely gone
+  // deviceExists is deviceStatus === "active" (finding #6): ONE fail-safe implementation,
+  // so the RevocationMonitor (deviceExists) and ApprovalMonitor (deviceStatus) can never
+  // disagree on when a device is "gone" vs inconclusive.
+  async deviceExists(deviceId: string, orgId: string): Promise<boolean> {
+    return (await this.deviceStatus(deviceId, orgId)) === "active";
   }
 
   async revokeDevice(deviceId: string): Promise<void> {

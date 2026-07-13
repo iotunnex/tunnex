@@ -20,7 +20,7 @@ function fakeApi(script: () => boolean | Error) {
 test("revocation: a definitive gone tears down exactly once", async () => {
   const api = fakeApi(() => false); // device gone
   let teardowns = 0;
-  const m = new RevocationMonitor("dev-1", api, () => {
+  const m = new RevocationMonitor("dev-1", "org-1", api, () => {
     teardowns++;
   });
   assert.equal(await m.checkOnce(), "torn-down");
@@ -34,7 +34,7 @@ test("revocation: a definitive gone tears down exactly once", async () => {
 test("revocation: a present device is kept (no teardown)", async () => {
   const api = fakeApi(() => true);
   let teardowns = 0;
-  const m = new RevocationMonitor("dev-1", api, () => {
+  const m = new RevocationMonitor("dev-1", "org-1", api, () => {
     teardowns++;
   });
   assert.equal(await m.checkOnce(), "kept");
@@ -46,7 +46,7 @@ test("revocation: a throw is inconclusive — never tears down, backs off", asyn
   const api = fakeApi(() => new Error("network"));
   let teardowns = 0;
   // Small base so the backoff math is easy to assert.
-  const m = new RevocationMonitor("dev-1", api, () => { teardowns++; }, 1000, 8000);
+  const m = new RevocationMonitor("dev-1", "org-1", api, () => { teardowns++; }, 1000, 8000);
 
   // Every throw KEEPS the tunnel (fail-safe) and doubles the next delay, capped.
   assert.equal(await m.checkOnce(), "inconclusive");
@@ -65,7 +65,7 @@ test("revocation: a throw is inconclusive — never tears down, backs off", asyn
 test("revocation: a healthy probe after backoff returns to steady cadence", async () => {
   let ok = false;
   const api = fakeApi(() => (ok ? true : new Error("network")));
-  const m = new RevocationMonitor("dev-1", api, () => {}, 1000, 8000);
+  const m = new RevocationMonitor("dev-1", "org-1", api, () => {}, 1000, 8000);
   await m.checkOnce(); // throw → backoff 1000
   await m.checkOnce(); // throw → backoff 2000
   assert.equal(backoffOf(m), 2000);
@@ -84,7 +84,7 @@ test("revocation: stop() mid-probe abandons the result (no teardown behind the u
     },
   };
   let teardowns = 0;
-  const m = new RevocationMonitor("dev-1", api, () => { teardowns++; });
+  const m = new RevocationMonitor("dev-1", "org-1", api, () => { teardowns++; });
   const p = m.checkOnce();
   m.stop(); // user disconnects while the probe is in flight
   release();
@@ -109,6 +109,7 @@ test("revocation: no probes overlap and none run while stopped (self-scheduling 
   const pending: Array<() => void> = [];
   const m = new RevocationMonitor(
     "dev-1",
+    "org-1",
     api,
     () => {},
     10,
@@ -138,6 +139,7 @@ test("revocation: start() is idempotent even mid-probe (no second concurrent loo
   const api = { async deviceExists(): Promise<boolean> { return true; } };
   const m = new RevocationMonitor(
     "dev-1",
+    "org-1",
     api,
     () => {},
     10,

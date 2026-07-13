@@ -78,26 +78,33 @@ LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
 ORDER BY d.created_at;
 
--- name: CountActiveDevicesForUser :one
+-- name: CountDevicesForUserCap :one
+-- The per-user device cap counts ACTIVE + PENDING (S7.3 finding #1): a pending device
+-- reserves a real pool /32 and is a real enrollment, so excluding it let a user create
+-- unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending
+-- is EXCLUDED from enforcement but INCLUDED in resource accounting (caps, pools, sweeps).
 SELECT count(*) FROM devices
-WHERE org_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL;
+WHERE org_id = $1 AND user_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL;
 
 -- name: RevokeDevice :one
--- Returns the gateway node_id (for the push) so the caller needs no extra read;
--- pgx.ErrNoRows means the device was not active (already revoked / wrong org).
--- Clears assigned_ip to release the address explicitly (rather than relying on
--- every reader to also filter status='active').
+-- Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
+-- their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
+-- pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
+-- (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+-- device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
 UPDATE devices
 SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
-WHERE id = $1 AND org_id = $2 AND status = 'active' AND deleted_at IS NULL
+WHERE id = $1 AND org_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
 RETURNING node_id;
 
 -- name: RevokeDevicesForNode :execrows
--- lint:cross-org — keyed by node_id; when a node is revoked its peers can no
--- longer reach a gateway, so they are revoked too (no dangling active devices).
+-- lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
+-- gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
+-- finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
+-- linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
 UPDATE devices
-SET status = 'revoked', revoked_at = now()
-WHERE node_id = $1 AND status = 'active' AND deleted_at IS NULL;
+SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL;
 
 -- name: DeleteDeviceStatus :exec
 -- lint:cross-org — keyed by device_id (the caller already authorized the device
