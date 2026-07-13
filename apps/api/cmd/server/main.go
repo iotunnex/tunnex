@@ -145,6 +145,9 @@ func main() {
 
 	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
 	nodeSvc := nodes.NewService(pool, agentCA, sealer)
+	// S7.2: wire the Zero Trust policy source for the desired state (nil in the open
+	// build -> no policy field -> agents keep the legacy mesh).
+	nodeSvc.SetPolicyProvider(apphttp.NewNodePolicyProvider(pool))
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
@@ -159,7 +162,7 @@ func main() {
 		Devices:            deviceSvc,
 		Sessions:           sessions,
 		SSO:                apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
-		Policy:             apphttp.NewPolicyPort(pool),
+		Policy:             apphttp.NewPolicyPort(pool, pushHub),
 		CookieSecure:       cfg.CookieSecure,
 		AppBaseURL:         cfg.AppBaseURL,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,

@@ -30,9 +30,9 @@ func (q *Queries) CountActiveDevicesForUser(ctx context.Context, arg CountActive
 }
 
 const createDevice = `-- name: CreateDevice :one
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel
 `
 
 type CreateDeviceParams struct {
@@ -43,6 +43,7 @@ type CreateDeviceParams struct {
 	Platform   string    `json:"platform"`
 	PublicKey  string    `json:"public_key"`
 	AssignedIp *string   `json:"assigned_ip"`
+	FullTunnel bool      `json:"full_tunnel"`
 }
 
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
@@ -54,6 +55,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		arg.Platform,
 		arg.PublicKey,
 		arg.AssignedIp,
+		arg.FullTunnel,
 	)
 	var i Device
 	err := row.Scan(
@@ -70,6 +72,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.UpdatedAt,
 		&i.RevokedAt,
 		&i.DeletedAt,
+		&i.FullTunnel,
 	)
 	return i, err
 }
@@ -87,7 +90,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -113,6 +116,7 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.UpdatedAt,
 		&i.RevokedAt,
 		&i.DeletedAt,
+		&i.FullTunnel,
 	)
 	return i, err
 }
@@ -187,6 +191,54 @@ func (q *Queries) ListActiveDeviceAllocations(ctx context.Context, orgID uuid.UU
 	return items, nil
 }
 
+const listActiveFullTunnelDevices = `-- name: ListActiveFullTunnelDevices :many
+SELECT d.id, d.user_id, d.name, d.assigned_ip
+FROM devices d
+JOIN users u ON u.id = d.user_id
+JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
+WHERE d.org_id = $1
+  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND u.status = 'active' AND u.deleted_at IS NULL
+  AND d.full_tunnel
+ORDER BY d.name
+`
+
+type ListActiveFullTunnelDevicesRow struct {
+	ID         uuid.UUID `json:"id"`
+	UserID     uuid.UUID `json:"user_id"`
+	Name       string    `json:"name"`
+	AssignedIp *string   `json:"assigned_ip"`
+}
+
+// S7.2 decision 2a: the devices whose internet egress is governed by policy once the
+// org enters enforcing mode -- enumerated (count + names) in the mode-enable response
+// so the warn-and-confirm shows real blast radius. Owner must be a CURRENT org member
+// (the F1 convention: policy-input queries re-verify membership, not just status).
+func (q *Queries) ListActiveFullTunnelDevices(ctx context.Context, orgID uuid.UUID) ([]ListActiveFullTunnelDevicesRow, error) {
+	rows, err := q.db.Query(ctx, listActiveFullTunnelDevices, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveFullTunnelDevicesRow{}
+	for rows.Next() {
+		var i ListActiveFullTunnelDevicesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.AssignedIp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivePeersForNode = `-- name: ListActivePeersForNode :many
 SELECT d.public_key, d.assigned_ip
 FROM devices d
@@ -227,7 +279,7 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
@@ -264,6 +316,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.UpdatedAt,
 			&i.Device.RevokedAt,
 			&i.Device.DeletedAt,
+			&i.Device.FullTunnel,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -279,7 +332,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
@@ -321,6 +374,7 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.UpdatedAt,
 			&i.Device.RevokedAt,
 			&i.Device.DeletedAt,
+			&i.Device.FullTunnel,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,

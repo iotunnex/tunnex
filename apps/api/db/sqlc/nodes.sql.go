@@ -208,6 +208,35 @@ func (q *Queries) InsertPlatformSecret(ctx context.Context, arg InsertPlatformSe
 	return err
 }
 
+const listActiveNodeIDsForOrg = `-- name: ListActiveNodeIDsForOrg :many
+SELECT id FROM nodes
+WHERE org_id = $1 AND status = 'active'
+`
+
+// S7.2 push targeting: every active gateway in the org. A policy change is org-wide,
+// and member-removal can orphan a device whose node would drop out of a device-join
+// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
+// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
+func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveNodeIDsForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodes = `-- name: ListNodes :many
 SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
 WHERE org_id = $1

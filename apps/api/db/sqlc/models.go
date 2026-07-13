@@ -80,6 +80,7 @@ type Device struct {
 	UpdatedAt  time.Time          `json:"updated_at"`
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
+	FullTunnel bool               `json:"full_tunnel"`
 }
 
 type DeviceStatus struct {

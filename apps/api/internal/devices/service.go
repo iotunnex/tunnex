@@ -206,6 +206,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			OrgID: in.OrgID, UserID: in.OwnerID, NodeID: in.NodeID,
 			Name: in.Name, Platform: in.Platform, PublicKey: pub,
 			AssignedIp: &assignedIP,
+			// Persisted (0019) so the S7.2 mode-enable can enumerate the full-tunnel
+			// devices whose egress the enforcing flip governs.
+			FullTunnel: in.FullTunnel,
 		})
 		if e != nil {
 			if c := pgerr.UniqueConstraint(e); c != "" {
@@ -472,6 +475,22 @@ func (s *Service) PushUserNodes(ctx context.Context, userID uuid.UUID) {
 	if err != nil {
 		// The interval reconcile still converges; surface the missed fast path.
 		s.logger.Warn("device_push_lookup_failed", slog.String("user_id", userID.String()), slog.String("error", err.Error()))
+		return
+	}
+	s.hub.NotifyMany(ids)
+}
+
+// PushOrgNodes signals EVERY active gateway in the org to re-fetch (S7.2). Used for
+// org-wide policy changes — notably org-membership REMOVAL (the F1 4th trigger): a
+// removed member's /32 must drop from every node's compiled ruleset that referenced
+// it, not just the nodes hosting the removed user's own devices. Best-effort.
+func (s *Service) PushOrgNodes(ctx context.Context, orgID uuid.UUID) {
+	if s.hub == nil {
+		return
+	}
+	ids, err := s.q.ListActiveNodeIDsForOrg(ctx, orgID)
+	if err != nil {
+		s.logger.Warn("device_push_org_lookup_failed", slog.String("org_id", orgID.String()), slog.String("error", err.Error()))
 		return
 	}
 	s.hub.NotifyMany(ids)

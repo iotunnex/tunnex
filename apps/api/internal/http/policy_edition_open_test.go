@@ -48,7 +48,7 @@ func TestPolicyEditionGatedInOpenBuild(t *testing.T) {
 // 403 (not a nil-panic) for the authorized caller — i.e. the port nil-check is
 // after authorize, mirroring the SSO precedent.
 func TestPolicyPortNilInOpenBuild(t *testing.T) {
-	if NewPolicyPort(nil) != nil {
+	if NewPolicyPort(nil, nil) != nil {
 		t.Fatal("open build must NOT wire a policy port")
 	}
 }

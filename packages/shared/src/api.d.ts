@@ -1110,6 +1110,14 @@ export interface components {
              * @enum {string}
              */
             mode: "off" | "enforcing";
+            /** @description On ENABLING enforcing (PUT only), the full-tunnel devices whose internet egress becomes policy-governed by the flip — the blast radius for the warn-and-confirm. The server obeys regardless; this is the honest count + names. Absent/empty when disabling or when none are affected. State name for these = egress_policy_denied (distinct from gateway_no_egress: the gateway CAN egress, policy is denying it).
+             *      */
+            affected_full_tunnel_devices?: components["schemas"]["AffectedDevice"][];
+        };
+        AffectedDevice: {
+            /** Format: uuid */
+            id: string;
+            name: string;
         };
         Orphan: {
             /** Format: uuid */
