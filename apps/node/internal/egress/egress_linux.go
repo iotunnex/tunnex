@@ -194,11 +194,20 @@ table ip6 tunnex {
 //     which the masquerade then NATs. v6 is left as pure default-deny (drop + ct only):
 //     spokes are v4 (the pool is v4), so there is no v6 device traffic to permit, and
 //     dropping it is strictly safer than the blanket mesh.
+//
+// Every forward rule carries a `counter` (S7.2): per-rule packet/byte counts, near-free
+// (a native nft primitive). REPORTING is deferred (the flow-log candidate); emitting now
+// reserves the seam and gives the box proof its positive (allow-count) + negative
+// (dropCounter) observations for free. counter is in the rendered RULESET only — it is
+// NOT part of the canonical Compiled JSON, so the pushed/applied CanonicalHash is
+// untouched (no version bump, twin goldens unchanged).
+const dropCounter = "    counter comment \"tunnex_default_drop\"\n" // counts unmatched -> policy drop
+
 func (m *Manager) forwardRules(pol *nodepolicy.Compiled) (v4, v6 string) {
 	wg := m.wgIface
 	if pol == nil || pol.Mesh {
-		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" accept\n", wg)
-		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" accept\n", wg)
+		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" counter accept\n", wg)
+		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n", wg)
 		return v4, v6
 	}
 	var b strings.Builder
@@ -207,7 +216,8 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled) (v4, v6 string) {
 			b.WriteString(line)
 		}
 	}
-	return b.String(), "" // enforcing v6 = default-deny (drop + ct only, no blanket)
+	b.WriteString(dropCounter) // count the default-deny drops (box-proof drop observation)
+	return b.String(), dropCounter // enforcing v6 = default-deny: no allows, just the drop counter
 }
 
 // renderAllow turns one compiled allow into an nft accept line for the ip (v4) forward
@@ -237,7 +247,7 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 			clause = fmt.Sprintf(" %s dport %d", e.Protocol, e.PortLow)
 		}
 	}
-	return fmt.Sprintf("    ip saddr %s ip daddr %s%s accept\n", src.String(), dst.Masked().String(), clause), true
+	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter accept\n", src.String(), dst.Masked().String(), clause), true
 }
 
 // applyAndTrack performs the atomic apply and records the fail-closed status: on
