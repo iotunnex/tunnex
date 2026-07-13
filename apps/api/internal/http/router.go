@@ -34,18 +34,21 @@ type AuthFunc func(r *http.Request) *authctx.Principal
 
 // Deps are the router's dependencies.
 type Deps struct {
-	Orgs         *tenancy.Service
-	CliAuth      *cliauth.Service
-	Auth         *auth.Service
-	Members      *tenancy.MembershipService
-	Invites      *invites.Service
-	Nodes        *nodes.Service
-	Devices      *devices.Service
-	Sessions     *session.Store
-	SSO          ssoPort    // nil => open build (SSO endpoints return edition_required)
-	Policy       policyPort // nil => open build (policy endpoints return edition_required)
-	CookieSecure bool
-	AppBaseURL   string
+	Orgs     *tenancy.Service
+	CliAuth  *cliauth.Service
+	Auth     *auth.Service
+	Members  *tenancy.MembershipService
+	Invites  *invites.Service
+	Nodes    *nodes.Service
+	Devices  *devices.Service
+	Sessions *session.Store
+	SSO      ssoPort    // nil => open build (SSO endpoints return edition_required)
+	Policy   policyPort // nil => open build (policy endpoints return edition_required)
+	// DeviceApprovalEnabled => false in the open build (S7.3 device posture endpoints
+	// return edition_required). Named per-feature (NewDeviceApprovalEdition).
+	DeviceApprovalEnabled bool
+	CookieSecure          bool
+	AppBaseURL            string
 	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
 	// (S6.2 desktop; app://tunnex). Empty = no CORS (pure same-origin).
 	CORSAllowedOrigins []string
@@ -145,7 +148,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, policy: d.Policy, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, policy: d.Policy, deviceApprovalEnabled: d.DeviceApprovalEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

@@ -543,6 +543,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/devices/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** The device-approval queue (enterprise) */
+        get: operations["listPendingDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/devices/{deviceId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a pending device (peer + grants land org-wide within seconds, enterprise) */
+        post: operations["approveDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/devices/{deviceId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a pending device (revoked, tunnel address freed, enterprise) */
+        post: operations["rejectDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/device-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** Get the org device-approval mode (enterprise) */
+        get: operations["getDeviceApproval"];
+        /** Set the org device-approval mode — enabling gates new enrollments (enterprise) */
+        put: operations["setDeviceApproval"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/groups": {
         parameters: {
             query?: never;
@@ -1261,7 +1340,12 @@ export interface components {
             public_key: string;
             assigned_ip?: string;
             /** @enum {string} */
-            status: "active" | "revoked";
+            status: "active" | "revoked" | "pending";
+            /**
+             * Format: uuid
+             * @description S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
+             */
+            approved_by?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1286,6 +1370,17 @@ export interface components {
             device: components["schemas"]["Device"];
             private_key?: string;
             config?: string;
+            pending_approval?: boolean;
+        };
+        DeviceApproval: {
+            /**
+             * @description S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
+             * @enum {string}
+             */
+            mode: "off" | "on";
+            /** @description On ENABLING (PUT off->on only), the count of existing active devices that stay active (grandfathered — a flip must not black-hole the fleet). Best-effort; absent when disabling.
+             *      */
+            grandfathered_count?: number;
         };
         InviteRequest: {
             /** Format: email */
@@ -2202,6 +2297,128 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listPendingDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Devices awaiting approval. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    approveDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rejected. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getDeviceApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current mode. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceApproval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setDeviceApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceApproval"];
+            };
+        };
+        responses: {
+            /** @description Updated mode (with grandfathered count when enabling). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceApproval"];
+                };
             };
             default: components["responses"]["Error"];
         };

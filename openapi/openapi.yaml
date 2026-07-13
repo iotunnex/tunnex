@@ -636,6 +636,104 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  # ── Device posture (S7.3, ENTERPRISE) ───────────────────────────────────────
+  # An org-level approval gate: new devices enroll PENDING (blocked) until approved.
+  # Edition-gated: the open build returns 403 edition_required. RBAC: device:approve.
+  /api/v1/organizations/{orgId}/devices/pending:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listPendingDevices
+      summary: The device-approval queue (enterprise)
+      tags: [devices]
+      responses:
+        "200":
+          description: Devices awaiting approval.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Device" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/devices/{deviceId}/approve:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: approveDevice
+      summary: Approve a pending device (peer + grants land org-wide within seconds, enterprise)
+      tags: [devices]
+      responses:
+        "204":
+          description: Approved.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/devices/{deviceId}/reject:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: rejectDevice
+      summary: Reject a pending device (revoked, tunnel address freed, enterprise)
+      tags: [devices]
+      responses:
+        "204":
+          description: Rejected.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/device-approval:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getDeviceApproval
+      summary: Get the org device-approval mode (enterprise)
+      tags: [devices]
+      responses:
+        "200":
+          description: Current mode.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceApproval" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setDeviceApproval
+      summary: Set the org device-approval mode — enabling gates new enrollments (enterprise)
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceApproval" }
+      responses:
+        "200":
+          description: Updated mode (with grandfathered count when enabling).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceApproval" }
+        default: { $ref: "#/components/responses/Error" }
+
   # ── Zero Trust policy (S7.1, ENTERPRISE) ────────────────────────────────────
   # Model only (groups, resources, allow-rules, org mode). Enforcement is S7.2.
   # Every endpoint is edition-gated: the open build returns 403 edition_required.
@@ -1731,7 +1829,12 @@ components:
         platform: { type: string }
         public_key: { type: string }
         assigned_ip: { type: string }
-        status: { type: string, enum: [active, revoked] }
+        status: { type: string, enum: [active, revoked, pending] }
+        approved_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: "S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved."
         created_at: { type: string, format: date-time }
         # Live status (S3.6). last_handshake_at is the most recent WireGuard
         # handshake; `online` is DERIVED from its recency (WireGuard has no
@@ -1769,6 +1872,26 @@ components:
         private_key: { type: string }
         # The ready-to-use wg-quick .conf (server-generated flow only), shown once.
         config: { type: string }
+        # S7.3: true when the org requires device approval — the device is enrolled but
+        # BLOCKED (no tunnel) until an admin approves. The client shows a stable
+        # "awaiting approval" state (never an error loop).
+        pending_approval: { type: boolean }
+
+    DeviceApproval:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [off, on]
+          description: "S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves."
+        grandfathered_count:
+          type: integer
+          description: >
+            On ENABLING (PUT off->on only), the count of existing active devices that stay
+            active (grandfathered — a flip must not black-hole the fleet). Best-effort;
+            absent when disabling.
 
     InviteRequest:
       type: object

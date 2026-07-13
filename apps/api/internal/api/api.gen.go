@@ -44,7 +44,14 @@ const (
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
+	DeviceStatusPending DeviceStatus = "pending"
 	DeviceStatusRevoked DeviceStatus = "revoked"
+)
+
+// Defines values for DeviceApprovalMode.
+const (
+	DeviceApprovalModeOff DeviceApprovalMode = "off"
+	DeviceApprovalModeOn  DeviceApprovalMode = "on"
 )
 
 // Defines values for HealthResponseStatus.
@@ -124,8 +131,8 @@ const (
 
 // Defines values for ZeroTrustModeMode.
 const (
-	Enforcing ZeroTrustModeMode = "enforcing"
-	Off       ZeroTrustModeMode = "off"
+	ZeroTrustModeModeEnforcing ZeroTrustModeMode = "enforcing"
+	ZeroTrustModeModeOff       ZeroTrustModeMode = "off"
 )
 
 // Defines values for SsoCallbackParamsProvider.
@@ -284,9 +291,10 @@ type CreateDeviceRequest struct {
 
 // CreateDeviceResult defines model for CreateDeviceResponse.
 type CreateDeviceResult struct {
-	Config     *string `json:"config,omitempty"`
-	Device     Device  `json:"device"`
-	PrivateKey *string `json:"private_key,omitempty"`
+	Config          *string `json:"config,omitempty"`
+	Device          Device  `json:"device"`
+	PendingApproval *bool   `json:"pending_approval,omitempty"`
+	PrivateKey      *string `json:"private_key,omitempty"`
 }
 
 // CreateOrganizationRequest defines model for CreateOrganizationRequest.
@@ -311,23 +319,37 @@ type CreatePolicyRuleRequestDstKind string
 
 // Device defines model for Device.
 type Device struct {
-	AssignedIp      *string            `json:"assigned_ip,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	Id              openapi_types.UUID `json:"id"`
-	LastHandshakeAt *time.Time         `json:"last_handshake_at,omitempty"`
-	Name            string             `json:"name"`
-	NodeId          openapi_types.UUID `json:"node_id"`
-	Online          *bool              `json:"online,omitempty"`
-	Platform        *string            `json:"platform,omitempty"`
-	PublicKey       string             `json:"public_key"`
-	RxBytes         *int64             `json:"rx_bytes,omitempty"`
-	Status          DeviceStatus       `json:"status"`
-	TxBytes         *int64             `json:"tx_bytes,omitempty"`
-	UserId          openapi_types.UUID `json:"user_id"`
+	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
+	ApprovedBy      *openapi_types.UUID `json:"approved_by"`
+	AssignedIp      *string             `json:"assigned_ip,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Id              openapi_types.UUID  `json:"id"`
+	LastHandshakeAt *time.Time          `json:"last_handshake_at,omitempty"`
+	Name            string              `json:"name"`
+	NodeId          openapi_types.UUID  `json:"node_id"`
+	Online          *bool               `json:"online,omitempty"`
+	Platform        *string             `json:"platform,omitempty"`
+	PublicKey       string              `json:"public_key"`
+	RxBytes         *int64              `json:"rx_bytes,omitempty"`
+	Status          DeviceStatus        `json:"status"`
+	TxBytes         *int64              `json:"tx_bytes,omitempty"`
+	UserId          openapi_types.UUID  `json:"user_id"`
 }
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string
+
+// DeviceApproval defines model for DeviceApproval.
+type DeviceApproval struct {
+	// GrandfatheredCount On ENABLING (PUT off->on only), the count of existing active devices that stay active (grandfathered — a flip must not black-hole the fleet). Best-effort; absent when disabling.
+	GrandfatheredCount *int `json:"grandfathered_count,omitempty"`
+
+	// Mode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
+	Mode DeviceApprovalMode `json:"mode"`
+}
+
+// DeviceApprovalMode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
+type DeviceApprovalMode string
 
 // DomainClaimRequest defines model for DomainClaimRequest.
 type DomainClaimRequest struct {
@@ -748,6 +770,9 @@ type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
 // UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
 type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
+// SetDeviceApprovalJSONRequestBody defines body for SetDeviceApproval for application/json ContentType.
+type SetDeviceApprovalJSONRequestBody = DeviceApproval
+
 // CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
 type CreateDeviceJSONRequestBody = CreateDeviceRequest
 
@@ -879,12 +904,27 @@ type ServerInterface interface {
 	// The org's audit log — filterable, keyset-paginated (read-only)
 	// (GET /api/v1/organizations/{orgId}/audit-logs)
 	ListAuditLogs(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, params ListAuditLogsParams)
+	// Get the org device-approval mode (enterprise)
+	// (GET /api/v1/organizations/{orgId}/device-approval)
+	GetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Set the org device-approval mode — enabling gates new enrollments (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/device-approval)
+	SetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
 	// List devices (own devices for members; all for admins)
 	// (GET /api/v1/organizations/{orgId}/devices)
 	ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
 	// Create a device/peer bound to the owning user
 	// (POST /api/v1/organizations/{orgId}/devices)
 	CreateDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// The device-approval queue (enterprise)
+	// (GET /api/v1/organizations/{orgId}/devices/pending)
+	ListPendingDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Approve a pending device (peer + grants land org-wide within seconds, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/approve)
+	ApproveDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
+	// Reject a pending device (revoked, tunnel address freed, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
+	RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
 	// Revoke a device (peer removed from the gateway within seconds)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke)
 	RevokeDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
@@ -1149,6 +1189,18 @@ func (_ Unimplemented) ListAuditLogs(w http.ResponseWriter, r *http.Request, org
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Get the org device-approval mode (enterprise)
+// (GET /api/v1/organizations/{orgId}/device-approval)
+func (_ Unimplemented) GetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Set the org device-approval mode — enabling gates new enrollments (enterprise)
+// (PUT /api/v1/organizations/{orgId}/device-approval)
+func (_ Unimplemented) SetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List devices (own devices for members; all for admins)
 // (GET /api/v1/organizations/{orgId}/devices)
 func (_ Unimplemented) ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
@@ -1158,6 +1210,24 @@ func (_ Unimplemented) ListDevices(w http.ResponseWriter, r *http.Request, orgId
 // Create a device/peer bound to the owning user
 // (POST /api/v1/organizations/{orgId}/devices)
 func (_ Unimplemented) CreateDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// The device-approval queue (enterprise)
+// (GET /api/v1/organizations/{orgId}/devices/pending)
+func (_ Unimplemented) ListPendingDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Approve a pending device (peer + grants land org-wide within seconds, enterprise)
+// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/approve)
+func (_ Unimplemented) ApproveDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Reject a pending device (revoked, tunnel address freed, enterprise)
+// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
+func (_ Unimplemented) RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2017,6 +2087,72 @@ func (siw *ServerInterfaceWrapper) ListAuditLogs(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetDeviceApproval operation middleware
+func (siw *ServerInterfaceWrapper) GetDeviceApproval(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDeviceApproval(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetDeviceApproval operation middleware
+func (siw *ServerInterfaceWrapper) SetDeviceApproval(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDeviceApproval(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListDevices operation middleware
 func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Request) {
 
@@ -2074,6 +2210,123 @@ func (siw *ServerInterfaceWrapper) CreateDevice(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDevice(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPendingDevices operation middleware
+func (siw *ServerInterfaceWrapper) ListPendingDevices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPendingDevices(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveDevice operation middleware
+func (siw *ServerInterfaceWrapper) ApproveDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deviceId" -------------
+	var deviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deviceId", chi.URLParam(r, "deviceId"), &deviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deviceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveDevice(w, r, orgId, deviceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectDevice operation middleware
+func (siw *ServerInterfaceWrapper) RejectDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deviceId" -------------
+	var deviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deviceId", chi.URLParam(r, "deviceId"), &deviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deviceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectDevice(w, r, orgId, deviceId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3522,10 +3775,25 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/audit-logs", wrapper.ListAuditLogs)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/device-approval", wrapper.GetDeviceApproval)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/device-approval", wrapper.SetDeviceApproval)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/devices", wrapper.ListDevices)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices", wrapper.CreateDevice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/devices/pending", wrapper.ListPendingDevices)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/approve", wrapper.ApproveDevice)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/reject", wrapper.RejectDevice)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/revoke", wrapper.RevokeDevice)
@@ -4641,6 +4909,85 @@ func (response ListAuditLogsdefaultJSONResponse) VisitListAuditLogsResponse(w ht
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type GetDeviceApprovalRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type GetDeviceApprovalResponseObject interface {
+	VisitGetDeviceApprovalResponse(w http.ResponseWriter) error
+}
+
+type GetDeviceApproval200ResponseHeaders struct {
+	XRequestId string
+}
+
+type GetDeviceApproval200JSONResponse struct {
+	Body    DeviceApproval
+	Headers GetDeviceApproval200ResponseHeaders
+}
+
+func (response GetDeviceApproval200JSONResponse) VisitGetDeviceApprovalResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetDeviceApprovaldefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response GetDeviceApprovaldefaultJSONResponse) VisitGetDeviceApprovalResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetDeviceApprovalRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+	Body  *SetDeviceApprovalJSONRequestBody
+}
+
+type SetDeviceApprovalResponseObject interface {
+	VisitSetDeviceApprovalResponse(w http.ResponseWriter) error
+}
+
+type SetDeviceApproval200ResponseHeaders struct {
+	XRequestId string
+}
+
+type SetDeviceApproval200JSONResponse struct {
+	Body    DeviceApproval
+	Headers SetDeviceApproval200ResponseHeaders
+}
+
+func (response SetDeviceApproval200JSONResponse) VisitSetDeviceApprovalResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetDeviceApprovaldefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response SetDeviceApprovaldefaultJSONResponse) VisitSetDeviceApprovalResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ListDevicesRequestObject struct {
 	OrgId openapi_types.UUID `json:"orgId"`
 }
@@ -4713,6 +5060,119 @@ type CreateDevicedefaultJSONResponse struct {
 }
 
 func (response CreateDevicedefaultJSONResponse) VisitCreateDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListPendingDevicesRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListPendingDevicesResponseObject interface {
+	VisitListPendingDevicesResponse(w http.ResponseWriter) error
+}
+
+type ListPendingDevices200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListPendingDevices200JSONResponse struct {
+	Body    []Device
+	Headers ListPendingDevices200ResponseHeaders
+}
+
+func (response ListPendingDevices200JSONResponse) VisitListPendingDevicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListPendingDevicesdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListPendingDevicesdefaultJSONResponse) VisitListPendingDevicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ApproveDeviceRequestObject struct {
+	OrgId    openapi_types.UUID `json:"orgId"`
+	DeviceId openapi_types.UUID `json:"deviceId"`
+}
+
+type ApproveDeviceResponseObject interface {
+	VisitApproveDeviceResponse(w http.ResponseWriter) error
+}
+
+type ApproveDevice204ResponseHeaders struct {
+	XRequestId string
+}
+
+type ApproveDevice204Response struct {
+	Headers ApproveDevice204ResponseHeaders
+}
+
+func (response ApproveDevice204Response) VisitApproveDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type ApproveDevicedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ApproveDevicedefaultJSONResponse) VisitApproveDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RejectDeviceRequestObject struct {
+	OrgId    openapi_types.UUID `json:"orgId"`
+	DeviceId openapi_types.UUID `json:"deviceId"`
+}
+
+type RejectDeviceResponseObject interface {
+	VisitRejectDeviceResponse(w http.ResponseWriter) error
+}
+
+type RejectDevice204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RejectDevice204Response struct {
+	Headers RejectDevice204ResponseHeaders
+}
+
+func (response RejectDevice204Response) VisitRejectDeviceResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RejectDevicedefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response RejectDevicedefaultJSONResponse) VisitRejectDeviceResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -6138,12 +6598,27 @@ type StrictServerInterface interface {
 	// The org's audit log — filterable, keyset-paginated (read-only)
 	// (GET /api/v1/organizations/{orgId}/audit-logs)
 	ListAuditLogs(ctx context.Context, request ListAuditLogsRequestObject) (ListAuditLogsResponseObject, error)
+	// Get the org device-approval mode (enterprise)
+	// (GET /api/v1/organizations/{orgId}/device-approval)
+	GetDeviceApproval(ctx context.Context, request GetDeviceApprovalRequestObject) (GetDeviceApprovalResponseObject, error)
+	// Set the org device-approval mode — enabling gates new enrollments (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/device-approval)
+	SetDeviceApproval(ctx context.Context, request SetDeviceApprovalRequestObject) (SetDeviceApprovalResponseObject, error)
 	// List devices (own devices for members; all for admins)
 	// (GET /api/v1/organizations/{orgId}/devices)
 	ListDevices(ctx context.Context, request ListDevicesRequestObject) (ListDevicesResponseObject, error)
 	// Create a device/peer bound to the owning user
 	// (POST /api/v1/organizations/{orgId}/devices)
 	CreateDevice(ctx context.Context, request CreateDeviceRequestObject) (CreateDeviceResponseObject, error)
+	// The device-approval queue (enterprise)
+	// (GET /api/v1/organizations/{orgId}/devices/pending)
+	ListPendingDevices(ctx context.Context, request ListPendingDevicesRequestObject) (ListPendingDevicesResponseObject, error)
+	// Approve a pending device (peer + grants land org-wide within seconds, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/approve)
+	ApproveDevice(ctx context.Context, request ApproveDeviceRequestObject) (ApproveDeviceResponseObject, error)
+	// Reject a pending device (revoked, tunnel address freed, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
+	RejectDevice(ctx context.Context, request RejectDeviceRequestObject) (RejectDeviceResponseObject, error)
 	// Revoke a device (peer removed from the gateway within seconds)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke)
 	RevokeDevice(ctx context.Context, request RevokeDeviceRequestObject) (RevokeDeviceResponseObject, error)
@@ -7009,6 +7484,65 @@ func (sh *strictHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
+// GetDeviceApproval operation middleware
+func (sh *strictHandler) GetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request GetDeviceApprovalRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDeviceApproval(ctx, request.(GetDeviceApprovalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDeviceApproval")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDeviceApprovalResponseObject); ok {
+		if err := validResponse.VisitGetDeviceApprovalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetDeviceApproval operation middleware
+func (sh *strictHandler) SetDeviceApproval(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request SetDeviceApprovalRequestObject
+
+	request.OrgId = orgId
+
+	var body SetDeviceApprovalJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetDeviceApproval(ctx, request.(SetDeviceApprovalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetDeviceApproval")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetDeviceApprovalResponseObject); ok {
+		if err := validResponse.VisitSetDeviceApprovalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListDevices operation middleware
 func (sh *strictHandler) ListDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
 	var request ListDevicesRequestObject
@@ -7061,6 +7595,86 @@ func (sh *strictHandler) CreateDevice(w http.ResponseWriter, r *http.Request, or
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateDeviceResponseObject); ok {
 		if err := validResponse.VisitCreateDeviceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPendingDevices operation middleware
+func (sh *strictHandler) ListPendingDevices(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListPendingDevicesRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPendingDevices(ctx, request.(ListPendingDevicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPendingDevices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPendingDevicesResponseObject); ok {
+		if err := validResponse.VisitListPendingDevicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveDevice operation middleware
+func (sh *strictHandler) ApproveDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	var request ApproveDeviceRequestObject
+
+	request.OrgId = orgId
+	request.DeviceId = deviceId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveDevice(ctx, request.(ApproveDeviceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveDevice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveDeviceResponseObject); ok {
+		if err := validResponse.VisitApproveDeviceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RejectDevice operation middleware
+func (sh *strictHandler) RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	var request RejectDeviceRequestObject
+
+	request.OrgId = orgId
+	request.DeviceId = deviceId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RejectDevice(ctx, request.(RejectDeviceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RejectDevice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RejectDeviceResponseObject); ok {
+		if err := validResponse.VisitRejectDeviceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8081,154 +8695,162 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"6Da+fPzy/wIAAP//nSnqGCLhAAA=",
+	"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",
+	"8fXT1/8fAAD//3xp+8IM7wAA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

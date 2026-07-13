@@ -36,13 +36,14 @@ var walkBodies = map[string]string{
 	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,
 	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
-	"creategroup":      `{"name":"Walk"}`,
-	"updategroup":      `{"name":"Walk"}`,
-	"addgroupmember":   `{"user_id":"00000000-0000-0000-0000-000000000000"}`,
-	"createresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
-	"updateresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
-	"createpolicyrule": `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
-	"setzerotrustmode": `{"mode":"off"}`,
+	"creategroup":       `{"name":"Walk"}`,
+	"updategroup":       `{"name":"Walk"}`,
+	"addgroupmember":    `{"user_id":"00000000-0000-0000-0000-000000000000"}`,
+	"createresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"updateresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"createpolicyrule":  `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
+	"setzerotrustmode":  `{"mode":"off"}`,
+	"setdeviceapproval": `{"mode":"off"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and

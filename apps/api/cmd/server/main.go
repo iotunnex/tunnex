@@ -153,21 +153,22 @@ func main() {
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
-		Orgs:               tenancy.NewService(pool),
-		CliAuth:            cliAuthSvc,
-		Auth:               authSvc,
-		Members:            tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
-		Invites:            invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
-		Nodes:              nodeSvc,
-		Devices:            deviceSvc,
-		Sessions:           sessions,
-		SSO:                apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
-		Policy:             apphttp.NewPolicyPort(pool, pushHub),
-		CookieSecure:       cfg.CookieSecure,
-		AppBaseURL:         cfg.AppBaseURL,
-		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
-		AuthFn:             apphttp.SessionAuth(sessions, sqlc.New(pool)),
-		BearerFn:           apphttp.BearerAuth(sqlc.New(pool)),
+		Orgs:                  tenancy.NewService(pool),
+		CliAuth:               cliAuthSvc,
+		Auth:                  authSvc,
+		Members:               tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
+		Invites:               invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
+		Nodes:                 nodeSvc,
+		Devices:               deviceSvc,
+		Sessions:              sessions,
+		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
+		Policy:                apphttp.NewPolicyPort(pool, pushHub),
+		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
+		CookieSecure:          cfg.CookieSecure,
+		AppBaseURL:            cfg.AppBaseURL,
+		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
+		AuthFn:                apphttp.SessionAuth(sessions, sqlc.New(pool)),
+		BearerFn:              apphttp.BearerAuth(sqlc.New(pool)),
 	})
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))
