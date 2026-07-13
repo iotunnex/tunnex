@@ -1463,6 +1463,23 @@ components:
           type: string
           enum: [off, enforcing]
           description: "off = legacy blanket mesh; enforcing = default-deny + compiled allows."
+        affected_full_tunnel_devices:
+          type: array
+          description: >
+            On ENABLING enforcing (PUT only), the full-tunnel devices whose internet egress
+            becomes policy-governed by the flip — the blast radius for the warn-and-confirm.
+            The server obeys regardless; this is the honest count + names. Absent/empty when
+            disabling or when none are affected. State name for these = egress_policy_denied
+            (distinct from gateway_no_egress: the gateway CAN egress, policy is denying it).
+          items: { $ref: "#/components/schemas/AffectedDevice" }
+
+    AffectedDevice:
+      type: object
+      required: [id, name]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
 
     # One stranded allocation. reason distinguishes out_of_range (visibly outside
     # the new range) from reserved_collision (numerically INSIDE it but on the new

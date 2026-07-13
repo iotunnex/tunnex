@@ -72,3 +72,11 @@ WHERE id = @id AND status = 'active';
 UPDATE nodes
 SET status = 'revoked', revoked_at = now()
 WHERE org_id = $1 AND id = $2;
+
+-- name: ListActiveNodeIDsForOrg :many
+-- S7.2 push targeting: every active gateway in the org. A policy change is org-wide,
+-- and member-removal can orphan a device whose node would drop out of a device-join
+-- query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
+-- to identical bytes = reconcile no-op, so over-notifying is safe + correct).
+SELECT id FROM nodes
+WHERE org_id = $1 AND status = 'active';

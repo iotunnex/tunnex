@@ -25,6 +25,9 @@ type SessionRevoker interface {
 // the data plane within seconds. Implemented by devices.Service.
 type DevicePusher interface {
 	PushUserNodes(ctx context.Context, userID uuid.UUID)
+	// PushOrgNodes signals all org gateways — used for org-wide policy changes like
+	// member removal (S7.2 F1 4th recompile+push trigger).
+	PushOrgNodes(ctx context.Context, orgID uuid.UUID)
 }
 
 // MembershipService provides org-scoped membership reads. Every method scopes by
@@ -197,7 +200,7 @@ func (s *MembershipService) ChangeMemberRole(ctx context.Context, actor *uuid.UU
 // RemoveMember removes a member, enforcing the RBAC relational rules and the
 // last-owner invariant, and records member.removed atomically.
 func (s *MembershipService) RemoveMember(ctx context.Context, actor *uuid.UUID, actorRole string, orgID, targetUserID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		target, e := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return apierr.NotFound("member_not_found", "member not found")
@@ -217,6 +220,13 @@ func (s *MembershipService) RemoveMember(ctx context.Context, actor *uuid.UUID, 
 		return writeAudit(ctx, q, orgID, actor, "member.removed", "membership", targetUserID.String(),
 			map[string]any{"role": target.Role})
 	})
+	if err == nil && s.pusher != nil {
+		// F1 4th trigger: member removal is an org-wide policy change (group_members
+		// cascade-dropped in the tx). Push ALL org gateways so the ex-member's /32
+		// leaves every compiled ruleset within the <5s spec, not just their own nodes.
+		s.pusher.PushOrgNodes(ctx, orgID)
+	}
+	return err
 }
 
 // guardLastOwner rejects demoting or removing the final owner of an org.

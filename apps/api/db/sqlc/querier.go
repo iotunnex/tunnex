@@ -139,6 +139,16 @@ type Querier interface {
 	// must not participate in policy (as a source OR a destination) even if the device
 	// itself was never revoked.
 	ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error)
+	// S7.2 decision 2a: the devices whose internet egress is governed by policy once the
+	// org enters enforcing mode -- enumerated (count + names) in the mode-enable response
+	// so the warn-and-confirm shows real blast radius. Owner must be a CURRENT org member
+	// (the F1 convention: policy-input queries re-verify membership, not just status).
+	ListActiveFullTunnelDevices(ctx context.Context, orgID uuid.UUID) ([]ListActiveFullTunnelDevicesRow, error)
+	// S7.2 push targeting: every active gateway in the org. A policy change is org-wide,
+	// and member-removal can orphan a device whose node would drop out of a device-join
+	// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
+	// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
+	ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops

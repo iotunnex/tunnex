@@ -34,6 +34,14 @@ type RuleInput struct {
 	DstGroupID    *uuid.UUID
 }
 
+// AffectedDevice is a full-tunnel device whose internet egress becomes policy-
+// governed when the org enters enforcing (S7.2 decision 2a). Neutral so the open-
+// build http port can name it without importing the enterprise package.
+type AffectedDevice struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
 // ProtocolVersion is the compiled-artifact wire version. Bump on any breaking
 // shape change so a mismatched agent can reject rather than misapply a ruleset.
 const ProtocolVersion = 1

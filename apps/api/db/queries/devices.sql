@@ -1,7 +1,22 @@
 -- name: CreateDevice :one
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: ListActiveFullTunnelDevices :many
+-- S7.2 decision 2a: the devices whose internet egress is governed by policy once the
+-- org enters enforcing mode -- enumerated (count + names) in the mode-enable response
+-- so the warn-and-confirm shows real blast radius. Owner must be a CURRENT org member
+-- (the F1 convention: policy-input queries re-verify membership, not just status).
+SELECT d.id, d.user_id, d.name, d.assigned_ip
+FROM devices d
+JOIN users u ON u.id = d.user_id
+JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
+WHERE d.org_id = $1
+  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND u.status = 'active' AND u.deleted_at IS NULL
+  AND d.full_tunnel
+ORDER BY d.name;
 
 -- name: GetDevice :one
 SELECT * FROM devices

@@ -33,8 +33,14 @@ type policyPort interface {
 	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
-	SetMode(ctx context.Context, orgID uuid.UUID, mode string) (string, error)
+	SetMode(ctx context.Context, orgID uuid.UUID, mode string) (mode_ string, affected []policyspec.AffectedDevice, err error)
 }
+
+// EgressPolicyDenied is the NAMED state for a device whose internet egress is denied
+// by Zero Trust POLICY on a gateway that IS egress-capable (S7.2 decision 2-coherence)
+// -- deliberately distinct from gateway_no_egress (the gateway cannot egress at all).
+// The two refusal paths must never be conflated in status/error surfaces.
+const EgressPolicyDenied = "egress_policy_denied"
 
 func policyEditionRequired() error {
 	return apierr.New(http.StatusForbidden, "edition_required", "Zero Trust policy is a Tunnex Enterprise feature")
@@ -312,12 +318,20 @@ func (s apiServer) SetZeroTrustMode(ctx context.Context, req api.SetZeroTrustMod
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	mode, err := s.policy.SetMode(ctx, req.OrgId, string(req.Body.Mode))
+	mode, affected, err := s.policy.SetMode(ctx, req.OrgId, string(req.Body.Mode))
 	if err != nil {
 		return nil, err
 	}
+	body := api.ZeroTrustMode{Mode: api.ZeroTrustModeMode(mode)}
+	if len(affected) > 0 {
+		out := make([]api.AffectedDevice, 0, len(affected))
+		for _, d := range affected {
+			out = append(out, api.AffectedDevice{Id: d.ID, Name: d.Name})
+		}
+		body.AffectedFullTunnelDevices = &out
+	}
 	return api.SetZeroTrustMode200JSONResponse{
-		Body:    api.ZeroTrustMode{Mode: api.ZeroTrustModeMode(mode)},
+		Body:    body,
 		Headers: api.SetZeroTrustMode200ResponseHeaders{XRequestId: reqID(ctx)},
 	}, nil
 }

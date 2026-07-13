@@ -26,6 +26,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
+	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
@@ -60,13 +61,25 @@ type DesiredState struct {
 	// on the next watch so a change during the fetch gap is not missed.
 	Version uint64 `json:"version"`
 	Peers   []Peer `json:"peers"`
+	// Policy is the compiled Zero Trust policy (S7.2). Omitted in the open build
+	// (nil provider) and when no provider is wired -> the agent decodes nil and
+	// keeps the legacy blanket mesh (its asserted absent=mesh default).
+	Policy *policyspec.Compiled `json:"policy,omitempty"`
+}
+
+// PolicyProvider compiles the Zero Trust policy artifact for one node (S7.2).
+// nil in the open build (no policy field is ever sent -> agents keep the legacy
+// mesh); the enterprise build wires the policy engine via SetPolicyProvider.
+type PolicyProvider interface {
+	CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error)
 }
 
 // Service provides node control-plane operations.
 type Service struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
-	ca   *agentca.CA
+	pool   *pgxpool.Pool
+	q      *sqlc.Queries
+	ca     *agentca.CA
+	policy PolicyProvider // nil => open build / not wired
 	// sealer supplies the keyed proof-of-secret fingerprint (S4.5 convention)
 	// written to the join-token audit rows, so issuance and redemption correlate
 	// without the raw token ever entering the audit stream.
@@ -77,6 +90,9 @@ type Service struct {
 func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Service {
 	return &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer}
 }
+
+// SetPolicyProvider wires the enterprise policy engine (S7.2). Call before serving.
+func (s *Service) SetPolicyProvider(p PolicyProvider) { s.policy = p }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	if s.pool == nil {
@@ -236,14 +252,28 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			gatewayCIDR = gw
 		}
 	}
-	return DesiredState{
+	ds := DesiredState{
 		ProtocolVersion:  ProtocolVersion,
 		NodeID:           node.ID.String(),
 		InterfaceAddress: gatewayCIDR,
 		MTU:              1420,
 		ListenPort:       51820,
 		Peers:            peers,
-	}, nil
+	}
+	if s.policy != nil {
+		// FAIL-CLOSED on a compile error: erroring the whole fetch means the agent
+		// backs off and keeps its LAST APPLIED policy in force (data-plane
+		// independence: a fetch error never touches the data plane). Omitting the
+		// field instead would decode as nil = LEGACY MESH on the agent -- silently
+		// fail-OPEN under enforcing. Peer updates are delayed too; that is the
+		// accepted cost of a control-plane-side compile failure.
+		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
+		if err != nil {
+			return DesiredState{}, err
+		}
+		ds.Policy = pol
+	}
+	return ds, nil
 }
 
 // validEndpoint reports whether s is a clean host:port with a numeric port and
@@ -340,15 +370,25 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	if len(applied.Error) > 512 {
 		applied.Error = applied.Error[:512]
 	}
+	// policy_hash_since: the SERVER timestamp at which the currently-reported hash
+	// was FIRST seen (preserved across reports carrying the same hash, reset when
+	// the hash changes). This is the substrate for the staleness alarm: stale =
+	// pushed != applied persisting past PolicyStaleAfter -- age is measured from
+	// this server-side mark, never from agent-supplied time.
+	since := time.Now().UTC().Format(time.RFC3339)
+	if prev := Capabilities(node.Capabilities); prev.PolicyHash == applied.Hash && prev.PolicyHashSince != "" {
+		since = prev.PolicyHashSince
+	}
 	// Gateway capabilities the agent probes + re-reports every reconcile (S3.7 +
 	// S7.2 applied-policy status). The column is a forward-compat JSONB map; we build
 	// it server-side from the typed report so a compromised agent can't inject
 	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
 	caps, err := json.Marshal(map[string]any{
-		"egress_nat":     egressNAT,
-		"policy_version": applied.Version,
-		"policy_hash":    applied.Hash,
-		"policy_error":   applied.Error,
+		"egress_nat":        egressNAT,
+		"policy_version":    applied.Version,
+		"policy_hash":       applied.Hash,
+		"policy_error":      applied.Error,
+		"policy_hash_since": since,
 	})
 	if err != nil {
 		return err
@@ -371,6 +411,34 @@ type NodeCapabilities struct {
 	PolicyVersion int    `json:"policy_version"`
 	PolicyHash    string `json:"policy_hash"`
 	PolicyError   string `json:"policy_error"`
+	// PolicyHashSince is the server timestamp (RFC3339) at which PolicyHash was
+	// first reported -- the base for the staleness persistence window.
+	PolicyHashSince string `json:"policy_hash_since"`
+}
+
+// PolicyStaleAfter is the staleness alarm window (S7.2 decision): pushed != applied
+// is an ALARM only when it persists longer than this -- 3 report intervals (the
+// report loop runs every 30s; a normal apply window is <=2s of push->fetch->apply
+// plus up to one 30s report cycle before the new applied hash lands, so a mismatch
+// older than 90s cannot be a normal window). policy_error is surfaced IMMEDIATELY,
+// regardless of hash state -- an apply failure is never smoothed by this window.
+const PolicyStaleAfter = 90 * time.Second
+
+// PolicyStale reports whether this node is running STALE policy relative to the
+// pushed hash: hashes differ AND the currently-reported hash has been in place
+// longer than PolicyStaleAfter. A transient mismatch inside the window is not stale.
+func (c NodeCapabilities) PolicyStale(pushedHash string, now time.Time) bool {
+	if c.PolicyHash == pushedHash {
+		return false
+	}
+	if c.PolicyHashSince == "" {
+		return false // never reported -- absence is visible elsewhere, not "stale"
+	}
+	t, err := time.Parse(time.RFC3339, c.PolicyHashSince)
+	if err != nil {
+		return true // corrupt mark + mismatched hash: fail toward visibility
+	}
+	return now.Sub(t) > PolicyStaleAfter
 }
 
 // Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all

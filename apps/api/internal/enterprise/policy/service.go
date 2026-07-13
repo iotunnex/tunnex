@@ -27,9 +27,14 @@ import (
 // validates inputs before touching the DB. It is only constructed in the
 // enterprise build (policy_wire_enterprise.go); the open build's port is nil.
 type Service struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	pool   *pgxpool.Pool
+	q      *sqlc.Queries
+	notify Notifier // nil => no push (provider-only service / tests)
 }
+
+// SetNotifier wires the push hub (S7.2). Call on the CRUD service; the desired-
+// state provider service does not mutate and needs none.
+func (s *Service) SetNotifier(n Notifier) { s.notify = n }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, q: sqlc.New(pool)}
@@ -47,7 +52,7 @@ func (s *Service) CreateGroup(ctx context.Context, orgID uuid.UUID, name, descri
 		return sqlc.UserGroup{}, apierr.BadRequest("invalid_request", "group name is required")
 	}
 	var g sqlc.UserGroup
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		var e error
 		g, e = q.CreateUserGroup(ctx, sqlc.CreateUserGroupParams{OrgID: orgID, Name: name, Description: description})
 		if e != nil {
@@ -64,7 +69,7 @@ func (s *Service) UpdateGroup(ctx context.Context, orgID, groupID uuid.UUID, nam
 		return sqlc.UserGroup{}, apierr.BadRequest("invalid_request", "group name is required")
 	}
 	var g sqlc.UserGroup
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		var e error
 		g, e = q.UpdateUserGroup(ctx, sqlc.UpdateUserGroupParams{ID: groupID, OrgID: orgID, Name: name, Description: description})
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -79,7 +84,7 @@ func (s *Service) UpdateGroup(ctx context.Context, orgID, groupID uuid.UUID, nam
 }
 
 func (s *Service) DeleteGroup(ctx context.Context, orgID, groupID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		n, e := q.DeleteUserGroup(ctx, sqlc.DeleteUserGroupParams{ID: groupID, OrgID: orgID})
 		if e != nil {
 			return e
@@ -104,7 +109,7 @@ func (s *Service) ListGroupMembers(ctx context.Context, orgID, groupID uuid.UUID
 }
 
 func (s *Service) AddGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		if _, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: groupID, OrgID: orgID}); e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				return apierr.NotFound("group_not_found", "group not found")
@@ -131,7 +136,7 @@ func (s *Service) AddGroupMember(ctx context.Context, orgID, groupID, userID uui
 }
 
 func (s *Service) RemoveGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		n, e := q.RemoveGroupMember(ctx, sqlc.RemoveGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID})
 		if e != nil {
 			return e
@@ -184,7 +189,7 @@ func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policy
 	}
 	in.CIDR = canonicalCIDR(in.CIDR) // store the masked prefix, never host-bits-set
 	var r sqlc.Resource
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		var e error
 		r, e = q.CreateResource(ctx, sqlc.CreateResourceParams{
 			OrgID: orgID, Name: strings.TrimSpace(in.Name), Cidr: in.CIDR,
@@ -205,7 +210,7 @@ func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUI
 	}
 	in.CIDR = canonicalCIDR(in.CIDR)
 	var r sqlc.Resource
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		var e error
 		r, e = q.UpdateResource(ctx, sqlc.UpdateResourceParams{
 			ID: resourceID, OrgID: orgID, Name: strings.TrimSpace(in.Name), Cidr: in.CIDR,
@@ -224,7 +229,7 @@ func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUI
 }
 
 func (s *Service) DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		n, e := q.DeleteResource(ctx, sqlc.DeleteResourceParams{ID: resourceID, OrgID: orgID})
 		if e != nil {
 			return e
@@ -258,7 +263,7 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource or group")
 	}
 	var r sqlc.PolicyRule
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		// Referenced src group + dst must belong to THIS org (no cross-tenant refs).
 		if _, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: in.SrcGroupID, OrgID: orgID}); e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
@@ -297,7 +302,7 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 }
 
 func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		n, e := q.DeletePolicyRule(ctx, sqlc.DeletePolicyRuleParams{ID: ruleID, OrgID: orgID})
 		if e != nil {
 			return e
@@ -323,11 +328,17 @@ func (s *Service) GetMode(ctx context.Context, orgID uuid.UUID) (string, error) 
 // (enforcing -> off) re-opens the mesh and is the security-sensitive direction.
 // Enabling with zero grants is ALLOWED (a locked-down posture is legitimate; the
 // UI warns — the server obeys, per the S4.7 server-is-truth precedent).
-func (s *Service) SetMode(ctx context.Context, orgID uuid.UUID, mode string) (string, error) {
+// SetMode flips the org enforcement mode. Enabling (off->enforcing) returns the
+// AFFECTED full-tunnel devices (S7.2 decision 2a): the server OBEYS regardless (S4.7
+// server-is-truth), but the response tells the caller / the S7.4 warn-and-confirm
+// exactly whose internet egress the flip governs (blast radius). Disabling returns no
+// list (re-opening the mesh restores egress). Both directions are audited + push the
+// gateways (via mutate).
+func (s *Service) SetMode(ctx context.Context, orgID uuid.UUID, mode string) (string, []policyspec.AffectedDevice, error) {
 	if mode != ModeOff && mode != ModeEnforcing {
-		return "", apierr.BadRequest("invalid_request", "mode must be off or enforcing")
+		return "", nil, apierr.BadRequest("invalid_request", "mode must be off or enforcing")
 	}
-	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		org, e := q.SetOrgZeroTrustMode(ctx, sqlc.SetOrgZeroTrustModeParams{ID: orgID, ZeroTrustMode: mode})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return apierr.NotFound("org_not_found", "organization not found")
@@ -341,7 +352,20 @@ func (s *Service) SetMode(ctx context.Context, orgID uuid.UUID, mode string) (st
 		}
 		return writeAudit(ctx, q, orgID, action, "organization", orgID.String(), map[string]any{"mode": mode})
 	})
-	return mode, err
+	if err != nil {
+		return "", nil, err
+	}
+	var affected []policyspec.AffectedDevice
+	if mode == ModeEnforcing {
+		rows, e := s.q.ListActiveFullTunnelDevices(ctx, orgID)
+		if e != nil {
+			return "", nil, e
+		}
+		for _, r := range rows {
+			affected = append(affected, policyspec.AffectedDevice{ID: r.ID, Name: r.Name})
+		}
+	}
+	return mode, affected, nil
 }
 
 // ── snapshot + invalidation (consumed by S7.2) ──────────────────────────────────
@@ -395,27 +419,69 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	return snap, nil
 }
 
+// CompiledForNode builds the per-node compiled artifact the control plane pushes in
+// the desired state (S7.2). A node with active devices gets its compiled entry; a
+// device-LESS node gets an explicit deny-all under enforcing (so the blanket mesh is
+// removed proactively, not left until the first device) or nil under off (legacy
+// mesh). This is the nodes.PolicyProvider the desired-state path calls.
+func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error) {
+	snap, err := s.BuildSnapshot(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	compiled := Compile(snap)
+	if c, ok := compiled[nodeID]; ok {
+		return &c, nil
+	}
+	if snap.Mode == ModeEnforcing {
+		return &policyspec.Compiled{
+			Version: policyspec.ProtocolVersion, NodeID: nodeID.String(),
+			Mode: ModeEnforcing, Mesh: false, // deny-all: no blanket even with no devices
+		}, nil
+	}
+	return nil, nil // off / no policy -> agent keeps the legacy mesh
+}
+
 // AffectedNodeIDs returns the nodes whose compiled policy could change for this
 // org — the nodes that currently host active devices. A policy mutation is
 // org-wide, so S7.2 recompiles + pushes to exactly these nodes (the invalidation
 // target). Model-layer logic, tested here; the push itself is S7.2.
 func (s *Service) AffectedNodeIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
-	devices, err := s.q.ListActiveDevicesForOrg(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[uuid.UUID]bool{}
-	var out []uuid.UUID
-	for _, d := range devices {
-		if !seen[d.NodeID] {
-			seen[d.NodeID] = true
-			out = append(out, d.NodeID)
-		}
-	}
-	return out, nil
+	return s.q.ListActiveNodeIDsForOrg(ctx, orgID)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
+
+// Notifier signals gateways to re-fetch desired state (the <5s push path). The
+// nodepush hub satisfies it; nil = no push (tests / provider-only service).
+type Notifier interface{ NotifyMany(nodeIDs []uuid.UUID) }
+
+// mutate runs a mutation in a transaction and, on success, PUSHES the org's
+// device-hosting gateways so they re-fetch + recompile within the <5s spec. Every
+// compiler input changes through one of these (group/resource/rule CRUD, membership
+// add/remove, mode) -- so wrapping them here is the single choke point for the
+// recompile+push triggers. The push is best-effort (a missed signal is caught by the
+// agent's reconcile-interval safety net); it never fails the mutation.
+func (s *Service) mutate(ctx context.Context, orgID uuid.UUID, fn func(*sqlc.Queries) error) error {
+	if err := s.withTx(ctx, fn); err != nil {
+		return err
+	}
+	s.pushOrg(ctx, orgID)
+	return nil
+}
+
+// pushOrg notifies every gateway that currently hosts an active device in the org
+// (the nodes whose compiled policy could change). Best-effort.
+func (s *Service) pushOrg(ctx context.Context, orgID uuid.UUID) {
+	if s.notify == nil {
+		return
+	}
+	ids, err := s.AffectedNodeIDs(ctx, orgID)
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	s.notify.NotifyMany(ids)
+}
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	tx, err := s.pool.Begin(ctx)
