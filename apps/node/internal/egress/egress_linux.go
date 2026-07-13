@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
@@ -56,23 +57,30 @@ type Manager struct {
 	appliedVersion int
 	appliedHash    string
 	applyErr       error
+	// failingSince is the instant apply FIRST started failing (the mismatch onset),
+	// cleared the moment an apply SUCCEEDS. The control plane's stale alarm measures
+	// (now - failingSince), NOT the applied-hash age — so a NORMAL push that applies
+	// cleanly never registers stale, and the 90s window measures the real mismatch
+	// duration (box-proof finding #3). now() is injectable for tests.
+	failingSince time.Time
+	now          func() time.Time
 }
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
-func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply} }
+func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now} }
 
 // SetPolicy stores the latest compiled policy for the next Reconcile to render. A nil
 // policy (open build / no Zero Trust) keeps the legacy blanket mesh.
 func (m *Manager) SetPolicy(p *nodepolicy.Compiled) { m.policy.Store(p) }
 
-// AppliedStatus reports the version + short content hash of the policy CURRENTLY IN
-// FORCE (last successful apply), and the last apply error if any. The reconcile loop
-// puts this on the status channel so the control plane can compare pushed-vs-applied
-// and surface a gateway running STALE policy (a policy violation in slow motion).
-func (m *Manager) AppliedStatus() (version int, hash string, applyErr error) {
+// AppliedStatus reports the version + canonical hash of the policy CURRENTLY IN FORCE
+// (last successful apply), the last apply error, and failingSince — the mismatch
+// onset (zero when apply is healthy). The reconcile loop puts these on the status
+// channel so the control plane can surface a gateway running STALE policy.
+func (m *Manager) AppliedStatus() (version int, hash string, failingSince time.Time, applyErr error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.appliedVersion, m.appliedHash, m.applyErr
+	return m.appliedVersion, m.appliedHash, m.failingSince, m.applyErr
 }
 
 // desiredVersion returns the version of the policy the loop last handed us (0 = mesh/
@@ -267,6 +275,9 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	if err := m.apply(ctx, ruleset); err != nil {
 		m.mu.Lock()
 		m.applyErr = err
+		if m.failingSince.IsZero() { // stamp the mismatch ONSET, once
+			m.failingSince = m.now()
+		}
 		m.mu.Unlock()
 		return err
 	}
@@ -278,6 +289,7 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	m.appliedVersion = version
 	m.appliedHash = nodepolicy.CanonicalHash(pol)
 	m.applyErr = nil
+	m.failingSince = time.Time{} // apply succeeded -> no mismatch -> not stale
 	m.mu.Unlock()
 	return nil
 }

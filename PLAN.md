@@ -1104,6 +1104,15 @@ EPIC 10 too; do not build S8 routing without it.
 - **S11.3 Rate limiting & security headers** — API abuse protection, TLS via nginx, secrets hygiene.
 - **S11.4 Docs & install guide** — self-host quickstart, upgrade path.
 
+**LEDGERED (S7.2 box-proof finding #2, DEFERRED): targeted conntrack-kill on Zero Trust grant change.**
+Today `ct established,related accept` (the return-path guard) lets flows ESTABLISHED under a prior
+policy DRAIN until idle when a restriction takes effect — covers BOTH enabling `enforcing` AND deleting
+an existing grant; NEW flows are blocked immediately, and revocation/offboarding is unaffected (wg peer
+removal kills the tunnel). To terminate in-flight flows the instant a grant is removed, the agent would
+delete the conntrack entries matching the removed allow. **Trigger = first customer/compliance need for
+immediate flow termination on grant change.** Pairs naturally with the flow-logs candidate (S7.2 already
+emits per-rule `counter`s) — the same per-rule identity drives both. Documented in docs/S7.2-decisions.md.
+
 ## EPIC 12 — Commercial / Licensing Infrastructure *(PARKED — trigger: post-public-beta; needs a sellable product + users first)*
 
 **Positioning guard:** licensing MUST NOT break the "self-hosted, no SaaS in the trust path" differentiator. License verification is **OFFLINE** — the customer's deployment verifies a signed key locally against a baked-in public key; it works air-gapped and **NEVER calls Tunnex infra to function.** Any phone-home (renewal reminders, telemetry) is optional, async, and degrades gracefully — a lapsed connection to Tunnex infra **NEVER hard-fails a running VPN.** This is the sovereignty/Tailscale-differentiator constraint; a call-home validation model is explicitly **REJECTED**.

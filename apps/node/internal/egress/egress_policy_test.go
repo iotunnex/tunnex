@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"testing"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
@@ -28,7 +29,7 @@ func TestApplyFailureLeavesAppliedStale(t *testing.T) {
 	if err := m.applyAndTrack(context.Background(), m.ruleset(""), v1); err != nil {
 		t.Fatalf("good apply: %v", err)
 	}
-	if v, h, e := m.AppliedStatus(); v != 1 || h != nodepolicy.CanonicalHash(v1) || e != nil {
+	if v, h, fs, e := m.AppliedStatus(); v != 1 || h != nodepolicy.CanonicalHash(v1) || e != nil || !fs.IsZero() {
 		t.Fatalf("after good apply want v=1, canonical hash, nil err; got v=%d h=%q e=%v", v, h, e)
 	}
 	goodHash := nodepolicy.CanonicalHash(v1)
@@ -41,7 +42,8 @@ func TestApplyFailureLeavesAppliedStale(t *testing.T) {
 	if err := m.applyAndTrack(context.Background(), m.ruleset(""), v2); !errors.Is(err, boom) {
 		t.Fatalf("failed apply must return the error; got %v", err)
 	}
-	v, h, e := m.AppliedStatus()
+	v, h, fs, e := m.AppliedStatus()
+	_ = fs
 	if v != 1 || h != goodHash {
 		t.Fatalf("applied must stay at the last-good (v=1) on failure; got v=%d h=%q", v, h)
 	}
@@ -181,3 +183,52 @@ func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 		t.Fatalf("port range mis-rendered: %q", line)
 	}
 }
+
+// failingSince (finding #3) is the mismatch ONSET: zero while apply is healthy, set
+// on the FIRST failure, cleared on the next success. This is what the control plane's
+// stale window measures — so a normal push that applies never registers stale.
+func TestFailingSinceMismatchOnset(t *testing.T) {
+	m := New("wg0")
+	tick := time.Unix(1000, 0)
+	m.now = func() time.Time { return tick }
+
+	// Healthy apply -> no failingSince (a normal push is never stale).
+	m.apply = func(context.Context, string) error { return nil }
+	m.SetPolicy(&nodepolicy.Compiled{Version: 1, Mode: nodepolicy.ModeEnforcing})
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), m.policy.Load()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, fs, _ := m.AppliedStatus(); !fs.IsZero() {
+		t.Fatalf("healthy apply must leave failingSince zero, got %v", fs)
+	}
+
+	// First failure stamps the onset.
+	m.apply = func(context.Context, string) error { return errFail }
+	tick = time.Unix(2000, 0)
+	m.SetPolicy(&nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing})
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), m.policy.Load())
+	_, _, fs1, _ := m.AppliedStatus()
+	if !fs1.Equal(time.Unix(2000, 0)) {
+		t.Fatalf("first failure must stamp onset=2000, got %v", fs1)
+	}
+	// A SECOND failure does NOT move the onset (measures duration from first fail).
+	tick = time.Unix(2050, 0)
+	_ = m.applyAndTrack(context.Background(), m.ruleset(""), m.policy.Load())
+	if _, _, fs2, _ := m.AppliedStatus(); !fs2.Equal(time.Unix(2000, 0)) {
+		t.Fatalf("onset must not advance on repeated failure, got %v", fs2)
+	}
+	// Recovery clears it.
+	m.apply = func(context.Context, string) error { return nil }
+	if err := m.applyAndTrack(context.Background(), m.ruleset(""), m.policy.Load()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, fs3, e := m.AppliedStatus(); !fs3.IsZero() || e != nil {
+		t.Fatalf("recovery must clear failingSince, got fs=%v err=%v", fs3, e)
+	}
+}
+
+var errFail = fmtErr("nft apply: rejected")
+
+type fmtErr string
+
+func (e fmtErr) Error() string { return string(e) }
