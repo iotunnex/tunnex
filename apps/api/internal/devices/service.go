@@ -181,7 +181,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			deviceStatus = "pending"
 		}
 		if org.MaxDevicesPerUser > 0 {
-			count, ce := q.CountActiveDevicesForUser(ctx, sqlc.CountActiveDevicesForUserParams{OrgID: in.OrgID, UserID: in.OwnerID})
+			// Counts active+pending (finding #1): a pending device reserves a pool /32 and
+			// is a real enrollment, so the cap must include it — else a user creates
+			// unbounded pending devices (cap bypass on approve + an org-pool DoS).
+			count, ce := q.CountDevicesForUserCap(ctx, sqlc.CountDevicesForUserCapParams{OrgID: in.OrgID, UserID: in.OwnerID})
 			if ce != nil {
 				return ce
 			}
@@ -458,6 +461,16 @@ func (s *Service) Get(ctx context.Context, orgID, deviceID uuid.UUID) (sqlc.Devi
 // from the device within the <5s bound. A no-op (already revoked) is a conflict.
 func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		// Read the PRIOR status (in-tx) so the audit distinguishes an owner CANCELLING their
+		// own pending enrollment (device.cancelled) from a revocation of an active device
+		// (device.revoked) — the queue history separates user-withdrew from admin-refused
+		// (finding #3). RevokeDevice itself now accepts active OR pending (owner-cancel path).
+		prior, ge := q.GetDevice(ctx, sqlc.GetDeviceParams{ID: deviceID, OrgID: orgID})
+		if errors.Is(ge, pgx.ErrNoRows) {
+			return apierr.Conflict("already_revoked", "device is not active")
+		} else if ge != nil {
+			return ge
+		}
 		if _, e := q.RevokeDevice(ctx, sqlc.RevokeDeviceParams{ID: deviceID, OrgID: orgID}); errors.Is(e, pgx.ErrNoRows) {
 			return apierr.Conflict("already_revoked", "device is not active")
 		} else if e != nil {
@@ -468,7 +481,11 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 		if e := q.DeleteDeviceStatus(ctx, deviceID); e != nil {
 			return e
 		}
-		return audit(ctx, q, orgID, &actorID, "device.revoked", "device", deviceID.String(), map[string]any{})
+		action := "device.revoked"
+		if prior.Status == "pending" {
+			action = "device.cancelled" // owner withdrew a pending enrollment
+		}
+		return audit(ctx, q, orgID, &actorID, action, "device", deviceID.String(), map[string]any{})
 	})
 	if err != nil {
 		return err

@@ -47,6 +47,7 @@ export class RevocationMonitor {
 
   constructor(
     private readonly deviceId: string,
+    private readonly orgId: string, // the device's own org — queried directly (S7.3 #4)
     private readonly api: Pick<DeviceApi, "deviceExists">,
     private readonly onRevoked: () => void | Promise<void>,
     private readonly baseMs: number = REVOKE_POLL_MS,
@@ -88,7 +89,7 @@ export class RevocationMonitor {
     if (this.stopped || this.fired || this.inFlight) return "skipped";
     this.inFlight = true;
     try {
-      const exists = await this.api.deviceExists(this.deviceId);
+      const exists = await this.api.deviceExists(this.deviceId, this.orgId);
       // A stop() during the await means the user is already disconnecting — abandon
       // the result rather than tearing down (or resetting backoff) behind their back.
       if (this.stopped) return "skipped";

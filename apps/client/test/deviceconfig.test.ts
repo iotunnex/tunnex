@@ -51,7 +51,7 @@ function fakePersist(): Persistence {
 
 test("TunnelConfigStore is origin-keyed and refuses insecure by default", () => {
   const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
-  const sc = { origin: "https://a.example", deviceId: "dev-a", config: { ...parseWgConf(CONF), full_tunnel: true } };
+  const sc = { origin: "https://a.example", deviceId: "dev-a", orgId: "org-1", config: { ...parseWgConf(CONF), full_tunnel: true } };
   store.put(sc);
   assert.equal(store.get("https://a.example")?.deviceId, "dev-a");
   assert.equal(store.get("https://b.example"), null); // never cross-origin
@@ -73,7 +73,7 @@ function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: bo
     pending: false, // S7.3: when true, createDevice returns pendingApproval
     async createDevice() {
       this.creates++;
-      return { deviceId: "dev-" + this.creates, confText: CONF, pendingApproval: this.pending };
+      return { deviceId: "dev-" + this.creates, confText: CONF, pendingApproval: this.pending, orgId: "org-1" };
     },
     async revokeDevice(id: string) {
       this.revoked.push(id);
@@ -193,4 +193,26 @@ test("resolveTunnelConfig: pending device gates (throws, no duplicate re-mint)",
   const cfg = await resolveTunnelConfig(origin, false, api, store);
   assert.ok(cfg); // returned the stored config
   assert.equal(api.creates, 1); // still no re-mint (existence check passes for active)
+});
+
+// Finding #3: a MODE change (split<->full) while a device is AWAITING approval must re-mint
+// for the new mode, NOT silently re-throw pending for the old-mode device (the reorder:
+// mode-mismatch is checked before the pending short-circuit).
+test("resolveTunnelConfig: mode change while pending re-mints (not silently dropped)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const api = fakeApi();
+  api.pending = true;
+  const origin = "https://m.example";
+
+  // Enroll split -> pending.
+  await assert.rejects(() => resolveTunnelConfig(origin, false, api, store), PendingApprovalError);
+  assert.equal(api.creates, 1);
+  assert.equal(store.get(origin)?.config.full_tunnel, false);
+
+  // Toggle to full-tunnel while still pending: must abandon the split device (revoke =
+  // owner-cancel) and mint a FRESH full-tunnel device — not re-throw the old split one.
+  await assert.rejects(() => resolveTunnelConfig(origin, true, api, store), PendingApprovalError);
+  assert.equal(api.creates, 2); // re-minted for the new mode
+  assert.deepEqual(api.revoked, ["dev-1"]); // the superseded pending device was cancelled
+  assert.equal(store.get(origin)?.config.full_tunnel, true);
 });

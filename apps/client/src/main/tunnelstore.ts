@@ -8,6 +8,7 @@ import type { TunnelConfig } from "./helperclient";
 export interface StoredTunnelConfig {
   origin: string; // the server origin this config/device belongs to
   deviceId: string; // for best-effort revoke (against THIS origin only)
+  orgId: string; // the device's OWN org — the monitors query it directly (S7.3 finding #4)
   config: TunnelConfig;
   // pending (S7.3) = the device is AWAITING admin approval: the config is valid but the
   // gateway won't serve the peer yet, so resolveTunnelConfig refuses to arm the helper and

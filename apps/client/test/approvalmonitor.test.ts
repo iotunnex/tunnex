@@ -21,6 +21,7 @@ function mk(api: { deviceStatus: (id: string) => Promise<"active" | "pending" | 
   const events: string[] = [];
   const m = new ApprovalMonitor(
     "dev-1",
+    "org-1",
     api,
     () => { events.push("approved"); },
     () => { events.push("rejected"); },
