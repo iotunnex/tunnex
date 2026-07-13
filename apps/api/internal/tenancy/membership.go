@@ -89,11 +89,15 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 			return err
 		}
 	}
-	// Offboarding cascade: the user's peers now fall out of every node's desired
-	// state (the peer query requires an active owner); push so they are removed
-	// from the data plane within seconds, not at the next interval.
+	// Offboarding cascade: the user's peers fall out of every node's desired state
+	// (the peer query requires an active owner). ORG-WIDE push (S7.2 finding #1): not
+	// just this user's own device-nodes — under Zero Trust enforcing, a DIFFERENT
+	// node hosting another user's device that referenced this now-inactive user as a
+	// policy group-destination must ALSO recompile so the ex-member's /32 leaves its
+	// ruleset within the <5s spec. PushUserNodes would miss those nodes on a
+	// multi-gateway org (single-gateway hid this; the multi-node test guards it).
 	if s.pusher != nil {
-		s.pusher.PushUserNodes(ctx, targetUserID)
+		s.pusher.PushOrgNodes(ctx, orgID)
 	}
 	return nil
 }
@@ -114,10 +118,11 @@ func (s *MembershipService) ReactivateMember(ctx context.Context, actor, orgID, 
 	}); err != nil {
 		return err
 	}
-	// Restore the user's peers to the data plane promptly (they re-enter desired
-	// state now that the owner is active again).
+	// Restore the user's peers + policy grants to the data plane promptly. ORG-WIDE
+	// (symmetric with deactivate, S7.2 finding #1): nodes referencing this user as a
+	// policy group-destination must recompile to re-add their /32.
 	if s.pusher != nil {
-		s.pusher.PushUserNodes(ctx, targetUserID)
+		s.pusher.PushOrgNodes(ctx, orgID)
 	}
 	return nil
 }
@@ -197,8 +202,16 @@ func (s *MembershipService) ChangeMemberRole(ctx context.Context, actor *uuid.UU
 	return result, err
 }
 
-// RemoveMember removes a member, enforcing the RBAC relational rules and the
-// last-owner invariant, and records member.removed atomically.
+// RemoveMember HARD-deletes a membership (the group_members cascade FK then drops the
+// user's group rows), enforcing the RBAC relational rules and the last-owner invariant,
+// and records member.removed atomically.
+//
+// INTERNAL-ONLY (S7.2 finding #1): there is deliberately NO HTTP endpoint for hard
+// removal today — the exposed offboarding is DeactivateMember (reversible; status
+// flip + org-wide push). This method retains the ORG-WIDE PushOrgNodes below so that
+// IF a hard-remove endpoint is ever added, it inherits the Zero Trust <5s push
+// targeting (a removed member's /32 must leave every node's ruleset, not just their
+// own device-nodes). Do not wire an endpoint to this without that push intact.
 func (s *MembershipService) RemoveMember(ctx context.Context, actor *uuid.UUID, actorRole string, orgID, targetUserID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		target, e := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID})

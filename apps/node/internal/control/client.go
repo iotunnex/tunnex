@@ -150,6 +150,9 @@ type PolicyStatus struct {
 	Version int
 	Hash    string
 	Error   string
+	// FailingSince (RFC3339, empty when healthy) is the mismatch onset — the control
+	// plane's stale alarm measures elapsed time from here, not the applied-hash age.
+	FailingSince string
 }
 
 // ReportInfo reports the node's locally-generated WireGuard public key, its public
@@ -160,6 +163,7 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 	body, _ := json.Marshal(map[string]any{
 		"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT,
 		"policy_version": ps.Version, "policy_hash": ps.Hash, "policy_error": ps.Error,
+		"policy_failing_since": ps.FailingSince,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

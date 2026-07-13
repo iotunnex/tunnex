@@ -343,6 +343,10 @@ type AppliedPolicy struct {
 	Version int    `json:"policy_version"`
 	Hash    string `json:"policy_hash"`
 	Error   string `json:"policy_error"`
+	// FailingSince (RFC3339, empty when healthy) is the agent-reported mismatch
+	// onset: when apply FIRST started failing. The stale alarm measures from here,
+	// so a normal push that applies cleanly never registers stale (finding #3).
+	FailingSince string `json:"policy_failing_since"`
 }
 
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
@@ -370,25 +374,20 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	if len(applied.Error) > 512 {
 		applied.Error = applied.Error[:512]
 	}
-	// policy_hash_since: the SERVER timestamp at which the currently-reported hash
-	// was FIRST seen (preserved across reports carrying the same hash, reset when
-	// the hash changes). This is the substrate for the staleness alarm: stale =
-	// pushed != applied persisting past PolicyStaleAfter -- age is measured from
-	// this server-side mark, never from agent-supplied time.
-	since := time.Now().UTC().Format(time.RFC3339)
-	if prev := Capabilities(node.Capabilities); prev.PolicyHash == applied.Hash && prev.PolicyHashSince != "" {
-		since = prev.PolicyHashSince
+	// Bound the agent-supplied failing_since string too (it lands in JSONB).
+	if len(applied.FailingSince) > 40 {
+		applied.FailingSince = applied.FailingSince[:40]
 	}
 	// Gateway capabilities the agent probes + re-reports every reconcile (S3.7 +
 	// S7.2 applied-policy status). The column is a forward-compat JSONB map; we build
 	// it server-side from the typed report so a compromised agent can't inject
 	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
 	caps, err := json.Marshal(map[string]any{
-		"egress_nat":        egressNAT,
-		"policy_version":    applied.Version,
-		"policy_hash":       applied.Hash,
-		"policy_error":      applied.Error,
-		"policy_hash_since": since,
+		"egress_nat":           egressNAT,
+		"policy_version":       applied.Version,
+		"policy_hash":          applied.Hash,
+		"policy_error":         applied.Error,
+		"policy_failing_since": applied.FailingSince,
 	})
 	if err != nil {
 		return err
@@ -411,9 +410,10 @@ type NodeCapabilities struct {
 	PolicyVersion int    `json:"policy_version"`
 	PolicyHash    string `json:"policy_hash"`
 	PolicyError   string `json:"policy_error"`
-	// PolicyHashSince is the server timestamp (RFC3339) at which PolicyHash was
-	// first reported -- the base for the staleness persistence window.
-	PolicyHashSince string `json:"policy_hash_since"`
+	// PolicyFailingSince (RFC3339) is the agent-reported mismatch ONSET: when apply
+	// first started failing (empty when healthy). The stale window measures from
+	// here, not the applied-hash age -- so a normal push never false-alarms (#3).
+	PolicyFailingSince string `json:"policy_failing_since"`
 }
 
 // PolicyStaleAfter is the staleness alarm window (S7.2 decision): pushed != applied
@@ -424,19 +424,18 @@ type NodeCapabilities struct {
 // regardless of hash state -- an apply failure is never smoothed by this window.
 const PolicyStaleAfter = 90 * time.Second
 
-// PolicyStale reports whether this node is running STALE policy relative to the
-// pushed hash: hashes differ AND the currently-reported hash has been in place
-// longer than PolicyStaleAfter. A transient mismatch inside the window is not stale.
-func (c NodeCapabilities) PolicyStale(pushedHash string, now time.Time) bool {
-	if c.PolicyHash == pushedHash {
-		return false
+// PolicyStale reports whether this node is running STALE policy: apply has been
+// FAILING (applied != desired) for longer than PolicyStaleAfter. Measured from the
+// mismatch ONSET (PolicyFailingSince), so a healthy node (no failing_since) is never
+// stale and a normal push that applies within the window never false-alarms (#3).
+// policy_error is surfaced IMMEDIATELY elsewhere; this is the persistent alarm.
+func (c NodeCapabilities) PolicyStale(now time.Time) bool {
+	if c.PolicyFailingSince == "" {
+		return false // apply is healthy -> not stale
 	}
-	if c.PolicyHashSince == "" {
-		return false // never reported -- absence is visible elsewhere, not "stale"
-	}
-	t, err := time.Parse(time.RFC3339, c.PolicyHashSince)
+	t, err := time.Parse(time.RFC3339, c.PolicyFailingSince)
 	if err != nil {
-		return true // corrupt mark + mismatched hash: fail toward visibility
+		return true // corrupt mark while failing: fail toward visibility
 	}
 	return now.Sub(t) > PolicyStaleAfter
 }

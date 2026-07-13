@@ -127,12 +127,13 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		PolicyVersion int    `json:"policy_version"`
 		PolicyHash    string `json:"policy_hash"`
 		PolicyError   string `json:"policy_error"`
+		PolicyFailing string `json:"policy_failing_since"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError}
+	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing}
 	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {

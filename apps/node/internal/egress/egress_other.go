@@ -4,6 +4,7 @@ package egress
 
 import (
 	"context"
+	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
@@ -23,4 +24,4 @@ func (m *Manager) SetPolicy(_ *nodepolicy.Compiled) {}
 
 // AppliedStatus off Linux reports "nothing applied" (version 0, no hash, no error) —
 // a non-Linux agent never claims a policy is in force.
-func (m *Manager) AppliedStatus() (int, string, error) { return 0, "", nil }
+func (m *Manager) AppliedStatus() (int, string, time.Time, error) { return 0, "", time.Time{}, nil }

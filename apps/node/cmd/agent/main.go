@@ -267,10 +267,13 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		// Applied-policy status rides the capability report (S7.2 staleness): version +
 		// canonical hash of what is IN FORCE, plus the last apply error. The control
 		// plane compares against what it pushed — a stale gateway must be visible.
-		v, h, applyErr := egressMgr.AppliedStatus()
+		v, h, failingSince, applyErr := egressMgr.AppliedStatus()
 		ps := control.PolicyStatus{Version: v, Hash: h}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
+		}
+		if !failingSince.IsZero() {
+			ps.FailingSince = failingSince.UTC().Format(time.RFC3339)
 		}
 		if err := client.ReportInfo(ctx, pubKey, endpoint, egressNAT.Load(), ps); err != nil {
 			logger.Warn("agent_report_key_failed", slog.String("error", err.Error()))
