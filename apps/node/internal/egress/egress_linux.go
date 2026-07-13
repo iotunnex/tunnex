@@ -245,7 +245,7 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 			b.WriteString(line)
 		}
 	}
-	b.WriteString(dropCounter) // count the default-deny drops (box-proof drop observation)
+	b.WriteString(dropCounter)     // count the default-deny drops (box-proof drop observation)
 	return b.String(), dropCounter // enforcing v6 = default-deny: no allows, just the drop counter
 }
 
@@ -264,13 +264,21 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 	if err != nil || !dst.Addr().Is4() {
 		return "", false
 	}
+	// CONVENTION (fail-closed rendering): this renderer REFUSES any unknown or half-
+	// specified field — it skips the rule (-> no match -> default-deny) and NEVER widens
+	// on it. validateResource is the first gate, but a compromised or future control
+	// plane could still emit a malformed artifact, so the renderer never trusts it. This
+	// has bitten twice (port range #1, protocol #6); it is a checklist line for every new
+	// field added to AllowEntry.
 	clause := ""
 	switch e.Protocol {
+	case "any":
+		// All protocols for this src/dst — the intended wide grant; clause stays empty.
 	case "tcp", "udp":
 		lowSet, highSet := e.PortLow > 0, e.PortHigh > 0
 		switch {
 		case !lowSet && !highSet:
-			// Both unset = any port of this protocol (the validated "no port range" case).
+			// Both unset = any port of this protocol (the "no port range" case).
 			clause = fmt.Sprintf(" ip protocol %s", e.Protocol)
 		case lowSet && highSet && e.PortHigh >= e.PortLow:
 			if e.PortHigh > e.PortLow {
@@ -280,11 +288,16 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 			}
 		default:
 			// A HALF-SET or inverted range (only low, only high, or high<low) is
-			// malformed (validateResource requires both-or-neither, but a compromised
-			// control plane or a future path could still emit it). FAIL CLOSED: skip
-			// the rule -> no match -> default-deny, NEVER widen to all-ports (finding #1).
+			// malformed. FAIL CLOSED: skip the rule -> default-deny, NEVER widen to
+			// all-ports (finding #1).
 			return "", false
 		}
+	default:
+		// Unknown/empty protocol. The compiler only emits any/tcp/udp, but the renderer
+		// does not rely on that: an unrecognized value FAILS CLOSED (skip -> default-deny),
+		// symmetric with the half-set-port refusal — never a silent all-protocol widen
+		// (finding #6).
+		return "", false
 	}
 	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter accept\n", src.String(), dst.Masked().String(), clause), true
 }
