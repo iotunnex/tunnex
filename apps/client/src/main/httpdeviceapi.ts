@@ -84,9 +84,13 @@ export class HttpDeviceApi implements DeviceApi {
     // inconclusive throw intact, so an upgrader's monitors keep working (never a malformed
     // /organizations//devices URL). Legacy configs stamp orgId on the next resolve
     // (resolveTunnelConfig), retiring the scan path.
-    if (!orgId) return (await this.scanDevice(deviceId)).status;
+    // orgId is ALWAYS present: new configs persist it at create, and a LEGACY config (no
+    // orgId) is re-minted before any monitor runs (the reduction — resolveTunnelConfig +
+    // connect never query a no-orgId config). A blank orgId here is therefore a bug, not a
+    // fallback: throw inconclusive rather than build a malformed /organizations//devices URL.
+    if (!orgId) throw new Error("no_org: inconclusive");
     const s = await this.deviceInOrg(orgId, deviceId);
-    return s ?? "gone"; // not in its OWN org -> genuinely gone (direct path, no list-trust)
+    return s ?? "gone"; // not in its OWN org -> genuinely gone (direct query, no list-trust)
   }
 
   // deviceExists is deviceStatus === "active" (finding #6): ONE fail-safe implementation,
@@ -96,49 +100,8 @@ export class HttpDeviceApi implements DeviceApi {
     return (await this.deviceStatus(deviceId, orgId)) === "active";
   }
 
-  // resolveDeviceOrg scans all orgs for the device and returns the org it lives in (null =
-  // genuinely gone, per scanDevice's complete-information rule; THROWS on inconclusive).
-  // resolveTunnelConfig uses it to STAMP a legacy config's orgId + as the one-fetch existence
-  // check (org found = exists), migrating the config onto the direct path so the scan retires.
-  async resolveDeviceOrg(deviceId: string): Promise<string | null> {
-    return (await this.scanDevice(deviceId)).orgId;
-  }
-
-  // scanDevice is the LEGACY all-orgs scan (pre-orgId configs only; retires as configs stamp).
-  // COMPLETE-INFORMATION RULE (finding #1): a destructive "gone" requires that EVERY org was
-  // read OK and none has the device — a single org's fetch error does NOT abort the scan
-  // (a 403 from an org the caller was offboarded from must not mask a device in a later org),
-  // and if the device wasn't found AND any fetch failed the verdict is INCONCLUSIVE (throw →
-  // keep + backoff), never "gone". Partial information yields unknown, never gone.
-  //
-  // KNOWN BOUNDED LIMITATION (finding #2, ACCEPTED, TRANSITIONAL): when ALL org fetches
-  // succeed but the org LIST itself is transiently partial (omits the device's org), the scan
-  // returns a false "gone". Unavoidable when scanning without a known orgId (the direct path
-  // has no such trust). Triple-bounded: legacy configs only + a stamp-blip window + a
-  // persistently-partial list while all fetches succeed. Self-retires via stamping.
-  // RETIREMENT CONDITION: when telemetry/support shows no un-stamped legacy configs remain
-  // (or a release-N deprecation), DELETE this scan path and make orgId REQUIRED.
-  private async scanDevice(deviceId: string): Promise<{ status: "active" | "pending" | "gone"; orgId: string | null }> {
-    const orgIds = await this.orgIds();
-    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
-    let anyFailed = false;
-    for (const orgId of orgIds) {
-      let s: "active" | "pending" | "gone" | null;
-      try {
-        s = await this.deviceInOrg(orgId, deviceId);
-      } catch {
-        anyFailed = true; // a single org's error must not abort the scan (#1)
-        continue;
-      }
-      if (s) return { status: s, orgId };
-    }
-    if (anyFailed) throw new Error("incomplete_scan: inconclusive"); // partial info -> unknown (#1)
-    return { status: "gone", orgId: null }; // every org read OK, none has it -> genuinely gone
-  }
-
   // deviceInOrg fetches ONE org's device list and maps the device's status, or null if it is
-  // not in that org. Throws on a non-OK read. The SINGLE per-org lookup both the direct path
-  // and the scan share (finding #5 — no duplicated fetch/find/status-map).
+  // not in that org. Throws on a non-OK read (inconclusive — a blip never reads as gone).
   private async deviceInOrg(orgId: string, deviceId: string): Promise<"active" | "pending" | "gone" | null> {
     const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
     if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
