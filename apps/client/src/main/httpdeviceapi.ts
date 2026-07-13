@@ -76,11 +76,17 @@ export class HttpDeviceApi implements DeviceApi {
   }
 
   async deviceStatus(deviceId: string, orgId: string): Promise<"active" | "pending" | "gone"> {
-    // The definitive server status, queried against the device's OWN org (persisted at
-    // create) — NOT a scan of all orgs. Scanning risked a false "gone" when a transient
-    // list omitted the device's org (finding #4); querying the one org means a fetch error
-    // THROWS (inconclusive — a blip never reads as a transition), and "gone" is returned
-    // ONLY when that org's real device list omits the id.
+    // A PRESENT orgId (new configs, persisted at create) queries the device's OWN org
+    // directly — a fetch error THROWS (inconclusive; a blip never reads as a transition),
+    // and "gone" is returned ONLY when that org's real list omits the id (no cross-org scan
+    // that a transient omit could false-"gone", finding #4).
+    //
+    // A MISSING/BLANK orgId (a LEGACY config persisted before the orgId field — the
+    // installed base / v0.1.0 upgraders) FALLS BACK to the all-orgs SCAN with the empty-orgs
+    // inconclusive throw intact, so an upgrader's monitors keep working (never a malformed
+    // /organizations//devices URL). Legacy configs stamp orgId on the next resolve
+    // (resolveTunnelConfig), retiring the scan path.
+    if (!orgId) return (await this.scanDevice(deviceId)).status;
     const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
     if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
     const devices = (await r.json()) as Array<{ id: string; status: string }>;
@@ -94,6 +100,36 @@ export class HttpDeviceApi implements DeviceApi {
   // disagree on when a device is "gone" vs inconclusive.
   async deviceExists(deviceId: string, orgId: string): Promise<boolean> {
     return (await this.deviceStatus(deviceId, orgId)) === "active";
+  }
+
+  // resolveDeviceOrg scans all orgs for the device and returns the org it lives in (null if
+  // genuinely gone; THROWS on a read blip). resolveTunnelConfig uses it to STAMP a legacy
+  // config's orgId, migrating it onto the direct-query path so the scan retires.
+  async resolveDeviceOrg(deviceId: string): Promise<string | null> {
+    return (await this.scanDevice(deviceId)).orgId;
+  }
+
+  // scanDevice is the legacy all-orgs scan (the pre-orgId behavior): the empty-org-list case
+  // THROWS inconclusive (a bare 200-with-[] must not read as "genuinely gone"). Returns the
+  // status AND the org the device was found in (for stamping).
+  private async scanDevice(deviceId: string): Promise<{ status: "active" | "pending" | "gone"; orgId: string | null }> {
+    const orgIds = await this.orgIds();
+    if (orgIds.length === 0) throw new Error("no_organizations: inconclusive");
+    for (const orgId of orgIds) {
+      const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices`, { headers: this.headers() });
+      if (!r.ok) throw new Error(`list_devices_failed: ${r.status}`);
+      const devices = (await r.json()) as Array<{ id: string; status: string }>;
+      const d = devices.find((x) => x.id === deviceId);
+      if (d) return { status: d.status === "active" ? "active" : d.status === "pending" ? "pending" : "gone", orgId };
+    }
+    return { status: "gone", orgId: null };
+  }
+
+  private async orgIds(): Promise<string[]> {
+    const r = await fetch(`${this.origin}/api/v1/organizations`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`list_organizations_failed: ${r.status}`);
+    const orgs = (await r.json()) as Array<{ id: string }>;
+    return orgs.map((o) => o.id);
   }
 
   async revokeDevice(deviceId: string): Promise<void> {

@@ -84,6 +84,9 @@ function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: bo
     async deviceStatus() {
       return this.pending ? "pending" : this.exists ? "active" : "gone";
     },
+    async resolveDeviceOrg() {
+      return this.exists || this.pending ? "org-1" : null;
+    },
   };
 }
 
@@ -112,7 +115,7 @@ test("clearTunnelConfigForOrigin: removes + best-effort revokes that origin's de
 
   // Best-effort: a revoke that throws is swallowed, local removal still happens.
   await resolveTunnelConfig("https://u.example", false, api, store);
-  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true, deviceStatus: async () => "active" };
+  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true, deviceStatus: async () => "active", resolveDeviceOrg: async () => "org-1" };
   await clearTunnelConfigForOrigin("https://u.example", throwingApi, store); // must not throw
   assert.equal(store.get("https://u.example"), null);
 });
@@ -138,6 +141,7 @@ test("resolveTunnelConfig: self-heals a revoked device (clear + mint fresh)", as
     revokeDevice: api.revokeDevice.bind(api),
     deviceExists: async () => { throw new Error("network"); },
     deviceStatus: async () => { throw new Error("network"); },
+    resolveDeviceOrg: async () => { throw new Error("network"); },
   };
   await resolveTunnelConfig(origin, false, flakyApi, store);
   assert.equal(api.creates, 2); // reused — no new create on a transient blip
@@ -215,4 +219,18 @@ test("resolveTunnelConfig: mode change while pending re-mints (not silently drop
   assert.equal(api.creates, 2); // re-minted for the new mode
   assert.deepEqual(api.revoked, ["dev-1"]); // the superseded pending device was cancelled
   assert.equal(store.get(origin)?.config.full_tunnel, true);
+});
+
+// Finding #1-#5 (stamping): a LEGACY stored config (no orgId, from a pre-orgId build) is
+// opportunistically STAMPED with its org on reuse — migrating onto the hardened direct path.
+test("resolveTunnelConfig: stamps orgId onto a legacy config on reuse", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const api = fakeApi();
+  const origin = "https://legacy.example";
+  // Seed a legacy config: no orgId field (as an old build persisted it).
+  store.put({ origin, deviceId: "dev-legacy", config: { ...parseWgConf(CONF), full_tunnel: false } } as never);
+  assert.equal(store.get(origin)?.orgId, undefined);
+
+  await resolveTunnelConfig(origin, false, api, store); // reuse -> self-heal resolves + stamps
+  assert.equal(store.get(origin)?.orgId, "org-1"); // migrated onto the direct path
 });

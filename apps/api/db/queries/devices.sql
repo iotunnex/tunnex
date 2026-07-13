@@ -64,6 +64,15 @@ ORDER BY d.name;
 SELECT * FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL;
 
+-- name: GetDeviceForUpdate :one
+-- Row-locking read (S7.3 finding #6): Revoke reads the PRIOR status in-tx to label the
+-- audit (device.cancelled for pending vs device.revoked for active). FOR UPDATE serializes
+-- against a concurrently-committing Approve (pending->active) so the label can't be stale —
+-- audit_logs is APPEND-ONLY, so a mislabel is a permanent error in the forensic record.
+SELECT * FROM devices
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: ListDevicesByUser :many
 SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
 FROM devices d

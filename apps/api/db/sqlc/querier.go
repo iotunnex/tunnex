@@ -105,6 +105,11 @@ type Querier interface {
 	GetCliCredentialByHash(ctx context.Context, tokenHash []byte) (CliCredential, error)
 	GetCliDeviceCodeByDeviceHash(ctx context.Context, deviceCodeHash []byte) (CliDeviceCode, error)
 	GetDevice(ctx context.Context, arg GetDeviceParams) (Device, error)
+	// Row-locking read (S7.3 finding #6): Revoke reads the PRIOR status in-tx to label the
+	// audit (device.cancelled for pending vs device.revoked for active). FOR UPDATE serializes
+	// against a concurrently-committing Approve (pending->active) so the label can't be stale —
+	// audit_logs is APPEND-ONLY, so a mislabel is a permanent error in the forensic record.
+	GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdateParams) (Device, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.

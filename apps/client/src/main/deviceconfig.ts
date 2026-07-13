@@ -23,6 +23,9 @@ export interface DeviceApi {
   // Self-heals a stale cached config (device revoked/GC'd) — an EXISTENCE check, not a
   // config re-fetch, so D2 holds.
   deviceExists(deviceId: string, orgId: string): Promise<boolean>;
+  // resolveDeviceOrg scans for the device's org (null = gone; throws on a blip) — used to
+  // STAMP a legacy config (persisted before orgId existed) onto the hardened direct path.
+  resolveDeviceOrg(deviceId: string): Promise<string | null>;
 }
 
 // PendingApprovalError aborts the ConfigProvider (resolveTunnelConfig) when the device
@@ -68,12 +71,28 @@ export async function resolveTunnelConfig(
     // state + the ApprovalMonitor (which flips this flag on approval) running.
     throw new PendingApprovalError(existing.deviceId);
   } else if (existing) {
-    // Same mode: self-heal a dead (revoked/deleted) config. Existence check against the
-    // device's OWN org (persisted at create) — NOT a config re-fetch (D2 intact); a
-    // transient error KEEPS the config (never nuke on a blip).
+    // Same mode: self-heal a dead (revoked/deleted) config. First, if this is a LEGACY
+    // config with no persisted orgId (installed base / v0.1.0), opportunistically resolve +
+    // STAMP the org so it migrates onto the hardened direct-query path (the scan retires). A
+    // resolve blip leaves it unstamped — deviceExists then falls back to the scan, so the
+    // check still works either way.
+    let orgId = existing.orgId;
+    if (!orgId) {
+      try {
+        const resolved = await api.resolveDeviceOrg(existing.deviceId);
+        if (resolved) {
+          orgId = resolved;
+          store.put({ ...existing, orgId });
+        }
+      } catch {
+        /* blip — leave unstamped; the fallback scan below still works */
+      }
+    }
+    // Existence check against the device's OWN org (or the scan fallback when unstamped) —
+    // NOT a config re-fetch (D2 intact); a transient error KEEPS the config (never nuke on a blip).
     let stillThere = true;
     try {
-      stillThere = await api.deviceExists(existing.deviceId, existing.orgId);
+      stillThere = await api.deviceExists(existing.deviceId, orgId);
     } catch {
       stillThere = true;
     }
