@@ -80,3 +80,36 @@ test("resolveDeviceOrg: returns the found org (for stamping), null when gone", a
   ]);
   assert.equal(await api().resolveDeviceOrg("dev-1"), null);
 });
+
+test("scanDevice: a single org 403 does NOT abort — device found in a later org (#1)", async () => {
+  // The caller was offboarded from o1 (403) but the device lives in o2. The scan must not
+  // abort on o1's error; it resolves o2 (not inconclusive, not gone) — the ordinary
+  // offboarding this epic is about.
+  stubFetch([
+    { match: "/organizations/o1/devices", ok: false, status: 403, body: {} },
+    { match: "/organizations/o2/devices", body: [{ id: "dev-1", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }, { id: "o2" }] },
+  ]);
+  assert.equal(await api().resolveDeviceOrg("dev-1"), "o2"); // resolves + (caller) stamps
+  assert.equal(await api().deviceStatus("dev-1", ""), "active");
+});
+
+test("scanDevice: not-found + a fetch failed = INCONCLUSIVE (throw), never gone (#1)", async () => {
+  // Partial information (o1 unreadable, dev not in o2) must be UNKNOWN, never a destructive
+  // "gone" — a destructive verdict requires COMPLETE information.
+  stubFetch([
+    { match: "/organizations/o1/devices", ok: false, status: 403, body: {} },
+    { match: "/organizations/o2/devices", body: [{ id: "other", status: "active" }] },
+    { match: "/organizations", body: [{ id: "o1" }, { id: "o2" }] },
+  ]);
+  await assert.rejects(api().deviceStatus("dev-1", ""), /inconclusive/);
+});
+
+test("scanDevice: ALL orgs read OK and none has it -> genuinely gone (#1)", async () => {
+  stubFetch([
+    { match: "/organizations/o1/devices", body: [{ id: "other", status: "active" }] },
+    { match: "/organizations/o2/devices", body: [] },
+    { match: "/organizations", body: [{ id: "o1" }, { id: "o2" }] },
+  ]);
+  assert.equal(await api().deviceStatus("dev-1", ""), "gone");
+});
