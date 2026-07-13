@@ -39,7 +39,14 @@ const (
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
+	DeviceStatusPending DeviceStatus = "pending"
 	DeviceStatusRevoked DeviceStatus = "revoked"
+)
+
+// Defines values for DeviceApprovalMode.
+const (
+	DeviceApprovalModeOff DeviceApprovalMode = "off"
+	DeviceApprovalModeOn  DeviceApprovalMode = "on"
 )
 
 // Defines values for HealthResponseStatus.
@@ -119,8 +126,8 @@ const (
 
 // Defines values for ZeroTrustModeMode.
 const (
-	Enforcing ZeroTrustModeMode = "enforcing"
-	Off       ZeroTrustModeMode = "off"
+	ZeroTrustModeModeEnforcing ZeroTrustModeMode = "enforcing"
+	ZeroTrustModeModeOff       ZeroTrustModeMode = "off"
 )
 
 // Defines values for SsoCallbackParamsProvider.
@@ -279,9 +286,10 @@ type CreateDeviceRequest struct {
 
 // CreateDeviceResult defines model for CreateDeviceResponse.
 type CreateDeviceResult struct {
-	Config     *string `json:"config,omitempty"`
-	Device     Device  `json:"device"`
-	PrivateKey *string `json:"private_key,omitempty"`
+	Config          *string `json:"config,omitempty"`
+	Device          Device  `json:"device"`
+	PendingApproval *bool   `json:"pending_approval,omitempty"`
+	PrivateKey      *string `json:"private_key,omitempty"`
 }
 
 // CreateOrganizationRequest defines model for CreateOrganizationRequest.
@@ -306,23 +314,37 @@ type CreatePolicyRuleRequestDstKind string
 
 // Device defines model for Device.
 type Device struct {
-	AssignedIp      *string            `json:"assigned_ip,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	Id              openapi_types.UUID `json:"id"`
-	LastHandshakeAt *time.Time         `json:"last_handshake_at,omitempty"`
-	Name            string             `json:"name"`
-	NodeId          openapi_types.UUID `json:"node_id"`
-	Online          *bool              `json:"online,omitempty"`
-	Platform        *string            `json:"platform,omitempty"`
-	PublicKey       string             `json:"public_key"`
-	RxBytes         *int64             `json:"rx_bytes,omitempty"`
-	Status          DeviceStatus       `json:"status"`
-	TxBytes         *int64             `json:"tx_bytes,omitempty"`
-	UserId          openapi_types.UUID `json:"user_id"`
+	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
+	ApprovedBy      *openapi_types.UUID `json:"approved_by"`
+	AssignedIp      *string             `json:"assigned_ip,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Id              openapi_types.UUID  `json:"id"`
+	LastHandshakeAt *time.Time          `json:"last_handshake_at,omitempty"`
+	Name            string              `json:"name"`
+	NodeId          openapi_types.UUID  `json:"node_id"`
+	Online          *bool               `json:"online,omitempty"`
+	Platform        *string             `json:"platform,omitempty"`
+	PublicKey       string              `json:"public_key"`
+	RxBytes         *int64              `json:"rx_bytes,omitempty"`
+	Status          DeviceStatus        `json:"status"`
+	TxBytes         *int64              `json:"tx_bytes,omitempty"`
+	UserId          openapi_types.UUID  `json:"user_id"`
 }
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string
+
+// DeviceApproval defines model for DeviceApproval.
+type DeviceApproval struct {
+	// GrandfatheredCount On ENABLING (PUT off->on only), the count of existing active devices that stay active (grandfathered — a flip must not black-hole the fleet). Best-effort; absent when disabling.
+	GrandfatheredCount *int `json:"grandfathered_count,omitempty"`
+
+	// Mode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
+	Mode DeviceApprovalMode `json:"mode"`
+}
+
+// DeviceApprovalMode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
+type DeviceApprovalMode string
 
 // DomainClaimRequest defines model for DomainClaimRequest.
 type DomainClaimRequest struct {
@@ -743,6 +765,9 @@ type CreateOrganizationJSONRequestBody = CreateOrganizationRequest
 // UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
 type UpdateOrganizationJSONRequestBody = UpdateOrganizationRequest
 
+// SetDeviceApprovalJSONRequestBody defines body for SetDeviceApproval for application/json ContentType.
+type SetDeviceApprovalJSONRequestBody = DeviceApproval
+
 // CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
 type CreateDeviceJSONRequestBody = CreateDeviceRequest
 
@@ -971,6 +996,14 @@ type ClientInterface interface {
 	// ListAuditLogs request
 	ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetDeviceApproval request
+	GetDeviceApproval(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetDeviceApprovalWithBody request with any body
+	SetDeviceApprovalWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetDeviceApproval(ctx context.Context, orgId openapi_types.UUID, body SetDeviceApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListDevices request
 	ListDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -978,6 +1011,15 @@ type ClientInterface interface {
 	CreateDeviceWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	CreateDevice(ctx context.Context, orgId openapi_types.UUID, body CreateDeviceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListPendingDevices request
+	ListPendingDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApproveDevice request
+	ApproveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RejectDevice request
+	RejectDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RevokeDevice request
 	RevokeDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1582,6 +1624,42 @@ func (c *Client) ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, pa
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetDeviceApproval(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDeviceApprovalRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetDeviceApprovalWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetDeviceApprovalRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetDeviceApproval(ctx context.Context, orgId openapi_types.UUID, body SetDeviceApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetDeviceApprovalRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListDevicesRequest(c.Server, orgId)
 	if err != nil {
@@ -1608,6 +1686,42 @@ func (c *Client) CreateDeviceWithBody(ctx context.Context, orgId openapi_types.U
 
 func (c *Client) CreateDevice(ctx context.Context, orgId openapi_types.UUID, body CreateDeviceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateDeviceRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListPendingDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPendingDevicesRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ApproveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApproveDeviceRequest(c.Server, orgId, deviceId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RejectDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRejectDeviceRequest(c.Server, orgId, deviceId)
 	if err != nil {
 		return nil, err
 	}
@@ -3304,6 +3418,87 @@ func NewListAuditLogsRequest(server string, orgId openapi_types.UUID, params *Li
 	return req, nil
 }
 
+// NewGetDeviceApprovalRequest generates requests for GetDeviceApproval
+func NewGetDeviceApprovalRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/device-approval", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetDeviceApprovalRequest calls the generic SetDeviceApproval builder with application/json body
+func NewSetDeviceApprovalRequest(server string, orgId openapi_types.UUID, body SetDeviceApprovalJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetDeviceApprovalRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewSetDeviceApprovalRequestWithBody generates requests for SetDeviceApproval with any type of body
+func NewSetDeviceApprovalRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/device-approval", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListDevicesRequest generates requests for ListDevices
 func NewListDevicesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -3381,6 +3576,122 @@ func NewCreateDeviceRequestWithBody(server string, orgId openapi_types.UUID, con
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListPendingDevicesRequest generates requests for ListPendingDevices
+func NewListPendingDevicesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/devices/pending", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApproveDeviceRequest generates requests for ApproveDevice
+func NewApproveDeviceRequest(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "deviceId", runtime.ParamLocationPath, deviceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/approve", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRejectDeviceRequest generates requests for RejectDevice
+func NewRejectDeviceRequest(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "deviceId", runtime.ParamLocationPath, deviceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/reject", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -5001,6 +5312,14 @@ type ClientWithResponsesInterface interface {
 	// ListAuditLogsWithResponse request
 	ListAuditLogsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*ListAuditLogsResponse, error)
 
+	// GetDeviceApprovalWithResponse request
+	GetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDeviceApprovalResponse, error)
+
+	// SetDeviceApprovalWithBodyWithResponse request with any body
+	SetDeviceApprovalWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetDeviceApprovalResponse, error)
+
+	SetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetDeviceApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*SetDeviceApprovalResponse, error)
+
 	// ListDevicesWithResponse request
 	ListDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListDevicesResponse, error)
 
@@ -5008,6 +5327,15 @@ type ClientWithResponsesInterface interface {
 	CreateDeviceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDeviceResponse, error)
 
 	CreateDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateDeviceJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDeviceResponse, error)
+
+	// ListPendingDevicesWithResponse request
+	ListPendingDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingDevicesResponse, error)
+
+	// ApproveDeviceWithResponse request
+	ApproveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveDeviceResponse, error)
+
+	// RejectDeviceWithResponse request
+	RejectDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RejectDeviceResponse, error)
 
 	// RevokeDeviceWithResponse request
 	RevokeDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeDeviceResponse, error)
@@ -5738,6 +6066,52 @@ func (r ListAuditLogsResponse) StatusCode() int {
 	return 0
 }
 
+type GetDeviceApprovalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DeviceApproval
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDeviceApprovalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDeviceApprovalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SetDeviceApprovalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DeviceApproval
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetDeviceApprovalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetDeviceApprovalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListDevicesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5778,6 +6152,73 @@ func (r CreateDeviceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateDeviceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListPendingDevicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Device
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPendingDevicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPendingDevicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ApproveDeviceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ApproveDeviceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApproveDeviceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RejectDeviceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RejectDeviceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RejectDeviceResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -6893,6 +7334,32 @@ func (c *ClientWithResponses) ListAuditLogsWithResponse(ctx context.Context, org
 	return ParseListAuditLogsResponse(rsp)
 }
 
+// GetDeviceApprovalWithResponse request returning *GetDeviceApprovalResponse
+func (c *ClientWithResponses) GetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDeviceApprovalResponse, error) {
+	rsp, err := c.GetDeviceApproval(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDeviceApprovalResponse(rsp)
+}
+
+// SetDeviceApprovalWithBodyWithResponse request with arbitrary body returning *SetDeviceApprovalResponse
+func (c *ClientWithResponses) SetDeviceApprovalWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetDeviceApprovalResponse, error) {
+	rsp, err := c.SetDeviceApprovalWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetDeviceApprovalResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetDeviceApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*SetDeviceApprovalResponse, error) {
+	rsp, err := c.SetDeviceApproval(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetDeviceApprovalResponse(rsp)
+}
+
 // ListDevicesWithResponse request returning *ListDevicesResponse
 func (c *ClientWithResponses) ListDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListDevicesResponse, error) {
 	rsp, err := c.ListDevices(ctx, orgId, reqEditors...)
@@ -6917,6 +7384,33 @@ func (c *ClientWithResponses) CreateDeviceWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseCreateDeviceResponse(rsp)
+}
+
+// ListPendingDevicesWithResponse request returning *ListPendingDevicesResponse
+func (c *ClientWithResponses) ListPendingDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingDevicesResponse, error) {
+	rsp, err := c.ListPendingDevices(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPendingDevicesResponse(rsp)
+}
+
+// ApproveDeviceWithResponse request returning *ApproveDeviceResponse
+func (c *ClientWithResponses) ApproveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveDeviceResponse, error) {
+	rsp, err := c.ApproveDevice(ctx, orgId, deviceId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApproveDeviceResponse(rsp)
+}
+
+// RejectDeviceWithResponse request returning *RejectDeviceResponse
+func (c *ClientWithResponses) RejectDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RejectDeviceResponse, error) {
+	rsp, err := c.RejectDevice(ctx, orgId, deviceId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRejectDeviceResponse(rsp)
 }
 
 // RevokeDeviceWithResponse request returning *RevokeDeviceResponse
@@ -8183,6 +8677,72 @@ func ParseListAuditLogsResponse(rsp *http.Response) (*ListAuditLogsResponse, err
 	return response, nil
 }
 
+// ParseGetDeviceApprovalResponse parses an HTTP response from a GetDeviceApprovalWithResponse call
+func ParseGetDeviceApprovalResponse(rsp *http.Response) (*GetDeviceApprovalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDeviceApprovalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeviceApproval
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetDeviceApprovalResponse parses an HTTP response from a SetDeviceApprovalWithResponse call
+func ParseSetDeviceApprovalResponse(rsp *http.Response) (*SetDeviceApprovalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetDeviceApprovalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeviceApproval
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListDevicesResponse parses an HTTP response from a ListDevicesWithResponse call
 func ParseListDevicesResponse(rsp *http.Response) (*ListDevicesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8237,6 +8797,91 @@ func ParseCreateDeviceResponse(rsp *http.Response) (*CreateDeviceResponse, error
 		}
 		response.JSON201 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPendingDevicesResponse parses an HTTP response from a ListPendingDevicesWithResponse call
+func ParseListPendingDevicesResponse(rsp *http.Response) (*ListPendingDevicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPendingDevicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Device
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApproveDeviceResponse parses an HTTP response from a ApproveDeviceWithResponse call
+func ParseApproveDeviceResponse(rsp *http.Response) (*ApproveDeviceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApproveDeviceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRejectDeviceResponse parses an HTTP response from a RejectDeviceWithResponse call
+func ParseRejectDeviceResponse(rsp *http.Response) (*RejectDeviceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RejectDeviceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

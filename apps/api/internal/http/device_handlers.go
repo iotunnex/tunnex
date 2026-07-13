@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
@@ -90,6 +91,10 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	if res.Config != "" {
 		body.Config = &res.Config
 	}
+	if res.PendingApproval { // S7.3: signal the client to show a stable "awaiting approval" state
+		pa := true
+		body.PendingApproval = &pa
+	}
 	return api.CreateDevice201JSONResponse{
 		Body:    body,
 		Headers: api.CreateDevice201ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
@@ -143,6 +148,10 @@ func toAPIDevice(d sqlc.Device) api.Device {
 	}
 	if d.AssignedIp != nil {
 		out.AssignedIp = d.AssignedIp
+	}
+	if d.ApprovedBy.Valid { // S7.3: null = grandfathered/auto; set = explicitly approved
+		u := uuid.UUID(d.ApprovedBy.Bytes)
+		out.ApprovedBy = &u
 	}
 	return out
 }
