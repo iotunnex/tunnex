@@ -22,16 +22,33 @@ const (
 	KindDesyncUnknown  PolicyDegradedKind = "desync_unknown"   // can't determine: pushed-hash unavailable, or stamped + reports stale
 )
 
-// ── DECIDE-POINT A (pending sign-off — values not final) ────────────────────────────────
-// T (desyncDebounce) and the report-freshness window are derived from the agent REPORT
-// interval (TUNNEX_AGENT_REPORT_INTERVAL, default 30s), NOT the <5s push latency — the
+// T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
+// interval R (TUNNEX_AGENT_REPORT_INTERVAL, default 30s), NOT the <5s push latency — the
 // convergence signal is a REPORT, so a desync younger than a report cycle is expected, not
-// stuck. Placeholder values below pending the arithmetic (returned to the user before their
-// finalization + the T-boundary reds).
+// stuck. T = 2R: one R for the agent to apply + report the new hash after a push, one R of
+// margin for a jittered/dropped report. F = 2R: a node silent for two report cycles can't
+// have its desync confirmed → desync_unknown. CP-side constants tied to the DEFAULT R; if an
+// operator tunes the agent's report interval, revisit these (the CP can't read the agent's
+// env — it logs assumed-R + derived-T at boot for discoverability, see logPolicyHealthTuning).
 const (
-	desyncDebounce    = 60 * time.Second // TODO(decide-point-a): T = 2× report interval?
-	reportFreshWindow = 60 * time.Second // TODO(decide-point-a): freshness F
+	// AssumedReportInterval (R) mirrors the agent default; the CP can't read the agent env.
+	AssumedReportInterval = 30 * time.Second
+	// DesyncSettleWindow (T = 2R) — a term-3 desync younger than this is CONVERGING (a normal
+	// push settling), not stuck. The exactly-T boundary is load-bearing (red).
+	DesyncSettleWindow = 2 * AssumedReportInterval
+	// ReportFreshnessWindow (F = 2R) — a node silent this long can't have its desync confirmed
+	// → desync_unknown.
+	ReportFreshnessWindow = 2 * AssumedReportInterval
 )
+
+// logPolicyHealthTuning emits the assumed R + derived T at boot so an operator who tuned the
+// agent report interval can DISCOVER the coupling (the doc caveat isn't findable at 3am).
+func logPolicyHealthTuning(log interface{ Info(string, ...any) }) {
+	log.Info("policy_health_tuning",
+		"assumed_report_interval", AssumedReportInterval.String(),
+		"desync_settle_window_T", DesyncSettleWindow.String(),
+		"report_freshness_window_F", ReportFreshnessWindow.String())
+}
 
 // KindInput is the render signature: kind = f(stamp × report-freshness × hash) — plus the
 // agent-reported apply error/onset. Every field is CP-known at compute time; nothing here is
@@ -65,13 +82,33 @@ var transitionTable = []TransitionRule{
 	{KindDesyncUnknown, "pushed-hash UNAVAILABLE, OR (stamped AND reports stale) — cannot determine"},
 }
 
-// degradedKind projects the advisory kind from the inputs. SKELETON: the branching body +
-// its reds land after DECIDE-POINT A (T) is signed off — this stub returns the can't-determine
-// state so nothing false-positives before the logic is finalized (never "healthy" by default).
+// degradedKind projects the advisory kind (pure — mirrors transitionTable). Order matters:
+// a live apply error is self-evident from the agent's last report; the desync path needs a
+// FRESH applied hash (a server-side compare is meaningless on a stale one).
 func degradedKind(in KindInput) PolicyDegradedKind {
-	_ = transitionTable
-	_ = desyncDebounce
-	_ = reportFreshWindow
-	// TODO(decide-point-a): implement the transition table above once T is confirmed.
-	return KindDesyncUnknown
+	// Agent-reported apply error (from the last report — a reported fact, not a server compare).
+	if in.PolicyError != "" {
+		if in.PolicyFailingSince != "" {
+			return KindApplyFailing
+		}
+		return KindStuckEnforcing // error + no failing_since = the stuck-enforcing branch (S7.2)
+	}
+	// No error → desync territory (term-3). Can't compute pushed → can't determine.
+	if !in.PushKnown {
+		return KindDesyncUnknown
+	}
+	if in.AppliedHash == in.PushedHash {
+		return KindHealthy // in sync (or reconverged — convergence is a STATE predicate)
+	}
+	// pushed != applied. A stale report can't confirm ONGOING desync → desync_unknown (the
+	// stamp is retained elsewhere; silence never clears it). NEVER healthy, NEVER silent_desync.
+	if in.ReportAge >= ReportFreshnessWindow {
+		return KindDesyncUnknown
+	}
+	// Fresh + mismatched: onset age decides converging vs stuck. A zero onset is a not-yet-
+	// stamped race (this report's ingest stamps it) → just-onset = converging.
+	if in.DesyncSince.IsZero() || in.Now.Sub(in.DesyncSince) < DesyncSettleWindow {
+		return KindConverging
+	}
+	return KindSilentDesync // fresh, mismatched, age >= T
 }
