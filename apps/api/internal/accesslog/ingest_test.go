@@ -92,8 +92,12 @@ func TestIngestEnrichAggregateGapSeq(t *testing.T) {
 			}
 		case DecisionDenyAggregate:
 			sawAgg = true
-			if e.DenyCount != 20 || e.WindowEnd == nil {
-				t.Fatalf("deny_aggregate must carry count 20 + window end: %+v", e)
+			// SIEM-sufficient: src + count + window [start=OccurredAt, end=WindowEnd].
+			if e.SrcIP != "10.99.0.66" || e.DenyCount != 20 || e.WindowEnd == nil || e.OccurredAt.IsZero() {
+				t.Fatalf("deny_aggregate must carry src + count 20 + window bounds: %+v", e)
+			}
+			if e.WindowEnd.Before(e.OccurredAt) {
+				t.Fatalf("window end must be >= start: %+v", e)
 			}
 		case DecisionGap:
 			sawGap = true

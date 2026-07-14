@@ -5,10 +5,34 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// A gap event serializes with decision "gap" — unambiguous to a JSONL/SIEM parser, never a
+// deny lookalike (report line b). A parser keying on `decision` recovers it as a gap
+// carrying the dropped count.
+func TestGapEventJSONLIsUnambiguous(t *testing.T) {
+	gap := Event{ID: uuid.New(), Seq: 9, OrgID: uuid.New(), Decision: DecisionGap, DenyCount: 7, OccurredAt: time.Unix(0, 0).UTC()}
+	b, err := json.Marshal(gap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"decision":"gap"`) {
+		t.Fatalf("gap line must carry decision=gap: %s", s)
+	}
+	if strings.Contains(s, `"decision":"deny"`) {
+		t.Fatalf("a gap must not look like a deny: %s", s)
+	}
+	var back Event
+	if err := json.Unmarshal(b, &back); err != nil || back.Decision != DecisionGap || back.DenyCount != 7 {
+		t.Fatalf("gap round-trip: %+v err=%v", back, err)
+	}
+}
 
 func ev(org uuid.UUID, seq int64, d Decision) Event {
 	return Event{ID: uuid.New(), Seq: seq, OrgID: org, Decision: d, SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp"}

@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
 
@@ -175,6 +176,29 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("report status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ReportFlows ships a drained batch of flow-observation events (+ the count DROPPED since
+// the last drain) over the SAME mTLS channel (node identity = the client cert). Best-effort
+// observability: a failed report just loses a batch (the CP writes a gap on the next drop),
+// never affects enforcement. Skips the round-trip when there is nothing to send.
+func (c *Client) ReportFlows(ctx context.Context, events []flowlog.Event, dropped int64) error {
+	if len(events) == 0 && dropped == 0 {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{"events": events, "dropped": dropped})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/flow-events", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("flow report status %d", resp.StatusCode)
 	}
 	return nil
 }

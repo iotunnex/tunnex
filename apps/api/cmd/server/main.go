@@ -22,6 +22,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
@@ -184,6 +185,15 @@ func main() {
 
 	// mTLS agent control channel (separate listener; client certs verified vs CA).
 	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, pushHub, logger)
+	// S7.5.1 flow-event ingest: the JSONL source-of-truth stream + the PG hot-window, wired
+	// onto the SAME mTLS channel (node identity = client cert). Best-effort; a writer failure
+	// here must not stop the control plane, so log-and-continue rather than exit.
+	if flowJSONL, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
+		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
+	} else {
+		fq := sqlc.New(pool)
+		agentCh.SetFlowIngester(accesslog.NewIngester(fq, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, nil))
+	}
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
 		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))

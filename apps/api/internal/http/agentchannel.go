@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
@@ -29,6 +30,7 @@ type AgentChannel struct {
 	hub       *nodepush.Hub
 	logger    *slog.Logger
 	watchHold time.Duration
+	ingest    *accesslog.Ingester // nil until flow logging is configured (S7.5.1)
 }
 
 // NewAgentChannel builds the channel handler. hub may be nil (watch then falls
@@ -36,6 +38,11 @@ type AgentChannel struct {
 func NewAgentChannel(svc *nodes.Service, ca *agentca.CA, hub *nodepush.Hub, logger *slog.Logger) *AgentChannel {
 	return &AgentChannel{svc: svc, ca: ca, hub: hub, logger: logger, watchHold: 25 * time.Second}
 }
+
+// SetFlowIngester wires the S7.5.1 flow-event ingester. Optional: when nil, the
+// /agent/flow-events endpoint replies 503 (flow logging not configured) — enforcement and
+// the rest of the channel are unaffected.
+func (a *AgentChannel) SetFlowIngester(ing *accesslog.Ingester) { a.ingest = ing }
 
 // TLSConfig requires and verifies agent client certs against the CA, and
 // presents a CA-signed server cert.
@@ -62,7 +69,43 @@ func (a *AgentChannel) Handler() http.Handler {
 	r.Post("/agent/renew", a.renew)
 	r.Post("/agent/report", a.report)
 	r.Post("/agent/status", a.status)
+	r.Post("/agent/flow-events", a.flowEvents)
 	return r
+}
+
+// flowEvents ingests a batch of gateway flow observations (S7.5.1). Authorized by the
+// client CERTIFICATE (serial -> node -> org), exactly as report/status — no new
+// unauthenticated surface. The batch is best-effort observability; a decode/ingest failure
+// is reported to the agent (which keeps retrying) but never touches the data plane.
+func (a *AgentChannel) flowEvents(w http.ResponseWriter, r *http.Request) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "client certificate required", http.StatusUnauthorized)
+		return
+	}
+	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
+	node, err := a.svc.AuthenticateCert(r.Context(), serial)
+	if err != nil {
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return
+	}
+	if a.ingest == nil {
+		http.Error(w, "flow logging not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Events  []accesslog.WireEvent `json:"events"`
+		Dropped int64                 `json:"dropped"`
+	}
+	// A full drained batch is bounded (≤16384 events); 8 MiB is generous headroom.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := a.ingest.IngestBatch(r.Context(), node.OrgID, node.ID, body.Events, body.Dropped); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // status ingests per-peer live telemetry (handshake/bytes/endpoint) from the

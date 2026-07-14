@@ -19,6 +19,9 @@ type Config struct {
 	LogLevel string
 	// SecretsDir is the dedicated volume holding the roots of trust (S0.3).
 	SecretsDir string
+	// FlowLogDir is where the S7.5.1 access-event JSONL source-of-truth stream is written
+	// (rotated segments + manifests). On the customer's disk; the PG hot-window is separate.
+	FlowLogDir string
 	// DatabaseURL is the postgres DSN (S0.4).
 	DatabaseURL string
 	// AutoMigrate runs pending migrations on boot so `docker compose up`
@@ -81,6 +84,7 @@ func Load() Config {
 		Env:                getenv("TUNNEX_ENV", "development"),
 		LogLevel:           strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
 		SecretsDir:         getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
+		FlowLogDir:         getenv("TUNNEX_FLOWLOG_DIR", "/var/lib/tunnex/flowlog"),
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),

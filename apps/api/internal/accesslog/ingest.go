@@ -134,11 +134,14 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 	for _, s := range srcs {
 		ds := denyBySrc[s]
 		if len(ds) > DenyAggregateThreshold {
-			// Collapse: one deny_aggregate carrying the count + the window end (last seen).
+			// Collapse: one deny_aggregate carrying the src (via enrich), the count, and the
+			// full window BOUNDS — OccurredAt = first deny seen, WindowEnd = last — so a SIEM
+			// has src + count + [start,end] without the individual lines.
 			last := ds[len(ds)-1]
 			agg := i.enrich(ctx, orgID, nodeID, last, DecisionDenyAggregate)
+			agg.OccurredAt = ds[0].OccurredAt.UTC() // window START
 			agg.DenyCount = len(ds)
-			end := last.OccurredAt
+			end := last.OccurredAt.UTC() // window END
 			agg.WindowEnd = &end
 			out = append(out, agg)
 			continue
