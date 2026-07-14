@@ -27,6 +27,6 @@ export function messageFor(ev: TunnelEvent): { title: string; body: string } {
     case "approved":
       return { title: "Tunnex device approved", body: "Your device was approved — click Connect to start the tunnel." };
     case "migrated":
-      return { title: "Tunnex device re-created", body: "This device was re-created for a security update — reconnecting with a fresh key." };
+      return { title: "Tunnex device replaced", body: "This device was replaced for a security update — click Connect to finish (a fresh key will be issued)." };
   }
 }

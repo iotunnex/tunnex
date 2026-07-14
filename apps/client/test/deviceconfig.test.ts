@@ -220,11 +220,12 @@ test("resolveTunnelConfig: mode change while pending re-mints (not silently drop
 // Finding #1-#5 (stamping): a LEGACY stored config (no orgId, from a pre-orgId build) is
 // opportunistically STAMPED with its org on reuse — migrating onto the hardened direct path.
 
-// REDUCTION invariant (the scan surface is deleted): a LEGACY config (no orgId) is NEVER
-// queried — it is dropped + best-effort revoked + RE-MINTED (a fresh device that carries
-// orgId). Combined with connect() reading the re-minted orgId before starting a monitor, a
-// monitor STRUCTURALLY never runs without an orgId.
-test("resolveTunnelConfig: a no-orgId (legacy) config is re-minted, never queried", async () => {
+// REDUCTION 2 DEFENSE: connect() migrates a legacy config (clear + revoke + notice, terminal
+// for that connect) BEFORE tunnel.up, so this ConfigProvider should never see a no-orgId
+// config. If it does, it must NEVER query or arm it — it drops it and creates fresh (it does
+// NOT revoke; connect() owns the cap-freeing revoke). This is the belt that guarantees a
+// monitor never runs on a legacy config.
+test("resolveTunnelConfig: a no-orgId (legacy) config is dropped + re-minted, never queried", async () => {
   const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
   const api = fakeApi();
   let existsCalls = 0;
@@ -241,37 +242,10 @@ test("resolveTunnelConfig: a no-orgId (legacy) config is re-minted, never querie
 
   const cfg = await resolveTunnelConfig(origin, false, wrapped, store);
   assert.ok(cfg);
-  assert.equal(existsCalls, 0); // never queried a no-orgId config
+  assert.equal(existsCalls, 0); // NEVER queried a no-orgId config (no monitor could run on it)
   assert.equal(statusCalls, 0);
-  assert.equal(api.creates, 1); // re-minted a fresh device
-  assert.deepEqual(api.revoked, ["dev-old"]); // best-effort revoke of the legacy device
-  assert.equal(store.get(origin)?.deviceId, "dev-1"); // fresh device replaces the legacy one
-  assert.ok(store.get(origin)?.orgId); // now carries orgId (direct path)
-});
-
-// Finding #2: create-first / swap-after-success. A re-mint FAILURE (transient network) must
-// leave the legacy config INTACT and the old device NOT revoked (never destroy a working
-// config on a blip); a retry then succeeds.
-test("resolveTunnelConfig: a re-mint failure keeps the legacy config (never destroy on a blip)", async () => {
-  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
-  const origin = "https://legacy.example";
-  store.put({ origin, deviceId: "dev-old", config: { ...parseWgConf(CONF), full_tunnel: false } } as never); // no orgId
-
-  const revoked: string[] = [];
-  const failing: DeviceApi = {
-    createDevice: async () => { throw new Error("network"); },
-    revokeDevice: async (id) => { revoked.push(id); },
-    deviceExists: async () => true,
-    deviceStatus: async () => "active",
-  };
-  await assert.rejects(() => resolveTunnelConfig(origin, false, failing, store), /network/);
-  assert.equal(store.get(origin)?.deviceId, "dev-old"); // legacy config INTACT
-  assert.deepEqual(revoked, []); // old device NOT revoked
-
-  // Retry with a working api -> re-mints + revokes the old AFTER the create succeeds.
-  const ok = fakeApi();
-  await resolveTunnelConfig(origin, false, ok, store);
+  assert.equal(api.creates, 1); // dropped the legacy config + created fresh
+  assert.deepEqual(api.revoked, []); // resolveTunnelConfig does NOT revoke — connect() owns that
   assert.equal(store.get(origin)?.deviceId, "dev-1"); // fresh device
-  assert.deepEqual(ok.revoked, ["dev-old"]); // old revoked after success
-  assert.ok(store.get(origin)?.orgId);
+  assert.ok(store.get(origin)?.orgId); // carries orgId (direct path)
 });
