@@ -6,7 +6,7 @@
 // state (including handshake-liveness: an interface that is up but has no fresh
 // handshake reads "connecting", not "connected") so the tray never disagrees with the
 // window, plus the operable states — failed (kill-switch) and revoked.
-export type TrayState = "disconnected" | "connecting" | "connected" | "failed" | "revoked" | "pending";
+export type TrayState = "disconnected" | "connecting" | "connected" | "failed" | "revoked" | "pending" | "migrate_retry";
 
 // HANDSHAKE_STALE_SEC mirrors TunnelControl.tsx: a handshake older than a couple rekey
 // windows (or none) means the link isn't live yet — "connecting", not "connected".
@@ -18,6 +18,7 @@ const HANDSHAKE_STALE_SEC = 180;
 export function trayStateFor(s: { state: string; last_handshake_sec?: number }): TrayState {
   if (s.state === "revoked") return "revoked";
   if (s.state === "pending_approval") return "pending"; // S7.3: awaiting admin approval
+  if (s.state === "migrate_failed") return "migrate_retry"; // S7.3: legacy replacement didn't complete
   if (s.state === "failed") return "failed";
   if (s.state === "up") {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -53,6 +54,10 @@ export function trayMenuModel(state: TrayState): TrayMenuModel {
       // S7.3: awaiting admin approval. No connect (already enrolled + waiting); offer
       // disconnect to stop waiting (cancel). The tunnel is NOT up — nothing to tear down.
       return { statusLabel: "Awaiting admin approval…", showConnect: false, showDisconnect: true };
+    case "migrate_retry":
+      // S7.3: the legacy-config replacement didn't complete. Config was kept, so reconnect
+      // retries it — offer connect (retry). Nothing is up, so no disconnect.
+      return { statusLabel: "Couldn't replace device — reconnect to retry", showConnect: true, showDisconnect: false };
     case "disconnected":
       return { statusLabel: "Not connected", showConnect: true, showDisconnect: false };
   }

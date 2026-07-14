@@ -63,6 +63,7 @@ export function TunnelControl() {
   const connecting = isUp && !live; // interface up but no fresh handshake — not "Connected"
   const failed = status.state === "failed";
   const revoked = status.state === "revoked"; // this device was revoked server-side
+  const migrateFailed = status.state === "migrate_failed"; // S7.3: legacy replacement didn't complete
 
   const statusText = live
     ? "Connected"
@@ -72,8 +73,10 @@ export function TunnelControl() {
         ? "Disconnected — tunnel failed (kill-switch active)"
         : revoked
           ? "Device revoked — reconnect to re-enroll"
-          : "Not connected";
-  const statusClass = live ? "text-emerald-400" : connecting ? "text-amber-400" : failed || revoked ? "text-red-400" : "text-slate-400";
+          : migrateFailed
+            ? "Couldn't replace device — reconnect to retry"
+            : "Not connected";
+  const statusClass = live ? "text-emerald-400" : connecting ? "text-amber-400" : failed || revoked ? "text-red-400" : migrateFailed ? "text-amber-400" : "text-slate-400";
 
   return (
     <Card className="mt-6">
@@ -88,7 +91,7 @@ export function TunnelControl() {
           </Button>
         ) : (
           <Button onClick={connect} disabled={busy}>
-            {busy ? "Connecting…" : failed || revoked ? "Reconnect" : "Connect"}
+            {busy ? "Connecting…" : failed || revoked || migrateFailed ? "Reconnect" : "Connect"}
           </Button>
         )}
       </div>
@@ -97,6 +100,13 @@ export function TunnelControl() {
         <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
           Your device was revoked or removed on the server. The local profile has been cleared — reconnecting will
           enroll a fresh device.
+        </div>
+      )}
+
+      {migrateFailed && (
+        <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+          Couldn&rsquo;t finish replacing this device for a security update. Your profile was kept — reconnect to retry.
+          If it keeps failing, ask an admin to remove the old device.
         </div>
       )}
 
