@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	tcrypto "github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
@@ -29,11 +28,14 @@ import (
 // substitute (settings.spec.ts:25) only checked the open-edition 403 gate, which
 // proves the endpoint is hidden, NOT that its payload is secret-free when served.
 //
-// The config is written via a DIRECT UpsertSSOConfig (a sealed secret + keyed
-// fingerprint), NOT the audited ConfigService.Set — an audit_logs row is
-// append-only (its org FK is SET NULL, which the append-only trigger REFUSES), so
-// an audited write would make the org un-deletable and the test would leak rows
-// into the shared compose DB. The READ path under assertion is unchanged.
+// The config is written through the REAL audited ConfigService.Set (via the SSO
+// port) — NOT a shortcut upsert — so the sealing + the secret-free audit-metadata
+// path (the exact S4.5 concern family: secret must not leak into audit_logs
+// either) stays under coverage. Cleanup can't cascade-delete the org because the
+// audit_logs row is APPEND-ONLY (its trigger REFUSES the SET NULL the FK cascade
+// attempts), so the cleanup deletes children explicitly under a test-only
+// `session_replication_role = replica` trigger bypass — no product-code change,
+// no shared-DB leak.
 func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -47,21 +49,41 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	org := uuid.New()
-	// Cleanup DELETEs the org (cascading sso_configs) THEN closes the pool. A
-	// separate `defer pool.Close()` would run BEFORE t.Cleanup (own-defers unwind
-	// before registered cleanups), leaving the delete to hit a closed pool and
-	// silently leak the org into the shared DB (inflating countRealOrgs, tripping
-	// the seed guard). No audit row is created, so the org delete is unblocked.
+	actor := uuid.New()
+	// Cleanup DELETEs the rows THEN closes the pool (own-defers would unwind before
+	// t.Cleanup, hitting a closed pool → a silent leak inflating countRealOrgs).
+	// The audited write leaves an append-only audit_logs row that blocks the normal
+	// org-delete cascade, so we drop triggers for the cleanup connection only
+	// (session_replication_role=replica), delete children + org + actor explicitly,
+	// then restore — on ITS OWN acquired conn so the setting never escapes to a
+	// pooled connection, and the pool is closed right after regardless.
 	t.Cleanup(func() {
 		c, cc := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cc()
-		_, _ = pool.Exec(c, "DELETE FROM organizations WHERE id=$1", org) // cascades sso_configs
-		pool.Close()
+		defer pool.Close()
+		conn, err := pool.Acquire(c)
+		if err != nil {
+			return
+		}
+		defer conn.Release()
+		if _, err := conn.Exec(c, "SET session_replication_role = replica"); err != nil {
+			return
+		}
+		_, _ = conn.Exec(c, "DELETE FROM audit_logs WHERE org_id=$1", org)
+		_, _ = conn.Exec(c, "DELETE FROM sso_configs WHERE org_id=$1", org)
+		_, _ = conn.Exec(c, "DELETE FROM organizations WHERE id=$1", org)
+		_, _ = conn.Exec(c, "DELETE FROM users WHERE id=$1", actor)
+		_, _ = conn.Exec(c, "SET session_replication_role = default")
 	})
 
+	// A real org + actor to satisfy FKs (Set writes an audit row referencing both).
 	if _, err := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)",
 		org, "O", "s45-"+org.String()); err != nil {
 		t.Fatalf("org: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'Actor')",
+		actor, actor.String()+"@t.local"); err != nil {
+		t.Fatalf("actor: %v", err)
 	}
 
 	masterKey := make([]byte, tcrypto.KeySize)
@@ -75,24 +97,13 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	const secret = "super-secret-google-client-secret-payload-guard"
 	const clientID = "client-id-abc.apps.googleusercontent.com"
 
-	// Store a config with a KNOWN sealed secret + its keyed fingerprint (un-audited).
-	sealed, err := sealer.Seal([]byte(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sqlc.New(pool).UpsertSSOConfig(ctx, sqlc.UpsertSSOConfigParams{
-		OrgID:              org,
-		Provider:           "google",
-		ClientID:           clientID,
-		ClientSecretSealed: []byte(sealed),
-		SecretFingerprint:  sealer.Fingerprint([]byte(secret)),
-		Enabled:            true,
-	}); err != nil {
-		t.Fatalf("upsert sso config: %v", err)
+	// Write through the REAL audited path (seals the secret, records a secret-free
+	// audit event), then read back through the REAL handler.
+	port := NewSSOPort(pool, sealer, nil, "", slog.Default())
+	if err := port.SetConfig(ctx, actor, org, "google", clientID, secret, "", true); err != nil {
+		t.Fatalf("set config: %v", err)
 	}
 
-	// Call the ACTUAL read handler as an authorized owner.
-	port := NewSSOPort(pool, sealer, nil, "", slog.Default())
 	s := apiServer{sso: port}
 	authed := principalWithRole(org, rbac.RoleOwner)
 	resp, err := s.GetSsoConfig(authed, api.GetSsoConfigRequestObject{OrgId: org, Provider: "google"})
@@ -127,5 +138,26 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	// (4) The client id IS surfaced — the View is functional, not an empty stub.
 	if !strings.Contains(blob, clientID) {
 		t.Fatalf("payload missing client_id: %s", blob)
+	}
+
+	// (5) The audited write must not leak the secret into audit_logs metadata
+	//     either — the same S4.5 concern, one table over. Set records a
+	//     sso.config_updated event; its metadata carries the fingerprint, not the
+	//     secret. (Only reachable now that the write goes through the real Set.)
+	var auditMeta string
+	if err := pool.QueryRow(ctx,
+		`SELECT metadata::text FROM audit_logs
+		   WHERE org_id=$1 AND action='sso.config_updated'
+		   ORDER BY created_at DESC LIMIT 1`, org).Scan(&auditMeta); err != nil {
+		t.Fatalf("audit row: %v", err)
+	}
+	if strings.Contains(auditMeta, secret) {
+		t.Fatalf("audit metadata leaked the client secret: %s", auditMeta)
+	}
+	if strings.Contains(strings.ToLower(auditMeta), "client_secret") {
+		t.Fatalf("audit metadata exposes a client_secret field: %s", auditMeta)
+	}
+	if !strings.Contains(auditMeta, wantFP) {
+		t.Fatalf("audit metadata missing the secret fingerprint proof: %s", auditMeta)
 	}
 }
