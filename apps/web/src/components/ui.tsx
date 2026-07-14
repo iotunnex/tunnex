@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useEffect, useId, useRef } from "react";
+import { cloneElement, isValidElement, useId } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes } from "react";
 
 // A small, deliberate set of primitives — enough to compose the app's pages
@@ -93,15 +93,10 @@ export function Modal({
   children: ReactNode;
   actions: ReactNode;
 }) {
-  // Esc dismiss is PANEL-scoped (not a document listener): autofocus the panel so a keydown
-  // originates inside it, and handle Esc on the panel. A native <select> that consumes Esc
-  // (closing its own dropdown) does NOT bubble to the panel, so the modal survives — the
-  // [17] fix. Focus-model degradation: if focus leaves the panel (tabs to browser chrome),
-  // Esc goes inert until focus returns; backdrop-click always dismisses.
-  const panelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    panelRef.current?.focus();
-  }, []);
+  // Dismiss on backdrop-click or the Cancel action only. Esc-to-dismiss was DROPPED after a
+  // 3-finding churn (broken → too-global → focus-steal) on a nice-to-have that's also a
+  // data-loss footgun on a form modal. If a11y later needs Esc, it returns as the full
+  // designed dialog pattern (focus trap + first-field focus + panel listener), not a patch.
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -111,15 +106,7 @@ export function Modal({
       onClick={onDismiss}
     >
       <div
-        ref={panelRef}
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.stopPropagation();
-            onDismiss();
-          }
-        }}
-        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl outline-none"
+        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className={`text-sm font-semibold ${danger ? "text-danger" : "text-white"}`}>{title}</h2>

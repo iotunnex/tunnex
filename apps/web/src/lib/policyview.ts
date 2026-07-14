@@ -59,6 +59,15 @@ export function sectionRender(loadError: string | null, notice: string | null): 
   return { showRetry: !!loadError, showContent: !loadError, showNotice: !!notice };
 }
 
+// staleNoticeCleared decides when the partial-swap notice may be dropped ([309]): ONLY when
+// the referenced (stale) rule is actually gone — keyed on its ABSENCE from the current rules
+// list, which covers both a delete of THAT rule and its disappearance from a fresh load, but
+// NEVER an unrelated delete (the stale rule is still present → notice persists).
+export function staleNoticeCleared(staleRuleId: string | null, rules: PolicyRule[]): boolean {
+  if (!staleRuleId) return false;
+  return !rules.some((r) => r.id === staleRuleId);
+}
+
 // ── Parent access-page gate as a PURE function ([75]+[101]) ──────────────────────────
 // The upsell needs only EDITION (role-irrelevant); the admin body needs ROLE RESOLVED. A
 // members-load failure must NOT blank a non-enterprise user's upsell ([75]), and role
