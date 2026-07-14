@@ -247,6 +247,7 @@ Seed for the eventual SECURITY.md.
 - **Query-lint / deleted_at** — soft-delete tables must filter `deleted_at IS NULL`.
 - **Trigger schema check** (`db/schema_test.go`) — every `updated_at` table has the `set_updated_at` trigger.
 - **audit_logs append-only** — DB triggers reject UPDATE/DELETE/TRUNCATE; actor FK to `users` enforces attribution.
+- **audit metadata never-NULL** (hotfix `fix/audit-nil-metadata`; `TestAuditedDeletesPersistMetadata`, red-on-main) — `audit_logs.metadata` is `NOT NULL`; the policy `writeAudit` helper must default a nil meta to `[]byte("{}")`, never a nil `[]byte` (pgx sends nil as SQL NULL → 23502). Demonstrated-red: it used `var raw []byte`, so EVERY audited DELETE (`group.deleted`/`resource.deleted`/`policy.rule_deleted`) 500'd + rolled back — undeletable rules/groups/resources — surfaced only when S7.4a's UI first deleted an audited entity on the wire. **BOX-PROOF CONVENTION (new):** every audited MUTATION CLASS (not just create) gets one wire execution in its story's box proof — a create-only proof let this live across S7.1/S7.2/S7.3. **UNIT-TEST GAP:** the policy integration suite tested create/mode/push but never an audited delete; the red test closes it.
 - **Codegen drift guard** (`make generate-check`) — spec/generated code can't diverge.
 - **Edition build+test** (`make build-editions` / `test-editions`) — open and enterprise builds both compiled & tested; neither rots.
 - **e2e correlation** (Playwright) — SPA→API `X-Request-Id` chain asserted end-to-end.
