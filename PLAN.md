@@ -253,16 +253,19 @@ CP-owned `policy_desync_since` (0021) stamped at report-ingest (single-writer `t
 T=F=2R=60s. Box-walked on the two-gateway wire (boot-log · converging no-false-alarm · desync_unknown via
 `docker stop g2`+forced-mismatch · matched-silent→healthy · bool/kind flip together = the collapse live).
 Review arc: story-end (9, incl. the kind-less-alarmed-than-bool class) → fold (collapse + real freshness clock
-+ log-not-swallow) → confirm (4, all hygiene/accept) → clean. **S7.4c (enterprise-e2e enabler, UN-DEFERRABLE) —
-BUILT + BOX-VERIFIED, awaiting review + merge sign-off.** Commit-one dispositioned in `docs/S7.4c-decisions.md`
-(D-c1 separate job · D-c2 two-tier: S4.5 payload BLOCKING Go httptest in gates + opportunistic Playwright ·
-D-c3 seed-enterprise composes on `seed` · D-c4 VERIFIED wrinkle-evaporates: orphan check is a pure DB read, no
-CI agent · one PR). Delivered: `cmd/seed-enterprise` + `make seed-enterprise` (sealed SSO config + gateway node
-row + device holding a pool IP), blocking `TestGetSsoConfigPayloadCarriesNoSecret`, `settings.enterprise.spec.ts`
-(real S4.5 payload + live-shrink S4.5b 409), `e2e-enterprise` CI job. Local box-walk on a fresh enterprise
-stack: both seeds green, both Playwright legs PASS, skip-guard skips them in the open job, both editions build.
-S4.5 + S4.5b ledgers flipped SUBSTITUTE→SATISFIED (sha finalized at merge). If this pointer disagrees with the
-git log, TRUST GIT (`git log --oneline -20`) and update this line.
++ log-not-swallow) → confirm (4, all hygiene/accept) → clean. **S7.4c (enterprise-e2e enabler, UN-DEFERRABLE)
+MERGED (PR#21, sha 8ad71cd) → EPIC 7 COMPLETE.** Delivered: `cmd/seed-enterprise` + `make seed-enterprise`
+(sealed SSO config + gateway node row + device holding a pool IP, composed ON TOP of `seed`), the BLOCKING
+`TestGetSsoConfigPayloadCarriesNoSecret` (real audited `Set` write + payload-secret-free + AUDIT-metadata-
+secret-free asserts, cleanup via `session_replication_role=replica` bypass), `settings.enterprise.spec.ts`
+(real S4.5 payload + live-shrink S4.5b 409, edition self-detected via `/meta`), the `e2e-enterprise` CI job.
+D-c4 VERIFIED (orphan check is a pure DB read → no CI agent). Review arc: high-effort story-end (18/18, 0 err,
+8 findings) → 7 folded + [3] accept-by-design → [audit-cascade] REWORKED as a decide-item (pick (a): restore
+the audited write, trigger-bypass cleanup) → CI all-green on a91e5cd incl. `e2e-enterprise` IN CI → box-walk
+stands. **S4.5 + S4.5b ledgers flipped SUBSTITUTE→SATISFIED (PR#21, sha 8ad71cd).** **NEXT: EPIC-7-CLOSE
+PLANNING SESSION** (disposition ledger batches 1–3 + the replan proposal + beta-timing / EPIC-7.5 + EPIC-M
+decisions; S7.5.1 commit-one is the expected first artifact after it). NO new story branch until the session
+sets the order. If this pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update it.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -478,8 +481,8 @@ neutral, confirm).
 - **S4.2 Login / signup / SSO screens** — all three auth paths.
 - **S4.3 Dashboard home** — org overview, members, activity, live connection stats. **Delivered:** single `GET /api/v1/organizations/{orgId}/overview` (counts + audit-log activity slice, LIMIT 10; `/organizations` matches every existing route — `/orgs` was only shorthand). Online tile inherits S3.6 honesty ("Seen in last N min", active-owner filter); `tenancy.OnlineWindow` is the single source of truth for the window; future-handshake upper bound is a data invariant at ingestion, not a per-read predicate.
 - **S4.4 Users & roles UI** — list, invite, edit role, deactivate.
-- **S4.5 Org settings & SSO config UI** — connect Google/Microsoft, domain-capture rules. **Delivered (org settings + SSO config only; CIDR resize split to its own story):** SSO secret is WRITE-ONLY (GET returns a keyed HMAC fingerprint, never the secret — no `client_secret` field in the response type); config writes are audited (`sso.config_updated`, actor-attributed, secret-free metadata); open builds refuse SSO-config endpoints with 403 `edition_required` (the established precedent, not 404); the client RBAC mirror is now GENERATED from the Go grant table (drift = red build). **Deferred tests — SATISFIED (S7.4c, sha TBD-at-merge):** the payload-level "GET has no secret" assertion now runs BOTH as a BLOCKING enterprise Go httptest (`TestGetSsoConfigPayloadCarriesNoSecret` in `make test-editions` — a security assert must gate, not sit behind continue-on-error) AND as an opportunistic enterprise Playwright leg (`settings.enterprise.spec.ts`, E2E_EDITION=enterprise, seeded SSO config → real 200 payload: fingerprint present, no `client_secret`). The old open-edition 403-gate check (settings.spec.ts:25) is retained + demoted-with-pointer as the OPEN substitute. ~~blocked because the e2e stack builds the open edition~~.
-- **S4.5b CIDR resize** (split from S4.5) — resize the org WG pool. **Delivered:** `PUT /organizations/{orgId}/pool-cidr` (edition-neutral — allocator is core/open); grow-superset / shrink-subset only (else `illegal_resize`), identical CIDR = idempotent 200, `< /30` = `cidr_too_small`; canonical (masked) CIDR stored/audited. Shrink that would strand allocations → structured 409 `{orphan_count, orphans[≤20]{device_id,name,assigned_ip,reason}}`, reason = `out_of_range | reserved_collision` (ipalloc.Orphans, reserved-collision-aware, single-read so check == 409 objects). Check runs UNCONDITIONALLY (check-anyway) — provably empty on a valid grow, a backstop if a non-Allocate writer breaks the invariant. Atomic + audited (`org.cidr_resized`, no row on no-op) under the shared per-org `LockDeviceKey`; `TestResizeAllocationRace` proves the lock excludes a concurrent allocation (red-without-lock demonstrated). **Deferred test — SATISFIED (S7.4c, sha TBD-at-merge):** the 409 orphan-list UI render now runs UN-MOCKED against a live shrink in `settings.enterprise.spec.ts` — `seed-enterprise` seeds a device holding `10.99.0.200`, a shrink to `/25` strands it, and the REAL 409 body renders (device name + `out_of_range`). Verified D-c4: the orphan check is a pure DB read (`ListActiveDeviceAllocations`), so a plain seeded node ROW satisfies the device's `node_id` FK — NO enrolled agent needed. The MOCKED render (settings.spec.ts) is retained + demoted-with-pointer as the OPEN substitute. ~~needs an enrolled gateway the open e2e stack lacks~~.
+- **S4.5 Org settings & SSO config UI** — connect Google/Microsoft, domain-capture rules. **Delivered (org settings + SSO config only; CIDR resize split to its own story):** SSO secret is WRITE-ONLY (GET returns a keyed HMAC fingerprint, never the secret — no `client_secret` field in the response type); config writes are audited (`sso.config_updated`, actor-attributed, secret-free metadata); open builds refuse SSO-config endpoints with 403 `edition_required` (the established precedent, not 404); the client RBAC mirror is now GENERATED from the Go grant table (drift = red build). **Deferred tests — SATISFIED (S7.4c, PR#21, sha 8ad71cd):** the payload-level "GET has no secret" assertion now runs BOTH as a BLOCKING enterprise Go httptest (`TestGetSsoConfigPayloadCarriesNoSecret` in `make test-editions` — a security assert must gate, not sit behind continue-on-error) AND as an opportunistic enterprise Playwright leg (`settings.enterprise.spec.ts`, E2E_EDITION=enterprise, seeded SSO config → real 200 payload: fingerprint present, no `client_secret`). The old open-edition 403-gate check (settings.spec.ts:25) is retained + demoted-with-pointer as the OPEN substitute. ~~blocked because the e2e stack builds the open edition~~.
+- **S4.5b CIDR resize** (split from S4.5) — resize the org WG pool. **Delivered:** `PUT /organizations/{orgId}/pool-cidr` (edition-neutral — allocator is core/open); grow-superset / shrink-subset only (else `illegal_resize`), identical CIDR = idempotent 200, `< /30` = `cidr_too_small`; canonical (masked) CIDR stored/audited. Shrink that would strand allocations → structured 409 `{orphan_count, orphans[≤20]{device_id,name,assigned_ip,reason}}`, reason = `out_of_range | reserved_collision` (ipalloc.Orphans, reserved-collision-aware, single-read so check == 409 objects). Check runs UNCONDITIONALLY (check-anyway) — provably empty on a valid grow, a backstop if a non-Allocate writer breaks the invariant. Atomic + audited (`org.cidr_resized`, no row on no-op) under the shared per-org `LockDeviceKey`; `TestResizeAllocationRace` proves the lock excludes a concurrent allocation (red-without-lock demonstrated). **Deferred test — SATISFIED (S7.4c, PR#21, sha 8ad71cd):** the 409 orphan-list UI render now runs UN-MOCKED against a live shrink in `settings.enterprise.spec.ts` — `seed-enterprise` seeds a device holding `10.99.0.200`, a shrink to `/25` strands it, and the REAL 409 body renders (device name + `out_of_range`). Verified D-c4: the orphan check is a pure DB read (`ListActiveDeviceAllocations`), so a plain seeded node ROW satisfies the device's `node_id` FK — NO enrolled agent needed. The MOCKED render (settings.spec.ts) is retained + demoted-with-pointer as the OPEN substitute. ~~needs an enrolled gateway the open e2e stack lacks~~.
 - **S4.6 Audit log viewer** — filterable event stream.
 - **S4.7 Fresh-user onboarding** — close the empty-funnel gap: a freshly-verified local user with
   zero orgs currently lands on a dead-end dashboard (no create-org / no gateway-enroll affordance).
@@ -1327,6 +1330,32 @@ emits per-rule `counter`s) — the same per-rule identity drives both. Documente
 EPIC-7-done while building 7.5 during beta, OR beta after Tier 1. Flow-logs-first is common to both paths.
 **Consequences acknowledged:** EPIC 8/9/10 slide right ~one epic; the EPIC 9/10 ZT-coverage guarantees
 (batch-1 items 6–8) UNCHANGED. Batch-1 items 1–4 are SUPERSEDED-BY-INCLUSION into S7.5.1–S7.5.4.
+
+**S7.5.4 CONSTRAINT (recorded at S7.4c-close):** temporary grants are **WINDOW-EXTENSIBLE**, not expiry-only —
+a grant carries a time window that can be EXTENDED before it lapses (renew/extend, not only set-and-expire).
+Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump, not a delete+recreate.
+
+## PRE-LAUNCH LEDGER — BATCH 3 (user-directed 2026-07-14; recorded at S7.4c-close / EPIC 7 COMPLETE, PR#21 sha 8ad71cd; PAPER only — DISPOSITION AT EPIC-7-CLOSE PLANNING)
+10 pre-launch items. Explicitly named by the user this pass:
+- **MFA / TOTP — STORY-REQUIRED** (its own story, not a ride-along): second factor for local auth before any
+  outside-circle distribution. Decide-before-code at its commit-one (TOTP enrollment, recovery codes, per-org
+  enforce policy, SSO-vs-local interplay).
+- **SIEM export — folds into the S7.5.1 (flow/access logs) DoD:** the access-event stream must be EXPORTABLE in
+  a SIEM-ingestable shape (syslog/CEF/JSON push or pull), not just viewable — bake into S7.5.1's DoD, don't
+  re-story.
+- **Mobile clients → EPIC M** (new epic, iOS/Android WireGuard clients; confirm insertion at planning).
+- **Distribution workstream** — the signing/notarization/store/download-channel path to actually SHIP to
+  outsiders (subsumes S6.5b's named trigger; a workstream, not one story).
+- **(remaining 6 items) enumerated for the planning session** — recorded as a 10-item batch; the balance is
+  captured live at EPIC-7-close, not fabricated here.
+
+## REPLAN PROPOSAL (user-directed 2026-07-14; recorded at S7.4c-close; CONFIRM/FLIP AT PLANNING — not executed)
+Proposed order: **EPIC 7 (done) → EPIC 7.5 (ZTNA competitiveness) → BETA BUNDLE → BETA → EPIC 8 (site-to-site)
+→ EPIC M (mobile) → EPIC 9 (OpenVPN) → EPIC 10 (k8s) → EPIC 11 remainder.** **EPIC 12 (licensing) trigger =
+first paying-customer INTENT** (build-on-intent, not calendar; supersedes the parked "post-beta" note).
+Two USER DECISIONS the session must settle (NOT pre-decided): **(1) beta timing** — proposed AFTER Tier 1 /
+EPIC 7.5; user confirms or flips to beta-at-EPIC-7-done-while-building-7.5. **(2) EPIC 7.5 insertion + EPIC M
+(mobile) confirmation.** Flow-logs-first (S7.5.1) is common to every path, so it starts first regardless.
 
 **LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
 throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
