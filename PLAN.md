@@ -1360,7 +1360,16 @@ emits per-rule `counter`s) — the same per-rule identity drives both. Documente
    UNDEFINED under `enforcing` (a full-tunnel device under enforcing with no egress grant = undefined behavior).
 
 ## ZTNA COMPETITIVE SCOPE — LEDGER BATCH 2 (user-directed strategic intent, 2026-07-14; PAPER only, no epic reorder executed — DISPOSITION AT EPIC-7-CLOSE PLANNING). Extends batch-1 items 1–4 from "gaps" → COMMITTED competitive scope.
-**STRATEGIC FRAME (pinned):** competitive target = the self-hosted / WireGuard ZTNA segment — **Tailscale · Twingate · NetBird · Headscale** — NOT the Zscaler tier. **Win condition:** match-or-beat the segment leaders on ZTNA DEPTH while holding the unique differentiator — **fully self-hosted, zero SaaS in the trust path, air-gappable**. L7/app-aware proxying, risk scoring, continuous re-auth = Tier-3 roadmap NAMES, explicitly NOT built.
+**STRATEGIC FRAME (pinned; refined 2026-07-14 post product-assessment):** **DIRECT competitive set = NetBird ·
+Firezone · Netmaker · Defguard** (the self-hosted, WireGuard, ZTNA+SSO products that overlap Tunnex head-on).
+**Tailscale = the ANCHOR / category-definer** (reference for DX + mesh magic, NOT a head-to-head target — we
+do NOT compete on developer-DX breadth). Twingate/Headscale = adjacent references. NOT the Zscaler tier.
+**Win condition:** match-or-beat the DIRECT set on ZTNA DEPTH while holding the differentiator — **fully
+self-hosted, zero SaaS in the trust path, air-gappable** — the wedge that Tailscale/Twingate (SaaS control
+plane) structurally can't hold and Headscale (community reimpl) doesn't productize. L7/app-aware proxying,
+risk scoring, continuous re-auth = Tier-3 roadmap NAMES, explicitly NOT built. **NAMED WEAKNESS (honest):** no
+relay/NAT-traversal fleet (batch-3 #3) = a real UX gap vs the Tailscale-likes; positions Tunnex as
+"modern Pritunl/sovereign ZTNA," not "connects-anywhere mesh" — target buyers who value the wedge over the magic.
 
 **PROPOSED EPIC 7.5 — "ZTNA Competitiveness" (insert BEFORE EPIC 8; confirm at planning):**
 - **S7.5.1 Flow / access logs** — per-connection / per-grant access events, org-scoped, queryable + exportable;
@@ -1437,6 +1446,38 @@ paying-customer INTENT** (build-on-intent; supersedes the parked "post-beta" not
   re-pointed (the `tunnex-site` repo IS the distribution workstream, complete through S4.3, runbook approved);
   the site's `/security` "Windows kill-switch in progress" caution is STALE (S6.7 MERGED + pcap-proven) →
   relay to the site ledger.
+
+## STRATEGIC POSTURE — DELIBERATE-BUILD MARKET ENTRY (user-directed 2026-07-14, DECIDED)
+**Decided: build to full scope, enter the market ONCE, strong.** No launch urgency. Rationale (pinned): the
+wedge buyer (regulated / sovereignty / air-gap) rewards COMPLETENESS + evidence of rigor over speed; a
+half-product first impression is unrecoverable in enterprise evaluation. CONFIRMS the locked order (7.5 → M →
+BUNDLE → BETA joint with site) — NO change. The posture's failure mode is "no hurry → no clock"; four guards:
+
+1. **Internal milestones (anti-drift, NOT protocol-compromising deadlines).** At each epic close, Claude Code
+   PROPOSES candidate target dates ("7.5 done", "first design-partner deployment", "M done", "bundle done")
+   for founder confirmation; slippage is REPORTED, not hidden. Dates never justify skipping decision-first /
+   box-proof / review.
+2. **Design-partner track REFRAMED (supersedes earlier framing): private deployments ≠ launch.** Goal = 1–2
+   friendly orgs in the wedge (regulated fintech · defense/govt integrators · OT/industrial · Pritunl
+   migrations · India/DPDP angle) running the product PRIVATELY during the build → launch day carries "running
+   in production at real orgs for N months." Founder-owned, parallel, NO code. Pre-authorized escape valve
+   STANDS: a partner's concrete need may RE-ORDER stories within the locked sequence; never gate-skip.
+3. **Trust-asset pipeline (the runway must produce more than features):** (a) **entity formation** — founder
+   starts NOW, longest clock; (b) **scoped pentest** (privilege helper + kill-switches ONLY, founder-affordable)
+   — trigger moved EARLIER to **post-entity + post-7.5, NOT gated on a deal** → launch carries "independently
+   tested"; the FULL audit (batch-3 #6) keeps its existing trigger (first enterprise deal / GA); (c) **security
+   whitepaper** (batch-3 #7) — drafted DURING the 7.5/M build from the armed-guards / box-proof material, not
+   after; founder-reviewed like the launch posts.
+4. **OPEN DECIDE-ITEM (founder's word, NOT decided): early content-only site launch.** Option: BLOG + `/compare`
+   pages ONLY go live early (no product pages / downloads / trial funnel) so the domain AGES and "Tailscale
+   alternative / Pritunl migration / NetBird vs" queries rank by launch day — SEO time is the one asset that
+   can't be bought later. Partially amends the single-launch decision (content early; product-launch still once
+   + complete). Needs founder yes/no; if yes, a small `tunnex-site` content-only-mode story. Disposition =
+   founder's word.
+
+**FOUNDER PARALLEL TRACK (no code; homework):** (1) entity formation — start this week; (2) design-partner
+conversations — identify the 3–5 wedge candidates; (3) the blog-early yes/no when sat with. Build side is fully
+unblocked; the next Claude Code artifact is the S7.5.1 commit-one.
 
 **LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
 throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
