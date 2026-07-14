@@ -9,7 +9,7 @@ import { trayMenuModel, trayStateFor } from "../src/main/trayview";
 // throw. The Electron wiring (notify.ts / tray.ts) is live-verified at S6.5a packaging.
 
 test("notify: every tunnel event has non-empty, distinct copy", () => {
-  const events = ["connected", "disconnected", "failed", "revoked", "pending", "approved", "migrated"] as const;
+  const events = ["connected", "disconnected", "failed", "revoked", "pending", "approved", "migrated", "migrate_retry"] as const;
   const titles = new Set<string>();
   for (const ev of events) {
     const { title, body } = messageFor(ev);
