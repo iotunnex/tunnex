@@ -10,10 +10,17 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: up
-up: ## Start the full stack (postgres, redis, api, web, nginx, node-agent, mailpit)
+up: ## Start the full stack (postgres, redis, api, web, nginx, node-agent, mailpit) — OPEN edition
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build
 	@echo "Tunnex is starting → http://localhost   (Mailpit → http://localhost:8025)"
+
+.PHONY: up-enterprise
+up-enterprise: ## Start the full stack with the ENTERPRISE api image (Zero Trust: policy + device posture)
+	@test -f .env || cp .env.example .env
+	TUNNEX_BUILD_TAGS=enterprise $(COMPOSE) up -d --build
+	@echo "Tunnex (ENTERPRISE) starting → http://localhost"
+	@echo "Verify: curl -s localhost/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> enterprise"
 
 .PHONY: down
 down: ## Stop the stack (keep volumes)

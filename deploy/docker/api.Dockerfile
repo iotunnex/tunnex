@@ -10,7 +10,15 @@ ENV GOFLAGS=-mod=readonly
 RUN go mod download
 
 COPY apps/api/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
+# Edition selector (open-core). Empty (default) = OPEN build — the enterprise policy
+# engine is //go:build enterprise-tagged and is NOT linked, so the default image can
+# never contain it (the CI edition-isolation guard asserts this on the open build).
+# Set TUNNEX_BUILD_TAGS=enterprise to build the ENTERPRISE image reproducibly from
+# committed config (Zero Trust policy/enforcement/device-approval) — used for local +
+# self-hosted enterprise testing. This replaces the old temporary `sed` hack; the same
+# tag `make build-editions`/`test-editions` already compile-check now plumbs into the image.
+ARG TUNNEX_BUILD_TAGS=""
+RUN CGO_ENABLED=0 GOOS=linux go build -tags "$TUNNEX_BUILD_TAGS" -trimpath -ldflags="-s -w" -o /out/tunnex-api ./cmd/server
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 tunnex

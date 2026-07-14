@@ -40,6 +40,10 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/api.Dockerfile
+      args:
+        # Open-core edition selector. Empty (default) builds the OPEN image; set
+        # TUNNEX_BUILD_TAGS=enterprise to build the enterprise image reproducibly.
+        TUNNEX_BUILD_TAGS: ${TUNNEX_BUILD_TAGS:-}
     restart: unless-stopped
     environment:
       TUNNEX_ENV: ${TUNNEX_ENV:-development}
