@@ -564,10 +564,17 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				deg = true
 			}
 		}
-		// [fold 8] the open build has NO policy engine → healthy, never desync_unknown (the
-		// bool is already false there — the kind must agree).
+		// [fold 8] the open build has NO policy engine → no desync path. The kind must AGREE
+		// with the bool structurally (not just architecturally): if caps somehow carry an apply
+		// error, reflect it (apply_failing/stuck) so {Degraded,Kind} can't disagree; else healthy.
+		// (Normally the open agent reports neither field — this is the structural guarantee.)
 		kind := KindHealthy
-		if enterprise {
+		switch {
+		case !enterprise && caps.PolicyFailingSince != "":
+			kind = KindApplyFailing
+		case !enterprise && caps.PolicyError != "":
+			kind = KindStuckEnforcing
+		case enterprise:
 			kind = degradedKind(KindInput{
 				PolicyError:        caps.PolicyError,
 				PolicyFailingSince: caps.PolicyFailingSince,
@@ -584,21 +591,6 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 	return out
 }
 
-// PolicyDegradedForNodes returns just the authoritative bool — delegates to the single source.
-func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]bool {
-	h := s.PolicyHealthForNodes(ctx, orgID, nodes)
-	out := make(map[uuid.UUID]bool, len(h))
-	for id, v := range h {
-		out[id] = v.Degraded
-	}
-	return out
-}
-
-// PolicyDegradedKindForNodes projects the ADVISORY differentiated kind (S7.4b) — display
-// detail over the authoritative bool; it adds NO decision logic and nothing outside the UI
-// reads it. Same single org compile (`pushed`) as the bool. `pushKnown` is org-wide: a
-// transient compile fault → every node reads `desync_unknown` (honest can't-determine),
-// never a false healthy/kind. Freshness from `last_seen_at`, onset from the CP-stamped column.
 // tsTime unwraps a nullable timestamp to a zero-or-value time.
 func tsTime(ts pgtype.Timestamptz) time.Time {
 	if !ts.Valid {
