@@ -102,6 +102,30 @@ func TestTrackDesync(t *testing.T) {
 		}
 	})
 
+	// A-3(ii), REAL PATH: a rule deleted and recreated with a new uuid but identical
+	// grant compiles to the SAME CanonicalHash (rule_id is hash-excluded), so the actual
+	// single-writer trackDesync sees pushed==applied and does NOT stamp policy_desync_since.
+	// Proves the S7.4b desync flap is dead against the real writer + DB column, not merely
+	// at the hash layer.
+	t.Run("rule_id-only recreate does NOT stamp (S7.4b flap dead on the trackDesync path)", func(t *testing.T) {
+		n := seedNode(t, pool)
+		mk := func(ruleID string) policyspec.Compiled {
+			return policyspec.Compiled{
+				Version: policyspec.ProtocolVersion, NodeID: n.ID.String(), Mode: "enforcing",
+				Allow: []policyspec.AllowEntry{{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: policyspec.ProtoTCP, PortLow: 5432, PortHigh: 5432, RuleID: ruleID}},
+			}
+		}
+		applied := policyspec.CanonicalHash(mk("rule-uuid-1")) // node applied the ORIGINAL rule's artifact
+		pushed := policyspec.CanonicalHash(mk("rule-uuid-2"))  // admin deleted+recreated → new uuid, same grant
+		if applied != pushed {
+			t.Fatalf("precondition: rule_id-only change must not move the hash (%s vs %s)", applied, pushed)
+		}
+		svc(pushed).trackDesync(ctx, n, applied) // pushed == applied → the real writer must NOT stamp
+		if desyncSince(t, pool, n.ID).Valid {
+			t.Fatal("a rule_id-only recreate must NOT stamp policy_desync_since")
+		}
+	})
+
 	t.Run("clear on non-enforcing (pushed == '')", func(t *testing.T) {
 		n := seedNode(t, pool)
 		svc("h").trackDesync(ctx, n, "old") // stamp under enforcing

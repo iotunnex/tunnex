@@ -42,9 +42,13 @@ type AffectedDevice struct {
 	Name string    `json:"name"`
 }
 
-// ProtocolVersion is the compiled-artifact wire version. Bump on any breaking
-// shape change so a mismatched agent can reject rather than misapply a ruleset.
-const ProtocolVersion = 1
+// ProtocolVersion is the compiled-artifact wire version. Bump on any shape change.
+// v2 (S7.5.1): AllowEntry gains an OBSERVABILITY-only `rule_id` (flow-log
+// attribution) — additive, never enforcement. Old agents ignore unknown fields
+// (verified) and CanonicalHash is metadata-blind (hashes an enforcement-only
+// projection), so v1 and v2 artifacts with identical grants hash + enforce
+// IDENTICALLY. See docs/S7.5.1-decisions.md (D2 / A-4).
+const ProtocolVersion = 2
 
 // Protocol scopes an allow entry to an L4 protocol. "any" ignores ports.
 type Protocol string
@@ -66,6 +70,12 @@ type AllowEntry struct {
 	Protocol Protocol `json:"protocol"`           // any | tcp | udp
 	PortLow  int      `json:"port_low,omitempty"` // 0 => all ports
 	PortHigh int      `json:"port_high,omitempty"`
+	// RuleID (v2, S7.5.1) is OBSERVABILITY metadata: the CP policy_rules.uuid whose
+	// grant produced this entry, so the agent stamps flow/deny events with it and the
+	// conntrack-kill agrees on identity. NEVER enforcement — EXCLUDED from CanonicalHash
+	// (the enforcement projection), so staleness is metadata-blind. Empty on v1 wire /
+	// default-deny with no matching rule.
+	RuleID string `json:"rule_id,omitempty"`
 }
 
 // Compiled is the per-node policy artifact. It expresses BOTH modes so S7.2 has a

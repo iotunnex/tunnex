@@ -149,6 +149,20 @@ func TestRulesetDeterministic(t *testing.T) {
 
 // renderAllow re-emits every field through netip (canonical numeric) so nothing can
 // inject nft statements, and skips what it can't safely render.
+// rule_id (v2, S7.5.1) is OBSERVABILITY metadata: renderAllow must IGNORE it — the nft
+// line is byte-identical with or without a rule_id, so v1-shaped and v2-shaped rulesets
+// ENFORCE identically (rule_id changes the flow log, never the packet fate).
+func TestRenderAllowIgnoresRuleID(t *testing.T) {
+	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}
+	withID := base
+	withID.RuleID = "rule-uuid-1"
+	l1, ok1 := renderAllow(base)
+	l2, ok2 := renderAllow(withID)
+	if !ok1 || !ok2 || l1 != l2 {
+		t.Fatalf("rule_id must not affect the rendered nft line: %q (ok=%v) vs %q (ok=%v)", l1, ok1, l2, ok2)
+	}
+}
+
 func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	// Injection attempt in SrcIP -> skipped (not parseable as an IP).
 	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1; add rule ip tunnex forward accept", DstCIDR: "10.0.0.0/24"}); ok {

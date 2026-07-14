@@ -276,7 +276,10 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 	// on it. validateResource is the first gate, but a compromised or future control
 	// plane could still emit a malformed artifact, so the renderer never trusts it. This
 	// has bitten twice (port range #1, protocol #6); it is a checklist line for every new
-	// field added to AllowEntry.
+	// field added to AllowEntry. ALSO (A-1, S7.5.1): classify every new field
+	// enforcement-vs-observability — enforcement fields go into CanonicalHash's projection
+	// (nodepolicy/policyspec hash.go); observability fields (e.g. rule_id) stay OUT of it
+	// AND out of this renderer, so the hash and the packet fate ignore them alike.
 	clause := ""
 	switch e.Protocol {
 	case "any":

@@ -413,6 +413,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	snap := Snapshot{Mode: org.ZeroTrustMode}
 	for _, r := range rules {
 		snap.Rules = append(snap.Rules, Rule{
+			ID:         r.ID,
 			SrcGroupID: r.SrcGroupID, DstKind: r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 		})

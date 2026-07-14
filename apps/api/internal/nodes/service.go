@@ -31,9 +31,13 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
-// ProtocolVersion is the control-plane protocol version. The control plane must
-// serve agents at version N and N-1 during rolling upgrades.
-const ProtocolVersion = 1
+// ProtocolVersion is the control-plane protocol version, kept in lockstep with
+// policyspec.ProtocolVersion (TestProtocolVersionConstantsAgree). v2 (S7.5.1): the
+// desired-state artifact gained an additive, hash-invisible rule_id. Bumping is safe:
+// EnrollAgent only rejects agents reporting a version GREATER than the CP (a newer
+// agent vs an older CP), so v1 agents (report 1, not > 2) are still served — the CP
+// serves v2, a v1 agent ignores the unknown field, and the hash is metadata-blind.
+const ProtocolVersion = 2
 
 const joinTokenTTL = time.Hour
 
