@@ -142,3 +142,49 @@ func TestTrackDesync(t *testing.T) {
 		}
 	})
 }
+
+// PolicyHealthForNodes — the collapsed bool+kind. Reds: [1] the freshness gate reads
+// policy_reported_at (NOT last_seen_at), so a node that polls but stopped REPORTING with a real
+// mismatch → desync_unknown; [8] the open build → {false, healthy}, never desync_unknown.
+func TestPolicyHealthForNodes(t *testing.T) {
+	pool := desyncPool(t)
+	ctx := context.Background()
+	org, id := uuid.New(), uuid.New()
+	exec := func(q string, a ...any) {
+		if _, err := pool.Exec(ctx, q, a...); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO organizations (id, name, slug) VALUES ($1,$2,$3)`, org, "ph", "ph-"+org.String()[:8])
+	exec(`INSERT INTO nodes (id, org_id, name, cert_serial) VALUES ($1,$2,'gw',$3)`, id, org, "s-"+id.String())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM organizations WHERE id=$1`, org) })
+	// applied="applied", REPORT is 5 min stale, but last_seen is FRESH (a poll bumped it), and
+	// an onset is stamped — i.e. the gateway stopped REPORTING while desynced.
+	exec(`UPDATE nodes SET capabilities = jsonb_set('{}','{policy_hash}','"applied"'),
+	      policy_reported_at = now() - interval '5 minutes',
+	      last_seen_at = now(),
+	      policy_desync_since = now() - interval '90 seconds' WHERE id=$1`, id)
+
+	q := sqlc.New(pool)
+	n, err := q.GetNodeByOrgName(ctx, sqlc.GetNodeByOrgNameParams{OrgID: org, Name: "gw"})
+	if err != nil {
+		t.Fatalf("GetNodeByOrgName: %v", err)
+	}
+
+	// [1] enterprise, pushed != applied, REPORT stale → desync_unknown (NOT converging/silent/healthy).
+	ent := &Service{pool: pool, q: q, policy: stubHashProvider{pushed: "pushed"}}
+	h := ent.PolicyHealthForNodes(ctx, org, []sqlc.Node{n})[id]
+	if !h.Degraded {
+		t.Fatal("enforcing mismatch must set the authoritative bool")
+	}
+	if h.Kind != KindDesyncUnknown {
+		t.Fatalf("[1] stale REPORT (last_seen fresh) must read desync_unknown, got %q", h.Kind)
+	}
+
+	// [8] open build (nil policy): {false, healthy}, never desync_unknown.
+	open := &Service{pool: pool, q: q, policy: nil}
+	ho := open.PolicyHealthForNodes(ctx, org, []sqlc.Node{n})[id]
+	if ho.Degraded || ho.Kind != KindHealthy {
+		t.Fatalf("[8] open build must be {false, healthy}, got {%v, %q}", ho.Degraded, ho.Kind)
+	}
+}

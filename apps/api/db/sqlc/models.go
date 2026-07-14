@@ -149,6 +149,7 @@ type Node struct {
 	Endpoint          string             `json:"endpoint"`
 	Capabilities      []byte             `json:"capabilities"`
 	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
+	PolicyReportedAt  pgtype.Timestamptz `json:"policy_reported_at"`
 }
 
 type NodeJoinToken struct {
