@@ -32,6 +32,29 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return e?.error?.message ?? fallback;
 }
 
+// Loaded<T> normalizes a GET result. openapi-fetch is a STANDING FOOTGUN: it returns
+// {data:undefined, error} on a non-2xx (it does NOT throw) and REJECTS on a network
+// failure — two paths that, if a component only reads `data`, silently render a
+// reassuring EMPTY state for a real failure (the S7.4a review's dominant cluster).
+// loadOne collapses BOTH into a discriminated result so callers render a legible
+// "failed — retry", never "none".
+//
+// SANCTIONED CALL PATTERN: a raw `api.GET` in a component whose emptiness is
+// user-meaningful (a list, a role, a count that gates a destructive action) is
+// review-refused — route it through loadOne so a fetch failure can't read as absence.
+export type Loaded<T> = { ok: true; data: T } | { ok: false; error: string };
+
+export async function loadOne<T>(call: () => Promise<{ data?: T; error?: unknown }>): Promise<Loaded<T>> {
+  try {
+    const { data, error } = await call();
+    if (error) return { ok: false, error: apiErrorMessage(error, "Could not load.") };
+    if (data === undefined) return { ok: false, error: "Could not load." };
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: "Could not reach the API." };
+  }
+}
+
 // apiErrorCode pulls the stable machine-readable code out of the error envelope
 // (e.g. "org_limit_reached") so callers can branch on it instead of matching prose.
 export function apiErrorCode(error: unknown): string | undefined {

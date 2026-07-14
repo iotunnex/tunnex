@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useId } from "react";
+import { cloneElement, isValidElement, useEffect, useId } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes } from "react";
 
 // A small, deliberate set of primitives — enough to compose the app's pages
@@ -93,6 +93,15 @@ export function Modal({
   children: ReactNode;
   actions: ReactNode;
 }) {
+  // Esc dismiss via a document listener — a keydown on the div never fires (it isn't
+  // focused). Backdrop click also dismisses; the inner panel stops propagation.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -100,7 +109,6 @@ export function Modal({
       aria-modal="true"
       aria-label={title}
       onClick={onDismiss}
-      onKeyDown={(e) => e.key === "Escape" && onDismiss()}
     >
       <div
         className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl"

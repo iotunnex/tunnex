@@ -4,9 +4,11 @@ import {
   policyGate,
   ruleRow,
   swapRule,
+  roleFromMembers,
   type LoadState,
 } from "../src/lib/policyview";
-import type { PolicyRule, UserGroup, Resource } from "../src/lib/api";
+import { loadOne, type Loaded } from "../src/lib/api";
+import type { PolicyRule, UserGroup, Resource, Member } from "../src/lib/api";
 
 const G = (id: string, name: string) => ({ id, name } as UserGroup);
 const R = (id: string, name: string) => ({ id, name } as Resource);
@@ -99,6 +101,50 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
     const row = ruleRow(rule, groups, [], { groupsLoaded: true, resourcesLoaded: false });
     expect(row.dst.state).toBe("unresolved");
     expect(row.dst.label).toMatch(/refresh/i);
+  });
+});
+
+describe("loadOne — the class armed-guard: a failure NEVER reads as absence", () => {
+  it("non-2xx (error present, data undefined) → NOT ok (never a reassuring empty)", async () => {
+    const r = await loadOne(async () => ({ data: undefined, error: { error: { message: "boom" } } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("boom");
+  });
+  it("data undefined with no error → NOT ok", async () => {
+    const r = await loadOne(async () => ({ data: undefined }));
+    expect(r.ok).toBe(false);
+  });
+  it("network REJECT (openapi-fetch throws) → NOT ok, legible message", async () => {
+    const r = await loadOne(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/reach the API/i);
+  });
+  it("data present → ok with the data", async () => {
+    const r = await loadOne(async () => ({ data: [1, 2, 3] }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).toEqual([1, 2, 3]);
+  });
+});
+
+describe("[0] roleFromMembers — a FAILED members load is NOT 'member' (no false lockout)", () => {
+  const me = "u-me";
+  it("failed load → failed:true, NO role (caller shows retry, not the manage-gate)", () => {
+    const res = roleFromMembers({ ok: false, error: "boom" } as Loaded<Member[]>, me);
+    expect(res.failed).toBe(true);
+    expect(res.role).toBeUndefined();
+    // Critical: policyGate must NOT be fed this as role=undefined-treated-as-member.
+  });
+  it("ok load, actor is admin → role admin, not failed", () => {
+    const members = [{ user_id: me, role: "admin" } as Member];
+    const res = roleFromMembers({ ok: true, data: members }, me);
+    expect(res).toEqual({ role: "admin", failed: false });
+  });
+  it("ok load, actor absent from roster → role undefined but NOT failed", () => {
+    const res = roleFromMembers({ ok: true, data: [] as Member[] }, me);
+    expect(res.failed).toBe(false);
+    expect(res.role).toBeUndefined();
   });
 });
 
