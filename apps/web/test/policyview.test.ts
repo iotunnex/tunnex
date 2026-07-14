@@ -5,6 +5,8 @@ import {
   ruleRow,
   swapRule,
   roleFromMembers,
+  sectionRender,
+  accessView,
   type LoadState,
 } from "../src/lib/policyview";
 import { loadOne, type Loaded } from "../src/lib/api";
@@ -125,6 +127,43 @@ describe("loadOne — the class armed-guard: a failure NEVER reads as absence", 
     const r = await loadOne(async () => ({ data: [1, 2, 3] }));
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data).toEqual([1, 2, 3]);
+  });
+});
+
+describe("[291] sectionRender — legibility signals COMPOSE, never compete", () => {
+  it("loadError + notice both set → retry shows AND notice STILL shows (content hidden)", () => {
+    const v = sectionRender("couldn't load", "old rule still active — retry removal");
+    expect(v.showRetry).toBe(true);
+    expect(v.showNotice).toBe(true); // the partial-swap warning is NOT masked by the load failure
+    expect(v.showContent).toBe(false); // only CONTENT is replaced by retry
+  });
+  it("no error, notice set → content + notice", () => {
+    expect(sectionRender(null, "note")).toEqual({ showRetry: false, showContent: true, showNotice: true });
+  });
+  it("no error, no notice → content only", () => {
+    expect(sectionRender(null, null)).toEqual({ showRetry: false, showContent: true, showNotice: false });
+  });
+});
+
+describe("[75]+[101] accessView — upsell needs only edition; role in-flight is not the gate", () => {
+  const base = { fatal: false, loadError: false, editionReady: true, isEnterprise: true, roleError: false, roleResolved: true, canView: true };
+  it("[75] non-enterprise + members-fail → upsell, NOT role_retry", () => {
+    expect(accessView({ ...base, isEnterprise: false, roleError: true, roleResolved: false })).toBe("upsell");
+  });
+  it("[101] enterprise + role in-flight → role_loading, NOT member_gate", () => {
+    expect(accessView({ ...base, roleResolved: false, canView: false })).toBe("role_loading");
+  });
+  it("enterprise + roleError → role_retry", () => {
+    expect(accessView({ ...base, roleError: true, roleResolved: false })).toBe("role_retry");
+  });
+  it("enterprise admin resolved → admin_body; member resolved → member_gate", () => {
+    expect(accessView({ ...base, canView: true })).toBe("admin_body");
+    expect(accessView({ ...base, canView: false })).toBe("member_gate");
+  });
+  it("meta/org not ready → loading; fatal → fatal; loadError → load_retry", () => {
+    expect(accessView({ ...base, editionReady: false })).toBe("loading");
+    expect(accessView({ ...base, fatal: true })).toBe("fatal");
+    expect(accessView({ ...base, loadError: true })).toBe("load_retry");
   });
 });
 
