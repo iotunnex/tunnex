@@ -59,7 +59,7 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
-**CURRENT (2026-07-12): EPIC 6 COMPLETE + `v0.1.0` CUT; NOW IN EPIC 7 (Zero Trust Access).**
+**CURRENT (2026-07-14): EPIC 6 COMPLETE + `v0.1.0` CUT; IN EPIC 7 (Zero Trust Access) — S7.1/S7.2/S7.3 MERGED, NEXT S7.4.**
 - **EPIC 6 done:** S6.1–S6.6 + S6.7 + S6.8/9/10 (+ S3.7) all MERGED. The mid-epic stories were spun
   up live during full-tunnel hardening and are defined ONLY here (reconciled against git log, so the
   checkpoint never points at ghosts): **S6.8 = quit continuity** (graceful helper Down on app quit +
@@ -75,8 +75,11 @@ expected to be rewritten before merge.
   (PR#14, fe67e28)** — allow-only default-deny model + pure deterministic compiler (`policyspec.Compiled`),
   enterprise-gated CRUD, migration 0018 (incl. the group_members→memberships cascade FK from the F1 fix).
   Enforcement + the on-the-wire default-deny proof are S7.2 (ledgered: AffectedNodeIDs direct test +
-  member-removal as the 4th recompile+push trigger). **NEXT: S7.2 (enforcement) decision-first.**
-  See `docs/S7.1-decisions.md`.
+  member-removal as the 4th recompile+push trigger). **S7.2 MERGED (PR#16, ac74123)** — enforcement
+  box-proven 8/8. **S7.3 MERGED (PR#17, 5e9838a)** — device posture (approval gate + F1-part-3 org-wide
+  push + migration reduction arc), box-proven on a live two-gateway wire incl. the 3b cross-gateway
+  discriminator (see the re-entry checkpoint). **NEXT: S7.4 (policy UI + differentiated health surface +
+  enterprise-e2e stack) decision-first.** See `docs/S7.1-decisions.md`, `docs/S7.3-decisions.md`.
 - **LEDGER re-points (recorded at S7.1 sign-off):** triggers formerly anchored to **"EPIC 6 close"**
   (S3.7 decision-review revisit; beta re-decide) are re-pointed to the named trigger **"public-beta
   readiness"** (never calendar clocks). **EPIC 7 is the trigger to build the deferred ENTERPRISE-E2E
@@ -201,16 +204,41 @@ forwarded traffic is denied until the CP returns. **Bounded + self-healing:** th
 fetch flips the state (`policyReceived`) and restores mesh/grants; no manual step. NB this is scoped to
 the NODE cold-start only — the control-plane policy-error path IS scoped by mode (finding #2: off orgs
 served mesh), so a CP/DB blip does not blackhole off-mode orgs while their gateway is already running.
+
+**NAMED LIMITATION (S7.3, migration compound-edge — [0] recorded-as-CLOSED):** the client's legacy-config
+migration (a pre-`orgId` v0.1.0 profile → one-time re-mint) can, on the compound edge
+`legacy × persistent-revoke-failure × OS-notifications-muted`, leave the user on a repeating soft
+`migrate_failed` state ("Couldn't replace device — reconnect to retry") rather than auto-completing. This is
+BOUNDED by construction (config kept, terminal-per-connect, no raw reject, no unbounded loop) and now
+LEGIBLE in the window/tray (the fifth-touch emit CLOSED the silent-"Disconnected" residual [0]); a working
+revoke on any later connect self-heals it. The smallest population this product will ever have (a capped
+legacy upgrader whose self-revoke persistently fails with notifications off); the four-reduction ceiling was
+deliberately not spent chasing it further. Wire-observation of the desktop states themselves is the ledgered
+client-wire-smoke (SUBSTITUTES≠SATISFIES). Recorded per the escalation doctrine: name the edge, don't keep
+touching working-enough code.
+
 Done through (merged to `main`): **EPIC 0–2, EPIC 3 (S3.1–S3.6), EPIC 4 COMPLETE — S4.1 (shell) ·
 S4.2 (auth) · S4.3 (dashboard) · S4.4 (users & roles) · S4.5 (org settings + SSO) · S4.5b (CIDR
 resize) · S4.6 (audit viewer) · S4.7 (onboarding funnel) · S4.8 (Round-2 walk fixes) · EPIC 5 / S5.1
 (tunnex CLI) · EPIC 6 S6.1 (client shell) + S6.2 (renderer transport — tenant-functional).**
-**RE-ENTRY CHECKPOINT — S7.2 MERGED (PR#16, merge sha ac74123)** — enforcement box-proven 8/8 on the
-wire; 4 review passes + 1 scoped folded (6+4+2 correctness findings, incl. 3 fail-opens the box proof
-missed and the staleness-surface collapse to `policy_degraded`); F1-part-2 lesson (proven at one layer ≠
-proven end-to-end). EPICs 0–6 COMPLETE + EPIC 7: S7.1 (policy model) + S7.2 (enforcement) MERGED.
-**NEXT: S7.3 (device posture) decision-first.** If this pointer disagrees with the git log, TRUST GIT
-(`git log --oneline -15`) and update this line.
+**RE-ENTRY CHECKPOINT — S7.3 MERGED (PR#17, merge sha 5e9838a)** — device posture: an org-level
+approval gate (org setting `device_approval` default-off, enterprise-gated; `device:approve` owner+admin;
+self-approve DISTINCTLY audited `device.self_approved`) + **F1-part-3 org-wide push** (device Create /
+Revoke / Approve / Reject ALL push org-wide, not own-node — Revoke→org-wide is the SECURITY fix for the
+address-reuse privilege leak) + the migration-surface **reduction arc** (4 reductions + 1 legibility emit:
+scan deletion → one-time reconnect → revoke-first → outcome-degrade → `migrate_failed` legible state).
+**BOX-PROVEN ON A LIVE TWO-GATEWAY WIRE (2026-07-14):** Legs 1/2/3/4 green (pending=no-peer/no-ping/no-rule;
+approve push Δ0.21s<5s; reject→IP-freed→reused; flip-ON grandfathers 0% loss) + **Leg 3b F1-part-3
+cross-gateway discriminator** — revoking a device homed on G2 stripped its stale `saddr S daddr T` grant
+from the NON-hosting gateway G1 in **0.236s** (own-node push would leave it → the loop would hang) + reused
+IP → `default_drop`, leak closed. G2 (2nd node-agent) LEFT STANDING as a live two-gateway env for S7.4 +
+the deferred client-wire-smoke + dogfooding. Client legs (connect-gate / re-mint / `migrate_failed`)
+ledgered SUBSTITUTES≠SATISFIES (66 client unit tests substitute; wire proof deferred → packaged-client
+smoke OR next desktop session). 5 review/confirm passes total; the collapse-arc's terminal form
+(degrade-on-outcome-not-error-type) recorded as the S7.4 first-reach heuristic. EPICs 0–6 COMPLETE + EPIC 7:
+S7.1 + S7.2 + S7.3 MERGED. **NEXT: S7.4 (policy UI + differentiated health surface + enterprise-e2e stack)
+decision-first.** If this pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update
+this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -264,6 +292,36 @@ Seed for the eventual SECURITY.md.
   failingSince empty, synced-would-be-true) MUST read `policy_degraded=true`. Demonstrated-red: this
   exact green-while-blackholing state survived review passes 2, 3 AND 4 across the 3→2-field staleness
   surface before the collapse to one conservative field closed it.
+- **Device active+pending accounting convention** (S7.3; `CountDevicesForUserCap` + its pin test) — a
+  `pending` device is EXCLUDED from enforcement (peer + compiler filters key on `status='active'`) but
+  INCLUDED in resource accounting: the per-user cap, the IP pool, and node-sweeps all count active+pending.
+  Demonstrated-red: cap counting active-only let a user enroll past the cap by stacking pendings (a free
+  DoS on the address pool); the fix counts both. The taxonomy: **exclude from what grants access, include
+  in what consumes resources.**
+- **Partial-unique-index ⊇ allocator domain** (S7.3; migration 0020 widened `devices_org_ip_key` to
+  `status IN ('active','pending')`) — the partial unique index on `(org_id, assigned_ip)` must cover EVERY
+  status the allocator can hand a live IP to. Hazard: an index narrower than the allocator's domain (index
+  on `active` only, allocator also assigns to `pending`) lets two pending devices collide on one IP with no
+  DB guard. Checklist line for any new status that can hold an `assigned_ip`.
+- **F1-part-3 org-wide push on every membership-changing lifecycle event** (S7.3; device
+  Create/Revoke/Approve/Reject → `PushOrgNodes`, wire-proven Leg 3b) — any device event that changes
+  compiled policy membership pushes EVERY active org gateway, not the device's own node. Demonstrated-red
+  ON THE WIRE: revoking a device homed on G2 left its stale `saddr S daddr T` grant on the non-hosting
+  gateway G1 under own-node push; org-wide push strips it (0.236s box-measured). Revoke→org-wide is the
+  SECURITY fix (address-reuse privilege leak: a reused IP would inherit the revoked device's grants).
+  Generalizes the S7.2 multi-node push-target guard to the device-lifecycle surface.
+- **Two-layer pending exclusion** (S7.3) — a `pending` device must be dropped from BOTH the peer set
+  (`ListActivePeersForNode` → no wg peer/tunnel) AND the compiler input (no grants) by the same
+  `status='active'` filter. Box-proven Leg 1: pending = no wg peer + no ping + no allow rule. Single-layer
+  exclusion (peer-only) would arm a tunnel with no policy (or vice versa).
+- **Terminal-migration outcome-degradation** (S7.3; client `migrateLegacyConfig` revoke-first + the
+  ipc bare-catch degrade + `migrate_failed` synth state; reds in `deviceconfig.test.ts` + `uxwiring.test.ts`)
+  — a legacy-config migration has EXACTLY TWO bounded outcomes, degraded on OUTCOME not error type: completed
+  → `migrated`; failed-for-any-reason → config KEPT + the legible `migrate_failed` down-state. Structurally
+  NO path from a failed migration to a raw renderer reject or an unbounded loop. Demonstrated-red across the
+  reduction arc: revoke-first fixed a cap-lockout; the bare-catch removed the raw-reject; the `migrate_failed`
+  emit removed the silent-"Disconnected" on notif-muted machines. The doctrine (collapse N error paths to one
+  outcome-degraded down-state) is the S7.4 first-reach heuristic.
 
 ## Edition Model — Open-core (resolved)
 
