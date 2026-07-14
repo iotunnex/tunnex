@@ -48,10 +48,12 @@ jobs:
       - name: Privilege-helper — cross-compile darwin/amd64+arm64 + windows/amd64 (S6.3)
         run: make helper-crosscompile
 
-      - name: Web — typecheck + build
+      - name: Web — typecheck + unit tests + build
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm --filter @tunnex/web typecheck
+          pnpm --filter @tunnex/web test
           pnpm --filter @tunnex/web build
 
   # macOS + Windows: the desktop client. Display-free (no Electron launch).
