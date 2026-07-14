@@ -49,19 +49,18 @@ export async function resolveTunnelConfig(
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
   const existing = store.get(origin);
-  if (existing && !existing.orgId) {
-    // LEGACY config (persisted before orgId existed — v0.1.0). It can't use the direct-query
-    // monitors, and we NEVER query a no-orgId config (the reduction invariant — the scan path
-    // + its fault surface are deleted). Migrate it ONCE: drop + best-effort revoke against its
-    // origin (S6.3 origin-keying), then fall through to re-mint a fresh device that carries
-    // orgId. connect() surfaces the loud "migrated" notice. Revoke failure is fine — the
-    // orphan is the admin-reap/GC case (loss=recreate doctrine); proceed with the re-mint.
-    store.remove(origin);
-    try {
-      await api.revokeDevice(existing.deviceId);
-    } catch {
-      /* orphan left for GC/admin-reap — re-mint proceeds regardless */
-    }
+  // LEGACY config (persisted before orgId existed — v0.1.0). It can't use the direct-query
+  // monitors, and we NEVER query a no-orgId config (the reduction invariant — the scan fault
+  // surface is deleted). Migrate it ONCE by re-minting a fresh device that carries orgId.
+  // CREATE-FIRST, SWAP-AFTER-SUCCESS (finding #2): do NOT drop/revoke upfront — the create
+  // below overwrites this origin's entry, and the OLD device is revoked only AFTER the create
+  // succeeds. So a create failure (offline / 5xx) leaves the working config intact (the
+  // "a transient failure never destroys a working config" invariant — loss=recreate, S6.3/S6.4).
+  // connect() surfaces the loud "migrated" notice only on a SUCCESSFUL migration.
+  const legacyDeviceId = existing && !existing.orgId ? existing.deviceId : null;
+  if (legacyDeviceId) {
+    // fall through to the re-mint below (skip mode/pending/self-heal — a legacy config is
+    // always re-minted, never reused/queried).
   } else if (existing && existing.config.full_tunnel !== fullTunnel) {
     // MODE CHANGED (split↔full): the stored profile's AllowedIPs are baked at mint, so it
     // can't satisfy the new intent — reusing it would silently keep the old routing. Drop +
@@ -99,8 +98,20 @@ export async function resolveTunnelConfig(
   const config: TunnelConfig = { ...parseWgConf(confText), full_tunnel: fullTunnel };
   // Persist BEFORE the pending gate so the ApprovalMonitor + a later connect have the device
   // (config is valid now; the gateway just won't serve the peer until approved). orgId is
-  // persisted so the monitors query the device's OWN org directly (finding #4).
+  // persisted so the monitors query the device's OWN org directly (finding #4). This overwrites
+  // any legacy entry for this origin (same key).
   store.put({ origin, deviceId, orgId, config, pending: pendingApproval });
+  // SWAP-AFTER-SUCCESS (finding #2): the fresh device now exists + is stored, so best-effort
+  // revoke the superseded LEGACY device. We only reach here if createDevice succeeded — a
+  // create failure threw above with the legacy config still intact. (A pending re-mint IS a
+  // successful migration, so we revoke the old before throwing the gate below.)
+  if (legacyDeviceId) {
+    try {
+      await api.revokeDevice(legacyDeviceId);
+    } catch {
+      /* orphan left for GC/admin-reap — the migration already succeeded */
+    }
+  }
   if (pendingApproval) {
     throw new PendingApprovalError(deviceId); // S7.3: abort — do NOT arm the helper
   }

@@ -74,20 +74,13 @@ export class HttpDeviceApi implements DeviceApi {
   }
 
   async deviceStatus(deviceId: string, orgId: string): Promise<"active" | "pending" | "gone"> {
-    // A PRESENT orgId (new configs, persisted at create) queries the device's OWN org
-    // directly — a fetch error THROWS (inconclusive; a blip never reads as a transition),
-    // and "gone" is returned ONLY when that org's real list omits the id (no cross-org scan
-    // that a transient omit could false-"gone", finding #4).
-    //
-    // A MISSING/BLANK orgId (a LEGACY config persisted before the orgId field — the
-    // installed base / v0.1.0 upgraders) FALLS BACK to the all-orgs SCAN with the empty-orgs
-    // inconclusive throw intact, so an upgrader's monitors keep working (never a malformed
-    // /organizations//devices URL). Legacy configs stamp orgId on the next resolve
-    // (resolveTunnelConfig), retiring the scan path.
-    // orgId is ALWAYS present: new configs persist it at create, and a LEGACY config (no
-    // orgId) is re-minted before any monitor runs (the reduction — resolveTunnelConfig +
-    // connect never query a no-orgId config). A blank orgId here is therefore a bug, not a
-    // fallback: throw inconclusive rather than build a malformed /organizations//devices URL.
+    // Direct query against the device's OWN org. A fetch error THROWS (inconclusive — a blip
+    // never reads as a transition); "gone" only when that org's real list omits the id (no
+    // cross-org scan that a transient omit could false-"gone"). orgId is ALWAYS present: new
+    // configs persist it at create, and a LEGACY config (no orgId) is re-minted before any
+    // monitor runs (the reduction — resolveTunnelConfig + connect never query a no-orgId
+    // config). A blank orgId here is a bug, not a fallback: throw rather than build a malformed
+    // /organizations//devices URL.
     if (!orgId) throw new Error("no_org: inconclusive");
     const s = await this.deviceInOrg(orgId, deviceId);
     return s ?? "gone"; // not in its OWN org -> genuinely gone (direct query, no list-trust)
