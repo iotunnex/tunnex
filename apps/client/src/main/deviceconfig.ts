@@ -104,17 +104,14 @@ export async function resolveTunnelConfig(
 }
 
 // migrateLegacyConfig migrates a LEGACY (no-orgId) config with REVOKE-FIRST ordering (S7.3
-// reduction 2, hardened). The revoke's SUCCESS is what frees the per-user cap slot the NEXT
-// connect's fresh create needs, so revoke BEFORE clearing and clear ONLY on revoke success:
-//   - revoke ok + remove ok  -> migrated (next connect: fresh create, slot free)
-//   - revoke FAILS (blip)    -> THROWS with the config KEPT (caller fails the connect; the next
-//                               connect re-detects + retries) — bounded, self-recovering, no
-//                               lockout (unlike clearTunnelConfigForOrigin's drop-first
-//                               best-effort, whose orphan is COSMETIC for logout/remove-orphan
-//                               but cap-BLOCKING here — this is why the ordering is migration-
-//                               specific and NOT generalized to that shared helper).
-//   - revoke ok, remove throws -> THROWS, config kept; next connect re-revokes (404 = success,
-//                                 idempotent) + retries remove — bounded.
+// reduction 2). The revoke's SUCCESS is what frees the per-user cap slot the NEXT connect's fresh
+// create needs, so revoke BEFORE clearing and clear ONLY on revoke success. On SUCCESS it returns
+// (config cleared); on ANY failure it THROWS with the config KEPT (the slot handle survives). The
+// caller (ipc connect) degrades on OUTCOME: success -> "migrated"; throw -> honest recoverable
+// down — it does NOT branch on the error type. So this helper only needs the one guarantee: never
+// clear the config unless the revoke that frees the slot actually succeeded. Whether a failure is
+// transient (next connect self-heals) or persistent (bounded-by-honest-message) is the caller's
+// single soft-down outcome, not N cases handled here.
 // DOCTRINE REFINEMENT: best-effort-revoke-and-orphan is correct where the orphan is COSMETIC;
 // where a subsequent operation DEPENDS on the revoke (here, the freed cap slot), REVOKE-FIRST-
 // VERIFY is required. (Recurs wherever a revoke frees a resource something else immediately claims.)

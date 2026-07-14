@@ -160,28 +160,36 @@ export function registerIpc(
     stopApprovalMonitor();
     lastSynth = null; // a fresh connect clears any stale revoked/pending state
     requestedFullTunnel = fullTunnel;
-    // LEGACY MIGRATION (reduction 2 — one-time reconnect): a stored config from before the
-    // orgId field can't be monitored. Handle it DETERMINISTICALLY AT DETECTION, terminal for
-    // THIS connect — there is NO tunnel.up on the legacy path, so no helper-arm failure can
-    // race the notice, no create/revoke atomicity, and no cap collision. Clear it + best-effort
-    // revoke (frees the per-user cap slot; origin-keyed S6.3; revoke failure -> orphan for
-    // admin-reap) + the loud one-time notice + end in a connectable ("down") state. The NEXT
-    // connect is an ordinary fresh create — cap slot already free, orgId present, no in-place
-    // swap. (This deletes the fault surface the two prior folds each re-cut: cap-permanence,
-    // notice-timing, and swap atomicity.)
+    // LEGACY MIGRATION (reduction 2, TERMINAL FORM — outcome-degraded): a stored config from
+    // before the orgId field can't be monitored. Handle it DETERMINISTICALLY AT DETECTION,
+    // terminal for THIS connect — there is NO tunnel.up on the legacy path, so no helper-arm
+    // failure can race the notice, no create/revoke atomicity, no cap collision. migrateLegacyConfig
+    // is REVOKE-FIRST (frees the per-user cap slot before clearing; config KEPT on any failure so
+    // the slot handle survives). This block degrades on OUTCOME, not error type — there are exactly
+    // TWO outcomes, both bounded and both ending in a connectable "down":
+    //   completed        -> "migrated"; the NEXT connect is an ordinary fresh create (slot free, orgId present)
+    //   failed FOR ANY REASON -> config KEPT + honest recoverable down ("couldn't replace device;
+    //                            reconnect to retry / contact admin if it persists")
+    // We do NOT catch-and-branch on which error it was: a failed migration is a failed migration.
+    // This structurally removes the two failure classes the whole arc produced — there is NO path
+    // from a failed migration to (a) a raw renderer reject or (b) an unbounded loop. Transient
+    // self-heals on the next connect; persistent is bounded-by-honest-message, never a crash, never
+    // a silent lockout. (Fourth and final touch on this surface — see docs/S7.3-decisions.md.)
     const preCred = store.load();
     if (preCred) {
       const preSc = tunnelStore.get(preCred.server);
       if (preSc && !preSc.orgId) {
-        // REVOKE-FIRST (harden): frees the cap slot BEFORE clearing; a revoke blip THROWS here
-        // (this connect fails, the user retries, the config is KEPT) rather than orphaning the
-        // slot and locking out a capped upgrader. Only reached AFTER a successful revoke+clear
-        // do we announce + go connectable. See migrateLegacyConfig for the state-walk.
-        await migrateLegacyConfig(preCred.server, preSc.deviceId, deviceApiFor(preCred.server), tunnelStore);
-        notifyTunnel("migrated");
         const down: ClientTunnelStatus = { state: "down" };
+        try {
+          await migrateLegacyConfig(preCred.server, preSc.deviceId, deviceApiFor(preCred.server), tunnelStore);
+          notifyTunnel("migrated");
+        } catch {
+          // ANY failure -> outcome = "not replaced". Config is still stored (revoke-first kept it),
+          // so the next connect re-detects + retries; the slot handle is retained. No re-throw.
+          notifyTunnel("migrate_retry");
+        }
         emit(down);
-        return down; // terminal — the user reconnects to finish the update (fresh create)
+        return down; // terminal both ways — the user reconnects to finish (or retry) the update
       }
     }
     let status: TunnelStatus;

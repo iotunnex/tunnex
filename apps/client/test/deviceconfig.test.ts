@@ -278,3 +278,20 @@ test("migrateLegacyConfig: a revoke blip KEEPS the config; retry self-heals (no 
   await migrateLegacyConfig(origin, "dev-old", ok, store); // retry
   assert.equal(store.get(origin), null); // now cleared — self-recovered, no admin-reap
 });
+
+// The THIRD documented state: revoke OK but store.remove throws (e.g. a storage write error).
+// migrateLegacyConfig must throw (config NOT silently half-cleared) AFTER the revoke ran, so the
+// caller degrades to the one soft-down outcome and the next connect re-detects + re-revokes
+// (404 = idempotent). Proves the revoke-BEFORE-remove ordering for this state.
+test("migrateLegacyConfig: revoke ok but remove throws -> throws, revoke already ran (ordering held)", async () => {
+  const revoked: string[] = [];
+  const okApi = { revokeDevice: async (id: string) => { revoked.push(id); } } as unknown as DeviceApi;
+  const throwingStore = {
+    remove: () => { throw new Error("insecure_storage"); },
+  } as unknown as TunnelConfigStore;
+  await assert.rejects(
+    () => migrateLegacyConfig("https://legacy.example", "dev-old", okApi, throwingStore),
+    /insecure_storage/,
+  );
+  assert.deepEqual(revoked, ["dev-old"]); // revoke ran BEFORE the failing remove (order proven)
+});
