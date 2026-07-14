@@ -82,6 +82,17 @@ expected to be rewritten before merge.
   readiness"** (never calendar clocks). **EPIC 7 is the trigger to build the deferred ENTERPRISE-E2E
   STACK** → unblocks the **S4.5** secret-payload Playwright assertion (GET sso payload carries no
   client_secret material) + the **S4.5b** orphan-render check; both **ledgered into S7.x scope**.
+- **DEFERRED CLIENT-WIRE-SMOKE (S7.3 device posture — SUBSTITUTES ≠ SATISFIES, named not dropped):**
+  the S7.3 desktop legs are DESKTOP-ONLY and could not run on the headless box-proof VM (no Electron):
+  (1) connect a **pending** device on a real mac/win desktop → stable "Awaiting admin approval…" state,
+  helper NEVER armed (no admin prompt / no `utun`/WFP adapter), **no spurious "revoked"** across ≥60s;
+  (2) trigger a **legacy re-mint** (strip `orgId` from a stored config) → one-time "device replaced" +
+  fresh mint; (3) force a migration revoke-fail with OS notifications muted → the new **`migrate_failed`
+  legible state** shows in the window/tray ("Couldn't replace device — reconnect to retry"), NOT a bare
+  "Disconnected". The **66 client unit tests SUBSTITUTE** (connect-gate, ApprovalMonitor, `migrateLegacyConfig`
+  revoke-first, `trayStateFor migrate_failed`) **but do NOT satisfy** the wire proof — same discipline as
+  the S4.5 secret-payload + S6.3 packaged-residue deferrals. **Trigger:** the S6.5-class packaged-client
+  smoke OR the next real mac/win desktop session, whichever lands first.
 
 **History (EPIC 6 detail):** **S6.5a PACKAGING MERGED (PR#6, 7228d29)** — unsigned macOS `.pkg` (install-time helper via
 postinstall, /Applications-pinned, self-uninstall watchdog) + Windows NSIS `.exe` (SCM service, sidtype
