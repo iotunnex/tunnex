@@ -449,16 +449,25 @@ func (s *Service) trackDesync(ctx context.Context, node sqlc.Node, appliedHash s
 	if pushed == "" || pushed == appliedHash {
 		// non-enforcing (off/mesh) OR reconverged — convergence is a STATE predicate, so a
 		// revert-to-clear (target moved back to the applied hash) legitimately clears.
-		_ = s.q.ClearNodePolicyDesyncSince(ctx, sqlc.ClearNodePolicyDesyncSinceParams{ID: node.ID, OrgID: node.OrgID})
+		// [fold 2] LOG a failed clear (don't swallow): a stale onset would render the NEXT
+		// legit push as a false red silent_desync. Self-healing bound ≤ R — the next report
+		// re-evaluates + retries this clear (the node stays reconverged).
+		if err := s.q.ClearNodePolicyDesyncSince(ctx, sqlc.ClearNodePolicyDesyncSinceParams{ID: node.ID, OrgID: node.OrgID}); err != nil {
+			slog.Warn("policy_desync_clear_failed", "node_id", node.ID, "error", err.Error())
+		}
 		return
 	}
 	// enforcing + mismatch → stamp the onset (idempotent: WHERE IS NULL preserves the first
 	// onset PER EPISODE; a re-push after a clear re-stamps a NEW onset).
-	_ = s.q.StampNodePolicyDesyncSince(ctx, sqlc.StampNodePolicyDesyncSinceParams{
+	// [fold 5] LOG a failed stamp: a NULL onset would render a genuinely stuck node as
+	// converging forever. Self-healing bound ≤ R — the next report retries (still mismatched).
+	if err := s.q.StampNodePolicyDesyncSince(ctx, sqlc.StampNodePolicyDesyncSinceParams{
 		ID:                node.ID,
 		OrgID:             node.OrgID,
 		PolicyDesyncSince: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	})
+	}); err != nil {
+		slog.Warn("policy_desync_stamp_failed", "node_id", node.ID, "error", err.Error())
+	}
 }
 
 // NodeCapabilities is the typed view of a node's capabilities JSONB, read where the
@@ -513,30 +522,74 @@ const zeroTrustOff = "off"
 // the DIFFERENTIATED surface (which-kind-of-degraded + badge UX) is S7.4, reading that JSONB.
 //
 // Open build / no policy provider: nothing degrades (no policy engine).
-func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]bool {
-	out := make(map[uuid.UUID]bool, len(nodes))
+// PolicyHealth is the atomic per-node health: the authoritative bool + the advisory kind,
+// derived from ONE snapshot (fold [0]) — a single pushed-hash compile + one caps read per node —
+// so the two can NEVER read different snapshots (the cross-snapshot race that suppressed the
+// badge on a genuinely-desynced gateway).
+type PolicyHealth struct {
+	Degraded bool
+	Kind     PolicyDegradedKind
+}
+
+// PolicyHealthForNodes computes both the bool and the advisory kind from a SINGLE org compile.
+// Atomicity unit = everything the render consumes, per node, from one snapshot: the pushed hash
+// (one CompiledHashesForNodes), the caps, the CP-stamped onset, and the report-freshness — all
+// from the same node row + the same pushed map. (Residual: the node rows are read by ListNodes
+// slightly before this compile; a push in that gap makes pushed reflect the new policy while
+// applied reflects the old — which is a REAL just-pushed desync and correctly renders
+// `converging`, so it is harmless, not a suppressed alarm.)
+func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]PolicyHealth {
+	out := make(map[uuid.UUID]PolicyHealth, len(nodes))
+	enterprise := s.policy != nil
 	var pushed map[uuid.UUID]string
-	if s.policy != nil {
+	pushKnown := false
+	if enterprise {
 		ids := make([]uuid.UUID, len(nodes))
 		for i, n := range nodes {
 			ids[i] = n.ID
 		}
-		// err (transient compile/DB) -> pushed stays nil: term (3) can't be evaluated, but
-		// the agent-reported terms (1)+(2) still apply. A transient control-plane hiccup is
-		// not on its own a gateway fault, so it does not manufacture a degraded signal.
+		// err (transient compile/DB) -> pushKnown stays false: term (3) can't be evaluated, but
+		// the agent-reported terms (1)+(2) still apply. A transient control-plane hiccup is not
+		// on its own a gateway fault, so it does not manufacture a degraded bool.
 		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
-			pushed = h
+			pushed, pushKnown = h, true
 		}
 	}
+	now := time.Now()
 	for _, n := range nodes {
 		caps := Capabilities(n.Capabilities)
 		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" // terms (1) + (2)
-		if !deg && pushed != nil {
+		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
 			}
 		}
-		out[n.ID] = deg
+		// [fold 8] the open build has NO policy engine → healthy, never desync_unknown (the
+		// bool is already false there — the kind must agree).
+		kind := KindHealthy
+		if enterprise {
+			kind = degradedKind(KindInput{
+				PolicyError:        caps.PolicyError,
+				PolicyFailingSince: caps.PolicyFailingSince,
+				PushKnown:          pushKnown,
+				PushedHash:         pushed[n.ID],
+				AppliedHash:        caps.PolicyHash,
+				DesyncSince:        tsTime(n.PolicyDesyncSince),
+				ReportAge:          reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
+				Now:                now,
+			})
+		}
+		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}
+	}
+	return out
+}
+
+// PolicyDegradedForNodes returns just the authoritative bool — delegates to the single source.
+func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]bool {
+	h := s.PolicyHealthForNodes(ctx, orgID, nodes)
+	out := make(map[uuid.UUID]bool, len(h))
+	for id, v := range h {
+		out[id] = v.Degraded
 	}
 	return out
 }
@@ -546,36 +599,6 @@ func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, n
 // reads it. Same single org compile (`pushed`) as the bool. `pushKnown` is org-wide: a
 // transient compile fault → every node reads `desync_unknown` (honest can't-determine),
 // never a false healthy/kind. Freshness from `last_seen_at`, onset from the CP-stamped column.
-func (s *Service) PolicyDegradedKindForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]PolicyDegradedKind {
-	out := make(map[uuid.UUID]PolicyDegradedKind, len(nodes))
-	var pushed map[uuid.UUID]string
-	pushKnown := false
-	if s.policy != nil {
-		ids := make([]uuid.UUID, len(nodes))
-		for i, n := range nodes {
-			ids[i] = n.ID
-		}
-		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
-			pushed, pushKnown = h, true
-		}
-	}
-	now := time.Now()
-	for _, n := range nodes {
-		caps := Capabilities(n.Capabilities)
-		out[n.ID] = degradedKind(KindInput{
-			PolicyError:        caps.PolicyError,
-			PolicyFailingSince: caps.PolicyFailingSince,
-			PushKnown:          pushKnown,
-			PushedHash:         pushed[n.ID], // "" when !pushKnown or non-enforcing
-			AppliedHash:        caps.PolicyHash,
-			DesyncSince:        tsTime(n.PolicyDesyncSince),
-			ReportAge:          reportAge(now, n.LastSeenAt),
-			Now:                now,
-		})
-	}
-	return out
-}
-
 // tsTime unwraps a nullable timestamp to a zero-or-value time.
 func tsTime(ts pgtype.Timestamptz) time.Time {
 	if !ts.Valid {
@@ -584,13 +607,14 @@ func tsTime(ts pgtype.Timestamptz) time.Time {
 	return ts.Time
 }
 
-// reportAge is how long since the node last reported (freshness). A never-seen node reads a
-// huge age → treated as stale (desync_unknown on the desync path), never fresh.
-func reportAge(now time.Time, lastSeen pgtype.Timestamptz) time.Duration {
-	if !lastSeen.Valid {
+// reportAge is how long since the node last REPORTED its applied policy (policy_reported_at,
+// [fold 1] — NOT last_seen_at, which polls also bump). NULL (never reported / pre-migration) →
+// forever-stale → desync_unknown on the desync path, NEVER fresh.
+func reportAge(now time.Time, reportedAt pgtype.Timestamptz) time.Duration {
+	if !reportedAt.Valid {
 		return 1<<62 - 1 // effectively "forever stale"
 	}
-	return now.Sub(lastSeen.Time)
+	return now.Sub(reportedAt.Time)
 }
 
 // Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all

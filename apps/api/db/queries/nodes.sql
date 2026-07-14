@@ -65,7 +65,10 @@ UPDATE nodes
 SET wg_public_key = @wg_public_key,
     endpoint = COALESCE(NULLIF(@endpoint::text, ''), nodes.endpoint),
     capabilities = @capabilities::jsonb,
-    last_seen_at = now()
+    last_seen_at = now(),
+    -- S7.4b fold [1]: the applied-policy REPORT time (this write IS the report), distinct from
+    -- last_seen_at (also bumped by DesiredState polls) — the desync freshness gate reads this.
+    policy_reported_at = now()
 WHERE id = @id AND status = 'active';
 
 -- name: RevokeNode :exec
@@ -92,4 +95,4 @@ UPDATE nodes SET policy_desync_since = $3 WHERE id = $1 AND org_id = $2 AND poli
 -- S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 -- or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
 -- pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
-UPDATE nodes SET policy_desync_since = NULL WHERE id = $1 AND org_id = $2;
+UPDATE nodes SET policy_desync_since = NULL WHERE id = $1 AND org_id = $2 AND policy_desync_since IS NOT NULL;

@@ -46,17 +46,15 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	if err != nil {
 		return nil, err
 	}
-	// Zero Trust policy health (S7.2 collapsed surface): ONE conservative degraded signal
-	// per node, from a single org policy compile (see nodes.PolicyDegradedForNodes).
-	degraded := s.nodes.PolicyDegradedForNodes(ctx, req.OrgId, ns)
-	// S7.4b: the ADVISORY differentiated kind (display over the authoritative bool).
-	kinds := s.nodes.PolicyDegradedKindForNodes(ctx, req.OrgId, ns)
+	// Zero Trust policy health: the authoritative bool + the advisory kind from ONE org
+	// compile (S7.4b fold [0] — a single snapshot so bool and kind can't disagree).
+	health := s.nodes.PolicyHealthForNodes(ctx, req.OrgId, ns)
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)
-		d := degraded[n.ID]
-		an.PolicyDegraded = &d
-		k := api.NodePolicyDegradedKind(kinds[n.ID])
+		h := health[n.ID]
+		an.PolicyDegraded = &h.Degraded
+		k := api.NodePolicyDegradedKind(h.Kind)
 		an.PolicyDegradedKind = &k
 		out = append(out, an)
 	}

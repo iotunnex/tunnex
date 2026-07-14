@@ -86,12 +86,14 @@ var transitionTable = []TransitionRule{
 // a live apply error is self-evident from the agent's last report; the desync path needs a
 // FRESH applied hash (a server-side compare is meaningless on a stale one).
 func degradedKind(in KindInput) PolicyDegradedKind {
-	// Agent-reported apply error (from the last report — a reported fact, not a server compare).
+	// Agent-reported apply failure (from the last report — a reported fact, not a server compare).
+	// [fold 3] mirror the bool's TERM-2: policy_failing_since alone (error empty) is a failing
+	// enforcing apply — apply_failing, NEVER the benign desync path. Order: failing_since first.
+	if in.PolicyFailingSince != "" {
+		return KindApplyFailing // an enforcing apply is failing (onset stamped), with or without an error string
+	}
 	if in.PolicyError != "" {
-		if in.PolicyFailingSince != "" {
-			return KindApplyFailing
-		}
-		return KindStuckEnforcing // error + no failing_since = the stuck-enforcing branch (S7.2)
+		return KindStuckEnforcing // error + no failing_since = enforcing a disabled policy (S7.2 stuck branch)
 	}
 	// No error → desync territory (term-3). Can't compute pushed → can't determine.
 	if !in.PushKnown {

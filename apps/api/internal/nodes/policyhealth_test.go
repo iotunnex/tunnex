@@ -22,6 +22,9 @@ func TestDegradedKind(t *testing.T) {
 		{"healthy — in sync, fresh", base, KindHealthy},
 		{"apply_failing — error + failing_since", KindInput{PolicyError: "boom", PolicyFailingSince: "t0", ReportAge: fresh, Now: now}, KindApplyFailing},
 		{"stuck_enforcing — error + NO failing_since", KindInput{PolicyError: "boom", ReportAge: fresh, Now: now}, KindStuckEnforcing},
+		// [fold 3] TERM-2: failing_since set with NO error must be apply_failing, NEVER the benign
+		// converging path (the bool catches failing_since alone; the kind must too).
+		{"term-2 — failing_since, no error → apply_failing (not converging)", KindInput{PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now}, KindApplyFailing},
 		{"desync_unknown — pushed hash unavailable", KindInput{PushKnown: false, AppliedHash: "h", ReportAge: fresh, Now: now}, KindDesyncUnknown},
 		{"non-enforcing — pushed '' → healthy (no enforcement boundary)", KindInput{PushKnown: true, PushedHash: "", AppliedHash: "old", ReportAge: fresh, Now: now}, KindHealthy},
 
