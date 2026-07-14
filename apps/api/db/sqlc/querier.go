@@ -6,6 +6,7 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -140,6 +141,10 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
+	// Idempotent on (org_id, seq) so a replayed ingest batch can't double-insert. The id is
+	// app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG hot-window and
+	// the JSONL source-of-truth stream.
+	InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) (int64, error)
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
@@ -149,6 +154,13 @@ type Querier interface {
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
+	// The security-focused feed: deny + deny_aggregate + terminated only, same keyset shape.
+	ListAccessDenies(ctx context.Context, arg ListAccessDeniesParams) ([]AccessEvent, error)
+	// Keyset page, newest-first, scoped by org. Expanded (created_at, id) < (cursor) predicate
+	// (row-value form confuses sqlc's type inference for the id cursor). First page passes a
+	// far-future created_at + a max uuid so the whole feed is < the cursor. Uses
+	// access_events_org_created_id_idx.
+	ListAccessEvents(ctx context.Context, arg ListAccessEventsParams) ([]AccessEvent, error)
 	// The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
 	// device (id, name). The SINGLE definition of "live allocation" — used by BOTH
 	// device-create's lowest-free choice AND resize's orphan check/409 objects, so
@@ -236,6 +248,9 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	// The current high-water seq for an org — the ingest resumes the monotonic counter from
+	// here after a restart so the per-org sequence never rewinds (gap-detection integrity).
+	MaxAccessEventSeqForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.
@@ -292,6 +307,13 @@ type Querier interface {
 	// Verification loss: clear verified_at so the domain stops capturing (the claim
 	// is NOT deleted — the org keeps its pending claim and can re-verify).
 	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
+	// lint:cross-org — retention housekeeping runs across ALL orgs by INGEST age (created_at,
+	// not the agent-clock occurred_at, so agent skew can't extend retention). The JSONL stream
+	// keeps the full record; PG is a bounded cache, so this delete is lossless for export.
+	SweepAccessEventsByAge(ctx context.Context, olderThan time.Time) (int64, error)
+	// Per-org row cap: keep the newest keep_newest rows for the org, delete the rest. Protects
+	// the disk when one org is noisy without touching quiet orgs.
+	SweepAccessEventsOverCap(ctx context.Context, arg SweepAccessEventsOverCapParams) (int64, error)
 	TouchCliCredentialUsed(ctx context.Context, id uuid.UUID) error
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// lint:cross-org — keyed by id after cert authorization.
