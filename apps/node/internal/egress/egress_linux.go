@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
@@ -82,10 +83,20 @@ type Manager struct {
 	// duration (box-proof finding #3). now() is injectable for tests.
 	failingSince time.Time
 	now          func() time.Time
+	// flowLogGroup is the nflog group the forward-chain accept/deny rules log to (S7.5.1
+	// flow observation). 0 = flow logging OFF: the forward chain renders EXACTLY as before
+	// (no log clauses) — the safety default, so enabling observation is opt-in and its
+	// absence is byte-for-byte the pre-S7.5.1 enforcement ruleset.
+	flowLogGroup int
 }
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now} }
+
+// SetFlowLogGroup enables flow logging by pointing the forward-chain log clauses at an
+// nflog group (>0). 0 disables it. Non-terminal + best-effort: the log clause NEVER changes
+// a packet's accept/drop fate (kernel semantics), so this cannot affect enforcement.
+func (m *Manager) SetFlowLogGroup(group int) { m.flowLogGroup = group }
 
 // SetPolicy stores the latest compiled policy (nil = legacy mesh) and marks that a
 // policy has now been received — flipping the forward chain out of the cold-start
@@ -247,22 +258,41 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 		return v4, v6
 	}
 	var b strings.Builder
+	g := m.flowLogGroup
 	for _, e := range pol.Allow {
-		if line, ok := renderAllow(e); ok {
+		line, ok := renderAllow(e)
+		if g > 0 {
+			line, ok = renderAllowLogged(e, g)
+		}
+		if ok {
 			b.WriteString(line)
 		}
 	}
-	b.WriteString(dropCounter)     // count the default-deny drops (box-proof drop observation)
-	return b.String(), dropCounter // enforcing v6 = default-deny: no allows, just the drop counter
+	b.WriteString(denyDrop(g))     // count (+ log when on) the default-deny drops
+	return b.String(), denyDrop(g) // enforcing v6 = default-deny: no allows, just the deny tail
 }
 
-// renderAllow turns one compiled allow into an nft accept line for the ip (v4) forward
-// chain, or reports ok=false to SKIP it. Every field is re-emitted through netip as a
-// canonical NUMERIC string (never the raw control-plane string) so nothing can inject
-// nft statements into this root ruleset — the same hardening as ifaceRE. Ports are
-// integers. A v6 destination is skipped (v4 spokes have no route to it; v6 stays
-// default-deny).
-func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
+// denyDrop is the default-deny tail. g==0: the original counter (relies on the chain's
+// policy drop) — byte-identical to pre-S7.5.1. g>0: additionally LOG the unmatched NEW
+// flow (flow-start deny, D1) with the deny sentinel, then count + drop. The verdict is
+// drop either way; the log is the sole addition (non-terminal). The deny-log is the
+// port-scan amplification point — aggregated CP-side (4/n), nflog socket sized for it.
+func denyDrop(group int) string {
+	if group <= 0 {
+		return dropCounter
+	}
+	return fmt.Sprintf("    ct state new%s counter comment \"tunnex_default_drop\" drop\n", logClause(flowlog.EncodePrefix(""), group))
+}
+
+// allowMatch turns one compiled allow into the ENFORCEMENT clause (match + counter, NO
+// verdict) for the ip (v4) forward chain, or reports ok=false to SKIP it. This is the
+// rule_id-INDEPENDENT part that decides packet fate — renderAllow / renderAllowLogged
+// append the verdict (and, for the logged form, an observation clause) to it. Every field
+// is re-emitted through netip as a canonical NUMERIC string (never the raw control-plane
+// string) so nothing can inject nft statements into this root ruleset — the same hardening
+// as ifaceRE. Ports are integers. A v6 destination is skipped (v4 spokes have no route to
+// it; v6 stays default-deny).
+func allowMatch(e nodepolicy.AllowEntry) (string, bool) {
 	src, err := netip.ParseAddr(e.SrcIP)
 	if err != nil || !src.Is4() {
 		return "", false
@@ -309,7 +339,37 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 		// (finding #6).
 		return "", false
 	}
-	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter accept\n", src.String(), dst.Masked().String(), clause), true
+	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter", src.String(), dst.Masked().String(), clause), true
+}
+
+// renderAllow is the ENFORCEMENT-ONLY accept line (no observation). rule_id-INDEPENDENT.
+func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
+	m, ok := allowMatch(e)
+	if !ok {
+		return "", false
+	}
+	return m + " accept\n", true
+}
+
+// renderAllowLogged is renderAllow PLUS an nflog observation clause carrying the grant's
+// rule_id (S7.5.1, decision (a)). The log clause is the SOLE delta vs renderAllow and is
+// NON-TERMINAL — `log` cannot change the accept verdict (kernel semantics). Scoping: the
+// established-accept line above short-circuits established flows, so this per-rule accept
+// only sees a flow's FIRST packet → one log per flow-start (D1). group is the nflog group
+// the flowlog reader listens on.
+func renderAllowLogged(e nodepolicy.AllowEntry, group int) (string, bool) {
+	m, ok := allowMatch(e)
+	if !ok {
+		return "", false
+	}
+	return m + logClause(flowlog.EncodePrefix(e.RuleID), group) + " accept\n", true
+}
+
+// logClause renders a non-terminal nflog statement. prefix names the grant (or the deny
+// sentinel); group is the nflog group. Placed BEFORE the verdict so the kernel logs the
+// matched packet then proceeds to accept/drop unchanged.
+func logClause(prefix string, group int) string {
+	return fmt.Sprintf(" log prefix %q group %d", prefix, group)
 }
 
 // applyAndTrack performs the atomic apply and records the fail-closed status: on

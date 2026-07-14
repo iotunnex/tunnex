@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
@@ -149,17 +150,77 @@ func TestRulesetDeterministic(t *testing.T) {
 
 // renderAllow re-emits every field through netip (canonical numeric) so nothing can
 // inject nft statements, and skips what it can't safely render.
-// rule_id (v2, S7.5.1) is OBSERVABILITY metadata: renderAllow must IGNORE it — the nft
-// line is byte-identical with or without a rule_id, so v1-shaped and v2-shaped rulesets
-// ENFORCE identically (rule_id changes the flow log, never the packet fate).
-func TestRenderAllowIgnoresRuleID(t *testing.T) {
+// rule_id (v2, S7.5.1) is OBSERVABILITY metadata. SPLIT assertion (the A-1 law at FULL
+// strength on the packet-fate part, NOT a loosening):
+//   (i)  the ENFORCEMENT clause (match + counter + verdict) is BYTE-IDENTICAL with and
+//        without rule_id — the part that decides accept/drop never depends on rule_id;
+//   (ii) rule_id appears ONLY inside the log clause, which is the SOLE delta of the logged
+//        variant and is NON-TERMINAL (the accept verdict is unchanged).
+func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}
 	withID := base
 	withID.RuleID = "rule-uuid-1"
-	l1, ok1 := renderAllow(base)
-	l2, ok2 := renderAllow(withID)
-	if !ok1 || !ok2 || l1 != l2 {
-		t.Fatalf("rule_id must not affect the rendered nft line: %q (ok=%v) vs %q (ok=%v)", l1, ok1, l2, ok2)
+
+	// (i) enforcement byte-identical regardless of rule_id, ending in the verdict.
+	enf1, ok1 := renderAllow(base)
+	enf2, ok2 := renderAllow(withID)
+	if !ok1 || !ok2 || enf1 != enf2 {
+		t.Fatalf("enforcement clause must be byte-identical w/ and w/o rule_id: %q vs %q", enf1, enf2)
+	}
+	if !strings.HasSuffix(enf1, " accept\n") {
+		t.Fatalf("enforcement clause must end in the accept verdict: %q", enf1)
+	}
+	if strings.Contains(enf1, "rule-uuid-1") {
+		t.Fatalf("enforcement clause must NOT carry rule_id (observability never touches packet fate): %q", enf1)
+	}
+
+	// (ii) the logged variant keeps the accept verdict and carries rule_id ONLY in the log
+	// clause, which is the SOLE delta vs the enforcement line.
+	logged, ok := renderAllowLogged(withID, 5)
+	if !ok {
+		t.Fatal("renderAllowLogged skipped a valid entry")
+	}
+	if !strings.HasSuffix(logged, " accept\n") {
+		t.Fatalf("logged line must keep the accept verdict (log is non-terminal): %q", logged)
+	}
+	delta := logClause(flowlog.EncodePrefix("rule-uuid-1"), 5)
+	if !strings.Contains(delta, "rule-uuid-1") {
+		t.Fatalf("the delta (log clause) must carry rule_id: %q", delta)
+	}
+	if strings.Replace(logged, delta, "", 1) != enf1 {
+		t.Fatalf("the log clause must be the SOLE delta vs enforcement:\n logged=%q\n enf=%q\n delta=%q", logged, enf1, delta)
+	}
+}
+
+// forwardRules: flow logging OFF (default) renders NO log clause — the enforcement ruleset
+// is exactly pre-S7.5.1 (safety default). Logging ON adds the rule_id + deny log clauses
+// while every verdict line still ends accept/drop.
+func TestForwardRulesFlowLogGrouping(t *testing.T) {
+	pol := &nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing, Allow: []nodepolicy.AllowEntry{
+		{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rid-1"},
+	}}
+	m := New("wg0")
+
+	v4off, _ := m.forwardRules(pol, true)
+	if strings.Contains(v4off, "log prefix") {
+		t.Fatalf("flow logging OFF must render NO log clause (safety default): %q", v4off)
+	}
+
+	m.SetFlowLogGroup(5)
+	v4on, _ := m.forwardRules(pol, true)
+	if !strings.Contains(v4on, `log prefix "tnx:rid-1 " group 5`) {
+		t.Fatalf("logging ON must carry the rule_id log clause: %q", v4on)
+	}
+	if !strings.Contains(v4on, `log prefix "tnx:deny " group 5`) {
+		t.Fatalf("logging ON must log denies (flow-start): %q", v4on)
+	}
+	if !strings.Contains(v4on, " accept\n") || !strings.Contains(v4on, " drop\n") {
+		t.Fatalf("verdicts must be preserved with logging on: %q", v4on)
+	}
+	// The enforcement match is present with and without logging (packet fate unchanged).
+	const match = "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24"
+	if !strings.Contains(v4off, match) || !strings.Contains(v4on, match) {
+		t.Fatalf("the enforcement match must be present regardless of logging:\n off=%q\n on=%q", v4off, v4on)
 	}
 }
 
