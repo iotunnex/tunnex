@@ -10,7 +10,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const clearNodePolicyDesyncSince = `-- name: ClearNodePolicyDesyncSince :exec
+UPDATE nodes SET policy_desync_since = NULL WHERE id = $1
+`
+
+// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
+// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
+// pushed target back to the applied hash) legitimately clears. CP-only, single-writer.
+func (q *Queries) ClearNodePolicyDesyncSince(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearNodePolicyDesyncSince, id)
+	return err
+}
 
 const consumeJoinToken = `-- name: ConsumeJoinToken :one
 UPDATE node_join_tokens
@@ -74,7 +87,7 @@ func (q *Queries) CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (org_id, name, cert_serial, agent_version)
 VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since
 `
 
 type CreateNodeParams struct {
@@ -107,12 +120,13 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.WgPublicKey,
 		&i.Endpoint,
 		&i.Capabilities,
+		&i.PolicyDesyncSince,
 	)
 	return i, err
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since FROM nodes
 WHERE cert_serial = $1
 `
 
@@ -136,12 +150,13 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 		&i.WgPublicKey,
 		&i.Endpoint,
 		&i.Capabilities,
+		&i.PolicyDesyncSince,
 	)
 	return i, err
 }
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since FROM nodes
 WHERE org_id = $1 AND name = $2
 `
 
@@ -168,6 +183,7 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 		&i.WgPublicKey,
 		&i.Endpoint,
 		&i.Capabilities,
+		&i.PolicyDesyncSince,
 	)
 	return i, err
 }
@@ -238,7 +254,7 @@ func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) 
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since FROM nodes
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -267,6 +283,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 			&i.WgPublicKey,
 			&i.Endpoint,
 			&i.Capabilities,
+			&i.PolicyDesyncSince,
 		); err != nil {
 			return nil, err
 		}
@@ -346,6 +363,24 @@ func (q *Queries) SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (i
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const stampNodePolicyDesyncSince = `-- name: StampNodePolicyDesyncSince :exec
+UPDATE nodes SET policy_desync_since = $2 WHERE id = $1 AND policy_desync_since IS NULL
+`
+
+type StampNodePolicyDesyncSinceParams struct {
+	ID                uuid.UUID          `json:"id"`
+	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
+}
+
+// S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
+// the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a
+// newer time). Called from exactly one site (nodes.trackDesync); the value is the CP clock,
+// never an agent string.
+func (q *Queries) StampNodePolicyDesyncSince(ctx context.Context, arg StampNodePolicyDesyncSinceParams) error {
+	_, err := q.db.Exec(ctx, stampNodePolicyDesyncSince, arg.ID, arg.PolicyDesyncSince)
+	return err
 }
 
 const touchNodeSeen = `-- name: TouchNodeSeen :exec
