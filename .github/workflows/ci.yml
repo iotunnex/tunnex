@@ -148,6 +148,30 @@ jobs:
             mcr.microsoft.com/playwright:v1.48.2-jammy \
             sh -c "npm install --no-audit --no-fund --silent && npx playwright test"
 
+  # S7.4c: the ENTERPRISE e2e — brings the stack up as the enterprise edition
+  # (TUNNEX_BUILD_TAGS=enterprise) with seed-enterprise laid on top of seed, then
+  # runs the REAL S4.5/S4.5b assertions (SSO no-secret payload + a live shrink that
+  # strands the seeded device → real 409 orphan render). OPPORTUNISTIC like `e2e`
+  # (the flake mandate applies to browser suites); the SECURITY half of S4.5 also
+  # gates BLOCKING in `gates` via TestGetSsoConfigPayloadCarriesNoSecret.
+  e2e-enterprise:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the ENTERPRISE stack + seed (base + enterprise fixtures)
+        run: |
+          cp .env.example .env
+          TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build --wait
+          make seed
+          make seed-enterprise
+      - name: Playwright enterprise e2e (real S4.5 / S4.5b)
+        run: |
+          docker run --rm --network tunnex_default \
+            -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 -e E2E_EDITION=enterprise \
+            mcr.microsoft.com/playwright:v1.48.2-jammy \
+            sh -c "npm install --no-audit --no-fund --silent && npx playwright test settings.enterprise.spec.ts"
+
   # S6.6 zero-build deploy: publish the prebuilt, MULTI-ARCH (amd64+arm64) service images to ghcr
   # so a customer never builds from source. Runs ONLY on a push (never PRs) and ONLY after the
   # gates pass. main pushes publish :latest + :sha (opt-in / main-tracking); a v* release tag
