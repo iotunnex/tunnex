@@ -53,7 +53,7 @@ func TestPolicyDegraded(t *testing.T) {
 	org := uuid.New()
 	node := func(caps map[string]any) sqlc.Node { return sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(caps)} }
 	deg := func(s *Service, n sqlc.Node) bool {
-		return s.PolicyDegradedForNodes(context.Background(), org, []sqlc.Node{n})[n.ID]
+		return s.PolicyHealthForNodes(context.Background(), org, []sqlc.Node{n})[n.ID].Degraded
 	}
 
 	enfSvc := &Service{policy: fakeProvider{pol: enf}}
@@ -102,7 +102,7 @@ func TestPolicyDegraded(t *testing.T) {
 	}
 
 	// Open build (no provider): nothing to compare, a clean node is not degraded.
-	if (&Service{}).PolicyDegradedForNodes(context.Background(), org, []sqlc.Node{node(map[string]any{"policy_hash": "x"})}) == nil {
+	if (&Service{}).PolicyHealthForNodes(context.Background(), org, []sqlc.Node{node(map[string]any{"policy_hash": "x"})}) == nil {
 		t.Fatal("open build must return a map, not nil")
 	}
 	if deg(&Service{}, node(map[string]any{"policy_hash": "x"})) {
