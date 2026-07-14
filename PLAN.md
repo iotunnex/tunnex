@@ -245,10 +245,18 @@ live-force optional] · failure leg [E is client-side `loadOne`, unchanged by th
 arc = story-end → fold-1 (loadOne legible-loads) → fold-2 (pure `accessView` gating + compose-not-compete) →
 round-3 (Esc drop) → budget-escalation → **notices reduction (single-source-of-truth `staleRuleIds`)** →
 clean. **HOTFIX MERGED — `fix/audit-nil-metadata` (PR#19, 28a388e):** audited DELETE 500 (audit_logs.metadata
-nil→NULL 23502) fixed; surfaced by S7.4a's walk (first wire-delete of an audited entity). **NEXT: S7.4b
-(differentiated health surface) — commit-one is DONE on paper (Option X, amended X-1…X-4; on main in
-`docs/S7.4-decisions.md`); build from it. Then S7.4c (enterprise-e2e enabler, UN-DEFERRABLE).** If this
-pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update this line.
+nil→NULL 23502) fixed; surfaced by S7.4a's walk (first wire-delete of an audited entity). **S7.4b
+(differentiated health surface) MERGED (PR#20, merge sha 6aa0fad)** — Option X built: `policy_degraded_kind`
+advisory over the authoritative `policy_degraded` bool, from ONE compute (`PolicyHealthForNodes`); the
+CP-owned `policy_desync_since` (0021) stamped at report-ingest (single-writer `trackDesync`, CP clock) +
+`policy_reported_at` (0022) as the REPORT-freshness clock; `desync_unknown` a first-class honest state;
+T=F=2R=60s. Box-walked on the two-gateway wire (boot-log · converging no-false-alarm · desync_unknown via
+`docker stop g2`+forced-mismatch · matched-silent→healthy · bool/kind flip together = the collapse live).
+Review arc: story-end (9, incl. the kind-less-alarmed-than-bool class) → fold (collapse + real freshness clock
++ log-not-swallow) → confirm (4, all hygiene/accept) → clean. **NEXT: S7.4c (enterprise-e2e enabler,
+UN-DEFERRABLE — SATISFIES the twice-deferred S4.5 secret-payload + S4.5b orphan-render; commit-one signed off
+on paper in `docs/S7.4-decisions.md`), decision-first.** If this pointer disagrees with the git log, TRUST GIT
+(`git log --oneline -20`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
