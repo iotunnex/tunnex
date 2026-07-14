@@ -1289,6 +1289,30 @@ emits per-rule `counter`s) — the same per-rule identity drives both. Documente
    egress is a policy DESTINATION KIND (an "internet" resource) or explicitly OUT-OF-ZT-SCOPE; currently
    UNDEFINED under `enforcing` (a full-tunnel device under enforcing with no egress grant = undefined behavior).
 
+## ZTNA COMPETITIVE SCOPE — LEDGER BATCH 2 (user-directed strategic intent, 2026-07-14; PAPER only, no epic reorder executed — DISPOSITION AT EPIC-7-CLOSE PLANNING). Extends batch-1 items 1–4 from "gaps" → COMMITTED competitive scope.
+**STRATEGIC FRAME (pinned):** competitive target = the self-hosted / WireGuard ZTNA segment — **Tailscale · Twingate · NetBird · Headscale** — NOT the Zscaler tier. **Win condition:** match-or-beat the segment leaders on ZTNA DEPTH while holding the unique differentiator — **fully self-hosted, zero SaaS in the trust path, air-gappable**. L7/app-aware proxying, risk scoring, continuous re-auth = Tier-3 roadmap NAMES, explicitly NOT built.
+
+**PROPOSED EPIC 7.5 — "ZTNA Competitiveness" (insert BEFORE EPIC 8; confirm at planning):**
+- **S7.5.1 Flow / access logs** — per-connection / per-grant access events, org-scoped, queryable + exportable;
+  builds on the S7.2 per-rule `counter`s seam. **Starts FIRST under any beta outcome.** Decide-before-code:
+  event granularity, retention/rotation (customer's disk), append-only / audit-class storage posture.
+- **S7.5.2 IdP-group sync + SCIM** — Entra/Google groups as policy SUBJECTS (sync, not mirror); SCIM rides or
+  splits at paper. Enterprise-gated. Decide-before-code: IdP-authoritative vs merge-conflict rules; a
+  deprovisioned user gets the full S2.6/S7.2 sweep.
+- **S7.5.3 Posture checks v1** — extends S7.3's gate: OS version · disk-encryption · EDR-present; block-or-warn
+  per org. Decide-before-code: client-reported attestation limits named HONESTLY (spoofable by a compromised
+  device — threat model stated, not oversold).
+- **S7.5.4 Per-user + temporary grants** — USER as a subject kind in `policyspec.Compiled` (versioned-artifact
+  bump per the S8 seam discipline) + grant EXPIRY (`expires_at` → recompile+push on lapse, org-wide push law).
+  **Decide before the S7.4a UI hardens the group-only habit.**
+
+**Tier 2 (carriers exist — confirm at session):** S8.4 internal DNS (stands) · EPIC 8 site-to-site under policy
+(pre-wired, stands) · connection-events / session-lite (extension of S7.5.1) · SCIM (in S7.5.2).
+**COLLISION flagged for planning (user decision, NOT pre-decided):** EPIC 7.5 vs the beta re-decide — beta at
+EPIC-7-done while building 7.5 during beta, OR beta after Tier 1. Flow-logs-first is common to both paths.
+**Consequences acknowledged:** EPIC 8/9/10 slide right ~one epic; the EPIC 9/10 ZT-coverage guarantees
+(batch-1 items 6–8) UNCHANGED. Batch-1 items 1–4 are SUPERSEDED-BY-INCLUSION into S7.5.1–S7.5.4.
+
 **LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
 throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
 policy version instead. (#9) no off-mode fast-path — off-mode orgs still walk the compile path to
