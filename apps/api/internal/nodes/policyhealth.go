@@ -41,9 +41,9 @@ const (
 	ReportFreshnessWindow = 2 * AssumedReportInterval
 )
 
-// logPolicyHealthTuning emits the assumed R + derived T at boot so an operator who tuned the
+// LogPolicyHealthTuning emits the assumed R + derived T at boot so an operator who tuned the
 // agent report interval can DISCOVER the coupling (the doc caveat isn't findable at 3am).
-func logPolicyHealthTuning(log interface{ Info(string, ...any) }) {
+func LogPolicyHealthTuning(log interface{ Info(string, ...any) }) {
 	log.Info("policy_health_tuning",
 		"assumed_report_interval", AssumedReportInterval.String(),
 		"desync_settle_window_T", DesyncSettleWindow.String(),
