@@ -25,6 +25,7 @@ import {
   roleFromMembers,
   ruleRow,
   sectionRender,
+  staleNoticeCleared,
   swapRule,
   swapPartialMessage,
   type LoadState,
@@ -258,9 +259,11 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [staleRuleId, setStaleRuleId] = useState<string | null>(null); // the rule the notice refers to ([309])
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
     const [rr, gr, resr] = await Promise.all([
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
@@ -281,6 +284,16 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   useEffect(() => {
     load();
   }, [load]);
+
+  // [309]: drop the partial-swap notice ONLY when its referenced (stale) rule is actually
+  // gone from the current list — a delete of THAT rule or its absence from a fresh load, but
+  // never an unrelated delete. Keyed on absence, so both resolutions collapse to one check.
+  useEffect(() => {
+    if (staleNoticeCleared(staleRuleId, rules)) {
+      setNotice(null);
+      setStaleRuleId(null);
+    }
+  }, [rules, staleRuleId]);
 
   async function del(id: string) {
     const { error } = await api.DELETE("/api/v1/organizations/{orgId}/policies/{ruleId}", {
@@ -354,8 +367,9 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
             setCreating(false);
             setEditing(null);
           }}
-          onDone={(msg) => {
+          onDone={(msg, staleId) => {
             setNotice(msg ?? null);
+            setStaleRuleId(staleId ?? null);
             setCreating(false);
             setEditing(null);
             load();
@@ -385,7 +399,7 @@ function RuleFormModal({
   resources: Resource[];
   editing: PolicyRule | null;
   onClose: () => void;
-  onDone: (notice?: string) => void;
+  onDone: (notice?: string, staleRuleId?: string) => void;
 }) {
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind ?? "group");
@@ -427,7 +441,7 @@ function RuleFormModal({
     );
     setBusy(false);
     if (out.outcome === "create_failed") return setErr(apiErrorMessage(out.error, "Could not create the new rule."));
-    if (out.outcome === "partial") return onDone(swapPartialMessage(out.oldId.slice(0, 8)));
+    if (out.outcome === "partial") return onDone(swapPartialMessage(out.oldId.slice(0, 8)), out.oldId);
     onDone();
   }
 

@@ -6,6 +6,7 @@ import {
   swapRule,
   roleFromMembers,
   sectionRender,
+  staleNoticeCleared,
   accessView,
   type LoadState,
 } from "../src/lib/policyview";
@@ -142,6 +143,20 @@ describe("[291] sectionRender — legibility signals COMPOSE, never compete", ()
   });
   it("no error, no notice → content only", () => {
     expect(sectionRender(null, null)).toEqual({ showRetry: false, showContent: true, showNotice: false });
+  });
+});
+
+describe("[309] staleNoticeCleared — clears ONLY on the referenced rule's resolution", () => {
+  const R = (id: string) => ({ id } as PolicyRule);
+  it("notice up (stale=X) + delete UNRELATED Y (X still present) → NOT cleared", () => {
+    expect(staleNoticeCleared("X", [R("X")])).toBe(false);
+  });
+  it("stale=X gone from the list (deleted or fresh-load absent) → cleared", () => {
+    expect(staleNoticeCleared("X", [R("Y")])).toBe(true);
+    expect(staleNoticeCleared("X", [])).toBe(true);
+  });
+  it("no stale rule tracked → nothing to clear", () => {
+    expect(staleNoticeCleared(null, [R("X")])).toBe(false);
   });
 });
 
