@@ -27,8 +27,8 @@ type Querier interface {
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
-	// pushed target back to the applied hash) legitimately clears. CP-only, single-writer.
-	ClearNodePolicyDesyncSince(ctx context.Context, id uuid.UUID) error
+	// pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
+	ClearNodePolicyDesyncSince(ctx context.Context, arg ClearNodePolicyDesyncSinceParams) error
 	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
 	// given purpose. A reset token therefore cannot be consumed as a verification
 	// token and vice-versa.
@@ -283,7 +283,7 @@ type Querier interface {
 	// S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
 	// the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a
 	// newer time). Called from exactly one site (nodes.trackDesync); the value is the CP clock,
-	// never an agent string.
+	// never an agent string. org_id-scoped (tenant isolation).
 	StampNodePolicyDesyncSince(ctx context.Context, arg StampNodePolicyDesyncSinceParams) error
 	// When a user joins an org another way (e.g. domain-capture JIT), pending
 	// invites for that (org, email) become moot — revoke them so they can't be

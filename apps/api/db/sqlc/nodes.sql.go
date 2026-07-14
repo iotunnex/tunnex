@@ -14,14 +14,19 @@ import (
 )
 
 const clearNodePolicyDesyncSince = `-- name: ClearNodePolicyDesyncSince :exec
-UPDATE nodes SET policy_desync_since = NULL WHERE id = $1
+UPDATE nodes SET policy_desync_since = NULL WHERE id = $1 AND org_id = $2
 `
+
+type ClearNodePolicyDesyncSinceParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
 
 // S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 // or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
-// pushed target back to the applied hash) legitimately clears. CP-only, single-writer.
-func (q *Queries) ClearNodePolicyDesyncSince(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, clearNodePolicyDesyncSince, id)
+// pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
+func (q *Queries) ClearNodePolicyDesyncSince(ctx context.Context, arg ClearNodePolicyDesyncSinceParams) error {
+	_, err := q.db.Exec(ctx, clearNodePolicyDesyncSince, arg.ID, arg.OrgID)
 	return err
 }
 
@@ -366,20 +371,21 @@ func (q *Queries) SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (i
 }
 
 const stampNodePolicyDesyncSince = `-- name: StampNodePolicyDesyncSince :exec
-UPDATE nodes SET policy_desync_since = $2 WHERE id = $1 AND policy_desync_since IS NULL
+UPDATE nodes SET policy_desync_since = $3 WHERE id = $1 AND org_id = $2 AND policy_desync_since IS NULL
 `
 
 type StampNodePolicyDesyncSinceParams struct {
 	ID                uuid.UUID          `json:"id"`
+	OrgID             uuid.UUID          `json:"org_id"`
 	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
 }
 
 // S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
 // the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a
 // newer time). Called from exactly one site (nodes.trackDesync); the value is the CP clock,
-// never an agent string.
+// never an agent string. org_id-scoped (tenant isolation).
 func (q *Queries) StampNodePolicyDesyncSince(ctx context.Context, arg StampNodePolicyDesyncSinceParams) error {
-	_, err := q.db.Exec(ctx, stampNodePolicyDesyncSince, arg.ID, arg.PolicyDesyncSince)
+	_, err := q.db.Exec(ctx, stampNodePolicyDesyncSince, arg.ID, arg.OrgID, arg.PolicyDesyncSince)
 	return err
 }
 
