@@ -552,7 +552,11 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 
 // writeAudit records an actor-attributed, secret-free audit row in the same tx.
 func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
-	var raw []byte
+	// metadata is NOT NULL — default a nil meta to an empty JSON object, never a nil
+	// []byte (which pgx sends as SQL NULL → 23502, silently 500ing every audited DELETE
+	// that passes nil: group.deleted / resource.deleted / policy.rule_deleted). The other
+	// audit helpers (invites, sso, devices, nodes) already default to "{}"; this one didn't.
+	raw := []byte("{}")
 	if meta != nil {
 		b, err := json.Marshal(meta)
 		if err != nil {

@@ -184,3 +184,69 @@ func policyResource() policyspec.ResourceInput {
 func ruleTo(srcGroup, dstResource uuid.UUID) policyspec.RuleInput {
 	return policyspec.RuleInput{SrcGroupID: srcGroup, DstKind: "resource", DstResourceID: &dstResource}
 }
+
+// TestAuditedDeletesPersistMetadata pins the S7.4a-walk finding: every audited DELETE goes
+// through writeAudit with nil meta, which inserted SQL NULL into audit_logs.metadata (NOT
+// NULL) → 23502 → the mutation 500'd + rolled back (so the rule/group/resource could never
+// be deleted via the UI). RED on main for all THREE nil-meta callsites; GREEN once writeAudit
+// defaults nil → '{}'. (Latent because no box proof ever deleted an audited entity on the wire.)
+func TestAuditedDeletesPersistMetadata(t *testing.T) {
+	pool := testPool(t)
+
+	assertAudit := func(t *testing.T, f fixture, action, targetID string) {
+		t.Helper()
+		var meta []byte
+		if err := pool.QueryRow(f.ctx,
+			`SELECT metadata FROM audit_logs WHERE org_id=$1 AND action=$2 AND target_id=$3`,
+			f.org, action, targetID).Scan(&meta); err != nil {
+			t.Fatalf("%s audit row missing: %v", action, err)
+		}
+		if len(meta) == 0 || string(meta) == "null" {
+			t.Fatalf("%s metadata must be non-null JSON, got %q", action, meta)
+		}
+	}
+
+	t.Run("group.deleted", func(t *testing.T) {
+		f := seed(t, pool)
+		s := policy.NewService(pool)
+		g, err := s.CreateGroup(f.ctx, f.org, "doomed", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteGroup(f.ctx, f.org, g.ID); err != nil {
+			t.Fatalf("audited delete errored (nil-meta NOT NULL bug): %v", err)
+		}
+		assertAudit(t, f, "group.deleted", g.ID.String())
+	})
+
+	t.Run("resource.deleted", func(t *testing.T) {
+		f := seed(t, pool)
+		s := policy.NewService(pool)
+		r, err := s.CreateResource(f.ctx, f.org, policyResource())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteResource(f.ctx, f.org, r.ID); err != nil {
+			t.Fatalf("audited delete errored (nil-meta NOT NULL bug): %v", err)
+		}
+		assertAudit(t, f, "resource.deleted", r.ID.String())
+	})
+
+	t.Run("policy.rule_deleted", func(t *testing.T) {
+		f := seed(t, pool)
+		s := policy.NewService(pool)
+		g, _ := s.CreateGroup(f.ctx, f.org, "g", "")
+		r, err := s.CreateResource(f.ctx, f.org, policyResource())
+		if err != nil {
+			t.Fatal(err)
+		}
+		rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, r.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeletePolicyRule(f.ctx, f.org, rule.ID); err != nil {
+			t.Fatalf("audited delete errored (nil-meta NOT NULL bug): %v", err)
+		}
+		assertAudit(t, f, "policy.rule_deleted", rule.ID.String())
+	})
+}
