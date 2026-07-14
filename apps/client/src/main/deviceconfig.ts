@@ -48,20 +48,17 @@ export async function resolveTunnelConfig(
   api: DeviceApi,
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
-  const existing = store.get(origin);
-  // LEGACY config (persisted before orgId existed — v0.1.0). It can't use the direct-query
-  // monitors, and we NEVER query a no-orgId config (the reduction invariant — the scan fault
-  // surface is deleted). Migrate it ONCE by re-minting a fresh device that carries orgId.
-  // CREATE-FIRST, SWAP-AFTER-SUCCESS (finding #2): do NOT drop/revoke upfront — the create
-  // below overwrites this origin's entry, and the OLD device is revoked only AFTER the create
-  // succeeds. So a create failure (offline / 5xx) leaves the working config intact (the
-  // "a transient failure never destroys a working config" invariant — loss=recreate, S6.3/S6.4).
-  // connect() surfaces the loud "migrated" notice only on a SUCCESSFUL migration.
-  const legacyDeviceId = existing && !existing.orgId ? existing.deviceId : null;
-  if (legacyDeviceId) {
-    // fall through to the re-mint below (skip mode/pending/self-heal — a legacy config is
-    // always re-minted, never reused/queried).
-  } else if (existing && existing.config.full_tunnel !== fullTunnel) {
+  let existing = store.get(origin);
+  if (existing && !existing.orgId) {
+    // DEFENSE (reduction 2): connect() migrates a legacy (no-orgId) config BEFORE tunnel.up —
+    // clears + best-effort revokes it, terminal for that connect — so this ConfigProvider
+    // should never see one. NEVER query or arm a no-orgId config: drop it and fall through to
+    // a fresh create. This belt guarantees resolveTunnelConfig can't arm a legacy config even
+    // if reached; connect() owns the cap-freeing revoke + the user-facing notice.
+    store.remove(origin);
+    existing = null;
+  }
+  if (existing && existing.config.full_tunnel !== fullTunnel) {
     // MODE CHANGED (split↔full): the stored profile's AllowedIPs are baked at mint, so it
     // can't satisfy the new intent — reusing it would silently keep the old routing. Drop +
     // best-effort revoke the superseded device (now also CANCELS a still-pending one —
@@ -98,20 +95,8 @@ export async function resolveTunnelConfig(
   const config: TunnelConfig = { ...parseWgConf(confText), full_tunnel: fullTunnel };
   // Persist BEFORE the pending gate so the ApprovalMonitor + a later connect have the device
   // (config is valid now; the gateway just won't serve the peer until approved). orgId is
-  // persisted so the monitors query the device's OWN org directly (finding #4). This overwrites
-  // any legacy entry for this origin (same key).
+  // persisted so the monitors query the device's OWN org directly (finding #4).
   store.put({ origin, deviceId, orgId, config, pending: pendingApproval });
-  // SWAP-AFTER-SUCCESS (finding #2): the fresh device now exists + is stored, so best-effort
-  // revoke the superseded LEGACY device. We only reach here if createDevice succeeded — a
-  // create failure threw above with the legacy config still intact. (A pending re-mint IS a
-  // successful migration, so we revoke the old before throwing the gate below.)
-  if (legacyDeviceId) {
-    try {
-      await api.revokeDevice(legacyDeviceId);
-    } catch {
-      /* orphan left for GC/admin-reap — the migration already succeeded */
-    }
-  }
   if (pendingApproval) {
     throw new PendingApprovalError(deviceId); // S7.3: abort — do NOT arm the helper
   }

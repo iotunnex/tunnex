@@ -160,14 +160,26 @@ export function registerIpc(
     stopApprovalMonitor();
     lastSynth = null; // a fresh connect clears any stale revoked/pending state
     requestedFullTunnel = fullTunnel;
-    // LEGACY MIGRATION (reduction): a stored config from before the orgId field will be
-    // re-minted by resolveTunnelConfig (create-first + swap). Capture that it WAS legacy, but
-    // fire the loud "migrated" notice only on a SUCCESSFUL migration (finding #3) — post
-    // tunnel.up, or in the pending-gate (a pending re-mint IS a successful migration); NEVER
-    // before, so a re-mint that fails on a blip doesn't falsely claim the device was re-created.
+    // LEGACY MIGRATION (reduction 2 — one-time reconnect): a stored config from before the
+    // orgId field can't be monitored. Handle it DETERMINISTICALLY AT DETECTION, terminal for
+    // THIS connect — there is NO tunnel.up on the legacy path, so no helper-arm failure can
+    // race the notice, no create/revoke atomicity, and no cap collision. Clear it + best-effort
+    // revoke (frees the per-user cap slot; origin-keyed S6.3; revoke failure -> orphan for
+    // admin-reap) + the loud one-time notice + end in a connectable ("down") state. The NEXT
+    // connect is an ordinary fresh create — cap slot already free, orgId present, no in-place
+    // swap. (This deletes the fault surface the two prior folds each re-cut: cap-permanence,
+    // notice-timing, and swap atomicity.)
     const preCred = store.load();
-    const preSc = preCred ? tunnelStore.get(preCred.server) : undefined;
-    const wasLegacy = !!(preSc && !preSc.orgId);
+    if (preCred) {
+      const preSc = tunnelStore.get(preCred.server);
+      if (preSc && !preSc.orgId) {
+        await clearTunnelConfigForOrigin(preCred.server, deviceApiFor(preCred.server), tunnelStore).catch(() => {});
+        notifyTunnel("migrated");
+        const down: ClientTunnelStatus = { state: "down" };
+        emit(down);
+        return down; // terminal — the user reconnects to finish the update (fresh create)
+      }
+    }
     let status: TunnelStatus;
     try {
       status = await tunnel.up(); // resolves + persists the device, arms the helper
@@ -180,7 +192,6 @@ export function registerIpc(
         const pending: ClientTunnelStatus = { state: "pending_approval" };
         lastSynth = pending;
         emit(pending);
-        if (wasLegacy) notifyTunnel("migrated"); // the re-mint succeeded (pending) — migration done
         notifyTunnel("pending");
         if (cred) {
           const orgId = tunnelStore.get(cred.server)?.orgId ?? ""; // persisted before the throw
@@ -204,7 +215,6 @@ export function registerIpc(
       monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
     }
-    if (wasLegacy) notifyTunnel("migrated"); // the re-mint succeeded (connected) — migration done
     emit(status);
     notifyTunnel("connected");
     return status;
