@@ -449,13 +449,14 @@ func (s *Service) trackDesync(ctx context.Context, node sqlc.Node, appliedHash s
 	if pushed == "" || pushed == appliedHash {
 		// non-enforcing (off/mesh) OR reconverged — convergence is a STATE predicate, so a
 		// revert-to-clear (target moved back to the applied hash) legitimately clears.
-		_ = s.q.ClearNodePolicyDesyncSince(ctx, node.ID)
+		_ = s.q.ClearNodePolicyDesyncSince(ctx, sqlc.ClearNodePolicyDesyncSinceParams{ID: node.ID, OrgID: node.OrgID})
 		return
 	}
 	// enforcing + mismatch → stamp the onset (idempotent: WHERE IS NULL preserves the first
 	// onset PER EPISODE; a re-push after a clear re-stamps a NEW onset).
 	_ = s.q.StampNodePolicyDesyncSince(ctx, sqlc.StampNodePolicyDesyncSinceParams{
 		ID:                node.ID,
+		OrgID:             node.OrgID,
 		PolicyDesyncSince: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	})
 }
