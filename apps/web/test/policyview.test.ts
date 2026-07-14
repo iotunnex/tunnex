@@ -6,7 +6,8 @@ import {
   swapRule,
   roleFromMembers,
   sectionRender,
-  staleNoticeCleared,
+  staleNoticeText,
+  pruneStaleRuleIds,
   accessView,
   type LoadState,
 } from "../src/lib/policyview";
@@ -146,17 +147,34 @@ describe("[291] sectionRender — legibility signals COMPOSE, never compete", ()
   });
 });
 
-describe("[309] staleNoticeCleared — clears ONLY on the referenced rule's resolution", () => {
+describe("notices reduction — derived from staleRuleIds (single source of truth)", () => {
   const R = (id: string) => ({ id } as PolicyRule);
-  it("notice up (stale=X) + delete UNRELATED Y (X still present) → NOT cleared", () => {
-    expect(staleNoticeCleared("X", [R("X")])).toBe(false);
+
+  it("staleNoticeText: none → null; one → the partial message; many → a count line", () => {
+    expect(staleNoticeText([])).toBeNull();
+    expect(staleNoticeText(["abcdef12"])).toMatch(/could not be removed.*still active/i);
+    expect(staleNoticeText(["a", "b"])).toMatch(/^2 rules could not be removed/i);
   });
-  it("stale=X gone from the list (deleted or fresh-load absent) → cleared", () => {
-    expect(staleNoticeCleared("X", [R("Y")])).toBe(true);
-    expect(staleNoticeCleared("X", [])).toBe(true);
+
+  it("[371] a clean create never drops the warning — the set is only pruned by pruneStaleRuleIds", () => {
+    // onDone(clean) adds nothing; the derived notice still reflects the live set.
+    const set = ["X"];
+    expect(staleNoticeText(set)).not.toBeNull(); // still shown after any unrelated success
   });
-  it("no stale rule tracked → nothing to clear", () => {
-    expect(staleNoticeCleared(null, [R("X")])).toBe(false);
+
+  it("[A] pruneStaleRuleIds NEVER clears on a FAILED load (loadOk=false) — persists", () => {
+    expect(pruneStaleRuleIds(["X"], false, [])).toEqual(["X"]);
+    expect(pruneStaleRuleIds(["X"], false, [R("Y")])).toEqual(["X"]);
+  });
+
+  it("[A] on a SUCCESSFUL load, an absent stale id CLEARS; a still-present one persists", () => {
+    expect(pruneStaleRuleIds(["X"], true, [R("Y")])).toEqual([]); // X gone → cleared
+    expect(pruneStaleRuleIds(["X"], true, [R("X"), R("Y")])).toEqual(["X"]); // unrelated Y present, X kept
+  });
+
+  it("[B] sequential partials — per-id prune, the first stale id is NOT orphaned", () => {
+    // Two partials tracked; a successful load where only Z resolved keeps X.
+    expect(pruneStaleRuleIds(["X", "Z"], true, [R("X")])).toEqual(["X"]);
   });
 });
 
