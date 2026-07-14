@@ -248,3 +248,30 @@ test("resolveTunnelConfig: a no-orgId (legacy) config is re-minted, never querie
   assert.equal(store.get(origin)?.deviceId, "dev-1"); // fresh device replaces the legacy one
   assert.ok(store.get(origin)?.orgId); // now carries orgId (direct path)
 });
+
+// Finding #2: create-first / swap-after-success. A re-mint FAILURE (transient network) must
+// leave the legacy config INTACT and the old device NOT revoked (never destroy a working
+// config on a blip); a retry then succeeds.
+test("resolveTunnelConfig: a re-mint failure keeps the legacy config (never destroy on a blip)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const origin = "https://legacy.example";
+  store.put({ origin, deviceId: "dev-old", config: { ...parseWgConf(CONF), full_tunnel: false } } as never); // no orgId
+
+  const revoked: string[] = [];
+  const failing: DeviceApi = {
+    createDevice: async () => { throw new Error("network"); },
+    revokeDevice: async (id) => { revoked.push(id); },
+    deviceExists: async () => true,
+    deviceStatus: async () => "active",
+  };
+  await assert.rejects(() => resolveTunnelConfig(origin, false, failing, store), /network/);
+  assert.equal(store.get(origin)?.deviceId, "dev-old"); // legacy config INTACT
+  assert.deepEqual(revoked, []); // old device NOT revoked
+
+  // Retry with a working api -> re-mints + revokes the old AFTER the create succeeds.
+  const ok = fakeApi();
+  await resolveTunnelConfig(origin, false, ok, store);
+  assert.equal(store.get(origin)?.deviceId, "dev-1"); // fresh device
+  assert.deepEqual(ok.revoked, ["dev-old"]); // old revoked after success
+  assert.ok(store.get(origin)?.orgId);
+});
