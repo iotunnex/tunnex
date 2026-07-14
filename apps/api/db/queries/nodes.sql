@@ -80,3 +80,16 @@ WHERE org_id = $1 AND id = $2;
 -- to identical bytes = reconcile no-op, so over-notifying is safe + correct).
 SELECT id FROM nodes
 WHERE org_id = $1 AND status = 'active';
+
+-- name: StampNodePolicyDesyncSince :exec
+-- S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
+-- the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a
+-- newer time). Called from exactly one site (nodes.trackDesync); the value is the CP clock,
+-- never an agent string.
+UPDATE nodes SET policy_desync_since = $2 WHERE id = $1 AND policy_desync_since IS NULL;
+
+-- name: ClearNodePolicyDesyncSince :exec
+-- S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
+-- or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
+-- pushed target back to the applied hash) legitimately clears. CP-only, single-writer.
+UPDATE nodes SET policy_desync_since = NULL WHERE id = $1;

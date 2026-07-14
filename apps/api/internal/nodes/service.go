@@ -427,7 +427,37 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	if n == 0 {
 		return apierr.Conflict("node_not_active", "node is no longer active; key not stored")
 	}
+	s.trackDesync(ctx, node, applied.Hash)
 	return nil
+}
+
+// trackDesync is the SINGLE WRITER of nodes.policy_desync_since (S7.4b X-4 + single-writer
+// amendment): on each FRESH report it stamps the term-3 desync onset (CP clock, X-2) or clears
+// on reconvergence / non-enforcing. Called from exactly one site (ReportWGInfo). The OPEN build
+// (s.policy == nil) is provably SILENT — no query runs, no error, no enterprise hash-compare
+// import in the open binary. The value is ALWAYS the CP clock (time.Now) — an agent report can
+// never supply it (AppliedPolicy has no desync field; the column is not in the agent-fed caps).
+func (s *Service) trackDesync(ctx context.Context, node sqlc.Node, appliedHash string) {
+	if s.policy == nil {
+		return // open build — desync tracking is enterprise-only; silent, no write
+	}
+	hashes, err := s.policy.CompiledHashesForNodes(ctx, node.OrgID, []uuid.UUID{node.ID})
+	if err != nil {
+		return // pushed hash unavailable (compile fault) → can't-determine; never stamp/clear
+	}
+	pushed := hashes[node.ID]
+	if pushed == "" || pushed == appliedHash {
+		// non-enforcing (off/mesh) OR reconverged — convergence is a STATE predicate, so a
+		// revert-to-clear (target moved back to the applied hash) legitimately clears.
+		_ = s.q.ClearNodePolicyDesyncSince(ctx, node.ID)
+		return
+	}
+	// enforcing + mismatch → stamp the onset (idempotent: WHERE IS NULL preserves the first
+	// onset PER EPISODE; a re-push after a clear re-stamps a NEW onset).
+	_ = s.q.StampNodePolicyDesyncSince(ctx, sqlc.StampNodePolicyDesyncSinceParams{
+		ID:                node.ID,
+		PolicyDesyncSince: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
 }
 
 // NodeCapabilities is the typed view of a node's capabilities JSONB, read where the

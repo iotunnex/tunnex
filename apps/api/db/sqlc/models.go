@@ -134,20 +134,21 @@ type Membership struct {
 }
 
 type Node struct {
-	ID           uuid.UUID          `json:"id"`
-	OrgID        uuid.UUID          `json:"org_id"`
-	Name         string             `json:"name"`
-	Status       string             `json:"status"`
-	CertSerial   string             `json:"cert_serial"`
-	AgentVersion string             `json:"agent_version"`
-	EnrolledAt   time.Time          `json:"enrolled_at"`
-	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
-	WgPublicKey  string             `json:"wg_public_key"`
-	Endpoint     string             `json:"endpoint"`
-	Capabilities []byte             `json:"capabilities"`
+	ID                uuid.UUID          `json:"id"`
+	OrgID             uuid.UUID          `json:"org_id"`
+	Name              string             `json:"name"`
+	Status            string             `json:"status"`
+	CertSerial        string             `json:"cert_serial"`
+	AgentVersion      string             `json:"agent_version"`
+	EnrolledAt        time.Time          `json:"enrolled_at"`
+	LastSeenAt        pgtype.Timestamptz `json:"last_seen_at"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	WgPublicKey       string             `json:"wg_public_key"`
+	Endpoint          string             `json:"endpoint"`
+	Capabilities      []byte             `json:"capabilities"`
+	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
 }
 
 type NodeJoinToken struct {
