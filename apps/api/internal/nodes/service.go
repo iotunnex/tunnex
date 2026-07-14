@@ -540,6 +540,58 @@ func (s *Service) PolicyDegradedForNodes(ctx context.Context, orgID uuid.UUID, n
 	return out
 }
 
+// PolicyDegradedKindForNodes projects the ADVISORY differentiated kind (S7.4b) — display
+// detail over the authoritative bool; it adds NO decision logic and nothing outside the UI
+// reads it. Same single org compile (`pushed`) as the bool. `pushKnown` is org-wide: a
+// transient compile fault → every node reads `desync_unknown` (honest can't-determine),
+// never a false healthy/kind. Freshness from `last_seen_at`, onset from the CP-stamped column.
+func (s *Service) PolicyDegradedKindForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]PolicyDegradedKind {
+	out := make(map[uuid.UUID]PolicyDegradedKind, len(nodes))
+	var pushed map[uuid.UUID]string
+	pushKnown := false
+	if s.policy != nil {
+		ids := make([]uuid.UUID, len(nodes))
+		for i, n := range nodes {
+			ids[i] = n.ID
+		}
+		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
+			pushed, pushKnown = h, true
+		}
+	}
+	now := time.Now()
+	for _, n := range nodes {
+		caps := Capabilities(n.Capabilities)
+		out[n.ID] = degradedKind(KindInput{
+			PolicyError:        caps.PolicyError,
+			PolicyFailingSince: caps.PolicyFailingSince,
+			PushKnown:          pushKnown,
+			PushedHash:         pushed[n.ID], // "" when !pushKnown or non-enforcing
+			AppliedHash:        caps.PolicyHash,
+			DesyncSince:        tsTime(n.PolicyDesyncSince),
+			ReportAge:          reportAge(now, n.LastSeenAt),
+			Now:                now,
+		})
+	}
+	return out
+}
+
+// tsTime unwraps a nullable timestamp to a zero-or-value time.
+func tsTime(ts pgtype.Timestamptz) time.Time {
+	if !ts.Valid {
+		return time.Time{}
+	}
+	return ts.Time
+}
+
+// reportAge is how long since the node last reported (freshness). A never-seen node reads a
+// huge age → treated as stale (desync_unknown on the desync path), never fresh.
+func reportAge(now time.Time, lastSeen pgtype.Timestamptz) time.Duration {
+	if !lastSeen.Valid {
+		return 1<<62 - 1 // effectively "forever stale"
+	}
+	return now.Sub(lastSeen.Time)
+}
+
 // Capabilities decodes a node row's capabilities JSONB (an empty/invalid value → all
 // false, the safe default: no capability claimed).
 func Capabilities(raw []byte) NodeCapabilities {

@@ -1321,6 +1321,11 @@ export interface components {
             last_seen_at?: string;
             /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
             policy_degraded?: boolean;
+            /**
+             * @description Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
+             * @enum {string}
+             */
+            policy_degraded_kind?: "healthy" | "apply_failing" | "stuck_enforcing" | "converging" | "silent_desync" | "desync_unknown";
         };
         JoinTokenRequest: {
             node_name?: string;

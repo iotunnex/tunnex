@@ -23,6 +23,7 @@ func TestDegradedKind(t *testing.T) {
 		{"apply_failing — error + failing_since", KindInput{PolicyError: "boom", PolicyFailingSince: "t0", ReportAge: fresh, Now: now}, KindApplyFailing},
 		{"stuck_enforcing — error + NO failing_since", KindInput{PolicyError: "boom", ReportAge: fresh, Now: now}, KindStuckEnforcing},
 		{"desync_unknown — pushed hash unavailable", KindInput{PushKnown: false, AppliedHash: "h", ReportAge: fresh, Now: now}, KindDesyncUnknown},
+		{"non-enforcing — pushed '' → healthy (no enforcement boundary)", KindInput{PushKnown: true, PushedHash: "", AppliedHash: "old", ReportAge: fresh, Now: now}, KindHealthy},
 
 		// [X-3 false-alarm] a fresh push settling: mismatch, fresh, age < T → converging, NEVER silent_desync.
 		{"converging — mismatch, fresh, age < T", KindInput{PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-10 * time.Second)}, KindConverging},
