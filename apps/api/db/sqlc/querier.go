@@ -132,6 +132,10 @@ type Querier interface {
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
+	// Resolve one rule (org-scoped) — S7.5.1 ingest enriches an allow event's kernel-stamped
+	// rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so
+	// it survives a later rule delete. Returns no rows if the rule was already deleted.
+	GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForOrgParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)

@@ -197,6 +197,33 @@ func (q *Queries) DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams
 	return result.RowsAffected(), nil
 }
 
+const getPolicyRuleForOrg = `-- name: GetPolicyRuleForOrg :one
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at FROM policy_rules WHERE id = $1 AND org_id = $2
+`
+
+type GetPolicyRuleForOrgParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// Resolve one rule (org-scoped) — S7.5.1 ingest enriches an allow event's kernel-stamped
+// rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so
+// it survives a later rule delete. Returns no rows if the rule was already deleted.
+func (q *Queries) GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForOrgParams) (PolicyRule, error) {
+	row := q.db.QueryRow(ctx, getPolicyRuleForOrg, arg.ID, arg.OrgID)
+	var i PolicyRule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.SrcGroupID,
+		&i.DstKind,
+		&i.DstResourceID,
+		&i.DstGroupID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getResource = `-- name: GetResource :one
 SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at FROM resources
 WHERE id = $1 AND org_id = $2

@@ -25,6 +25,10 @@ const (
 	// its grant was revoked, so the established connection was torn down. Carries the SAME
 	// RuleID the kill used.
 	DecisionTerminated Decision = "terminated"
+	// DecisionGap is a LEGIBLE hole marker: the CP writes it when an agent reports dropped
+	// events (buffer overflow or kernel nflog overrun). DenyCount carries N ("N events
+	// dropped here") so a hole in the audit trail is visible, never inferred.
+	DecisionGap Decision = "gap"
 )
 
 // Retention + rotation defaults (D3/D4) — NAMED so a POC never silently fills the
