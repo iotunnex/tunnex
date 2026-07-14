@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { login, OWNER, MEMBER, ORG } from "./helpers";
 
 // S4.5 Org settings + SSO config UI. The e2e stack is the OPEN edition, so the
 // SSO section renders as an "Enterprise feature" note (watch-item b: SSO config
@@ -7,21 +8,8 @@ import { test, expect, type Page } from "@playwright/test";
 // NOTE (S7.4c): the SSO test below is the OPEN-edition SUBSTITUTE — it proves the
 // endpoint is edition-GATED (403), not that its served payload is secret-free.
 // The REAL S4.5 secret-payload assertion lives in settings.enterprise.spec.ts
-// (E2E_EDITION=enterprise) + the blocking Go httptest
+// (enterprise edition, self-detected via /meta) + the blocking Go httptest
 // TestGetSsoConfigPayloadCarriesNoSecret (make test-editions).
-const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" };
-const MEMBER = { email: "member@demo.tunnex.local", pass: "tunnex-demo-password" };
-const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
-
-async function login(page: Page, who: { email: string; pass: string }) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(who.email);
-  await page.getByLabel("Password").fill(who.pass);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Settings" }).click();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-}
 
 test("owner sees org settings; SSO config is gated to the enterprise edition", async ({ page }) => {
   await login(page, OWNER);

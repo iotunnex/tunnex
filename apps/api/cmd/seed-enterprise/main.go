@@ -17,6 +17,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,9 +39,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The master key must already exist (the API bootstrap wrote it). LoadOrInit
-	// on the SAME secrets dir yields the SAME key, so the sealed secret is one the
-	// running enterprise API can actually open.
+	// The master key MUST already exist (the API bootstrap wrote it). LoadOrInit
+	// would silently MINT a fresh key if the secrets dir is empty/mismatched (e.g.
+	// a wrong compose-project volume name) — sealing the secret under a key the
+	// running API can never open. Fail loud if the key file is absent instead.
+	if _, err := os.Stat(filepath.Join(cfg.SecretsDir, "master.key")); err != nil {
+		logger.Error("seed_enterprise_no_master_key",
+			slog.String("secrets_dir", cfg.SecretsDir),
+			slog.String("hint", "the API must have booted (and its secrets volume mounted here) before seed-enterprise; check SECRETS_VOL"),
+			slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// LoadOrInit on the SAME secrets dir now yields the SAME key the API uses.
 	sec, err := secrets.LoadOrInit(cfg.SecretsDir)
 	if err != nil {
 		logger.Error("seed_enterprise_secrets_failed",
@@ -64,18 +74,23 @@ func main() {
 	defer pool.Close()
 
 	orgID := uuid.MustParse(seeddata.DemoOrgID)
+	ownerID := uuid.MustParse(seeddata.DemoOwnerUserID)
 
-	// Compose-on-top guard: the base seed must have run first.
-	var ownerExists bool
+	// Compose-on-top guard: the base seed must have run first. Check BOTH the org
+	// AND the owner user — the device INSERT below has FKs on both, so guarding
+	// only the org would pass then abort mid-seed (sso+node written, device fails
+	// on the user FK), leaving the fixtures half-applied.
+	var baseSeedPresent bool
 	if err := pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1 AND deleted_at IS NULL)`,
-		orgID).Scan(&ownerExists); err != nil {
+		`SELECT EXISTS (SELECT 1 FROM organizations WHERE id = $1 AND deleted_at IS NULL)
+		    AND EXISTS (SELECT 1 FROM users WHERE id = $2)`,
+		orgID, ownerID).Scan(&baseSeedPresent); err != nil {
 		logger.Error("seed_enterprise_check_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	if !ownerExists {
+	if !baseSeedPresent {
 		logger.Error("seed_enterprise_refused",
-			slog.String("hint", "base seed missing; run `make seed` before `make seed-enterprise`"),
+			slog.String("hint", "base seed (org + owner user) missing; run `make seed` before `make seed-enterprise`"),
 			slog.String("demo_org_id", seeddata.DemoOrgID))
 		os.Exit(1)
 	}
@@ -118,7 +133,6 @@ func main() {
 
 	// 3) A device holding a pool IP a shrink strands (fixed ID, idempotent upsert).
 	deviceID := uuid.MustParse(seeddata.DemoStrandableDeviceID)
-	ownerID := uuid.MustParse(seeddata.DemoOwnerUserID)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO devices (id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
 		 VALUES ($1, $2, $3, $4, $5, 'seed', $6, $7, false, 'active')

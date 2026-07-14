@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	tcrypto "github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
@@ -24,9 +25,15 @@ import (
 // (gates job, `make test-editions`) that SATISFIES the twice-deferred S4.5
 // secret-payload claim: the SSO config READ endpoint returns the keyed
 // fingerprint but NEVER the client secret (plaintext or sealed). It exercises
-// the REAL handler against a live DB in the enterprise build — the substitute
-// (settings.spec.ts:25) only checked the open-edition 403 gate, which proves the
-// endpoint is hidden, NOT that its payload is secret-free when it IS served.
+// the REAL read handler against a live DB in the enterprise build — the
+// substitute (settings.spec.ts:25) only checked the open-edition 403 gate, which
+// proves the endpoint is hidden, NOT that its payload is secret-free when served.
+//
+// The config is written via a DIRECT UpsertSSOConfig (a sealed secret + keyed
+// fingerprint), NOT the audited ConfigService.Set — an audit_logs row is
+// append-only (its org FK is SET NULL, which the append-only trigger REFUSES), so
+// an audited write would make the org un-deletable and the test would leak rows
+// into the shared compose DB. The READ path under assertion is unchanged.
 func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -39,25 +46,23 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
-
-	// A real org + actor to satisfy FKs (Set writes an audit row referencing both).
 	org := uuid.New()
-	actor := uuid.New()
+	// Cleanup DELETEs the org (cascading sso_configs) THEN closes the pool. A
+	// separate `defer pool.Close()` would run BEFORE t.Cleanup (own-defers unwind
+	// before registered cleanups), leaving the delete to hit a closed pool and
+	// silently leak the org into the shared DB (inflating countRealOrgs, tripping
+	// the seed guard). No audit row is created, so the org delete is unblocked.
+	t.Cleanup(func() {
+		c, cc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cc()
+		_, _ = pool.Exec(c, "DELETE FROM organizations WHERE id=$1", org) // cascades sso_configs
+		pool.Close()
+	})
+
 	if _, err := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)",
 		org, "O", "s45-"+org.String()); err != nil {
 		t.Fatalf("org: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'Actor')",
-		actor, actor.String()+"@t.local"); err != nil {
-		t.Fatalf("actor: %v", err)
-	}
-	t.Cleanup(func() {
-		c, cc := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cc()
-		_, _ = pool.Exec(c, "DELETE FROM organizations WHERE id=$1", org) // cascades sso_configs + audit_logs
-		_, _ = pool.Exec(c, "DELETE FROM users WHERE id=$1", actor)
-	})
 
 	masterKey := make([]byte, tcrypto.KeySize)
 	if _, err := rand.Read(masterKey); err != nil {
@@ -70,13 +75,24 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 	const secret = "super-secret-google-client-secret-payload-guard"
 	const clientID = "client-id-abc.apps.googleusercontent.com"
 
-	// Real enterprise SSO port; seal + store a config with a KNOWN secret.
-	port := NewSSOPort(pool, sealer, nil, "", slog.Default())
-	if err := port.SetConfig(ctx, actor, org, "google", clientID, secret, "", true); err != nil {
-		t.Fatalf("set config: %v", err)
+	// Store a config with a KNOWN sealed secret + its keyed fingerprint (un-audited).
+	sealed, err := sealer.Seal([]byte(secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlc.New(pool).UpsertSSOConfig(ctx, sqlc.UpsertSSOConfigParams{
+		OrgID:              org,
+		Provider:           "google",
+		ClientID:           clientID,
+		ClientSecretSealed: []byte(sealed),
+		SecretFingerprint:  sealer.Fingerprint([]byte(secret)),
+		Enabled:            true,
+	}); err != nil {
+		t.Fatalf("upsert sso config: %v", err)
 	}
 
 	// Call the ACTUAL read handler as an authorized owner.
+	port := NewSSOPort(pool, sealer, nil, "", slog.Default())
 	s := apiServer{sso: port}
 	authed := principalWithRole(org, rbac.RoleOwner)
 	resp, err := s.GetSsoConfig(authed, api.GetSsoConfigRequestObject{OrgId: org, Provider: "google"})
