@@ -1264,6 +1264,31 @@ delete the conntrack entries matching the removed allow. **Trigger = first custo
 immediate flow termination on grant change.** Pairs naturally with the flow-logs candidate (S7.2 already
 emits per-rule `counter`s) — the same per-rule identity drives both. Documented in docs/S7.2-decisions.md.
 
+## ZTNA COVERAGE + GAP LEDGER (batch recorded during S7.4b; DISPOSITION AT EPIC-7-CLOSE PLANNING — no code, no story #s except as noted)
+1. **Flow / access logs — PROMOTION CANDIDATE.** Argue at EPIC-7 close for EPIC-7-ADJACENT, *ahead of
+   site-to-site* if needed. Seam exists: the S7.2 per-rule `counter`s. Buyer-facing property = "who accessed
+   WHAT, WHEN" — compliance/sovereignty buyers treat this as the *reason to buy ZTNA*; "ZTNA without access
+   logs" is the competitor's line against us. (Pairs with the conntrack-kill item above — same per-rule identity.)
+2. **IdP-group sync (Entra/Google groups → policy subjects) — enterprise-gated.** Without it, policy groups
+   must manually mirror the directory and decay immediately. Candidate: EPIC 7.x / EPIC 8 era.
+3. **Posture DEPTH (OS version · disk-encryption · EDR-present).** S7.3 is KNOWN-device, not HEALTHY-device.
+   Needs a story number + named trigger = **first compliance-driven prospect**.
+4. **Per-USER grants.** Rules are group→resource only; "give Alice temporary access" has NO path. DECIDE
+   (user-as-a-subject-kind vs a blessed one-user-group UX) **before the policy UI hardens the habit** (S7.4a
+   shipped group-only; revisit before it ossifies).
+5. **S7.4b scope note.** The differentiated-health BADGE is *enforcer-health*, NOT *access-visibility* — the
+   larger visibility half is item 1 (flow/access logs). Don't let the badge read as "we have visibility."
+6. **ZT-coverage: OpenVPN (S9.1 DECIDE-BEFORE-CODE — REQUIRED).** OVPN devices MUST be policy subjects in the
+   SAME `policyspec.Compiled` artifact (grants are transport-agnostic); **cert-auth alone is NOT enforcement**.
+   Deliberate-red at S9.1: `enforcing` + zero grants → OVPN client traffic DROPPED at the forward chain, same
+   as WG. A parallel non-compiled OVPN path = a two-door breach — **rejected in advance**.
+7. **ZT-coverage: DNS under enforcing (S8.4 PAPER ITEM).** Split-horizon DNS needs port-53-to-site-resolver
+   reachability MODELED (a grant, or an explicit modeled exception) — else name resolution breaks silently
+   under `enforcing`.
+8. **ZT-coverage: full-tunnel egress under enforcing (S3.7 DECISION-REVIEW ITEM).** Decide whether internet
+   egress is a policy DESTINATION KIND (an "internet" resource) or explicitly OUT-OF-ZT-SCOPE; currently
+   UNDEFINED under `enforcing` (a full-tunnel device under enforcing with no egress grant = undefined behavior).
+
 **LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
 throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
 policy version instead. (#9) no off-mode fast-path — off-mode orgs still walk the compile path to
