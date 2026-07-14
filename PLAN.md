@@ -237,8 +237,10 @@ ledgered SUBSTITUTES≠SATISFIES (66 client unit tests substitute; wire proof de
 smoke OR next desktop session). 5 review/confirm passes total; the collapse-arc's terminal form
 (degrade-on-outcome-not-error-type) recorded as the S7.4 first-reach heuristic. EPICs 0–6 COMPLETE + EPIC 7:
 S7.1 + S7.2 + S7.3 MERGED. **NEXT: S7.4 (policy UI + differentiated health surface + enterprise-e2e stack)
-decision-first.** If this pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update
-this line.
+decision-first — S7.4a (Zero Trust admin UI) is IN REVIEW-CLEAN + box-walking on PR#18 (not merged).**
+**HOTFIX MERGED — `fix/audit-nil-metadata` (PR#19, 28a388e):** audited DELETE 500 (audit_logs.metadata
+nil→NULL 23502) fixed; surfaced by S7.4a's walk (first wire-delete of an audited entity). If this pointer
+disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -247,7 +249,7 @@ Seed for the eventual SECURITY.md.
 - **Query-lint / deleted_at** — soft-delete tables must filter `deleted_at IS NULL`.
 - **Trigger schema check** (`db/schema_test.go`) — every `updated_at` table has the `set_updated_at` trigger.
 - **audit_logs append-only** — DB triggers reject UPDATE/DELETE/TRUNCATE; actor FK to `users` enforces attribution.
-- **audit metadata never-NULL** (hotfix `fix/audit-nil-metadata`; `TestAuditedDeletesPersistMetadata`, red-on-main) — `audit_logs.metadata` is `NOT NULL`; the policy `writeAudit` helper must default a nil meta to `[]byte("{}")`, never a nil `[]byte` (pgx sends nil as SQL NULL → 23502). Demonstrated-red: it used `var raw []byte`, so EVERY audited DELETE (`group.deleted`/`resource.deleted`/`policy.rule_deleted`) 500'd + rolled back — undeletable rules/groups/resources — surfaced only when S7.4a's UI first deleted an audited entity on the wire. **BOX-PROOF CONVENTION (new):** every audited MUTATION CLASS (not just create) gets one wire execution in its story's box proof — a create-only proof let this live across S7.1/S7.2/S7.3. **UNIT-TEST GAP:** the policy integration suite tested create/mode/push but never an audited delete; the red test closes it.
+- **audit metadata never-NULL** (hotfix `fix/audit-nil-metadata`; `TestAuditedDeletesPersistMetadata`, red-on-main) — `audit_logs.metadata` is `NOT NULL`; the policy `writeAudit` helper must default a nil meta to `[]byte("{}")`, never a nil `[]byte` (pgx sends nil as SQL NULL → 23502). Demonstrated-red: it used `var raw []byte`, so EVERY audited DELETE (`group.deleted`/`resource.deleted`/`policy.rule_deleted`) 500'd + rolled back — undeletable rules/groups/resources — surfaced only when S7.4a's UI first deleted an audited entity on the wire. **BOX-PROOF CONVENTION (new):** every audited MUTATION CLASS (not just create) gets one wire execution in its story's box proof — a create-only proof let this live across S7.1/S7.2/S7.3. **UNIT-TEST GAP:** the policy integration suite tested create/mode/push but never an audited delete; the red test closes it. **LEDGER (S11-class, swallowed-500 logging gap):** the handler wrapper maps a raw error → `500 internal_error` WITHOUT logging the wrapped cause — the http_request line showed only `status:500`, so the DB error (23502) was invisible until reproduced via the DB directly. The `internal_error` path MUST log the wrapped cause WITH the `request_id` (diagnosis-from-logs, not from a repro). → S11 (production hardening / observability). **REVIEW-PASS WAIVER (recorded, NON-PRECEDENT):** merged `fix/audit-nil-metadata` (PR#19) on CI-green without a multi-finder review pass — scoped to THIS hotfix only (1-line change, red-proven on the real schema, wire-confirmed 23502, sweep-complete). Not a precedent for feature work.
 - **Codegen drift guard** (`make generate-check`) — spec/generated code can't diverge.
 - **Edition build+test** (`make build-editions` / `test-editions`) — open and enterprise builds both compiled & tested; neither rots.
 - **e2e correlation** (Playwright) — SPA→API `X-Request-Id` chain asserted end-to-end.
