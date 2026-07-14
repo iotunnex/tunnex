@@ -20,9 +20,12 @@ import type { TunnelStatus } from "./helperclient";
 const DEFAULT_FULL_TUNNEL = false;
 
 // ClientTunnelStatus is what main forwards: the helper's TunnelStatus plus the
-// client-synthesized states the helper never emits — "revoked" and "pending_approval"
-// (S7.3: enrolled but awaiting admin approval; the helper is never armed for it).
-type ClientTunnelStatus = TunnelStatus | { state: "revoked" } | { state: "pending_approval" };
+// client-synthesized states the helper never emits — "revoked", "pending_approval"
+// (S7.3: enrolled but awaiting admin approval; the helper is never armed for it), and
+// "migrate_failed" (S7.3: a legacy-config replacement didn't complete — the ONE bounded
+// failure outcome of the migration path, made legible in the window/tray so it never
+// reads as a bare "Disconnected"; the helper is never armed for it).
+type ClientTunnelStatus = TunnelStatus | { state: "revoked" } | { state: "pending_approval" } | { state: "migrate_failed" };
 
 // TunnelControls is what registerIpc returns so the tray (built in index.ts) can drive
 // the SAME connect/disconnect path the renderer uses — no duplicated tunnel logic, one
@@ -55,7 +58,7 @@ export function registerIpc(
   // lastSynth holds a CLIENT-synthesized state (currently only "revoked") so it
   // survives a renderer remount/reload: the helper can't report "revoked", so
   // tunnel:status returns this until the next connect/disconnect clears it.
-  let lastSynth: { state: "revoked" } | { state: "pending_approval" } | null = null;
+  let lastSynth: { state: "revoked" } | { state: "pending_approval" } | { state: "migrate_failed" } | null = null;
 
   const emitTray = (s: TrayState): void => {
     trayState = s;
@@ -179,17 +182,25 @@ export function registerIpc(
     if (preCred) {
       const preSc = tunnelStore.get(preCred.server);
       if (preSc && !preSc.orgId) {
-        const down: ClientTunnelStatus = { state: "down" };
         try {
           await migrateLegacyConfig(preCred.server, preSc.deviceId, deviceApiFor(preCred.server), tunnelStore);
           notifyTunnel("migrated");
+          const down: ClientTunnelStatus = { state: "down" };
+          emit(down);
+          return down; // terminal — next connect is an ordinary fresh create
         } catch {
-          // ANY failure -> outcome = "not replaced". Config is still stored (revoke-first kept it),
-          // so the next connect re-detects + retries; the slot handle is retained. No re-throw.
+          // ANY failure -> the ONE bounded outcome ("not replaced"). Config is still stored
+          // (revoke-first kept it), so the next connect re-detects + retries; the slot handle
+          // is retained. No re-throw, no branch on error type. Surface it as a DISTINCT synth
+          // state (mirrors "revoked"/"pending_approval") so the window/tray shows it legibly
+          // even when OS notifications are off — never a bare "Disconnected". Latched so it
+          // survives a renderer remount until the next connect/disconnect.
           notifyTunnel("migrate_retry");
+          const s: ClientTunnelStatus = { state: "migrate_failed" };
+          lastSynth = s;
+          emit(s);
+          return s; // terminal — the user reconnects to retry the update
         }
-        emit(down);
-        return down; // terminal both ways — the user reconnects to finish (or retry) the update
       }
     }
     let status: TunnelStatus;

@@ -31,10 +31,13 @@ export interface TunnexBridge {
   };
 }
 
-// TunnelStatus mirrors the helper (no secrets — never key material). "revoked" is
-// client-synthesized by main (proactive revocation monitor) — the helper never emits it.
+// TunnelStatus mirrors the helper (no secrets — never key material). "revoked" and
+// "migrate_failed" are client-synthesized by main (the helper never emits them):
+// "revoked" from the proactive revocation monitor; "migrate_failed" is the one bounded
+// failure outcome of a legacy-config replacement (S7.3), surfaced so a stuck migration
+// shows a distinct, actionable state instead of a bare "Disconnected".
 export interface TunnelStatus {
-  state: "down" | "up" | "failed" | "revoked";
+  state: "down" | "up" | "failed" | "revoked" | "migrate_failed";
   interface?: string;
   last_handshake_sec?: number;
   rx_bytes?: number;

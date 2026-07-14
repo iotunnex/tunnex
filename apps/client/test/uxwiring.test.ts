@@ -53,5 +53,12 @@ test("tray: trayStateFor mirrors the renderer's handshake-liveness (no drift)", 
   assert.equal(trayStateFor({ state: "up" }), "connecting");
   assert.equal(trayStateFor({ state: "failed" }), "failed");
   assert.equal(trayStateFor({ state: "revoked" }), "revoked");
+  // S7.3: a failed legacy-config replacement surfaces a DISTINCT state (not bare
+  // "disconnected"), so a stuck migration is legible in the tray/window even with OS
+  // notifications off — mirrors the revoked synth-state.
+  assert.equal(trayStateFor({ state: "migrate_failed" }), "migrate_retry");
+  const mr = trayMenuModel("migrate_retry");
+  assert.ok(mr.showConnect && !mr.showDisconnect); // reconnect retries; nothing to disconnect
+  assert.match(mr.statusLabel, /replace device|retry/i);
   assert.equal(trayStateFor({ state: "down" }), "disconnected");
 });
