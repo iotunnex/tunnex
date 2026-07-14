@@ -5,7 +5,7 @@ import { runLogin, runLogout } from "./login";
 import { TunnelController, helperSocketPath } from "./tunnel";
 import { TunnelConfigStore } from "./tunnelstore";
 import { HttpDeviceApi } from "./httpdeviceapi";
-import { resolveTunnelConfig, clearTunnelConfigForOrigin, PendingApprovalError } from "./deviceconfig";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
 import { ApprovalMonitor } from "./approvalmonitor";
 import { ensureHelperInstalled } from "./helperinstall";
@@ -173,7 +173,11 @@ export function registerIpc(
     if (preCred) {
       const preSc = tunnelStore.get(preCred.server);
       if (preSc && !preSc.orgId) {
-        await clearTunnelConfigForOrigin(preCred.server, deviceApiFor(preCred.server), tunnelStore).catch(() => {});
+        // REVOKE-FIRST (harden): frees the cap slot BEFORE clearing; a revoke blip THROWS here
+        // (this connect fails, the user retries, the config is KEPT) rather than orphaning the
+        // slot and locking out a capped upgrader. Only reached AFTER a successful revoke+clear
+        // do we announce + go connectable. See migrateLegacyConfig for the state-walk.
+        await migrateLegacyConfig(preCred.server, preSc.deviceId, deviceApiFor(preCred.server), tunnelStore);
         notifyTunnel("migrated");
         const down: ClientTunnelStatus = { state: "down" };
         emit(down);

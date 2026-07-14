@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { parseWgConf } from "../src/main/wgconf";
 import { TunnelConfigStore } from "../src/main/tunnelstore";
-import { resolveTunnelConfig, clearTunnelConfigForOrigin, PendingApprovalError, type DeviceApi } from "../src/main/deviceconfig";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError, type DeviceApi } from "../src/main/deviceconfig";
 import { InsecureStorageError, type Persistence, type SafeStorageLike } from "../src/main/credential";
 
 const CONF = `[Interface]
@@ -248,4 +248,33 @@ test("resolveTunnelConfig: a no-orgId (legacy) config is dropped + re-minted, ne
   assert.deepEqual(api.revoked, []); // resolveTunnelConfig does NOT revoke — connect() owns that
   assert.equal(store.get(origin)?.deviceId, "dev-1"); // fresh device
   assert.ok(store.get(origin)?.orgId); // carries orgId (direct path)
+});
+
+// REDUCTION 2 harden — REVOKE-FIRST migration. The revoke frees the cap slot the next connect
+// needs, so it runs BEFORE clearing and the config is cleared ONLY on revoke success.
+test("migrateLegacyConfig: revoke ok -> config cleared (slot freed before next create)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const origin = "https://legacy.example";
+  store.put({ origin, deviceId: "dev-old", config: { ...parseWgConf(CONF), full_tunnel: false } } as never);
+  const revoked: string[] = [];
+  const ok = { revokeDevice: async (id: string) => { revoked.push(id); } } as unknown as DeviceApi;
+  await migrateLegacyConfig(origin, "dev-old", ok, store);
+  assert.deepEqual(revoked, ["dev-old"]); // slot freed
+  assert.equal(store.get(origin), null); // cleared after revoke success
+});
+
+// The permanence case, now self-healing: a revoke BLIP keeps the config (throws), and the
+// NEXT attempt (working revoke) succeeds — no admin-reap, no lockout.
+test("migrateLegacyConfig: a revoke blip KEEPS the config; retry self-heals (no lockout)", async () => {
+  const store = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const origin = "https://legacy.example";
+  store.put({ origin, deviceId: "dev-old", config: { ...parseWgConf(CONF), full_tunnel: false } } as never);
+
+  const failing = { revokeDevice: async () => { throw new Error("network"); } } as unknown as DeviceApi;
+  await assert.rejects(() => migrateLegacyConfig(origin, "dev-old", failing, store), /network/);
+  assert.equal(store.get(origin)?.deviceId, "dev-old"); // config KEPT (revoke ran before remove)
+
+  const ok = { revokeDevice: async () => {} } as unknown as DeviceApi;
+  await migrateLegacyConfig(origin, "dev-old", ok, store); // retry
+  assert.equal(store.get(origin), null); // now cleared — self-recovered, no admin-reap
 });
