@@ -86,6 +86,16 @@ const (
 	MetaSsoProvidersMicrosoft MetaSsoProviders = "microsoft"
 )
 
+// Defines values for NodePolicyDegradedKind.
+const (
+	ApplyFailing   NodePolicyDegradedKind = "apply_failing"
+	Converging     NodePolicyDegradedKind = "converging"
+	DesyncUnknown  NodePolicyDegradedKind = "desync_unknown"
+	Healthy        NodePolicyDegradedKind = "healthy"
+	SilentDesync   NodePolicyDegradedKind = "silent_desync"
+	StuckEnforcing NodePolicyDegradedKind = "stuck_enforcing"
+)
+
 // Defines values for NodeStatus.
 const (
 	Active  NodeStatus = "active"
@@ -520,9 +530,15 @@ type Node struct {
 	Name         string             `json:"name"`
 
 	// PolicyDegraded Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB.
-	PolicyDegraded *bool      `json:"policy_degraded,omitempty"`
-	Status         NodeStatus `json:"status"`
+	PolicyDegraded *bool `json:"policy_degraded,omitempty"`
+
+	// PolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
+	PolicyDegradedKind *NodePolicyDegradedKind `json:"policy_degraded_kind,omitempty"`
+	Status             NodeStatus              `json:"status"`
 }
+
+// NodePolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
+type NodePolicyDegradedKind string
 
 // NodeStatus defines model for Node.Status.
 type NodeStatus string

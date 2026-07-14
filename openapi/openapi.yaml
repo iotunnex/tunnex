@@ -1803,6 +1803,16 @@ components:
             where the gateway is guaranteed on its last-good fail-closed policy (never open, never
             blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge
             UX is S7.4, reading the same agent-reported JSONB.
+        policy_degraded_kind:
+          type: string
+          enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown]
+          description: >-
+            Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail
+            over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on
+            this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the
+            gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific
+            kind. `converging` is a normal push settling (< the report-cadence debounce) and must not
+            alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
 
     JoinTokenRequest:
       type: object

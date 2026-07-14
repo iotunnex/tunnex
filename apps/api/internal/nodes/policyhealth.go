@@ -97,8 +97,10 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	if !in.PushKnown {
 		return KindDesyncUnknown
 	}
-	if in.AppliedHash == in.PushedHash {
-		return KindHealthy // in sync (or reconverged — convergence is a STATE predicate)
+	// pushed "" = non-enforcing (off/mesh) — no enforcement boundary, so never a desync
+	// (mirrors the bool's term-3 `h != ""` guard). Equal hashes = in sync / reconverged.
+	if in.PushedHash == "" || in.AppliedHash == in.PushedHash {
+		return KindHealthy
 	}
 	// pushed != applied. A stale report can't confirm ONGOING desync → desync_unknown (the
 	// stamp is retained elsewhere; silence never clears it). NEVER healthy, NEVER silent_desync.
