@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useEffect, useId } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes } from "react";
 
 // A small, deliberate set of primitives — enough to compose the app's pages
@@ -93,15 +93,15 @@ export function Modal({
   children: ReactNode;
   actions: ReactNode;
 }) {
-  // Esc dismiss via a document listener — a keydown on the div never fires (it isn't
-  // focused). Backdrop click also dismisses; the inner panel stops propagation.
+  // Esc dismiss is PANEL-scoped (not a document listener): autofocus the panel so a keydown
+  // originates inside it, and handle Esc on the panel. A native <select> that consumes Esc
+  // (closing its own dropdown) does NOT bubble to the panel, so the modal survives — the
+  // [17] fix. Focus-model degradation: if focus leaves the panel (tabs to browser chrome),
+  // Esc goes inert until focus returns; backdrop-click always dismisses.
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDismiss();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+    panelRef.current?.focus();
+  }, []);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -111,7 +111,15 @@ export function Modal({
       onClick={onDismiss}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl"
+        ref={panelRef}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onDismiss();
+          }
+        }}
+        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className={`text-sm font-semibold ${danger ? "text-danger" : "text-white"}`}>{title}</h2>

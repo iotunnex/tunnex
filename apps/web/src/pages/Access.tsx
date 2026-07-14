@@ -19,10 +19,12 @@ import {
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import {
+  accessView,
   modeEnableConfirm,
   policyGate,
   roleFromMembers,
   ruleRow,
+  sectionRender,
   swapRule,
   swapPartialMessage,
   type LoadState,
@@ -52,19 +54,26 @@ export default function Access() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
   const [myRole, setMyRole] = useState<Role | undefined>(undefined);
-  // loadError = a RETRYABLE fetch failure of a GATING input (edition or role). While set,
-  // the body is NOT rendered — we never gate off a value we failed to load ([0] false lockout).
+  // Page-level gating inputs, kept DISTINCT so no signal blanks another (fold-2):
+  // - loadError: meta/org fetch failed (can't determine edition) → retry, nothing renderable.
+  // - fatal: terminal, non-retryable (no org).
+  // - roleError / roleResolved: the members fetch — its failure affects ONLY the enterprise
+  //   admin path ([75]); role in-flight must render "loading", never the gate notice ([101]).
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [fatal, setFatal] = useState<string | null>(null); // terminal, non-retryable (e.g. no org)
+  const [fatal, setFatal] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
+  const [roleResolved, setRoleResolved] = useState(false);
 
   const reload = useCallback(async () => {
     setLoadError(null);
     setFatal(null);
+    setRoleError(null);
+    setRoleResolved(false);
     const mRes = await loadOne(() => api.GET("/api/v1/meta"));
-    if (!mRes.ok) return setLoadError("Couldn't load your account details.");
+    if (!mRes.ok) return setLoadError(mRes.error); // [67]: surface loadOne's (human) message
     setMeta(mRes.data as Meta);
     const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError("Couldn't load your organizations.");
+    if (!oRes.ok) return setLoadError(oRes.error);
     const first = (oRes.data as Org[])[0];
     if (!first) return setFatal("You are not a member of any organization yet.");
     setOrg(first);
@@ -72,24 +81,36 @@ export default function Access() {
       api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId: first.id } } }),
     )) as Loaded<Member[]>;
     const resolved = roleFromMembers(memRes, myId);
-    if (resolved.failed) return setLoadError("Couldn't determine your role.");
+    if (resolved.failed) return setRoleError(memRes.ok ? "Couldn't determine your role." : memRes.error);
     setMyRole(resolved.role);
+    setRoleResolved(true);
   }, [myId]);
   useEffect(() => {
     reload();
   }, [reload]);
 
   const gate = policyGate({ role: myRole, emailVerified, edition: meta?.edition });
-  const ready = !loadError && !fatal && meta != null && org != null;
+  const view = accessView({
+    fatal: fatal != null,
+    loadError: loadError != null,
+    editionReady: meta != null && org != null,
+    isEnterprise: gate.isEnterprise,
+    roleError: roleError != null,
+    roleResolved,
+    canView: gate.canView,
+  });
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-white">Access policies</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
-      {fatal && <ErrorText>{fatal}</ErrorText>}
-      {loadError && <LoadRetry error={loadError} onRetry={reload} />}
 
-      {ready && !gate.isEnterprise && (
+      {view === "fatal" && <ErrorText>{fatal}</ErrorText>}
+      {view === "load_retry" && <LoadRetry error={loadError ?? "Couldn't load."} onRetry={reload} />}
+      {view === "role_retry" && <LoadRetry error={roleError ?? "Couldn't determine your role."} onRetry={reload} />}
+      {(view === "loading" || view === "role_loading") && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
+
+      {view === "upsell" && (
         <Card className="mt-6">
           <h2 className="text-sm font-semibold text-slate-300">Zero Trust access</h2>
           <p className="mt-1 text-xs text-slate-500">
@@ -98,13 +119,13 @@ export default function Access() {
         </Card>
       )}
 
-      {ready && gate.isEnterprise && !gate.canView && (
+      {view === "member_gate" && (
         <Card className="mt-6">
           <p className="text-sm text-slate-400">Access policies are managed by owners and admins.</p>
         </Card>
       )}
 
-      {ready && gate.canView && org && (
+      {view === "admin_body" && org && (
         <>
           <ModeSection orgId={org.id} canManage={gate.canManagePolicy} />
           <RulesSection orgId={org.id} canManage={gate.canManagePolicy} />
@@ -269,27 +290,31 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     load();
   }
 
+  const view = sectionRender(loadError, notice);
+
   return (
     <Card className="mt-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Rules</h2>
-        {canManage && !loadError && (
+        {canManage && !view.showRetry && (
           <Button onClick={() => setCreating(true)} disabled={groups.length === 0}>
             Add rule
           </Button>
         )}
       </div>
       <p className="mt-1 text-xs text-slate-500">Allow rules: a source group may reach a destination group or resource.</p>
-      {loadError ? (
-        <LoadRetry error={loadError} onRetry={load} />
-      ) : (
+
+      {/* [291] legibility signals COMPOSE: the partial-swap notice + a mutation error render at
+          TOP LEVEL — a load failure replaces the LIST (content), never a warning. */}
+      {view.showNotice && <p className="mt-2 text-xs text-amber-300">{notice}</p>}
+      <ErrorText>{err}</ErrorText>
+      {view.showRetry && <LoadRetry error={loadError ?? "Couldn't load rules."} onRetry={load} />}
+
+      {view.showContent && (
         <>
           {groups.length === 0 && loaded.groupsLoaded && (
             <p className="mt-2 text-xs text-slate-500">Create a group first — every rule&rsquo;s source is a group.</p>
           )}
-          <ErrorText>{err}</ErrorText>
-          {notice && <p className="mt-2 text-xs text-amber-300">{notice}</p>}
-
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
               const row = ruleRow(r, groups, resources, loaded);

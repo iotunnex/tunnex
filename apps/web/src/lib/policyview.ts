@@ -45,6 +45,52 @@ export function modeEnableConfirm(ruleCount: number): ConfirmCopy {
   };
 }
 
+// ── Bug law (S7.4a fold-2): legibility signals COMPOSE, never compete ────────────────
+// An error state may replace CONTENT, never another WARNING. A partial-swap notice (a stale
+// enforcing rule is still active, D-a5) must render even when a coincident reload failed
+// ([291]). sectionRender is the pure render-plan: retry replaces the list, but the notice
+// always shows when set.
+export interface SectionRender {
+  showRetry: boolean;
+  showContent: boolean;
+  showNotice: boolean;
+}
+export function sectionRender(loadError: string | null, notice: string | null): SectionRender {
+  return { showRetry: !!loadError, showContent: !loadError, showNotice: !!notice };
+}
+
+// ── Parent access-page gate as a PURE function ([75]+[101]) ──────────────────────────
+// The upsell needs only EDITION (role-irrelevant); the admin body needs ROLE RESOLVED. A
+// members-load failure must NOT blank a non-enterprise user's upsell ([75]), and role
+// in-flight must render "loading", never the manage-gated-away notice ([101]).
+export type AccessView =
+  | "loading"
+  | "fatal"
+  | "load_retry"
+  | "upsell"
+  | "role_retry"
+  | "role_loading"
+  | "member_gate"
+  | "admin_body";
+
+export function accessView(i: {
+  fatal: boolean;
+  loadError: boolean;
+  editionReady: boolean; // meta + org both loaded
+  isEnterprise: boolean;
+  roleError: boolean;
+  roleResolved: boolean;
+  canView: boolean;
+}): AccessView {
+  if (i.fatal) return "fatal";
+  if (i.loadError) return "load_retry";
+  if (!i.editionReady) return "loading";
+  if (!i.isEnterprise) return "upsell"; // [75]: role irrelevant here — never role_retry
+  if (i.roleError) return "role_retry";
+  if (!i.roleResolved) return "role_loading"; // [101]: never the gate copy while role in-flight
+  return i.canView ? "admin_body" : "member_gate";
+}
+
 // ── policy RBAC + edition gate (pure) ───────────────────────────────────────────────
 // Whole feature is enterprise-gated; view needs policy:view; managing needs
 // policy:manage AND a verified email (mirrors the server's verified-email requirement
