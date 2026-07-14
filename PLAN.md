@@ -262,10 +262,12 @@ secret-free asserts, cleanup via `session_replication_role=replica` bypass), `se
 D-c4 VERIFIED (orphan check is a pure DB read → no CI agent). Review arc: high-effort story-end (18/18, 0 err,
 8 findings) → 7 folded + [3] accept-by-design → [audit-cascade] REWORKED as a decide-item (pick (a): restore
 the audited write, trigger-bypass cleanup) → CI all-green on a91e5cd incl. `e2e-enterprise` IN CI → box-walk
-stands. **S4.5 + S4.5b ledgers flipped SUBSTITUTE→SATISFIED (PR#21, sha 8ad71cd).** **NEXT: EPIC-7-CLOSE
-PLANNING SESSION** (disposition ledger batches 1–3 + the replan proposal + beta-timing / EPIC-7.5 + EPIC-M
-decisions; S7.5.1 commit-one is the expected first artifact after it). NO new story branch until the session
-sets the order. If this pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update it.
+stands. **S4.5 + S4.5b ledgers flipped SUBSTITUTE→SATISFIED (PR#21, sha 8ad71cd).** **EPIC-7-CLOSE PLANNING
+SESSION HELD (2026-07-14) — build order LOCKED: 7.5 → M → BETA BUNDLE → PUBLIC BETA (joint w/ site) → 8 → 9 →
+10 → 11 → 12-remainder.** Beta = full scope (7.5 + M + bundle). S12.1/S12.2 pulled into the bundle; EPIC 12
+trigger = first paying-customer intent. Batches 1–3 dispositioned (see the ledger + `docs/` decisions). **NEXT:
+S7.5.1 (flow/access logs) commit-one — decision-first, PAPER, no code until disposition.** If this pointer
+disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update it.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
@@ -1186,18 +1188,68 @@ present — detect and warn/refuse rather than silently downgrade.
   its default) — bootstrap must FAIL LOUD or warn when `APP_BASE_URL` is the localhost default while
   the process is clearly non-local. Both are immediate customer-facing bugs.
 
-## EPIC 7 — Zero Trust Access *(enterprise)*
+## EPIC 7 — Zero Trust Access *(enterprise)* — ✅ COMPLETE
 
-- **S7.1 Policy model** — resources, groups, access rules (who → what), default-deny.
-- **S7.2 Policy enforcement** — evaluate on connection + per-peer route filtering (via agent).
-- **S7.3 Device posture (basic)** — require known device, block untrusted.
-- **S7.4 Policy UI** — rule builder in dashboard. **LEDGERED (from S7.2): the DIFFERENTIATED policy-health
-  surface.** S7.2 collapsed the gateway health signal to ONE conservative `policy_degraded` boolean
-  (the 3-signal→2-field mapping produced gap states across 3 review passes; see docs/S7.2-decisions.md).
-  The rich agent signals (`policy_error`, `policy_failing_since`, `policy_hash`) still land in the node
-  capabilities JSONB. S7.4 designs the differentiated read (which-KIND-of-degraded: apply-failing vs
-  stuck-enforcing vs silent-desync) + the debounced badge UX, reading that JSONB — and MAY re-introduce a
-  windowed silent-desync signal (needs a server-side desync-onset, deferred out of S7.2 as new state).
+- **S7.1 Policy model** ✅ (PR#14) — resources, groups, access rules (who → what), default-deny.
+- **S7.2 Policy enforcement** ✅ (PR#16) — evaluate on connection + per-peer route filtering (via agent);
+  conservative `policy_degraded` bool + org-wide push law.
+- **S7.3 Device posture (basic)** ✅ (PR#17) — require known device, block untrusted.
+- **S7.4 Policy UI + differentiated health + enterprise-e2e** ✅ — shipped as three PRs:
+  - **S7.4a** Zero Trust admin UI (`/access`) ✅ (PR#18) + audit-nil-metadata hotfix (PR#19).
+  - **S7.4b** differentiated health surface (advisory `policy_degraded_kind` OVER the bool, Option X) ✅ (PR#20).
+  - **S7.4c** enterprise-e2e enabler ✅ (PR#21, sha `8ad71cd`) — SATISFIED the twice-deferred S4.5
+    secret-payload + S4.5b orphan-render (blocking Go httptest + enterprise Playwright leg + `seed-enterprise`).
+
+## EPIC 7.5 — ZTNA Competitiveness *(enterprise)* — NEXT (order LOCKED 2026-07-14)
+
+Target segment = self-hosted / WireGuard ZTNA (Tailscale · Twingate · NetBird · Headscale), NOT the Zscaler
+tier. Win = match-or-beat on ZTNA DEPTH while holding the differentiator (fully self-hosted, zero SaaS in the
+trust path, air-gappable). L7/app-aware proxying · risk scoring · continuous re-auth = Tier-3 NAMES, NOT built.
+Every story is decision-first (commit-one paper before code). Batch-1 items 1–4 are superseded-by-inclusion here.
+
+- **S7.5.1 Flow / access logs** — **STARTS FIRST under every path.** Per-connection / per-grant access events,
+  org-scoped, queryable + **exportable in a SIEM-ingestable shape (SIEM export is in the DoD, batch-3 #2)**.
+  Builds on the S7.2 per-rule `counter` seam. Decide-before-code: event granularity · retention/rotation
+  (customer disk) · append-only / audit-class storage posture · SIEM export shape · schema seam from counters.
+- **S7.5.2 IdP-group sync + SCIM** — Entra/Google groups as policy SUBJECTS (sync, not mirror); SCIM rides or
+  splits at paper. Enterprise-gated. Decide: IdP-authoritative vs merge-conflict rules; a deprovisioned user
+  gets the full S2.6/S7.2 sweep.
+- **S7.5.3 Posture checks v1** — extends S7.3's gate: OS version · disk-encryption · EDR-present; block-or-warn
+  per org. Decide: client-reported attestation limits named HONESTLY (spoofable by a compromised device).
+- **S7.5.4 Per-user + temporary grants** — USER as a subject kind in `policyspec.Compiled` (versioned-artifact
+  bump per the S8 seam discipline) + grant EXPIRY that is **WINDOW-EXTENSIBLE** (extend before lapse, not
+  delete+recreate; recompile+push on lapse, org-wide push law). **Decide before the S7.4a UI hardens the
+  group-only habit.**
+- **S7.5.5 MFA / TOTP** *(batch-3 #1, STORY-REQUIRED before outside-circle distribution)* — second factor for
+  local auth. Decide-before-code: TOTP enrollment · recovery codes · per-org enforce policy · SSO-vs-local
+  interplay.
+
+## EPIC M — Mobile Clients (iOS + Android) — after EPIC 7.5, before EPICs 9/10 (CONFIRMED 2026-07-14)
+
+iOS + Android WireGuard clients — login against a tenant (local + SSO) + tunnel control, at the discipline of
+the desktop client (EPIC 6). **THE ONE OPEN DECISION (resolved at EPIC M's own commit-one, calendar costs
+stated per option — NOT now): the beta gate = stage-1 (config-export / QR into the OFFICIAL WireGuard iOS/
+Android apps) vs FULL native apps.** Stories enumerated at commit-one once that gate is set.
+
+## BETA BUNDLE — the pre-public-beta gate (a workstream bundle, joint launch with the site)
+
+The set that must all land before PUBLIC BETA; the site goes live ONCE, synchronized (single complete launch).
+**INTERNAL ORDER (approved 2026-07-14): S12.1 → S12.2 → S6.5b → rest** — the load-bearing runtime license-gate
+goes FIRST (everything packaged/signed depends on the final edition-gating shape).
+- **S12.1 — runtime license-gate refactor** *(FIRST; PULLED INTO THE BUNDLE — site-launch consequence)*:
+  build-tag → runtime `LicenseManager`, **DECIDE-BEFORE-CODE, load-bearing — supersedes the S1.1 edition
+  model.** Everything else in the bundle assumes the final edition-gating shape, so it leads.
+- **S12.2 — Ed25519 offline issuance** *(PULLED INTO THE BUNDLE)* — the site's trial funnel delivers REAL keys
+  at its only launch. Payments (**S12.5) stay PARKED.**
+- **S6.5b** signing + notarization + auto-update ON *(named trigger now FIRED = public beta; Windows EV still
+  waits on entity formation)*.
+- **S11.3** rate limiting + security headers.
+- **SECURITY.md + vulnerability disclosure** *(batch-3 #5; seeded from the Armed Guards inventory)*.
+- **S6.6 clean-VPS acceptance + client-wire-smoke** *(the pending EPIC-6 box-proof + the ledgered wire-smoke)*.
+- **Go-module vanity rename** `tunnexio/tunnex` → `tunnex.io/…` *(trigger FIRED — domain purchased)*.
+- **Site-sync joint cutover** — the platform emits three SYNC EMIT-POINTS the site consumes: **(a)** 7.5 close
+  → site feature/pricing/compare refresh; **(b)** EPIC M close → mobile claims + downloads; **(c)** bundle done
+  → joint cutover.
 
 ## EPIC 8 — Site-to-Site Networking
 
@@ -1395,7 +1447,13 @@ kernel no-op, but it still burns an `nft` transaction); skip apply when the appl
 matches. None change behavior; all are throughput optimizations. **Trigger = policy-fetch load becomes
 measurable.** Documented in docs/S7.2-decisions.md.
 
-## EPIC 12 — Commercial / Licensing Infrastructure *(PARKED — trigger: post-public-beta; needs a sellable product + users first)*
+## EPIC 12 — Commercial / Licensing Infrastructure *(trigger: FIRST PAYING-CUSTOMER INTENT — build-on-intent, not calendar)*
+
+**RESTRUCTURED 2026-07-14:** **S12.1 (runtime license-gate refactor) + S12.2 (Ed25519 offline issuance) are
+PULLED FORWARD into the BETA BUNDLE** (the single-complete-launch consequence — the site's trial funnel
+delivers real keys at its only launch). **S12.5 (payments) stays PARKED.** The remainder below (S12.3 upgrade
+affordance, S12.4 issuance service, S12.5 payment, S12.6 compliance incl. **GDPR / batch-3 #10**) fires on
+first paying-customer INTENT.
 
 **Positioning guard:** licensing MUST NOT break the "self-hosted, no SaaS in the trust path" differentiator. License verification is **OFFLINE** — the customer's deployment verifies a signed key locally against a baked-in public key; it works air-gapped and **NEVER calls Tunnex infra to function.** Any phone-home (renewal reminders, telemetry) is optional, async, and degrades gracefully — a lapsed connection to Tunnex infra **NEVER hard-fails a running VPN.** This is the sovereignty/Tailscale-differentiator constraint; a call-home validation model is explicitly **REJECTED**.
 
@@ -1410,8 +1468,19 @@ measurable.** Documented in docs/S7.2-decisions.md.
 
 ---
 
-## Recommended Build Order
-EPIC 0 → 1 → 2 → 3 (WG core loop) → 4 (dashboard) → 5 (CLI) → 6 (Electron) → 7 → 8 → 9 → 10 → 11. **(EPIC 12 = commercial/licensing, PARKED — inserted post-public-beta when monetization is wanted, NOT in the near-term path.)**
+## Build Order — LOCKED at the EPIC-7-close planning session (2026-07-14)
+EPIC 0 → 1 → 2 → 3 → 4 → 5 → 6 → **7 ✅ → 7.5 (ZTNA competitiveness) → M (mobile) → BETA BUNDLE → PUBLIC BETA
+(joint with the site) → 8 → 9 → 10 → 11-remainder → 12-remainder.**
+- **S12.1 + S12.2 are pulled into the BETA BUNDLE** (single-complete-launch consequence); the rest of EPIC 12
+  fires on **first paying-customer INTENT**.
+- Beta ships FULL SCOPE (7.5 + M + bundle) — "beta at EPIC-7-done" REJECTED. EPIC M's stage-1-vs-native beta
+  gate is resolved at EPIC M's commit-one, not here.
+- ZT-coverage guarantees carry UNCHANGED: OVPN-through-compiler (S9.1) · DNS-under-enforcing (S8.4) ·
+  egress-under-enforcing (S3.7-review).
+- **NEXT ARTIFACT: S7.5.1 commit-one (decision-first, paper).**
+
+### (historical) original recommended order
+EPIC 0 → 1 → 2 → 3 (WG core loop) → 4 (dashboard) → 5 (CLI) → 6 (Electron) → 7 → 8 → 9 → 10 → 11.
 
 ## First Story to Execute: **S0.1 + S0.2 (Foundation + one-command boot)**
 Deliverable: a `git`-ready monorepo where `docker compose up` brings up postgres, redis, a Go API `/healthz` (structured logging + request IDs), a node-agent stub (`NET_ADMIN`, WG UDP port), Mailpit, and a React dashboard shell reachable through nginx.
