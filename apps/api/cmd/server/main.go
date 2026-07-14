@@ -148,6 +148,7 @@ func main() {
 	// S7.2: wire the Zero Trust policy source for the desired state (nil in the open
 	// build -> no policy field -> agents keep the legacy mesh).
 	nodeSvc.SetPolicyProvider(apphttp.NewNodePolicyProvider(pool))
+	nodes.LogPolicyHealthTuning(logger) // S7.4b: assumed R + derived T (operator discoverability)
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)

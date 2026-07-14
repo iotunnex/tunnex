@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, apiErrorMessage, type Node, type Org } from "../lib/api";
+import { policyHealthBadge, badgeClass } from "../lib/healthview";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
@@ -92,6 +93,10 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               <span className="text-sm text-white">{n.name}</span>
               <span className="ml-2 font-mono text-xs text-slate-500">{n.agent_version}</span>
               {n.status === "revoked" && <span className="ml-2 text-xs text-rose-400">revoked</span>}
+              {(() => {
+                const b = policyHealthBadge(n);
+                return b ? <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>{b.label}</span> : null;
+              })()}
             </div>
             <span className="text-xs text-slate-500">
               {n.last_seen_at ? `last seen ${relativeAge(n.last_seen_at)}` : "never connected"}
