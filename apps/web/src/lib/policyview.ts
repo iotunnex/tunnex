@@ -3,7 +3,17 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule } from "./api";
+import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded } from "./api";
+
+// roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
+// members load must NOT read as "no role" — that silently downgrades an admin to the
+// member gate (a false lockout from their own admin surface). Distinguish role-unknown-
+// because-the-fetch-FAILED from a genuine member: `failed` true → the caller shows
+// "couldn't determine your role — retry", never the manage-gated-away notice.
+export function roleFromMembers(loaded: Loaded<Member[]>, myId: string): { role?: Role; failed: boolean } {
+  if (!loaded.ok) return { failed: true };
+  return { role: loaded.data.find((m) => m.user_id === myId)?.role, failed: false };
+}
 
 // ── D-a4: mode-enable confirm copy = a pure function of the ALLOW-RULE COUNT ────────
 // NOT a computed blast radius (that would reimplement the compiler client-side — a

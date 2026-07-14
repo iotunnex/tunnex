@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   apiErrorMessage,
+  loadOne,
+  type Loaded,
   type Meta,
   type Org,
   type Member,
@@ -19,17 +21,30 @@ import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../compone
 import {
   modeEnableConfirm,
   policyGate,
+  roleFromMembers,
   ruleRow,
   swapRule,
   swapPartialMessage,
   type LoadState,
 } from "../lib/policyview";
 // swapRule + swapPartialMessage power the create-then-delete rule edit (D-a5) in RuleFormModal.
+// Every GET here goes through loadOne — a raw api.GET whose emptiness is user-meaningful is
+// review-refused (S7.4a review): a fetch failure must render a legible retry, never a
+// reassuring empty state.
 
-// Access is the Zero Trust admin UI (S7.4a): one page, stacked Card sections —
-// mode · rules · groups+resources · device-approval queue. Enterprise-gated; the
-// consequential logic (mode-confirm copy, rule label joins, create-then-delete swap)
-// lives in ../lib/policyview and is unit-tested there.
+// LoadRetry replaces a reassuring-empty render when a load FAILED — a transient API error
+// must be legible + retryable, not shown as "none / not an admin".
+function LoadRetry({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div className="mt-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-amber-300">
+      {error}{" "}
+      <button className="underline underline-offset-2 hover:text-amber-200" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export default function Access() {
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
@@ -37,44 +52,44 @@ export default function Access() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
   const [myRole, setMyRole] = useState<Role | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
+  // loadError = a RETRYABLE fetch failure of a GATING input (edition or role). While set,
+  // the body is NOT rendered — we never gate off a value we failed to load ([0] false lockout).
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fatal, setFatal] = useState<string | null>(null); // terminal, non-retryable (e.g. no org)
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [{ data: m }, { data: orgs, error: orgErr }] = await Promise.all([
-          api.GET("/api/v1/meta"),
-          api.GET("/api/v1/organizations"),
-        ]);
-        if (cancelled) return;
-        if (m) setMeta(m);
-        if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
-        const first = orgs?.[0];
-        if (!first) return setError("You are not a member of any organization yet.");
-        setOrg(first);
-        const { data: members } = await api.GET("/api/v1/organizations/{orgId}/members", {
-          params: { path: { orgId: first.id } },
-        });
-        if (!cancelled) setMyRole((members as Member[] | undefined)?.find((mm) => mm.user_id === myId)?.role);
-      } catch {
-        if (!cancelled) setError("Could not reach the API.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const reload = useCallback(async () => {
+    setLoadError(null);
+    setFatal(null);
+    const mRes = await loadOne(() => api.GET("/api/v1/meta"));
+    if (!mRes.ok) return setLoadError("Couldn't load your account details.");
+    setMeta(mRes.data as Meta);
+    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
+    if (!oRes.ok) return setLoadError("Couldn't load your organizations.");
+    const first = (oRes.data as Org[])[0];
+    if (!first) return setFatal("You are not a member of any organization yet.");
+    setOrg(first);
+    const memRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId: first.id } } }),
+    )) as Loaded<Member[]>;
+    const resolved = roleFromMembers(memRes, myId);
+    if (resolved.failed) return setLoadError("Couldn't determine your role.");
+    setMyRole(resolved.role);
   }, [myId]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const gate = policyGate({ role: myRole, emailVerified, edition: meta?.edition });
+  const ready = !loadError && !fatal && meta != null && org != null;
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-white">Access policies</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
-      <ErrorText>{error}</ErrorText>
+      {fatal && <ErrorText>{fatal}</ErrorText>}
+      {loadError && <LoadRetry error={loadError} onRetry={reload} />}
 
-      {!gate.isEnterprise && (
+      {ready && !gate.isEnterprise && (
         <Card className="mt-6">
           <h2 className="text-sm font-semibold text-slate-300">Zero Trust access</h2>
           <p className="mt-1 text-xs text-slate-500">
@@ -83,13 +98,13 @@ export default function Access() {
         </Card>
       )}
 
-      {gate.isEnterprise && !gate.canView && (
+      {ready && gate.isEnterprise && !gate.canView && (
         <Card className="mt-6">
           <p className="text-sm text-slate-400">Access policies are managed by owners and admins.</p>
         </Card>
       )}
 
-      {org && gate.canView && (
+      {ready && gate.canView && org && (
         <>
           <ModeSection orgId={org.id} canManage={gate.canManagePolicy} />
           <RulesSection orgId={org.id} canManage={gate.canManagePolicy} />
@@ -104,23 +119,35 @@ export default function Access() {
 // ── Zero Trust mode ─────────────────────────────────────────────────────────────────
 function ModeSection({ orgId, canManage }: { orgId: string; canManage: boolean }) {
   const [mode, setMode] = useState<"off" | "enforcing" | null>(null);
-  const [ruleCount, setRuleCount] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [confirmCount, setConfirmCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [affected, setAffected] = useState<AffectedDevice[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: zt }, { data: rules }] = await Promise.all([
-      api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", { params: { path: { orgId } } }),
-      api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } }),
-    ]);
-    if (zt) setMode((zt as ZeroTrustMode).mode);
-    setRuleCount((rules as PolicyRule[] | undefined)?.length ?? 0);
+    const r = await loadOne(() => api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", { params: { path: { orgId } } }));
+    if (!r.ok) {
+      setLoadError(r.error); // never hide the toggle on a failure ([5]) — show retry
+      return;
+    }
+    setLoadError(null);
+    setMode((r.data as ZeroTrustMode).mode);
   }, [orgId]);
   useEffect(() => {
     load();
   }, [load]);
+
+  // [1]+[7]: fetch the rule count FRESH at Enable-click — never a stale/defaulted-0 count that
+  // would show the false zero-rules danger gate. A failed count fetch aborts LEGIBLY.
+  async function openEnableConfirm() {
+    setErr(null);
+    const r = await loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } }));
+    if (!r.ok) return setErr("Couldn't verify the current rule count — retry.");
+    setConfirmCount((r.data as PolicyRule[]).length);
+    setConfirming(true);
+  }
 
   async function setModeTo(next: "off" | "enforcing") {
     setBusy(true);
@@ -136,12 +163,11 @@ function ModeSection({ orgId, canManage }: { orgId: string; canManage: boolean }
     const zt = data as ZeroTrustMode | undefined;
     if (zt) {
       setMode(zt.mode);
-      // Post-hoc authoritative blast radius (D-A1) — never a client-computed one.
       if (zt.affected_full_tunnel_devices?.length) setAffected(zt.affected_full_tunnel_devices);
     }
   }
 
-  const confirm = modeEnableConfirm(ruleCount);
+  const confirm = modeEnableConfirm(confirmCount);
 
   return (
     <Card className="mt-6">
@@ -153,19 +179,22 @@ function ModeSection({ orgId, canManage }: { orgId: string; canManage: boolean }
               ? "Enforcing — default-deny; only your allow rules pass."
               : mode === "off"
                 ? "Off — legacy full-mesh (all devices reach all devices)."
-                : "…"}
+                : loadError
+                  ? "—"
+                  : "…"}
           </p>
         </div>
-        {canManage && mode != null && (
+        {canManage && mode != null && !loadError && (
           <Button
             variant={mode === "enforcing" ? "ghost" : "primary"}
             disabled={busy}
-            onClick={() => (mode === "enforcing" ? setModeTo("off") : setConfirming(true))}
+            onClick={() => (mode === "enforcing" ? setModeTo("off") : openEnableConfirm())}
           >
             {mode === "enforcing" ? "Disable" : "Enable enforcing"}
           </Button>
         )}
       </div>
+      {loadError && <LoadRetry error={loadError} onRetry={load} />}
       <ErrorText>{err}</ErrorText>
 
       {affected && (
@@ -204,23 +233,29 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [loaded, setLoaded] = useState<LoadState>({ groupsLoaded: false, resourcesLoaded: false });
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: rs }, { data: gs, error: gErr }, { data: res, error: rErr }] = await Promise.all([
-      api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } }),
-      api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } }),
-      api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } }),
+    const [rr, gr, resr] = await Promise.all([
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
     ]);
-    setRules((rs as PolicyRule[] | undefined) ?? []);
-    setGroups((gs as UserGroup[] | undefined) ?? []);
-    setResources((res as Resource[] | undefined) ?? []);
-    // Track load SUCCESS per set so the label can tell deleted from unresolved (D-a6).
-    setLoaded({ groupsLoaded: !gErr, resourcesLoaded: !rErr });
-    if (gErr || rErr) setErr("Some groups/resources failed to load — rule names may show as unresolved. Refresh.");
+    // The RULES fetch failing means the section cannot render truthfully — show retry, NOT
+    // the reassuring "No rules — enforcing denies everything" ([2]).
+    if (!rr.ok) return setLoadError(rr.error);
+    setLoadError(null);
+    setRules(rr.data as PolicyRule[]);
+    setGroups((gr.ok ? (gr.data as UserGroup[]) : []) as UserGroup[]);
+    setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
+    // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
+    // "unresolved", not "deleted".
+    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok });
+    setErr(gr.ok && resr.ok ? null : "Some groups/resources failed to load — names may show as unresolved. Refresh.");
   }, [orgId]);
   useEffect(() => {
     load();
@@ -238,41 +273,51 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     <Card className="mt-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Rules</h2>
-        {canManage && (
+        {canManage && !loadError && (
           <Button onClick={() => setCreating(true)} disabled={groups.length === 0}>
             Add rule
           </Button>
         )}
       </div>
       <p className="mt-1 text-xs text-slate-500">Allow rules: a source group may reach a destination group or resource.</p>
-      {groups.length === 0 && <p className="mt-2 text-xs text-slate-500">Create a group first — every rule&rsquo;s source is a group.</p>}
-      <ErrorText>{err}</ErrorText>
-      {notice && <p className="mt-2 text-xs text-amber-300">{notice}</p>}
+      {loadError ? (
+        <LoadRetry error={loadError} onRetry={load} />
+      ) : (
+        <>
+          {groups.length === 0 && loaded.groupsLoaded && (
+            <p className="mt-2 text-xs text-slate-500">Create a group first — every rule&rsquo;s source is a group.</p>
+          )}
+          <ErrorText>{err}</ErrorText>
+          {notice && <p className="mt-2 text-xs text-amber-300">{notice}</p>}
 
-      <ul className="mt-3 space-y-1">
-        {rules.map((r) => {
-          const row = ruleRow(r, groups, resources, loaded);
-          return (
-            <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm">
-              <span className="text-slate-200">
-                <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
-                <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
-              </span>
-              {canManage && (
-                <span className="flex gap-2">
-                  <Button variant="ghost" onClick={() => setEditing(r)}>
-                    Edit
-                  </Button>
-                  <Button variant="danger" onClick={() => del(r.id)}>
-                    Delete
-                  </Button>
-                </span>
-              )}
-            </li>
-          );
-        })}
-        {rules.length === 0 && <li className="text-xs text-slate-500">No rules — under Enforcing, all device-to-device traffic is denied.</li>}
-      </ul>
+          <ul className="mt-3 space-y-1">
+            {rules.map((r) => {
+              const row = ruleRow(r, groups, resources, loaded);
+              return (
+                <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm">
+                  <span className="text-slate-200">
+                    <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
+                    <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
+                  </span>
+                  {canManage && (
+                    <span className="flex gap-2">
+                      <Button variant="ghost" onClick={() => setEditing(r)}>
+                        Edit
+                      </Button>
+                      <Button variant="danger" onClick={() => del(r.id)}>
+                        Delete
+                      </Button>
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+            {rules.length === 0 && (
+              <li className="text-xs text-slate-500">No rules — under Enforcing, all device-to-device traffic is denied.</li>
+            )}
+          </ul>
+        </>
+      )}
 
       {(creating || editing) && (
         <RuleFormModal
@@ -300,10 +345,8 @@ function RefText({ label, broken }: { label: string; broken: boolean }) {
   return broken ? <span className="text-amber-400">⚠ {label}</span> : <span>{label}</span>;
 }
 
-// RuleFormModal creates OR edits a rule (src group → resource|group). Because there is no
-// updatePolicyRule, an edit is a CREATE-THEN-DELETE swap (D-a5): create the new rule first,
-// then delete the old — gap-free (allow-only union), never delete-first. A create-ok/delete-
-// fail is surfaced as a LEGIBLE partial (both rules remain, retry the removal) via swapRule.
+// RuleFormModal creates OR edits a rule. Editing = CREATE-THEN-DELETE (D-a5) via swapRule —
+// gap-free (allow-only union), never delete-first, with a LEGIBLE partial on delete-fail.
 function RuleFormModal({
   orgId,
   groups,
@@ -335,12 +378,16 @@ function RuleFormModal({
   async function submit() {
     setBusy(true);
     setErr(null);
-    const create = async () => {
+    // [8]: guard a 2xx-with-no-body — never let (data).id throw and strand busy=true.
+    const create = async (): Promise<{ id: string } | { error: unknown }> => {
       const { data, error } = await api.POST("/api/v1/organizations/{orgId}/policies", {
         params: { path: { orgId } },
         body: bodyFor(),
       });
-      return error ? { error } : { id: (data as PolicyRule).id };
+      if (error) return { error };
+      const id = (data as PolicyRule | undefined)?.id;
+      if (!id) return { error: { error: { message: "Server returned no rule id." } } };
+      return { id };
     };
 
     if (!editing) {
@@ -350,12 +397,8 @@ function RuleFormModal({
       return onDone();
     }
 
-    // EDIT = create-then-delete (D-a5). swapRule guarantees the ordering + a legible partial.
-    const out = await swapRule(
-      editing.id,
-      create,
-      async (id) =>
-        api.DELETE("/api/v1/organizations/{orgId}/policies/{ruleId}", { params: { path: { orgId, ruleId: id } } }),
+    const out = await swapRule(editing.id, create, async (id) =>
+      api.DELETE("/api/v1/organizations/{orgId}/policies/{ruleId}", { params: { path: { orgId, ruleId: id } } }),
     );
     setBusy(false);
     if (out.outcome === "create_failed") return setErr(apiErrorMessage(out.error, "Could not create the new rule."));
@@ -425,17 +468,23 @@ function RuleFormModal({
 function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage: boolean }) {
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [newGroup, setNewGroup] = useState("");
   const [newRes, setNewRes] = useState({ name: "", cidr: "", protocol: "any" as "any" | "tcp" | "udp" });
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: res }] = await Promise.all([
-      api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } }),
-      api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } }),
+    const [gr, resr] = await Promise.all([
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
     ]);
-    setGroups((gs as UserGroup[] | undefined) ?? []);
-    setResources((res as Resource[] | undefined) ?? []);
+    // Per-column legibility: a failed groups load shows retry in the groups column, not
+    // "No groups yet." ([4]); same for resources.
+    setGroupsError(gr.ok ? null : gr.error);
+    setResourcesError(resr.ok ? null : resr.error);
+    if (gr.ok) setGroups(gr.data as UserGroup[]);
+    if (resr.ok) setResources(resr.data as Resource[]);
   }, [orgId]);
   useEffect(() => {
     load();
@@ -483,56 +532,68 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
       <div className="mt-3 grid gap-4 sm:grid-cols-2">
         <div>
           <p className="text-xs font-medium text-slate-400">Groups (rule sources / device-to-device targets)</p>
-          <ul className="mt-2 space-y-1">
-            {groups.map((g) => (
-              <li key={g.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
-                {g.name}
-                {canManage && (
-                  <Button variant="danger" onClick={() => delGroup(g.id)}>
-                    Delete
-                  </Button>
-                )}
-              </li>
-            ))}
-            {groups.length === 0 && <li className="text-xs text-slate-500">No groups yet.</li>}
-          </ul>
-          {canManage && (
-            <div className="mt-2 flex gap-2">
-              <Input placeholder="Group name" value={newGroup} onChange={(e) => setNewGroup(e.target.value)} />
-              <Button onClick={addGroup}>Add</Button>
-            </div>
+          {groupsError ? (
+            <LoadRetry error={groupsError} onRetry={load} />
+          ) : (
+            <>
+              <ul className="mt-2 space-y-1">
+                {groups.map((g) => (
+                  <li key={g.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
+                    {g.name}
+                    {canManage && (
+                      <Button variant="danger" onClick={() => delGroup(g.id)}>
+                        Delete
+                      </Button>
+                    )}
+                  </li>
+                ))}
+                {groups.length === 0 && <li className="text-xs text-slate-500">No groups yet.</li>}
+              </ul>
+              {canManage && (
+                <div className="mt-2 flex gap-2">
+                  <Input placeholder="Group name" value={newGroup} onChange={(e) => setNewGroup(e.target.value)} />
+                  <Button onClick={addGroup}>Add</Button>
+                </div>
+              )}
+            </>
           )}
         </div>
         <div>
           <p className="text-xs font-medium text-slate-400">Resources (CIDR : protocol : ports)</p>
-          <ul className="mt-2 space-y-1">
-            {resources.map((r) => (
-              <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
-                <span>
-                  {r.name} <span className="text-slate-500">{r.cidr}</span>
-                </span>
-                {canManage && (
-                  <Button variant="danger" onClick={() => delResource(r.id)}>
-                    Delete
-                  </Button>
-                )}
-              </li>
-            ))}
-            {resources.length === 0 && <li className="text-xs text-slate-500">No resources yet.</li>}
-          </ul>
-          {canManage && (
-            <div className="mt-2 space-y-2">
-              <Input placeholder="Name" value={newRes.name} onChange={(e) => setNewRes({ ...newRes, name: e.target.value })} />
-              <div className="flex gap-2">
-                <Input placeholder="CIDR e.g. 10.0.5.0/24" value={newRes.cidr} onChange={(e) => setNewRes({ ...newRes, cidr: e.target.value })} />
-                <Select value={newRes.protocol} onChange={(e) => setNewRes({ ...newRes, protocol: e.target.value as "any" | "tcp" | "udp" })}>
-                  <option value="any">any</option>
-                  <option value="tcp">tcp</option>
-                  <option value="udp">udp</option>
-                </Select>
-                <Button onClick={addResource}>Add</Button>
-              </div>
-            </div>
+          {resourcesError ? (
+            <LoadRetry error={resourcesError} onRetry={load} />
+          ) : (
+            <>
+              <ul className="mt-2 space-y-1">
+                {resources.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
+                    <span>
+                      {r.name} <span className="text-slate-500">{r.cidr}</span>
+                    </span>
+                    {canManage && (
+                      <Button variant="danger" onClick={() => delResource(r.id)}>
+                        Delete
+                      </Button>
+                    )}
+                  </li>
+                ))}
+                {resources.length === 0 && <li className="text-xs text-slate-500">No resources yet.</li>}
+              </ul>
+              {canManage && (
+                <div className="mt-2 space-y-2">
+                  <Input placeholder="Name" value={newRes.name} onChange={(e) => setNewRes({ ...newRes, name: e.target.value })} />
+                  <div className="flex gap-2">
+                    <Input placeholder="CIDR e.g. 10.0.5.0/24" value={newRes.cidr} onChange={(e) => setNewRes({ ...newRes, cidr: e.target.value })} />
+                    <Select value={newRes.protocol} onChange={(e) => setNewRes({ ...newRes, protocol: e.target.value as "any" | "tcp" | "udp" })}>
+                      <option value="any">any</option>
+                      <option value="tcp">tcp</option>
+                      <option value="udp">udp</option>
+                    </Select>
+                    <Button onClick={addResource}>Add</Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -543,17 +604,23 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
 // ── Device approval (folded S7.3 admin surface) ─────────────────────────────────────
 function DeviceApprovalSection({ orgId, canManage }: { orgId: string; canManage: boolean }) {
   const [mode, setMode] = useState<"off" | "on" | null>(null);
+  const [modeError, setModeError] = useState<string | null>(null);
   const [pending, setPending] = useState<Device[]>([]);
+  const [pendingError, setPendingError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: da }, { data: pend }] = await Promise.all([
-      api.GET("/api/v1/organizations/{orgId}/device-approval", { params: { path: { orgId } } }),
-      api.GET("/api/v1/organizations/{orgId}/devices/pending", { params: { path: { orgId } } }),
+    const [dr, pr] = await Promise.all([
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/device-approval", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/devices/pending", { params: { path: { orgId } } })),
     ]);
-    if (da) setMode((da as DeviceApproval).mode);
-    setPending((pend as Device[] | undefined) ?? []);
+    setModeError(dr.ok ? null : dr.error);
+    if (dr.ok) setMode((dr.data as DeviceApproval).mode);
+    // [3]: a failed pending fetch must NOT render "No devices awaiting approval" — that hides
+    // a device blocked from connecting. Show retry.
+    setPendingError(pr.ok ? null : pr.error);
+    if (pr.ok) setPending(pr.data as Device[]);
   }, [orgId]);
   useEffect(() => {
     load();
@@ -590,36 +657,43 @@ function DeviceApprovalSection({ orgId, canManage }: { orgId: string; canManage:
               ? "On — new devices enroll pending and cannot connect until approved."
               : mode === "off"
                 ? "Off — new devices are active on enrollment."
-                : "…"}
+                : modeError
+                  ? "—"
+                  : "…"}
           </p>
         </div>
-        {canManage && mode != null && (
+        {canManage && mode != null && !modeError && (
           <Button variant={mode === "on" ? "ghost" : "primary"} disabled={busy} onClick={() => setApproval(mode === "on" ? "off" : "on")}>
             {mode === "on" ? "Turn off" : "Require approval"}
           </Button>
         )}
       </div>
+      {modeError && <LoadRetry error={modeError} onRetry={load} />}
       <ErrorText>{err}</ErrorText>
 
       <p className="mt-3 text-xs font-medium text-slate-400">Pending devices</p>
-      <ul className="mt-2 space-y-1">
-        {pending.map((d) => (
-          <li key={d.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm text-slate-200">
-            <span>
-              {d.name} <span className="text-slate-500">{d.assigned_ip}</span>
-            </span>
-            {canManage && (
-              <span className="flex gap-2">
-                <Button onClick={() => decide(d.id, "approve")}>Approve</Button>
-                <Button variant="danger" onClick={() => decide(d.id, "reject")}>
-                  Reject
-                </Button>
+      {pendingError ? (
+        <LoadRetry error={pendingError} onRetry={load} />
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {pending.map((d) => (
+            <li key={d.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm text-slate-200">
+              <span>
+                {d.name} <span className="text-slate-500">{d.assigned_ip}</span>
               </span>
-            )}
-          </li>
-        ))}
-        {pending.length === 0 && <li className="text-xs text-slate-500">No devices awaiting approval.</li>}
-      </ul>
+              {canManage && (
+                <span className="flex gap-2">
+                  <Button onClick={() => decide(d.id, "approve")}>Approve</Button>
+                  <Button variant="danger" onClick={() => decide(d.id, "reject")}>
+                    Reject
+                  </Button>
+                </span>
+              )}
+            </li>
+          ))}
+          {pending.length === 0 && <li className="text-xs text-slate-500">No devices awaiting approval.</li>}
+        </ul>
+      )}
     </Card>
   );
 }

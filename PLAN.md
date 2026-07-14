@@ -317,6 +317,17 @@ Seed for the eventual SECURITY.md.
   (`ListActivePeersForNode` → no wg peer/tunnel) AND the compiler input (no grants) by the same
   `status='active'` filter. Box-proven Leg 1: pending = no wg peer + no ping + no allow rule. Single-layer
   exclusion (peer-only) would arm a tunnel with no policy (or vice versa).
+- **openapi-fetch no-throw legibility — `loadOne` (S7.4a; `apps/web/src/lib/api.ts`, class-guard tests
+  in `policyview.test.ts`)** — openapi-fetch is a STANDING FOOTGUN: it returns `{data:undefined, error}`
+  on a non-2xx (does NOT throw) and REJECTS on a network failure, so a component that reads only `data`
+  renders a REASSURING EMPTY state for a real failure (a failed rules load → "No rules"; a failed members
+  load → a false "not an admin" lockout). **SANCTIONED CALL PATTERN:** a raw `api.GET` in a component whose
+  emptiness is user-meaningful (a list, a role, a count gating a destructive action) is **review-refused** —
+  route it through `loadOne`, which collapses both failure paths into a discriminated `Loaded<T>` so the
+  caller renders a legible "failed — retry", never absence. Demonstrated-red: the S7.4a story-end review's
+  dominant cluster — 6 sections each swallowing their fetch error into a reassuring default (the exact
+  failure-must-be-legible invariant, applied to referents but not the loads themselves). **Carry into S7.4b
+  (the health-badge fetch) and every later web surface.**
 - **Terminal-migration outcome-degradation** (S7.3; client `migrateLegacyConfig` revoke-first + the
   ipc bare-catch degrade + `migrate_failed` synth state; reds in `deviceconfig.test.ts` + `uxwiring.test.ts`)
   — a legacy-config migration has EXACTLY TWO bounded outcomes, degraded on OUTCOME not error type: completed
