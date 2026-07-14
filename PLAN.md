@@ -236,11 +236,19 @@ the deferred client-wire-smoke + dogfooding. Client legs (connect-gate / re-mint
 ledgered SUBSTITUTES≠SATISFIES (66 client unit tests substitute; wire proof deferred → packaged-client
 smoke OR next desktop session). 5 review/confirm passes total; the collapse-arc's terminal form
 (degrade-on-outcome-not-error-type) recorded as the S7.4 first-reach heuristic. EPICs 0–6 COMPLETE + EPIC 7:
-S7.1 + S7.2 + S7.3 MERGED. **NEXT: S7.4 (policy UI + differentiated health surface + enterprise-e2e stack)
-decision-first — S7.4a (Zero Trust admin UI) is IN REVIEW-CLEAN + box-walking on PR#18 (not merged).**
-**HOTFIX MERGED — `fix/audit-nil-metadata` (PR#19, 28a388e):** audited DELETE 500 (audit_logs.metadata
-nil→NULL 23502) fixed; surfaced by S7.4a's walk (first wire-delete of an audited entity). If this pointer
-disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update this line.
+S7.1 + S7.2 + S7.3 MERGED. **S7.4a (Zero Trust admin UI) MERGED (PR#18, merge sha 7402e5b)** — the Access
+page (rules builder + mode toggle w/ count-confirm + FOLDED-IN device-approval queue), web-only consumption
+of the S7.1–S7.3 backend; box-walked on the live two-gateway enterprise env (mode+count · post-hoc affected ·
+create · approve · delete · D-a5 edit-completes-clean [wire 1→2→1 poll deferred — UI+`swapRule` unit cover
+the ordering] · notices legibility [Amendment-A unit-covered via the `sectionRender` red; live-force optional]
+· failure leg [E is client-side `loadOne`, unchanged by the hotfix] · member gating). Review
+arc = story-end → fold-1 (loadOne legible-loads) → fold-2 (pure `accessView` gating + compose-not-compete) →
+round-3 (Esc drop) → budget-escalation → **notices reduction (single-source-of-truth `staleRuleIds`)** →
+clean. **HOTFIX MERGED — `fix/audit-nil-metadata` (PR#19, 28a388e):** audited DELETE 500 (audit_logs.metadata
+nil→NULL 23502) fixed; surfaced by S7.4a's walk (first wire-delete of an audited entity). **NEXT: S7.4b
+(differentiated health surface) — commit-one is DONE on paper (Option X, amended X-1…X-4; on main in
+`docs/S7.4-decisions.md`); build from it. Then S7.4c (enterprise-e2e enabler, UN-DEFERRABLE).** If this
+pointer disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update this line.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
