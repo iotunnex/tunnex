@@ -25,9 +25,9 @@ import {
   roleFromMembers,
   ruleRow,
   sectionRender,
-  staleNoticeCleared,
+  staleNoticeText,
+  pruneStaleRuleIds,
   swapRule,
-  swapPartialMessage,
   type LoadState,
 } from "../lib/policyview";
 // swapRule + swapPartialMessage power the create-then-delete rule edit (D-a5) in RuleFormModal.
@@ -258,8 +258,10 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [staleRuleId, setStaleRuleId] = useState<string | null>(null); // the rule the notice refers to ([309])
+  // SINGLE source of truth for the partial-swap warning: the SET of rule ids a create-then-
+  // delete left un-deleted. The notice is DERIVED (staleNoticeText) — no separate state to
+  // desync ([291]/[309]/[371]). Pruned ONLY on a successful load (amendment A), per-id (B).
+  const [staleRuleIds, setStaleRuleIds] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -270,30 +272,27 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
     ]);
     // The RULES fetch failing means the section cannot render truthfully — show retry, NOT
-    // the reassuring "No rules — enforcing denies everything" ([2]).
+    // the reassuring "No rules — enforcing denies everything" ([2]). Amendment A: on this
+    // FAILED path the stale-rule set is left untouched (the warning persists).
     if (!rr.ok) return setLoadError(rr.error);
     setLoadError(null);
-    setRules(rr.data as PolicyRule[]);
+    const freshRules = rr.data as PolicyRule[];
+    setRules(freshRules);
     setGroups((gr.ok ? (gr.data as UserGroup[]) : []) as UserGroup[]);
     setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
     setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok });
     setErr(gr.ok && resr.ok ? null : "Some groups/resources failed to load — names may show as unresolved. Refresh.");
+    // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
+    // longer present, keep the rest (B).
+    setStaleRuleIds((prev) => pruneStaleRuleIds(prev, true, freshRules));
   }, [orgId]);
   useEffect(() => {
     load();
   }, [load]);
 
-  // [309]: drop the partial-swap notice ONLY when its referenced (stale) rule is actually
-  // gone from the current list — a delete of THAT rule or its absence from a fresh load, but
-  // never an unrelated delete. Keyed on absence, so both resolutions collapse to one check.
-  useEffect(() => {
-    if (staleNoticeCleared(staleRuleId, rules)) {
-      setNotice(null);
-      setStaleRuleId(null);
-    }
-  }, [rules, staleRuleId]);
+  const notice = staleNoticeText(staleRuleIds); // DERIVED — no notice state
 
   async function del(id: string) {
     const { error } = await api.DELETE("/api/v1/organizations/{orgId}/policies/{ruleId}", {
@@ -367,9 +366,10 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
             setCreating(false);
             setEditing(null);
           }}
-          onDone={(msg, staleId) => {
-            setNotice(msg ?? null);
-            setStaleRuleId(staleId ?? null);
+          onDone={(staleId) => {
+            // A partial swap adds the un-deleted rule id to the set; a clean create adds
+            // nothing (so it can never drop a live warning — [371]).
+            if (staleId) setStaleRuleIds((prev) => (prev.includes(staleId) ? prev : [...prev, staleId]));
             setCreating(false);
             setEditing(null);
             load();
@@ -399,7 +399,7 @@ function RuleFormModal({
   resources: Resource[];
   editing: PolicyRule | null;
   onClose: () => void;
-  onDone: (notice?: string, staleRuleId?: string) => void;
+  onDone: (staleRuleId?: string) => void;
 }) {
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind ?? "group");
@@ -441,7 +441,7 @@ function RuleFormModal({
     );
     setBusy(false);
     if (out.outcome === "create_failed") return setErr(apiErrorMessage(out.error, "Could not create the new rule."));
-    if (out.outcome === "partial") return onDone(swapPartialMessage(out.oldId.slice(0, 8)), out.oldId);
+    if (out.outcome === "partial") return onDone(out.oldId); // notice derived from the id (staleNoticeText)
     onDone();
   }
 

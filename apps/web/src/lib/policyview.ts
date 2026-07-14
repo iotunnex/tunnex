@@ -59,13 +59,23 @@ export function sectionRender(loadError: string | null, notice: string | null): 
   return { showRetry: !!loadError, showContent: !loadError, showNotice: !!notice };
 }
 
-// staleNoticeCleared decides when the partial-swap notice may be dropped ([309]): ONLY when
-// the referenced (stale) rule is actually gone — keyed on its ABSENCE from the current rules
-// list, which covers both a delete of THAT rule and its disappearance from a fresh load, but
-// NEVER an unrelated delete (the stale rule is still present → notice persists).
-export function staleNoticeCleared(staleRuleId: string | null, rules: PolicyRule[]): boolean {
-  if (!staleRuleId) return false;
-  return !rules.some((r) => r.id === staleRuleId);
+// The partial-swap notice is DERIVED from ONE state — the SET of rule ids a create-then-delete
+// left un-deleted (staleRuleIds). No separate `notice` state exists, so the two can never
+// desync ([291]/[309]/[371] are structurally impossible). A SET (not a single id) so sequential
+// partials each stay tracked — a second partial never orphans the first's warning (amendment B).
+export function staleNoticeText(staleRuleIds: string[]): string | null {
+  if (staleRuleIds.length === 0) return null;
+  if (staleRuleIds.length === 1) return swapPartialMessage(staleRuleIds[0].slice(0, 8));
+  return `${staleRuleIds.length} rules could not be removed after an edit — they are still active. Retry the removals.`;
+}
+
+// pruneStaleRuleIds is the ONLY clear path. AMENDMENT A: it prunes ONLY on a SUCCESSFUL rules
+// load (`loadOk`) — a failed/transient load must NEVER satisfy the clear (that would be [291]
+// via the clear path). On success, keep per-id only the ids still present in the fresh list
+// (amendment B) — so a resolved stale rule clears while others persist.
+export function pruneStaleRuleIds(staleRuleIds: string[], loadOk: boolean, rules: PolicyRule[]): string[] {
+  if (!loadOk) return staleRuleIds; // A: never clear on a failed load
+  return staleRuleIds.filter((id) => rules.some((r) => r.id === id));
 }
 
 // ── Parent access-page gate as a PURE function ([75]+[101]) ──────────────────────────
