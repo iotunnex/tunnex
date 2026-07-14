@@ -239,9 +239,9 @@ smoke OR next desktop session). 5 review/confirm passes total; the collapse-arc'
 S7.1 + S7.2 + S7.3 MERGED. **S7.4a (Zero Trust admin UI) MERGED (PR#18, merge sha 7402e5b)** — the Access
 page (rules builder + mode toggle w/ count-confirm + FOLDED-IN device-approval queue), web-only consumption
 of the S7.1–S7.3 backend; box-walked on the live two-gateway enterprise env (mode+count · post-hoc affected ·
-create · approve · delete · D-a5 edit-completes-clean [wire 1→2→1 poll deferred — UI+`swapRule` unit cover
-the ordering] · notices legibility [Amendment-A unit-covered via the `sectionRender` red; live-force optional]
-· failure leg [E is client-side `loadOne`, unchanged by the hotfix] · member gating). Review
+create · approve · delete · **D-a5 edit gap-free — WIRE-PROVEN `1→2→1` on the nft ruleset** (create-before-
+delete; never `1→0→1`) · notices legibility [Amendment-A unit-covered via the `sectionRender` [291] red;
+live-force optional] · failure leg [E is client-side `loadOne`, unchanged by the hotfix] · member gating). Review
 arc = story-end → fold-1 (loadOne legible-loads) → fold-2 (pure `accessView` gating + compose-not-compete) →
 round-3 (Esc drop) → budget-escalation → **notices reduction (single-source-of-truth `staleRuleIds`)** →
 clean. **HOTFIX MERGED — `fix/audit-nil-metadata` (PR#19, 28a388e):** audited DELETE 500 (audit_logs.metadata
