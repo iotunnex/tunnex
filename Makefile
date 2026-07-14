@@ -81,6 +81,9 @@ NET := tunnex_default
 PG_USER ?= tunnex
 PG_PASS ?= tunnex_dev_password
 PG_DB ?= tunnex
+# The compose-managed named volume holding the master key (project `tunnex`, same
+# prefix convention as NET). seed-enterprise mounts it to SEAL with the API's key.
+SECRETS_VOL := tunnex_tunnex_secrets
 
 .PHONY: generate
 generate: generate-go generate-ts generate-rbac sqlc ## Regenerate all code from openapi/openapi.yaml
@@ -171,6 +174,14 @@ seed: ## Seed the demo org/user (idempotent, non-destructive)
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed
+
+.PHONY: seed-enterprise
+seed-enterprise: ## Seed the ENTERPRISE fixtures (SSO config + strandable device) ON TOP of `seed` (S7.4c)
+	@echo ">> enterprise seed (requires the stack up so the master key exists; run after `make seed`)"
+	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	  -v $(SECRETS_VOL):/var/lib/tunnex/secrets -e TUNNEX_SECRETS_DIR=/var/lib/tunnex/secrets \
+	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  $(GO_IMAGE) go run ./cmd/seed-enterprise
 
 .PHONY: e2e
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e

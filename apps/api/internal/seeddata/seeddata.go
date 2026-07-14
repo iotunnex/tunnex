@@ -57,4 +57,43 @@ const (
 	DemoNoOrgName = "Demo Fresh User"
 	// DemoNoOrgPassword is that user's password (development only).
 	DemoNoOrgPassword = "tunnex-demo-password"
+
+	// --- ENTERPRISE seed (S7.4c) — laid down by cmd/seed-enterprise ON TOP of the
+	// base seed, never forking it. These rows exist only to let the enterprise
+	// e2e stack exercise the REAL S4.5/S4.5b assertions (SSO no-secret payload +
+	// live 409 orphan render) instead of a gate-check / page.route mock.
+
+	// DemoSSOProvider is the seeded SSO provider whose config View (S4.5) must
+	// return a non-secret projection (client_id + keyed fingerprint, NEVER the
+	// secret). "google" matches an OIDC provider the enterprise build wires.
+	DemoSSOProvider = "google"
+	// DemoSSOClientID is the seeded OIDC client id — surfaced by the config View.
+	DemoSSOClientID = "demo-enterprise-client.apps.googleusercontent.com"
+	// DemoSSOClientSecret is the plaintext secret the seed SEALS before storage.
+	// It must never appear in any read-path payload (the S4.5 assertion).
+	DemoSSOClientSecret = "demo-enterprise-client-secret-do-not-ship"
+
+	// DemoGatewayNodeID is a seeded gateway node row. The 409 orphan check
+	// (devices.ResizePool) reads device rows purely from the DB — a device's
+	// node_id FK just needs a node ROW to exist; no enrolled agent, mTLS, or
+	// join token is involved (verified S7.4c D-c4).
+	DemoGatewayNodeID = "01900000-0000-7000-8000-000000000010"
+	// DemoGatewayNodeName is that gateway's display name.
+	DemoGatewayNodeName = "demo-gateway"
+
+	// DemoStrandableDeviceID is a device holding a pool IP that a shrink strands,
+	// producing the REAL 409 orphan list (S4.5b).
+	DemoStrandableDeviceID = "01900000-0000-7000-8000-000000000011"
+	// DemoStrandableDeviceName is that device's display name — it appears in the
+	// rendered orphan list.
+	DemoStrandableDeviceName = "demo-strandable-laptop"
+	// DemoStrandableDeviceIP is the pool address the device holds. The demo org's
+	// pool is 10.99.0.0/24; .200 is inside it but OUTSIDE a shrink to /25
+	// (.0–.127), so the shrink strands it (reason: out_of_range).
+	DemoStrandableDeviceIP = "10.99.0.200"
+	// DemoStrandShrinkCIDR is the CIDR the e2e shrink targets to strand the device.
+	DemoStrandShrinkCIDR = "10.99.0.0/25"
+	// DemoStrandableDevicePubKey is a fixed, syntactically-valid WG public key
+	// (32 zero bytes, base64). Never a private key.
+	DemoStrandableDevicePubKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA="
 )

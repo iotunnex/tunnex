@@ -3,6 +3,12 @@ import { test, expect, type Page } from "@playwright/test";
 // S4.5 Org settings + SSO config UI. The e2e stack is the OPEN edition, so the
 // SSO section renders as an "Enterprise feature" note (watch-item b: SSO config
 // is hidden in open builds), and the org-name edit exercises the settings save.
+//
+// NOTE (S7.4c): the SSO test below is the OPEN-edition SUBSTITUTE — it proves the
+// endpoint is edition-GATED (403), not that its served payload is secret-free.
+// The REAL S4.5 secret-payload assertion lives in settings.enterprise.spec.ts
+// (E2E_EDITION=enterprise) + the blocking Go httptest
+// TestGetSsoConfigPayloadCarriesNoSecret (make test-editions).
 const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" };
 const MEMBER = { email: "member@demo.tunnex.local", pass: "tunnex-demo-password" };
 const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
@@ -54,9 +60,14 @@ test("editing the org name saves (and is reverted to keep the shared seed clean)
 
 // S4.5b — the address-pool resize control. The seeded org has the default pool
 // (10.99.0.0/24). Real render is checked directly; the success (accept-and-
-// surface) and the shrink-conflict (orphan list) renders are mocked — the
-// orphan list needs stranded devices, which need an enrolled gateway the e2e
-// stack doesn't have, so we mock the endpoint like the other UI-render tests.
+// surface) and the shrink-conflict (orphan list) renders are mocked here in the
+// OPEN suite because it has no seeded device to strand.
+//
+// NOTE (S7.4c): the 409-orphan MOCK below is the OPEN-edition SUBSTITUTE. The
+// REAL S4.5b assertion — a LIVE shrink stranding a seeded device, un-mocked —
+// lives in settings.enterprise.spec.ts (E2E_EDITION=enterprise), where
+// seed-enterprise provides the device holding a pool IP. (The orphan check is a
+// pure DB read — no enrolled agent needed; S7.4c D-c4.)
 test("the address-pool section shows the current CIDR and gates Resize on a change", async ({ page }) => {
   await login(page, OWNER);
   await expect(page.getByText("Address pool")).toBeVisible();
