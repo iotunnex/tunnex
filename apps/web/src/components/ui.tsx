@@ -1,5 +1,5 @@
 import { cloneElement, isValidElement, useId } from "react";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes } from "react";
 
 // A small, deliberate set of primitives — enough to compose the app's pages
 // consistently without a heavyweight component library. Colors come only from the
@@ -60,4 +60,56 @@ export function StatusDot({ tone }: { tone: "on" | "off" | "warn" }) {
 
 export function ErrorText({ children }: { children: ReactNode }) {
   return children ? <p className="text-xs text-danger">{children}</p> : null;
+}
+
+// Select: themed <select>, promoted from the raw <select>+selectCls that pages rolled
+// inline (S7.4a). Same border/bg/focus tokens as Input so the two read as one family.
+export function Select({ className = "", children, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }) {
+  return (
+    <select
+      className={`w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400 ${className}`}
+      {...props}
+    >
+      {children}
+    </select>
+  );
+}
+
+// Modal: the one generic overlay+dismiss shell (S7.4a), extracted from the
+// OneTimeSecretModal structure but content-agnostic — reused for every create/edit
+// form and the two confirm dialogs. Deliberately NOT a live "switch": consequential,
+// confirm-gated actions must not wear switch clothing. Esc + backdrop-click dismiss;
+// `danger` tints the title for the strong (zero-rules lockout) gate.
+export function Modal({
+  title,
+  danger = false,
+  onDismiss,
+  children,
+  actions,
+}: {
+  title: string;
+  danger?: boolean;
+  onDismiss: () => void;
+  children: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onDismiss}
+      onKeyDown={(e) => e.key === "Escape" && onDismiss()}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className={`text-sm font-semibold ${danger ? "text-danger" : "text-white"}`}>{title}</h2>
+        <div className="mt-3 text-sm text-slate-300">{children}</div>
+        <div className="mt-5 flex justify-end gap-2">{actions}</div>
+      </div>
+    </div>
+  );
 }
