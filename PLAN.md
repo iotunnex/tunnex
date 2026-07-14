@@ -1335,27 +1335,56 @@ EPIC-7-done while building 7.5 during beta, OR beta after Tier 1. Flow-logs-firs
 a grant carries a time window that can be EXTENDED before it lapses (renew/extend, not only set-and-expire).
 Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump, not a delete+recreate.
 
-## PRE-LAUNCH LEDGER — BATCH 3 (user-directed 2026-07-14; recorded at S7.4c-close / EPIC 7 COMPLETE, PR#21 sha 8ad71cd; PAPER only — DISPOSITION AT EPIC-7-CLOSE PLANNING)
-10 pre-launch items. Explicitly named by the user this pass:
-- **MFA / TOTP — STORY-REQUIRED** (its own story, not a ride-along): second factor for local auth before any
-  outside-circle distribution. Decide-before-code at its commit-one (TOTP enrollment, recovery codes, per-org
-  enforce policy, SSO-vs-local interplay).
-- **SIEM export — folds into the S7.5.1 (flow/access logs) DoD:** the access-event stream must be EXPORTABLE in
-  a SIEM-ingestable shape (syslog/CEF/JSON push or pull), not just viewable — bake into S7.5.1's DoD, don't
-  re-story.
-- **Mobile clients → EPIC M** (new epic, iOS/Android WireGuard clients; confirm insertion at planning).
-- **Distribution workstream** — the signing/notarization/store/download-channel path to actually SHIP to
-  outsiders (subsumes S6.5b's named trigger; a workstream, not one story).
-- **(remaining 6 items) enumerated for the planning session** — recorded as a 10-item batch; the balance is
-  captured live at EPIC-7-close, not fabricated here.
+## PRE-LAUNCH LEDGER — BATCH 3 (user-directed 2026-07-14; recorded at S7.4c-close / EPIC 7 COMPLETE, PR#21 sha 8ad71cd; PAPER — DISPOSITION AT EPIC-7-CLOSE PLANNING) — COMPLETE (10/10)
+1. **MFA / TOTP — STORY-REQUIRED** (own story, not a ride-along) → **S7.5.5**: second factor for local auth
+   before any outside-circle distribution. Decide-before-code (TOTP enrollment, recovery codes, per-org enforce
+   policy, SSO-vs-local interplay).
+2. **SIEM export — folds into the S7.5.1 (flow/access logs) DoD:** the access-event stream must be EXPORTABLE in
+   a SIEM-ingestable shape (syslog/CEF/JSON push or pull), not just viewable — bake into S7.5.1's DoD.
+3. **NAT-traversal limitation NAMED** — no relay fleet; gateways need public reachability / port-forward,
+   CGNAT clients may fail direct connect. Document-as-DEPLOYMENT-REQUIREMENT now; optional STUN/relay item,
+   trigger = repeated prospect friction.
+4. **Control-plane HA posture** — decide-item, rides **S10.1 / S11**: state the supported HA shape + the
+   already-true guarantee (a CP outage NEVER kills running tunnels — agents reconcile) as a public operational
+   claim.
+5. **SECURITY.md + vulnerability disclosure** — trigger = repo-public / beta; seeded from the Armed Guards
+   inventory. (In the beta bundle.)
+6. **External security audit / pentest** — trigger = first enterprise deal OR GA; scope candidates: the
+   privilege helper, the kill-switches, the policy engine.
+7. **Security whitepaper / public trust page** — productize the box-proof / armed-guards story; pre-beta
+   candidate (feeds the site's /security).
+8. **Mobile clients → EPIC M** (new epic, iOS/Android WireGuard clients; CONFIRMED for insertion — see
+   decisions below).
+9. **Distribution workstream → the `tunnex-site` repo IS this workstream** (complete through S4.3, launch
+   runbook approved; re-pointed from a platform story). Subsumes S6.5b's signing/notarization trigger on the
+   platform side.
+10. **GDPR → S12.6 scope addition** — the hosted issuance service holds EU billing data (EU data-subject
+    obligations on the trial/issuance funnel).
 
-## REPLAN PROPOSAL (user-directed 2026-07-14; recorded at S7.4c-close; CONFIRM/FLIP AT PLANNING — not executed)
-Proposed order: **EPIC 7 (done) → EPIC 7.5 (ZTNA competitiveness) → BETA BUNDLE → BETA → EPIC 8 (site-to-site)
-→ EPIC M (mobile) → EPIC 9 (OpenVPN) → EPIC 10 (k8s) → EPIC 11 remainder.** **EPIC 12 (licensing) trigger =
-first paying-customer INTENT** (build-on-intent, not calendar; supersedes the parked "post-beta" note).
-Two USER DECISIONS the session must settle (NOT pre-decided): **(1) beta timing** — proposed AFTER Tier 1 /
-EPIC 7.5; user confirms or flips to beta-at-EPIC-7-done-while-building-7.5. **(2) EPIC 7.5 insertion + EPIC M
-(mobile) confirmation.** Flow-logs-first (S7.5.1) is common to every path, so it starts first regardless.
+## DECISIONS RESOLVED (user-directed 2026-07-14, PRE-SESSION FINAL — the planning collisions are closed)
+**LOCKED build order: EPIC 7 (done) → EPIC 7.5 → EPIC M (mobile) → BETA BUNDLE → PUBLIC BETA (joint w/ site) →
+EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11-remainder → EPIC 12-remainder.** EPIC 12 (licensing) trigger = **first
+paying-customer INTENT** (build-on-intent; supersedes the parked "post-beta" note — see
+[[tunnex-epic12-licensing]]).
+- **BETA-SCOPE (final):** beta ships FULL SCOPE — EPIC 7.5 AND EPIC M AND the beta bundle. "Beta at
+  EPIC-7-done" REJECTED; the timing collision is CLOSED. Sole open sub-question: **EPIC M's beta gate** —
+  stage-1 (config-export / QR into the official WireGuard iOS/Android apps) vs full native apps — resolved at
+  **EPIC M's own commit-one with calendar costs per option**, NOT now.
+- **OPS — domain DONE:** `tunnex.io` live on Cloudflare ($5 plan); enquiry + enterprise email tested working.
+  Supersedes "domain pending (Pawan)". UNBLOCKS: production `APP_BASE_URL` · SSO redirect URIs · outbound email
+  · `get.tunnex.io` serving · the B2 domain-capture walk leg. **The vanity Go-module-path trigger (domain
+  purchase) has FIRED** → the `tunnexio/tunnex` → `tunnex.io/…` rename gets a story slot (in the beta bundle).
+  **Entity formation = the ONLY remaining long ops clock** (gates Windows EV signing, S12 commercial).
+- **SITE-LAUNCH — single complete launch:** the `tunnex-site` prelaunch cutover is HELD; the site goes live
+  ONCE, content-complete, synchronized with the platform's PUBLIC BETA. **Consequence: S12.1 (runtime
+  license-gate refactor, DECIDE-BEFORE-CODE, load-bearing) + S12.2 (Ed25519 offline issuance) JOIN THE BETA
+  BUNDLE** — no prelaunch phase means the site's trial funnel delivers REAL keys at its only launch (payments
+  **S12.5 stays PARKED**). The superseded-edition-model note (S1.1 runtime gate) FIRES here. Site-sync
+  milestones the platform emits: **(a)** 7.5 close → site feature/pricing/compare refresh; **(b)** EPIC M close
+  → mobile claims + downloads; **(c)** bundle done → joint cutover. Cross-repo corrections: batch-3 item 9
+  re-pointed (the `tunnex-site` repo IS the distribution workstream, complete through S4.3, runbook approved);
+  the site's `/security` "Windows kill-switch in progress" caution is STALE (S6.7 MERGED + pcap-proven) →
+  relay to the site ledger.
 
 **LEDGERED (S7.2 story-end review #8/#9/#10, DEFERRED — CORRECTNESS-NEUTRAL perf pass): policy-fetch
 throughput.** (#8) `CompiledForNode` recompiles the artifact on EVERY `DesiredState` fetch — cache by
