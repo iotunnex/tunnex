@@ -35,11 +35,10 @@ const (
 // customer's disk. The PG hot-window is trimmed to whichever of age/row-cap hits first;
 // the JSONL stream (the source-of-truth) rotates by size and is the retention record.
 const (
-	DefaultRetention     = 30 * 24 * time.Hour // PG hot-window: max INGEST age kept
-	DefaultPGRowCap      = 100_000             // PG hot-window: max rows per org
-	DefaultJSONLMaxBytes = 64 * 1024 * 1024    // rotate the JSONL segment at 64 MiB
-	// RetentionSweepInterval is how often the CP runs the hot-window sweep (review #3 wires
-	// it in main). Frequent enough to bound growth between runs, cheap enough to be idle.
+	DefaultRetention = 30 * 24 * time.Hour // PG hot-window: max INGEST age kept
+	DefaultPGRowCap  = 100_000             // PG hot-window: max rows per org
+	// RetentionSweepInterval is how often the CP runs the hot-window sweep (wired in main).
+	// Frequent enough to bound growth between runs, cheap enough to be idle.
 	RetentionSweepInterval = 10 * time.Minute
 )
 

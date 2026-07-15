@@ -605,27 +605,8 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/AccessEvent" } }
         default: { $ref: "#/components/responses/Error" }
 
-  /api/v1/organizations/{orgId}/access-events/export:
-    parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      operationId: exportAccessEvents
-      summary: Export the org's access events as the raw JSONL source-of-truth stream (enterprise)
-      description: >
-        Streams the org's lines VERBATIM from the JSONL source-of-truth (a reader, never a
-        re-serializer) so the per-line seq tamper-evidence is preserved byte-for-byte.
-      tags: [organizations]
-      responses:
-        "200":
-          description: The org's access events as newline-delimited JSON (JSONL). Open build → 403 edition_required.
-          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
-          content:
-            application/x-ndjson:
-              schema: { type: string, format: binary }
-        default: { $ref: "#/components/responses/Error" }
+  # NOTE (S7.5.1b): GET /access-events/export (verbatim JSONL source-of-truth stream) is DEFERRED
+  # with the on-disk JSONL writer; v1 read surface is the keyset /access-events query above.
 
   /api/v1/organizations/{orgId}/access-log/health:
     parameters:
@@ -635,7 +616,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getAccessLogHealth
-      summary: Access-log subsystem health — JSONL-stream degradation + retention sweep (enterprise)
+      summary: Access-log subsystem health — retention sweep (enterprise)
       tags: [organizations]
       responses:
         "200":
@@ -2128,13 +2109,9 @@ components:
 
     AccessLogHealth:
       type: object
-      required: [jsonl_degraded, jsonl_failures, jsonl_seal_deferred, retention_dropped, retention_failed]
+      required: [retention_dropped, retention_failed]
       additionalProperties: false
       properties:
-        jsonl_degraded: { type: boolean, description: The JSONL source-of-truth stream is failing to write (diverging from PG). }
-        jsonl_degraded_since: { type: string, format: date-time }
-        jsonl_failures: { type: integer, format: int64 }
-        jsonl_seal_deferred: { type: boolean, description: A segment's data is durable but its manifest (tamper-evidence seal) could not be written; retried on the next roll. Not data loss. }
         retention_last_sweep: { type: string, format: date-time }
         retention_dropped: { type: integer, format: int64, description: Rows deleted by the last retention sweep (age + cap). }
         retention_failed: { type: boolean, description: The last retention sweep errored (partial/failed) — the PG hot-window may be growing. }

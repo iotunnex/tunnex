@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -19,9 +18,6 @@ import (
 // itself is DB-neutral; the gate is the product boundary (visibility = enterprise).
 type accessLogPort interface {
 	List(ctx context.Context, orgID uuid.UUID, deniesOnly bool, cursorTS time.Time, cursorID uuid.UUID, limit int32) ([]accesslog.Event, error)
-	// Export streams the org's JSONL source-of-truth lines VERBATIM (a reader, never a
-	// re-serializer — per-line seq tamper-evidence preserved byte-for-byte).
-	Export(ctx context.Context, orgID uuid.UUID) (body io.Reader, contentLength int64, err error)
 	Health() accesslog.Snapshot
 }
 
@@ -64,26 +60,6 @@ func (s apiServer) ListAccessEvents(ctx context.Context, req api.ListAccessEvent
 	}, nil
 }
 
-// ExportAccessEvents implements GET /organizations/{orgId}/access-events/export — the raw
-// JSONL source-of-truth, org-filtered + streamed verbatim.
-func (s apiServer) ExportAccessEvents(ctx context.Context, req api.ExportAccessEventsRequestObject) (api.ExportAccessEventsResponseObject, error) {
-	if _, err := authorize(ctx, req.OrgId, rbac.PermPolicyView); err != nil {
-		return nil, err
-	}
-	if s.accessLog == nil {
-		return nil, editionRequired()
-	}
-	body, cl, err := s.accessLog.Export(ctx, req.OrgId)
-	if err != nil {
-		return nil, err
-	}
-	return api.ExportAccessEvents200ApplicationxNdjsonResponse{
-		Body:          body,
-		ContentLength: cl,
-		Headers:       api.ExportAccessEvents200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
-	}, nil
-}
-
 // GetAccessLogHealth implements GET /organizations/{orgId}/access-log/health.
 func (s apiServer) GetAccessLogHealth(ctx context.Context, req api.GetAccessLogHealthRequestObject) (api.GetAccessLogHealthResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermPolicyView); err != nil {
@@ -94,15 +70,8 @@ func (s apiServer) GetAccessLogHealth(ctx context.Context, req api.GetAccessLogH
 	}
 	snap := s.accessLog.Health()
 	body := api.AccessLogHealth{
-		JsonlDegraded:     snap.JSONLDegraded,
-		JsonlFailures:     snap.JSONLFailures,
-		JsonlSealDeferred: snap.JSONLSealDeferred,
-		RetentionDropped:  snap.RetentionDropped,
-		RetentionFailed:   snap.RetentionFailed,
-	}
-	if !snap.JSONLDegradedSince.IsZero() {
-		t := snap.JSONLDegradedSince
-		body.JsonlDegradedSince = &t
+		RetentionDropped: snap.RetentionDropped,
+		RetentionFailed:  snap.RetentionFailed,
 	}
 	if !snap.RetentionLastSweep.IsZero() {
 		t := snap.RetentionLastSweep

@@ -169,7 +169,7 @@ func main() {
 		Sessions:              sessions,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
-		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth, cfg.FlowLogDir),
+		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
@@ -190,42 +190,35 @@ func main() {
 
 	// mTLS agent control channel (separate listener; client certs verified vs CA).
 	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, pushHub, logger)
-	// S7.5.1 flow-event ingest: the JSONL source-of-truth stream + the PG hot-window, wired
-	// onto the SAME mTLS channel (node identity = client cert). Best-effort; a writer failure
-	// here must not stop the control plane, so log-and-continue rather than exit.
-	var flowIngester *accesslog.Ingester
+	// S7.5.1 flow-event ingest: the PG hot-window (queryable access-event store), wired onto the
+	// SAME mTLS channel (node identity = client cert). (S7.5.1b) the JSONL on-disk source-of-truth
+	// + verbatim export are DEFERRED — v1 is PG-only.
 	retentionStop := make(chan struct{})
-	if fw, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
-		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
-	} else {
-		fq := sqlc.New(pool)
-		flowIngester = accesslog.NewIngester(pool, fw, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil)
-		agentCh.SetFlowIngester(flowIngester)
-		// D3 retention sweep (review #3): without this loop access_events grows unbounded and
-		// exhausts the DB disk — the exact failure the hot-window design existed to prevent. Run
-		// it on an interval: delete by ingest age + trim each org to the row cap (JSONL keeps the
-		// full record, so the sweep is lossless for export). Drop-count lands on flowHealth.
-		go func() {
-			t := time.NewTicker(accesslog.RetentionSweepInterval)
-			defer t.Stop()
-			for {
-				select {
-				case <-retentionStop:
-					return
-				case <-t.C:
-					sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					orgs, err := fq.DistinctAccessEventOrgs(sctx)
-					if err == nil {
-						_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
-					}
-					if err != nil {
-						logger.Error("flowlog_retention_sweep_failed", slog.String("error", err.Error()))
-					}
-					scancel()
+	fq := sqlc.New(pool)
+	agentCh.SetFlowIngester(accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
+	// D3 retention sweep: without this loop access_events grows unbounded and exhausts the DB
+	// disk. Run it on an interval: delete by ingest age + trim each org to the row cap. Drop-count
+	// + failure land on flowHealth.
+	go func() {
+		t := time.NewTicker(accesslog.RetentionSweepInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				orgs, err := fq.DistinctAccessEventOrgs(sctx)
+				if err == nil {
+					_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
 				}
+				if err != nil {
+					logger.Error("flowlog_retention_sweep_failed", slog.String("error", err.Error()))
+				}
+				scancel()
 			}
-		}()
-	}
+		}
+	}()
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
 		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))
@@ -270,16 +263,6 @@ func main() {
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
 	close(retentionStop) // stop the retention sweep loop
-	// Flush + close the JSONL source-of-truth via the Ingester's mutex-guarded Shutdown, AFTER
-	// the agent channel drains. Closing THROUGH the ingest mutex (fold-2 #3) means that even if
-	// agentSrv.Shutdown timed out with a request still mid-batch, the close can't race the
-	// writer — it waits for the in-flight IngestBatch to release mu. The final batch's buffered
-	// lines are then durable and the last segment's manifest is written before exit.
-	if flowIngester != nil {
-		if err := flowIngester.Shutdown(); err != nil {
-			logger.Error("flowlog_close_error", slog.String("error", err.Error()))
-		}
-	}
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))
 		os.Exit(1)

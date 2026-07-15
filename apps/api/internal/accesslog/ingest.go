@@ -65,52 +65,36 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 }
 
 // Ingester turns an agent report batch into persisted access events: enrich (grant-only),
-// aggregate per-source denies, mark gaps, assign the per-org monotonic seq, and write BOTH
-// stores (PG hot-window + JSONL source-of-truth).
+// aggregate per-source denies, mark gaps, assign the per-org monotonic seq, and persist to the
+// PG hot-window.
 //
-// CONCURRENCY (review #1/#2, composed): the net/http agent channel calls IngestBatch from a
-// PER-REQUEST goroutine, so the SAME Ingester + shared JSONLWriter are hit concurrently. A
-// single process-level `mu` encloses the WHOLE batch — seq reservation, the PG inserts, AND
-// the JSONL append+flush are ONE critical section. So seq order == PG commit order == JSONL
-// append order == manifest order; there is no window where the not-concurrency-safe bufio
-// writer is raced or where JSONL reorders under a correct seq. Nested INSIDE mu, the per-org
-// DB counter (BumpOrgFlowSeq) still row-locks the org row — redundant under mu on a single CP
-// but the correct primitive if the control plane ever runs multi-instance. Tradeoff: ingest
-// is serialized process-wide; acceptable — batches are drain-interval driven, and a whole
-// source-of-truth's integrity outranks ingest parallelism.
+// NOTE (S7.5.1b deferral): the JSONL on-disk source-of-truth + byte-verbatim export were
+// DEFERRED to S7.5.1b after the writer failed to converge over six review rounds (see
+// docs/S7.5.1-decisions.md). v1 is PG-only; the per-org monotonic seq column REMAINS in PG as
+// the follow-up's anchor + the gap detector.
 //
-// seq integrity: the seq is reserved from the per-org counter (organizations.flow_seq) INSIDE
-// the per-batch tx, so a rolled-back batch releases its reserved range (no burn, no false
-// gap), and the counter is never swept so seq is monotonic + sweep-proof. JSONL is BEST-EFFORT
-// (a write failure does NOT fail the batch — PG stays the queryable store; the failure
-// surfaces on Health and the per-line seq leaves a durable, detectable hole in the stream).
-// streamWriter is the JSONL source-of-truth sink (JSONLWriter in production; a fake in
-// tests, to exercise the best-effort write-failure path). WriteBatch records a whole batch
-// DURABLY (open -> write -> fsync -> close) in one call — on a nil return every line is on
-// disk. The ingest calls it AFTER the PG commit, so a failure means "PG has it, the JSONL
-// shows a detectable seq hole", never a silent divergence.
-type streamWriter interface {
-	WriteBatch([]Event) error
-}
-
+// CONCURRENCY (review #1): the net/http agent channel calls IngestBatch from a per-request
+// goroutine, so the SAME Ingester is hit concurrently. The per-org DB counter (BumpOrgFlowSeq)
+// row-locks the org row, serializing same-org ingest so seq can never collide; a process-level
+// `mu` additionally serializes the batch (defensive + keeps a single ordering point). seq is
+// reserved from the per-org counter (organizations.flow_seq) INSIDE the per-batch tx, so a
+// rolled-back batch releases its reserved range (no burn, no false gap), and the counter is
+// never swept so seq is monotonic + sweep-proof.
 type Ingester struct {
-	// mu serializes the whole IngestBatch — the seq/PG/JSONL critical section (see the type
-	// doc). Guards both the shared JSONLWriter (not concurrency-safe) and the seq order.
-	mu     sync.Mutex
+	mu     sync.Mutex // serializes IngestBatch (seq reservation + inserts) — defensive over the DB row lock
 	pool   *pgxpool.Pool
 	grants GrantResolver
-	jsonl  streamWriter
 	health *Health
 	now    func() time.Time
 }
 
-// NewIngester wires the pool (for the per-batch tx), the JSONL stream, the grant resolver,
-// and the health surface. now defaults to time.Now; jsonl/health may be nil.
-func NewIngester(pool *pgxpool.Pool, jsonl streamWriter, grants GrantResolver, health *Health, now func() time.Time) *Ingester {
+// NewIngester wires the pool (for the per-batch tx), the grant resolver, and the health
+// surface. now defaults to time.Now; health may be nil.
+func NewIngester(pool *pgxpool.Pool, grants GrantResolver, health *Health, now func() time.Time) *Ingester {
 	if now == nil {
 		now = time.Now
 	}
-	return &Ingester{pool: pool, jsonl: jsonl, grants: grants, health: health, now: now}
+	return &Ingester{pool: pool, grants: grants, health: health, now: now}
 }
 
 // IngestBatch persists one agent report: the observed events (enriched + aggregated) plus,
@@ -127,7 +111,7 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	if len(events) == 0 {
 		return nil
 	}
-	// One ingest clock for the whole batch — the keyset created_at (PG + JSONL agree).
+	// One ingest clock for the whole batch — the PG keyset created_at.
 	ingestAt := i.now().UTC()
 	for idx := range events {
 		events[idx].CreatedAt = ingestAt
@@ -141,10 +125,9 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 		events[idx].ID = id
 	}
 
-	// The whole batch is ONE critical section (seq reservation + PG inserts + JSONL): serializes
-	// concurrent same-org AND cross-org ingest so seq never collides and the shared JSONLWriter
-	// is never raced (review #1/#2). See the Ingester type doc for how the process mutex and the
-	// per-org DB row lock compose.
+	// One critical section (seq reservation + PG inserts): serializes concurrent same-org ingest
+	// so seq never collides (review #1). The per-org DB counter row-lock is the primary guard;
+	// this process mutex is defensive + a single ordering point.
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -190,25 +173,8 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 		return err
 	}
 
-	// JSONL (source-of-truth stream) — best-effort, AFTER commit so it only ever reflects
-	// committed events. WriteBatch is durable-on-return (fsync); a failure marks Health and
-	// leaves a detectable seq hole (the events are in PG), and does NOT fail the batch (else a
-	// retry would duplicate committed PG rows). PG-commit-THEN-JSONL is the non-circular pair:
-	// "PG has it, JSONL shows a hole" — never silent divergence.
-	if i.jsonl != nil {
-		switch err := i.jsonl.WriteBatch(events); {
-		case err == nil:
-			i.health.jsonlRecovered()
-		case errors.Is(err, ErrSealDeferred):
-			// The batch's events are DURABLE on disk; only sealing the segment's manifest was
-			// deferred. The JSONL WRITE itself succeeded, so clear any prior write-degraded (review
-			// [4] — else a stale jsonl_degraded would linger), then note the soft seal-pending.
-			i.health.jsonlRecovered()
-			i.health.jsonlSealDeferredSet()
-		default:
-			i.health.jsonlFailed(i.now())
-		}
-	}
+	// (S7.5.1b) the JSONL source-of-truth write happened HERE, after commit. Deferred — v1 is
+	// PG-only. The per-line seq already committed above is the follow-up's anchor + gap detector.
 	return nil
 }
 
@@ -294,18 +260,5 @@ func (i *Ingester) enrich(ctx context.Context, gc *grantCache, orgID, nodeID uui
 		}
 	}
 	return e
-}
-
-// Shutdown flushes + closes the JSONL writer UNDER the ingest mutex, so it can never race an
-// in-flight IngestBatch's write if the agent server's graceful shutdown timed out with a
-// request still mid-batch (fold-2 #3: Close was the one writer-touch outside the composed
-// critical section). Call once at process shutdown; safe when the writer is nil.
-func (i *Ingester) Shutdown() error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if closer, ok := i.jsonl.(interface{ Close() error }); ok {
-		return closer.Close()
-	}
-	return nil
 }
 

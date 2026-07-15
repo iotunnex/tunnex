@@ -1,12 +1,8 @@
 package accesslog
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -17,31 +13,23 @@ import (
 )
 
 // TestIngestConcurrentSameOrgNoLossNoTear is the armed-guard for the concurrent-ingest class
-// (review finding #1/#2 — the class the single-gateway box-walk could not exercise). Many
-// gateways of ONE org report simultaneously; net/http runs each POST /agent/flow-events in
-// its own goroutine, so IngestBatch is called concurrently on the SAME Ingester + shared
-// JSONLWriter.
+// (review finding #1). Many gateways of ONE org report simultaneously; net/http runs each POST
+// /agent/flow-events in its own goroutine, so IngestBatch is called concurrently on the SAME
+// Ingester.
 //
-// RED on the pre-fold code (run this against HEAD before the fix): the per-batch seq was
-// derived from MAX(seq) under READ COMMITTED with no serialization, so concurrent same-org
-// batches computed the same base and collided on (org_id, seq); InsertAccessEvent's
-// `ON CONFLICT DO NOTHING` + the discarded RowsAffected SILENTLY dropped the loser's rows
-// (audit loss, no gap marker), and the un-serialized bufio JSONLWriter interleaved/tore the
-// source-of-truth lines. This test MUST fail there.
+// RED on the pre-fix code: the per-batch seq was derived from MAX(seq) under READ COMMITTED with
+// no serialization, so concurrent same-org batches computed the same base and collided on
+// (org_id, seq); InsertAccessEvent's `ON CONFLICT DO NOTHING` + the discarded RowsAffected
+// SILENTLY dropped the loser's rows (audit loss, no gap marker). This test MUST fail there.
 //
-// GREEN after the fold: a process-level Ingester mutex encloses the whole batch (seq-alloc +
-// insert + JSONL append are ONE critical section) and the per-org DB counter allocates
-// unique, monotonic, sweep-proof seq. So all events persist, seq is contiguous+unique, and
-// every JSONL line is intact.
+// GREEN after the fix: the per-org DB counter (BumpOrgFlowSeq) row-locks the org row and the
+// Ingester mutex serializes the batch, so seq is unique + contiguous and every event persists.
+// (S7.5.1b: the JSONL-untorn half of this red retired with the deferred JSONL writer; the PG
+// no-loss/no-collision guarantee is what remains and is what mattered.)
 func TestIngestConcurrentSameOrgNoLossNoTear(t *testing.T) {
 	q, pool, org := ingestPool(t) // skips without TUNNEX_TEST_DATABASE_URL
 	ctx := context.Background()
-	dir := t.TempDir()
-	jw, err := NewJSONLWriter(dir, 1<<30) // no rotation: exercise the shared open segment
-	if err != nil {
-		t.Fatal(err)
-	}
-	ing := NewIngester(pool, jw, stubGrants{}, NewHealth(), nil)
+	ing := NewIngester(pool, stubGrants{}, NewHealth(), nil)
 
 	const goroutines, perBatch = 8, 25
 	want := goroutines * perBatch
@@ -95,33 +83,5 @@ func TestIngestConcurrentSameOrgNoLossNoTear(t *testing.T) {
 		if !seen[s] {
 			t.Fatalf("seq not contiguous 1..%d: missing %d", want, s)
 		}
-	}
-
-	// JSONL: UNTORN — exactly `want` lines, every one valid JSON (WriteBatch is durable per
-	// batch, so no flush is needed; the ingest mutex serialized every WriteBatch).
-	segs, _ := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
-	lines := 0
-	for _, seg := range segs {
-		f, err := os.Open(seg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-		for sc.Scan() {
-			if len(sc.Bytes()) == 0 {
-				continue
-			}
-			var e Event
-			if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-				_ = f.Close()
-				t.Fatalf("torn JSONL line (concurrent writer race): %q: %v", sc.Text(), err)
-			}
-			lines++
-		}
-		_ = f.Close()
-	}
-	if lines != want {
-		t.Fatalf("JSONL source-of-truth line count %d != %d (loss or tear)", lines, want)
 	}
 }

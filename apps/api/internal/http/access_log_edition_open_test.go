@@ -23,9 +23,6 @@ func TestAccessLogEditionGatedInOpenBuild(t *testing.T) {
 	if _, err := s.ListAccessEvents(ctx, api.ListAccessEventsRequestObject{OrgId: org}); !hasCode(err, 403, "edition_required") {
 		t.Fatalf("open-build ListAccessEvents: want 403 edition_required, got %v", err)
 	}
-	if _, err := s.ExportAccessEvents(ctx, api.ExportAccessEventsRequestObject{OrgId: org}); !hasCode(err, 403, "edition_required") {
-		t.Fatalf("open-build ExportAccessEvents: want 403 edition_required, got %v", err)
-	}
 	if _, err := s.GetAccessLogHealth(ctx, api.GetAccessLogHealthRequestObject{OrgId: org}); !hasCode(err, 403, "edition_required") {
 		t.Fatalf("open-build GetAccessLogHealth: want 403 edition_required, got %v", err)
 	}
