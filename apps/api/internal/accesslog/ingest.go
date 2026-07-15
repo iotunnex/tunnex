@@ -2,11 +2,13 @@ package accesslog
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -156,6 +158,9 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
 	q := sqlc.New(tx)
 	top, err := q.BumpOrgFlowSeq(ctx, sqlc.BumpOrgFlowSeqParams{N: int64(len(events)), OrgID: orgID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // org soft-deleted / absent — nothing to ingest; drop the batch (not an error)
+	}
 	if err != nil {
 		return err
 	}

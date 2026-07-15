@@ -22,7 +22,7 @@ INSERT INTO access_events (
 -- never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
 -- so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
 UPDATE organizations SET flow_seq = flow_seq + sqlc.arg(n)::bigint
-WHERE id = sqlc.arg(org_id)
+WHERE id = sqlc.arg(org_id) AND deleted_at IS NULL
 RETURNING flow_seq;
 
 -- name: DistinctAccessEventOrgs :many

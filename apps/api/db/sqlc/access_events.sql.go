@@ -15,7 +15,7 @@ import (
 
 const bumpOrgFlowSeq = `-- name: BumpOrgFlowSeq :one
 UPDATE organizations SET flow_seq = flow_seq + $1::bigint
-WHERE id = $2
+WHERE id = $2 AND deleted_at IS NULL
 RETURNING flow_seq
 `
 
