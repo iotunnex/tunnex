@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/node/internal/control"
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
+	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
@@ -113,6 +115,13 @@ func main() {
 	// shutdown (full-sweep). No-op / not-capable off Linux.
 	egressMgr := egress.New(wgIface)
 	defer egressMgr.Teardown(context.Background())
+	// S7.5.1 flow logging is OPT-IN per gateway: TUNNEX_FLOWLOG_GROUP>0 arms the forward-chain
+	// nflog rules (set BEFORE the first Reconcile so the log clauses render from the start) and
+	// the reader+drain below. 0 = OFF (the forward chain is byte-identical to pre-S7.5.1).
+	flowGroup := getint("TUNNEX_FLOWLOG_GROUP", 0)
+	if flowGroup > 0 {
+		egressMgr.SetFlowLogGroup(flowGroup)
+	}
 	if ok, err := egressMgr.Reconcile(ctx); err != nil {
 		logger.Warn("egress_initial_degraded", slog.String("error", err.Error()))
 		egressNAT.Store(ok)
@@ -145,6 +154,13 @@ func main() {
 		default: // a kick is already pending — the apply reads the latest policy anyway
 		}
 	})
+
+	// S7.5.1 flow-log drive: read the nflog group the forward chain logs to, buffer the
+	// flow-start records, and drain them to the CP on an interval (best-effort observability;
+	// NEVER on the enforcement path). Enabled only when TUNNEX_FLOWLOG_GROUP>0.
+	if flowGroup > 0 {
+		startFlowLog(ctx, flowGroup, client, egressMgr, logger)
+	}
 
 	// Renew the cert at half-life (default 24h; the cert lives 48h) and hot-swap
 	// it. Persist the rotated cert so a restart uses the current one. If renewal
@@ -429,6 +445,35 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func getint(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// startFlowLog wires the nflog reader → pump → periodic drain → ReportFlows (S7.5.1 7/n).
+// Best-effort + isolated: a source-open failure logs and returns (enforcement + the rest of
+// the agent are unaffected); the pump/drain run until ctx is cancelled. Each event is stamped
+// with the APPLIED policy hash so the CP can detect a ruleset-swap-window skew.
+func startFlowLog(ctx context.Context, group int, client *control.Client, egressMgr *egress.Manager, logger *slog.Logger) {
+	sockBuf := getint("TUNNEX_FLOWLOG_SOCKBUF", flowlog.DefaultNflogSockBuf)
+	src, err := flowlog.NewNflogSource(ctx, group, sockBuf)
+	if err != nil {
+		logger.Error("flowlog_source_failed", slog.Int("group", group), slog.String("error", err.Error()))
+		return
+	}
+	pump := flowlog.NewPump(src, flowlog.NewBuffer(0), func() string {
+		_, hash, _, _ := egressMgr.AppliedStatus()
+		return hash
+	})
+	go pump.Run(ctx)
+	go flowlog.RunDrain(ctx, pump, client, getdur("TUNNEX_FLOWLOG_INTERVAL", flowlog.DefaultDrainInterval), logger)
+	logger.Info("flowlog_started", slog.Int("group", group), slog.Int("sock_buf_bytes", sockBuf))
 }
 
 func hostname() string { h, _ := os.Hostname(); return h }
