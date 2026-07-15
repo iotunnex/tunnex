@@ -154,6 +154,10 @@ func main() {
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 
+	// S7.5.1 access-log health is SHARED: the flow-event Ingester (mTLS channel) records
+	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
+	flowHealth := accesslog.NewHealth()
+
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:                  tenancy.NewService(pool),
 		CliAuth:               cliAuthSvc,
@@ -165,6 +169,7 @@ func main() {
 		Sessions:              sessions,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
+		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
@@ -192,7 +197,6 @@ func main() {
 		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
 	} else {
 		fq := sqlc.New(pool)
-		flowHealth := accesslog.NewHealth()
 		agentCh.SetFlowIngester(accesslog.NewIngester(pool, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
 	}
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")

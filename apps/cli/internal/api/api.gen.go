@@ -23,6 +23,15 @@ const (
 	CookieAuthScopes = "cookieAuth.Scopes"
 )
 
+// Defines values for AccessEventDecision.
+const (
+	Allow         AccessEventDecision = "allow"
+	Deny          AccessEventDecision = "deny"
+	DenyAggregate AccessEventDecision = "deny_aggregate"
+	Gap           AccessEventDecision = "gap"
+	Terminated    AccessEventDecision = "terminated"
+)
+
 // Defines values for ChangeRoleRequestRole.
 const (
 	ChangeRoleRequestRoleAdmin  ChangeRoleRequestRole = "admin"
@@ -157,6 +166,48 @@ type AcceptInviteRequest struct {
 	Name     *string `json:"name,omitempty"`
 	Password *string `json:"password,omitempty"`
 	Token    string  `json:"token"`
+}
+
+// AccessEvent defines model for AccessEvent.
+type AccessEvent struct {
+	CreatedAt time.Time           `json:"created_at"`
+	Decision  AccessEventDecision `json:"decision"`
+
+	// DenyCount >1 for a per-source deny aggregate (port-scan collapse); N for a gap marker.
+	DenyCount     *int                `json:"deny_count,omitempty"`
+	DstGroupId    *openapi_types.UUID `json:"dst_group_id,omitempty"`
+	DstIp         string              `json:"dst_ip"`
+	DstPort       *int                `json:"dst_port,omitempty"`
+	DstResourceId *openapi_types.UUID `json:"dst_resource_id,omitempty"`
+	Id            openapi_types.UUID  `json:"id"`
+	NodeId        *openapi_types.UUID `json:"node_id,omitempty"`
+
+	// OccurredAt Agent-clock flow observation time (NOT the pagination clock).
+	OccurredAt time.Time           `json:"occurred_at"`
+	Protocol   string              `json:"protocol"`
+	RuleId     *openapi_types.UUID `json:"rule_id,omitempty"`
+
+	// Seq Per-org monotonic sequence (tamper-evidence / gap detection).
+	Seq   int64  `json:"seq"`
+	SrcIp string `json:"src_ip"`
+
+	// WindowEnd deny_aggregate window end.
+	WindowEnd *time.Time `json:"window_end,omitempty"`
+}
+
+// AccessEventDecision defines model for AccessEvent.Decision.
+type AccessEventDecision string
+
+// AccessLogHealth defines model for AccessLogHealth.
+type AccessLogHealth struct {
+	// JsonlDegraded The JSONL source-of-truth stream is failing to write (diverging from PG).
+	JsonlDegraded      bool       `json:"jsonl_degraded"`
+	JsonlDegradedSince *time.Time `json:"jsonl_degraded_since,omitempty"`
+	JsonlFailures      int64      `json:"jsonl_failures"`
+
+	// RetentionDropped Rows deleted by the last retention sweep (age + cap).
+	RetentionDropped   int64      `json:"retention_dropped"`
+	RetentionLastSweep *time.Time `json:"retention_last_sweep,omitempty"`
 }
 
 // ActivityEntry defines model for ActivityEntry.
@@ -726,6 +777,15 @@ type StartSsoLoginParams struct {
 // StartSsoLoginParamsProvider defines parameters for StartSsoLogin.
 type StartSsoLoginParamsProvider string
 
+// ListAccessEventsParams defines parameters for ListAccessEvents.
+type ListAccessEventsParams struct {
+	// DeniesOnly Only deny/deny_aggregate/terminated events (the security feed).
+	DeniesOnly *bool               `form:"denies_only,omitempty" json:"denies_only,omitempty"`
+	CursorTs   *time.Time          `form:"cursor_ts,omitempty" json:"cursor_ts,omitempty"`
+	CursorId   *openapi_types.UUID `form:"cursor_id,omitempty" json:"cursor_id,omitempty"`
+	Limit      *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListAuditLogsParams defines parameters for ListAuditLogs.
 type ListAuditLogsParams struct {
 	// Actor Filter by acting user (must be an org member).
@@ -1008,6 +1068,12 @@ type ClientInterface interface {
 	UpdateOrganizationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateOrganization(ctx context.Context, orgId openapi_types.UUID, body UpdateOrganizationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListAccessEvents request
+	ListAccessEvents(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAccessLogHealth request
+	GetAccessLogHealth(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListAuditLogs request
 	ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1618,6 +1684,30 @@ func (c *Client) UpdateOrganizationWithBody(ctx context.Context, orgId openapi_t
 
 func (c *Client) UpdateOrganization(ctx context.Context, orgId openapi_types.UUID, body UpdateOrganizationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateOrganizationRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAccessEvents(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAccessEventsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetAccessLogHealth(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAccessLogHealthRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -3278,6 +3368,144 @@ func NewUpdateOrganizationRequestWithBody(server string, orgId openapi_types.UUI
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListAccessEventsRequest generates requests for ListAccessEvents
+func NewListAccessEventsRequest(server string, orgId openapi_types.UUID, params *ListAccessEventsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/access-events", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.DeniesOnly != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "denies_only", runtime.ParamLocationQuery, *params.DeniesOnly); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.CursorTs != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor_ts", runtime.ParamLocationQuery, *params.CursorTs); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.CursorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor_id", runtime.ParamLocationQuery, *params.CursorId); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetAccessLogHealthRequest generates requests for GetAccessLogHealth
+func NewGetAccessLogHealthRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/access-log/health", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -5325,6 +5553,12 @@ type ClientWithResponsesInterface interface {
 
 	UpdateOrganizationWithResponse(ctx context.Context, orgId openapi_types.UUID, body UpdateOrganizationJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateOrganizationResponse, error)
 
+	// ListAccessEventsWithResponse request
+	ListAccessEventsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*ListAccessEventsResponse, error)
+
+	// GetAccessLogHealthWithResponse request
+	GetAccessLogHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetAccessLogHealthResponse, error)
+
 	// ListAuditLogsWithResponse request
 	ListAuditLogsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*ListAuditLogsResponse, error)
 
@@ -6053,6 +6287,52 @@ func (r UpdateOrganizationResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UpdateOrganizationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAccessEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]AccessEvent
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAccessEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAccessEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAccessLogHealthResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AccessLogHealth
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAccessLogHealthResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAccessLogHealthResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7339,6 +7619,24 @@ func (c *ClientWithResponses) UpdateOrganizationWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseUpdateOrganizationResponse(rsp)
+}
+
+// ListAccessEventsWithResponse request returning *ListAccessEventsResponse
+func (c *ClientWithResponses) ListAccessEventsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*ListAccessEventsResponse, error) {
+	rsp, err := c.ListAccessEvents(ctx, orgId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAccessEventsResponse(rsp)
+}
+
+// GetAccessLogHealthWithResponse request returning *GetAccessLogHealthResponse
+func (c *ClientWithResponses) GetAccessLogHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetAccessLogHealthResponse, error) {
+	rsp, err := c.GetAccessLogHealth(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAccessLogHealthResponse(rsp)
 }
 
 // ListAuditLogsWithResponse request returning *ListAuditLogsResponse
@@ -8643,6 +8941,72 @@ func ParseUpdateOrganizationResponse(rsp *http.Response) (*UpdateOrganizationRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Organization
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAccessEventsResponse parses an HTTP response from a ListAccessEventsWithResponse call
+func ParseListAccessEventsResponse(rsp *http.Response) (*ListAccessEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAccessEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []AccessEvent
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAccessLogHealthResponse parses an HTTP response from a GetAccessLogHealthWithResponse call
+func ParseGetAccessLogHealthResponse(rsp *http.Response) (*GetAccessLogHealthResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAccessLogHealthResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AccessLogHealth
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

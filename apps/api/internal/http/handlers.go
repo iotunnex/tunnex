@@ -93,8 +93,9 @@ type apiServer struct {
 	nodes    *nodes.Service
 	devices  *devices.Service
 	sessions *session.Store
-	sso      ssoPort    // nil in the open build
-	policy   policyPort // nil in the open build (Zero Trust, S7.1)
+	sso       ssoPort       // nil in the open build
+	policy    policyPort    // nil in the open build (Zero Trust, S7.1)
+	accessLog accessLogPort // nil in the open build (Zero Trust visibility, S7.5.1)
 	// deviceApprovalEnabled gates device posture (S7.3). NAMED per-feature (its own
 	// wire files), not a proxy behind s.policy — device posture and Zero Trust policy
 	// are distinct enterprise features (F2 / ledgered S12.1 refactor).

@@ -5,11 +5,11 @@
 INSERT INTO access_events (
     id, org_id, seq, node_id, occurred_at, decision, rule_id,
     src_device_id, src_user_id, src_ip, dst_ip, dst_resource_id, dst_group_id,
-    protocol, dst_port, deny_count, window_end
+    protocol, dst_port, deny_count, window_end, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17
+    $14, $15, $16, $17, $18
 )
 ON CONFLICT (org_id, seq) DO NOTHING;
 

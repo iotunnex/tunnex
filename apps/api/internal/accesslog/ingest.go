@@ -104,6 +104,11 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	if len(events) == 0 {
 		return nil
 	}
+	// One ingest clock for the whole batch — the keyset created_at (PG + JSONL agree).
+	ingestAt := i.now().UTC()
+	for idx := range events {
+		events[idx].CreatedAt = ingestAt
+	}
 
 	// PG: all inserts in ONE tx, seq derived from the in-tx high-water (rollback burns no
 	// seq). On failure nothing commits → the agent counts the batch lost → next-report gap.

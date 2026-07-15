@@ -46,7 +46,10 @@ const (
 // not applicable); Seq is the per-org monotonic tamper-evidence sequence assigned at
 // ingest (slice 4), carried into BOTH stores so the same event cross-references.
 type Event struct {
-	ID            uuid.UUID  `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// CreatedAt is the CP INGEST time — the keyset-pagination + retention clock (NOT the
+	// agent-clock OccurredAt). Set at ingest so PG and the JSONL line agree.
+	CreatedAt     time.Time  `json:"created_at"`
 	Seq           int64      `json:"seq"`
 	OrgID         uuid.UUID  `json:"org_id"`
 	NodeID        *uuid.UUID `json:"node_id,omitempty"`     // observing gateway

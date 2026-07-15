@@ -23,13 +23,14 @@ func InsertParams(e Event) sqlc.InsertAccessEventParams {
 		RuleID: pgUUID(e.RuleID), SrcDeviceID: pgUUID(e.SrcDeviceID), SrcUserID: pgUUID(e.SrcUserID),
 		SrcIp: e.SrcIP, DstIp: e.DstIP, DstResourceID: pgUUID(e.DstResourceID), DstGroupID: pgUUID(e.DstGroupID),
 		Protocol: e.Protocol, DstPort: i32Ptr(e.DstPort), DenyCount: dc, WindowEnd: pgTS(e.WindowEnd),
+		CreatedAt: e.CreatedAt,
 	}
 }
 
 // FromRow rebuilds an Event from a persisted row (for the query API + tests).
 func FromRow(r sqlc.AccessEvent) Event {
 	e := Event{
-		ID: r.ID, Seq: r.Seq, OrgID: r.OrgID, NodeID: uuidPtr(r.NodeID), OccurredAt: r.OccurredAt,
+		ID: r.ID, CreatedAt: r.CreatedAt, Seq: r.Seq, OrgID: r.OrgID, NodeID: uuidPtr(r.NodeID), OccurredAt: r.OccurredAt,
 		Decision: Decision(r.Decision), RuleID: uuidPtr(r.RuleID), SrcDeviceID: uuidPtr(r.SrcDeviceID),
 		SrcUserID: uuidPtr(r.SrcUserID), SrcIP: r.SrcIp, DstIP: r.DstIp, DstResourceID: uuidPtr(r.DstResourceID),
 		DstGroupID: uuidPtr(r.DstGroupID), Protocol: r.Protocol, DenyCount: int(r.DenyCount),

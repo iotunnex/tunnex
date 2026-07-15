@@ -503,6 +503,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/access-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** The org's Zero Trust access/flow events — keyset-paginated (enterprise, read-only) */
+        get: operations["listAccessEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/access-log/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** Access-log subsystem health — JSONL-stream degradation + retention sweep (enterprise) */
+        get: operations["getAccessLogHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices": {
         parameters: {
             query?: never;
@@ -1477,6 +1515,58 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        AccessEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description Per-org monotonic sequence (tamper-evidence / gap detection).
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description Agent-clock flow observation time (NOT the pagination clock).
+             */
+            occurred_at: string;
+            /** @enum {string} */
+            decision: "allow" | "deny" | "deny_aggregate" | "terminated" | "gap";
+            /** Format: uuid */
+            rule_id?: string;
+            /** Format: uuid */
+            node_id?: string;
+            src_ip: string;
+            dst_ip: string;
+            /** Format: uuid */
+            dst_resource_id?: string;
+            /** Format: uuid */
+            dst_group_id?: string;
+            protocol: string;
+            dst_port?: number;
+            /** @description >1 for a per-source deny aggregate (port-scan collapse); N for a gap marker. */
+            deny_count?: number;
+            /**
+             * Format: date-time
+             * @description deny_aggregate window end.
+             */
+            window_end?: string;
+        };
+        AccessLogHealth: {
+            /** @description The JSONL source-of-truth stream is failing to write (diverging from PG). */
+            jsonl_degraded: boolean;
+            /** Format: date-time */
+            jsonl_degraded_since?: string;
+            /** Format: int64 */
+            jsonl_failures: number;
+            /** Format: date-time */
+            retention_last_sweep?: string;
+            /**
+             * Format: int64
+             * @description Rows deleted by the last retention sweep (age + cap).
+             */
+            retention_dropped: number;
+        };
         OrgOverview: {
             members: number;
             devices: number;
@@ -2226,6 +2316,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditLogEntry"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAccessEvents: {
+        parameters: {
+            query?: {
+                /** @description Only deny/deny_aggregate/terminated events (the security feed). */
+                denies_only?: boolean;
+                cursor_ts?: string;
+                cursor_id?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of access events, newest first. Fewer than `limit` means the last page. Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessEvent"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAccessLogHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The access-log health snapshot. Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessLogHealth"];
                 };
             };
             default: components["responses"]["Error"];
