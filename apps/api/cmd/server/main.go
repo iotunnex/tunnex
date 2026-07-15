@@ -192,7 +192,8 @@ func main() {
 		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
 	} else {
 		fq := sqlc.New(pool)
-		agentCh.SetFlowIngester(accesslog.NewIngester(fq, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, nil))
+		flowHealth := accesslog.NewHealth()
+		agentCh.SetFlowIngester(accesslog.NewIngester(pool, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
 	}
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {

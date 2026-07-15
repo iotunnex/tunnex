@@ -2,6 +2,7 @@ package accesslog
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 )
+
+type failingStream struct{ calls int }
+
+func (f *failingStream) Append(Event) error { f.calls++; return errors.New("disk full") }
 
 type stubGrants struct {
 	dstResource *uuid.UUID
@@ -44,7 +49,7 @@ func ingestPool(t *testing.T) (*sqlc.Queries, *pgxpool.Pool, uuid.UUID) {
 }
 
 func TestIngestEnrichAggregateGapSeq(t *testing.T) {
-	q, _, org := ingestPool(t)
+	q, pool, org := ingestPool(t)
 	ctx := context.Background()
 	node := uuid.New()
 	rule := uuid.New()
@@ -53,7 +58,7 @@ func TestIngestEnrichAggregateGapSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ing := NewIngester(q, jw, stubGrants{dstResource: &res, known: rule}, func() time.Time { return time.Unix(1000, 0).UTC() })
+	ing := NewIngester(pool, jw, stubGrants{dstResource: &res, known: rule}, nil, func() time.Time { return time.Unix(1000, 0).UTC() })
 
 	now := time.Now().UTC()
 	batch := []WireEvent{
@@ -118,9 +123,9 @@ func TestIngestEnrichAggregateGapSeq(t *testing.T) {
 // A deny burst AT the threshold stays individual (not collapsed) — aggregation only fires
 // past the bound.
 func TestIngestDenyUnderThresholdNotAggregated(t *testing.T) {
-	q, _, org := ingestPool(t)
+	q, pool, org := ingestPool(t)
 	ctx := context.Background()
-	ing := NewIngester(q, nil, stubGrants{}, nil)
+	ing := NewIngester(pool, nil, stubGrants{}, nil, nil)
 	batch := []WireEvent{}
 	for p := 0; p < DenyAggregateThreshold; p++ { // exactly threshold, not over
 		batch = append(batch, WireEvent{OccurredAt: time.Now().UTC(), Verdict: "deny", SrcIP: "10.99.0.7", DstIP: "10.0.0.1", Protocol: "tcp", DstPort: p + 1})
@@ -135,6 +140,55 @@ func TestIngestDenyUnderThresholdNotAggregated(t *testing.T) {
 	for _, r := range rows {
 		if r.Decision != string(DecisionDeny) {
 			t.Fatalf("want plain deny, got %q", r.Decision)
+		}
+	}
+}
+
+// A JSONL write failure is BEST-EFFORT: the batch still succeeds (PG has the events), the
+// failure is LEGIBLE on Health, and the missing lines are a durable seq hole in the stream.
+func TestIngestJSONLFailureIsBestEffortAndLegible(t *testing.T) {
+	q, pool, org := ingestPool(t)
+	ctx := context.Background()
+	h := NewHealth()
+	ing := NewIngester(pool, &failingStream{}, stubGrants{}, h, func() time.Time { return time.Unix(2000, 0).UTC() })
+	batch := []WireEvent{{OccurredAt: time.Now().UTC(), Verdict: "allow", SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp"}}
+	if err := ing.IngestBatch(ctx, org, uuid.New(), batch, 0); err != nil {
+		t.Fatalf("a JSONL failure must NOT fail the batch (best-effort): %v", err)
+	}
+	rows, _ := q.ListAccessEvents(ctx, sqlc.ListAccessEventsParams{OrgID: org, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: maxUUID, PageLimit: 10})
+	if len(rows) != 1 {
+		t.Fatalf("PG must hold the event despite JSONL failure: got %d", len(rows))
+	}
+	if snap := h.Snapshot(); !snap.JSONLDegraded || snap.JSONLFailures == 0 {
+		t.Fatalf("JSONL failure must be LEGIBLE on Health: %+v", snap)
+	}
+}
+
+// seq is DB-derived + contiguous across batches — no burn, no false gap.
+func TestIngestSeqContiguousAcrossBatches(t *testing.T) {
+	q, pool, org := ingestPool(t)
+	ctx := context.Background()
+	ing := NewIngester(pool, nil, stubGrants{}, nil, nil)
+	mk := func(ip string) []WireEvent {
+		return []WireEvent{
+			{OccurredAt: time.Now().UTC(), Verdict: "allow", SrcIP: ip, DstIP: "10.0.0.1", Protocol: "tcp"},
+			{OccurredAt: time.Now().UTC(), Verdict: "allow", SrcIP: ip, DstIP: "10.0.0.2", Protocol: "tcp"},
+		}
+	}
+	if err := ing.IngestBatch(ctx, org, uuid.New(), mk("10.99.0.1"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := ing.IngestBatch(ctx, org, uuid.New(), mk("10.99.0.2"), 0); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := q.ListAccessEvents(ctx, sqlc.ListAccessEventsParams{OrgID: org, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: maxUUID, PageLimit: 10})
+	got := map[int64]bool{}
+	for _, r := range rows {
+		got[r.Seq] = true
+	}
+	for s := int64(1); s <= 4; s++ {
+		if !got[s] {
+			t.Fatalf("seq must be contiguous 1..4 across batches (DB-derived, no burn), missing %d: %v", s, got)
 		}
 	}
 }

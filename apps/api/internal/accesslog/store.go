@@ -46,8 +46,10 @@ func FromRow(r sqlc.AccessEvent) Event {
 
 // Retain runs the PG hot-window sweep (D3): delete by INGEST age, then trim each org to
 // the row cap. The JSONL stream keeps the full record, so this is LOSSLESS for export.
-// Returns the total rows deleted. `orgs` is the set to cap (callers pass orgs with events).
-func Retain(ctx context.Context, q *sqlc.Queries, now time.Time, retention time.Duration, rowCap int32, orgs []uuid.UUID) (int64, error) {
+// Returns the total rows deleted and records the result on health (the LEGIBLE alarm
+// surface — an operator sees the drop count where they'd look, not just in a log). `orgs`
+// is the set to cap (callers pass orgs with events); health may be nil.
+func Retain(ctx context.Context, q *sqlc.Queries, health *Health, now time.Time, retention time.Duration, rowCap int32, orgs []uuid.UUID) (int64, error) {
 	if retention <= 0 {
 		retention = DefaultRetention
 	}
@@ -67,6 +69,7 @@ func Retain(ctx context.Context, q *sqlc.Queries, now time.Time, retention time.
 		}
 		deleted += n
 	}
+	health.recordSweep(now, deleted)
 	return deleted, nil
 }
 

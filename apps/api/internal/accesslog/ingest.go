@@ -3,10 +3,10 @@ package accesslog
 import (
 	"context"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 )
@@ -62,25 +62,32 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 
 // Ingester turns an agent report batch into persisted access events: enrich (grant-only),
 // aggregate per-source denies, mark gaps, assign the per-org monotonic seq, and write BOTH
-// stores (PG hot-window + JSONL source-of-truth). One CP instance owns the seq counter
-// (self-hosted single control plane); the (org_id, seq) unique index is the backstop.
-type Ingester struct {
-	q      *sqlc.Queries
-	jsonl  *JSONLWriter
-	grants GrantResolver
-	now    func() time.Time
+// stores (PG hot-window + JSONL source-of-truth).
+//
+// seq integrity: the seq is derived from the DB high-water INSIDE the per-batch tx (not an
+// in-memory counter), so a rolled-back batch burns NO seq (no false gap) and a same-batch
+// retry is idempotent via the (org_id, seq) unique index. JSONL is BEST-EFFORT (a write
+// failure does NOT fail the batch — PG stays the queryable store; the failure surfaces on
+// Health and the per-line seq leaves a durable, detectable hole in the stream).
+// streamWriter is the JSONL source-of-truth sink (JSONLWriter in production; a fake in
+// tests, to exercise the best-effort write-failure path).
+type streamWriter interface{ Append(Event) error }
 
-	mu       sync.Mutex
-	seqByOrg map[uuid.UUID]int64
+type Ingester struct {
+	pool   *pgxpool.Pool
+	grants GrantResolver
+	jsonl  streamWriter
+	health *Health
+	now    func() time.Time
 }
 
-// NewIngester wires the querier, the JSONL stream, and the grant resolver. now defaults to
-// time.Now.
-func NewIngester(q *sqlc.Queries, jsonl *JSONLWriter, grants GrantResolver, now func() time.Time) *Ingester {
+// NewIngester wires the pool (for the per-batch tx), the JSONL stream, the grant resolver,
+// and the health surface. now defaults to time.Now; jsonl/health may be nil.
+func NewIngester(pool *pgxpool.Pool, jsonl streamWriter, grants GrantResolver, health *Health, now func() time.Time) *Ingester {
 	if now == nil {
 		now = time.Now
 	}
-	return &Ingester{q: q, jsonl: jsonl, grants: grants, now: now, seqByOrg: map[uuid.UUID]int64{}}
+	return &Ingester{pool: pool, jsonl: jsonl, grants: grants, health: health, now: now}
 }
 
 // IngestBatch persists one agent report: the observed events (enriched + aggregated) plus,
@@ -94,20 +101,42 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 			Decision: DecisionGap, DenyCount: int(dropped),
 		})
 	}
+	if len(events) == 0 {
+		return nil
+	}
+
+	// PG: all inserts in ONE tx, seq derived from the in-tx high-water (rollback burns no
+	// seq). On failure nothing commits → the agent counts the batch lost → next-report gap.
+	tx, err := i.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+	q := sqlc.New(tx)
+	base, err := q.MaxAccessEventSeqForOrg(ctx, orgID)
+	if err != nil {
+		return err
+	}
 	for idx := range events {
-		e := &events[idx]
-		e.ID = uuid.New()
-		seq, err := i.nextSeq(ctx, orgID)
-		if err != nil {
+		events[idx].ID = uuid.New()
+		events[idx].Seq = base + int64(idx) + 1
+		if _, err := q.InsertAccessEvent(ctx, InsertParams(events[idx])); err != nil {
 			return err
 		}
-		e.Seq = seq
-		if _, err := i.q.InsertAccessEvent(ctx, InsertParams(*e)); err != nil {
-			return err
-		}
-		if i.jsonl != nil {
-			if err := i.jsonl.Append(*e); err != nil {
-				return err // JSONL is the source-of-truth; a write failure is real
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// JSONL (source-of-truth stream) — best-effort, AFTER commit so it only ever reflects
+	// committed events. A failure marks Health (legible divergence) + leaves a seq hole;
+	// it does NOT fail the batch (else a retry would duplicate committed PG rows).
+	if i.jsonl != nil {
+		for idx := range events {
+			if err := i.jsonl.Append(events[idx]); err != nil {
+				i.health.jsonlFailed(i.now())
+			} else {
+				i.health.jsonlRecovered()
 			}
 		}
 	}
@@ -170,18 +199,3 @@ func (i *Ingester) enrich(ctx context.Context, orgID, nodeID uuid.UUID, w WireEv
 	return e
 }
 
-// nextSeq returns the next per-org monotonic sequence, resuming from the DB high-water on
-// first use so the sequence never rewinds across a CP restart (gap-detection integrity).
-func (i *Ingester) nextSeq(ctx context.Context, orgID uuid.UUID) (int64, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if _, seen := i.seqByOrg[orgID]; !seen {
-		hi, err := i.q.MaxAccessEventSeqForOrg(ctx, orgID)
-		if err != nil {
-			return 0, err
-		}
-		i.seqByOrg[orgID] = hi
-	}
-	i.seqByOrg[orgID]++
-	return i.seqByOrg[orgID], nil
-}
