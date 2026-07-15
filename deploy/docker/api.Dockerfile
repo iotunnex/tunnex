@@ -22,8 +22,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -tags "$TUNNEX_BUILD_TAGS" -trimpath -ldfl
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 tunnex
-# Pre-own the secrets mountpoint as uid 10001 so the named volume inherits
-# 0700/uid-10001 on first init and the non-root process can write 0600 files.
+# Pre-own the secrets mountpoint as uid 10001 so the named volume inherits uid-10001 on first
+# init and the non-root process can write 0600 files.
 RUN mkdir -p /var/lib/tunnex/secrets \
     && chown -R 10001:10001 /var/lib/tunnex \
     && chmod 700 /var/lib/tunnex/secrets

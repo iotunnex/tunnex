@@ -6,6 +6,7 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -24,6 +25,11 @@ type Querier interface {
 	// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
 	// Returns the owner so the caller can distinguish self-approval for the audit.
 	ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error)
+	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
+	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
+	// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
+	// so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
+	BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
@@ -99,6 +105,14 @@ type Querier interface {
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
+	// lint:cross-org — retention housekeeping enumerates the orgs that actually HOLD events so the
+	// per-org row-cap sweep bounds every such org's hot-window disk use. This MUST include
+	// SOFT-DELETED orgs: a deleted org's event flood is exactly what the disk-guard cap must bound
+	// (fold-3 #3 reverted the fold-2 organizations-table enumeration, which excluded deleted orgs).
+	// PERF LEDGER: this is a DISTINCT scan of access_events every RetentionSweepInterval; if
+	// access_events scale makes the 10-min scan measurable, add a supporting index / cheaper
+	// enumeration (trigger, not a silent now-do-it).
+	DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -131,6 +145,10 @@ type Querier interface {
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
+	// Resolve one rule (org-scoped) — S7.5.1 ingest enriches an allow event's kernel-stamped
+	// rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so
+	// it survives a later rule delete. Returns no rows if the rule was already deleted.
+	GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForOrgParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -140,6 +158,19 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
+	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
+	// hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
+	// locked counter), so it is unique by construction — this is a PLAIN insert (NO
+	// `ON CONFLICT DO NOTHING`): the (org_id, seq) unique index is a FAIL-LOUD backstop, so an
+	// impossible collision errors the batch (agent -> next-report gap) rather than SILENTLY
+	// dropping audit rows (review #1). No replay path re-inserts: a failed batch rolls the tx
+	// (and the counter bump) back, so a retry re-reserves a fresh range.
+	InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) error
+	// The hot ingest path (review fold-2 #6): pipeline a whole batch's inserts in ONE round trip
+	// instead of N sequential Execs, so the process-global ingest mutex is held for far less time.
+	// Same plain insert as InsertAccessEvent (seq is unique via the counter; the unique index is
+	// the fail-LOUD backstop).
+	InsertAccessEventBatch(ctx context.Context, arg []InsertAccessEventBatchParams) *InsertAccessEventBatchBatchResults
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
@@ -149,6 +180,13 @@ type Querier interface {
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
+	// The security-focused feed: deny + deny_aggregate + terminated only, same keyset shape.
+	ListAccessDenies(ctx context.Context, arg ListAccessDeniesParams) ([]AccessEvent, error)
+	// Keyset page, newest-first, scoped by org. Expanded (created_at, id) < (cursor) predicate
+	// (row-value form confuses sqlc's type inference for the id cursor). First page passes a
+	// far-future created_at + a max uuid so the whole feed is < the cursor. Uses
+	// access_events_org_created_id_idx.
+	ListAccessEvents(ctx context.Context, arg ListAccessEventsParams) ([]AccessEvent, error)
 	// The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
 	// device (id, name). The SINGLE definition of "live allocation" — used by BOTH
 	// device-create's lowest-free choice AND resize's orphan check/409 objects, so
@@ -292,6 +330,13 @@ type Querier interface {
 	// Verification loss: clear verified_at so the domain stops capturing (the claim
 	// is NOT deleted — the org keeps its pending claim and can re-verify).
 	SuspendDomainClaim(ctx context.Context, arg SuspendDomainClaimParams) error
+	// lint:cross-org — retention housekeeping runs across ALL orgs by INGEST age (created_at,
+	// not the agent-clock occurred_at, so agent skew can't extend retention). The JSONL stream
+	// keeps the full record; PG is a bounded cache, so this delete is lossless for export.
+	SweepAccessEventsByAge(ctx context.Context, olderThan time.Time) (int64, error)
+	// Per-org row cap: keep the newest keep_newest rows for the org, delete the rest. Protects
+	// the disk when one org is noisy without touching quiet orgs.
+	SweepAccessEventsOverCap(ctx context.Context, arg SweepAccessEventsOverCapParams) (int64, error)
 	TouchCliCredentialUsed(ctx context.Context, id uuid.UUID) error
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// lint:cross-org — keyed by id after cert authorization.

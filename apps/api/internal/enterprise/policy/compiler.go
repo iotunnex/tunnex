@@ -31,6 +31,7 @@ const (
 // selects which Dst*ID is meaningful ("resource" => static cidr:ports; "group" =>
 // that group's members' device /32s).
 type Rule struct {
+	ID            uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
 	SrcGroupID    uuid.UUID
 	DstKind       string
 	DstResourceID uuid.UUID
@@ -152,21 +153,31 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		}
 	}
 
-	// Accumulate allows per node, de-duplicated.
+	// Accumulate allows per node, de-duplicated on the ENFORCEMENT tuple ONLY (NOT
+	// rule_id — that is observability, S7.5.1). If two rules produce the same grant,
+	// the FIRST (in rule order) wins the rule_id stamp; the enforcement is identical
+	// either way, so the hash is unaffected. Keying dedup on the full AllowEntry would
+	// wrongly emit a duplicate nft rule when two rules grant the same tuple.
+	type allowKey struct {
+		SrcIP, DstCIDR    string
+		Protocol          policyspec.Protocol
+		PortLow, PortHigh int
+	}
 	type nodeAcc struct {
-		set  map[policyspec.AllowEntry]bool
+		set  map[allowKey]bool
 		list []policyspec.AllowEntry
 	}
 	acc := map[uuid.UUID]*nodeAcc{}
 	for nodeID := range nodeSet {
-		acc[nodeID] = &nodeAcc{set: map[policyspec.AllowEntry]bool{}}
+		acc[nodeID] = &nodeAcc{set: map[allowKey]bool{}}
 	}
 	add := func(nodeID uuid.UUID, e policyspec.AllowEntry) {
 		a := acc[nodeID]
-		if a.set[e] {
-			return
+		k := allowKey{e.SrcIP, e.DstCIDR, e.Protocol, e.PortLow, e.PortHigh}
+		if a.set[k] {
+			return // first rule to grant this tuple keeps the rule_id stamp
 		}
-		a.set[e] = true
+		a.set[k] = true
 		a.list = append(a.list, e)
 	}
 
@@ -194,6 +205,7 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 					Protocol: normProto(res.Protocol),
 					PortLow:  res.PortLow,
 					PortHigh: res.PortHigh,
+					RuleID:   r.ID.String(),
 				})
 			case "group":
 				for _, dstIP := range groupDeviceIPs[r.DstGroupID] {
@@ -204,6 +216,7 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 						SrcIP:    d.AssignedIP,
 						DstCIDR:  dstIP + "/32",
 						Protocol: policyspec.ProtoAny, // device-to-device is L3
+						RuleID:   r.ID.String(),
 					})
 				}
 			}

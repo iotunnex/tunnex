@@ -580,6 +580,53 @@ paths:
                 items: { $ref: "#/components/schemas/AuditLogEntry" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/access-events:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listAccessEvents
+      summary: The org's Zero Trust access/flow events — keyset-paginated (enterprise, read-only)
+      tags: [organizations]
+      parameters:
+        - { name: denies_only, in: query, required: false, schema: { type: boolean, default: false }, description: Only deny/deny_aggregate/terminated events (the security feed). }
+        # Keyset cursor: pass the last entry's created_at + id to fetch the next page.
+        - { name: cursor_ts, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: cursor_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: A page of access events, newest first. Fewer than `limit` means the last page. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AccessEvent" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  # NOTE (S7.5.1b): GET /access-events/export (verbatim JSONL source-of-truth stream) is DEFERRED
+  # with the on-disk JSONL writer; v1 read surface is the keyset /access-events query above.
+
+  /api/v1/organizations/{orgId}/access-log/health:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getAccessLogHealth
+      summary: Access-log subsystem health — retention sweep (enterprise)
+      tags: [organizations]
+      responses:
+        "200":
+          description: The access-log health snapshot. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessLogHealth" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/devices:
     parameters:
       - name: orgId
@@ -2034,6 +2081,40 @@ components:
         target_type: { type: string }
         target_id: { type: string }
         details: { type: object, additionalProperties: true }
+
+    AccessEvent:
+      type: object
+      required: [id, created_at, seq, occurred_at, decision, src_ip, dst_ip, protocol]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        # created_at (ingest time) + id are the KEYSET CURSOR — pass the last entry's pair
+        # as cursor_ts + cursor_id for the next page.
+        created_at: { type: string, format: date-time }
+        seq: { type: integer, format: int64, description: Per-org monotonic sequence (tamper-evidence / gap detection). }
+        occurred_at: { type: string, format: date-time, description: Agent-clock flow observation time (NOT the pagination clock). }
+        decision: { type: string, enum: [allow, deny, deny_aggregate, terminated, gap] }
+        # GRANT-level attribution (rule_id -> resource/group). device/user are DEFERRED
+        # (nil) — never derived from a racy src_ip lookup.
+        rule_id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid }
+        src_ip: { type: string }
+        dst_ip: { type: string }
+        dst_resource_id: { type: string, format: uuid }
+        dst_group_id: { type: string, format: uuid }
+        protocol: { type: string }
+        dst_port: { type: integer }
+        deny_count: { type: integer, description: ">1 for a per-source deny aggregate (port-scan collapse); N for a gap marker." }
+        window_end: { type: string, format: date-time, description: deny_aggregate window end. }
+
+    AccessLogHealth:
+      type: object
+      required: [retention_dropped, retention_failed]
+      additionalProperties: false
+      properties:
+        retention_last_sweep: { type: string, format: date-time }
+        retention_dropped: { type: integer, format: int64, description: Rows deleted by the last retention sweep (age + cap). }
+        retention_failed: { type: boolean, description: The last retention sweep errored (partial/failed) — the PG hot-window may be growing. }
 
     OrgOverview:
       type: object

@@ -5,10 +5,12 @@ package egress
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
@@ -149,6 +151,159 @@ func TestRulesetDeterministic(t *testing.T) {
 
 // renderAllow re-emits every field through netip (canonical numeric) so nothing can
 // inject nft statements, and skips what it can't safely render.
+// rule_id (v2, S7.5.1) is OBSERVABILITY metadata. SPLIT assertion (the A-1 law at FULL
+// strength on the packet-fate part, NOT a loosening):
+//   (i)  the ENFORCEMENT clause (match + counter + verdict) is BYTE-IDENTICAL with and
+//        without rule_id — the part that decides accept/drop never depends on rule_id;
+//   (ii) rule_id appears ONLY inside the log clause, which is the SOLE delta of the logged
+//        variant and is NON-TERMINAL (the accept verdict is unchanged).
+func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
+	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}
+	withID := base
+	withID.RuleID = "019f6400-0000-7000-8000-000000000a01"
+
+	// (i) enforcement byte-identical regardless of rule_id, ending in the verdict.
+	enf1, ok1 := renderAllow(base)
+	enf2, ok2 := renderAllow(withID)
+	if !ok1 || !ok2 || enf1 != enf2 {
+		t.Fatalf("enforcement clause must be byte-identical w/ and w/o rule_id: %q vs %q", enf1, enf2)
+	}
+	if !strings.HasSuffix(enf1, " accept\n") {
+		t.Fatalf("enforcement clause must end in the accept verdict: %q", enf1)
+	}
+	if strings.Contains(enf1, "019f6400-0000-7000-8000-000000000a01") {
+		t.Fatalf("enforcement clause must NOT carry rule_id (observability never touches packet fate): %q", enf1)
+	}
+
+	// (ii) the logged variant keeps the accept verdict and carries rule_id ONLY in the log
+	// clause, which is the SOLE delta vs the enforcement line.
+	logged, ok := renderAllowLogged(withID, 5)
+	if !ok {
+		t.Fatal("renderAllowLogged skipped a valid entry")
+	}
+	if !strings.HasSuffix(logged, " accept\n") {
+		t.Fatalf("logged line must keep the accept verdict (log is non-terminal): %q", logged)
+	}
+	delta := logClause(flowlog.EncodePrefix("019f6400-0000-7000-8000-000000000a01"), 5)
+	if !strings.Contains(delta, "019f6400-0000-7000-8000-000000000a01") {
+		t.Fatalf("the delta (log clause) must carry rule_id: %q", delta)
+	}
+	if strings.Replace(logged, delta, "", 1) != enf1 {
+		t.Fatalf("the log clause must be the SOLE delta vs enforcement:\n logged=%q\n enf=%q\n delta=%q", logged, enf1, delta)
+	}
+}
+
+// forwardRules: flow logging OFF (default) renders NO log clause — the enforcement ruleset
+// is exactly pre-S7.5.1 (safety default). Logging ON adds the rule_id + deny log clauses
+// while every verdict line still ends accept/drop.
+func TestForwardRulesFlowLogGrouping(t *testing.T) {
+	// rule_id must be a canonical UUID — renderAllowLogged validates it (fold-2 #7), so a fake
+	// "rid-1" would (correctly) render NO log clause. Use a real uuid, matching what the
+	// compiler always stamps.
+	const rid = "019f645f-0f5b-74a7-ba0a-fdaca4fca917"
+	pol := &nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing, Allow: []nodepolicy.AllowEntry{
+		{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: rid},
+	}}
+	m := New("wg0")
+
+	v4off, _ := m.forwardRules(pol, true)
+	if strings.Contains(v4off, "log prefix") {
+		t.Fatalf("flow logging OFF must render NO log clause (safety default): %q", v4off)
+	}
+
+	m.SetFlowLogGroup(5)
+	v4on, _ := m.forwardRules(pol, true)
+	if !strings.Contains(v4on, `log prefix "tnx:`+rid+` " group 5`) {
+		t.Fatalf("logging ON must carry the rule_id log clause: %q", v4on)
+	}
+	if !strings.Contains(v4on, `log prefix "tnx:deny " group 5`) {
+		t.Fatalf("logging ON must log denies (flow-start): %q", v4on)
+	}
+	if !strings.Contains(v4on, " accept\n") {
+		t.Fatalf("allow verdict must be preserved with logging on: %q", v4on)
+	}
+	// The deny tail's verdict must come BEFORE the trailing comment. nft requires `comment`
+	// to be the LAST token in a rule; the box-walk caught the inverted `counter comment ...
+	// drop` form as a hard syntax error that made the whole atomic apply fail (stranding the
+	// gateway at cold-start deny-all). Asserting `drop\n` (as this test once did) ENCODED the
+	// bug — it only matched the invalid ordering. Parse-validated by TestEnforcingLoggedRulesetIsValidNft.
+	if !strings.Contains(v4on, "counter drop comment \"tunnex_default_drop\"\n") {
+		t.Fatalf("deny verdict must precede the trailing comment (valid nft): %q", v4on)
+	}
+	// The enforcement match is present with and without logging (packet fate unchanged).
+	const match = "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24"
+	if !strings.Contains(v4off, match) || !strings.Contains(v4on, match) {
+		t.Fatalf("the enforcement match must be present regardless of logging:\n off=%q\n on=%q", v4off, v4on)
+	}
+}
+
+// TestEnforcingLoggedRulesetIsValidNft is the regression guard for the box-walk finding:
+// the logged deny tail rendered `counter comment "..." drop`, which nft REJECTS (`comment`
+// must be the last token in a rule). Because the whole ruleset is ONE atomic `nft -f -`
+// transaction, that one bad line failed EVERY enforcing apply — silently stranding the
+// gateway at its cold-start deny-all (fail-closed, but the policy never landed). The other
+// egress tests string-check the render but never PARSE it, so the class slipped. This test
+// shells `nft -c` (check/parse only — no commit) on the rendered enforcing+logging ruleset.
+// It fails ONLY on a detected syntax error; where nft is absent or refuses without privilege
+// it SKIPS (the box-walk host applies the real ruleset, the ultimate proof).
+func TestEnforcingLoggedRulesetIsValidNft(t *testing.T) {
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Skip("nft not present; parse-guard runs on the box-walk host / nftables-equipped CI")
+	}
+	m := New("wg0")
+	m.SetFlowLogGroup(100)
+	m.SetPolicy(&nodepolicy.Compiled{
+		Version: 2, Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Allow: []nodepolicy.AllowEntry{
+			{SrcIP: "10.99.0.2", DstCIDR: "10.99.0.3/32", Protocol: "any", RuleID: "019f6400-0000-7000-8000-000000000b01"},
+			{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "019f6400-0000-7000-8000-000000000b02"},
+		},
+	})
+	rs := m.ruleset("10.99.0.1/24")
+	cmd := exec.Command("nft", "-c", "-f", "-")
+	cmd.Stdin = strings.NewReader(rs)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return // parses clean
+	}
+	if strings.Contains(strings.ToLower(string(out)), "syntax error") {
+		t.Fatalf("rendered enforcing+logging ruleset is invalid nft (box-walk regression):\n%s\nRULESET:\n%s", out, rs)
+	}
+	t.Skipf("nft check inconclusive (likely needs privilege in this env): %v: %s", err, out)
+}
+
+// review #7: rule_id (the one non-numeric renderer field) is validated to the canonical UUID
+// shape before entering the root nft ruleset. A valid uuid rides the log prefix; a malformed
+// / injection-shaped rule_id renders the accept WITHOUT a log clause — never an empty prefix
+// (which EncodePrefix encodes as the DENY sentinel, misclassifying the accepted flow) and
+// never a raw interpolation. Enforcement (accept) is unaffected either way.
+func TestRenderAllowLoggedValidatesRuleID(t *testing.T) {
+	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "any"}
+
+	good := base
+	good.RuleID = "019f645f-0f5b-74a7-ba0a-fdaca4fca917"
+	line, ok := renderAllowLogged(good, 100)
+	if !ok || !strings.Contains(line, `log prefix "tnx:019f645f-0f5b-74a7-ba0a-fdaca4fca917 " group 100`) {
+		t.Fatalf("valid rule_id must ride the log prefix: %q", line)
+	}
+
+	bad := base
+	bad.RuleID = `x" ; add rule ip tunnex forward accept ; log prefix "y`
+	line, ok = renderAllowLogged(bad, 100)
+	if !ok {
+		t.Fatal("a bad rule_id must not skip the rule (enforcement unaffected)")
+	}
+	if strings.Contains(line, "log prefix") {
+		t.Fatalf("malformed rule_id must render NO log clause, never interpolate: %q", line)
+	}
+	if strings.Contains(line, "tnx:deny") {
+		t.Fatalf("a malformed ALLOW rule_id must NOT collapse to the deny sentinel: %q", line)
+	}
+	if !strings.HasSuffix(line, " accept\n") {
+		t.Fatalf("verdict must stay accept: %q", line)
+	}
+}
+
 func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	// Injection attempt in SrcIP -> skipped (not parseable as an IP).
 	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1; add rule ip tunnex forward accept", DstCIDR: "10.0.0.0/24"}); ok {

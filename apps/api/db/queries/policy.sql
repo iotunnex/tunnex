@@ -115,3 +115,9 @@ UPDATE organizations
 SET zero_trust_mode = $2
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
+
+-- name: GetPolicyRuleForOrg :one
+-- Resolve one rule (org-scoped) — S7.5.1 ingest enriches an allow event's kernel-stamped
+-- rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so
+-- it survives a later rule delete. Returns no rows if the rule was already deleted.
+SELECT * FROM policy_rules WHERE id = $1 AND org_id = $2;

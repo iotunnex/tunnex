@@ -22,6 +22,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
@@ -153,6 +154,10 @@ func main() {
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 
+	// S7.5.1 access-log health is SHARED: the flow-event Ingester (mTLS channel) records
+	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
+	flowHealth := accesslog.NewHealth()
+
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:                  tenancy.NewService(pool),
 		CliAuth:               cliAuthSvc,
@@ -164,6 +169,7 @@ func main() {
 		Sessions:              sessions,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
+		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
@@ -184,6 +190,35 @@ func main() {
 
 	// mTLS agent control channel (separate listener; client certs verified vs CA).
 	agentCh := apphttp.NewAgentChannel(nodeSvc, agentCA, pushHub, logger)
+	// S7.5.1 flow-event ingest: the PG hot-window (queryable access-event store), wired onto the
+	// SAME mTLS channel (node identity = client cert). (S7.5.1b) the JSONL on-disk source-of-truth
+	// + verbatim export are DEFERRED — v1 is PG-only.
+	retentionStop := make(chan struct{})
+	fq := sqlc.New(pool)
+	agentCh.SetFlowIngester(accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
+	// D3 retention sweep: without this loop access_events grows unbounded and exhausts the DB
+	// disk. Run it on an interval: delete by ingest age + trim each org to the row cap. Drop-count
+	// + failure land on flowHealth.
+	go func() {
+		t := time.NewTicker(accesslog.RetentionSweepInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				orgs, err := fq.DistinctAccessEventOrgs(sctx)
+				if err == nil {
+					_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
+				}
+				if err != nil {
+					logger.Error("flowlog_retention_sweep_failed", slog.String("error", err.Error()))
+				}
+				scancel()
+			}
+		}
+	}()
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
 		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))
@@ -227,6 +262,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
+	close(retentionStop) // stop the retention sweep loop
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))
 		os.Exit(1)

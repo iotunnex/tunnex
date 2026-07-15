@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AccessEvent struct {
+	ID            uuid.UUID          `json:"id"`
+	OrgID         uuid.UUID          `json:"org_id"`
+	Seq           int64              `json:"seq"`
+	NodeID        pgtype.UUID        `json:"node_id"`
+	OccurredAt    time.Time          `json:"occurred_at"`
+	Decision      string             `json:"decision"`
+	RuleID        pgtype.UUID        `json:"rule_id"`
+	SrcDeviceID   pgtype.UUID        `json:"src_device_id"`
+	SrcUserID     pgtype.UUID        `json:"src_user_id"`
+	SrcIp         string             `json:"src_ip"`
+	DstIp         string             `json:"dst_ip"`
+	DstResourceID pgtype.UUID        `json:"dst_resource_id"`
+	DstGroupID    pgtype.UUID        `json:"dst_group_id"`
+	Protocol      string             `json:"protocol"`
+	DstPort       *int32             `json:"dst_port"`
+	DenyCount     int32              `json:"deny_count"`
+	WindowEnd     pgtype.Timestamptz `json:"window_end"`
+	CreatedAt     time.Time          `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID          uuid.UUID   `json:"id"`
 	OrgID       pgtype.UUID `json:"org_id"`
@@ -174,6 +195,7 @@ type Organization struct {
 	PoolCidr          string             `json:"pool_cidr"`
 	ZeroTrustMode     string             `json:"zero_trust_mode"`
 	DeviceApproval    string             `json:"device_approval"`
+	FlowSeq           int64              `json:"flow_seq"`
 }
 
 type PlatformSecret struct {

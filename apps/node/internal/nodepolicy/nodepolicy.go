@@ -26,6 +26,10 @@ type AllowEntry struct {
 	Protocol string `json:"protocol"` // any | tcp | udp
 	PortLow  int    `json:"port_low,omitempty"`
 	PortHigh int    `json:"port_high,omitempty"`
+	// RuleID (v2, S7.5.1) is OBSERVABILITY metadata the agent captures so it can stamp
+	// flow/deny events (and the conntrack-kill) with the grant identity that matched.
+	// NEVER enforcement — EXCLUDED from CanonicalHash (the enforcement projection).
+	RuleID string `json:"rule_id,omitempty"`
 }
 
 // Compiled is the per-node policy artifact. Mesh=true (mode off) => the agent keeps
@@ -44,19 +48,49 @@ type Compiled struct {
 	Allow   []AllowEntry `json:"allow"`
 }
 
-// CanonicalHash mirrors policyspec.CanonicalHash EXACTLY: 12 hex of SHA-256 over
-// the canonical Compiled JSON (the sorted, byte-stable form the control plane's
-// determinism test asserts). Both sides hash identical canonical bytes — never
-// their own private serialization — so the control plane's pushed-hash and the
-// agent's applied-hash compare meaningfully (staleness detection, S7.2 4b). A
-// nil policy has no hash ("", mesh/none).
+// hashAllow / hashView are the ENFORCEMENT-ONLY projection hashed by CanonicalHash —
+// the EXACT mirror of policyspec's projection (A-1 allowlist). Observability metadata
+// (rule_id) is DELIBERATELY ABSENT so staleness is metadata-blind and the v2 bump does
+// not disturb existing pushed/applied hashes. Field order + tags match the v1 shape.
+type hashAllow struct {
+	SrcIP    string `json:"src_ip"`
+	DstCIDR  string `json:"dst_cidr"`
+	Protocol string `json:"protocol"`
+	PortLow  int    `json:"port_low,omitempty"`
+	PortHigh int    `json:"port_high,omitempty"`
+}
+
+type hashView struct {
+	Version int         `json:"version"`
+	NodeID  string      `json:"node_id"`
+	Mode    string      `json:"mode"`
+	Mesh    bool        `json:"mesh"`
+	Allow   []hashAllow `json:"allow"`
+}
+
+func projectForHash(c *Compiled) hashView {
+	v := hashView{Version: c.Version, NodeID: c.NodeID, Mode: c.Mode, Mesh: c.Mesh}
+	if c.Allow != nil {
+		v.Allow = make([]hashAllow, len(c.Allow))
+		for i, e := range c.Allow {
+			v.Allow[i] = hashAllow{SrcIP: e.SrcIP, DstCIDR: e.DstCIDR, Protocol: e.Protocol, PortLow: e.PortLow, PortHigh: e.PortHigh}
+		}
+	}
+	return v
+}
+
+// CanonicalHash mirrors policyspec.CanonicalHash EXACTLY: 12 hex of SHA-256 over the
+// canonical ENFORCEMENT PROJECTION of Compiled (NOT the raw struct — v2 added
+// observability metadata that must not enter the hash). Both sides hash identical
+// projected bytes — never their own private serialization — so pushed-vs-applied
+// comparison is meaningful (staleness detection, S7.2 4b). A nil policy has no hash.
 func CanonicalHash(c *Compiled) string {
 	if c == nil {
 		return ""
 	}
-	b, err := json.Marshal(c)
+	b, err := json.Marshal(projectForHash(c))
 	if err != nil {
-		return "" // unreachable: Compiled is plain data
+		return "" // unreachable: the projection is plain data
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:6])

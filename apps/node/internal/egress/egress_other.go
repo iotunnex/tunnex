@@ -22,6 +22,10 @@ func (m *Manager) Teardown(_ context.Context) {}
 // SetPolicy is a no-op off Linux (no forward chain to program).
 func (m *Manager) SetPolicy(_ *nodepolicy.Compiled) {}
 
+// SetFlowLogGroup is a no-op off Linux (nflog is Linux-only; the agent runs on Linux
+// gateways — this only keeps non-Linux builds compiling).
+func (m *Manager) SetFlowLogGroup(_ int) {}
+
 // AppliedStatus off Linux reports "nothing applied" (version 0, no hash, no error) —
 // a non-Linux agent never claims a policy is in force.
 func (m *Manager) AppliedStatus() (int, string, time.Time, error) { return 0, "", time.Time{}, nil }

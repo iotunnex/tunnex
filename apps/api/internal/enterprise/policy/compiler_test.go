@@ -228,6 +228,33 @@ func TestDuplicateGrantsDeduped(t *testing.T) {
 	}
 }
 
+// A rule deleted and recreated with a NEW uuid but the SAME grant yields the SAME
+// compiled hash — rule_id is STAMPED (for S7.5.1 flow-log attribution) yet hash-
+// EXCLUDED, so the delete+recreate desync flap (the S7.4b trackDesync path) is dead by
+// construction: the CP sees no content change, so no stamp fires.
+func TestRuleRecreateHashStableStampVaries(t *testing.T) {
+	build := func(ruleID uuid.UUID) policyspec.Compiled {
+		snap := policy.Snapshot{
+			Mode:        policy.ModeEnforcing,
+			Resources:   []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}},
+			Rules:       []policy.Rule{{ID: ruleID, SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB}},
+			Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+			Devices:     []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+		}
+		return policy.Compile(snap)[nodeA]
+	}
+	r1, r2 := uuid.New(), uuid.New() // r2 = the "recreated" rule: new uuid, identical grant
+	c1, c2 := build(r1), build(r2)
+	// The stamp VARIES — proves rule_id is actually populated from the CP rule uuid.
+	if c1.Allow[0].RuleID != r1.String() || c2.Allow[0].RuleID != r2.String() {
+		t.Fatalf("rule_id must be stamped from the CP rule uuid: %q / %q", c1.Allow[0].RuleID, c2.Allow[0].RuleID)
+	}
+	// ...yet the HASH is stable — no content change, so no desync flap.
+	if policyspec.CanonicalHash(c1) != policyspec.CanonicalHash(c2) {
+		t.Fatal("delete+recreate of an identical grant must NOT change the hash (S7.4b flap dead)")
+	}
+}
+
 // Determinism: equal input compiles to byte-identical output (the reconcile
 // no-op contract). Compile the same rich snapshot twice and compare JSON.
 func TestCompileDeterministic(t *testing.T) {
