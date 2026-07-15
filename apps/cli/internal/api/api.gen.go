@@ -545,12 +545,13 @@ type IdpGroupMapRequest struct {
 
 // IdpSyncConfig defines model for IdpSyncConfig.
 type IdpSyncConfig struct {
-	ClientId      string                `json:"client_id"`
-	Enabled       bool                  `json:"enabled"`
-	LastSyncAt    *time.Time            `json:"last_sync_at,omitempty"`
-	LastSyncError *string               `json:"last_sync_error,omitempty"`
-	LastSyncOk    bool                  `json:"last_sync_ok"`
-	Provider      IdpSyncConfigProvider `json:"provider"`
+	ClientId          string                `json:"client_id"`
+	Enabled           bool                  `json:"enabled"`
+	LastSyncAt        *time.Time            `json:"last_sync_at,omitempty"`
+	LastSyncError     *string               `json:"last_sync_error,omitempty"`
+	LastSyncOk        bool                  `json:"last_sync_ok"`
+	Provider          IdpSyncConfigProvider `json:"provider"`
+	SecretFingerprint *string               `json:"secret_fingerprint,omitempty"`
 
 	// SyncHealth Two-tier derived health (D2).
 	SyncHealth string  `json:"sync_health"`

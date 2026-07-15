@@ -144,6 +144,9 @@ func toAPIIdpSyncConfig(v idpsyncspec.ConfigView) api.IdpSyncConfig {
 		LastSyncOk: v.LastSyncOk,
 		SyncHealth: v.SyncHealth,
 	}
+	if v.SecretFingerprint != "" {
+		out.SecretFingerprint = &v.SecretFingerprint
+	}
 	if v.TenantID != "" {
 		out.TenantId = &v.TenantID
 	}

@@ -17,16 +17,17 @@ type ConfigInput struct {
 	Enabled      bool
 }
 
-// ConfigView is a stored config for display — NEVER carries the secret.
+// ConfigView is a stored config for display — NEVER carries the secret, only its fingerprint.
 type ConfigView struct {
-	Provider      string
-	ClientID      string
-	TenantID      string
-	Enabled       bool
-	LastSyncAt    *time.Time
-	LastSyncOk    bool
-	LastSyncError string
-	SyncHealth    string // ok | degraded | escalated (derived, D2)
+	Provider          string
+	ClientID          string
+	SecretFingerprint string // keyed 12-hex proof-of-secret (S4.5); never the secret itself
+	TenantID          string
+	Enabled           bool
+	LastSyncAt        *time.Time
+	LastSyncOk        bool
+	LastSyncError     string
+	SyncHealth        string // ok | degraded | escalated (derived, D2)
 }
 
 // HealthView is the two-tier sync-health snapshot.

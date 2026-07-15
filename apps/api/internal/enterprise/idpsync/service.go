@@ -18,6 +18,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsyncspec"
 )
@@ -92,19 +93,33 @@ func (s *Service) UpsertConfig(ctx context.Context, orgID uuid.UUID, provider st
 	if err != nil {
 		return idpsyncspec.ConfigView{}, err
 	}
+	fp := s.sealer.Fingerprint([]byte(in.ClientSecret)) // keyed proof-of-secret (S4.5) — never the secret
 	var tid *string
 	if strings.TrimSpace(in.TenantID) != "" {
 		t := in.TenantID
 		tid = &t
 	}
-	row, err := s.q.UpsertIdpSyncConfig(ctx, sqlc.UpsertIdpSyncConfigParams{
-		OrgID: orgID, Provider: provider, ClientID: in.ClientID,
-		SecretSealed: []byte(sealed), TenantID: tid, Enabled: in.Enabled,
+	var row sqlc.IdpSyncConfig
+	err = s.withTx(ctx, func(q *sqlc.Queries) error {
+		var e error
+		row, e = q.UpsertIdpSyncConfig(ctx, sqlc.UpsertIdpSyncConfigParams{
+			OrgID: orgID, Provider: provider, ClientID: in.ClientID,
+			SecretSealed: []byte(sealed), TenantID: tid, Enabled: in.Enabled,
+		})
+		if e != nil {
+			return e
+		}
+		// A credential change is high-privilege — audit it (human actor). Metadata is secret-free:
+		// only the fingerprint proves WHICH secret, never the secret or the sealed bytes.
+		return s.humanAudit(ctx, q, orgID, "idp_sync.config_updated", "idp_sync_config", provider,
+			map[string]any{"provider": provider, "client_id": in.ClientID, "secret_fingerprint": fp, "enabled": in.Enabled})
 	})
 	if err != nil {
 		return idpsyncspec.ConfigView{}, err
 	}
-	return s.viewOf(row), nil
+	view := s.viewOf(row)
+	view.SecretFingerprint = fp
+	return view, nil
 }
 
 // Health returns the two-tier sync health (derived at read time).
@@ -349,6 +364,29 @@ func (s *Service) viewOf(row sqlc.IdpSyncConfig) idpsyncspec.ConfigView {
 	}
 	v.SyncHealth = ClassifySyncHealth(row.LastSyncOk, lastAt, row.CreatedAt, s.now(), EscalationCeiling).String()
 	return v
+}
+
+// humanAudit records a principal-attributed audit row (config changes are human actions via the
+// authenticated PUT). Secret-free metadata only.
+func (s *Service) humanAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	actor := pgtype.UUID{}
+	if p, ok := authctx.PrincipalFrom(ctx); ok {
+		actor = pgtype.UUID{Bytes: p.UserID, Valid: true}
+	}
+	tt, tid := targetType, targetID
+	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
+		ActorUserID: actor,
+		Action:      action,
+		TargetType:  &tt,
+		TargetID:    &tid,
+		Metadata:    b,
+	})
+	return err
 }
 
 func (s *Service) systemAudit(ctx context.Context, orgID uuid.UUID, action string, groupID, userID uuid.UUID, cause string) error {

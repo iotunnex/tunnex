@@ -1675,6 +1675,9 @@ components:
       properties:
         provider: { type: string, enum: [microsoft, google] }
         client_id: { type: string }
+        # Keyed 12-hex proof-of-secret (S4.5): the read path NEVER returns the client secret, only
+        # this fingerprint — enough to confirm a secret is set / detect a change, useless to an attacker.
+        secret_fingerprint: { type: string }
         tenant_id: { type: string }
         enabled: { type: boolean }
         last_sync_at: { type: string, format: date-time }

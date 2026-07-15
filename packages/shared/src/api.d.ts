@@ -1267,6 +1267,7 @@ export interface components {
             /** @enum {string} */
             provider: "microsoft" | "google";
             client_id: string;
+            secret_fingerprint?: string;
             tenant_id?: string;
             enabled: boolean;
             /** Format: date-time */

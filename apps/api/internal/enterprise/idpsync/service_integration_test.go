@@ -69,7 +69,6 @@ func TestMapGroup_RefusesPopulatedManualGroup(t *testing.T) {
 	exec(t, pool, `INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')`, org, user)
 	exec(t, pool, `INSERT INTO user_groups (id,org_id,name,origin) VALUES ($1,$2,'eng','manual')`, grp, org)
 	exec(t, pool, `INSERT INTO group_members (org_id,group_id,user_id,origin) VALUES ($1,$2,$3,'manual')`, org, grp, user)
-	t.Cleanup(func() { exec(t, pool, `DELETE FROM organizations WHERE id=$1`, org) })
 
 	svc := newService(t, pool)
 	mustConfig(t, svc, ctx, org)
@@ -101,7 +100,6 @@ func TestMapGroup_CreateAndDuplicate(t *testing.T) {
 	ctx := context.Background()
 	org := uuid.New()
 	exec(t, pool, `INSERT INTO organizations (id,name,slug) VALUES ($1,'o',$2)`, org, "o-"+org.String()[:8])
-	t.Cleanup(func() { exec(t, pool, `DELETE FROM organizations WHERE id=$1`, org) })
 	svc := newService(t, pool)
 	mustConfig(t, svc, ctx, org)
 
@@ -123,7 +121,6 @@ func TestManualEditOfSyncedGroupRefused(t *testing.T) {
 	exec(t, pool, `INSERT INTO organizations (id,name,slug) VALUES ($1,'o',$2)`, org, "o-"+org.String()[:8])
 	exec(t, pool, `INSERT INTO users (id,email,name) VALUES ($1,$2,'u')`, user, user.String()[:8]+"@t.io")
 	exec(t, pool, `INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')`, org, user)
-	t.Cleanup(func() { exec(t, pool, `DELETE FROM organizations WHERE id=$1`, org) })
 
 	svc := newService(t, pool)
 	mustConfig(t, svc, ctx, org)
