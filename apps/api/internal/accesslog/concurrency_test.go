@@ -97,10 +97,8 @@ func TestIngestConcurrentSameOrgNoLossNoTear(t *testing.T) {
 		}
 	}
 
-	// JSONL: UNTORN — exactly `want` lines, every one valid JSON (no interleaved writes).
-	if err := jw.Flush(); err != nil {
-		t.Fatal(err)
-	}
+	// JSONL: UNTORN — exactly `want` lines, every one valid JSON (WriteBatch is durable per
+	// batch, so no flush is needed; the ingest mutex serialized every WriteBatch).
 	segs, _ := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
 	lines := 0
 	for _, seg := range segs {

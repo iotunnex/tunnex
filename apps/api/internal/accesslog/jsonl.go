@@ -2,60 +2,57 @@ package accesslog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// JSONLWriter appends access events as JSON lines to a rotating stream on the customer's
-// disk — the SIEM source-of-truth + retention record (D4/D5). Tamper-evidence MINIMUM
-// (D4): every line carries the per-org monotonic `seq` (assigned at ingest), and every
-// rotated segment gets a sidecar MANIFEST recording its line count + seq range + close
-// time, so a DELETED or TRUNCATED segment is detectable. Hash-chaining (each line hashing
-// the prior) is NAMED-DEFERRED (Tier-2, trigger = a compliance ask for cryptographic
-// non-repudiation). Not safe for concurrent use — the ingest owns one writer, serialized.
-// segmentSink is the current segment's underlying file — an *os.File in production, or a
-// fake in tests (so a transient write/flush failure + the self-heal path are unit-provable).
-type segmentSink interface {
-	io.Writer
-	Sync() error
-	Close() error
-	Name() string
-}
-
+// JSONLWriter appends access events as JSON lines to a rotating stream on the customer's disk
+// — the SIEM source-of-truth + retention record (D4/D5). Tamper-evidence MINIMUM (D4): every
+// line carries the per-org monotonic `seq` (assigned at ingest), and every rotated segment
+// gets a sidecar MANIFEST recording its line count + seq range + close time, so a DELETED or
+// TRUNCATED segment is detectable.
+//
+// STATELESS-PER-BATCH design (the reduce after four review rounds on the old buffered/
+// self-healing/abandoned-marker writer kept trading one durability defect for another): the
+// writer holds NO open file handle and NO bufio between batches. WriteBatch opens the current
+// segment O_APPEND, writes the WHOLE batch in one Write, fsyncs, and closes — so every recorded
+// batch is durable on return and there is no long-lived mutable failure state to corrupt. A
+// failed batch simply returns an error (the ingest marks Health + the per-line seq leaves a
+// detectable hole — the events are still in PG); the NEXT batch starts fresh. A crash or a
+// failed write can leave a partial trailing line; it is truncated at a clean line boundary
+// before the next append (on restart via resume(), or mid-run via the `dirty` flag), so a torn
+// tail never corrupts a following line and never survives into a SEALED segment.
+//
+// Not safe for concurrent use — the ingest owns one writer, serialized by the Ingester mutex.
 type JSONLWriter struct {
 	dir      string
 	maxBytes int64
+	now      func() time.Time
+	// Accounting for the CURRENT (open, not-yet-rolled) segment — used to write its manifest on
+	// roll/Close. Advanced ONLY after a batch's durable write succeeds, so a manifest can never
+	// claim more lines than are fsync'd on disk (no false TRUNCATED).
 	seg      int
-	f        segmentSink
-	w        *bufio.Writer
-	bytes    int64
 	lines    int
+	bytes    int64
 	firstSeq int64
 	lastSeq  int64
-	now      func() time.Time
-	// broken marks that a Write/Flush/Sync error poisoned the current bufio writer (its error
-	// is STICKY — every later call would keep returning it, so the stream would silently stop
-	// for the process lifetime). The next Append REOPENS a fresh segment to self-heal (fold-2
-	// #1: the "cleared on next success" recovery must actually be reachable).
-	broken bool
-	// openFn creates a segment file; injectable so tests can drive write/flush failures.
-	openFn func(path string) (segmentSink, error)
+	// dirty = the previous WriteBatch failed mid-write and may have left a torn partial line;
+	// the next WriteBatch truncates it before appending (clean boundary). Self-clears on success.
+	dirty bool
 }
 
-func osOpenSegment(path string) (segmentSink, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
-}
-
-// Manifest is the sidecar written next to each CLOSED segment (segment.jsonl.manifest).
-// A verifier re-counts the segment's lines against Lines to catch truncation.
+// Manifest is the sidecar written next to each SEALED segment (segment.jsonl.manifest). A
+// verifier re-counts the segment's lines against Lines to catch truncation.
 type Manifest struct {
 	File     string    `json:"file"`
 	FirstSeq int64     `json:"first_seq"`
@@ -65,8 +62,8 @@ type Manifest struct {
 	ClosedAt time.Time `json:"closed_at"`
 }
 
-// NewJSONLWriter opens a fresh stream under dir (created if absent). maxBytes<=0 uses
-// DefaultJSONLMaxBytes.
+// NewJSONLWriter opens a stream under dir (created if absent), RESUMING the active segment a
+// prior run left (crash-safe — no O_TRUNC of existing data). maxBytes<=0 uses DefaultJSONLMaxBytes.
 func NewJSONLWriter(dir string, maxBytes int64) (*JSONLWriter, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultJSONLMaxBytes
@@ -74,175 +71,220 @@ func NewJSONLWriter(dir string, maxBytes int64) (*JSONLWriter, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
-	jw := &JSONLWriter{dir: dir, maxBytes: maxBytes, now: time.Now, openFn: osOpenSegment}
-	if err := jw.openSegment(); err != nil {
+	w := &JSONLWriter{dir: dir, maxBytes: maxBytes, now: time.Now}
+	if err := w.resume(); err != nil {
 		return nil, err
 	}
-	return jw, nil
+	return w, nil
 }
 
 func segmentName(seg int) string { return fmt.Sprintf("access-%06d.jsonl", seg) }
 
-func (w *JSONLWriter) openSegment() error {
-	w.seg++
-	p := filepath.Join(w.dir, segmentName(w.seg))
-	f, err := w.openFn(p)
+func segNumber(path string) int {
+	b := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "access-"), ".jsonl")
+	n, _ := strconv.Atoi(b)
+	return n
+}
+
+// resume picks the segment to continue: the highest-numbered segment WITHOUT a manifest is the
+// still-open active one — truncate any torn tail a crash left, then re-derive its line/seq/byte
+// accounting by scanning it. A SEALED (has-manifest) highest segment means the last run closed
+// cleanly → start a fresh segment after it. No segments → start at 1.
+func (w *JSONLWriter) resume() error {
+	segs, err := filepath.Glob(filepath.Join(w.dir, "access-*.jsonl"))
 	if err != nil {
 		return err
 	}
-	w.f, w.w = f, bufio.NewWriter(f)
-	w.bytes, w.lines, w.firstSeq, w.lastSeq = 0, 0, 0, 0
-	w.broken = false
-	return nil
-}
-
-// abandonedExt marks a POISONED segment that was abandoned mid-write (see the writer state
-// model). Distinct from ".manifest" (a cleanly-closed segment) — it names an incomplete,
-// UNVERIFIABLE segment so VerifySegment/export can tell "abandoned" from "tampered".
-const abandonedExt = ".abandoned"
-
-// WRITER STATE MODEL (fold-3 — one rule per failure mode; the single `broken` flag used to
-// conflate three modes):
-//   - HEALTHY: append/flush normally.
-//   - SYNC-DEGRADED (Flush: bufio.Flush ok, f.Sync fails): the lines ARE on disk (OS page
-//     cache — readable + manifest-able), only the fsync failed. Durability-degraded, NOT
-//     corruption → KEEP the segment (do NOT poison/reopen; that would abandon a valid segment
-//     and destroy its tamper-evidence on a recoverable hiccup). Surfaced via the returned
-//     error on Health; the next Flush retries the Sync.
-//   - POISONED (bufio.Write / bufio.Flush errors, on Append, Flush, OR closeSegment/rotate):
-//     the bufio's error is sticky and the segment is genuinely incomplete → set `broken`; the
-//     next Append reopens a fresh segment and ABANDONS this one (marker, no manifest).
-//
-// reopen self-heals a POISONED writer: it abandons the poisoned segment (best-effort marker so
-// the loss is legible + distinguishable from tampering) and opens a fresh one.
-func (w *JSONLWriter) reopen() error {
-	if w.f != nil {
-		name := filepath.Base(w.f.Name())
-		_ = w.f.Close() // best-effort — the old file is already poisoned
-		w.f = nil
-		// Mark the poisoned segment abandoned (best-effort — the disk may still be failing). Its
-		// content is genuinely incomplete (appended-but-unflushed lines are lost); the marker
-		// lets VerifySegment report it as abandoned/unverifiable (≠ tampered) and lets the export
-		// skip it. The lost events are still queryable in the PG hot-window.
-		_ = os.WriteFile(filepath.Join(w.dir, name+abandonedExt), []byte("abandoned\n"), 0o640)
+	sort.Strings(segs)
+	if len(segs) == 0 {
+		w.seg = 1
+		return nil
 	}
-	return w.openSegment()
+	last := segs[len(segs)-1]
+	n := segNumber(last)
+	if _, err := os.Stat(last + ".manifest"); err == nil {
+		w.seg = n + 1 // sealed → continue on a fresh segment
+		return nil
+	}
+	w.seg = n // active, unsealed → truncate any torn tail + re-derive accounting
+	if err := truncateTornTail(last); err != nil {
+		return err
+	}
+	return w.deriveAccounting(last)
 }
 
-// Append writes one event as a JSON line, then rotates if the segment reached maxBytes.
-func (w *JSONLWriter) Append(e Event) error {
-	if w.broken {
-		// A prior write/flush poisoned the bufio writer. Reopen a fresh segment so the stream
-		// self-heals (fold-2 #1) — else the sticky error would make every later write fail and
-		// the source-of-truth would silently stop for the process lifetime. If reopen ALSO
-		// fails (e.g. disk still full), stay broken and surface the error; retry next call.
-		if err := w.reopen(); err != nil {
+// deriveAccounting rebuilds the current-segment counters from a (torn-tail-truncated) file.
+func (w *JSONLWriter) deriveAccounting(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var probe struct {
+			Seq int64 `json:"seq"`
+		}
+		if json.Unmarshal(line, &probe) != nil {
+			continue
+		}
+		if w.lines == 0 {
+			w.firstSeq = probe.Seq
+		}
+		w.lines++
+		w.lastSeq = probe.Seq
+		w.bytes += int64(len(line)) + 1
+	}
+	return sc.Err()
+}
+
+// WriteBatch appends a whole batch as JSON lines: build the bytes, open O_APPEND, write, FSYNC,
+// close — so on a nil return every line is durable on disk. On any failure it returns the error
+// WITHOUT advancing the accounting and marks the segment dirty (the next batch truncates the
+// torn tail). The caller (ingest) treats a failure as best-effort: PG keeps the events and the
+// per-line seq leaves a detectable hole. Rolls to the next segment when the size cap is reached.
+func (w *JSONLWriter) WriteBatch(events []Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	path := filepath.Join(w.dir, segmentName(w.seg))
+	if w.dirty {
+		// A prior batch failed mid-write; drop any torn partial so this batch appends at a clean
+		// line boundary. The failed batch's events are in PG (a legible seq gap); the in-memory
+		// accounting already excludes them, so no re-derive is needed.
+		if err := truncateTornTail(path); err != nil {
 			return err
 		}
+		w.dirty = false
 	}
-	b, err := json.Marshal(e)
+	var buf bytes.Buffer
+	for i := range events {
+		b, err := json.Marshal(events[i])
+		if err != nil {
+			return err // marshal can't leave a torn file (nothing written yet)
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		return err
 	}
-	b = append(b, '\n')
-	n, err := w.w.Write(b)
-	if err != nil {
-		w.broken = true
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		w.dirty = true
+		_ = f.Close()
 		return err
 	}
+	if err := f.Sync(); err != nil {
+		w.dirty = true
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		w.dirty = true
+		return err
+	}
+	// Durable — advance the accounting (never before the fsync, so a manifest can't over-claim).
 	if w.lines == 0 {
-		w.firstSeq = e.Seq
+		w.firstSeq = events[0].Seq
 	}
-	w.lines++
-	w.lastSeq = e.Seq
-	w.bytes += int64(n)
+	w.lines += len(events)
+	w.lastSeq = events[len(events)-1].Seq
+	w.bytes += int64(buf.Len())
 	if w.bytes >= w.maxBytes {
-		return w.rotate()
+		return w.roll()
 	}
 	return nil
 }
 
-// Flush pushes buffered lines out of the bufio buffer to the OS and fsyncs the open
-// segment. The ingest calls this after each batch so committed events are DURABLE on disk
-// (and visible to a reader/ExportOrg) before the process can exit. Without it, Append only
-// fills a bufio buffer that is flushed solely on rotation/Close — so a graceful shutdown
-// (SIGTERM) or an export would see an empty/short segment while PG already holds the rows,
-// the source-of-truth silently diverging (box-walk finding). No-op if no segment is open.
-func (w *JSONLWriter) Flush() error {
-	if w.f == nil {
-		return nil
-	}
-	if err := w.w.Flush(); err != nil {
-		w.broken = true // POISONED (sticky bufio) — the next Append reopens a fresh segment
+// roll seals the current segment (writes its manifest — the segment is already fully fsync'd)
+// and advances to the next segment number.
+func (w *JSONLWriter) roll() error {
+	if err := w.writeManifest(w.seg); err != nil {
 		return err
 	}
-	if err := w.f.Sync(); err != nil {
-		// SYNC-DEGRADED, NOT poisoned: bufio.Flush succeeded, so every line is on disk (OS page
-		// cache) — only the fsync failed. KEEP the segment (do NOT set broken/reopen; that would
-		// abandon a valid segment and drop its tamper-evidence on a recoverable hiccup, fold-3
-		// #1). The returned error surfaces on Health; the next Flush retries the Sync.
-		return err
-	}
+	w.seg++
+	w.lines, w.bytes, w.firstSeq, w.lastSeq = 0, 0, 0, 0
 	return nil
 }
 
-// rotate flushes + closes the current segment, writes its manifest, and opens the next.
-func (w *JSONLWriter) rotate() error {
-	if err := w.closeSegment(); err != nil {
-		return err
-	}
-	return w.openSegment()
-}
-
-func (w *JSONLWriter) closeSegment() error {
-	if w.f == nil {
-		return nil
-	}
-	if err := w.w.Flush(); err != nil {
-		w.broken = true // POISONED on the rotation/close path too (fold-3 #2) — else the next
-		return err      // Append would write into the still-poisoned bufio and drop an event before healing
-	}
-	name := filepath.Base(w.f.Name())
-	if err := w.f.Close(); err != nil {
-		return err
-	}
-	w.f = nil
-	// A manifest is written ONLY for a segment that actually holds lines — an empty
-	// trailing segment (rotate-then-close) needs no record.
+// Close seals the final open segment (writes its manifest) on shutdown. No open handle to close
+// — every batch already fsync'd — so this only records the manifest for the partial last segment.
+func (w *JSONLWriter) Close() error {
 	if w.lines == 0 {
-		return os.Remove(filepath.Join(w.dir, name)) // drop the empty segment
+		return nil
 	}
+	return w.writeManifest(w.seg)
+}
+
+// writeManifest records + fsyncs a sealed segment's manifest. FSYNC-FIRST is satisfied by
+// construction: the segment file was fsync'd on every WriteBatch, so the manifest can never
+// claim more than the durable content (no false TRUNCATED). The manifest is itself fsync'd so a
+// crash can't lose it and turn a durable segment into a "manifest missing" false tamper alarm.
+func (w *JSONLWriter) writeManifest(seg int) error {
+	name := segmentName(seg)
 	m := Manifest{File: name, FirstSeq: w.firstSeq, LastSeq: w.lastSeq, Lines: w.lines, Bytes: w.bytes, ClosedAt: w.now().UTC()}
 	mb, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(w.dir, name+".manifest"), append(mb, '\n'), 0o640)
+	return writeFileSync(filepath.Join(w.dir, name+".manifest"), append(mb, '\n'))
 }
 
-// Close flushes + closes the final open segment (writing its manifest).
-func (w *JSONLWriter) Close() error { return w.closeSegment() }
+// writeFileSync writes b to path and fsyncs it (durable manifest).
+func writeFileSync(path string, b []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// truncateTornTail drops a trailing partial line (bytes after the last newline) — a crash or a
+// failed write can leave one. A file with no newline at all is reset to empty. Idempotent.
+func truncateTornTail(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	i := bytes.LastIndexByte(data, '\n')
+	if i+1 == len(data) {
+		return nil // already ends on a clean line boundary
+	}
+	return os.Truncate(path, int64(i+1)) // i==-1 -> truncate to 0 (whole file was a torn fragment)
+}
 
 // --- tamper-evidence read side ---
 
-// ErrSegmentAbandoned reports a segment POISONED mid-write and abandoned (marker present, no
-// manifest): UNVERIFIABLE + incomplete, which is DISTINCT from a tampered/truncated closed
-// segment. An auditor reads it as a legible gap (a disk hiccup abandoned it), NOT as evidence
-// of tampering; the lost events remain queryable in the PG hot-window.
-var ErrSegmentAbandoned = errors.New("segment abandoned mid-write (unverifiable, incomplete — not tampered)")
-
-// VerifySegment re-counts a closed segment's lines against its manifest, catching truncation
-// or line loss. It fails LOUD on an abandoned segment (distinct error) and on a manifest-less
-// segment — the tamper-evidence guarantee covers cleanly-closed segments only; the single
-// currently-OPEN segment is legitimately manifest-less and is not verified (a stream verifier
-// skips the newest open segment).
+// VerifySegment re-counts a SEALED segment's lines against its manifest, catching truncation or
+// line loss. A missing manifest means the segment is not sealed — either the single currently-
+// OPEN active segment (legitimately manifest-less; a stream verifier skips the newest one) or a
+// genuinely lost/deleted manifest. TORN-TAIL RULE: sealed segments never contain a torn tail (a
+// crash's partial line lives only on the active segment and is truncated before the next append),
+// so a count mismatch on a sealed segment is a genuine tamper/loss signal, not a crash artifact.
 func VerifySegment(segmentPath string) error {
-	if _, err := os.Stat(segmentPath + abandonedExt); err == nil {
-		return fmt.Errorf("%s: %w", filepath.Base(segmentPath), ErrSegmentAbandoned)
-	}
 	mb, err := os.ReadFile(segmentPath + ".manifest")
 	if err != nil {
-		return fmt.Errorf("manifest missing for %s: %w", filepath.Base(segmentPath), err)
+		return fmt.Errorf("manifest missing for %s (unsealed/active or deleted): %w", filepath.Base(segmentPath), err)
 	}
 	var m Manifest
 	if err := json.Unmarshal(mb, &m); err != nil {
@@ -270,9 +312,9 @@ func VerifySegment(segmentPath string) error {
 	return nil
 }
 
-// ScanSeqGaps reads events (any order, possibly multi-org) and reports, per org, any
-// MISSING seq between the min and max observed — a hole in the audit trail must be
-// legible as a hole. It reports gaps, it does not repair.
+// ScanSeqGaps reads events (any order, possibly multi-org) and reports, per org, any MISSING
+// seq between the min and max observed — a hole in the audit trail must be legible as a hole. It
+// reports gaps, it does not repair.
 func ScanSeqGaps(events []Event) map[string][]int64 {
 	byOrg := map[string][]int64{}
 	for _, e := range events {
@@ -290,18 +332,12 @@ func ScanSeqGaps(events []Event) map[string][]int64 {
 	return gaps
 }
 
-// ExportOrg streams an org's lines VERBATIM from the JSONL segments under dir to w — a
-// READER, never a re-serializer, so the per-line seq tamper-evidence is preserved
-// byte-for-byte (timestamps ride as facts inside the line, not as integrity anchors).
-// Segments are read in name order (chronological, matching seq order); a line is emitted
-// iff its org_id matches. Decoding reads ONLY org_id; the ORIGINAL bytes are written.
-//
-// EVENTUALLY-CONSISTENT TAIL (fold-2 #4, accepted): the export runs WITHOUT the ingest lock,
-// so if a batch is mid-flush on the active segment the scanner may read a partial final line,
-// fail to decode it, and skip it — the export can lag the very newest committed event(s) by
-// one flush. Those events are durable in PG and appear on the next export. We deliberately do
-// NOT hold the ingest mutex across a potentially large export (it would stall all ingest); a
-// point-in-time SIEM export being a hair behind the live tail is the correct trade.
+// ExportOrg streams an org's lines VERBATIM from the JSONL segments under dir to w — a READER,
+// never a re-serializer, so the per-line seq tamper-evidence is preserved byte-for-byte.
+// Segments are read in name order (chronological, matching seq order); a line is emitted iff its
+// org_id matches. A partial/torn or non-JSON line is skipped (it never survives into a sealed
+// segment; on the active segment it is a not-yet-clean tail, eventually-consistent — its event
+// is in PG). Decoding reads ONLY org_id; the ORIGINAL bytes are written.
 func ExportOrg(dir string, orgID uuid.UUID, w io.Writer) error {
 	segs, err := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
 	if err != nil {
@@ -309,10 +345,6 @@ func ExportOrg(dir string, orgID uuid.UUID, w io.Writer) error {
 	}
 	sort.Strings(segs)
 	for _, seg := range segs {
-		if _, err := os.Stat(seg + abandonedExt); err == nil {
-			continue // ABANDONED/unverifiable segment — excluded from the verbatim export (not
-			// silently ridden along); its committed events remain queryable in the PG hot-window.
-		}
 		if err := exportSegment(seg, orgID, w); err != nil {
 			return err
 		}
@@ -337,7 +369,7 @@ func exportSegment(path string, orgID uuid.UUID, w io.Writer) error {
 			OrgID uuid.UUID `json:"org_id"`
 		}
 		if err := json.Unmarshal(line, &probe); err != nil || probe.OrgID != orgID {
-			continue // not this org (or unparseable) — skip; never emit a foreign line
+			continue // not this org, or a torn/non-JSON tail — skip; never emit a foreign/partial line
 		}
 		if _, err := w.Write(line); err != nil { // VERBATIM original bytes, not a re-marshal
 			return err

@@ -15,8 +15,7 @@ import (
 
 type failingStream struct{ calls int }
 
-func (f *failingStream) Append(Event) error { f.calls++; return errors.New("disk full") }
-func (f *failingStream) Flush() error        { return errors.New("disk full") }
+func (f *failingStream) WriteBatch([]Event) error { f.calls++; return errors.New("disk full") }
 
 type stubGrants struct {
 	dstResource *uuid.UUID

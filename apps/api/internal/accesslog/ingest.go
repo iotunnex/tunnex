@@ -85,12 +85,12 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 // (a write failure does NOT fail the batch — PG stays the queryable store; the failure
 // surfaces on Health and the per-line seq leaves a durable, detectable hole in the stream).
 // streamWriter is the JSONL source-of-truth sink (JSONLWriter in production; a fake in
-// tests, to exercise the best-effort write-failure path). Flush makes the batch's appended
-// lines DURABLE (bufio -> OS -> fsync); the ingest calls it once per batch so a graceful
-// shutdown or a reader never sees committed-in-PG-but-buffered-in-memory events.
+// tests, to exercise the best-effort write-failure path). WriteBatch records a whole batch
+// DURABLY (open -> write -> fsync -> close) in one call — on a nil return every line is on
+// disk. The ingest calls it AFTER the PG commit, so a failure means "PG has it, the JSONL
+// shows a detectable seq hole", never a silent divergence.
 type streamWriter interface {
-	Append(Event) error
-	Flush() error
+	WriteBatch([]Event) error
 }
 
 type Ingester struct {
@@ -191,26 +191,14 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	}
 
 	// JSONL (source-of-truth stream) — best-effort, AFTER commit so it only ever reflects
-	// committed events. A failure marks Health (legible divergence) + leaves a seq hole;
-	// it does NOT fail the batch (else a retry would duplicate committed PG rows).
+	// committed events. WriteBatch is durable-on-return (fsync); a failure marks Health and
+	// leaves a detectable seq hole (the events are in PG), and does NOT fail the batch (else a
+	// retry would duplicate committed PG rows). PG-commit-THEN-JSONL is the non-circular pair:
+	// "PG has it, JSONL shows a hole" — never silent divergence.
 	if i.jsonl != nil {
-		wrote := true
-		for idx := range events {
-			if err := i.jsonl.Append(events[idx]); err != nil {
-				wrote = false
-				i.health.jsonlFailed(i.now())
-			}
-		}
-		// Flush the batch to disk (bufio -> OS -> fsync). Append only fills a buffer; without
-		// this the lines are not durable and a reader/export sees nothing until a far-off
-		// rotation (box-walk finding). A flush failure is a real durability failure, so it too
-		// marks Health (not just per-line write errors) — Health must not read green while the
-		// source-of-truth is diverging from PG.
-		if err := i.jsonl.Flush(); err != nil {
-			wrote = false
+		if err := i.jsonl.WriteBatch(events); err != nil {
 			i.health.jsonlFailed(i.now())
-		}
-		if wrote {
+		} else {
 			i.health.jsonlRecovered()
 		}
 	}
