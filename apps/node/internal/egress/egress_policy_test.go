@@ -5,6 +5,7 @@ package egress
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -214,14 +215,57 @@ func TestForwardRulesFlowLogGrouping(t *testing.T) {
 	if !strings.Contains(v4on, `log prefix "tnx:deny " group 5`) {
 		t.Fatalf("logging ON must log denies (flow-start): %q", v4on)
 	}
-	if !strings.Contains(v4on, " accept\n") || !strings.Contains(v4on, " drop\n") {
-		t.Fatalf("verdicts must be preserved with logging on: %q", v4on)
+	if !strings.Contains(v4on, " accept\n") {
+		t.Fatalf("allow verdict must be preserved with logging on: %q", v4on)
+	}
+	// The deny tail's verdict must come BEFORE the trailing comment. nft requires `comment`
+	// to be the LAST token in a rule; the box-walk caught the inverted `counter comment ...
+	// drop` form as a hard syntax error that made the whole atomic apply fail (stranding the
+	// gateway at cold-start deny-all). Asserting `drop\n` (as this test once did) ENCODED the
+	// bug — it only matched the invalid ordering. Parse-validated by TestEnforcingLoggedRulesetIsValidNft.
+	if !strings.Contains(v4on, "counter drop comment \"tunnex_default_drop\"\n") {
+		t.Fatalf("deny verdict must precede the trailing comment (valid nft): %q", v4on)
 	}
 	// The enforcement match is present with and without logging (packet fate unchanged).
 	const match = "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24"
 	if !strings.Contains(v4off, match) || !strings.Contains(v4on, match) {
 		t.Fatalf("the enforcement match must be present regardless of logging:\n off=%q\n on=%q", v4off, v4on)
 	}
+}
+
+// TestEnforcingLoggedRulesetIsValidNft is the regression guard for the box-walk finding:
+// the logged deny tail rendered `counter comment "..." drop`, which nft REJECTS (`comment`
+// must be the last token in a rule). Because the whole ruleset is ONE atomic `nft -f -`
+// transaction, that one bad line failed EVERY enforcing apply — silently stranding the
+// gateway at its cold-start deny-all (fail-closed, but the policy never landed). The other
+// egress tests string-check the render but never PARSE it, so the class slipped. This test
+// shells `nft -c` (check/parse only — no commit) on the rendered enforcing+logging ruleset.
+// It fails ONLY on a detected syntax error; where nft is absent or refuses without privilege
+// it SKIPS (the box-walk host applies the real ruleset, the ultimate proof).
+func TestEnforcingLoggedRulesetIsValidNft(t *testing.T) {
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Skip("nft not present; parse-guard runs on the box-walk host / nftables-equipped CI")
+	}
+	m := New("wg0")
+	m.SetFlowLogGroup(100)
+	m.SetPolicy(&nodepolicy.Compiled{
+		Version: 2, Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Allow: []nodepolicy.AllowEntry{
+			{SrcIP: "10.99.0.2", DstCIDR: "10.99.0.3/32", Protocol: "any", RuleID: "rid-1"},
+			{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rid-2"},
+		},
+	})
+	rs := m.ruleset("10.99.0.1/24")
+	cmd := exec.Command("nft", "-c", "-f", "-")
+	cmd.Stdin = strings.NewReader(rs)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return // parses clean
+	}
+	if strings.Contains(strings.ToLower(string(out)), "syntax error") {
+		t.Fatalf("rendered enforcing+logging ruleset is invalid nft (box-walk regression):\n%s\nRULESET:\n%s", out, rs)
+	}
+	t.Skipf("nft check inconclusive (likely needs privilege in this env): %v: %s", err, out)
 }
 
 func TestRenderAllowSanitizesAndSkips(t *testing.T) {

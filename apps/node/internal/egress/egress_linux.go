@@ -281,7 +281,7 @@ func denyDrop(group int) string {
 	if group <= 0 {
 		return dropCounter
 	}
-	return fmt.Sprintf("    ct state new%s counter comment \"tunnex_default_drop\" drop\n", logClause(flowlog.EncodePrefix(""), group))
+	return fmt.Sprintf("    ct state new%s counter drop comment \"tunnex_default_drop\"\n", logClause(flowlog.EncodePrefix(""), group))
 }
 
 // allowMatch turns one compiled allow into the ENFORCEMENT clause (match + counter, NO
