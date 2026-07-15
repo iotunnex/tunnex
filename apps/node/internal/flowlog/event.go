@@ -18,6 +18,13 @@ type Verdict string
 const (
 	VerdictAllow Verdict = "allow"
 	VerdictDeny  Verdict = "deny"
+	// VerdictTerminated is a flow TORN DOWN by a policy change — the DORMANT seam (6/n): a
+	// future agent-side conntrack flush on rule-revoke will emit an Event with this verdict
+	// + the REVOKED grant's RuleID (the carried "conntrack-kill, same rule identity" binding).
+	// Not produced by the nflog pump (that only sees allow/deny at flow-start); the kill code
+	// constructs it directly and buffers it. The kill itself is a ledgered S7.2-class
+	// enforcement follow-up (see docs/S7.5.1-decisions.md); this verdict is the ready contract.
+	VerdictTerminated Verdict = "terminated"
 )
 
 // Event is ONE flow observation the agent ships to the control plane. The agent stamps

@@ -13,8 +13,9 @@ import (
 
 // Wire verdict values (the agent's flowlog.Verdict, as a string on the ingest wire).
 const (
-	wireAllow = "allow"
-	wireDeny  = "deny"
+	wireAllow      = "allow"
+	wireDeny       = "deny"
+	wireTerminated = "terminated" // 6/n seam: a flow torn down by a policy-rule revoke
 )
 
 // DenyAggregateThreshold bounds the port-scan log-DoS (D1): within ONE report batch (the
@@ -153,11 +154,16 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 	out := make([]Event, 0, len(wire))
 	denyBySrc := map[string][]WireEvent{}
 	for _, w := range wire {
-		if w.Verdict == wireDeny {
+		switch w.Verdict {
+		case wireDeny:
 			denyBySrc[w.SrcIP] = append(denyBySrc[w.SrcIP], w)
-			continue
+		case wireTerminated:
+			// A flow torn down by a rule-revoke — enriched on the REVOKED grant's rule_id (the
+			// carried binding), NEVER aggregated (each termination is a distinct event).
+			out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionTerminated))
+		default: // allow
+			out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionAllow))
 		}
-		out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionAllow))
 	}
 	// Deterministic order: aggregate/emit denies by src.
 	srcs := make([]string, 0, len(denyBySrc))

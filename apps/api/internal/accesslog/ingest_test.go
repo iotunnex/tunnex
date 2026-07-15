@@ -192,3 +192,41 @@ func TestIngestSeqContiguousAcrossBatches(t *testing.T) {
 		}
 	}
 }
+
+// 6/n seam: a `terminated` wire event (a flow torn down by a rule-revoke) ingests as
+// DecisionTerminated, enriched on the SAME rule_id as the revoked grant (the carried
+// binding), and is NEVER aggregated.
+func TestIngestTerminatedKeyedOnRuleID(t *testing.T) {
+	q, pool, org := ingestPool(t)
+	ctx := context.Background()
+	rule := uuid.New()
+	res := uuid.New()
+	ing := NewIngester(pool, nil, stubGrants{dstResource: &res, known: rule}, nil, nil)
+	batch := []WireEvent{
+		{OccurredAt: time.Now().UTC(), Verdict: "terminated", RuleID: rule.String(), SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 5432},
+		{OccurredAt: time.Now().UTC(), Verdict: "terminated", RuleID: rule.String(), SrcIP: "10.99.0.10", DstIP: "10.0.5.6", Protocol: "tcp", DstPort: 5433},
+	}
+	if err := ing.IngestBatch(ctx, org, uuid.New(), batch, 0); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	rows, err := q.ListAccessDenies(ctx, sqlc.ListAccessDeniesParams{OrgID: org, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: maxUUID, PageLimit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two distinct terminations (never collapsed), each keyed on the revoked grant.
+	if len(rows) != 2 {
+		t.Fatalf("terminated events must NOT aggregate: got %d, want 2", len(rows))
+	}
+	for _, r := range rows {
+		e := FromRow(r)
+		if e.Decision != DecisionTerminated {
+			t.Fatalf("want decision=terminated, got %q", e.Decision)
+		}
+		if e.RuleID == nil || *e.RuleID != rule {
+			t.Fatalf("terminated must carry the revoked grant's rule_id: %+v", e)
+		}
+		if e.DstResourceID == nil || *e.DstResourceID != res {
+			t.Fatalf("terminated must be grant-enriched (dst resource): %+v", e)
+		}
+	}
+}
