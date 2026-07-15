@@ -5,6 +5,7 @@ package http
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,7 +29,17 @@ func (d syncDeprovisioner) DeactivateForSync(ctx context.Context, orgID, userID 
 // NewIdpSyncPort builds the enterprise IdP-sync service: sqlc + AES-GCM sealer + the device pusher
 // (the same org-wide recompile the tenancy sweep uses) + the deactivate sweep behind Deprovisioner.
 func NewIdpSyncPort(pool *pgxpool.Pool, sealer *crypto.Sealer, members *tenancy.MembershipService, pusher *devices.Service, logger *slog.Logger) idpSyncPort {
-	return idpsync.NewService(pool, sealer, pusher, syncDeprovisioner{members: members}, logger)
+	svc := idpsync.NewService(pool, sealer, pusher, syncDeprovisioner{members: members}, logger)
+	// Box-walk / e2e harness: a file-backed FAKE directory replaces live Graph so directory state
+	// can be mutated between sync legs by editing JSON. Gated behind an env var + a loud warning;
+	// never active in a normal deploy. (S7.5.2 slice 5.)
+	if path := os.Getenv("TUNNEX_IDPSYNC_FAKE_DIR"); path != "" {
+		svc.SetProviderFactory(idpsync.FileProviderFactory(path))
+		logger.Warn("idp_sync_FAKE_DIRECTORY_ACTIVE",
+			slog.String("path", path),
+			slog.String("warning", "file-backed fake directory is serving group membership — NOT FOR PRODUCTION"))
+	}
+	return svc
 }
 
 // StartIdpSyncPoller runs the background directory poll every 10 minutes (D2), jittered so many
