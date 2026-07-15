@@ -13,6 +13,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// A batch's lines must be DURABLE + readable after Flush, WITHOUT waiting for rotation or
+// Close. The box-walk found the writer buffered lines in a bufio.Writer and flushed only on
+// rotation/Close — so a reader/export (and a graceful SIGTERM shutdown) saw an empty segment
+// while PG already held the committed rows (the source-of-truth silently diverging). Flush
+// (bufio -> OS -> fsync) makes the open segment durable + readable immediately.
+func TestJSONLFlushMakesOpenSegmentDurable(t *testing.T) {
+	dir := t.TempDir()
+	jw, err := NewJSONLWriter(dir, 1<<30) // huge maxBytes: no rotation, so ONLY Flush can persist
+	if err != nil {
+		t.Fatal(err)
+	}
+	org := uuid.New()
+	for i := 0; i < 3; i++ {
+		if err := jw.Append(Event{OrgID: org, Seq: int64(i + 1), Decision: DecisionAllow}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := jw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// Read the OPEN segment back from disk via a fresh reader — no Close/rotation happened.
+	var out bytes.Buffer
+	if err := ExportOrg(dir, org, &out); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out.String(), "\n"); n != 3 {
+		t.Fatalf("after Flush the open segment must expose all 3 committed lines on disk, got %d:\n%s", n, out.String())
+	}
+}
+
 // ExportOrg copies an org's lines VERBATIM (a reader, never a re-serializer): the export is
 // byte-identical to the org's stored lines, isolated (no foreign org leaks), and the
 // per-line seq tamper-evidence survives.

@@ -71,8 +71,13 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 // failure does NOT fail the batch — PG stays the queryable store; the failure surfaces on
 // Health and the per-line seq leaves a durable, detectable hole in the stream).
 // streamWriter is the JSONL source-of-truth sink (JSONLWriter in production; a fake in
-// tests, to exercise the best-effort write-failure path).
-type streamWriter interface{ Append(Event) error }
+// tests, to exercise the best-effort write-failure path). Flush makes the batch's appended
+// lines DURABLE (bufio -> OS -> fsync); the ingest calls it once per batch so a graceful
+// shutdown or a reader never sees committed-in-PG-but-buffered-in-memory events.
+type streamWriter interface {
+	Append(Event) error
+	Flush() error
+}
 
 type Ingester struct {
 	pool   *pgxpool.Pool
@@ -138,12 +143,24 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	// committed events. A failure marks Health (legible divergence) + leaves a seq hole;
 	// it does NOT fail the batch (else a retry would duplicate committed PG rows).
 	if i.jsonl != nil {
+		wrote := true
 		for idx := range events {
 			if err := i.jsonl.Append(events[idx]); err != nil {
+				wrote = false
 				i.health.jsonlFailed(i.now())
-			} else {
-				i.health.jsonlRecovered()
 			}
+		}
+		// Flush the batch to disk (bufio -> OS -> fsync). Append only fills a buffer; without
+		// this the lines are not durable and a reader/export sees nothing until a far-off
+		// rotation (box-walk finding). A flush failure is a real durability failure, so it too
+		// marks Health (not just per-line write errors) — Health must not read green while the
+		// source-of-truth is diverging from PG.
+		if err := i.jsonl.Flush(); err != nil {
+			wrote = false
+			i.health.jsonlFailed(i.now())
+		}
+		if wrote {
+			i.health.jsonlRecovered()
 		}
 	}
 	return nil

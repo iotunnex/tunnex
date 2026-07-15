@@ -193,9 +193,11 @@ func main() {
 	// S7.5.1 flow-event ingest: the JSONL source-of-truth stream + the PG hot-window, wired
 	// onto the SAME mTLS channel (node identity = client cert). Best-effort; a writer failure
 	// here must not stop the control plane, so log-and-continue rather than exit.
-	if flowJSONL, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
+	var flowJSONL *accesslog.JSONLWriter
+	if fw, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
 		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
 	} else {
+		flowJSONL = fw
 		fq := sqlc.New(pool)
 		agentCh.SetFlowIngester(accesslog.NewIngester(pool, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
 	}
@@ -242,6 +244,15 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
+	// Flush + close the JSONL source-of-truth AFTER the agent channel drains (no in-flight
+	// flow-event ingest races the close), so the final batch's buffered lines are durable and
+	// the last segment's manifest is written before exit — a graceful stop must not drop
+	// committed-in-PG events from the stream (box-walk finding).
+	if flowJSONL != nil {
+		if err := flowJSONL.Close(); err != nil {
+			logger.Error("flowlog_close_error", slog.String("error", err.Error()))
+		}
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))
 		os.Exit(1)

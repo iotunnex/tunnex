@@ -97,6 +97,22 @@ func (w *JSONLWriter) Append(e Event) error {
 	return nil
 }
 
+// Flush pushes buffered lines out of the bufio buffer to the OS and fsyncs the open
+// segment. The ingest calls this after each batch so committed events are DURABLE on disk
+// (and visible to a reader/ExportOrg) before the process can exit. Without it, Append only
+// fills a bufio buffer that is flushed solely on rotation/Close — so a graceful shutdown
+// (SIGTERM) or an export would see an empty/short segment while PG already holds the rows,
+// the source-of-truth silently diverging (box-walk finding). No-op if no segment is open.
+func (w *JSONLWriter) Flush() error {
+	if w.f == nil {
+		return nil
+	}
+	if err := w.w.Flush(); err != nil {
+		return err
+	}
+	return w.f.Sync()
+}
+
 // rotate flushes + closes the current segment, writes its manifest, and opens the next.
 func (w *JSONLWriter) rotate() error {
 	if err := w.closeSegment(); err != nil {
