@@ -19,6 +19,9 @@ type Querier interface {
 	// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
 	// the audit event for a no-op re-add (idempotent, still 204).
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
+	// Idempotent add of a synced member. Explicit origin='idp_sync'. 0 rows on conflict = already
+	// present (no state change).
+	AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	// S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
@@ -132,6 +135,11 @@ type Querier interface {
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.
 	GetEnabledSSOConfigByProvider(ctx context.Context, arg GetEnabledSSOConfigByProviderParams) (SsoConfig, error)
+	// S7.5.2 IdP-group sync. Enterprise. All tenant-scoped by org_id.
+	// The reconciler reads the desired membership from a DirectoryProvider (Graph/etc.) and drives
+	// these to converge group_members(origin='idp_sync') — NEVER touching manual rows (disjoint by D1).
+	// ── sync configs (per org, per provider) ─────────────────────────────────────────
+	GetIdpSyncConfig(ctx context.Context, arg GetIdpSyncConfigParams) (IdpSyncConfig, error)
 	// lint:cross-org — the token hash IS the authorization key; lookup is by token,
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
@@ -142,6 +150,12 @@ type Querier interface {
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
 	GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, error)
+	// ── directory email → Tunnex org user ────────────────────────────────────────────
+	// Resolve a directory member's email to a Tunnex user that BELONGS to this org (membership
+	// join). A directory member with no matching org user is skipped by the reconciler (sync grants
+	// access to existing users; it does not JIT-provision — that's S2.5). Case-insensitive: the
+	// provider already lower-cases; users.email is stored lower-cased.
+	GetOrgUserByEmail(ctx context.Context, arg GetOrgUserByEmailParams) (GetOrgUserByEmailRow, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
@@ -231,9 +245,19 @@ type Querier interface {
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
+	// The poller's work-list: every org/provider with sync turned on.
+	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)
+	// ── idp-origin membership (the reconcile target) ─────────────────────────────────
+	// Current idp-origin members of one group (user ids). Filtered to origin='idp_sync' so a
+	// hand-added row could never appear here and get computed into a removal (belt over disjoint).
+	ListIdpGroupMemberIDs(ctx context.Context, arg ListIdpGroupMemberIDsParams) ([]uuid.UUID, error)
+	// ── idp_sync groups (the mappings to reconcile) ──────────────────────────────────
+	// Every Tunnex group bound to an IdP group for this org+provider — the units the reconciler
+	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.
+	ListIdpSyncGroups(ctx context.Context, arg ListIdpSyncGroupsParams) ([]ListIdpSyncGroupsRow, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
@@ -274,11 +298,22 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	// One stamp for all three poll outcomes (the two-tier health, D2):
+	//   success  → ok=true,  advance_clock=true  (last_sync_at = now; error cleared)
+	//   transient→ ok=false, advance_clock=false (last_sync_at FROZEN at the last good sync — the
+	//              staleness the escalation tier measures; a Graph outage must NOT reset that clock)
+	//   gone     → ok=false, advance_clock=true  (fetch itself succeeded, so data is fresh: immediate
+	//              tier only, never escalates — a stable known-bad mapping, not a worsening outage)
+	// advance_clock also drives whether last_sync_error is cleared vs set.
+	RecordIdpSyncResult(ctx context.Context, arg RecordIdpSyncResultParams) error
 	// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.
 	RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a
+	// manual membership even if one somehow shared the (group,user) key.
+	RemoveIdpGroupMember(ctx context.Context, arg RemoveIdpGroupMemberParams) (int64, error)
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
