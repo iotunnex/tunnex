@@ -10,4 +10,4 @@ import (
 
 // NewAccessLogPort — open build returns nil, so the access-log query endpoints reply
 // 403 edition_required (Zero Trust visibility is enterprise).
-func NewAccessLogPort(_ *pgxpool.Pool, _ *accesslog.Health) accessLogPort { return nil }
+func NewAccessLogPort(_ *pgxpool.Pool, _ *accesslog.Health, _ string) accessLogPort { return nil }

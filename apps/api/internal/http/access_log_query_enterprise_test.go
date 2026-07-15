@@ -44,7 +44,7 @@ func TestAccessLogPortKeysetAndDeniesFilter(t *testing.T) {
 		t.Fatalf("ingest: %v", err)
 	}
 
-	port := NewAccessLogPort(pool, accesslog.NewHealth())
+	port := NewAccessLogPort(pool, accesslog.NewHealth(), t.TempDir())
 	future := time.Now().Add(time.Hour)
 
 	// Full feed: 3 events, newest-first (created_at DESC, id DESC).

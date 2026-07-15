@@ -1072,6 +1072,9 @@ type ClientInterface interface {
 	// ListAccessEvents request
 	ListAccessEvents(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ExportAccessEvents request
+	ExportAccessEvents(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetAccessLogHealth request
 	GetAccessLogHealth(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1696,6 +1699,18 @@ func (c *Client) UpdateOrganization(ctx context.Context, orgId openapi_types.UUI
 
 func (c *Client) ListAccessEvents(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAccessEventsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ExportAccessEvents(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportAccessEventsRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -3466,6 +3481,40 @@ func NewListAccessEventsRequest(server string, orgId openapi_types.UUID, params 
 		}
 
 		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportAccessEventsRequest generates requests for ExportAccessEvents
+func NewExportAccessEventsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/access-events/export", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -5556,6 +5605,9 @@ type ClientWithResponsesInterface interface {
 	// ListAccessEventsWithResponse request
 	ListAccessEventsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAccessEventsParams, reqEditors ...RequestEditorFn) (*ListAccessEventsResponse, error)
 
+	// ExportAccessEventsWithResponse request
+	ExportAccessEventsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ExportAccessEventsResponse, error)
+
 	// GetAccessLogHealthWithResponse request
 	GetAccessLogHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetAccessLogHealthResponse, error)
 
@@ -6310,6 +6362,28 @@ func (r ListAccessEventsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListAccessEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ExportAccessEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportAccessEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportAccessEventsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7628,6 +7702,15 @@ func (c *ClientWithResponses) ListAccessEventsWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseListAccessEventsResponse(rsp)
+}
+
+// ExportAccessEventsWithResponse request returning *ExportAccessEventsResponse
+func (c *ClientWithResponses) ExportAccessEventsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ExportAccessEventsResponse, error) {
+	rsp, err := c.ExportAccessEvents(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportAccessEventsResponse(rsp)
 }
 
 // GetAccessLogHealthWithResponse request returning *GetAccessLogHealthResponse
@@ -8979,6 +9062,32 @@ func ParseListAccessEventsResponse(rsp *http.Response) (*ListAccessEventsRespons
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseExportAccessEventsResponse parses an HTTP response from a ExportAccessEventsWithResponse call
+func ParseExportAccessEventsResponse(rsp *http.Response) (*ExportAccessEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportAccessEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

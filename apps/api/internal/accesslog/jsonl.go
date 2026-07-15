@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // JSONLWriter appends access events as JSON lines to a rotating stream on the customer's
@@ -183,4 +186,52 @@ func ScanSeqGaps(events []Event) map[string][]int64 {
 		}
 	}
 	return gaps
+}
+
+// ExportOrg streams an org's lines VERBATIM from the JSONL segments under dir to w — a
+// READER, never a re-serializer, so the per-line seq tamper-evidence is preserved
+// byte-for-byte (timestamps ride as facts inside the line, not as integrity anchors).
+// Segments are read in name order (chronological, matching seq order); a line is emitted
+// iff its org_id matches. Decoding reads ONLY org_id; the ORIGINAL bytes are written.
+func ExportOrg(dir string, orgID uuid.UUID, w io.Writer) error {
+	segs, err := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(segs)
+	for _, seg := range segs {
+		if err := exportSegment(seg, orgID, w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func exportSegment(path string, orgID uuid.UUID, w io.Writer) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var probe struct {
+			OrgID uuid.UUID `json:"org_id"`
+		}
+		if err := json.Unmarshal(line, &probe); err != nil || probe.OrgID != orgID {
+			continue // not this org (or unparseable) — skip; never emit a foreign line
+		}
+		if _, err := w.Write(line); err != nil { // VERBATIM original bytes, not a re-marshal
+			return err
+		}
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
 }

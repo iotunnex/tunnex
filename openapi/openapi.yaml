@@ -605,6 +605,28 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/AccessEvent" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/access-events/export:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: exportAccessEvents
+      summary: Export the org's access events as the raw JSONL source-of-truth stream (enterprise)
+      description: >
+        Streams the org's lines VERBATIM from the JSONL source-of-truth (a reader, never a
+        re-serializer) so the per-line seq tamper-evidence is preserved byte-for-byte.
+      tags: [organizations]
+      responses:
+        "200":
+          description: The org's access events as newline-delimited JSON (JSONL). Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/x-ndjson:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/access-log/health:
     parameters:
       - name: orgId

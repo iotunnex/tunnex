@@ -522,6 +522,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/access-events/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Export the org's access events as the raw JSONL source-of-truth stream (enterprise)
+         * @description Streams the org's lines VERBATIM from the JSONL source-of-truth (a reader, never a re-serializer) so the per-line seq tamper-evidence is preserved byte-for-byte.
+         *
+         */
+        get: operations["exportAccessEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/access-log/health": {
         parameters: {
             query?: never;
@@ -2346,6 +2369,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessEvent"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exportAccessEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The org's access events as newline-delimited JSON (JSONL). Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": string;
                 };
             };
             default: components["responses"]["Error"];

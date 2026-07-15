@@ -169,7 +169,7 @@ func main() {
 		Sessions:              sessions,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
-		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
+		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth, cfg.FlowLogDir),
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,

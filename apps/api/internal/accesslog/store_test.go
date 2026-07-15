@@ -38,8 +38,12 @@ func TestStoreInsertListSweep(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM organizations WHERE id=$1`, org) })
 
 	rule := uuid.New()
+	// A fixed OLD created_at so the CROSS-ORG age sweep below can target ONLY this test's
+	// rows (packages test-run in parallel; other tests insert access_events at ~now, which a
+	// mid-cutoff excludes). created_at is the sweep/keyset clock — not the agent OccurredAt.
+	oldTime := time.Unix(1_000_000, 0).UTC() // ~1970
 	mk := func(seq int64, d Decision) Event {
-		return Event{ID: uuid.New(), Seq: seq, OrgID: org, OccurredAt: time.Now().UTC(), Decision: d,
+		return Event{ID: uuid.New(), CreatedAt: oldTime, Seq: seq, OrgID: org, OccurredAt: time.Now().UTC(), Decision: d,
 			RuleID: &rule, SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 5432}
 	}
 	// Insert 5 events; a duplicate (org,seq) is idempotent (0 rows).
@@ -75,8 +79,9 @@ func TestStoreInsertListSweep(t *testing.T) {
 	if n, err := q.SweepAccessEventsOverCap(ctx, sqlc.SweepAccessEventsOverCapParams{OrgID: org, KeepNewest: 2}); err != nil || n != 3 {
 		t.Fatalf("cap sweep deleted %d (err %v), want 3", n, err)
 	}
-	// Age sweep: everything is older than a future cutoff → deletes the rest (2).
-	if n, err := q.SweepAccessEventsByAge(ctx, time.Now().Add(time.Hour)); err != nil || n != 2 {
+	// Age sweep (CROSS-ORG): a cutoff just after this test's OLD rows deletes only them (the
+	// remaining 2), never concurrent packages' ~now rows.
+	if n, err := q.SweepAccessEventsByAge(ctx, oldTime.Add(time.Hour)); err != nil || n != 2 {
 		t.Fatalf("age sweep deleted %d (err %v), want 2", n, err)
 	}
 }

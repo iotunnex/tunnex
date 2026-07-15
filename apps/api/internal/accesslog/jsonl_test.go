@@ -2,6 +2,7 @@ package accesslog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,51 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ExportOrg copies an org's lines VERBATIM (a reader, never a re-serializer): the export is
+// byte-identical to the org's stored lines, isolated (no foreign org leaks), and the
+// per-line seq tamper-evidence survives.
+func TestExportOrgIsVerbatimAndIsolated(t *testing.T) {
+	dir := t.TempDir()
+	w, _ := NewJSONLWriter(dir, 1<<30) // one segment
+	orgA, orgB := uuid.New(), uuid.New()
+	for _, e := range []Event{ev(orgA, 1, DecisionDeny), ev(orgB, 1, DecisionAllow), ev(orgA, 2, DecisionAllow)} {
+		if err := w.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The ORIGINAL orgA lines, byte-for-byte, filtered from the raw segment.
+	raw, _ := os.ReadFile(filepath.Join(dir, "access-000001.jsonl"))
+	var wantLines []string
+	for _, ln := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		var p struct {
+			OrgID uuid.UUID `json:"org_id"`
+		}
+		_ = json.Unmarshal([]byte(ln), &p)
+		if p.OrgID == orgA {
+			wantLines = append(wantLines, ln)
+		}
+	}
+	want := strings.Join(wantLines, "\n") + "\n"
+
+	var buf bytes.Buffer
+	if err := ExportOrg(dir, orgA, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != want {
+		t.Fatalf("export not byte-identical:\n got  %q\n want %q", buf.String(), want)
+	}
+	if strings.Contains(buf.String(), orgB.String()) {
+		t.Fatal("export leaked a foreign org's line (isolation broken)")
+	}
+	if !strings.Contains(buf.String(), `"seq":1`) || !strings.Contains(buf.String(), `"seq":2`) {
+		t.Fatalf("export must preserve per-line seq (tamper-evidence): %s", buf.String())
+	}
+}
 
 // A gap event serializes with decision "gap" — unambiguous to a JSONL/SIEM parser, never a
 // deny lookalike (report line b). A parser keying on `decision` recovers it as a gap
