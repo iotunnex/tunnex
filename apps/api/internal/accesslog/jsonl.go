@@ -3,6 +3,7 @@ package accesslog
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -95,14 +96,35 @@ func (w *JSONLWriter) openSegment() error {
 	return nil
 }
 
-// reopen self-heals a poisoned writer (fold-2 #1): the bufio error is sticky, so on a
-// Write/Flush/Sync failure the ONLY way to record again is a fresh bufio around a fresh
-// segment. The poisoned segment is left WITHOUT a clean manifest — a legible gap (a
-// close-less segment is detectable), consistent with the best-effort/loss-is-legible model.
+// abandonedExt marks a POISONED segment that was abandoned mid-write (see the writer state
+// model). Distinct from ".manifest" (a cleanly-closed segment) — it names an incomplete,
+// UNVERIFIABLE segment so VerifySegment/export can tell "abandoned" from "tampered".
+const abandonedExt = ".abandoned"
+
+// WRITER STATE MODEL (fold-3 — one rule per failure mode; the single `broken` flag used to
+// conflate three modes):
+//   - HEALTHY: append/flush normally.
+//   - SYNC-DEGRADED (Flush: bufio.Flush ok, f.Sync fails): the lines ARE on disk (OS page
+//     cache — readable + manifest-able), only the fsync failed. Durability-degraded, NOT
+//     corruption → KEEP the segment (do NOT poison/reopen; that would abandon a valid segment
+//     and destroy its tamper-evidence on a recoverable hiccup). Surfaced via the returned
+//     error on Health; the next Flush retries the Sync.
+//   - POISONED (bufio.Write / bufio.Flush errors, on Append, Flush, OR closeSegment/rotate):
+//     the bufio's error is sticky and the segment is genuinely incomplete → set `broken`; the
+//     next Append reopens a fresh segment and ABANDONS this one (marker, no manifest).
+//
+// reopen self-heals a POISONED writer: it abandons the poisoned segment (best-effort marker so
+// the loss is legible + distinguishable from tampering) and opens a fresh one.
 func (w *JSONLWriter) reopen() error {
 	if w.f != nil {
-		_ = w.f.Close() // best-effort — the old file is already broken
+		name := filepath.Base(w.f.Name())
+		_ = w.f.Close() // best-effort — the old file is already poisoned
 		w.f = nil
+		// Mark the poisoned segment abandoned (best-effort — the disk may still be failing). Its
+		// content is genuinely incomplete (appended-but-unflushed lines are lost); the marker
+		// lets VerifySegment report it as abandoned/unverifiable (≠ tampered) and lets the export
+		// skip it. The lost events are still queryable in the PG hot-window.
+		_ = os.WriteFile(filepath.Join(w.dir, name+abandonedExt), []byte("abandoned\n"), 0o640)
 	}
 	return w.openSegment()
 }
@@ -151,11 +173,14 @@ func (w *JSONLWriter) Flush() error {
 		return nil
 	}
 	if err := w.w.Flush(); err != nil {
-		w.broken = true // sticky bufio error — the next Append reopens a fresh segment (fold-2 #1)
+		w.broken = true // POISONED (sticky bufio) — the next Append reopens a fresh segment
 		return err
 	}
 	if err := w.f.Sync(); err != nil {
-		w.broken = true
+		// SYNC-DEGRADED, NOT poisoned: bufio.Flush succeeded, so every line is on disk (OS page
+		// cache) — only the fsync failed. KEEP the segment (do NOT set broken/reopen; that would
+		// abandon a valid segment and drop its tamper-evidence on a recoverable hiccup, fold-3
+		// #1). The returned error surfaces on Health; the next Flush retries the Sync.
 		return err
 	}
 	return nil
@@ -174,7 +199,8 @@ func (w *JSONLWriter) closeSegment() error {
 		return nil
 	}
 	if err := w.w.Flush(); err != nil {
-		return err
+		w.broken = true // POISONED on the rotation/close path too (fold-3 #2) — else the next
+		return err      // Append would write into the still-poisoned bufio and drop an event before healing
 	}
 	name := filepath.Base(w.f.Name())
 	if err := w.f.Close(); err != nil {
@@ -199,9 +225,21 @@ func (w *JSONLWriter) Close() error { return w.closeSegment() }
 
 // --- tamper-evidence read side ---
 
-// VerifySegment re-counts a closed segment's lines against its manifest, catching
-// truncation or line loss. Returns an error naming the mismatch.
+// ErrSegmentAbandoned reports a segment POISONED mid-write and abandoned (marker present, no
+// manifest): UNVERIFIABLE + incomplete, which is DISTINCT from a tampered/truncated closed
+// segment. An auditor reads it as a legible gap (a disk hiccup abandoned it), NOT as evidence
+// of tampering; the lost events remain queryable in the PG hot-window.
+var ErrSegmentAbandoned = errors.New("segment abandoned mid-write (unverifiable, incomplete — not tampered)")
+
+// VerifySegment re-counts a closed segment's lines against its manifest, catching truncation
+// or line loss. It fails LOUD on an abandoned segment (distinct error) and on a manifest-less
+// segment — the tamper-evidence guarantee covers cleanly-closed segments only; the single
+// currently-OPEN segment is legitimately manifest-less and is not verified (a stream verifier
+// skips the newest open segment).
 func VerifySegment(segmentPath string) error {
+	if _, err := os.Stat(segmentPath + abandonedExt); err == nil {
+		return fmt.Errorf("%s: %w", filepath.Base(segmentPath), ErrSegmentAbandoned)
+	}
 	mb, err := os.ReadFile(segmentPath + ".manifest")
 	if err != nil {
 		return fmt.Errorf("manifest missing for %s: %w", filepath.Base(segmentPath), err)
@@ -271,6 +309,10 @@ func ExportOrg(dir string, orgID uuid.UUID, w io.Writer) error {
 	}
 	sort.Strings(segs)
 	for _, seg := range segs {
+		if _, err := os.Stat(seg + abandonedExt); err == nil {
+			continue // ABANDONED/unverifiable segment — excluded from the verbatim export (not
+			// silently ridden along); its committed events remain queryable in the PG hot-window.
+		}
 		if err := exportSegment(seg, orgID, w); err != nil {
 			return err
 		}

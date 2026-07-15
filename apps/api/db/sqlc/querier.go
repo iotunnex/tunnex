@@ -105,6 +105,14 @@ type Querier interface {
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
+	// lint:cross-org — retention housekeeping enumerates the orgs that actually HOLD events so the
+	// per-org row-cap sweep bounds every such org's hot-window disk use. This MUST include
+	// SOFT-DELETED orgs: a deleted org's event flood is exactly what the disk-guard cap must bound
+	// (fold-3 #3 reverted the fold-2 organizations-table enumeration, which excluded deleted orgs).
+	// PERF LEDGER: this is a DISTINCT scan of access_events every RetentionSweepInterval; if
+	// access_events scale makes the 10-min scan measurable, add a supporting index / cheaper
+	// enumeration (trigger, not a silent now-do-it).
+	DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -208,10 +216,6 @@ type Querier interface {
 	// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
 	// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
 	ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
-	// lint:cross-org — retention housekeeping enumerates orgs from the SMALL organizations table
-	// (fold-2 #7) instead of a full DISTINCT scan of the large access_events hot-window every
-	// sweep; the per-org row-cap sweep on an org with no events is a cheap no-op.
-	ListActiveOrgIDs(ctx context.Context) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops

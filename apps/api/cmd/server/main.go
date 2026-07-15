@@ -214,7 +214,7 @@ func main() {
 					return
 				case <-t.C:
 					sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					orgs, err := fq.ListActiveOrgIDs(sctx)
+					orgs, err := fq.DistinctAccessEventOrgs(sctx)
 					if err == nil {
 						_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
 					}

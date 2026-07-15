@@ -40,11 +40,15 @@ UPDATE organizations SET flow_seq = flow_seq + sqlc.arg(n)::bigint
 WHERE id = sqlc.arg(org_id) AND deleted_at IS NULL
 RETURNING flow_seq;
 
--- name: ListActiveOrgIDs :many
--- lint:cross-org — retention housekeeping enumerates orgs from the SMALL organizations table
--- (fold-2 #7) instead of a full DISTINCT scan of the large access_events hot-window every
--- sweep; the per-org row-cap sweep on an org with no events is a cheap no-op.
-SELECT id FROM organizations WHERE deleted_at IS NULL;
+-- name: DistinctAccessEventOrgs :many
+-- lint:cross-org — retention housekeeping enumerates the orgs that actually HOLD events so the
+-- per-org row-cap sweep bounds every such org's hot-window disk use. This MUST include
+-- SOFT-DELETED orgs: a deleted org's event flood is exactly what the disk-guard cap must bound
+-- (fold-3 #3 reverted the fold-2 organizations-table enumeration, which excluded deleted orgs).
+-- PERF LEDGER: this is a DISTINCT scan of access_events every RetentionSweepInterval; if
+-- access_events scale makes the 10-min scan measurable, add a supporting index / cheaper
+-- enumeration (trigger, not a silent now-do-it).
+SELECT DISTINCT org_id FROM access_events;
 
 -- name: ListAccessEvents :many
 -- Keyset page, newest-first, scoped by org. Expanded (created_at, id) < (cursor) predicate

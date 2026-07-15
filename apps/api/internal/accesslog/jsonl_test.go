@@ -14,11 +14,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeSink is an injectable segment file — failWrite makes Write/Sync fail, to drive the
-// sticky-error self-heal path (fold-2 #1) without a real disk-full.
+// fakeSink is an injectable segment file. failWrite makes Write (and Sync) fail — the bufio
+// POISONED mode; failSync makes ONLY Sync fail (Write ok) — the SYNC-DEGRADED mode. name lets
+// a test give two sinks distinct segment files.
 type fakeSink struct {
 	written   bytes.Buffer
 	failWrite bool
+	failSync  bool
+	name      string
 }
 
 func (f *fakeSink) Write(p []byte) (int, error) {
@@ -28,13 +31,91 @@ func (f *fakeSink) Write(p []byte) (int, error) {
 	return f.written.Write(p)
 }
 func (f *fakeSink) Sync() error {
-	if f.failWrite {
+	if f.failWrite || f.failSync {
 		return errors.New("sink sync failed")
 	}
 	return nil
 }
 func (f *fakeSink) Close() error { return nil }
-func (f *fakeSink) Name() string { return "fake-segment.jsonl" }
+func (f *fakeSink) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "fake-segment.jsonl"
+}
+
+// SYNC-DEGRADED (fold-3 #1): a Sync-ONLY failure must NOT poison the writer — the lines are on
+// disk (bufio flushed), only the fsync failed. The segment is KEPT (not abandoned/reopened, so
+// its tamper-evidence survives) and the next Flush retries the Sync; the error still surfaces
+// so Health degrades.
+func TestJSONLSyncFailureKeepsSegmentNoReopen(t *testing.T) {
+	dir := t.TempDir()
+	degraded := &fakeSink{failSync: true, name: "seg-a.jsonl"}
+	fresh := &fakeSink{name: "seg-b.jsonl"}
+	jw := &JSONLWriter{
+		dir: dir, maxBytes: 1 << 30, now: time.Now,
+		openFn: func(string) (segmentSink, error) { return fresh, nil }, // a reopen would switch to `fresh`
+	}
+	jw.f, jw.w = degraded, bufio.NewWriter(degraded)
+
+	if err := jw.Append(Event{Seq: 1, OrgID: uuid.New(), Decision: DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jw.Flush(); err == nil {
+		t.Fatal("a Sync failure must surface an error so Health degrades")
+	}
+	if jw.broken {
+		t.Fatal("a Sync-ONLY failure must NOT poison the writer (segment must be kept, not abandoned)")
+	}
+	if degraded.written.Len() == 0 {
+		t.Fatal("the line must be on disk (bufio flushed) despite the Sync failure")
+	}
+	if jw.f != segmentSink(degraded) {
+		t.Fatal("Sync failure must NOT reopen a new segment (must keep the same one)")
+	}
+	if fresh.written.Len() != 0 {
+		t.Fatal("no reopen — the fresh segment must be untouched")
+	}
+}
+
+// POISONED on the ROTATION path (fold-3 #2): a bufio.Flush failure during rotate()/closeSegment
+// must set `broken` so the next Append self-heals — else it would write into the still-poisoned
+// bufio and drop a committed event before healing.
+func TestJSONLRotateFlushFailurePoisons(t *testing.T) {
+	dir := t.TempDir()
+	fresh := &fakeSink{name: "seg-b.jsonl"}
+	poison := &fakeSink{failWrite: true, name: "seg-a.jsonl"}
+	jw := &JSONLWriter{
+		dir: dir, maxBytes: 1, now: time.Now, // maxBytes=1 → the first append triggers rotate
+		openFn: func(string) (segmentSink, error) { return fresh, nil },
+	}
+	jw.f, jw.w = poison, bufio.NewWriter(poison)
+
+	// Append buffers a line (> maxBytes) → rotate() → closeSegment() → bufio.Flush → poison.Write fails.
+	if err := jw.Append(Event{Seq: 1, OrgID: uuid.New(), Decision: DecisionAllow}); err == nil {
+		t.Fatal("a rotate/closeSegment flush to a failing sink must error")
+	}
+	if !jw.broken {
+		t.Fatal("a rotate/closeSegment flush failure must POISON the writer (fold-3 #2)")
+	}
+	// The next Append must reopen (self-heal), not ride the poisoned bufio.
+	if err := jw.Append(Event{Seq: 2, OrgID: uuid.New(), Decision: DecisionAllow}); err != nil {
+		t.Fatalf("next Append must reopen after a rotate-flush poison, got %v", err)
+	}
+	if jw.broken {
+		t.Fatal("writer must self-heal after reopen")
+	}
+	if fresh.written.Len() == 0 {
+		_ = jw.Flush()
+		if fresh.written.Len() == 0 {
+			t.Fatal("recovered write must land in the fresh segment")
+		}
+	}
+	// The poisoned segment must be marked ABANDONED (legible, distinct from tampered).
+	if _, err := os.Stat(filepath.Join(dir, "seg-a.jsonl"+abandonedExt)); err != nil {
+		t.Fatalf("poisoned segment must be marked abandoned: %v", err)
+	}
+}
 
 // A TRANSIENT flush failure must not kill the stream for the process lifetime (fold-2 #1):
 // the bufio error is sticky, so the writer must REOPEN a fresh segment on the next Append and
@@ -72,6 +153,47 @@ func TestJSONLSelfHealsAfterTransientFlushError(t *testing.T) {
 	}
 	if good.written.Len() == 0 {
 		t.Fatal("after self-heal the fresh segment must receive the recovered write (stream resumed)")
+	}
+}
+
+// The abandoned-segment RULE (fold-3): an abandoned segment (poisoned, marker present, no
+// manifest) verifies LOUD as ErrSegmentAbandoned — DISTINCT from a tampered/truncated closed
+// segment — and the export EXCLUDES it (its committed events stay in PG), never silently
+// riding along as unverifiable.
+func TestAbandonedSegmentIsUnverifiableAndExcludedFromExport(t *testing.T) {
+	dir := t.TempDir()
+	org := uuid.New()
+	jw, err := NewJSONLWriter(dir, 1<<30) // real writer → access-000001.jsonl (the open segment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jw.Append(Event{Seq: 1, OrgID: org, Decision: DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// An abandoned segment: a real line + the .abandoned marker, no manifest.
+	abPath := filepath.Join(dir, "access-000099.jsonl")
+	if err := os.WriteFile(abPath, []byte(`{"org_id":"`+org.String()+`","seq":2}`+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abPath+abandonedExt, []byte("abandoned\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := VerifySegment(abPath); !errors.Is(err, ErrSegmentAbandoned) {
+		t.Fatalf("an abandoned segment must verify as ErrSegmentAbandoned (≠ tampered), got %v", err)
+	}
+	var buf bytes.Buffer
+	if err := ExportOrg(dir, org, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), `"seq":2`) {
+		t.Fatalf("export must EXCLUDE the abandoned segment's lines; got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `"seq":1`) {
+		t.Fatalf("export must include the clean segment's line; got:\n%s", buf.String())
 	}
 }
 
