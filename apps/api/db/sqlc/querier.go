@@ -105,9 +105,6 @@ type Querier interface {
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
-	// lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
-	// row-cap sweep only visits orgs that actually have rows.
-	DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -161,6 +158,11 @@ type Querier interface {
 	// dropping audit rows (review #1). No replay path re-inserts: a failed batch rolls the tx
 	// (and the counter bump) back, so a retry re-reserves a fresh range.
 	InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) error
+	// The hot ingest path (review fold-2 #6): pipeline a whole batch's inserts in ONE round trip
+	// instead of N sequential Execs, so the process-global ingest mutex is held for far less time.
+	// Same plain insert as InsertAccessEvent (seq is unique via the counter; the unique index is
+	// the fail-LOUD backstop).
+	InsertAccessEventBatch(ctx context.Context, arg []InsertAccessEventBatchParams) *InsertAccessEventBatchBatchResults
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
@@ -206,6 +208,10 @@ type Querier interface {
 	// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
 	// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
 	ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// lint:cross-org — retention housekeeping enumerates orgs from the SMALL organizations table
+	// (fold-2 #7) instead of a full DISTINCT scan of the large access_events hot-window every
+	// sweep; the per-org row-cap sweep on an org with no events is a cheap no-op.
+	ListActiveOrgIDs(ctx context.Context) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops

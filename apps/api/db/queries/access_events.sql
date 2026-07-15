@@ -16,6 +16,21 @@ INSERT INTO access_events (
     $14, $15, $16, $17, $18
 );
 
+-- name: InsertAccessEventBatch :batchexec
+-- The hot ingest path (review fold-2 #6): pipeline a whole batch's inserts in ONE round trip
+-- instead of N sequential Execs, so the process-global ingest mutex is held for far less time.
+-- Same plain insert as InsertAccessEvent (seq is unique via the counter; the unique index is
+-- the fail-LOUD backstop).
+INSERT INTO access_events (
+    id, org_id, seq, node_id, occurred_at, decision, rule_id,
+    src_device_id, src_user_id, src_ip, dst_ip, dst_resource_id, dst_group_id,
+    protocol, dst_port, deny_count, window_end, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18
+);
+
 -- name: BumpOrgFlowSeq :one
 -- Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
 -- takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
@@ -25,10 +40,11 @@ UPDATE organizations SET flow_seq = flow_seq + sqlc.arg(n)::bigint
 WHERE id = sqlc.arg(org_id) AND deleted_at IS NULL
 RETURNING flow_seq;
 
--- name: DistinctAccessEventOrgs :many
--- lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
--- row-cap sweep only visits orgs that actually have rows.
-SELECT DISTINCT org_id FROM access_events;
+-- name: ListActiveOrgIDs :many
+-- lint:cross-org — retention housekeeping enumerates orgs from the SMALL organizations table
+-- (fold-2 #7) instead of a full DISTINCT scan of the large access_events hot-window every
+-- sweep; the per-org row-cap sweep on an org with no events is a cheap no-op.
+SELECT id FROM organizations WHERE deleted_at IS NULL;
 
 -- name: ListAccessEvents :many
 -- Keyset page, newest-first, scoped by org. Expanded (created_at, id) < (cursor) predicate

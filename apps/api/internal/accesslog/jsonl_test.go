@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,67 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// fakeSink is an injectable segment file — failWrite makes Write/Sync fail, to drive the
+// sticky-error self-heal path (fold-2 #1) without a real disk-full.
+type fakeSink struct {
+	written   bytes.Buffer
+	failWrite bool
+}
+
+func (f *fakeSink) Write(p []byte) (int, error) {
+	if f.failWrite {
+		return 0, errors.New("sink write failed")
+	}
+	return f.written.Write(p)
+}
+func (f *fakeSink) Sync() error {
+	if f.failWrite {
+		return errors.New("sink sync failed")
+	}
+	return nil
+}
+func (f *fakeSink) Close() error { return nil }
+func (f *fakeSink) Name() string { return "fake-segment.jsonl" }
+
+// A TRANSIENT flush failure must not kill the stream for the process lifetime (fold-2 #1):
+// the bufio error is sticky, so the writer must REOPEN a fresh segment on the next Append and
+// resume recording — the "cleared on next success" recovery must actually be reachable, not a
+// permanently-degraded-green lie.
+func TestJSONLSelfHealsAfterTransientFlushError(t *testing.T) {
+	dir := t.TempDir()
+	good := &fakeSink{}
+	jw := &JSONLWriter{
+		dir: dir, maxBytes: 1 << 30, now: time.Now,
+		openFn: func(string) (segmentSink, error) { return good, nil },
+	}
+	// Start on a POISONED segment: a sink whose write/flush fails.
+	bad := &fakeSink{failWrite: true}
+	jw.f, jw.w = bad, bufio.NewWriter(bad)
+
+	_ = jw.Append(Event{Seq: 1, OrgID: uuid.New(), Decision: DecisionAllow}) // buffers
+	if err := jw.Flush(); err == nil {
+		t.Fatal("flush to a failing sink must error (poisons the bufio writer)")
+	}
+	if !jw.broken {
+		t.Fatal("a flush failure must mark the writer broken")
+	}
+
+	// RECOVERY: the next Append must reopen a fresh (good) segment and record durably —
+	// NOT stay dead on the sticky bufio error.
+	if err := jw.Append(Event{Seq: 2, OrgID: uuid.New(), Decision: DecisionAllow}); err != nil {
+		t.Fatalf("Append after a transient failure must self-heal, got %v", err)
+	}
+	if err := jw.Flush(); err != nil {
+		t.Fatalf("Flush after self-heal must succeed, got %v", err)
+	}
+	if jw.broken {
+		t.Fatal("writer must no longer be broken after a successful reopen+write")
+	}
+	if good.written.Len() == 0 {
+		t.Fatal("after self-heal the fresh segment must receive the recovered write (stream resumed)")
+	}
+}
 
 // A batch's lines must be DURABLE + readable after Flush, WITHOUT waiting for rotation or
 // Close. The box-walk found the writer buffered lines in a bufio.Writer and flushed only on

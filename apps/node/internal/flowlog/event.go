@@ -30,13 +30,16 @@ const (
 // Event is ONE flow observation the agent ships to the control plane. The agent stamps
 // RuleID (kernel-carried via the nft log prefix — attribution rides the grant the kernel
 // matched, NOT a userspace re-derivation) and PolicyHash (the applied artifact hash at
-// observation, so the CP can detect a ruleset-swap-window skew). The agent ships IP-level
-// facts only; identity enrichment (device / user / resource) is CP-side at ingest (4/n).
+// observation). NOTE (fold-2 #2): PolicyHash is carried on the wire but the CP does NOT yet
+// consume it — per-flow skew detection is a DEFERRED enhancement; the working policy-skew
+// signal is the node-status desync path (policy_desync_since/reported_at, 0021/0022). The
+// agent ships IP-level facts only; identity enrichment (device / user / resource) is CP-side
+// at ingest (4/n).
 type Event struct {
 	OccurredAt time.Time `json:"occurred_at"`
 	Verdict    Verdict   `json:"verdict"`
 	RuleID     string    `json:"rule_id,omitempty"` // "" = default-deny / no matching rule
-	PolicyHash string    `json:"policy_hash"`       // applied CanonicalHash at observation (skew detection)
+	PolicyHash string    `json:"policy_hash"`       // applied CanonicalHash at observation (CP consumption deferred, fold-2 #2)
 	SrcIP      string    `json:"src_ip"`
 	DstIP      string    `json:"dst_ip"`
 	Protocol   string    `json:"protocol"`

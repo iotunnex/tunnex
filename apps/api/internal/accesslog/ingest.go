@@ -165,11 +165,26 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 		return err
 	}
 	base := top - int64(len(events)) // the reserved range is base+1 .. top
+	params := make([]sqlc.InsertAccessEventBatchParams, len(events))
 	for idx := range events {
 		events[idx].Seq = base + int64(idx) + 1
-		if err := q.InsertAccessEvent(ctx, InsertParams(events[idx])); err != nil {
-			return err // a (org_id, seq) collision here is IMPOSSIBLE under the counter -> fail LOUD, never silent
+		params[idx] = sqlc.InsertAccessEventBatchParams(InsertParams(events[idx]))
+	}
+	// Pipeline the whole batch's inserts in ONE round trip (fold-2 #6) so the process-global
+	// ingest mutex is held for far less time. A (org_id, seq) collision is IMPOSSIBLE under the
+	// counter, so any error here fails LOUD (never a silent drop).
+	var insErr error
+	br := q.InsertAccessEventBatch(ctx, params)
+	br.Exec(func(_ int, err error) {
+		if err != nil && insErr == nil {
+			insErr = err
 		}
+	})
+	if err := br.Close(); err != nil {
+		return err
+	}
+	if insErr != nil {
+		return insErr
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
@@ -202,9 +217,32 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	return nil
 }
 
+// grantCache memoizes rule_id → grant-dst resolution FOR ONE batch (fold-2 #5): a report
+// where many flows share a grant resolved the same rule_id once per event (N+1). Keyed by
+// rule_id; each distinct rule_id hits the DB at most once per batch.
+type grantCache struct {
+	r    GrantResolver
+	seen map[uuid.UUID]grantHit
+}
+
+type grantHit struct {
+	res, grp *uuid.UUID
+	ok       bool
+}
+
+func (c *grantCache) resolve(ctx context.Context, orgID, ruleID uuid.UUID) (*uuid.UUID, *uuid.UUID, bool) {
+	if h, ok := c.seen[ruleID]; ok {
+		return h.res, h.grp, h.ok
+	}
+	res, grp, ok := c.r.ResolveGrant(ctx, orgID, ruleID)
+	c.seen[ruleID] = grantHit{res, grp, ok}
+	return res, grp, ok
+}
+
 // aggregate enriches each wire event (grant-only) and collapses per-source deny floods.
 func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire []WireEvent) []Event {
 	out := make([]Event, 0, len(wire))
+	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}} // one grant lookup per distinct rule_id per batch
 	denyBySrc := map[string][]WireEvent{}
 	for _, w := range wire {
 		switch w.Verdict {
@@ -213,9 +251,9 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 		case wireTerminated:
 			// A flow torn down by a rule-revoke — enriched on the REVOKED grant's rule_id (the
 			// carried binding), NEVER aggregated (each termination is a distinct event).
-			out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionTerminated))
+			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionTerminated))
 		default: // allow
-			out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionAllow))
+			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionAllow))
 		}
 	}
 	// Deterministic order: aggregate/emit denies by src.
@@ -231,7 +269,7 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 			// full window BOUNDS — OccurredAt = first deny seen, WindowEnd = last — so a SIEM
 			// has src + count + [start,end] without the individual lines.
 			last := ds[len(ds)-1]
-			agg := i.enrich(ctx, orgID, nodeID, last, DecisionDenyAggregate)
+			agg := i.enrich(ctx, gc, orgID, nodeID, last, DecisionDenyAggregate)
 			agg.OccurredAt = ds[0].OccurredAt.UTC() // window START
 			agg.DenyCount = len(ds)
 			end := last.OccurredAt.UTC() // window END
@@ -240,7 +278,7 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 			continue
 		}
 		for _, w := range ds {
-			out = append(out, i.enrich(ctx, orgID, nodeID, w, DecisionDeny))
+			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionDeny))
 		}
 	}
 	return out
@@ -249,17 +287,30 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 // enrich builds an Event from a wire event. Attribution is GRANT-ONLY: rule_id → the
 // grant's destination (resource/group). NO src_ip→device/user lookup (device/user stay nil
 // — a racy IP map is forbidden). src_ip is kept as the raw observed fact.
-func (i *Ingester) enrich(ctx context.Context, orgID, nodeID uuid.UUID, w WireEvent, d Decision) Event {
+func (i *Ingester) enrich(ctx context.Context, gc *grantCache, orgID, nodeID uuid.UUID, w WireEvent, d Decision) Event {
 	e := Event{
 		OrgID: orgID, NodeID: &nodeID, OccurredAt: w.OccurredAt.UTC(), Decision: d,
 		SrcIP: w.SrcIP, DstIP: w.DstIP, Protocol: w.Protocol, DstPort: w.DstPort,
 	}
 	if rid, err := uuid.Parse(w.RuleID); err == nil {
 		e.RuleID = &rid
-		if res, grp, ok := i.grants.ResolveGrant(ctx, orgID, rid); ok {
+		if res, grp, ok := gc.resolve(ctx, orgID, rid); ok { // per-batch memoized (fold-2 #5)
 			e.DstResourceID, e.DstGroupID = res, grp // grant dst captured at event time
 		}
 	}
 	return e
+}
+
+// Shutdown flushes + closes the JSONL writer UNDER the ingest mutex, so it can never race an
+// in-flight IngestBatch's write if the agent server's graceful shutdown timed out with a
+// request still mid-batch (fold-2 #3: Close was the one writer-touch outside the composed
+// critical section). Call once at process shutdown; safe when the writer is nil.
+func (i *Ingester) Shutdown() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if closer, ok := i.jsonl.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
 }
 

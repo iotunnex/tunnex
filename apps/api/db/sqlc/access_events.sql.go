@@ -35,32 +35,6 @@ func (q *Queries) BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) 
 	return flow_seq, err
 }
 
-const distinctAccessEventOrgs = `-- name: DistinctAccessEventOrgs :many
-SELECT DISTINCT org_id FROM access_events
-`
-
-// lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
-// row-cap sweep only visits orgs that actually have rows.
-func (q *Queries) DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, distinctAccessEventOrgs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []uuid.UUID{}
-	for rows.Next() {
-		var org_id uuid.UUID
-		if err := rows.Scan(&org_id); err != nil {
-			return nil, err
-		}
-		items = append(items, org_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const insertAccessEvent = `-- name: InsertAccessEvent :exec
 INSERT INTO access_events (
     id, org_id, seq, node_id, occurred_at, decision, rule_id,
@@ -244,6 +218,33 @@ func (q *Queries) ListAccessEvents(ctx context.Context, arg ListAccessEventsPara
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveOrgIDs = `-- name: ListActiveOrgIDs :many
+SELECT id FROM organizations WHERE deleted_at IS NULL
+`
+
+// lint:cross-org — retention housekeeping enumerates orgs from the SMALL organizations table
+// (fold-2 #7) instead of a full DISTINCT scan of the large access_events hot-window every
+// sweep; the per-org row-cap sweep on an org with no events is a cheap no-op.
+func (q *Queries) ListActiveOrgIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveOrgIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

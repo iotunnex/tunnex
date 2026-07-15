@@ -30,7 +30,8 @@ type Source interface {
 }
 
 // Pump reads records from a Source, STAMPS each into an Event (rule_id from the prefix +
-// the applied PolicyHash for skew detection), and buffers it. It is best-effort + async:
+// the applied PolicyHash, carried on the wire; CP-side skew consumption is deferred, fold-2
+// #2), and buffers it. It is best-effort + async:
 // nothing here is on the forward-chain apply path (enforcement isolation), and the buffer
 // never blocks.
 type Pump struct {

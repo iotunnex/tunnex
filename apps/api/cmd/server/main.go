@@ -193,14 +193,14 @@ func main() {
 	// S7.5.1 flow-event ingest: the JSONL source-of-truth stream + the PG hot-window, wired
 	// onto the SAME mTLS channel (node identity = client cert). Best-effort; a writer failure
 	// here must not stop the control plane, so log-and-continue rather than exit.
-	var flowJSONL *accesslog.JSONLWriter
+	var flowIngester *accesslog.Ingester
 	retentionStop := make(chan struct{})
 	if fw, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
 		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
 	} else {
-		flowJSONL = fw
 		fq := sqlc.New(pool)
-		agentCh.SetFlowIngester(accesslog.NewIngester(pool, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
+		flowIngester = accesslog.NewIngester(pool, fw, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil)
+		agentCh.SetFlowIngester(flowIngester)
 		// D3 retention sweep (review #3): without this loop access_events grows unbounded and
 		// exhausts the DB disk — the exact failure the hot-window design existed to prevent. Run
 		// it on an interval: delete by ingest age + trim each org to the row cap (JSONL keeps the
@@ -214,7 +214,7 @@ func main() {
 					return
 				case <-t.C:
 					sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					orgs, err := fq.DistinctAccessEventOrgs(sctx)
+					orgs, err := fq.ListActiveOrgIDs(sctx)
 					if err == nil {
 						_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
 					}
@@ -270,12 +270,13 @@ func main() {
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
 	close(retentionStop) // stop the retention sweep loop
-	// Flush + close the JSONL source-of-truth AFTER the agent channel drains (no in-flight
-	// flow-event ingest races the close), so the final batch's buffered lines are durable and
-	// the last segment's manifest is written before exit — a graceful stop must not drop
-	// committed-in-PG events from the stream (box-walk finding).
-	if flowJSONL != nil {
-		if err := flowJSONL.Close(); err != nil {
+	// Flush + close the JSONL source-of-truth via the Ingester's mutex-guarded Shutdown, AFTER
+	// the agent channel drains. Closing THROUGH the ingest mutex (fold-2 #3) means that even if
+	// agentSrv.Shutdown timed out with a request still mid-batch, the close can't race the
+	// writer — it waits for the in-flight IngestBatch to release mu. The final batch's buffered
+	// lines are then durable and the last segment's manifest is written before exit.
+	if flowIngester != nil {
+		if err := flowIngester.Shutdown(); err != nil {
 			logger.Error("flowlog_close_error", slog.String("error", err.Error()))
 		}
 	}
