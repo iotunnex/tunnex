@@ -19,6 +19,11 @@ type Health struct {
 	jsonlDegradedSince time.Time
 	jsonlFailures      int64
 
+	// A roll's manifest write can fail while the segment's DATA is already durable on disk — the
+	// tamper-evidence SEAL is deferred (retried on the next roll), which is NOT a write failure /
+	// data-at-risk, so it is a SEPARATE, softer signal that must not read as a lost batch.
+	jsonlSealDeferred bool
+
 	// Retention: the drop-oldest sweep must alarm somewhere a human looks.
 	retentionLastSweep time.Time
 	retentionDropped   int64 // rows deleted by the last sweep (age + cap)
@@ -29,6 +34,7 @@ type Snapshot struct {
 	JSONLDegraded      bool      `json:"jsonl_degraded"`
 	JSONLDegradedSince time.Time `json:"jsonl_degraded_since,omitempty"`
 	JSONLFailures      int64     `json:"jsonl_failures"`
+	JSONLSealDeferred  bool      `json:"jsonl_seal_deferred"`
 	RetentionLastSweep time.Time `json:"retention_last_sweep,omitempty"`
 	RetentionDropped   int64     `json:"retention_dropped"`
 }
@@ -50,7 +56,7 @@ func (h *Health) jsonlFailed(now time.Time) {
 	h.jsonlFailures++
 }
 
-// jsonlRecovered clears the degraded state after a successful write.
+// jsonlRecovered clears the degraded + seal-deferred state after a fully successful batch.
 func (h *Health) jsonlRecovered() {
 	if h == nil {
 		return
@@ -58,6 +64,18 @@ func (h *Health) jsonlRecovered() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.jsonlDegradedSince = time.Time{}
+	h.jsonlSealDeferred = false
+}
+
+// jsonlSealDeferred records that a batch is DURABLE on disk but its segment's manifest could not
+// be written (the seal retries on the next roll). A soft signal — NOT a write failure / data loss.
+func (h *Health) jsonlSealDeferredSet() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.jsonlSealDeferred = true
 }
 
 // recordSweep records a retention sweep's result.
@@ -82,6 +100,7 @@ func (h *Health) Snapshot() Snapshot {
 		JSONLDegraded:      !h.jsonlDegradedSince.IsZero(),
 		JSONLDegradedSince: h.jsonlDegradedSince,
 		JSONLFailures:      h.jsonlFailures,
+		JSONLSealDeferred:  h.jsonlSealDeferred,
 		RetentionLastSweep: h.retentionLastSweep,
 		RetentionDropped:   h.retentionDropped,
 	}

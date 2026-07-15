@@ -196,10 +196,15 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	// retry would duplicate committed PG rows). PG-commit-THEN-JSONL is the non-circular pair:
 	// "PG has it, JSONL shows a hole" — never silent divergence.
 	if i.jsonl != nil {
-		if err := i.jsonl.WriteBatch(events); err != nil {
-			i.health.jsonlFailed(i.now())
-		} else {
+		switch err := i.jsonl.WriteBatch(events); {
+		case err == nil:
 			i.health.jsonlRecovered()
+		case errors.Is(err, ErrSealDeferred):
+			// The batch's events are DURABLE on disk; only sealing the segment's manifest was
+			// deferred (retried on the next roll). Note it softly — NOT a lost batch / seq hole.
+			i.health.jsonlSealDeferredSet()
+		default:
+			i.health.jsonlFailed(i.now())
 		}
 	}
 	return nil

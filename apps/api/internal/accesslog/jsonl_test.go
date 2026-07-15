@@ -104,8 +104,8 @@ func TestJSONLTornTailTruncatedBeforeAppend(t *testing.T) {
 	f, _ := os.OpenFile(seg, os.O_WRONLY|os.O_APPEND, 0o640)
 	_, _ = f.WriteString(`{"org_id":"` + org.String() + `","seq":2,PARTIAL`) // no newline, invalid JSON
 	_ = f.Close()
-	w.dirty = true
 
+	// Every WriteBatch truncates a torn tail before appending — no dirty flag needed.
 	if err := w.WriteBatch([]Event{ev(org, 3, DecisionAllow)}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,9 +149,6 @@ func TestJSONLResumeAfterCrashTruncatesTorn(t *testing.T) {
 	if w2.seg != 1 {
 		t.Fatalf("resume must continue the active segment 1, got %d", w2.seg)
 	}
-	if w2.lines != 2 {
-		t.Fatalf("resume must re-derive the 2 durable lines, got %d", w2.lines)
-	}
 	if err := w2.WriteBatch([]Event{ev(org, 4, DecisionAllow)}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +164,68 @@ func TestJSONLResumeAfterCrashTruncatesTorn(t *testing.T) {
 		if !strings.Contains(out, s) {
 			t.Fatalf("missing %s after resume (durable lines must survive): %s", s, out)
 		}
+	}
+	// Seal + verify: the manifest is DERIVED from disk, so it counts exactly the 3 durable lines.
+	if err := w2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySegment(filepath.Join(dir, "access-000001.jsonl")); err != nil {
+		t.Fatalf("sealed segment must verify (manifest derived from disk == on-disk lines): %v", err)
+	}
+}
+
+// Derive-from-disk (the fix for the re-earned review's root cause): complete lines that a
+// failed batch left DURABLE on disk but that the writer never "accounted" are still counted at
+// seal — the manifest is scanned from disk, so it can never UNDER-count and raise a false
+// TRUNCATED. (The old design tracked in-memory counters that drifted from disk.)
+func TestJSONLSealCountsAllDurableLinesNoFalseTruncate(t *testing.T) {
+	dir := t.TempDir()
+	org := uuid.New()
+	w, err := NewJSONLWriter(dir, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a batch whose WriteBatch failed at Sync/Close but whose 2 complete lines are
+	// durable on disk (write succeeded), with NO writer-side accounting for them.
+	seg := filepath.Join(dir, "access-000001.jsonl")
+	b1, _ := json.Marshal(ev(org, 1, DecisionAllow))
+	b2, _ := json.Marshal(ev(org, 2, DecisionAllow))
+	if err := os.WriteFile(seg, append(append(append(b1, '\n'), b2...), '\n'), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// A normal batch appends a 3rd line, then seal on Close.
+	if err := w.WriteBatch([]Event{ev(org, 3, DecisionAllow)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySegment(seg); err != nil {
+		t.Fatalf("derive-from-disk must count ALL durable lines (no false TRUNCATED): %v", err)
+	}
+	mb, _ := os.ReadFile(seg + ".manifest")
+	var m Manifest
+	_ = json.Unmarshal(mb, &m)
+	if m.Lines != 3 {
+		t.Fatalf("manifest must count all 3 on-disk lines, got %d", m.Lines)
+	}
+}
+
+// A roll's manifest-write failure is a DURABLE batch with a deferred seal — Health notes it
+// (jsonl_seal_deferred), NEVER as a write failure / lost batch; a later success clears it.
+func TestHealthSealDeferredIsNotAFailure(t *testing.T) {
+	h := NewHealth()
+	h.jsonlSealDeferredSet()
+	s := h.Snapshot()
+	if !s.JSONLSealDeferred {
+		t.Fatal("a deferred seal must be noted on Health")
+	}
+	if s.JSONLDegraded || s.JSONLFailures != 0 {
+		t.Fatalf("a deferred seal must NOT read as a write failure / data loss: %+v", s)
+	}
+	h.jsonlRecovered()
+	if h.Snapshot().JSONLSealDeferred {
+		t.Fatal("a fully successful batch must clear the deferred-seal note")
 	}
 }
 
