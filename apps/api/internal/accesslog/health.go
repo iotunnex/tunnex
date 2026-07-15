@@ -27,6 +27,7 @@ type Health struct {
 	// Retention: the drop-oldest sweep must alarm somewhere a human looks.
 	retentionLastSweep time.Time
 	retentionDropped   int64 // rows deleted by the last sweep (age + cap)
+	retentionFailed    bool  // the last sweep ERRORED (partial/failed) — else a stale timestamp hides it
 }
 
 // Snapshot is a read-only view of Health for a health/admin endpoint.
@@ -37,6 +38,7 @@ type Snapshot struct {
 	JSONLSealDeferred  bool      `json:"jsonl_seal_deferred"`
 	RetentionLastSweep time.Time `json:"retention_last_sweep,omitempty"`
 	RetentionDropped   int64     `json:"retention_dropped"`
+	RetentionFailed    bool      `json:"retention_failed"`
 }
 
 // NewHealth returns a zero-value Health (nothing degraded).
@@ -78,8 +80,9 @@ func (h *Health) jsonlSealDeferredSet() {
 	h.jsonlSealDeferred = true
 }
 
-// recordSweep records a retention sweep's result.
-func (h *Health) recordSweep(now time.Time, dropped int64) {
+// recordSweep records a retention sweep's result — ALWAYS called (even on a failed/partial
+// sweep) so the surface never shows a stale healthy-looking timestamp while retention is broken.
+func (h *Health) recordSweep(now time.Time, dropped int64, err error) {
 	if h == nil {
 		return
 	}
@@ -87,6 +90,7 @@ func (h *Health) recordSweep(now time.Time, dropped int64) {
 	defer h.mu.Unlock()
 	h.retentionLastSweep = now
 	h.retentionDropped = dropped
+	h.retentionFailed = err != nil
 }
 
 // Snapshot returns the current health for display.
@@ -103,5 +107,6 @@ func (h *Health) Snapshot() Snapshot {
 		JSONLSealDeferred:  h.jsonlSealDeferred,
 		RetentionLastSweep: h.retentionLastSweep,
 		RetentionDropped:   h.retentionDropped,
+		RetentionFailed:    h.retentionFailed,
 	}
 }

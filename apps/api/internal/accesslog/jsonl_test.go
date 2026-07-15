@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,114 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// [0] tamper-evidence: a stray/malformed access-*.jsonl must NOT hijack resume() and make the
+// writer roll into (and overwrite) an already-sealed segment.
+func TestJSONLStrayFileDoesNotHijackResume(t *testing.T) {
+	dir := t.TempDir()
+	org := uuid.New()
+	w1, err := NewJSONLWriter(dir, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w1.WriteBatch([]Event{ev(org, 1, DecisionAllow)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w1.Close(); err != nil { // seals access-000001 + manifest
+		t.Fatal(err)
+	}
+	// A stray malformed file that sorts AFTER access-000001 (a letter > any digit).
+	stray := filepath.Join(dir, "access-tmpXYZ.jsonl")
+	if err := os.WriteFile(stray, []byte(`{"org_id":"`+org.String()+`","seq":99}`+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	w2, err := NewJSONLWriter(dir, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w2.seg != 2 {
+		t.Fatalf("a stray file must not hijack resume; want fresh seg 2, got %d", w2.seg)
+	}
+	if err := w2.WriteBatch([]Event{ev(org, 2, DecisionAllow)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySegment(filepath.Join(dir, "access-000001.jsonl")); err != nil {
+		t.Fatalf("the sealed segment 1 must be untouched by a stray file: %v", err)
+	}
+}
+
+// [1] crash-durability: creating a new segment and sealing a manifest must fsync the DIRECTORY so
+// the dir entries survive a crash (fsync of the file alone doesn't persist the entry).
+func TestJSONLSyncsDirOnNewSegmentAndSeal(t *testing.T) {
+	dir := t.TempDir()
+	org := uuid.New()
+	var calls int
+	orig := syncDirFn
+	syncDirFn = func(d string) error { calls++; return orig(d) }
+	defer func() { syncDirFn = orig }()
+
+	w, err := NewJSONLWriter(dir, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteBatch([]Event{ev(org, 1, DecisionAllow)}); err != nil {
+		t.Fatal(err)
+	}
+	if calls == 0 {
+		t.Fatal("creating a new segment must fsync the dir (crash-durable dir entry)")
+	}
+	before := calls
+	if err := w.Close(); err != nil { // seal → manifest write → dir fsync
+		t.Fatal(err)
+	}
+	if calls <= before {
+		t.Fatal("sealing (manifest write) must fsync the dir")
+	}
+}
+
+// [2] a persistently-failing manifest write must not grow the active segment unbounded: WriteBatch
+// ADVANCES to a fresh segment (bounding growth) and reports ErrSealDeferred.
+func TestJSONLSealDeferredAdvancesToBoundGrowth(t *testing.T) {
+	dir := t.TempDir()
+	org := uuid.New()
+	// Make the manifest PATH a directory so writeFileSync (opens O_WRONLY) always fails → seal fails.
+	if err := os.Mkdir(filepath.Join(dir, "access-000001.jsonl.manifest"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewJSONLWriter(dir, 1) // tiny cap → the first batch rolls
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteBatch([]Event{ev(org, 1, DecisionAllow)}); !errors.Is(err, ErrSealDeferred) {
+		t.Fatalf("a seal failure must return ErrSealDeferred, got %v", err)
+	}
+	if w.seg != 2 {
+		t.Fatalf("seg must ADVANCE past a failed seal to bound growth, got %d", w.seg)
+	}
+	if err := w.WriteBatch([]Event{ev(org, 2, DecisionAllow)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "access-000002.jsonl")); err != nil {
+		t.Fatalf("the fresh segment access-000002 must exist: %v", err)
+	}
+}
+
+// [3] a FAILED retention sweep must surface retention_failed — never leave a stale healthy-looking
+// timestamp that hides a broken sweep.
+func TestHealthRetentionFailedSurfaced(t *testing.T) {
+	h := NewHealth()
+	h.recordSweep(time.Unix(1000, 0), 5, errors.New("sweep boom"))
+	s := h.Snapshot()
+	if !s.RetentionFailed {
+		t.Fatal("a failed sweep must surface retention_failed")
+	}
+	if s.RetentionDropped != 5 {
+		t.Fatalf("a partial drop count must still record, got %d", s.RetentionDropped)
+	}
+	if h.recordSweep(time.Unix(2000, 0), 3, nil); h.Snapshot().RetentionFailed {
+		t.Fatal("a successful sweep must clear retention_failed")
+	}
+}
 
 func ev(org uuid.UUID, seq int64, d Decision) Event {
 	return Event{ID: uuid.New(), Seq: seq, OrgID: org, Decision: d, SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp"}

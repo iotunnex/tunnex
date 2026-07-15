@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,24 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// segRE bounds a real segment filename EXACTLY (access-<6 digits>.jsonl). resume()/export only
+// consider files matching it, so a stray/malformed access-*.jsonl (which glob would match and
+// sort last) can NEVER be taken as the active segment and make the writer overwrite a sealed one
+// (review [0] — a tamper-evidence bug).
+var segRE = regexp.MustCompile(`^access-\d{6}\.jsonl$`)
+
+// syncDirFn fsyncs a directory so a newly-created file's/manifest's directory ENTRY is
+// crash-durable (fsync of the file alone doesn't persist the dir entry — review [1]). Injectable
+// for tests.
+var syncDirFn = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close() //nolint:errcheck
+	return d.Sync()
+}
 
 // JSONLWriter appends access events as JSON lines to a rotating stream on the customer's disk
 // — the SIEM source-of-truth + retention record (D4/D5). Tamper-evidence MINIMUM (D4): every
@@ -89,16 +108,32 @@ func segNumber(path string) int {
 
 func (w *JSONLWriter) segPath(seg int) string { return filepath.Join(w.dir, segmentName(seg)) }
 
+// segmentFiles lists the WELL-FORMED segment files under dir, sorted (chronological). A stray or
+// malformed access-*.jsonl is excluded, so it can never hijack resume() or leak into an export.
+func segmentFiles(dir string) ([]string, error) {
+	all, err := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	segs := all[:0]
+	for _, p := range all {
+		if segRE.MatchString(filepath.Base(p)) {
+			segs = append(segs, p)
+		}
+	}
+	sort.Strings(segs)
+	return segs, nil
+}
+
 // resume picks the segment to continue: the highest-numbered segment WITHOUT a manifest is the
 // still-open active one — truncate any torn tail a crash left, then continue it. A SEALED
 // (has-manifest) highest segment means the last run closed cleanly → start fresh after it. No
 // segments → start at 1. No accounting is rebuilt — it is derived from disk at seal time.
 func (w *JSONLWriter) resume() error {
-	segs, err := filepath.Glob(filepath.Join(w.dir, "access-*.jsonl"))
+	segs, err := segmentFiles(w.dir)
 	if err != nil {
 		return err
 	}
-	sort.Strings(segs)
 	if len(segs) == 0 {
 		w.seg = 1
 		return nil
@@ -126,6 +161,12 @@ func (w *JSONLWriter) WriteBatch(events []Event) error {
 	if err := truncateTornTail(path); err != nil {
 		return err
 	}
+	// Is this the first write to a brand-new segment file? If so its directory ENTRY must be
+	// fsync'd after creation, not just the file's data (review [1]).
+	newSegment := false
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		newSegment = true
+	}
 	var buf bytes.Buffer
 	for i := range events {
 		b, err := json.Marshal(events[i])
@@ -150,14 +191,24 @@ func (w *JSONLWriter) WriteBatch(events []Event) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	// Size-roll: the batch is durable, so a seal failure never loses it.
+	if newSegment {
+		if err := syncDirFn(w.dir); err != nil { // make the new segment's dir entry crash-durable
+			return err
+		}
+	}
+	// Size-roll: the batch is ALREADY durable, so nothing past here may fail the batch.
 	fi, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil // a Stat error only skips the size check (durable data); the next batch re-checks (review [6])
 	}
 	if fi.Size() >= w.maxBytes {
 		if err := w.sealSegment(w.seg); err != nil {
-			return ErrSealDeferred // data durable; retried on the next over-cap batch
+			// The batch is durable; only the manifest seal failed. ADVANCE to a fresh segment
+			// anyway so a persistently-failing seal can't grow this segment unbounded and re-scan
+			// it every batch under the mutex (review [2]). The old segment stays unsealed
+			// (manifest-less, data intact) — a legible, Health-noted seal gap, not a loss.
+			w.seg++
+			return ErrSealDeferred
 		}
 		w.seg++
 	}
@@ -227,7 +278,8 @@ func (w *JSONLWriter) sealSegment(seg int) error {
 	return writeFileSync(path+".manifest", append(mb, '\n'))
 }
 
-// writeFileSync writes b to path and fsyncs it (durable manifest).
+// writeFileSync writes b to path, fsyncs it AND its parent directory (so the new manifest's
+// directory entry is crash-durable, not just its data — review [1]).
 func writeFileSync(path string, b []byte) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
 	if err != nil {
@@ -241,7 +293,10 @@ func writeFileSync(path string, b []byte) error {
 		_ = f.Close()
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return syncDirFn(filepath.Dir(path))
 }
 
 // truncateTornTail drops a trailing partial line (bytes after the last newline) — a crash or a
@@ -364,11 +419,10 @@ func ScanSeqGaps(events []Event) map[string][]int64 {
 // partial/torn or non-JSON line is skipped (it never survives into a sealed segment; on the
 // active segment it is a not-yet-clean tail, eventually-consistent — its event is in PG).
 func ExportOrg(dir string, orgID uuid.UUID, w io.Writer) error {
-	segs, err := filepath.Glob(filepath.Join(dir, "access-*.jsonl"))
+	segs, err := segmentFiles(dir)
 	if err != nil {
 		return err
 	}
-	sort.Strings(segs)
 	for _, seg := range segs {
 		if err := exportSegment(seg, orgID, w); err != nil {
 			return err

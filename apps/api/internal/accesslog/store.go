@@ -59,18 +59,20 @@ func Retain(ctx context.Context, q *sqlc.Queries, health *Health, now time.Time,
 	}
 	var deleted int64
 	n, err := q.SweepAccessEventsByAge(ctx, now.Add(-retention))
+	deleted += n
 	if err != nil {
+		health.recordSweep(now, deleted, err) // record the FAILURE (review [3] — never leave a stale-healthy surface)
 		return deleted, err
 	}
-	deleted += n
 	for _, org := range orgs {
 		n, err := q.SweepAccessEventsOverCap(ctx, sqlc.SweepAccessEventsOverCapParams{OrgID: org, KeepNewest: rowCap})
+		deleted += n
 		if err != nil {
+			health.recordSweep(now, deleted, err)
 			return deleted, err
 		}
-		deleted += n
 	}
-	health.recordSweep(now, deleted)
+	health.recordSweep(now, deleted, nil)
 	return deleted, nil
 }
 

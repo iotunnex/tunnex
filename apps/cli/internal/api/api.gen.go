@@ -205,8 +205,14 @@ type AccessLogHealth struct {
 	JsonlDegradedSince *time.Time `json:"jsonl_degraded_since,omitempty"`
 	JsonlFailures      int64      `json:"jsonl_failures"`
 
+	// JsonlSealDeferred A segment's data is durable but its manifest (tamper-evidence seal) could not be written; retried on the next roll. Not data loss.
+	JsonlSealDeferred bool `json:"jsonl_seal_deferred"`
+
 	// RetentionDropped Rows deleted by the last retention sweep (age + cap).
-	RetentionDropped   int64      `json:"retention_dropped"`
+	RetentionDropped int64 `json:"retention_dropped"`
+
+	// RetentionFailed The last retention sweep errored (partial/failed) — the PG hot-window may be growing.
+	RetentionFailed    bool       `json:"retention_failed"`
 	RetentionLastSweep *time.Time `json:"retention_last_sweep,omitempty"`
 }
 

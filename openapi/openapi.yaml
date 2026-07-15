@@ -2128,14 +2128,16 @@ components:
 
     AccessLogHealth:
       type: object
-      required: [jsonl_degraded, jsonl_failures, retention_dropped]
+      required: [jsonl_degraded, jsonl_failures, jsonl_seal_deferred, retention_dropped, retention_failed]
       additionalProperties: false
       properties:
         jsonl_degraded: { type: boolean, description: The JSONL source-of-truth stream is failing to write (diverging from PG). }
         jsonl_degraded_since: { type: string, format: date-time }
         jsonl_failures: { type: integer, format: int64 }
+        jsonl_seal_deferred: { type: boolean, description: A segment's data is durable but its manifest (tamper-evidence seal) could not be written; retried on the next roll. Not data loss. }
         retention_last_sweep: { type: string, format: date-time }
         retention_dropped: { type: integer, format: int64, description: Rows deleted by the last retention sweep (age + cap). }
+        retention_failed: { type: boolean, description: The last retention sweep errored (partial/failed) — the PG hot-window may be growing. }
 
     OrgOverview:
       type: object

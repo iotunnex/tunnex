@@ -1582,6 +1582,8 @@ export interface components {
             jsonl_degraded_since?: string;
             /** Format: int64 */
             jsonl_failures: number;
+            /** @description A segment's data is durable but its manifest (tamper-evidence seal) could not be written; retried on the next roll. Not data loss. */
+            jsonl_seal_deferred: boolean;
             /** Format: date-time */
             retention_last_sweep?: string;
             /**
@@ -1589,6 +1591,8 @@ export interface components {
              * @description Rows deleted by the last retention sweep (age + cap).
              */
             retention_dropped: number;
+            /** @description The last retention sweep errored (partial/failed) — the PG hot-window may be growing. */
+            retention_failed: boolean;
         };
         OrgOverview: {
             members: number;

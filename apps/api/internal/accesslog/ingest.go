@@ -201,7 +201,9 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 			i.health.jsonlRecovered()
 		case errors.Is(err, ErrSealDeferred):
 			// The batch's events are DURABLE on disk; only sealing the segment's manifest was
-			// deferred (retried on the next roll). Note it softly — NOT a lost batch / seq hole.
+			// deferred. The JSONL WRITE itself succeeded, so clear any prior write-degraded (review
+			// [4] — else a stale jsonl_degraded would linger), then note the soft seal-pending.
+			i.health.jsonlRecovered()
 			i.health.jsonlSealDeferredSet()
 		default:
 			i.health.jsonlFailed(i.now())

@@ -94,9 +94,11 @@ func (s apiServer) GetAccessLogHealth(ctx context.Context, req api.GetAccessLogH
 	}
 	snap := s.accessLog.Health()
 	body := api.AccessLogHealth{
-		JsonlDegraded:    snap.JSONLDegraded,
-		JsonlFailures:    snap.JSONLFailures,
-		RetentionDropped: snap.RetentionDropped,
+		JsonlDegraded:     snap.JSONLDegraded,
+		JsonlFailures:     snap.JSONLFailures,
+		JsonlSealDeferred: snap.JSONLSealDeferred,
+		RetentionDropped:  snap.RetentionDropped,
+		RetentionFailed:   snap.RetentionFailed,
 	}
 	if !snap.JSONLDegradedSince.IsZero() {
 		t := snap.JSONLDegradedSince
