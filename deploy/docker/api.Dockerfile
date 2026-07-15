@@ -22,9 +22,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -tags "$TUNNEX_BUILD_TAGS" -trimpath -ldfl
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 tunnex
-# Pre-own the secrets mountpoint as uid 10001 so the named volume inherits
-# 0700/uid-10001 on first init and the non-root process can write 0600 files.
-RUN mkdir -p /var/lib/tunnex/secrets \
+# Pre-own the secrets AND flowlog mountpoints as uid 10001 so each named volume inherits
+# uid-10001 on first init and the non-root process can write. A fresh Docker volume mounts
+# ROOT-owned unless its mountpoint pre-exists in the image with the right owner — without
+# pre-creating flowlog here, the tunnex_flowlog volume mounts root-owned and the 10001 api
+# cannot create the JSONL source-of-truth (flowlog_writer_failed, PG-only, no SIEM stream).
+RUN mkdir -p /var/lib/tunnex/secrets /var/lib/tunnex/flowlog \
     && chown -R 10001:10001 /var/lib/tunnex \
     && chmod 700 /var/lib/tunnex/secrets
 USER tunnex
