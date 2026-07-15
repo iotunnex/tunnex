@@ -116,7 +116,7 @@ const createUserGroup = `-- name: CreateUserGroup :one
 
 INSERT INTO user_groups (org_id, name, description)
 VALUES ($1, $2, $3)
-RETURNING id, org_id, name, description, created_at, updated_at
+RETURNING id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id
 `
 
 type CreateUserGroupParams struct {
@@ -139,6 +139,9 @@ func (q *Queries) CreateUserGroup(ctx context.Context, arg CreateUserGroupParams
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
 	)
 	return i, err
 }
@@ -252,7 +255,7 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Resou
 }
 
 const getUserGroup = `-- name: GetUserGroup :one
-SELECT id, org_id, name, description, created_at, updated_at FROM user_groups
+SELECT id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id FROM user_groups
 WHERE id = $1 AND org_id = $2
 `
 
@@ -271,6 +274,9 @@ func (q *Queries) GetUserGroup(ctx context.Context, arg GetUserGroupParams) (Use
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
 	)
 	return i, err
 }
@@ -473,7 +479,7 @@ func (q *Queries) ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Re
 }
 
 const listUserGroupsByOrg = `-- name: ListUserGroupsByOrg :many
-SELECT id, org_id, name, description, created_at, updated_at FROM user_groups
+SELECT id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id FROM user_groups
 WHERE org_id = $1
 ORDER BY name
 `
@@ -494,6 +500,9 @@ func (q *Queries) ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]U
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
+			&i.IdpProvider,
+			&i.IdpGroupID,
 		); err != nil {
 			return nil, err
 		}
@@ -602,7 +611,7 @@ const updateUserGroup = `-- name: UpdateUserGroup :one
 UPDATE user_groups
 SET name = $3, description = $4
 WHERE id = $1 AND org_id = $2
-RETURNING id, org_id, name, description, created_at, updated_at
+RETURNING id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id
 `
 
 type UpdateUserGroupParams struct {
@@ -627,6 +636,9 @@ func (q *Queries) UpdateUserGroup(ctx context.Context, arg UpdateUserGroupParams
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
 	)
 	return i, err
 }
