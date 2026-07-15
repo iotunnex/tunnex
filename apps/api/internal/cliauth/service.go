@@ -58,6 +58,19 @@ func NewService(pool *pgxpool.Pool, sealer *crypto.Sealer) *Service {
 	return &Service{pool: pool, q: sqlc.New(pool), sealer: sealer}
 }
 
+// MintForUser mints a CLI bearer credential for a user OUT OF BAND (no browser/device flow) —
+// for privileged bootstrap tooling only (the S7.5.2 box-walk drives the enterprise endpoints with
+// it). Not wired to any HTTP handler.
+func (s *Service) MintForUser(ctx context.Context, userID uuid.UUID) (Credential, error) {
+	var cred Credential
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		var e error
+		cred, e = s.mintCredential(ctx, q, userID, "walk-bootstrap")
+		return e
+	})
+	return cred, err
+}
+
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	if s.pool == nil {
 		return fn(s.q)
