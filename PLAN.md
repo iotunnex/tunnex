@@ -264,9 +264,11 @@ D-c4 VERIFIED (orphan check is a pure DB read → no CI agent). Review arc: high
 the audited write, trigger-bypass cleanup) → CI all-green on a91e5cd incl. `e2e-enterprise` IN CI → box-walk
 stands. **S4.5 + S4.5b ledgers flipped SUBSTITUTE→SATISFIED (PR#21, sha 8ad71cd).** **EPIC-7-CLOSE PLANNING
 SESSION HELD (2026-07-14) — build order LOCKED: 7.5 → M → BETA BUNDLE → PUBLIC BETA (joint w/ site) → 8 → 9 →
-10 → 11 → 12-remainder.** Beta = full scope (7.5 + M + bundle). S12.1/S12.2 pulled into the bundle; EPIC 12
+10 → 11 → 12-remainder.** ~~Beta = full scope (7.5 + M + bundle).~~ **AMENDED 2026-07-15: EPIC M parked (founder
+trigger); beta gates on 7.5+8+9+10+11+bundle; mobile-at-beta via official WG apps. New order: 7.5 → 8 → 9 →
+10 → 11 → bundle → beta → M-parked (see Build Order — LOCKED).** S12.1/S12.2 pulled into the bundle; EPIC 12
 trigger = first paying-customer intent. Batches 1–3 dispositioned (see the ledger + `docs/` decisions). **NEXT:
-S7.5.1 (flow/access logs) commit-one — decision-first, PAPER, no code until disposition.** If this pointer
+S7.5.1 (flow/access logs) — BUILD PHASE CLOSED at 6/n; next = slice 7/n (nflog Source) then box-walk.** If this pointer
 disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update it.
 
 ## Armed Guards (living inventory — "what protects us")
