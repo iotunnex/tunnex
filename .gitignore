@@ -52,3 +52,4 @@ apps/web/vite.config.d.ts
 # S6.5a packaging build outputs (electron-builder + staged helper)
 apps/client/release/
 apps/client/build/helper/
+S.conf
