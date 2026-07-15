@@ -8,7 +8,9 @@ SELECT * FROM idp_sync_configs
 WHERE org_id = $1 AND provider = $2;
 
 -- name: ListEnabledIdpSyncConfigs :many
--- The poller's work-list: every org/provider with sync turned on.
+-- The poller's work-list: every org/provider with sync turned on. Deliberately CROSS-ORG — the
+-- background poller iterates all tenants; each config is reconciled org-scoped downstream.
+-- lint:cross-org
 SELECT * FROM idp_sync_configs
 WHERE enabled = true
 ORDER BY org_id, provider;
@@ -27,6 +29,51 @@ SET last_sync_ok    = $3,
     last_sync_at    = CASE WHEN $5::boolean THEN $6 ELSE last_sync_at END,
     updated_at      = $6
 WHERE org_id = $1 AND provider = $2;
+
+-- name: UpsertIdpSyncConfig :one
+-- Connect / update a provider credential. The secret is pre-sealed (AES-GCM) by the caller;
+-- plaintext never reaches SQL. On re-set, credentials update but the sync-health columns are
+-- left intact (a credential rotation shouldn't fake a green health).
+INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, enabled)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, provider) DO UPDATE
+    SET client_id = EXCLUDED.client_id,
+        secret_sealed = EXCLUDED.secret_sealed,
+        tenant_id = EXCLUDED.tenant_id,
+        enabled = EXCLUDED.enabled,
+        updated_at = now()
+RETURNING *;
+
+-- ── group mapping (create / bind / unbind) ───────────────────────────────────────
+-- name: CreateIdpSyncGroup :one
+-- Create a fresh Tunnex group already bound to an IdP group (origin='idp_sync').
+INSERT INTO user_groups (org_id, name, description, origin, idp_provider, idp_group_id)
+VALUES ($1, $2, '', 'idp_sync', $3, $4)
+RETURNING *;
+
+-- name: BindGroupToIdp :one
+-- Flip an EXISTING manual group to idp_sync. The WHERE origin='manual' clause makes a re-bind of
+-- an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
+-- disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.
+UPDATE user_groups
+SET origin = 'idp_sync', idp_provider = $3, idp_group_id = $4, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND origin = 'manual'
+RETURNING *;
+
+-- name: UnbindIdpGroup :one
+-- Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
+UPDATE user_groups
+SET origin = 'manual', idp_provider = NULL, idp_group_id = NULL, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND origin = 'idp_sync'
+RETURNING *;
+
+-- name: CountGroupMembers :one
+-- Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
+SELECT count(*) FROM group_members WHERE org_id = $1 AND group_id = $2;
+
+-- name: DeleteGroupMembersByGroup :execrows
+-- Clear a group's membership (used on un-map, after the origin flip back to manual).
+DELETE FROM group_members WHERE org_id = $1 AND group_id = $2;
 
 -- ── idp_sync groups (the mappings to reconcile) ──────────────────────────────────
 -- name: ListIdpSyncGroups :many

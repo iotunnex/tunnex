@@ -41,6 +41,7 @@ type AuditLog struct {
 	TargetID    *string     `json:"target_id"`
 	Metadata    []byte      `json:"metadata"`
 	CreatedAt   time.Time   `json:"created_at"`
+	ActorSystem *string     `json:"actor_system"`
 }
 
 type AuthToken struct {

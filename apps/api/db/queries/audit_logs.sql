@@ -6,6 +6,14 @@ INSERT INTO audit_logs (org_id, actor_user_id, action, target_type, target_id, m
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
+-- name: InsertSystemAuditLog :one
+-- Append a system/service-initiated audit row: actor_user_id is NULL and the actor is NAMED in
+-- actor_system (e.g. 'idp-sync'). The metadata carries the CAUSE. Used when no human initiated
+-- the action (S7.5.2 idp-sync deprovisioning).
+INSERT INTO audit_logs (org_id, actor_system, action, target_type, target_id, metadata)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
 -- name: ListAuditLogsByOrg :many
 -- Org-scoped audit feed with optional filters (actor / action / date range) and
 -- KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is

@@ -111,11 +111,18 @@ func (s *Service) ListGroupMembers(ctx context.Context, orgID, groupID uuid.UUID
 
 func (s *Service) AddGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
 	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
-		if _, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: groupID, OrgID: orgID}); e != nil {
+		g, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: groupID, OrgID: orgID})
+		if e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				return apierr.NotFound("group_not_found", "group not found")
 			}
 			return e
+		}
+		// D1 (S7.5.2): an idp_sync group's membership is owned by the reconciler — hand-editing
+		// it would be silently overwritten on the next poll, and worse, would blur the disjoint
+		// manual/idp origins the schema guards. Refuse loudly instead.
+		if g.Origin == "idp_sync" {
+			return apierr.Conflict("idp_managed_group", "this group is managed by directory sync; members cannot be edited manually")
 		}
 		// The user must be a member of THIS org — no adding a foreign/unknown user
 		// to a group (which would then inherit grants). GetMembership is org-scoped.
@@ -138,6 +145,16 @@ func (s *Service) AddGroupMember(ctx context.Context, orgID, groupID, userID uui
 
 func (s *Service) RemoveGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
 	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+		g, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: groupID, OrgID: orgID})
+		if e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return apierr.NotFound("group_not_found", "group not found")
+			}
+			return e
+		}
+		if g.Origin == "idp_sync" { // D1: reconciler-owned; see AddGroupMember
+			return apierr.Conflict("idp_managed_group", "this group is managed by directory sync; members cannot be edited manually")
+		}
 		n, e := q.RemoveGroupMember(ctx, sqlc.RemoveGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID})
 		if e != nil {
 			return e

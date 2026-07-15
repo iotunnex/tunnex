@@ -85,17 +85,18 @@ func requireVerifiedSessionUser(ctx context.Context) (*authctx.Principal, error)
 // typed responses on success and plain errors on failure; the strict handler's
 // ResponseErrorHandlerFunc renders those errors as the standard envelope.
 type apiServer struct {
-	orgs     *tenancy.Service
-	cliAuth  *cliauth.Service
-	auth     *auth.Service
-	members  *tenancy.MembershipService
-	invites  *invites.Service
-	nodes    *nodes.Service
-	devices  *devices.Service
-	sessions *session.Store
+	orgs      *tenancy.Service
+	cliAuth   *cliauth.Service
+	auth      *auth.Service
+	members   *tenancy.MembershipService
+	invites   *invites.Service
+	nodes     *nodes.Service
+	devices   *devices.Service
+	sessions  *session.Store
 	sso       ssoPort       // nil in the open build
 	policy    policyPort    // nil in the open build (Zero Trust, S7.1)
 	accessLog accessLogPort // nil in the open build (Zero Trust visibility, S7.5.1)
+	idpSync   idpSyncPort   // nil in the open build (IdP-group sync, S7.5.2)
 	// deviceApprovalEnabled gates device posture (S7.3). NAMED per-feature (its own
 	// wire files), not a proxy behind s.policy — device posture and Zero Trust policy
 	// are distinct enterprise features (F2 / ledgered S12.1 refactor).

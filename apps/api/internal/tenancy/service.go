@@ -182,6 +182,24 @@ func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uu
 	return err
 }
 
+// writeSystemAudit records a system/service-initiated audit event (no human actor) with a NAMED
+// actor in actor_system (e.g. "idp-sync") + the cause in metadata. See migration 0027.
+func writeSystemAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actorSystem, action, targetType, targetID string, meta map[string]any) error {
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	_, err = q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
+		ActorSystem: &actorSystem,
+		Action:      action,
+		TargetType:  &targetType,
+		TargetID:    &targetID,
+		Metadata:    b,
+	})
+	return err
+}
+
 func orgNotFound() error { return apierr.NotFound("org_not_found", "organization not found") }
 
 // mapDBError converts known Postgres errors into typed API errors.

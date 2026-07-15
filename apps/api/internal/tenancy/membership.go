@@ -55,6 +55,26 @@ func (s *MembershipService) WithDevicePusher(p DevicePusher) *MembershipService 
 // session. It refuses to deactivate the sole owner of any org (last-owner
 // invariant) so an org can never be orphaned.
 func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, targetUserID uuid.UUID) error {
+	return s.deactivate(ctx, orgID, targetUserID, func(q *sqlc.Queries) error {
+		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})
+	})
+}
+
+// DeactivateMemberBySync is the idp-sync (S7.5.2) deprovision path: the SAME full sweep as
+// DeactivateMember, but audited to a first-class NAMED system actor ("idp-sync") — not NULL, not a
+// borrowed admin — with the CAUSE in metadata, so a compliance reader sees "revoked by idp-sync
+// because <cause>" (same discipline as device.self_approved). cause is e.g. "disabled_in_directory".
+func (s *MembershipService) DeactivateMemberBySync(ctx context.Context, orgID, targetUserID uuid.UUID, cause string) error {
+	return s.deactivate(ctx, orgID, targetUserID, func(q *sqlc.Queries) error {
+		return writeSystemAudit(ctx, q, orgID, "idp-sync", "user.deactivated", "user", targetUserID.String(),
+			map[string]any{"cause": cause})
+	})
+}
+
+// deactivate is the shared core: last-owner guard, status flip + CLI-cred sweep + audit (in one tx),
+// then live-session revoke + org-wide push. The audit row is written by writeAuditFn so the human
+// and system callers attribute the SAME action to different, legible actors.
+func (s *MembershipService) deactivate(ctx context.Context, orgID, targetUserID uuid.UUID, writeAuditFn func(*sqlc.Queries) error) error {
 	// target must belong to the acting org (authorization scope).
 	if _, err := s.q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -67,6 +87,8 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 		return err
 	}
 	if sole > 0 {
+		// Never orphan an org — even from sync. The sync caller degrades that config's health
+		// on this error so an operator sees "couldn't deprovision the sole owner".
 		return apierr.Conflict("last_owner", "this user is the only owner of an organization and cannot be deactivated")
 	}
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
@@ -78,7 +100,7 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 		if e := cliauth.SweepUser(ctx, q, targetUserID); e != nil {
 			return e
 		}
-		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})
+		return writeAuditFn(q)
 	}); err != nil {
 		return err
 	}

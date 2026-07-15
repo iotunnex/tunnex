@@ -34,6 +34,117 @@ func (q *Queries) AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberPa
 	return result.RowsAffected(), nil
 }
 
+const bindGroupToIdp = `-- name: BindGroupToIdp :one
+UPDATE user_groups
+SET origin = 'idp_sync', idp_provider = $3, idp_group_id = $4, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND origin = 'manual'
+RETURNING id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id
+`
+
+type BindGroupToIdpParams struct {
+	ID          uuid.UUID `json:"id"`
+	OrgID       uuid.UUID `json:"org_id"`
+	IdpProvider *string   `json:"idp_provider"`
+	IdpGroupID  *string   `json:"idp_group_id"`
+}
+
+// Flip an EXISTING manual group to idp_sync. The WHERE origin='manual' clause makes a re-bind of
+// an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
+// disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.
+func (q *Queries) BindGroupToIdp(ctx context.Context, arg BindGroupToIdpParams) (UserGroup, error) {
+	row := q.db.QueryRow(ctx, bindGroupToIdp,
+		arg.ID,
+		arg.OrgID,
+		arg.IdpProvider,
+		arg.IdpGroupID,
+	)
+	var i UserGroup
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
+	)
+	return i, err
+}
+
+const countGroupMembers = `-- name: CountGroupMembers :one
+SELECT count(*) FROM group_members WHERE org_id = $1 AND group_id = $2
+`
+
+type CountGroupMembersParams struct {
+	OrgID   uuid.UUID `json:"org_id"`
+	GroupID uuid.UUID `json:"group_id"`
+}
+
+// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
+func (q *Queries) CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countGroupMembers, arg.OrgID, arg.GroupID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createIdpSyncGroup = `-- name: CreateIdpSyncGroup :one
+INSERT INTO user_groups (org_id, name, description, origin, idp_provider, idp_group_id)
+VALUES ($1, $2, '', 'idp_sync', $3, $4)
+RETURNING id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id
+`
+
+type CreateIdpSyncGroupParams struct {
+	OrgID       uuid.UUID `json:"org_id"`
+	Name        string    `json:"name"`
+	IdpProvider *string   `json:"idp_provider"`
+	IdpGroupID  *string   `json:"idp_group_id"`
+}
+
+// ── group mapping (create / bind / unbind) ───────────────────────────────────────
+// Create a fresh Tunnex group already bound to an IdP group (origin='idp_sync').
+func (q *Queries) CreateIdpSyncGroup(ctx context.Context, arg CreateIdpSyncGroupParams) (UserGroup, error) {
+	row := q.db.QueryRow(ctx, createIdpSyncGroup,
+		arg.OrgID,
+		arg.Name,
+		arg.IdpProvider,
+		arg.IdpGroupID,
+	)
+	var i UserGroup
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
+	)
+	return i, err
+}
+
+const deleteGroupMembersByGroup = `-- name: DeleteGroupMembersByGroup :execrows
+DELETE FROM group_members WHERE org_id = $1 AND group_id = $2
+`
+
+type DeleteGroupMembersByGroupParams struct {
+	OrgID   uuid.UUID `json:"org_id"`
+	GroupID uuid.UUID `json:"group_id"`
+}
+
+// Clear a group's membership (used on un-map, after the origin flip back to manual).
+func (q *Queries) DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupMembersByGroup, arg.OrgID, arg.GroupID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getIdpSyncConfig = `-- name: GetIdpSyncConfig :one
 
 SELECT id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at FROM idp_sync_configs
@@ -104,7 +215,9 @@ WHERE enabled = true
 ORDER BY org_id, provider
 `
 
-// The poller's work-list: every org/provider with sync turned on.
+// The poller's work-list: every org/provider with sync turned on. Deliberately CROSS-ORG — the
+// background poller iterates all tenants; each config is reconciled org-scoped downstream.
+// lint:cross-org
 func (q *Queries) ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error) {
 	rows, err := q.db.Query(ctx, listEnabledIdpSyncConfigs)
 	if err != nil {
@@ -271,4 +384,85 @@ func (q *Queries) RemoveIdpGroupMember(ctx context.Context, arg RemoveIdpGroupMe
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const unbindIdpGroup = `-- name: UnbindIdpGroup :one
+UPDATE user_groups
+SET origin = 'manual', idp_provider = NULL, idp_group_id = NULL, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND origin = 'idp_sync'
+RETURNING id, org_id, name, description, created_at, updated_at, origin, idp_provider, idp_group_id
+`
+
+type UnbindIdpGroupParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
+func (q *Queries) UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) (UserGroup, error) {
+	row := q.db.QueryRow(ctx, unbindIdpGroup, arg.ID, arg.OrgID)
+	var i UserGroup
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Origin,
+		&i.IdpProvider,
+		&i.IdpGroupID,
+	)
+	return i, err
+}
+
+const upsertIdpSyncConfig = `-- name: UpsertIdpSyncConfig :one
+INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, enabled)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, provider) DO UPDATE
+    SET client_id = EXCLUDED.client_id,
+        secret_sealed = EXCLUDED.secret_sealed,
+        tenant_id = EXCLUDED.tenant_id,
+        enabled = EXCLUDED.enabled,
+        updated_at = now()
+RETURNING id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at
+`
+
+type UpsertIdpSyncConfigParams struct {
+	OrgID        uuid.UUID `json:"org_id"`
+	Provider     string    `json:"provider"`
+	ClientID     string    `json:"client_id"`
+	SecretSealed []byte    `json:"secret_sealed"`
+	TenantID     *string   `json:"tenant_id"`
+	Enabled      bool      `json:"enabled"`
+}
+
+// Connect / update a provider credential. The secret is pre-sealed (AES-GCM) by the caller;
+// plaintext never reaches SQL. On re-set, credentials update but the sync-health columns are
+// left intact (a credential rotation shouldn't fake a green health).
+func (q *Queries) UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConfigParams) (IdpSyncConfig, error) {
+	row := q.db.QueryRow(ctx, upsertIdpSyncConfig,
+		arg.OrgID,
+		arg.Provider,
+		arg.ClientID,
+		arg.SecretSealed,
+		arg.TenantID,
+		arg.Enabled,
+	)
+	var i IdpSyncConfig
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Provider,
+		&i.ClientID,
+		&i.SecretSealed,
+		&i.TenantID,
+		&i.Enabled,
+		&i.LastSyncAt,
+		&i.LastSyncOk,
+		&i.LastSyncError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

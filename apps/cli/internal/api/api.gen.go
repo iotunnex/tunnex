@@ -63,6 +63,18 @@ const (
 	Ok HealthResponseStatus = "ok"
 )
 
+// Defines values for IdpSyncConfigProvider.
+const (
+	IdpSyncConfigProviderGoogle    IdpSyncConfigProvider = "google"
+	IdpSyncConfigProviderMicrosoft IdpSyncConfigProvider = "microsoft"
+)
+
+// Defines values for IdpSyncHealthProvider.
+const (
+	IdpSyncHealthProviderGoogle    IdpSyncHealthProvider = "google"
+	IdpSyncHealthProviderMicrosoft IdpSyncHealthProvider = "microsoft"
+)
+
 // Defines values for InviteRequestRole.
 const (
 	InviteRequestRoleAdmin  InviteRequestRole = "admin"
@@ -143,6 +155,18 @@ const (
 	SsoConfigViewProviderMicrosoft SsoConfigViewProvider = "microsoft"
 )
 
+// Defines values for UserGroupIdpProvider.
+const (
+	UserGroupIdpProviderGoogle    UserGroupIdpProvider = "google"
+	UserGroupIdpProviderMicrosoft UserGroupIdpProvider = "microsoft"
+)
+
+// Defines values for UserGroupOrigin.
+const (
+	IdpSync UserGroupOrigin = "idp_sync"
+	Manual  UserGroupOrigin = "manual"
+)
+
 // Defines values for ZeroTrustModeMode.
 const (
 	ZeroTrustModeModeEnforcing ZeroTrustModeMode = "enforcing"
@@ -157,8 +181,8 @@ const (
 
 // Defines values for StartSsoLoginParamsProvider.
 const (
-	StartSsoLoginParamsProviderGoogle    StartSsoLoginParamsProvider = "google"
-	StartSsoLoginParamsProviderMicrosoft StartSsoLoginParamsProvider = "microsoft"
+	Google    StartSsoLoginParamsProvider = "google"
+	Microsoft StartSsoLoginParamsProvider = "microsoft"
 )
 
 // AcceptInviteRequest defines model for AcceptInviteRequest.
@@ -230,13 +254,14 @@ type AffectedDevice struct {
 
 // AuditLogEntry defines model for AuditLogEntry.
 type AuditLogEntry struct {
-	Action     string                 `json:"action"`
-	ActorId    *openapi_types.UUID    `json:"actor_id,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	Details    map[string]interface{} `json:"details"`
-	Id         openapi_types.UUID     `json:"id"`
-	TargetId   *string                `json:"target_id,omitempty"`
-	TargetType *string                `json:"target_type,omitempty"`
+	Action      string                 `json:"action"`
+	ActorId     *openapi_types.UUID    `json:"actor_id,omitempty"`
+	ActorSystem *string                `json:"actor_system,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	Details     map[string]interface{} `json:"details"`
+	Id          openapi_types.UUID     `json:"id"`
+	TargetId    *string                `json:"target_id,omitempty"`
+	TargetType  *string                `json:"target_type,omitempty"`
 }
 
 // AuthUser defines model for AuthUser.
@@ -509,6 +534,56 @@ type HealthResponse struct {
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
 
+// IdpGroupMapRequest defines model for IdpGroupMapRequest.
+type IdpGroupMapRequest struct {
+	GroupId *openapi_types.UUID `json:"group_id,omitempty"`
+
+	// IdpGroupId The external directory group id.
+	IdpGroupId string  `json:"idp_group_id"`
+	Name       *string `json:"name,omitempty"`
+}
+
+// IdpSyncConfig defines model for IdpSyncConfig.
+type IdpSyncConfig struct {
+	ClientId      string                `json:"client_id"`
+	Enabled       bool                  `json:"enabled"`
+	LastSyncAt    *time.Time            `json:"last_sync_at,omitempty"`
+	LastSyncError *string               `json:"last_sync_error,omitempty"`
+	LastSyncOk    bool                  `json:"last_sync_ok"`
+	Provider      IdpSyncConfigProvider `json:"provider"`
+
+	// SyncHealth Two-tier derived health (D2).
+	SyncHealth string  `json:"sync_health"`
+	TenantId   *string `json:"tenant_id,omitempty"`
+}
+
+// IdpSyncConfigProvider defines model for IdpSyncConfig.Provider.
+type IdpSyncConfigProvider string
+
+// IdpSyncConfigRequest defines model for IdpSyncConfigRequest.
+type IdpSyncConfigRequest struct {
+	ClientId string `json:"client_id"`
+
+	// ClientSecret Sealed at rest (AES-GCM); never returned.
+	ClientSecret string `json:"client_secret"`
+	Enabled      *bool  `json:"enabled,omitempty"`
+
+	// TenantId Entra tenant id; omit for google.
+	TenantId *string `json:"tenant_id,omitempty"`
+}
+
+// IdpSyncHealth defines model for IdpSyncHealth.
+type IdpSyncHealth struct {
+	LastSyncAt    *time.Time            `json:"last_sync_at,omitempty"`
+	LastSyncError *string               `json:"last_sync_error,omitempty"`
+	LastSyncOk    bool                  `json:"last_sync_ok"`
+	Provider      IdpSyncHealthProvider `json:"provider"`
+	SyncHealth    string                `json:"sync_health"`
+}
+
+// IdpSyncHealthProvider defines model for IdpSyncHealth.Provider.
+type IdpSyncHealthProvider string
+
 // InviteCreated defines model for InviteCreated.
 type InviteCreated struct {
 	// InviteToken Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later.
@@ -737,13 +812,22 @@ type UpdateOrganizationRequest struct {
 
 // UserGroup defines model for UserGroup.
 type UserGroup struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	Description string             `json:"description"`
-	Id          openapi_types.UUID `json:"id"`
-	Name        string             `json:"name"`
-	OrgId       openapi_types.UUID `json:"org_id"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	CreatedAt   time.Time             `json:"created_at"`
+	Description string                `json:"description"`
+	Id          openapi_types.UUID    `json:"id"`
+	IdpGroupId  *string               `json:"idp_group_id,omitempty"`
+	IdpProvider *UserGroupIdpProvider `json:"idp_provider,omitempty"`
+	Name        string                `json:"name"`
+	OrgId       openapi_types.UUID    `json:"org_id"`
+	Origin      *UserGroupOrigin      `json:"origin,omitempty"`
+	UpdatedAt   time.Time             `json:"updated_at"`
 }
+
+// UserGroupIdpProvider defines model for UserGroup.IdpProvider.
+type UserGroupIdpProvider string
+
+// UserGroupOrigin defines model for UserGroup.Origin.
+type UserGroupOrigin string
 
 // ZeroTrustMode defines model for ZeroTrustMode.
 type ZeroTrustMode struct {
@@ -859,6 +943,12 @@ type UpdateGroupJSONRequestBody = GroupRequest
 
 // AddGroupMemberJSONRequestBody defines body for AddGroupMember for application/json ContentType.
 type AddGroupMemberJSONRequestBody = AddGroupMemberRequest
+
+// PutIdpSyncConfigJSONRequestBody defines body for PutIdpSyncConfig for application/json ContentType.
+type PutIdpSyncConfigJSONRequestBody = IdpSyncConfigRequest
+
+// MapIdpGroupJSONRequestBody defines body for MapIdpGroup for application/json ContentType.
+type MapIdpGroupJSONRequestBody = IdpGroupMapRequest
 
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = InviteRequest
@@ -1140,6 +1230,25 @@ type ClientInterface interface {
 
 	// RemoveGroupMember request
 	RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutIdpSyncConfigWithBody request with any body
+	PutIdpSyncConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutIdpSyncConfig(ctx context.Context, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MapIdpGroupWithBody request with any body
+	MapIdpGroupWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	MapIdpGroup(ctx context.Context, orgId openapi_types.UUID, provider string, body MapIdpGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UnmapIdpGroup request
+	UnmapIdpGroup(ctx context.Context, orgId openapi_types.UUID, provider string, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetIdpSyncHealth request
+	GetIdpSyncHealth(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TriggerIdpSync request
+	TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateInvitationWithBody request with any body
 	CreateInvitationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2006,6 +2115,90 @@ func (c *Client) AddGroupMember(ctx context.Context, orgId openapi_types.UUID, g
 
 func (c *Client) RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRemoveGroupMemberRequest(c.Server, orgId, groupId, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutIdpSyncConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutIdpSyncConfigRequestWithBody(c.Server, orgId, provider, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutIdpSyncConfig(ctx context.Context, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutIdpSyncConfigRequest(c.Server, orgId, provider, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MapIdpGroupWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMapIdpGroupRequestWithBody(c.Server, orgId, provider, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MapIdpGroup(ctx context.Context, orgId openapi_types.UUID, provider string, body MapIdpGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMapIdpGroupRequest(c.Server, orgId, provider, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UnmapIdpGroup(ctx context.Context, orgId openapi_types.UUID, provider string, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnmapIdpGroupRequest(c.Server, orgId, provider, groupId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetIdpSyncHealth(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetIdpSyncHealthRequest(c.Server, orgId, provider)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTriggerIdpSyncRequest(c.Server, orgId, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -4392,6 +4585,244 @@ func NewRemoveGroupMemberRequest(server string, orgId openapi_types.UUID, groupI
 	return req, nil
 }
 
+// NewPutIdpSyncConfigRequest calls the generic PutIdpSyncConfig builder with application/json body
+func NewPutIdpSyncConfigRequest(server string, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutIdpSyncConfigRequestWithBody(server, orgId, provider, "application/json", bodyReader)
+}
+
+// NewPutIdpSyncConfigRequestWithBody generates requests for PutIdpSyncConfig with any type of body
+func NewPutIdpSyncConfigRequestWithBody(server string, orgId openapi_types.UUID, provider string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "provider", runtime.ParamLocationPath, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/idp-sync/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewMapIdpGroupRequest calls the generic MapIdpGroup builder with application/json body
+func NewMapIdpGroupRequest(server string, orgId openapi_types.UUID, provider string, body MapIdpGroupJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewMapIdpGroupRequestWithBody(server, orgId, provider, "application/json", bodyReader)
+}
+
+// NewMapIdpGroupRequestWithBody generates requests for MapIdpGroup with any type of body
+func NewMapIdpGroupRequestWithBody(server string, orgId openapi_types.UUID, provider string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "provider", runtime.ParamLocationPath, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/idp-sync/%s/groups", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewUnmapIdpGroupRequest generates requests for UnmapIdpGroup
+func NewUnmapIdpGroupRequest(server string, orgId openapi_types.UUID, provider string, groupId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "provider", runtime.ParamLocationPath, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "groupId", runtime.ParamLocationPath, groupId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/idp-sync/%s/groups/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetIdpSyncHealthRequest generates requests for GetIdpSyncHealth
+func NewGetIdpSyncHealthRequest(server string, orgId openapi_types.UUID, provider string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "provider", runtime.ParamLocationPath, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/idp-sync/%s/health", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewTriggerIdpSyncRequest generates requests for TriggerIdpSync
+func NewTriggerIdpSyncRequest(server string, orgId openapi_types.UUID, provider string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "provider", runtime.ParamLocationPath, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/idp-sync/%s/trigger", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewCreateInvitationRequest calls the generic CreateInvitation builder with application/json body
 func NewCreateInvitationRequest(server string, orgId openapi_types.UUID, body CreateInvitationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5625,6 +6056,25 @@ type ClientWithResponsesInterface interface {
 	// RemoveGroupMemberWithResponse request
 	RemoveGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveGroupMemberResponse, error)
 
+	// PutIdpSyncConfigWithBodyWithResponse request with any body
+	PutIdpSyncConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error)
+
+	PutIdpSyncConfigWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error)
+
+	// MapIdpGroupWithBodyWithResponse request with any body
+	MapIdpGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MapIdpGroupResponse, error)
+
+	MapIdpGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, body MapIdpGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*MapIdpGroupResponse, error)
+
+	// UnmapIdpGroupWithResponse request
+	UnmapIdpGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnmapIdpGroupResponse, error)
+
+	// GetIdpSyncHealthWithResponse request
+	GetIdpSyncHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*GetIdpSyncHealthResponse, error)
+
+	// TriggerIdpSyncWithResponse request
+	TriggerIdpSyncWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*TriggerIdpSyncResponse, error)
+
 	// CreateInvitationWithBodyWithResponse request with any body
 	CreateInvitationWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInvitationResponse, error)
 
@@ -6745,6 +7195,120 @@ func (r RemoveGroupMemberResponse) StatusCode() int {
 	return 0
 }
 
+type PutIdpSyncConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *IdpSyncConfig
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r PutIdpSyncConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutIdpSyncConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MapIdpGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *UserGroup
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MapIdpGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MapIdpGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UnmapIdpGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r UnmapIdpGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnmapIdpGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetIdpSyncHealthResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *IdpSyncHealth
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetIdpSyncHealthResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetIdpSyncHealthResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type TriggerIdpSyncResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *IdpSyncHealth
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r TriggerIdpSyncResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TriggerIdpSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type CreateInvitationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7853,6 +8417,67 @@ func (c *ClientWithResponses) RemoveGroupMemberWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseRemoveGroupMemberResponse(rsp)
+}
+
+// PutIdpSyncConfigWithBodyWithResponse request with arbitrary body returning *PutIdpSyncConfigResponse
+func (c *ClientWithResponses) PutIdpSyncConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error) {
+	rsp, err := c.PutIdpSyncConfigWithBody(ctx, orgId, provider, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutIdpSyncConfigResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutIdpSyncConfigWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error) {
+	rsp, err := c.PutIdpSyncConfig(ctx, orgId, provider, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutIdpSyncConfigResponse(rsp)
+}
+
+// MapIdpGroupWithBodyWithResponse request with arbitrary body returning *MapIdpGroupResponse
+func (c *ClientWithResponses) MapIdpGroupWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MapIdpGroupResponse, error) {
+	rsp, err := c.MapIdpGroupWithBody(ctx, orgId, provider, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMapIdpGroupResponse(rsp)
+}
+
+func (c *ClientWithResponses) MapIdpGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, body MapIdpGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*MapIdpGroupResponse, error) {
+	rsp, err := c.MapIdpGroup(ctx, orgId, provider, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMapIdpGroupResponse(rsp)
+}
+
+// UnmapIdpGroupWithResponse request returning *UnmapIdpGroupResponse
+func (c *ClientWithResponses) UnmapIdpGroupWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, groupId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnmapIdpGroupResponse, error) {
+	rsp, err := c.UnmapIdpGroup(ctx, orgId, provider, groupId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnmapIdpGroupResponse(rsp)
+}
+
+// GetIdpSyncHealthWithResponse request returning *GetIdpSyncHealthResponse
+func (c *ClientWithResponses) GetIdpSyncHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*GetIdpSyncHealthResponse, error) {
+	rsp, err := c.GetIdpSyncHealth(ctx, orgId, provider, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetIdpSyncHealthResponse(rsp)
+}
+
+// TriggerIdpSyncWithResponse request returning *TriggerIdpSyncResponse
+func (c *ClientWithResponses) TriggerIdpSyncWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*TriggerIdpSyncResponse, error) {
+	rsp, err := c.TriggerIdpSync(ctx, orgId, provider, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTriggerIdpSyncResponse(rsp)
 }
 
 // CreateInvitationWithBodyWithResponse request with arbitrary body returning *CreateInvitationResponse
@@ -9562,6 +10187,164 @@ func ParseRemoveGroupMemberResponse(rsp *http.Response) (*RemoveGroupMemberRespo
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutIdpSyncConfigResponse parses an HTTP response from a PutIdpSyncConfigWithResponse call
+func ParsePutIdpSyncConfigResponse(rsp *http.Response) (*PutIdpSyncConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutIdpSyncConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest IdpSyncConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMapIdpGroupResponse parses an HTTP response from a MapIdpGroupWithResponse call
+func ParseMapIdpGroupResponse(rsp *http.Response) (*MapIdpGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MapIdpGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UserGroup
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUnmapIdpGroupResponse parses an HTTP response from a UnmapIdpGroupWithResponse call
+func ParseUnmapIdpGroupResponse(rsp *http.Response) (*UnmapIdpGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnmapIdpGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetIdpSyncHealthResponse parses an HTTP response from a GetIdpSyncHealthWithResponse call
+func ParseGetIdpSyncHealthResponse(rsp *http.Response) (*GetIdpSyncHealthResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetIdpSyncHealthResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest IdpSyncHealth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTriggerIdpSyncResponse parses an HTTP response from a TriggerIdpSyncWithResponse call
+func ParseTriggerIdpSyncResponse(rsp *http.Response) (*TriggerIdpSyncResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TriggerIdpSyncResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest IdpSyncHealth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

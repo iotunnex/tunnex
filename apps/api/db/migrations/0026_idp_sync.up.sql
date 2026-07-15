@@ -43,3 +43,6 @@ CREATE TABLE idp_sync_configs (
     updated_at      timestamptz NOT NULL DEFAULT now(),
     UNIQUE (org_id, provider)
 );
+
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON idp_sync_configs
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();

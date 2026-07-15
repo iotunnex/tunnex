@@ -627,6 +627,133 @@ paths:
               schema: { $ref: "#/components/schemas/AccessLogHealth" }
         default: { $ref: "#/components/responses/Error" }
 
+  # ── IdP-group sync (S7.5.2, enterprise) ──────────────────────────────────────────
+  /api/v1/organizations/{orgId}/idp-sync/{provider}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [microsoft, google] }
+    put:
+      operationId: putIdpSyncConfig
+      summary: Connect / update a directory-sync provider credential (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IdpSyncConfigRequest" }
+      responses:
+        "200":
+          description: The stored config (secret never returned). Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdpSyncConfig" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/idp-sync/{provider}/health:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [microsoft, google] }
+    get:
+      operationId: getIdpSyncHealth
+      summary: Directory-sync two-tier health (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: The sync-health snapshot. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdpSyncHealth" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/idp-sync/{provider}/trigger:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [microsoft, google] }
+    post:
+      operationId: triggerIdpSync
+      summary: Reconcile the org's mapped directory groups now (enterprise)
+      tags: [policy]
+      responses:
+        "200":
+          description: Sync ran; the resulting health snapshot. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdpSyncHealth" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/idp-sync/{provider}/groups:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [microsoft, google] }
+    post:
+      operationId: mapIdpGroup
+      summary: Map a directory group to a Tunnex group — new or an EMPTY manual group (enterprise)
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IdpGroupMapRequest" }
+      responses:
+        "200":
+          description: The mapped (idp_sync) group. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/idp-sync/{provider}/groups/{groupId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string, enum: [microsoft, google] }
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: unmapIdpGroup
+      summary: Un-map a directory group (reverts the Tunnex group to manual, empty) (enterprise)
+      tags: [policy]
+      responses:
+        "204":
+          description: Un-mapped. Open build → 403 edition_required.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/devices:
     parameters:
       - name: orgId
@@ -1524,6 +1651,59 @@ components:
         description: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        # origin distinguishes a hand-managed group from a directory-synced one (S7.5.2). A
+        # manual group omits the idp_* fields; an idp_sync group carries both. Hand-editing an
+        # idp_sync group's membership is refused (409) — the reconciler owns it.
+        origin: { type: string, enum: [manual, idp_sync] }
+        idp_provider: { type: string, enum: [microsoft, google] }
+        idp_group_id: { type: string }
+
+    IdpSyncConfigRequest:
+      type: object
+      required: [client_id, client_secret]
+      additionalProperties: false
+      properties:
+        client_id: { type: string, minLength: 1 }
+        client_secret: { type: string, minLength: 1, description: Sealed at rest (AES-GCM); never returned. }
+        tenant_id: { type: string, description: Entra tenant id; omit for google. }
+        enabled: { type: boolean, default: true }
+
+    IdpSyncConfig:
+      type: object
+      required: [provider, client_id, enabled, last_sync_ok, sync_health]
+      additionalProperties: false
+      properties:
+        provider: { type: string, enum: [microsoft, google] }
+        client_id: { type: string }
+        tenant_id: { type: string }
+        enabled: { type: boolean }
+        last_sync_at: { type: string, format: date-time }
+        last_sync_ok: { type: boolean }
+        last_sync_error: { type: string }
+        sync_health: { type: string, description: Two-tier derived health (D2). }
+
+    IdpSyncHealth:
+      type: object
+      required: [provider, sync_health, last_sync_ok]
+      additionalProperties: false
+      properties:
+        provider: { type: string, enum: [microsoft, google] }
+        sync_health: { type: string }
+        last_sync_ok: { type: boolean }
+        last_sync_at: { type: string, format: date-time }
+        last_sync_error: { type: string }
+
+    IdpGroupMapRequest:
+      type: object
+      required: [idp_group_id]
+      additionalProperties: false
+      properties:
+        idp_group_id: { type: string, minLength: 1, description: The external directory group id. }
+        # Exactly one of name (create a new idp_sync group) or group_id (bind an EXISTING manual
+        # group — refused unless it is empty). Providing neither creates a group named after the
+        # idp_group_id; providing both is a 400.
+        name: { type: string, minLength: 1, maxLength: 100 }
+        group_id: { type: string, format: uuid }
 
     GroupRequest:
       type: object
@@ -2077,6 +2257,9 @@ components:
         id: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
         actor_id: { type: string, format: uuid }
+        # actor_system NAMES a non-human initiator (e.g. "idp-sync") when actor_id is absent —
+        # a first-class, legible actor for compliance attribution (S7.5.2).
+        actor_system: { type: string }
         action: { type: string }
         target_type: { type: string }
         target_id: { type: string }
