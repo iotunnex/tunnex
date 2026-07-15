@@ -1224,12 +1224,22 @@ Every story is decision-first (commit-one paper before code). Batch-1 items 1–
   local auth. Decide-before-code: TOTP enrollment · recovery codes · per-org enforce policy · SSO-vs-local
   interplay.
 
-## EPIC M — Mobile Clients (iOS + Android) — after EPIC 7.5, before EPICs 9/10 (CONFIRMED 2026-07-14)
+## EPIC M — Mobile Clients (iOS + Android) — PARKED (RESTRUCTURED 2026-07-15; founder trigger)
 
-iOS + Android WireGuard clients — login against a tenant (local + SSO) + tunnel control, at the discipline of
-the desktop client (EPIC 6). **THE ONE OPEN DECISION (resolved at EPIC M's own commit-one, calendar costs
-stated per option — NOT now): the beta gate = stage-1 (config-export / QR into the OFFICIAL WireGuard iOS/
-Android apps) vs FULL native apps.** Stories enumerated at commit-one once that gate is set.
+**PARKED at the strongest tier with a NAMED TRIGGER: founder decision — revisit at BETA-BUNDLE PLANNING OR on a
+demand signal (a design partner / prospect requiring native mobile), whichever first.** Native iOS + Android
+Tunnex clients (login local+SSO + tunnel control, at the EPIC-6 desktop discipline). The one open decide-item —
+**stage-1 (QR/config export into the official WireGuard apps) vs FULL native apps** — PARKS WITH the epic,
+resolved at M's commit-one when it unparks (calendar costs per option, then).
+
+**MOBILE-AT-BETA (the fact that softens the amendment):** mobile connectivity SHIPS at beta WITHOUT EPIC M —
+the existing **S3.3/S3.4 QR / config export**, consumed by the **official WireGuard iOS/Android apps**, gives
+mobile users a working tunnel; **gateway-side Zero Trust enforcement applies (transport-agnostic).** Pinned
+POSITIONING LINE for site copy: *"Mobile via the official WireGuard apps; native Tunnex apps on the roadmap."*
+Honest caveats (all = EPIC M's scope when it unparks): **no in-app SSO device creation** (config is minted from
+the dashboard) · **no mobile posture reporting** · **no client-side mobile kill-switch.** **VERIFY-AND-RECORD
+(small, rides an existing walk): the dashboard QR flow works end-to-end on the official WG mobile apps — one
+leg; if a gap surfaces it is a small story, NOT EPIC M.**
 
 ## BETA BUNDLE — the pre-public-beta gate (a workstream bundle, joint launch with the site)
 
@@ -1243,15 +1253,27 @@ goes FIRST (everything packaged/signed depends on the final edition-gating shape
   at its only launch. Payments (**S12.5) stay PARKED.**
 - **S6.5b** signing + notarization + auto-update ON *(named trigger now FIRED = public beta; Windows EV still
   waits on entity formation)*.
-- **S11.3** rate limiting + security headers.
+- *(S11.3 rate limits + security headers REMOVED 2026-07-15 — rejoins EPIC 11, which now runs FULL before the
+  bundle.)*
 - **SECURITY.md + vulnerability disclosure** *(batch-3 #5; seeded from the Armed Guards inventory)*.
-- **S6.6 clean-VPS acceptance + client-wire-smoke** *(the pending EPIC-6 box-proof + the ledgered wire-smoke)*.
+- **S6.6 clean-VPS acceptance + client-wire-smoke** *(the pending EPIC-6 box-proof + the ledgered wire-smoke)* —
+  **but its PROOF-run re-triggers to the "next available desktop/VPS session" (founder-schedulable NOW), NOT
+  the now-distant bundle** (else several epics stack on unproven legs; the Mailpit customer-path check rides it).
 - **Go-module vanity rename** `tunnexio/tunnex` → `tunnex.io/…` *(trigger FIRED — domain purchased)*.
-- **Site-sync joint cutover** — the platform emits three SYNC EMIT-POINTS the site consumes: **(a)** 7.5 close
-  → site feature/pricing/compare refresh; **(b)** EPIC M close → mobile claims + downloads; **(c)** bundle done
-  → joint cutover.
+- **Site-sync joint cutover** — the platform emits SYNC EMIT-POINTS the site consumes (re-anchored 2026-07-15):
+  **(a)** 7.5 close → compare/feature DRAFTS (not final); **(b) NEW:** 11 close → CONTENT FREEZE (the honest
+  feature list now includes site-to-site, DNS, OpenVPN, K8s); **(c)** bundle done → joint cutover. The mobile
+  claim uses the EPIC-M positioning line (*"Mobile via the official WireGuard apps; native on the roadmap"*),
+  NOT an M-close point (M is parked).
 
-## EPIC 8 — Site-to-Site Networking
+## EPIC 8 — Site-to-Site Networking — opens next AFTER S7.5.2–S7.5.5 (RESTRUCTURED 2026-07-15)
+
+**INHERITS the S7.5.1 versioned-artifact discipline** (sites-as-destination-kind bumps `policyspec.Compiled`):
+(1) the **newer-Version FAIL-CLOSED decide-item** — an agent receiving a Version it doesn't speak must refuse →
+deny-all + `policy_degraded` (today it silently accepts; S7.5.1 ledger, decide-before-code AT this bump since
+sites is a SEMANTIC change) · (2) the **enforcement-vs-observability PROJECTION checklist** — every new
+`Compiled`/`AllowEntry` field is classified; enforcement → into `CanonicalHash`'s projection, observability →
+out (S7.5.1 A-1). See docs/S7.5.1-decisions.md.
 
 **LEDGERED at S7.2 (decide-before-code for S8.1/S8.2): Zero Trust policy MUST govern site-to-site
 traffic.** Sites/subnets become a policy DESTINATION KIND — extending the S7.1 model through the
@@ -1318,7 +1340,10 @@ EPIC 10 too; do not build S8 routing without it.
 - **S10.2 Operator + CRDs** *(enterprise)* — `TunnexPeer`, `TunnexRoute`; reconcile WG peers/routes as k8s resources — **reuses the S3.1 reconcile loop design**.
 - **S10.3 Cluster gateway** — expose in-cluster services to tunnex clients via Zero Trust policies (agent as in-cluster gateway). **Depends on the EPIC 8 ledger seam** (sites/subnets as a policy destination kind in the versioned `Compiled` artifact) — in-cluster service exposure is the same "subnet reachable only via grant" mechanism.
 
-## EPIC 11 — Production Hardening
+## EPIC 11 — Production Hardening — runs FULL before the BETA BUNDLE (RESTRUCTURED 2026-07-15)
+
+*(S11.3 rate limits + security headers REJOINS here — it was pulled into the bundle under the old order; the
+new order runs EPIC 11 complete before the bundle, so the bundle sheds it.)*
 
 - **S11.1 Metrics** — Prometheus metrics, health/readiness (logging already in EPIC 0).
 - **S11.2 Backup/restore** — DB + master key **+ node-agent state (WG private keys on each gateway)**; documented restore.
@@ -1424,14 +1449,13 @@ Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump,
     obligations on the trial/issuance funnel).
 
 ## DECISIONS RESOLVED (user-directed 2026-07-14, PRE-SESSION FINAL — the planning collisions are closed)
-**LOCKED build order: EPIC 7 (done) → EPIC 7.5 → EPIC M (mobile) → BETA BUNDLE → PUBLIC BETA (joint w/ site) →
-EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11-remainder → EPIC 12-remainder.** EPIC 12 (licensing) trigger = **first
-paying-customer INTENT** (build-on-intent; supersedes the parked "post-beta" note — see
-[[tunnex-epic12-licensing]]).
-- **BETA-SCOPE (final):** beta ships FULL SCOPE — EPIC 7.5 AND EPIC M AND the beta bundle. "Beta at
-  EPIC-7-done" REJECTED; the timing collision is CLOSED. Sole open sub-question: **EPIC M's beta gate** —
-  stage-1 (config-export / QR into the official WireGuard iOS/Android apps) vs full native apps — resolved at
-  **EPIC M's own commit-one with calendar costs per option**, NOT now.
+**LOCKED build order (RESTRUCTURED 2026-07-15): EPIC 7 (done) → EPIC 7.5 → EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11
+(FULL) → BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
+EPIC 12 (licensing) trigger = **first paying-customer INTENT**.
+- **BETA-SCOPE (AMENDED 2026-07-15):** beta ships 7.5 + EPICs 8/9/10/11 + the bundle. **EPIC M is PARKED — beta
+  NO LONGER gates on it.** Mobile ships at beta via the official WireGuard apps (S3.3/S3.4 QR export;
+  gateway-side ZT applies). "Beta at EPIC-7-done" REJECTED still stands (beta is full-platform, just not native
+  mobile). EPIC M's stage-1-vs-native decide-item PARKS WITH IT, resolved at M's commit-one when it unparks.
 - **OPS — domain DONE:** `tunnex.io` live on Cloudflare ($5 plan); enquiry + enterprise email tested working.
   Supersedes "domain pending (Pawan)". UNBLOCKS: production `APP_BASE_URL` · SSO redirect URIs · outbound email
   · `get.tunnex.io` serving · the B2 domain-capture walk leg. **The vanity Go-module-path trigger (domain
@@ -1451,13 +1475,16 @@ paying-customer INTENT** (build-on-intent; supersedes the parked "post-beta" not
 ## STRATEGIC POSTURE — DELIBERATE-BUILD MARKET ENTRY (user-directed 2026-07-14, DECIDED)
 **Decided: build to full scope, enter the market ONCE, strong.** No launch urgency. Rationale (pinned): the
 wedge buyer (regulated / sovereignty / air-gap) rewards COMPLETENESS + evidence of rigor over speed; a
-half-product first impression is unrecoverable in enterprise evaluation. CONFIRMS the locked order (7.5 → M →
-BUNDLE → BETA joint with site) — NO change. The posture's failure mode is "no hurry → no clock"; four guards:
+half-product first impression is unrecoverable in enterprise evaluation. CONFIRMS the deliberate-build posture
+(the LOCKED order itself was RESTRUCTURED 2026-07-15 — 7.5 → 8 → 9 → 10 → 11 → BUNDLE → BETA → M-parked; see
+the Build Order section). The posture's failure mode is "no hurry → no clock"; four guards:
 
-1. **Internal milestones (anti-drift, NOT protocol-compromising deadlines).** At each epic close, Claude Code
-   PROPOSES candidate target dates ("7.5 done", "first design-partner deployment", "M done", "bundle done")
-   for founder confirmation; slippage is REPORTED, not hidden. Dates never justify skipping decision-first /
-   box-proof / review.
+1. **Internal milestones (anti-drift, NOT protocol-compromising deadlines) — RE-ANCHORED 2026-07-15.** Proposed
+   at **7.5 / 8 / 9 / 10 / 11 closes** (+ "first design-partner deployment", "bundle done"); slippage REPORTED,
+   not hidden. Dates never justify skipping decision-first / box-proof / review. **DEFERRED PROOFS must NOT ride
+   the now-distant bundle:** the **client-wire-smoke** + the **S6.6 clean-VPS acceptance** re-trigger to the
+   "next available desktop/VPS session" (founder-schedulable NOW) — else several epics of code stack on unproven
+   legs. The Mailpit customer-path check rides the S6.6 acceptance.
 2. **Design-partner track REFRAMED (supersedes earlier framing): private deployments ≠ launch.** Goal = 1–2
    friendly orgs in the wedge (regulated fintech · defense/govt integrators · OT/industrial · Pritunl
    migrations · India/DPDP angle) running the product PRIVATELY during the build → launch day carries "running
@@ -1467,12 +1494,14 @@ BUNDLE → BETA joint with site) — NO change. The posture's failure mode is "n
    starts NOW, longest clock; (b) **scoped pentest** (privilege helper + kill-switches ONLY, founder-affordable)
    — trigger moved EARLIER to **post-entity + post-7.5, NOT gated on a deal** → launch carries "independently
    tested"; the FULL audit (batch-3 #6) keeps its existing trigger (first enterprise deal / GA); (c) **security
-   whitepaper** (batch-3 #7) — drafted DURING the 7.5/M build from the armed-guards / box-proof material, not
-   after; founder-reviewed like the launch posts.
-4. **OPEN DECIDE-ITEM (founder's word, NOT decided): early content-only site launch.** Option: BLOG + `/compare`
-   pages ONLY go live early (no product pages / downloads / trial funnel) so the domain AGES and "Tailscale
-   alternative / Pritunl migration / NetBird vs" queries rank by launch day — SEO time is the one asset that
-   can't be bought later. Partially amends the single-launch decision (content early; product-launch still once
+   whitepaper** (batch-3 #7) — drafted DURING the 7.5/8 build from the armed-guards / box-proof material, not
+   after; founder-reviewed like the launch posts. *(The scoped pentest KEEPS its trigger — post-entity +
+   post-7.5 — it does NOT slide to post-everything.)*
+4. **OPEN DECIDE-ITEM (founder's word, NOT decided): early content-only site launch — HIGHER-VALUE under the
+   longer runway (RESTRUCTURED 2026-07-15: beta is now several more epics out, so more domain-aging time to
+   bank).** Option: BLOG + `/compare` pages ONLY go live early (no product pages / downloads / trial funnel) so
+   the domain AGES and "Tailscale alternative / Pritunl migration / NetBird vs" queries rank by launch day —
+   SEO time is the one asset that can't be bought later. Partially amends the single-launch decision (content early; product-launch still once
    + complete). Needs founder yes/no; if yes, a small `tunnex-site` content-only-mode story. Disposition =
    founder's word.
 
@@ -1513,16 +1542,21 @@ not near-term" note — S12.1's runtime license-gate now leads the bundle, so bu
 
 ---
 
-## Build Order — LOCKED at the EPIC-7-close planning session (2026-07-14)
-EPIC 0 → 1 → 2 → 3 → 4 → 5 → 6 → **7 ✅ → 7.5 (ZTNA competitiveness) → M (mobile) → BETA BUNDLE → PUBLIC BETA
-(joint with the site) → 8 → 9 → 10 → 11-remainder → 12-remainder.**
-- **S12.1 + S12.2 are pulled into the BETA BUNDLE** (single-complete-launch consequence); the rest of EPIC 12
-  fires on **first paying-customer INTENT**.
-- Beta ships FULL SCOPE (7.5 + M + bundle) — "beta at EPIC-7-done" REJECTED. EPIC M's stage-1-vs-native beta
-  gate is resolved at EPIC M's commit-one, not here.
+## Build Order — LOCKED (RESTRUCTURED 2026-07-15; supersedes the 2026-07-14 lock)
+EPIC 0 → 1 → 2 → 3 → 4 → 5 → 6 → **7 ✅ → 7.5 (in flight) → 8 → 9 → 10 → 11 (FULL) → BETA BUNDLE → PUBLIC BETA
+(joint with the site) → M (PARKED, founder trigger) → 12-remainder.**
+- **EPIC M → PARKED** (native mobile clients; founder trigger = beta-bundle-planning revisit OR a design-
+  partner/prospect requiring native mobile, whichever first). **Beta no longer gates on EPIC M.** Mobile
+  connectivity STILL ships at beta via the S3.3/S3.4 QR/config export consumed by the OFFICIAL WireGuard
+  iOS/Android apps (gateway-side ZT enforcement is transport-agnostic) — see the EPIC M section.
+- **EPIC 11 now runs COMPLETE before the bundle** — S11.3 (rate limits + security headers) REJOINS EPIC 11;
+  the bundle SHEDS it.
+- **S12.1 + S12.2 stay in the BETA BUNDLE** (single-complete-launch — the site trial funnel delivers real keys
+  at the one launch); the rest of EPIC 12 fires on **first paying-customer INTENT**. Bundle internal order
+  stands: **S12.1 → S12.2 → S6.5b → rest.**
 - ZT-coverage guarantees carry UNCHANGED: OVPN-through-compiler (S9.1) · DNS-under-enforcing (S8.4) ·
   egress-under-enforcing (S3.7-review).
-- **NEXT ARTIFACT: S7.5.1 commit-one (decision-first, paper).**
+- **NEXT ARTIFACT: S7.5.1 box-walk (build phase complete), then S7.5.2.**
 
 ### (historical) original recommended order
 EPIC 0 → 1 → 2 → 3 (WG core loop) → 4 (dashboard) → 5 (CLI) → 6 (Electron) → 7 → 8 → 9 → 10 → 11.
