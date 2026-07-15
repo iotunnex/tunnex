@@ -160,7 +160,7 @@ func TestRulesetDeterministic(t *testing.T) {
 func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}
 	withID := base
-	withID.RuleID = "rule-uuid-1"
+	withID.RuleID = "019f6400-0000-7000-8000-000000000a01"
 
 	// (i) enforcement byte-identical regardless of rule_id, ending in the verdict.
 	enf1, ok1 := renderAllow(base)
@@ -171,7 +171,7 @@ func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 	if !strings.HasSuffix(enf1, " accept\n") {
 		t.Fatalf("enforcement clause must end in the accept verdict: %q", enf1)
 	}
-	if strings.Contains(enf1, "rule-uuid-1") {
+	if strings.Contains(enf1, "019f6400-0000-7000-8000-000000000a01") {
 		t.Fatalf("enforcement clause must NOT carry rule_id (observability never touches packet fate): %q", enf1)
 	}
 
@@ -184,8 +184,8 @@ func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 	if !strings.HasSuffix(logged, " accept\n") {
 		t.Fatalf("logged line must keep the accept verdict (log is non-terminal): %q", logged)
 	}
-	delta := logClause(flowlog.EncodePrefix("rule-uuid-1"), 5)
-	if !strings.Contains(delta, "rule-uuid-1") {
+	delta := logClause(flowlog.EncodePrefix("019f6400-0000-7000-8000-000000000a01"), 5)
+	if !strings.Contains(delta, "019f6400-0000-7000-8000-000000000a01") {
 		t.Fatalf("the delta (log clause) must carry rule_id: %q", delta)
 	}
 	if strings.Replace(logged, delta, "", 1) != enf1 {
@@ -197,8 +197,12 @@ func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 // is exactly pre-S7.5.1 (safety default). Logging ON adds the rule_id + deny log clauses
 // while every verdict line still ends accept/drop.
 func TestForwardRulesFlowLogGrouping(t *testing.T) {
+	// rule_id must be a canonical UUID — renderAllowLogged validates it (fold-2 #7), so a fake
+	// "rid-1" would (correctly) render NO log clause. Use a real uuid, matching what the
+	// compiler always stamps.
+	const rid = "019f645f-0f5b-74a7-ba0a-fdaca4fca917"
 	pol := &nodepolicy.Compiled{Version: 2, Mode: nodepolicy.ModeEnforcing, Allow: []nodepolicy.AllowEntry{
-		{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rid-1"},
+		{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: rid},
 	}}
 	m := New("wg0")
 
@@ -209,7 +213,7 @@ func TestForwardRulesFlowLogGrouping(t *testing.T) {
 
 	m.SetFlowLogGroup(5)
 	v4on, _ := m.forwardRules(pol, true)
-	if !strings.Contains(v4on, `log prefix "tnx:rid-1 " group 5`) {
+	if !strings.Contains(v4on, `log prefix "tnx:`+rid+` " group 5`) {
 		t.Fatalf("logging ON must carry the rule_id log clause: %q", v4on)
 	}
 	if !strings.Contains(v4on, `log prefix "tnx:deny " group 5`) {
@@ -251,8 +255,8 @@ func TestEnforcingLoggedRulesetIsValidNft(t *testing.T) {
 	m.SetPolicy(&nodepolicy.Compiled{
 		Version: 2, Mode: nodepolicy.ModeEnforcing, Mesh: false,
 		Allow: []nodepolicy.AllowEntry{
-			{SrcIP: "10.99.0.2", DstCIDR: "10.99.0.3/32", Protocol: "any", RuleID: "rid-1"},
-			{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rid-2"},
+			{SrcIP: "10.99.0.2", DstCIDR: "10.99.0.3/32", Protocol: "any", RuleID: "019f6400-0000-7000-8000-000000000b01"},
+			{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "019f6400-0000-7000-8000-000000000b02"},
 		},
 	})
 	rs := m.ruleset("10.99.0.1/24")
