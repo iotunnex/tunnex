@@ -267,9 +267,18 @@ SESSION HELD (2026-07-14) — build order LOCKED: 7.5 → M → BETA BUNDLE → 
 10 → 11 → 12-remainder.** ~~Beta = full scope (7.5 + M + bundle).~~ **AMENDED 2026-07-15: EPIC M parked (founder
 trigger); beta gates on 7.5+8+9+10+11+bundle; mobile-at-beta via official WG apps. New order: 7.5 → 8 → 9 →
 10 → 11 → bundle → beta → M-parked (see Build Order — LOCKED).** S12.1/S12.2 pulled into the bundle; EPIC 12
-trigger = first paying-customer intent. Batches 1–3 dispositioned (see the ledger + `docs/` decisions). **NEXT:
-S7.5.1 (flow/access logs) — BUILD PHASE CLOSED at 6/n; next = slice 7/n (nflog Source) then box-walk.** If this pointer
-disagrees with the git log, TRUST GIT (`git log --oneline -20`) and update it.
+trigger = first paying-customer intent. Batches 1–3 dispositioned (see the ledger + `docs/` decisions).
+**S7.5.1 (flow/access logs) MERGED — the VISIBILITY half of Zero Trust, PG-only.** Ships: kernel nflog →
+kernel-stamped `rule_id` on the wire → allow/deny/deny_aggregate/gap/terminated access events (box-proven
+LIVE on the two-gateway box) + PG hot-window (retention sweep + `retention_failed`) + org-scoped keyset
+query API + deny-aggregation. Box-walk caught+fixed 3 real gateway/ingest bugs (deny-tail nft syntax,
+JSONL-durability class, flowlog volume/ownership); the review arc caught+fixed the concurrent-ingest class
+(RED-proven). **S7.5.1b REGISTERED-DEFERRED (EPIC 7.5, after S7.5.5 or first SIEM/compliance prospect):** the
+on-disk JSONL source-of-truth + byte-verbatim SIEM export + tamper-evidence (D4) + beyond-hot-window retention
+— the writer took six review rounds without converging and was DEFERRED rather than shipped with defects
+(the D4 obligation moved to S7.5.1b; the `seq` column + box-walk JSONL/export evidence carry over as its spec).
+**NEXT: S7.5.2 (IdP sync + SCIM) commit-one — its own fresh sitting.** If this pointer disagrees with the git
+log, TRUST GIT (`git log --oneline -20`) and update it.
 
 ## Armed Guards (living inventory — "what protects us")
 Each has been demonstrated to *fail* on a real violation during its story's DoD.
