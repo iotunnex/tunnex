@@ -1,7 +1,11 @@
--- name: InsertAccessEvent :execrows
--- Idempotent on (org_id, seq) so a replayed ingest batch can't double-insert. The id is
--- app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG hot-window and
--- the JSONL source-of-truth stream.
+-- name: InsertAccessEvent :exec
+-- The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
+-- hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
+-- locked counter), so it is unique by construction — this is a PLAIN insert (NO
+-- `ON CONFLICT DO NOTHING`): the (org_id, seq) unique index is a FAIL-LOUD backstop, so an
+-- impossible collision errors the batch (agent -> next-report gap) rather than SILENTLY
+-- dropping audit rows (review #1). No replay path re-inserts: a failed batch rolls the tx
+-- (and the counter bump) back, so a retry re-reserves a fresh range.
 INSERT INTO access_events (
     id, org_id, seq, node_id, occurred_at, decision, rule_id,
     src_device_id, src_user_id, src_ip, dst_ip, dst_resource_id, dst_group_id,
@@ -10,8 +14,21 @@ INSERT INTO access_events (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12, $13,
     $14, $15, $16, $17, $18
-)
-ON CONFLICT (org_id, seq) DO NOTHING;
+);
+
+-- name: BumpOrgFlowSeq :one
+-- Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
+-- takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
+-- never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
+-- so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
+UPDATE organizations SET flow_seq = flow_seq + sqlc.arg(n)::bigint
+WHERE id = sqlc.arg(org_id)
+RETURNING flow_seq;
+
+-- name: DistinctAccessEventOrgs :many
+-- lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
+-- row-cap sweep only visits orgs that actually have rows.
+SELECT DISTINCT org_id FROM access_events;
 
 -- name: ListAccessEvents :many
 -- Keyset page, newest-first, scoped by org. Expanded (created_at, id) < (cursor) predicate
@@ -34,11 +51,6 @@ WHERE org_id = $1
        OR (created_at = sqlc.arg(before_created_at) AND id < sqlc.arg(before_id)))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
-
--- name: MaxAccessEventSeqForOrg :one
--- The current high-water seq for an org — the ingest resumes the monotonic counter from
--- here after a restart so the per-org sequence never rewinds (gap-detection integrity).
-SELECT COALESCE(MAX(seq), 0)::bigint AS max_seq FROM access_events WHERE org_id = $1;
 
 -- name: SweepAccessEventsByAge :execrows
 -- lint:cross-org — retention housekeeping runs across ALL orgs by INGEST age (created_at,

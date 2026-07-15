@@ -13,7 +13,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertAccessEvent = `-- name: InsertAccessEvent :execrows
+const bumpOrgFlowSeq = `-- name: BumpOrgFlowSeq :one
+UPDATE organizations SET flow_seq = flow_seq + $1::bigint
+WHERE id = $2
+RETURNING flow_seq
+`
+
+type BumpOrgFlowSeqParams struct {
+	N     int64     `json:"n"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
+// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
+// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
+// so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
+func (q *Queries) BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) (int64, error) {
+	row := q.db.QueryRow(ctx, bumpOrgFlowSeq, arg.N, arg.OrgID)
+	var flow_seq int64
+	err := row.Scan(&flow_seq)
+	return flow_seq, err
+}
+
+const distinctAccessEventOrgs = `-- name: DistinctAccessEventOrgs :many
+SELECT DISTINCT org_id FROM access_events
+`
+
+// lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
+// row-cap sweep only visits orgs that actually have rows.
+func (q *Queries) DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, distinctAccessEventOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var org_id uuid.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertAccessEvent = `-- name: InsertAccessEvent :exec
 INSERT INTO access_events (
     id, org_id, seq, node_id, occurred_at, decision, rule_id,
     src_device_id, src_user_id, src_ip, dst_ip, dst_resource_id, dst_group_id,
@@ -23,7 +71,6 @@ INSERT INTO access_events (
     $8, $9, $10, $11, $12, $13,
     $14, $15, $16, $17, $18
 )
-ON CONFLICT (org_id, seq) DO NOTHING
 `
 
 type InsertAccessEventParams struct {
@@ -47,11 +94,15 @@ type InsertAccessEventParams struct {
 	CreatedAt     time.Time          `json:"created_at"`
 }
 
-// Idempotent on (org_id, seq) so a replayed ingest batch can't double-insert. The id is
-// app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG hot-window and
-// the JSONL source-of-truth stream.
-func (q *Queries) InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) (int64, error) {
-	result, err := q.db.Exec(ctx, insertAccessEvent,
+// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
+// hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
+// locked counter), so it is unique by construction — this is a PLAIN insert (NO
+// `ON CONFLICT DO NOTHING`): the (org_id, seq) unique index is a FAIL-LOUD backstop, so an
+// impossible collision errors the batch (agent -> next-report gap) rather than SILENTLY
+// dropping audit rows (review #1). No replay path re-inserts: a failed batch rolls the tx
+// (and the counter bump) back, so a retry re-reserves a fresh range.
+func (q *Queries) InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) error {
+	_, err := q.db.Exec(ctx, insertAccessEvent,
 		arg.ID,
 		arg.OrgID,
 		arg.Seq,
@@ -71,10 +122,7 @@ func (q *Queries) InsertAccessEvent(ctx context.Context, arg InsertAccessEventPa
 		arg.WindowEnd,
 		arg.CreatedAt,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	return err
 }
 
 const listAccessDenies = `-- name: ListAccessDenies :many
@@ -201,19 +249,6 @@ func (q *Queries) ListAccessEvents(ctx context.Context, arg ListAccessEventsPara
 		return nil, err
 	}
 	return items, nil
-}
-
-const maxAccessEventSeqForOrg = `-- name: MaxAccessEventSeqForOrg :one
-SELECT COALESCE(MAX(seq), 0)::bigint AS max_seq FROM access_events WHERE org_id = $1
-`
-
-// The current high-water seq for an org — the ingest resumes the monotonic counter from
-// here after a restart so the per-org sequence never rewinds (gap-detection integrity).
-func (q *Queries) MaxAccessEventSeqForOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, maxAccessEventSeqForOrg, orgID)
-	var max_seq int64
-	err := row.Scan(&max_seq)
-	return max_seq, err
 }
 
 const sweepAccessEventsByAge = `-- name: SweepAccessEventsByAge :execrows

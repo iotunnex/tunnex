@@ -9,11 +9,16 @@ import "sync"
 // blocks a producer — enforcement/observation must never wait on the reporter.
 const DefaultBufferCap = 16384
 
-// Buffer is a bounded, concurrency-safe, non-blocking ring of flow events.
+// Buffer is a bounded, concurrency-safe, non-blocking ring of flow events. It is a true ring
+// (fixed array + head index + count), so Add is O(1) even when full — drop-oldest advances
+// the head instead of memmoving the whole array (review #8). This matters because the
+// deny-log is the port-scan AMPLIFICATION point: the enqueue path runs hottest exactly when
+// the buffer is full, so per-event work must be constant, not O(cap).
 type Buffer struct {
 	mu      sync.Mutex
-	cap     int
-	events  []Event
+	buf     []Event
+	head    int // index of the OLDEST buffered event
+	count   int // number currently buffered (0..len(buf))
 	dropped int64
 }
 
@@ -22,30 +27,41 @@ func NewBuffer(capacity int) *Buffer {
 	if capacity <= 0 {
 		capacity = DefaultBufferCap
 	}
-	return &Buffer{cap: capacity, events: make([]Event, 0, capacity)}
+	return &Buffer{buf: make([]Event, capacity)}
 }
 
-// Add appends an event; at capacity it drops the OLDEST and counts the drop. Non-blocking.
+// Add appends an event; at capacity it drops the OLDEST and counts the drop. O(1), never
+// blocks a producer.
 func (b *Buffer) Add(e Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.events) >= b.cap {
-		// Drop-oldest: shift down by one. The count is the legibility signal.
-		copy(b.events, b.events[1:])
-		b.events = b.events[:b.cap-1]
+	n := len(b.buf)
+	if b.count == n {
+		// Full: overwrite the oldest slot with the new event and advance head. The new event
+		// becomes the newest; the previous second-oldest becomes the oldest. Drop-oldest, O(1).
+		b.buf[b.head] = e
+		b.head = (b.head + 1) % n
 		b.dropped++
+		return
 	}
-	b.events = append(b.events, e)
+	b.buf[(b.head+b.count)%n] = e
+	b.count++
 }
 
-// Drain removes and returns the buffered events plus the number DROPPED since the last
-// drain (both reset). The caller ships the events and records the drop-count as a gap.
+// Drain removes and returns the buffered events (oldest-first) plus the number DROPPED since
+// the last drain (both reset). The caller ships the events and records the drop-count as a gap.
 func (b *Buffer) Drain() (events []Event, dropped int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	events, dropped = b.events, b.dropped
-	b.events = make([]Event, 0, b.cap)
-	b.dropped = 0
+	dropped = b.dropped
+	if b.count > 0 {
+		n := len(b.buf)
+		events = make([]Event, b.count)
+		for i := 0; i < b.count; i++ {
+			events[i] = b.buf[(b.head+i)%n]
+		}
+	}
+	b.head, b.count, b.dropped = 0, 0, 0
 	return events, dropped
 }
 
@@ -53,5 +69,5 @@ func (b *Buffer) Drain() (events []Event, dropped int64) {
 func (b *Buffer) Len() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return len(b.events)
+	return b.count
 }

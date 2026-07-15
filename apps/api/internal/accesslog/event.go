@@ -38,6 +38,9 @@ const (
 	DefaultRetention     = 30 * 24 * time.Hour // PG hot-window: max INGEST age kept
 	DefaultPGRowCap      = 100_000             // PG hot-window: max rows per org
 	DefaultJSONLMaxBytes = 64 * 1024 * 1024    // rotate the JSONL segment at 64 MiB
+	// RetentionSweepInterval is how often the CP runs the hot-window sweep (review #3 wires
+	// it in main). Frequent enough to bound growth between runs, cheap enough to be idle.
+	RetentionSweepInterval = 10 * time.Minute
 )
 
 // Event is ONE identity-level access event — a flow the gateway allowed or denied (or a

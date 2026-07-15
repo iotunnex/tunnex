@@ -3,6 +3,7 @@ package accesslog
 import (
 	"context"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,11 +66,22 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 // aggregate per-source denies, mark gaps, assign the per-org monotonic seq, and write BOTH
 // stores (PG hot-window + JSONL source-of-truth).
 //
-// seq integrity: the seq is derived from the DB high-water INSIDE the per-batch tx (not an
-// in-memory counter), so a rolled-back batch burns NO seq (no false gap) and a same-batch
-// retry is idempotent via the (org_id, seq) unique index. JSONL is BEST-EFFORT (a write
-// failure does NOT fail the batch — PG stays the queryable store; the failure surfaces on
-// Health and the per-line seq leaves a durable, detectable hole in the stream).
+// CONCURRENCY (review #1/#2, composed): the net/http agent channel calls IngestBatch from a
+// PER-REQUEST goroutine, so the SAME Ingester + shared JSONLWriter are hit concurrently. A
+// single process-level `mu` encloses the WHOLE batch — seq reservation, the PG inserts, AND
+// the JSONL append+flush are ONE critical section. So seq order == PG commit order == JSONL
+// append order == manifest order; there is no window where the not-concurrency-safe bufio
+// writer is raced or where JSONL reorders under a correct seq. Nested INSIDE mu, the per-org
+// DB counter (BumpOrgFlowSeq) still row-locks the org row — redundant under mu on a single CP
+// but the correct primitive if the control plane ever runs multi-instance. Tradeoff: ingest
+// is serialized process-wide; acceptable — batches are drain-interval driven, and a whole
+// source-of-truth's integrity outranks ingest parallelism.
+//
+// seq integrity: the seq is reserved from the per-org counter (organizations.flow_seq) INSIDE
+// the per-batch tx, so a rolled-back batch releases its reserved range (no burn, no false
+// gap), and the counter is never swept so seq is monotonic + sweep-proof. JSONL is BEST-EFFORT
+// (a write failure does NOT fail the batch — PG stays the queryable store; the failure
+// surfaces on Health and the per-line seq leaves a durable, detectable hole in the stream).
 // streamWriter is the JSONL source-of-truth sink (JSONLWriter in production; a fake in
 // tests, to exercise the best-effort write-failure path). Flush makes the batch's appended
 // lines DURABLE (bufio -> OS -> fsync); the ingest calls it once per batch so a graceful
@@ -80,6 +92,9 @@ type streamWriter interface {
 }
 
 type Ingester struct {
+	// mu serializes the whole IngestBatch — the seq/PG/JSONL critical section (see the type
+	// doc). Guards both the shared JSONLWriter (not concurrency-safe) and the seq order.
+	mu     sync.Mutex
 	pool   *pgxpool.Pool
 	grants GrantResolver
 	jsonl  streamWriter
@@ -114,25 +129,41 @@ func (i *Ingester) IngestBatch(ctx context.Context, orgID, nodeID uuid.UUID, wir
 	ingestAt := i.now().UTC()
 	for idx := range events {
 		events[idx].CreatedAt = ingestAt
+		// uuid v7 (time-ordered): within a batch all events share created_at, so the
+		// (created_at DESC, id DESC) keyset falls to id — v7 keeps that in occurrence order
+		// (review #5). uuid.NewV7 only errors on a crypto/rand failure; surface it.
+		id, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		events[idx].ID = id
 	}
 
-	// PG: all inserts in ONE tx, seq derived from the in-tx high-water (rollback burns no
-	// seq). On failure nothing commits → the agent counts the batch lost → next-report gap.
+	// The whole batch is ONE critical section (seq reservation + PG inserts + JSONL): serializes
+	// concurrent same-org AND cross-org ingest so seq never collides and the shared JSONLWriter
+	// is never raced (review #1/#2). See the Ingester type doc for how the process mutex and the
+	// per-org DB row lock compose.
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	// PG: all inserts in ONE tx. seq is reserved from the per-org sweep-proof counter, whose
+	// UPDATE row-locks the org row (serializes same-org even across instances). On failure
+	// nothing commits and the counter bump rolls back → no burn → the agent's next report gaps.
 	tx, err := i.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
 	q := sqlc.New(tx)
-	base, err := q.MaxAccessEventSeqForOrg(ctx, orgID)
+	top, err := q.BumpOrgFlowSeq(ctx, sqlc.BumpOrgFlowSeqParams{N: int64(len(events)), OrgID: orgID})
 	if err != nil {
 		return err
 	}
+	base := top - int64(len(events)) // the reserved range is base+1 .. top
 	for idx := range events {
-		events[idx].ID = uuid.New()
 		events[idx].Seq = base + int64(idx) + 1
-		if _, err := q.InsertAccessEvent(ctx, InsertParams(events[idx])); err != nil {
-			return err
+		if err := q.InsertAccessEvent(ctx, InsertParams(events[idx])); err != nil {
+			return err // a (org_id, seq) collision here is IMPOSSIBLE under the counter -> fail LOUD, never silent
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

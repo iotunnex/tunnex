@@ -46,14 +46,16 @@ func TestStoreInsertListSweep(t *testing.T) {
 		return Event{ID: uuid.New(), CreatedAt: oldTime, Seq: seq, OrgID: org, OccurredAt: time.Now().UTC(), Decision: d,
 			RuleID: &rule, SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 5432}
 	}
-	// Insert 5 events; a duplicate (org,seq) is idempotent (0 rows).
+	// Insert 5 events. seq now comes from the per-org counter and is unique by construction,
+	// so InsertAccessEvent is a PLAIN insert (review #1): a duplicate (org,seq) FAILS LOUD (a
+	// unique-violation error) rather than silently no-op'ing — a would-be silent audit drop.
 	for i := int64(1); i <= 5; i++ {
-		if n, err := q.InsertAccessEvent(ctx, InsertParams(mk(i, DecisionDeny))); err != nil || n != 1 {
-			t.Fatalf("insert %d: n=%d err=%v", i, n, err)
+		if err := q.InsertAccessEvent(ctx, InsertParams(mk(i, DecisionDeny))); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
 		}
 	}
-	if n, _ := q.InsertAccessEvent(ctx, InsertParams(mk(5, DecisionDeny))); n != 0 {
-		t.Fatal("duplicate (org,seq) must be idempotent (0 rows)")
+	if err := q.InsertAccessEvent(ctx, InsertParams(mk(5, DecisionDeny))); err == nil {
+		t.Fatal("duplicate (org,seq) must now FAIL LOUD (unique violation), never a silent no-op")
 	}
 
 	// Keyset first page (far-future cursor) → newest-first, FromRow round-trips.
@@ -70,10 +72,9 @@ func TestStoreInsertListSweep(t *testing.T) {
 		t.Fatalf("FromRow round-trip wrong: %+v", e)
 	}
 
-	// MaxSeq resume high-water.
-	if hi, _ := q.MaxAccessEventSeqForOrg(ctx, org); hi != 5 {
-		t.Fatalf("max seq = %d, want 5", hi)
-	}
+	// (seq high-water is now the per-org organizations.flow_seq counter, exercised via
+	// IngestBatch in the ingest tests + the concurrency test — not derivable from a direct
+	// insert here, which doesn't bump the counter.)
 
 	// Cap sweep: keep newest 2 → deletes 3.
 	if n, err := q.SweepAccessEventsOverCap(ctx, sqlc.SweepAccessEventsOverCapParams{OrgID: org, KeepNewest: 2}); err != nil || n != 3 {

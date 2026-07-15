@@ -268,6 +268,38 @@ func TestEnforcingLoggedRulesetIsValidNft(t *testing.T) {
 	t.Skipf("nft check inconclusive (likely needs privilege in this env): %v: %s", err, out)
 }
 
+// review #7: rule_id (the one non-numeric renderer field) is validated to the canonical UUID
+// shape before entering the root nft ruleset. A valid uuid rides the log prefix; a malformed
+// / injection-shaped rule_id renders the accept WITHOUT a log clause — never an empty prefix
+// (which EncodePrefix encodes as the DENY sentinel, misclassifying the accepted flow) and
+// never a raw interpolation. Enforcement (accept) is unaffected either way.
+func TestRenderAllowLoggedValidatesRuleID(t *testing.T) {
+	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.2", DstCIDR: "10.0.5.0/24", Protocol: "any"}
+
+	good := base
+	good.RuleID = "019f645f-0f5b-74a7-ba0a-fdaca4fca917"
+	line, ok := renderAllowLogged(good, 100)
+	if !ok || !strings.Contains(line, `log prefix "tnx:019f645f-0f5b-74a7-ba0a-fdaca4fca917 " group 100`) {
+		t.Fatalf("valid rule_id must ride the log prefix: %q", line)
+	}
+
+	bad := base
+	bad.RuleID = `x" ; add rule ip tunnex forward accept ; log prefix "y`
+	line, ok = renderAllowLogged(bad, 100)
+	if !ok {
+		t.Fatal("a bad rule_id must not skip the rule (enforcement unaffected)")
+	}
+	if strings.Contains(line, "log prefix") {
+		t.Fatalf("malformed rule_id must render NO log clause, never interpolate: %q", line)
+	}
+	if strings.Contains(line, "tnx:deny") {
+		t.Fatalf("a malformed ALLOW rule_id must NOT collapse to the deny sentinel: %q", line)
+	}
+	if !strings.HasSuffix(line, " accept\n") {
+		t.Fatalf("verdict must stay accept: %q", line)
+	}
+}
+
 func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	// Injection attempt in SrcIP -> skipped (not parseable as an IP).
 	if _, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1; add rule ip tunnex forward accept", DstCIDR: "10.0.0.0/24"}); ok {

@@ -25,6 +25,11 @@ type Querier interface {
 	// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
 	// Returns the owner so the caller can distinguish self-approval for the audit.
 	ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error)
+	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
+	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
+	// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
+	// so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
+	BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
@@ -100,6 +105,9 @@ type Querier interface {
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
+	// lint:cross-org — retention housekeeping enumerates the orgs holding events so the per-org
+	// row-cap sweep only visits orgs that actually have rows.
+	DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -145,10 +153,14 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
-	// Idempotent on (org_id, seq) so a replayed ingest batch can't double-insert. The id is
-	// app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG hot-window and
-	// the JSONL source-of-truth stream.
-	InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) (int64, error)
+	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
+	// hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
+	// locked counter), so it is unique by construction — this is a PLAIN insert (NO
+	// `ON CONFLICT DO NOTHING`): the (org_id, seq) unique index is a FAIL-LOUD backstop, so an
+	// impossible collision errors the batch (agent -> next-report gap) rather than SILENTLY
+	// dropping audit rows (review #1). No replay path re-inserts: a failed batch rolls the tx
+	// (and the counter bump) back, so a retry re-reserves a fresh range.
+	InsertAccessEvent(ctx context.Context, arg InsertAccessEventParams) error
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
@@ -252,9 +264,6 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
-	// The current high-water seq for an org — the ingest resumes the monotonic counter from
-	// here after a restart so the per-org sequence never rewinds (gap-detection integrity).
-	MaxAccessEventSeqForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.

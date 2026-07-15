@@ -38,6 +38,11 @@ import (
 // statements (review #4).
 var ifaceRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,15}$`)
 
+// ruleIDRE bounds a rule_id (observability metadata) to the canonical UUID shape before it is
+// interpolated into the root nft ruleset — the A-1 discipline applied to the one renderer
+// field that isn't numeric (review #7). A non-match drops the id rather than widening trust.
+var ruleIDRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // Manager reconciles the tunnex nft tables for one WG interface. It also holds the
 // latest compiled Zero Trust policy (S7.2): the reconcile loop feeds it via SetPolicy
 // on every desired-state fetch, and the forward chain is rendered from it — nil or
@@ -260,9 +265,15 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 	var b strings.Builder
 	g := m.flowLogGroup
 	for _, e := range pol.Allow {
-		line, ok := renderAllow(e)
+		// Compute ONE form (review #9): the logged variant when logging is on, else the plain
+		// one — never both (allowMatch re-parses src/dst via netip, so the throwaway call
+		// doubled the per-rule work every reconcile).
+		var line string
+		var ok bool
 		if g > 0 {
 			line, ok = renderAllowLogged(e, g)
+		} else {
+			line, ok = renderAllow(e)
 		}
 		if ok {
 			b.WriteString(line)
@@ -358,6 +369,16 @@ func renderAllow(e nodepolicy.AllowEntry) (string, bool) {
 // only sees a flow's FIRST packet → one log per flow-start (D1). group is the nflog group
 // the flowlog reader listens on.
 func renderAllowLogged(e nodepolicy.AllowEntry, group int) (string, bool) {
+	// rule_id is the ONE renderer field that isn't a number — validate it to the canonical UUID
+	// shape before it enters the root nft ruleset (the A-1 fail-closed discipline, review #7).
+	// A non-conforming rule_id renders the accept WITHOUT a log clause: NOT an empty prefix
+	// (EncodePrefix("") is the DENY sentinel, which would misclassify this ACCEPTED flow as a
+	// deny) and NOT a raw interpolation. Fail-closed on OBSERVABILITY only — the packet is still
+	// correctly accepted. In practice the compiler always stamps a DB uuid; this defends a
+	// future/compromised artifact, matching allowMatch's netip re-emission of src/dst/port.
+	if !ruleIDRE.MatchString(e.RuleID) {
+		return renderAllow(e)
+	}
 	m, ok := allowMatch(e)
 	if !ok {
 		return "", false

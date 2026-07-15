@@ -194,12 +194,37 @@ func main() {
 	// onto the SAME mTLS channel (node identity = client cert). Best-effort; a writer failure
 	// here must not stop the control plane, so log-and-continue rather than exit.
 	var flowJSONL *accesslog.JSONLWriter
+	retentionStop := make(chan struct{})
 	if fw, ferr := accesslog.NewJSONLWriter(cfg.FlowLogDir, 0); ferr != nil {
 		logger.Error("flowlog_writer_failed", slog.String("dir", cfg.FlowLogDir), slog.String("error", ferr.Error()))
 	} else {
 		flowJSONL = fw
 		fq := sqlc.New(pool)
 		agentCh.SetFlowIngester(accesslog.NewIngester(pool, flowJSONL, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
+		// D3 retention sweep (review #3): without this loop access_events grows unbounded and
+		// exhausts the DB disk — the exact failure the hot-window design existed to prevent. Run
+		// it on an interval: delete by ingest age + trim each org to the row cap (JSONL keeps the
+		// full record, so the sweep is lossless for export). Drop-count lands on flowHealth.
+		go func() {
+			t := time.NewTicker(accesslog.RetentionSweepInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-retentionStop:
+					return
+				case <-t.C:
+					sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					orgs, err := fq.DistinctAccessEventOrgs(sctx)
+					if err == nil {
+						_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
+					}
+					if err != nil {
+						logger.Error("flowlog_retention_sweep_failed", slog.String("error", err.Error()))
+					}
+					scancel()
+				}
+			}
+		}()
 	}
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
@@ -244,6 +269,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
+	close(retentionStop) // stop the retention sweep loop
 	// Flush + close the JSONL source-of-truth AFTER the agent channel drains (no in-flight
 	// flow-event ingest races the close), so the final batch's buffered lines are durable and
 	// the last segment's manifest is written before exit — a graceful stop must not drop
