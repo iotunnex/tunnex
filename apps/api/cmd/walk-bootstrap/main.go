@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -134,13 +135,18 @@ func phase2(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool, orgID uui
 	// enforcing mode (the allow-list + deny tail get compiled onto the gateway forward chain).
 	exec(ctx, log, pool, `UPDATE organizations SET zero_trust_mode='enforcing' WHERE id=$1`, orgID)
 
-	// a destination resource for the rule (src = the synced group → this dst).
+	// a destination resource for the rule (src = the synced group → this dst). Select-or-insert
+	// (resources has a case-insensitive unique index, so ON CONFLICT column-inference won't match).
 	var resID uuid.UUID
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO resources (org_id,name,cidr,protocol) VALUES ($1,'walk-dst',$2,'any')
-		 ON CONFLICT (org_id,name) DO UPDATE SET cidr=EXCLUDED.cidr RETURNING id`,
-		orgID, dstCIDR).Scan(&resID); err != nil {
-		fatal(log, "create resource: "+err.Error())
+	err := pool.QueryRow(ctx, `SELECT id FROM resources WHERE org_id=$1 AND name='walk-dst'`, orgID).Scan(&resID)
+	if err == pgx.ErrNoRows {
+		if e := pool.QueryRow(ctx,
+			`INSERT INTO resources (org_id,name,cidr,protocol) VALUES ($1,'walk-dst',$2,'any') RETURNING id`,
+			orgID, dstCIDR).Scan(&resID); e != nil {
+			fatal(log, "create resource: "+e.Error())
+		}
+	} else if err != nil {
+		fatal(log, "lookup resource: "+err.Error())
 	}
 
 	fmt.Println("\n=== PHASE 2 DONE ===")
