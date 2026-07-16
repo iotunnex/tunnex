@@ -2,6 +2,21 @@ package mfa
 
 import "testing"
 
+// TestHOTPRFC4226Vectors validates the HOTP core against the PUBLISHED RFC 4226 Appendix D test
+// vectors (secret "12345678901234567890", counts 0..9) — an EXTERNAL oracle, not round-trip
+// self-consistency (a self-consistent implementation can be self-consistently wrong). These are
+// the 6-digit codes; they equal the low-6 digits of the RFC 6238 Appendix B 8-digit TOTP vectors,
+// so this pins the HMAC-SHA1 + dynamic-truncation + mod-10^6 exactly.
+func TestHOTPRFC4226Vectors(t *testing.T) {
+	key := []byte("12345678901234567890")
+	want := []string{"755224", "287082", "359152", "969429", "338314", "254676", "287922", "162583", "399871", "520489"}
+	for c, w := range want {
+		if got := hotp(key, int64(c)); got != w {
+			t.Fatalf("HOTP(count=%d) = %s, want %s (RFC 4226 App D)", c, got, w)
+		}
+	}
+}
+
 // codeAt computes the valid code for a secret at a given unix time (test helper via the
 // same hotp path Validate uses).
 func codeAt(t *testing.T, secret string, unix int64) string {
