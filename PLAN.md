@@ -1307,6 +1307,22 @@ sites is a SEMANTIC change) · (2) the **enforcement-vs-observability PROJECTION
 `Compiled`/`AllowEntry` field is classified; enforcement → into `CanonicalHash`'s projection, observability →
 out (S7.5.1 A-1). See docs/S7.5.1-decisions.md.
 
+**HARDENED at S7.5.4 box-walk (2026-07-16) — the newer-Version gate is now a BLOCKING S8.1 item, not a
+discretionary one.** The walk confirmed `ProtocolVersion` has already bumped **1→2→3** (S7.1 v1 · S7.5.1 v2
+`rule_id` · S7.5.4 v3 `src_device_id`) with **NO consumer-side gate** — the node applies ANY Version,
+safe-ignoring unknown JSON fields (proven: reconcile `policy_test.go` applies v5/v6). This has been safe ONLY
+because every bump so far is **observability-additive + hash-blind + safe-ignore, each unit-pinned** (v3:
+`TestCanonicalHashSrcDeviceIDIsObservabilityOnly`). Bindings inherited by S8:
+- **S8.1 commit-one MUST build the fail-closed gate** (`Version > maxSupported → refuse → deny-all +
+  policy_degraded`) BEFORE the first enforcement-significant wire field (sites-as-destination IS that field).
+  Blocking decide-item, not optional.
+- **Interim law (until the gate lands):** every `ProtocolVersion` bump owes its OWN hash-blindness +
+  safe-ignore unit pin (the v3 pattern) — this is what keeps the unguarded window safe if anything bumps
+  before S8.
+- **Honesty:** the model is **safe-by-CONVENTION, not safe-by-construction** — "nobody ships an
+  enforcement-significant field without the gate" is mechanized by NOTHING until S8 (the branch-protection
+  lesson class: a convention holding is not a guarantee). See docs/S7.5.4-decisions.md §D5-reaffirmed.
+
 **LEDGERED at S7.2 (decide-before-code for S8.1/S8.2): Zero Trust policy MUST govern site-to-site
 traffic.** Sites/subnets become a policy DESTINATION KIND — extending the S7.1 model through the
 VERSIONED `policyspec.Compiled` artifact (bump the version; agents gate on it), not a side channel.
