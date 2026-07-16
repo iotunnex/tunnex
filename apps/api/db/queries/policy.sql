@@ -115,16 +115,17 @@ SET expires_at = sqlc.arg(new_expires_at)
 WHERE id = $1 AND org_id = $2 AND expires_at IS NOT NULL AND expires_at > now()
 RETURNING *;
 
--- name: ListExpiredGrantsForSweep :many
--- The expiry sweeper's window: temporary grants that lapsed since the last tick. FOR
--- UPDATE locks each so a concurrent ExtendPolicyRule (which takes the same row lock via
--- its UPDATE) serializes — the sweeper audits grant_expired ONLY for grants still expired
--- under the lock; an extend that won the lock moved expires_at to the future, so the row
--- no longer matches expires_at <= now() and is not falsely audited as expired.
-SELECT id, org_id FROM policy_rules
-WHERE expires_at > sqlc.arg(since) AND expires_at <= sqlc.arg(now)
-ORDER BY org_id
-FOR UPDATE;
+-- name: DeleteExpiredGrants :many
+-- The expiry sweeper (S7.5.4 story-end AMENDMENT — delete-on-sweep, replaced linger). A
+-- lapsed temporary grant is DELETED (not lingered), returning id+org for the same-tx
+-- grant_expired audit + the org-wide push. STATELESS — no window/`last` cursor: every
+-- currently-expired grant is deleted each tick, so a failed or interrupted (downtime) tick
+-- simply leaves rows for the NEXT tick to delete+audit (closes the window-skip + downtime-
+-- audit-gap by construction). Composes with ExtendPolicyRule on the row lock: a grant an
+-- extend rescued (expires_at moved to the future) no longer matches expires_at <= now().
+DELETE FROM policy_rules
+WHERE expires_at IS NOT NULL AND expires_at <= now()
+RETURNING id, org_id;
 
 -- ── compiler inputs ─────────────────────────────────────────────────────────────
 -- name: ListActiveDevicesForOrg :many

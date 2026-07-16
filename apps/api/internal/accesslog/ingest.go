@@ -3,6 +3,7 @@ package accesslog
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -53,8 +54,9 @@ type GrantResolver interface {
 }
 
 // DeviceResolver joins an agent-stamped src_device_id to its owning user (S7.5.4 v3). This
-// is an ID→ID FK join, NEVER an src_ip→device guess. ok=false = the device is unknown (a
-// stale/foreign id) — the event keeps src_device_id, src_user_id stays nil.
+// is an ID→ID FK join, NEVER an src_ip→device guess. ok=false = the device is unknown/foreign
+// to this org — the event drops BOTH device + user to unattributed (an unverifiable id is not
+// persisted; [9] cross-tenant-seed guard).
 type DeviceResolver interface {
 	ResolveUser(ctx context.Context, orgID, deviceID uuid.UUID) (userID *uuid.UUID, ok bool)
 }
@@ -229,26 +231,36 @@ func (c *grantCache) resolve(ctx context.Context, orgID, ruleID uuid.UUID) (*uui
 // avoids an N+1 (mirrors grantCache). nil resolver => never joins (device stays unattributed).
 type deviceCache struct {
 	r    DeviceResolver
-	seen map[uuid.UUID]*uuid.UUID
+	seen map[uuid.UUID]deviceHit
 }
 
-func (c *deviceCache) resolve(ctx context.Context, orgID, deviceID uuid.UUID) *uuid.UUID {
+type deviceHit struct {
+	user *uuid.UUID
+	ok   bool // the device id belongs to THIS org (an org-scoped resolve confirmed it)
+}
+
+// resolve returns the owning user AND whether the device id is a VERIFIED org device. An
+// agent-stamped id that does not resolve to this org (ok=false) is treated as unverified —
+// the caller drops it to unattributed (an unverifiable id is ABSENT, never persisted as if
+// authoritative; the S7.5.3 no-guess law) rather than seeding the immutable log with a
+// foreign/forged device id (the [9] cross-tenant-seed the story-end review flagged).
+func (c *deviceCache) resolve(ctx context.Context, orgID, deviceID uuid.UUID) (*uuid.UUID, bool) {
 	if c == nil || c.r == nil {
-		return nil
+		return nil, false
 	}
-	if u, ok := c.seen[deviceID]; ok {
-		return u
+	if h, seen := c.seen[deviceID]; seen {
+		return h.user, h.ok
 	}
-	u, _ := c.r.ResolveUser(ctx, orgID, deviceID)
-	c.seen[deviceID] = u
-	return u
+	u, ok := c.r.ResolveUser(ctx, orgID, deviceID)
+	c.seen[deviceID] = deviceHit{user: u, ok: ok}
+	return u, ok
 }
 
 // aggregate enriches each wire event (grant-only) and collapses per-source deny floods.
 func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire []WireEvent) []Event {
 	out := make([]Event, 0, len(wire))
 	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}}     // one grant lookup per distinct rule_id per batch
-	dc := &deviceCache{r: i.devices, seen: map[uuid.UUID]*uuid.UUID{}} // one device→user lookup per distinct device per batch
+	dc := &deviceCache{r: i.devices, seen: map[uuid.UUID]deviceHit{}} // one device→user lookup per distinct device per batch
 	denyBySrc := map[string][]WireEvent{}
 	for _, w := range wire {
 		switch w.Verdict {
@@ -307,11 +319,20 @@ func (i *Ingester) enrich(ctx context.Context, gc *grantCache, dc *deviceCache, 
 		}
 	}
 	// v3: the agent stamped src_device_id from the applied artifact — capture it and join to
-	// the owning user (per-batch memoized). An unresolvable/foreign id keeps the device id and
-	// leaves the user nil (report-absent, never guessed — the S7.5.1/7.5.2 no-IP-guess law).
+	// the owning user (per-batch memoized). Store it ONLY when the org-scoped resolve VERIFIES
+	// it is this org's device ([9]): an unverified/foreign id (a buggy or compromised agent) is
+	// dropped to unattributed — an unverifiable fact is ABSENT, never persisted into the
+	// immutable log where a viewer could later surface a foreign device (cross-tenant seed).
+	// The mismatch is LOGGED (a compromise/bug signal), not silently swallowed.
 	if did, err := uuid.Parse(w.SrcDeviceID); err == nil {
-		e.SrcDeviceID = &did
-		e.SrcUserID = dc.resolve(ctx, orgID, did)
+		if user, ok := dc.resolve(ctx, orgID, did); ok {
+			e.SrcDeviceID = &did
+			e.SrcUserID = user
+		} else {
+			slog.Warn("flow_event_unverified_device_id",
+				slog.String("org_id", orgID.String()), slog.String("node_id", nodeID.String()),
+				slog.String("stamped_device_id", did.String()))
+		}
 	}
 	return e
 }

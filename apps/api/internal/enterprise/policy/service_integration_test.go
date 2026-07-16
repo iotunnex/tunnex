@@ -357,44 +357,112 @@ func TestExtendVsSweepRace(t *testing.T) {
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
 
-	t.Run("sweep wins -> extend is 409 grant_lapsed, exactly one action", func(t *testing.T) {
+	t.Run("sweep wins -> grant DELETED, extend is 404 (row gone), exactly one action", func(t *testing.T) {
 		f := seed(t, pool)
-		exp := time.Now().Add(-time.Second) // already lapsed
-		rid, _ := tempGrant(t, pool, f, exp)
-		// Sweeper claims it. n is SYSTEM-WIDE (may include other fixtures' leaked expired
-		// grants in the shared DB), so assert on THIS org's audit, not the global count.
-		if _, err := s.SweepExpiredGrants(context.Background(), exp.Add(-time.Hour), time.Now()); err != nil {
+		rid, _ := tempGrant(t, pool, f, time.Now().Add(-time.Second)) // already lapsed
+		// Sweeper claims it: DELETEs + audits grant_expired (this org).
+		if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if auditCount(t, pool, f.org, "policy.grant_expired") != 1 {
 			t.Fatal("sweep must audit grant_expired once for this org")
 		}
-		// Extend now finds it lapsed -> 409. No double-action (no grant_extended).
-		if _, err := s.ExtendGrant(f.ctx, f.org, rid, time.Now().Add(time.Hour)); code(err) != "grant_lapsed" {
-			t.Fatalf("post-sweep extend must be grant_lapsed, got %v", err)
+		// Extend now finds NO row (deleted) -> 404. No double-action (no grant_extended).
+		if _, err := s.ExtendGrant(f.ctx, f.org, rid, time.Now().Add(time.Hour)); code(err) != "rule_not_found" {
+			t.Fatalf("post-sweep extend must be rule_not_found (row deleted), got %v", err)
 		}
 		if auditCount(t, pool, f.org, "policy.grant_extended") != 0 {
-			t.Fatal("a lapsed grant must NOT also record an extend (torn state)")
+			t.Fatal("a swept grant must NOT also record an extend (torn state)")
 		}
 	})
 
-	t.Run("extend wins -> sweep does NOT falsely expire it", func(t *testing.T) {
+	t.Run("extend wins -> sweep does NOT delete/expire it", func(t *testing.T) {
 		f := seed(t, pool)
-		exp := time.Now().Add(2 * time.Second) // live, near boundary
-		rid, _ := tempGrant(t, pool, f, exp)
-		// Extend moves the window to the future FIRST.
+		rid, _ := tempGrant(t, pool, f, time.Now().Add(2*time.Second)) // live, near boundary
 		if _, err := s.ExtendGrant(f.ctx, f.org, rid, time.Now().Add(time.Hour)); err != nil {
 			t.Fatalf("extend: %v", err)
 		}
-		// A sweep whose window would have covered the OLD expiry must not fire — the row
-		// now has a future expires_at, so it doesn't match expires_at <= now().
-		if _, err := s.SweepExpiredGrants(context.Background(), exp.Add(-time.Hour), time.Now().Add(10*time.Second)); err != nil {
+		// The row now has a future expires_at, so delete-on-sweep skips it.
+		if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if auditCount(t, pool, f.org, "policy.grant_expired") != 0 {
-			t.Fatal("an extended grant must NOT be swept-expired (this org)")
+			t.Fatal("an extended grant must NOT be swept (this org)")
+		}
+		var n int
+		pool.QueryRow(context.Background(), `SELECT count(*) FROM policy_rules WHERE id=$1`, rid).Scan(&n)
+		if n != 1 {
+			t.Fatal("an extended grant's row must survive the sweep")
 		}
 	})
+}
+
+// TestRegrantAfterLapseSucceeds is the [1] RED (story-end review): the linger dead-end is
+// GONE — after a grant lapses and is SWEPT (deleted), re-creating the same (src,dst) grant
+// SUCCEEDS (no lingering row to collide on the unique index). Under linger this 409'd with
+// no in-UI escape.
+func TestRegrantAfterLapseSucceeds(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	res, err := s.CreateResource(f.ctx, f.org, policyResource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A temporary group->resource grant, created via the service so the unique index applies.
+	g, _ := s.CreateGroup(f.ctx, f.org, "g", "")
+	past := time.Now().Add(time.Hour)
+	rid, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
+		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &past,
+	})
+	if err != nil {
+		t.Fatalf("create temp grant: %v", err)
+	}
+	// Force it lapsed, then sweep (delete).
+	if _, err := pool.Exec(context.Background(), `UPDATE policy_rules SET expires_at=now()-interval '1 second' WHERE id=$1`, rid.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The SAME (src,dst) grant re-creates cleanly — no lingering row, no 409.
+	future := time.Now().Add(2 * time.Hour)
+	if _, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
+		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &future,
+	}); err != nil {
+		t.Fatalf("re-grant after lapse must SUCCEED (delete-on-sweep, no linger dead-end), got %v", err)
+	}
+}
+
+// TestSweepStatelessAcrossDowntime is the [4]/[5] RED: the stateless sweep audits EVERY
+// currently-expired grant, so grants that lapsed while the sweeper was NOT running (a
+// failed tick / server downtime) are still deleted+audited on the next sweep — no window,
+// no audit hole. Idempotent: a second sweep finds nothing new.
+func TestSweepStatelessAcrossDowntime(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	// THREE grants that all lapsed "during downtime" (no sweeper ran).
+	for i := 0; i < 3; i++ {
+		tempGrant(t, pool, f, time.Now().Add(-time.Duration(i+1)*time.Minute))
+	}
+	// One sweep (post-restart) catches ALL of them — no window to miss the downtime lapses.
+	if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount(t, pool, f.org, "policy.grant_expired") != 3 {
+		t.Fatalf("stateless sweep must audit ALL downtime lapses, got %d", auditCount(t, pool, f.org, "policy.grant_expired"))
+	}
+	// Idempotent: nothing left to sweep.
+	before := auditCount(t, pool, f.org, "policy.grant_expired")
+	if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount(t, pool, f.org, "policy.grant_expired") != before {
+		t.Fatal("a second sweep must be a no-op (grants already deleted)")
+	}
 }
 
 // TestSweepPushesOrgWide — a lapsed grant's expiry pushes the org's gateways (F1: the
@@ -406,7 +474,7 @@ func TestSweepPushesOrgWide(t *testing.T) {
 	n := &fakeNotifier{}
 	s := policy.NewService(pool)
 	s.SetNotifier(n)
-	if _, err := s.SweepExpiredGrants(context.Background(), time.Now().Add(-time.Hour), time.Now()); err != nil {
+	if _, err := s.SweepExpiredGrants(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// The sweep is system-wide (may push several orgs from the shared DB); assert THIS
