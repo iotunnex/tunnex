@@ -20,7 +20,8 @@ type Querier interface {
 	// the audit event for a no-op re-add (idempotent, still 204).
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
 	// Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
-	// 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
+	// Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
+	// skips BOTH the audit and the org-wide re-push.
 	AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)

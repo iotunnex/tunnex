@@ -26,7 +26,8 @@ type AddIdpGroupMemberParams struct {
 }
 
 // Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
-// 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
+// Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
+// skips BOTH the audit and the org-wide re-push.
 func (q *Queries) AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error) {
 	result, err := q.db.Exec(ctx, addIdpGroupMember,
 		arg.OrgID,
