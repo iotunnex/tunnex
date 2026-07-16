@@ -64,7 +64,7 @@ func newSvc(t *testing.T, pool *pgxpool.Pool) (*Service, *time.Time) {
 	if err != nil {
 		t.Fatalf("sealer: %v", err)
 	}
-	s := NewService(pool, sealer, nil)
+	s := NewService(pool, sealer, nil, nil)
 	// Base on real now: challenge expiry is filtered against the DB's now(), so the injected
 	// clock must track it. TOTP is absolute-time-agnostic (only step deltas matter).
 	clock := time.Now()

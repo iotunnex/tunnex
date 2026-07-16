@@ -94,3 +94,12 @@ SELECT * FROM org_mfa WHERE org_id = $1;
 -- name: UpsertOrgMfaEnforce :exec
 INSERT INTO org_mfa (org_id, enforce, updated_at) VALUES ($1, $2, now())
 ON CONFLICT (org_id) DO UPDATE SET enforce = EXCLUDED.enforce, updated_at = now();
+
+-- name: UserInEnforcingOrg :one
+-- lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
+-- The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).
+SELECT EXISTS (
+    SELECT 1 FROM org_mfa om
+    JOIN memberships m ON m.org_id = om.org_id
+    WHERE m.user_id = $1 AND om.enforce
+);

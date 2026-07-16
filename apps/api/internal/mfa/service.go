@@ -18,6 +18,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 )
 
 const (
@@ -31,15 +32,78 @@ type Service struct {
 	pool   *pgxpool.Pool
 	q      *sqlc.Queries
 	sealer *crypto.Sealer
+	mailer mail.Mailer // best-effort notifications (admin-reset); nil-safe
 	logger *slog.Logger
 	now    func() time.Time
 }
 
-func NewService(pool *pgxpool.Pool, sealer *crypto.Sealer, logger *slog.Logger) *Service {
+func NewService(pool *pgxpool.Pool, sealer *crypto.Sealer, mailer mail.Mailer, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{pool: pool, q: sqlc.New(pool), sealer: sealer, logger: logger, now: time.Now}
+	return &Service{pool: pool, q: sqlc.New(pool), sealer: sealer, mailer: mailer, logger: logger, now: time.Now}
+}
+
+// OrgEnforcesForUser reports whether ANY org the user belongs to enforces MFA (the D8/D5 predicate;
+// caller gates it to local-auth logins in the enterprise edition — SSO + open edition are exempt).
+func (s *Service) OrgEnforcesForUser(ctx context.Context, userID uuid.UUID) (bool, error) {
+	return s.q.UserInEnforcingOrg(ctx, userID)
+}
+
+// SetOrgEnforce toggles org-level MFA enforcement (enterprise; PermMfaManage-gated at the handler),
+// audited org-scoped with the acting admin.
+func (s *Service) SetOrgEnforce(ctx context.Context, orgID, actor uuid.UUID, enforce bool) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.UpsertOrgMfaEnforce(ctx, sqlc.UpsertOrgMfaEnforceParams{OrgID: orgID, Enforce: enforce}); e != nil {
+			return e
+		}
+		action := "mfa.enforce_disabled"
+		if enforce {
+			action = "mfa.enforce_enabled"
+		}
+		return s.auditOrg(ctx, q, orgID, actor, action, "organization", orgID.String(), nil)
+	})
+}
+
+// OrgEnforces reports the org's current enforce flag (for the settings UI).
+func (s *Service) OrgEnforces(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	row, err := s.q.GetOrgMfa(ctx, orgID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil // no row = OFF (unlock-then-opt-in)
+	}
+	if err != nil {
+		return false, err
+	}
+	return row.Enforce, nil
+}
+
+// AdminReset DISENROLLS another user's MFA (enterprise; PermMfaManage). It only clears the factor —
+// it never authenticates as the user. Audited org-scoped (actor=admin, target=user) and the target
+// is NOTIFIED best-effort (a silently-reset factor by a compromised admin must surface to the owner).
+func (s *Service) AdminReset(ctx context.Context, orgID, actorAdmin, targetUser uuid.UUID) error {
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		if _, e := q.DeleteTOTP(ctx, targetUser); e != nil {
+			return e
+		}
+		if e := q.DeleteRecoveryCodesForUser(ctx, targetUser); e != nil {
+			return e
+		}
+		return s.auditOrg(ctx, q, orgID, actorAdmin, "mfa.admin_reset", "user", targetUser.String(),
+			map[string]any{"target_user": targetUser.String()})
+	}); err != nil {
+		return err
+	}
+	// Notify the target (best-effort — never fail the reset on a mail error).
+	if s.mailer != nil {
+		if u, e := s.q.GetUserByID(ctx, targetUser); e == nil {
+			_ = s.mailer.Send(ctx, mail.Message{
+				To:      u.Email,
+				Subject: "Your two-factor authentication was reset",
+				Text:    "An administrator reset the two-factor authentication (MFA) on your Tunnex account. If your organization requires MFA, you will be asked to set it up again at your next sign-in. If you did not expect this, contact your administrator immediately.",
+			})
+		}
+	}
+	return nil
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
@@ -289,6 +353,21 @@ func (s *Service) audit(ctx context.Context, q *sqlc.Queries, subjectUser, actor
 		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
 		ActorUserID: pgtype.UUID{Bytes: [16]byte(actor), Valid: true},
 		Action:      action, TargetType: &tt, TargetID: &tid, Metadata: b,
+	})
+	return err
+}
+
+// auditOrg writes an ORG-scoped audit (enterprise enforce/admin-reset actions have a clear org
+// context — the acting admin's org), unlike the user-primary-org scoping of self-service events.
+func (s *Service) auditOrg(ctx context.Context, q *sqlc.Queries, orgID, actor uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
+	b := []byte("{}")
+	if meta != nil {
+		b, _ = json.Marshal(meta)
+	}
+	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: [16]byte(actor), Valid: true},
+		Action:      action, TargetType: &targetType, TargetID: &targetID, Metadata: b,
 	})
 	return err
 }

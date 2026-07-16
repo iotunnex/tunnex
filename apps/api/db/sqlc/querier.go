@@ -553,6 +553,9 @@ type Querier interface {
 	UpsertUnconfirmedTOTP(ctx context.Context, arg UpsertUnconfirmedTOTPParams) error
 	// Used by the seed with a fixed id; idempotent.
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
+	// lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
+	// The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).
+	UserInEnforcingOrg(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)
