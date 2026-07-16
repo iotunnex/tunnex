@@ -27,7 +27,12 @@ const DEFAULT_FULL_TUNNEL = false;
 // "migrate_failed" (S7.3: a legacy-config replacement didn't complete — the ONE bounded
 // failure outcome of the migration path, made legible in the window/tray so it never
 // reads as a bare "Disconnected"; the helper is never armed for it).
-type ClientTunnelStatus = TunnelStatus | { state: "revoked" } | { state: "pending_approval" } | { state: "migrate_failed" };
+type ClientTunnelStatus =
+  | TunnelStatus
+  | { state: "revoked" }
+  | { state: "pending_approval" }
+  | { state: "migrate_failed" }
+  | { state: "posture_blocked" };
 
 // TunnelControls is what registerIpc returns so the tray (built in index.ts) can drive
 // the SAME connect/disconnect path the renderer uses — no duplicated tunnel logic, one
@@ -60,7 +65,7 @@ export function registerIpc(
   // lastSynth holds a CLIENT-synthesized state (currently only "revoked") so it
   // survives a renderer remount/reload: the helper can't report "revoked", so
   // tunnel:status returns this until the next connect/disconnect clears it.
-  let lastSynth: { state: "revoked" } | { state: "pending_approval" } | { state: "migrate_failed" } | null = null;
+  let lastSynth: { state: "revoked" } | { state: "pending_approval" } | { state: "migrate_failed" } | { state: "posture_blocked" } | null = null;
 
   const emitTray = (s: TrayState): void => {
     trayState = s;
@@ -139,9 +144,35 @@ export function registerIpc(
   // 10-min jittered cadence. Stops on disconnect / logout / origin change, and
   // stops ITSELF on a terminal server answer (403 open-edition / 404 gone).
   let healthMonitor: HealthMonitor | null = null;
+  // postureBlocked latches the server's require-mode verdict so the transition is
+  // surfaced once (not on every 10-min report), and so a stale renderer sees the
+  // block via tunnel:status (lastSynth). Reset when the monitor stops.
+  let postureBlocked = false;
   const stopHealthMonitor = (): void => {
     healthMonitor?.stop();
     healthMonitor = null;
+    postureBlocked = false;
+  };
+  // onHealthResult surfaces the SERVER'S posture verdict on the client ([2]): a
+  // require-mode block drops the device's peer at the gateway, so the tunnel is
+  // "up" locally but dead — WITHOUT this the tray would still read "connected"
+  // while all traffic is silently blocked (the bare-Disconnected class the story
+  // is built to avoid). This is the client half of the honesty the server already
+  // records. Only require-mode blocks reach here (warn-mode never sets blocked).
+  const onHealthResult = (r: { blocked: boolean }): void => {
+    if (r.blocked && !postureBlocked) {
+      postureBlocked = true;
+      const s: ClientTunnelStatus = { state: "posture_blocked" };
+      lastSynth = s; // survive a renderer remount until the block clears / reconnect
+      emit(s);
+      notifyTunnel("posture_blocked");
+    } else if (!r.blocked && postureBlocked) {
+      // A later compliant report cleared the block server-side; the gateway
+      // re-admitted the peer. Drop the synth and let the live heartbeat refine.
+      postureBlocked = false;
+      lastSynth = null;
+      emit({ state: "up" });
+    }
   };
   // collectHealthFacts gathers what main can read directly (platform, OS product
   // version) + the privileged fact via the helper's read-only posture verb. A fact
@@ -273,9 +304,9 @@ export function registerIpc(
       monitor.start();
       // S7.5.3: self-report posture while connected. First report early (~15s),
       // then every 10min (+ fixed jitter). Terminal 403 (open edition) stops it
-      // until the next connect. Result surfacing (warn banner / blocked state)
-      // is the S7.5.3 UI slice; the report loop is what matters here.
-      healthMonitor = new HealthMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), collectHealthFacts);
+      // until the next connect. onHealthResult surfaces a require-mode block as the
+      // posture_blocked state so a server-side disconnect is never silent ([2]).
+      healthMonitor = new HealthMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), collectHealthFacts, onHealthResult);
       healthMonitor.start();
     }
     emit(status);

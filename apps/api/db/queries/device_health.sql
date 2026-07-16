@@ -71,3 +71,15 @@ WHERE dh.device_id = d.id
   AND d.deleted_at IS NULL
   AND dh.reported_at < now() - sqlc.arg(ttl)::interval
 RETURNING d.id, d.org_id;
+
+-- name: ClearAllHealthBlocks :many
+-- lint:cross-org — the DOWNGRADE-RELEASE sweep (the enforcement mirror of
+-- unlock-then-opt-in): when the device-health feature is OFF (open build), NO
+-- device may remain posture-blocked — disabling a feature must RELEASE its
+-- enforcement, not petrify it. Unconditional (no TTL): every health_blocked
+-- device is freed. Returns the affected devices for auditing + org push. Runs at
+-- open-build boot; idempotent (no blocks -> no rows).
+UPDATE devices
+SET health_blocked = false, updated_at = now()
+WHERE health_blocked AND deleted_at IS NULL
+RETURNING id, org_id;

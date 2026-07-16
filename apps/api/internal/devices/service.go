@@ -423,16 +423,17 @@ func (s *Service) ListForUser(ctx context.Context, orgID, userID uuid.UUID) ([]D
 	if err != nil {
 		return nil, err
 	}
-	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	surfaceHealth, err := s.healthSurfaceActive(ctx, orgID) // [3]: a config-read error fails the list (retriable), never hides a live block
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
-		if surfaceHealth {
-			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
-			d.Health = &h
-		}
-		out = append(out, d)
+		out = append(out, DeviceWithStatus{
+			Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes,
+			Health: s.deviceHealthProjection(surfaceHealth, r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, r.ReportedAt, now),
+		})
 	}
 	return out, nil
 }
@@ -443,16 +444,17 @@ func (s *Service) ListForOrg(ctx context.Context, orgID uuid.UUID) ([]DeviceWith
 	if err != nil {
 		return nil, err
 	}
-	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	surfaceHealth, err := s.healthSurfaceActive(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
-		if surfaceHealth {
-			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
-			d.Health = &h
-		}
-		out = append(out, d)
+		out = append(out, DeviceWithStatus{
+			Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes,
+			Health: s.deviceHealthProjection(surfaceHealth, r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, r.ReportedAt, now),
+		})
 	}
 	return out, nil
 }
@@ -587,16 +589,17 @@ func (s *Service) ListPending(ctx context.Context, orgID uuid.UUID) ([]DeviceWit
 	if err != nil {
 		return nil, err
 	}
-	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	surfaceHealth, err := s.healthSurfaceActive(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
-		if surfaceHealth {
-			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
-			d.Health = &h
-		}
-		out = append(out, d)
+		out = append(out, DeviceWithStatus{
+			Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes,
+			Health: s.deviceHealthProjection(surfaceHealth, r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, r.ReportedAt, now),
+		})
 	}
 	return out, nil
 }

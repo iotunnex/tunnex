@@ -25,10 +25,10 @@ export type PolicyRule = components["schemas"]["PolicyRule"];
 export type ZeroTrustMode = components["schemas"]["ZeroTrustMode"];
 export type AffectedDevice = components["schemas"]["AffectedDevice"];
 export type DeviceApproval = components["schemas"]["DeviceApproval"];
-// S7.5.3 — device health / posture checks DTOs.
+// S7.5.3 — device posture config DTO. (HealthCheckInput / DeviceHealthResult are
+// consumed by the Electron client, not the SPA — the web app only reads/writes the
+// check config, so only HealthCheck is surfaced here.)
 export type HealthCheck = components["schemas"]["HealthCheck"];
-export type HealthCheckInput = components["schemas"]["HealthCheckInput"];
-export type DeviceHealthResult = components["schemas"]["DeviceHealthResult"];
 
 // apiErrorMessage pulls the human message out of the standard error envelope.
 export function apiErrorMessage(error: unknown, fallback: string): string {

@@ -103,6 +103,49 @@ test("health: a server throw is inconclusive — keep reporting with capped back
   assert.deepEqual(results, [compliant]);
 });
 
+test("health [4]: an early-phase (pre-first-report) blip retries FAST, not at 10-min base", async () => {
+  const scheduled: Array<{ cb: () => void; ms: number }> = [];
+  let fail = true;
+  const api = fakeApi(() => (fail ? new Error("blip") : compliant));
+  const settle = () => new Promise((r) => setImmediate(r));
+  const m = new HealthMonitor(
+    "dev-1",
+    "org-1",
+    api,
+    async () => goodFacts,
+    undefined,
+    HEALTH_REPORT_BASE_MS, // 10 min base
+    30 * 60_000,
+    0, // no jitter
+    15_000, // first/early delay
+    (cb, ms) => {
+      scheduled.push({ cb, ms });
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    },
+    () => {},
+  );
+  m.start();
+  assert.equal(scheduled[0].ms, 15_000); // early first report
+
+  // Fire the first report; it blips BEFORE any success (early phase). The NEXT delay
+  // must be the short early-retry (15s), not the 10-min base — else the device sits
+  // 'unknown' for a full interval, the exact thing the 15s early report exists to avoid.
+  scheduled[0].cb();
+  await settle();
+  assert.equal(api.calls, 1);
+  assert.equal(scheduled[1].ms, 15_000);
+
+  // Now let a report SUCCEED, then blip again: post-first-success uses the base backoff.
+  fail = false;
+  scheduled[1].cb();
+  await settle();
+  assert.equal(scheduled[2].ms, HEALTH_REPORT_BASE_MS); // steady cadence after first success
+  fail = true;
+  scheduled[2].cb();
+  await settle();
+  assert.equal(scheduled[3].ms, HEALTH_REPORT_BASE_MS); // post-success blip → base backoff, not early-retry
+});
+
 test("health: stop during the awaited report abandons the result", async () => {
   const api = {
     calls: 0,

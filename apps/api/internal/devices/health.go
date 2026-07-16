@@ -230,16 +230,70 @@ func healthInfoFor(blocked bool, evaluatedState *string, failedChecks []byte,
 // the gate for surfacing per-device health on list responses. An org that never
 // opted in sees NO posture fields (no "unknown" noise on a feature it doesn't
 // use); once a check exists, unknown devices MUST show as unknown (absence is
-// not compliance). Best-effort: a config read failure omits the surface (and
-// logs) rather than failing the whole devices list.
-func (s *Service) healthSurfaceActive(ctx context.Context, orgID uuid.UUID) bool {
+// not compliance).
+//
+// A config-read ERROR is PROPAGATED, never swallowed to false: silently omitting
+// the surface would render an actively-blocked device as ordinary (no "posture
+// blocked" badge) — a transient error reading as all-clear, the reassuring-green
+// class this project fails toward showing (the S7.5.1 green-while-empty / S7.5.2
+// transient-fetch law). The caller surfaces it as a retriable list failure.
+func (s *Service) healthSurfaceActive(ctx context.Context, orgID uuid.UUID) (bool, error) {
 	rows, err := s.q.ListOrgHealthChecks(ctx, orgID)
 	if err != nil {
-		s.logger.Warn("health_surface_config_read_failed",
-			slog.String("org_id", orgID.String()), slog.String("error", err.Error()))
-		return false
+		return false, err
 	}
-	return len(rows) > 0
+	return len(rows) > 0, nil
+}
+
+// deviceHealthProjection is the SINGLE per-row health attach (used by all three
+// list surfaces so a health-field change is one edit, not three — the 7-arg
+// healthInfoFor call lives here only). nil when the surface is inactive.
+func (s *Service) deviceHealthProjection(surfaceHealth bool, blocked bool, evaluatedState *string,
+	failedChecks []byte, osVersion *string, diskEncrypted *bool, reportedAt pgtype.Timestamptz, now time.Time) *HealthInfo {
+	if !surfaceHealth {
+		return nil
+	}
+	h := healthInfoFor(blocked, evaluatedState, failedChecks, osVersion, diskEncrypted, tsPtr(reportedAt), now)
+	return &h
+}
+
+// ReleaseAllHealthBlocks frees EVERY posture-blocked device (the [1] downgrade-
+// release fix). Called at open-build boot: when device-health is OFF, no report
+// will ever arrive and the staleness sweeper never runs, so a device left
+// health_blocked by a prior enterprise deployment would be excluded from every
+// gateway FOREVER (silent permanent network loss). Disabling a feature must
+// RELEASE its enforcement — the downgrade mirror of unlock-then-opt-in. Audited
+// (system actor, cause posture_disabled) + pushes each affected org. Idempotent.
+func (s *Service) ReleaseAllHealthBlocks(ctx context.Context) (int, error) {
+	var cleared []sqlc.ClearAllHealthBlocksRow
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		rows, e := q.ClearAllHealthBlocks(ctx)
+		if e != nil {
+			return e
+		}
+		cleared = rows
+		for _, r := range rows {
+			if e := auditSystem(ctx, q, r.OrgID, "device.health_unblocked", "device", r.ID.String(),
+				map[string]any{"cause": "posture_disabled"}); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	orgs := map[uuid.UUID]bool{}
+	for _, r := range cleared {
+		if !orgs[r.OrgID] {
+			orgs[r.OrgID] = true
+			s.PushOrgNodes(ctx, r.OrgID)
+		}
+	}
+	if len(cleared) > 0 {
+		s.logger.Info("health_blocks_released_on_downgrade", slog.Int("count", len(cleared)))
+	}
+	return len(cleared), nil
 }
 
 // auditSystem writes a system-actor audit row (0027) in the caller's tx — used
@@ -401,7 +455,15 @@ func (s *Service) SetHealthCheck(ctx context.Context, actor, orgID uuid.UUID, ki
 		s.logger.Warn("health_would_fail_count_failed_after_commit",
 			slog.String("org_id", orgID.String()), slog.String("error", e.Error()))
 	} else {
+		now := time.Now()
 		for _, r := range rows {
+			// STALE reports don't count ([5]): a device gone silent past the TTL is
+			// posture_unknown, not blocked, and will never report again — counting its
+			// old non-compliant report would overstate a blast radius that models honesty.
+			// Only devices that WILL actually be gated (a fresh report) are counted.
+			if now.Sub(r.ReportedAt) > HealthStaleTTL {
+				continue
+			}
 			f := HealthFacts{Platform: r.Platform, OSVersion: r.OsVersion, DiskEncrypted: r.DiskEncrypted}
 			if v := evaluateHealth([]HealthCheckConfig{cfg}, f); v.State == "noncompliant" {
 				wouldFail++

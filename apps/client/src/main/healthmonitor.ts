@@ -39,6 +39,11 @@ export class HealthMonitor {
   private inFlight = false;
   private terminal = false;
   private backoff = 0;
+  // hasReported gates the EARLY phase ([4]): until the FIRST successful report, an
+  // inconclusive result retries at the short first-report delay, NOT the 10-min
+  // base — a first-report blip must not leave the device "unknown" for a full
+  // interval, which is the exact outcome the early first report exists to avoid.
+  private hasReported = false;
   private readonly jitter: number;
 
   constructor(
@@ -109,11 +114,19 @@ export class HealthMonitor {
         return res;
       }
       this.backoff = 0;
+      this.hasReported = true;
       this.onResult?.(res);
       return "reported";
     } catch {
-      // Inconclusive (network blip / 5xx): keep reporting, lengthen the next try.
-      this.backoff = this.backoff === 0 ? this.baseMs : Math.min(this.backoff * 2, this.maxMs);
+      // Inconclusive (network blip / 5xx): keep reporting, lengthen the next try —
+      // EXCEPT in the early phase (no successful report yet), where we retry at the
+      // short first-report delay so a first-report blip doesn't drop the device to
+      // 10-min "unknown" ([4]).
+      if (!this.hasReported) {
+        this.backoff = this.firstMs;
+      } else {
+        this.backoff = this.backoff === 0 ? this.baseMs : Math.min(this.backoff * 2, this.maxMs);
+      }
       return "inconclusive";
     } finally {
       this.inFlight = false;

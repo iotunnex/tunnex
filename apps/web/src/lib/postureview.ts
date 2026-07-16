@@ -1,5 +1,5 @@
 import type { Device, HealthCheck } from "./api";
-import type { BadgeTone } from "./healthview";
+import { badgeClass, type BadgeTone } from "./healthview";
 
 // postureview — PURE projections for the S7.5.3 device-posture surfaces
 // (config section + devices-list badge). No fetches, no JSX: unit-tested like
@@ -61,14 +61,11 @@ export function postureBadge(
 }
 
 // postureBadgeClass extends healthview's tone vocabulary with the compliant-ok tone
-// (subtle, not celebratory — compliance is the expected steady state).
+// (subtle, not celebratory — compliance is the expected steady state). warn/danger/
+// unknown DELEGATE to healthview.badgeClass so a palette restyle can't drift the
+// posture and gateway-health badges out of sync; only "ok" is new here.
 export function postureBadgeClass(tone: PostureBadge["tone"]): string {
-  return {
-    ok: "text-emerald-400",
-    warn: "text-amber-400",
-    danger: "text-rose-400",
-    unknown: "text-slate-400",
-  }[tone];
+  return tone === "ok" ? "text-emerald-400" : badgeClass(tone);
 }
 
 // ── per-fact tri-state rendering (admin detail) ──────────────────────────────────────

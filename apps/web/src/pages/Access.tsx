@@ -878,6 +878,13 @@ function PostureChecksSection({ orgId, canManage }: { orgId: string; canManage: 
                 <Button disabled={busy} onClick={saveOsVersion}>
                   Save
                 </Button>
+                {/* [6] Windows-version foot-gun: Win 11 reports major 10 (10.0.22000+),
+                    so "11.0" would block the whole Windows fleet. Steer to build numbers. */}
+                <p className="w-full text-xs text-slate-500">
+                  Windows uses build numbers — Windows 11 reports as <span className="font-mono text-slate-400">10.0.22000</span>, not
+                  11.0. Enter the build (e.g. <span className="font-mono text-slate-400">10.0.22631</span> for 23H2); run{" "}
+                  <span className="font-mono text-slate-400">winver</span> to check a device.
+                </p>
               </div>
             )}
             {/* THE coverage indicator (ratified rider): every reporting platform is named —

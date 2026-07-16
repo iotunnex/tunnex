@@ -6,7 +6,7 @@
 // state (including handshake-liveness: an interface that is up but has no fresh
 // handshake reads "connecting", not "connected") so the tray never disagrees with the
 // window, plus the operable states — failed (kill-switch) and revoked.
-export type TrayState = "disconnected" | "connecting" | "connected" | "failed" | "revoked" | "pending" | "migrate_retry";
+export type TrayState = "disconnected" | "connecting" | "connected" | "failed" | "revoked" | "pending" | "migrate_retry" | "posture_blocked";
 
 // HANDSHAKE_STALE_SEC mirrors TunnelControl.tsx: a handshake older than a couple rekey
 // windows (or none) means the link isn't live yet — "connecting", not "connected".
@@ -19,6 +19,7 @@ export function trayStateFor(s: { state: string; last_handshake_sec?: number }):
   if (s.state === "revoked") return "revoked";
   if (s.state === "pending_approval") return "pending"; // S7.3: awaiting admin approval
   if (s.state === "migrate_failed") return "migrate_retry"; // S7.3: legacy replacement didn't complete
+  if (s.state === "posture_blocked") return "posture_blocked"; // S7.5.3: server-side require-mode block
   if (s.state === "failed") return "failed";
   if (s.state === "up") {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -58,6 +59,13 @@ export function trayMenuModel(state: TrayState): TrayMenuModel {
       // S7.3: the legacy-config replacement didn't complete. Config was kept, so reconnect
       // retries it — offer connect (retry). Nothing is up, so no disconnect.
       return { statusLabel: "Couldn't replace device — reconnect to retry", showConnect: true, showDisconnect: false };
+    case "posture_blocked":
+      // S7.5.3: a require-mode posture check disconnected the device server-side. The
+      // interface is up but the gateway dropped the peer, so traffic is dead. Reconnect
+      // won't help (still non-compliant) — the device auto-reconnects on the NEXT report
+      // once the posture is fixed (encryption on / OS updated). Offer disconnect to tear
+      // down the dead tunnel; no connect (a re-mint doesn't change posture).
+      return { statusLabel: "Blocked by device posture policy — fix posture to reconnect", showConnect: false, showDisconnect: true };
     case "disconnected":
       return { statusLabel: "Not connected", showConnect: true, showDisconnect: false };
   }

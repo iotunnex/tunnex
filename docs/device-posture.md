@@ -31,6 +31,14 @@ until you turn a check on.
 | Disk encryption | — | FileVault / BitLocker, as reported by the device. |
 | Minimum OS version | per-platform minimums | e.g. macOS `14.0`, Windows `10.0.22631`. **A platform you leave empty is not constrained** — the UI shows exactly which platforms a check covers. Version floors are per-platform because version numbers are not comparable across OS schemes. |
 
+> **Windows version numbers — a foot-gun.** Windows 11 reports its OS version as
+> **`10.0.22000`** (major `10`, not `11`) — Microsoft never bumped the major.
+> To require Windows 11, enter `10.0.22000`, **not** `11.0`. Entering `11.0`
+> compares numerically greater than every real Windows build and would block your
+> entire Windows fleet, including Windows 11. Use the **build number**
+> (`winver` shows it): Win 10 21H2 = `10.0.19044`, Win 11 22H2 = `10.0.22621`,
+> Win 11 23H2 = `10.0.22631`.
+
 RBAC: configuring checks requires the `device_health:manage` permission
 (owners + admins). Reporting is done by each device's owner automatically.
 

@@ -40,6 +40,13 @@ type Querier interface {
 	// so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
 	BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
+	// lint:cross-org — the DOWNGRADE-RELEASE sweep (the enforcement mirror of
+	// unlock-then-opt-in): when the device-health feature is OFF (open build), NO
+	// device may remain posture-blocked — disabling a feature must RELEASE its
+	// enforcement, not petrify it. Unconditional (no TTL): every health_blocked
+	// device is freed. Returns the affected devices for auditing + org push. Runs at
+	// open-build boot; idempotent (no blocks -> no rows).
+	ClearAllHealthBlocks(ctx context.Context) ([]ClearAllHealthBlocksRow, error)
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
 	// pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.

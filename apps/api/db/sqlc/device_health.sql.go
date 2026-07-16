@@ -12,6 +12,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAllHealthBlocks = `-- name: ClearAllHealthBlocks :many
+UPDATE devices
+SET health_blocked = false, updated_at = now()
+WHERE health_blocked AND deleted_at IS NULL
+RETURNING id, org_id
+`
+
+type ClearAllHealthBlocksRow struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// lint:cross-org — the DOWNGRADE-RELEASE sweep (the enforcement mirror of
+// unlock-then-opt-in): when the device-health feature is OFF (open build), NO
+// device may remain posture-blocked — disabling a feature must RELEASE its
+// enforcement, not petrify it. Unconditional (no TTL): every health_blocked
+// device is freed. Returns the affected devices for auditing + org push. Runs at
+// open-build boot; idempotent (no blocks -> no rows).
+func (q *Queries) ClearAllHealthBlocks(ctx context.Context) ([]ClearAllHealthBlocksRow, error) {
+	rows, err := q.db.Query(ctx, clearAllHealthBlocks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClearAllHealthBlocksRow{}
+	for rows.Next() {
+		var i ClearAllHealthBlocksRow
+		if err := rows.Scan(&i.ID, &i.OrgID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearStaleHealthBlocks = `-- name: ClearStaleHealthBlocks :many
 UPDATE devices d
 SET health_blocked = false, updated_at = now()
