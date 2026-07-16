@@ -119,6 +119,9 @@ export interface PolicyGate {
   canView: boolean;
   canManagePolicy: boolean;
   canManageDevices: boolean;
+  // S7.5.3: posture-check config is its OWN grant (device_health:manage) — deliberately
+  // not a reuse of device:approve (approval and health are orthogonal governance axes).
+  canManageDeviceHealth: boolean;
 }
 
 export function policyGate(input: {
@@ -133,6 +136,7 @@ export function policyGate(input: {
     canView,
     canManagePolicy: canView && input.emailVerified && can(input.role, "policy:manage"),
     canManageDevices: isEnterprise && input.emailVerified && can(input.role, "device:approve"),
+    canManageDeviceHealth: isEnterprise && input.emailVerified && can(input.role, "device_health:manage"),
   };
 }
 

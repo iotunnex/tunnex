@@ -37,6 +37,9 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	}
 	out := make([]api.Device, 0, len(devs))
 	for _, d := range devs {
+		if !s.deviceHealthEnabled {
+			d.Health = nil // open build: never surface leftover enterprise posture rows
+		}
 		out = append(out, toAPIDeviceWithStatus(d))
 	}
 	return api.ListDevices200JSONResponse{
@@ -163,6 +166,32 @@ func toAPIDeviceWithStatus(d devices.DeviceWithStatus) api.Device {
 	out.TxBytes = d.TxBytes
 	online := deviceOnline(d.LastHandshakeAt)
 	out.Online = &online
+	// S7.5.3: the posture projection — present only when the service surfaced it
+	// (org has >= 1 configured check). "unknown" is a first-class state the UI
+	// must render distinctly: absence is not compliance.
+	if h := d.Health; h != nil {
+		state := api.DeviceHealthState(h.State)
+		out.HealthState = &state
+		blocked := h.Blocked
+		out.HealthBlocked = &blocked
+		out.HealthDiskEncrypted = h.DiskEncrypted
+		out.HealthReportedAt = h.ReportedAt
+		if h.OSVersion != "" {
+			v := h.OSVersion
+			out.HealthOsVersion = &v
+		}
+		fcs := make([]struct {
+			Kind api.DeviceHealthFailedChecksKind `json:"kind"`
+			Mode api.DeviceHealthFailedChecksMode `json:"mode"`
+		}, 0, len(h.FailedChecks))
+		for _, f := range h.FailedChecks {
+			fcs = append(fcs, struct {
+				Kind api.DeviceHealthFailedChecksKind `json:"kind"`
+				Mode api.DeviceHealthFailedChecksMode `json:"mode"`
+			}{Kind: api.DeviceHealthFailedChecksKind(f.Kind), Mode: api.DeviceHealthFailedChecksMode(f.Mode)})
+		}
+		out.HealthFailedChecks = &fcs
+	}
 	return out
 }
 

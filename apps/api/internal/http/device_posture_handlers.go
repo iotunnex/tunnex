@@ -32,6 +32,9 @@ func (s apiServer) ListPendingDevices(ctx context.Context, req api.ListPendingDe
 	}
 	out := make([]api.Device, 0, len(list))
 	for _, d := range list {
+		if !s.deviceHealthEnabled {
+			d.Health = nil // open build: never surface leftover enterprise posture rows
+		}
 		out = append(out, toAPIDeviceWithStatus(d))
 	}
 	return api.ListPendingDevices200JSONResponse{Body: out, Headers: api.ListPendingDevices200ResponseHeaders{XRequestId: reqID(ctx)}}, nil

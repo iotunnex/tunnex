@@ -320,6 +320,8 @@ type Querier interface {
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	// The approval queue (S7.3): devices awaiting admin approval, oldest first.
+	// device_health joined (S7.5.3): a pending device may already be reporting posture
+	// (both facts surface independently — the D7 orthogonality).
 	ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error)
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)

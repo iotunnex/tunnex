@@ -5,6 +5,7 @@ import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input, StatusDot } from "../components/ui";
 import { Gateways } from "../components/Gateways";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
+import { postureBadge, postureBadgeClass } from "../lib/postureview";
 
 // lastSeen renders honest recency ("last seen 42s ago"), never a faked live claim
 // — WireGuard only knows the last handshake time (online is derived from it). The
@@ -189,6 +190,14 @@ export default function Devices() {
                   {lastSeen(d.last_handshake_at)}
                 </span>
               )}
+              {/* S7.5.3 posture badge — present only when the org has posture checks
+                  configured. "not reported"/"stale" render distinctly from ok: an
+                  admin must never read unknown as a pass (absence is not compliance). */}
+              {d.status !== "revoked" &&
+                (() => {
+                  const pb = postureBadge(d);
+                  return pb ? <span className={`ml-2 text-xs ${postureBadgeClass(pb.tone)}`}>{pb.label}</span> : null;
+                })()}
             </div>
             {d.status === "active" && (
               <Button variant="danger" onClick={() => revoke(d.id)}>

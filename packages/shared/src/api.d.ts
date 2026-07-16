@@ -1603,6 +1603,19 @@ export interface components {
             rx_bytes?: number;
             /** Format: int64 */
             tx_bytes?: number;
+            /** @enum {string} */
+            health_state?: "compliant" | "noncompliant" | "unknown";
+            health_blocked?: boolean;
+            health_os_version?: string;
+            health_disk_encrypted?: boolean;
+            /** Format: date-time */
+            health_reported_at?: string;
+            health_failed_checks?: {
+                /** @enum {string} */
+                kind: "os_version" | "disk_encryption";
+                /** @enum {string} */
+                mode: "warn" | "require";
+            }[];
         };
         CreateDeviceRequest: {
             name: string;

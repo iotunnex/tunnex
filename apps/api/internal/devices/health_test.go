@@ -3,6 +3,7 @@ package devices
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func osCheck(mode, minJSON string) HealthCheckConfig {
@@ -120,6 +121,38 @@ func TestVersionLess(t *testing.T) {
 		if got := versionLess(c.v, c.min); got != c.want {
 			t.Errorf("versionLess(%q, %q) = %v, want %v", c.v, c.min, got, c.want)
 		}
+	}
+}
+
+func TestHealthInfoFor(t *testing.T) {
+	now := time.Now()
+	fresh := now.Add(-5 * time.Minute)
+	stale := now.Add(-HealthStaleTTL - time.Minute)
+	state := "noncompliant"
+	osv := "13.0"
+	fc := []byte(`[{"kind":"os_version","mode":"require"}]`)
+
+	// Never reported: unknown, no facts — absence is not compliance.
+	info := healthInfoFor(false, nil, nil, nil, nil, nil, now)
+	if info.State != "unknown" || info.Blocked || len(info.FailedChecks) != 0 {
+		t.Fatalf("never-reported must be unknown: %+v", info)
+	}
+
+	// Fresh report: state + failed checks surface as current claims.
+	info = healthInfoFor(true, &state, fc, &osv, bp(true), &fresh, now)
+	if info.State != "noncompliant" || !info.Blocked || len(info.FailedChecks) != 1 || info.OSVersion != "13.0" {
+		t.Fatalf("fresh report must surface state+failures: %+v", info)
+	}
+
+	// Stale report: state degrades to unknown (stale = absence) and its failures
+	// are no longer current claims — but the raw facts + reported_at stay visible,
+	// and a not-yet-swept block is still shown (the device IS still excluded).
+	info = healthInfoFor(true, &state, fc, &osv, bp(true), &stale, now)
+	if info.State != "unknown" || len(info.FailedChecks) != 0 {
+		t.Fatalf("stale report must read unknown with no current failures: %+v", info)
+	}
+	if !info.Blocked || info.OSVersion != "13.0" || info.ReportedAt == nil {
+		t.Fatalf("stale report must keep the block flag + raw facts visible: %+v", info)
 	}
 }
 

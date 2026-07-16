@@ -193,6 +193,55 @@ func validateHealthCheck(kind, mode string, param json.RawMessage) error {
 	return nil
 }
 
+// HealthInfo is the per-device posture projection for the list surfaces (S7.5.3
+// slice 3). State "unknown" = no report, stale report (stale = absence), or —
+// per-fact — a fact reported absent. ABSENCE IS NOT COMPLIANCE: the UI renders
+// unknown distinctly, never as a pass. Blocked is the devices-row enforcement
+// fact and is surfaced even when the backing report has gone stale (the device
+// IS still excluded until the sweep clears it — hiding that would lie).
+type HealthInfo struct {
+	State         string // compliant | noncompliant | unknown
+	Blocked       bool
+	OSVersion     string
+	DiskEncrypted *bool
+	FailedChecks  []FailedCheck
+	ReportedAt    *time.Time
+}
+
+// healthInfoFor computes the projection from a device row + its (possibly
+// absent) health snapshot. Pure — unit-testable without a DB. failed_checks are
+// surfaced only from a FRESH report: a stale report's failures are no longer a
+// current claim (its state is unknown), but its raw facts stay visible.
+func healthInfoFor(blocked bool, evaluatedState *string, failedChecks []byte,
+	osVersion *string, diskEncrypted *bool, reportedAt *time.Time, now time.Time) HealthInfo {
+	info := HealthInfo{State: "unknown", Blocked: blocked, DiskEncrypted: diskEncrypted,
+		FailedChecks: []FailedCheck{}, ReportedAt: reportedAt}
+	if osVersion != nil {
+		info.OSVersion = *osVersion
+	}
+	if evaluatedState != nil && reportedAt != nil && now.Sub(*reportedAt) <= HealthStaleTTL {
+		info.State = *evaluatedState
+		_ = json.Unmarshal(failedChecks, &info.FailedChecks)
+	}
+	return info
+}
+
+// healthSurfaceActive reports whether the org has opted into ANY posture check —
+// the gate for surfacing per-device health on list responses. An org that never
+// opted in sees NO posture fields (no "unknown" noise on a feature it doesn't
+// use); once a check exists, unknown devices MUST show as unknown (absence is
+// not compliance). Best-effort: a config read failure omits the surface (and
+// logs) rather than failing the whole devices list.
+func (s *Service) healthSurfaceActive(ctx context.Context, orgID uuid.UUID) bool {
+	rows, err := s.q.ListOrgHealthChecks(ctx, orgID)
+	if err != nil {
+		s.logger.Warn("health_surface_config_read_failed",
+			slog.String("org_id", orgID.String()), slog.String("error", err.Error()))
+		return false
+	}
+	return len(rows) > 0
+}
+
 // auditSystem writes a system-actor audit row (0027) in the caller's tx — used
 // for evaluation-driven flips where no human is the actor; metadata carries the
 // CAUSE ("blocked by device-health because …").

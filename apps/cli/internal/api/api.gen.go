@@ -45,6 +45,25 @@ const (
 	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
 )
 
+// Defines values for DeviceHealthFailedChecksKind.
+const (
+	DeviceHealthFailedChecksKindDiskEncryption DeviceHealthFailedChecksKind = "disk_encryption"
+	DeviceHealthFailedChecksKindOsVersion      DeviceHealthFailedChecksKind = "os_version"
+)
+
+// Defines values for DeviceHealthFailedChecksMode.
+const (
+	DeviceHealthFailedChecksModeRequire DeviceHealthFailedChecksMode = "require"
+	DeviceHealthFailedChecksModeWarn    DeviceHealthFailedChecksMode = "warn"
+)
+
+// Defines values for DeviceHealthState.
+const (
+	DeviceHealthStateCompliant    DeviceHealthState = "compliant"
+	DeviceHealthStateNoncompliant DeviceHealthState = "noncompliant"
+	DeviceHealthStateUnknown      DeviceHealthState = "unknown"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -80,14 +99,14 @@ const (
 
 // Defines values for DeviceHealthResultState.
 const (
-	Compliant    DeviceHealthResultState = "compliant"
-	Noncompliant DeviceHealthResultState = "noncompliant"
+	DeviceHealthResultStateCompliant    DeviceHealthResultState = "compliant"
+	DeviceHealthResultStateNoncompliant DeviceHealthResultState = "noncompliant"
 )
 
 // Defines values for HealthCheckKind.
 const (
-	HealthCheckKindDiskEncryption HealthCheckKind = "disk_encryption"
-	HealthCheckKindOsVersion      HealthCheckKind = "os_version"
+	DiskEncryption HealthCheckKind = "disk_encryption"
+	OsVersion      HealthCheckKind = "os_version"
 )
 
 // Defines values for HealthCheckMode.
@@ -98,8 +117,8 @@ const (
 
 // Defines values for HealthCheckInputMode.
 const (
-	Require HealthCheckInputMode = "require"
-	Warn    HealthCheckInputMode = "warn"
+	HealthCheckInputModeRequire HealthCheckInputMode = "require"
+	HealthCheckInputModeWarn    HealthCheckInputMode = "warn"
 )
 
 // Defines values for HealthResponseStatus.
@@ -443,21 +462,39 @@ type CreatePolicyRuleRequestDstKind string
 // Device defines model for Device.
 type Device struct {
 	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
-	ApprovedBy      *openapi_types.UUID `json:"approved_by"`
-	AssignedIp      *string             `json:"assigned_ip,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
-	Id              openapi_types.UUID  `json:"id"`
-	LastHandshakeAt *time.Time          `json:"last_handshake_at,omitempty"`
-	Name            string              `json:"name"`
-	NodeId          openapi_types.UUID  `json:"node_id"`
-	Online          *bool               `json:"online,omitempty"`
-	Platform        *string             `json:"platform,omitempty"`
-	PublicKey       string              `json:"public_key"`
-	RxBytes         *int64              `json:"rx_bytes,omitempty"`
-	Status          DeviceStatus        `json:"status"`
-	TxBytes         *int64              `json:"tx_bytes,omitempty"`
-	UserId          openapi_types.UUID  `json:"user_id"`
+	ApprovedBy          *openapi_types.UUID `json:"approved_by"`
+	AssignedIp          *string             `json:"assigned_ip,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	HealthBlocked       *bool               `json:"health_blocked,omitempty"`
+	HealthDiskEncrypted *bool               `json:"health_disk_encrypted,omitempty"`
+	HealthFailedChecks  *[]struct {
+		Kind DeviceHealthFailedChecksKind `json:"kind"`
+		Mode DeviceHealthFailedChecksMode `json:"mode"`
+	} `json:"health_failed_checks,omitempty"`
+	HealthOsVersion  *string            `json:"health_os_version,omitempty"`
+	HealthReportedAt *time.Time         `json:"health_reported_at,omitempty"`
+	HealthState      *DeviceHealthState `json:"health_state,omitempty"`
+	Id               openapi_types.UUID `json:"id"`
+	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
+	Name             string             `json:"name"`
+	NodeId           openapi_types.UUID `json:"node_id"`
+	Online           *bool              `json:"online,omitempty"`
+	Platform         *string            `json:"platform,omitempty"`
+	PublicKey        string             `json:"public_key"`
+	RxBytes          *int64             `json:"rx_bytes,omitempty"`
+	Status           DeviceStatus       `json:"status"`
+	TxBytes          *int64             `json:"tx_bytes,omitempty"`
+	UserId           openapi_types.UUID `json:"user_id"`
 }
+
+// DeviceHealthFailedChecksKind defines model for Device.HealthFailedChecks.Kind.
+type DeviceHealthFailedChecksKind string
+
+// DeviceHealthFailedChecksMode defines model for Device.HealthFailedChecks.Mode.
+type DeviceHealthFailedChecksMode string
+
+// DeviceHealthState defines model for Device.HealthState.
+type DeviceHealthState string
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string

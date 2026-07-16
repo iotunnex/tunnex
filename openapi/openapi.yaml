@@ -2174,6 +2174,27 @@ components:
         online: { type: boolean }
         rx_bytes: { type: integer, format: int64 }
         tx_bytes: { type: integer, format: int64 }
+        # Device health / posture (S7.5.3). Present ONLY when the org has >= 1
+        # posture check configured (enterprise) — otherwise omitted, so an org
+        # that never opted in sees no posture noise. health_state 'unknown' =
+        # no report, stale report, or the fact was reported absent: ABSENCE IS
+        # NOT COMPLIANCE — never render unknown as a pass. health_blocked is the
+        # enforcement fact (the device is excluded from every gateway while true).
+        health_state: { type: string, enum: [compliant, noncompliant, unknown] }
+        health_blocked: { type: boolean }
+        health_os_version: { type: string }
+        # Tri-state: true/false = the client's reported fact; absent = not reported.
+        health_disk_encrypted: { type: boolean }
+        health_reported_at: { type: string, format: date-time }
+        health_failed_checks:
+          type: array
+          items:
+            type: object
+            required: [kind, mode]
+            additionalProperties: false
+            properties:
+              kind: { type: string, enum: [os_version, disk_encryption] }
+              mode: { type: string, enum: [warn, require] }
 
     CreateDeviceRequest:
       type: object

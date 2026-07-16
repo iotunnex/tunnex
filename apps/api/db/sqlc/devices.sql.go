@@ -379,9 +379,11 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -391,6 +393,11 @@ type ListDevicesByOrgRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error) {
@@ -422,6 +429,11 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -434,9 +446,11 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -451,6 +465,11 @@ type ListDevicesByUserRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error) {
@@ -482,6 +501,11 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -522,9 +546,11 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 }
 
 const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -534,9 +560,16 @@ type ListPendingDevicesByOrgRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 // The approval queue (S7.3): devices awaiting admin approval, oldest first.
+// device_health joined (S7.5.3): a pending device may already be reporting posture
+// (both facts surface independently — the D7 orthogonality).
 func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDevicesByOrg, orgID)
 	if err != nil {
@@ -566,6 +599,11 @@ func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) 
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}

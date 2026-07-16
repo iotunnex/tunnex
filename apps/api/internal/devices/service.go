@@ -411,6 +411,10 @@ type DeviceWithStatus struct {
 	LastHandshakeAt *time.Time
 	RxBytes         *int64
 	TxBytes         *int64
+	// Health is the posture projection (S7.5.3) — nil unless the org has opted
+	// into >= 1 posture check (healthSurfaceActive), so an org that never opted
+	// in gets no posture fields at all.
+	Health *HealthInfo
 }
 
 // ListForUser returns a user's devices in an org (self-service view) with status.
@@ -419,9 +423,16 @@ func (s *Service) ListForUser(ctx context.Context, orgID, userID uuid.UUID) ([]D
 	if err != nil {
 		return nil, err
 	}
+	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
+		if surfaceHealth {
+			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
+			d.Health = &h
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }
@@ -432,9 +443,16 @@ func (s *Service) ListForOrg(ctx context.Context, orgID uuid.UUID) ([]DeviceWith
 	if err != nil {
 		return nil, err
 	}
+	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
+		if surfaceHealth {
+			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
+			d.Health = &h
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }
@@ -561,15 +579,24 @@ func (s *Service) Reject(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 	return nil
 }
 
-// ListPending returns the org's device-approval queue (S7.3).
+// ListPending returns the org's device-approval queue (S7.3). Health rides along
+// (S7.5.3): a pending device may already be reporting posture — both facts show
+// independently (the D7 orthogonality), excluded from desired state once.
 func (s *Service) ListPending(ctx context.Context, orgID uuid.UUID) ([]DeviceWithStatus, error) {
 	rows, err := s.q.ListPendingDevicesByOrg(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	surfaceHealth := s.healthSurfaceActive(ctx, orgID)
+	now := time.Now()
 	out := make([]DeviceWithStatus, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes})
+		d := DeviceWithStatus{Device: r.Device, LastHandshakeAt: tsPtr(r.LastHandshakeAt), RxBytes: r.RxBytes, TxBytes: r.TxBytes}
+		if surfaceHealth {
+			h := healthInfoFor(r.Device.HealthBlocked, r.EvaluatedState, r.FailedChecks, r.OsVersion, r.DiskEncrypted, tsPtr(r.ReportedAt), now)
+			d.Health = &h
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }
