@@ -48,6 +48,10 @@ authorization to merge. (Codified after S4.8's merge waited on an explicit re-co
 an admin (iotunnex) can still push, but the social sign-off gate is now mechanized for PRs. The
 standard flow: story branch → PR → CI green (required checks) → user sign-off → ff-merge → push.
 CI is the CONTINUOUS invariant proof; the human sign-off is still required on top (CI green ≠ auto-merge).
+**(Protection was found ABSENT — 404, not permissive — at S7.5.3/PR#24 and RE-ESTABLISHED 2026-07-16,
+now belt-and-braces: repo `allow_merge_commit=false` + `required_linear_history` + required checks strict
++ no force-push + `enforce_admins=false`. Verify-present is now a PRE-MERGE check — see the Armed Guards
+inventory "main branch protection can silently vanish". This claim is dated + true, not aspirational.)**
 
 **Force-push standing authorization (S6.3):** `git push --force-with-lease` is pre-authorized for
 `story/*` branches ONLY (e.g. after a rebase onto main) — no per-push ask needed. `main` is NEVER
@@ -378,6 +382,20 @@ Seed for the eventual SECURITY.md.
   reduction arc: revoke-first fixed a cap-lockout; the bare-catch removed the raw-reject; the `migrate_failed`
   emit removed the silent-"Disconnected" on notif-muted machines. The doctrine (collapse N error paths to one
   outcome-degraded down-state) is the S7.4 first-reach heuristic.
+- **main branch protection is itself a guard that can silently vanish** (S7.5.3; found ABSENT — `gh api
+  .../branches/main/protection` returned **404**, not permissive — at PR#24 merge, cause unknown). The
+  mechanized safety layer documented at S6.0b (required checks + linear history + no force-push) had
+  silently dropped at some earlier point; nothing was watching it, and green CI + convention-held sign-offs
+  MASKED the gap — the reassuring-green class applied to the PROCESS itself: everything looked fine while a
+  load-bearing guard was gone, so for an unknown window every merge relied entirely on human discipline with
+  no backstop (it held — luck + habit, not a guarantee). Restored 2026-07-16 belt-and-braces: repo
+  `allow_merge_commit=false` (squash+rebase only, so `--merge` can't produce a merge commit regardless of
+  flag) + branch protection `required_linear_history=true` + required checks strict (`gates` + `client
+  (macos-latest)` + `client (windows-latest)`) + `allow_force_pushes=false` + `enforce_admins=false`. Either
+  layer alone blocks the deviation; both make it structurally impossible. **STANDING CHECK (pre-merge
+  assertion):** verify protection is PRESENT (`gh api repos/iotunnex/tunnex/branches/main/protection` ≠ 404,
+  `required_linear_history.enabled=true`) at each story merge — a one-line check so an absent guard can never
+  again hide behind green CI. The guard that protects the merges must itself be verified, not assumed.
 
 ## Edition Model — Open-core (resolved)
 
