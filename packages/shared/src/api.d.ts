@@ -976,7 +976,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Extend a temporary grant's expiry window in place (enterprise)
+         * @description S7.5.4: moves a temporary grant's expires_at forward (window-extensible, never delete+recreate). Refuses a permanent grant (409 not_temporary) or an already-lapsed one (409 grant_lapsed) — a lapsed grant is terminal.
+         *
+         */
+        put: operations["extendGrant"];
         post?: never;
         /** Delete an allow-rule (enterprise) */
         delete: operations["deletePolicyRule"];
@@ -1446,6 +1451,13 @@ export interface components {
              * @description Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
              */
             expires_at?: string | null;
+        };
+        ExtendGrantRequest: {
+            /**
+             * Format: date-time
+             * @description The grant's new expiry (must be in the future).
+             */
+            expires_at: string;
         };
         ZeroTrustMode: {
             /**
@@ -3415,6 +3427,35 @@ export interface operations {
         responses: {
             /** @description Created rule. */
             201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyRule"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    extendGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtendGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description The grant with its new window. */
+            200: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;

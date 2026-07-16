@@ -228,6 +228,10 @@ func main() {
 	// directory groups every ~10min. Cancelled on shutdown.
 	pollCtx, pollCancel := context.WithCancel(context.Background())
 	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger)
+	// S7.5.4 temporary-grant expiry sweep (enterprise only; no-op in the open build):
+	// a lapsed temporary grant's /32 is pushed off every org gateway promptly. Shares
+	// pollCtx (cancelled on shutdown).
+	apphttp.StartPolicyGrantSweeper(pollCtx, pool, pushHub)
 	// S7.5.3 device-health staleness sweep (enterprise only): a stale report is
 	// ABSENCE, and absence never blocks — clears health_blocked past the TTL and
 	// pushes the affected orgs. Shares pollCtx (cancelled on shutdown).

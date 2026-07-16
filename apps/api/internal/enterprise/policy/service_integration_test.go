@@ -4,12 +4,15 @@ package policy_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/enterprise/policy"
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
@@ -258,6 +261,174 @@ func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
 	// (b) WIRE freshness: the rebuilt artifact no longer grants bob's /32.
 	if compiledHas("10.99.0.11") {
 		t.Fatal("cascade-correct but gateway-STALE: bob's /32 still in the compiled artifact after removal")
+	}
+}
+
+// tempGrant creates a group→resource rule expiring at `at` (raw, so tests can place
+// it in the past to simulate a lapsed grant the API would refuse to create).
+func tempGrant(t *testing.T, pool *pgxpool.Pool, f fixture, at time.Time) (ruleID, groupID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	groupID, res := uuid.New(), uuid.New()
+	mustExec := func(sql string, args ...any) {
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+	uniq := groupID.String()[:8] // group/resource names are unique per org
+	mustExec(`INSERT INTO user_groups (id, org_id, name) VALUES ($1,$2,$3)`, groupID, f.org, "g-"+uniq)
+	mustExec(`INSERT INTO group_members (org_id, group_id, user_id) VALUES ($1,$2,$3)`, f.org, groupID, f.user)
+	mustExec(`INSERT INTO resources (id, org_id, name, cidr, protocol) VALUES ($1,$2,$3,'10.0.5.0/24','any')`, res, f.org, "db-"+uniq)
+	ruleID = uuid.New()
+	mustExec(`INSERT INTO policy_rules (id, org_id, src_kind, src_group_id, dst_kind, dst_resource_id, expires_at)
+	          VALUES ($1,$2,'group',$3,'resource',$4,$5)`, ruleID, f.org, groupID, res, at)
+	return ruleID, groupID
+}
+
+// code extracts an apierr code for asserting typed 4xx failures.
+func code(err error) string {
+	var a *apierr.Error
+	if err != nil && errors.As(err, &a) {
+		return a.Code
+	}
+	return ""
+}
+
+func auditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, action string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action=$2`, org, action).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestExtendGrantWindow — the happy path: a live temporary grant's window moves in place.
+func TestExtendGrantWindow(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	rid, _ := tempGrant(t, pool, f, time.Now().Add(30*time.Minute))
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	newExp := time.Now().Add(4 * time.Hour)
+	r, err := s.ExtendGrant(f.ctx, f.org, rid, newExp)
+	if err != nil {
+		t.Fatalf("extend: %v", err)
+	}
+	if !r.ExpiresAt.Valid || r.ExpiresAt.Time.Sub(newExp).Abs() > time.Second {
+		t.Fatalf("window not moved: %+v", r.ExpiresAt)
+	}
+	if auditCount(t, pool, f.org, "policy.grant_extended") != 1 {
+		t.Fatal("extend must audit policy.grant_extended")
+	}
+}
+
+// TestExtendRefusesPermanentAndLapsed — the two 409s: a permanent grant has no window,
+// and a lapsed grant is terminal.
+func TestExtendRefusesPermanentAndLapsed(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+
+	// permanent: create a normal rule (no expiry) -> not_temporary.
+	perm, _ := tempGrant(t, pool, f, time.Now().Add(time.Hour))
+	if _, err := pool.Exec(context.Background(), `UPDATE policy_rules SET expires_at=NULL WHERE id=$1`, perm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExtendGrant(f.ctx, f.org, perm, time.Now().Add(time.Hour)); code(err) != "not_temporary" {
+		t.Fatalf("permanent grant extend must be 409 not_temporary, got %v", err)
+	}
+
+	// lapsed: a grant already past its expiry -> grant_lapsed.
+	lapsed, _ := tempGrant(t, pool, f, time.Now().Add(-time.Minute))
+	if _, err := s.ExtendGrant(f.ctx, f.org, lapsed, time.Now().Add(time.Hour)); code(err) != "grant_lapsed" {
+		t.Fatalf("lapsed grant extend must be 409 grant_lapsed, got %v", err)
+	}
+}
+
+// TestExtendVsSweepRace is the disposition RED: extend and the expiry sweeper compose on
+// the row lock, so a grant at its lapse boundary resolves DETERMINISTICALLY to
+// extended-OR-409, never torn. The FOR UPDATE lock guarantees that under real concurrency
+// exactly ONE of these two serial orderings occurs — both are asserted correct here.
+func TestExtendVsSweepRace(t *testing.T) {
+	pool := testPool(t)
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+
+	t.Run("sweep wins -> extend is 409 grant_lapsed, exactly one action", func(t *testing.T) {
+		f := seed(t, pool)
+		exp := time.Now().Add(-time.Second) // already lapsed
+		rid, _ := tempGrant(t, pool, f, exp)
+		// Sweeper claims it. n is SYSTEM-WIDE (may include other fixtures' leaked expired
+		// grants in the shared DB), so assert on THIS org's audit, not the global count.
+		if _, err := s.SweepExpiredGrants(context.Background(), exp.Add(-time.Hour), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if auditCount(t, pool, f.org, "policy.grant_expired") != 1 {
+			t.Fatal("sweep must audit grant_expired once for this org")
+		}
+		// Extend now finds it lapsed -> 409. No double-action (no grant_extended).
+		if _, err := s.ExtendGrant(f.ctx, f.org, rid, time.Now().Add(time.Hour)); code(err) != "grant_lapsed" {
+			t.Fatalf("post-sweep extend must be grant_lapsed, got %v", err)
+		}
+		if auditCount(t, pool, f.org, "policy.grant_extended") != 0 {
+			t.Fatal("a lapsed grant must NOT also record an extend (torn state)")
+		}
+	})
+
+	t.Run("extend wins -> sweep does NOT falsely expire it", func(t *testing.T) {
+		f := seed(t, pool)
+		exp := time.Now().Add(2 * time.Second) // live, near boundary
+		rid, _ := tempGrant(t, pool, f, exp)
+		// Extend moves the window to the future FIRST.
+		if _, err := s.ExtendGrant(f.ctx, f.org, rid, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("extend: %v", err)
+		}
+		// A sweep whose window would have covered the OLD expiry must not fire — the row
+		// now has a future expires_at, so it doesn't match expires_at <= now().
+		if _, err := s.SweepExpiredGrants(context.Background(), exp.Add(-time.Hour), time.Now().Add(10*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if auditCount(t, pool, f.org, "policy.grant_expired") != 0 {
+			t.Fatal("an extended grant must NOT be swept-expired (this org)")
+		}
+	})
+}
+
+// TestSweepPushesOrgWide — a lapsed grant's expiry pushes the org's gateways (F1: the
+// /32 must leave every gateway, not just the subject's node) + audits (system actor).
+func TestSweepPushesOrgWide(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	tempGrant(t, pool, f, time.Now().Add(-time.Second))
+	n := &fakeNotifier{}
+	s := policy.NewService(pool)
+	s.SetNotifier(n)
+	if _, err := s.SweepExpiredGrants(context.Background(), time.Now().Add(-time.Hour), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// The sweep is system-wide (may push several orgs from the shared DB); assert THIS
+	// org's gateway is among the pushes.
+	pushedThisNode := false
+	for _, call := range n.calls {
+		for _, id := range call {
+			if id == f.node {
+				pushedThisNode = true
+			}
+		}
+	}
+	if !pushedThisNode {
+		t.Fatalf("expiry sweep must push this org's gateway (%s), got %v", f.node, n.calls)
+	}
+	var actor *string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT actor_system FROM audit_logs WHERE org_id=$1 AND action='policy.grant_expired'`, f.org).Scan(&actor); err != nil {
+		t.Fatal(err)
+	}
+	if actor == nil || *actor != "policy-grants" {
+		t.Fatalf("expiry must be a SYSTEM-actor audit (policy-grants), got %v", actor)
 	}
 }
 

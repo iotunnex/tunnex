@@ -145,6 +145,13 @@ type Querier interface {
 	// access_events scale makes the 10-min scan measurable, add a supporting index / cheaper
 	// enumeration (trigger, not a silent now-do-it).
 	DistinctAccessEventOrgs(ctx context.Context) ([]uuid.UUID, error)
+	// S7.5.4: move a temporary grant's window IN PLACE (never delete+recreate — that would
+	// churn the /32 out+back and cause a spurious push). The `expires_at > now()` predicate
+	// is the LAPSE GUARD: a grant that has already expired matches 0 rows, so extend and the
+	// expiry sweeper compose deterministically on the row lock — a grant lapsing mid-extend
+	// resolves to extended-OR-(0 rows -> 409 grant_lapsed), never torn. Only a TEMPORARY
+	// (expires_at NOT NULL), still-LIVE grant can be extended.
+	ExtendPolicyRule(ctx context.Context, arg ExtendPolicyRuleParams) (PolicyRule, error)
 	// Returns a fresh time-ordered UUIDv7 from the database. Demonstrates the sqlc
 	// pipeline and the uuid override; callers may also generate v7 ids in Go.
 	GenerateID(ctx context.Context) (uuid.UUID, error)
@@ -300,6 +307,12 @@ type Querier interface {
 	// background poller iterates all tenants; each config is reconciled org-scoped downstream.
 	// lint:cross-org
 	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
+	// The expiry sweeper's window: temporary grants that lapsed since the last tick. FOR
+	// UPDATE locks each so a concurrent ExtendPolicyRule (which takes the same row lock via
+	// its UPDATE) serializes — the sweeper audits grant_expired ONLY for grants still expired
+	// under the lock; an extend that won the lock moved expires_at to the future, so the row
+	// no longer matches expires_at <= now() and is not falsely audited as expired.
+	ListExpiredGrantsForSweep(ctx context.Context, arg ListExpiredGrantsForSweepParams) ([]ListExpiredGrantsForSweepRow, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)

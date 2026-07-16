@@ -1263,6 +1263,27 @@ paths:
           description: Deleted.
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: extendGrant
+      summary: Extend a temporary grant's expiry window in place (enterprise)
+      description: >
+        S7.5.4: moves a temporary grant's expires_at forward (window-extensible, never
+        delete+recreate). Refuses a permanent grant (409 not_temporary) or an
+        already-lapsed one (409 grant_lapsed) — a lapsed grant is terminal.
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExtendGrantRequest" }
+      responses:
+        "200":
+          description: The grant with its new window.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyRule" }
+        default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/zero-trust-mode:
     parameters:
@@ -1880,6 +1901,13 @@ components:
         dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
         dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }
         expires_at: { type: string, format: date-time, nullable: true, description: "Set = a temporary grant that expires at this time (must be future); omit for a permanent grant." }
+
+    ExtendGrantRequest:
+      type: object
+      required: [expires_at]
+      additionalProperties: false
+      properties:
+        expires_at: { type: string, format: date-time, description: "The grant's new expiry (must be in the future)." }
 
     ZeroTrustMode:
       type: object
