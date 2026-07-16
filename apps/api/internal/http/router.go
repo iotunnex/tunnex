@@ -54,7 +54,10 @@ type Deps struct {
 	// DeviceHealthEnabled => false in the open build (S7.5.3 device health/posture-check
 	// endpoints return edition_required). Named per-feature (NewDeviceHealthEdition).
 	DeviceHealthEnabled bool
-	CookieSecure        bool
+	// MfaEnforceEnabled => false in the open build (S7.5.5 org enforce + admin-reset endpoints
+	// return edition_required, and the enrollment gate never engages). NewMfaEnforceEdition().
+	MfaEnforceEnabled bool
+	CookieSecure      bool
 	AppBaseURL          string
 	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
 	// (S6.2 desktop; app://tunnex). Empty = no CORS (pure same-origin).
@@ -155,7 +158,16 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	// Default-deny MFA-enrollment gate (S7.5.5 D8, enterprise): runs after auth attaches the
+	// principal; a gated user is restricted to enrollment. Registered before the routes so it
+	// wraps every operation (self-arming — a new endpoint is gated by construction).
+	gate, err := srv.mfaEnrollmentGate(swagger)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(gate)
+
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,
