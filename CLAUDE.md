@@ -19,8 +19,18 @@ Stories build one at a time, decision-first:
 2. **Slices** — build in reviewable slices on the story branch (`story/S<n>-<slug>`).
 3. **Review** — self-review + `/code-review`; dispositions come BEFORE folding findings.
    A mid-fold redesign (e.g. of a security test) is a decide-item, not a fold.
+   Story-end = a multi-finder review. Findings are presented RANKED and HELD for
+   disposition (the user brings dispositions back); fold only what's dispositioned.
+   A feature-sized fold RE-EARNS a review of the folded code. Budget rule: repeated
+   fold-induced defects in the same component = HALT, paper its state model, reduce
+   not patch (the S7.5.1 JSONL arc — six rounds → deferred to S7.5.1b rather than
+   shipped). A session-limited/incomplete review is INCONCLUSIVE, never clean —
+   re-run it.
 4. **Box-walk** — prove the story on a live wire (docs/S*-boxwalk.md / -box-walk.md);
    unit tests SUBSTITUTE for a wire proof but never SATISFY it (see ledger conventions).
+   Walk evidence is COMMITTED during the walk session (walk-artifacts/), not after.
+   Walk-time scratch credentials (WG configs etc.) contain private keys — gitignore
+   them at creation, never commit.
 5. **Both-green** — CI required checks (`gates` + `client (macos-latest)` + `client (windows-latest)`)
    must pass; run the gate targets locally first.
 6. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
@@ -68,7 +78,9 @@ Other commands: `make up` / `make up-enterprise` / `make down` (compose stack),
   (e.g. "public-beta readiness"), never calendar clocks.
 - **Mid-build forks halt-and-surface:** discovering a fork in the road mid-build (a new
   decide-item, a scope change, an unexpected design constraint) halts the build and surfaces
-  it for disposition — do not pick a branch silently.
+  it for disposition — do not pick a branch silently. This applies to review findings too:
+  decide-items and named stop-conditions/tripwires go to the user; never resolve one
+  unilaterally.
 - **Enterprise features are UNLOCK-THEN-OPT-IN, never unlock-and-enforce** (founder-directed):
   org-level opt-in, default OFF. Unlocking (edition/license) makes a capability available;
   it never turns enforcement on.
