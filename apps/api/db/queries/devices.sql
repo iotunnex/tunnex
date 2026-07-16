@@ -177,6 +177,14 @@ WHERE d.node_id = $1
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at;
 
+-- name: GetDeviceUserForOrg :one
+-- lint:cross-org — org-scoped by the $2 arg; resolves a flow event's SRC device to its
+-- owning user (S7.5.4 v3 flow attribution: src_device_id -> src_user_id, a clean FK join,
+-- NEVER an src_ip->device guess). NO deleted_at filter: a since-revoked/deleted device's
+-- HISTORICAL flow must still attribute its user (access_events is an immutable record;
+-- src_device_id/src_user_id are plain uuids, not FKs, precisely so they survive deletion).
+SELECT user_id FROM devices WHERE id = $1 AND org_id = $2;
+
 -- name: ListNodeIDsForUserActiveDevices :many
 -- lint:cross-org — keyed by user_id; used to find which nodes to push after a
 -- user's peers change (create/revoke/deactivate). Not org-scoped: a user's

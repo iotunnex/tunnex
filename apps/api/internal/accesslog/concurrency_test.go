@@ -29,7 +29,7 @@ import (
 func TestIngestConcurrentSameOrgNoLossNoTear(t *testing.T) {
 	q, pool, org := ingestPool(t) // skips without TUNNEX_TEST_DATABASE_URL
 	ctx := context.Background()
-	ing := NewIngester(pool, stubGrants{}, NewHealth(), nil)
+	ing := NewIngester(pool, stubGrants{}, nil, NewHealth(), nil)
 
 	const goroutines, perBatch = 8, 25
 	want := goroutines * perBatch

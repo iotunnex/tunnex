@@ -8,10 +8,10 @@ import (
 
 // hashAllow is the ENFORCEMENT-ONLY view of an AllowEntry hashed by CanonicalHash.
 // EXPLICIT ALLOWLIST (A-1): only enforcement-significant fields appear. Observability
-// metadata (rule_id) is DELIBERATELY ABSENT — staleness must be metadata-blind
-// ("observability, never semantics" at the hash layer). Field order + tags match the
-// v1 AllowEntry EXACTLY, so v1 and v2 artifacts with identical grants hash IDENTICALLY
-// (existing pushed/applied hashes are unchanged by the v2 bump).
+// metadata (rule_id, src_device_id) is DELIBERATELY ABSENT — staleness must be
+// metadata-blind ("observability, never semantics" at the hash layer). Field order +
+// tags match the v1 AllowEntry EXACTLY, so artifacts with identical grants hash
+// IDENTICALLY across the v2/v3 field additions (the added metadata never touches this).
 type hashAllow struct {
 	SrcIP    string   `json:"src_ip"`
 	DstCIDR  string   `json:"dst_cidr"`

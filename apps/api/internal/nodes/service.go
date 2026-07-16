@@ -32,12 +32,12 @@ import (
 )
 
 // ProtocolVersion is the control-plane protocol version, kept in lockstep with
-// policyspec.ProtocolVersion (TestProtocolVersionConstantsAgree). v2 (S7.5.1): the
-// desired-state artifact gained an additive, hash-invisible rule_id. Bumping is safe:
+// policyspec.ProtocolVersion (TestProtocolVersionConstantsAgree). v2 (S7.5.1): rule_id.
+// v3 (S7.5.4): src_device_id — both additive + hash-invisible. Bumping is safe:
 // EnrollAgent only rejects agents reporting a version GREATER than the CP (a newer
-// agent vs an older CP), so v1 agents (report 1, not > 2) are still served — the CP
-// serves v2, a v1 agent ignores the unknown field, and the hash is metadata-blind.
-const ProtocolVersion = 2
+// agent vs an older CP), so older agents (report ≤3, not > 3) are still served — the CP
+// serves v3, an older agent ignores the unknown field, and the hash is metadata-blind.
+const ProtocolVersion = 3
 
 const joinTokenTTL = time.Hour
 

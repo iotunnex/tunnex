@@ -33,15 +33,17 @@ const (
 // observation). NOTE (fold-2 #2): PolicyHash is carried on the wire but the CP does NOT yet
 // consume it — per-flow skew detection is a DEFERRED enhancement; the working policy-skew
 // signal is the node-status desync path (policy_desync_since/reported_at, 0021/0022). The
-// agent ships IP-level facts only; identity enrichment (device / user / resource) is CP-side
-// at ingest (4/n).
+// agent ships IP-level facts. DEVICE identity (S7.5.4 v3) is now agent-STAMPED from the
+// applied artifact's /32->device map (SrcDeviceID) — still NOT an src_ip->device DB guess;
+// the CP joins device->user server-side. Resource enrichment stays CP-side at ingest.
 type Event struct {
-	OccurredAt time.Time `json:"occurred_at"`
-	Verdict    Verdict   `json:"verdict"`
-	RuleID     string    `json:"rule_id,omitempty"` // "" = default-deny / no matching rule
-	PolicyHash string    `json:"policy_hash"`       // applied CanonicalHash at observation (CP consumption deferred, fold-2 #2)
-	SrcIP      string    `json:"src_ip"`
-	DstIP      string    `json:"dst_ip"`
-	Protocol   string    `json:"protocol"`
-	DstPort    int       `json:"dst_port,omitempty"`
+	OccurredAt  time.Time `json:"occurred_at"`
+	Verdict     Verdict   `json:"verdict"`
+	RuleID      string    `json:"rule_id,omitempty"` // "" = default-deny / no matching rule
+	PolicyHash  string    `json:"policy_hash"`       // applied CanonicalHash at observation (CP consumption deferred, fold-2 #2)
+	SrcIP       string    `json:"src_ip"`
+	SrcDeviceID string    `json:"src_device_id,omitempty"` // v3: source device uuid from the artifact map ("" = unresolved src)
+	DstIP       string    `json:"dst_ip"`
+	Protocol    string    `json:"protocol"`
+	DstPort     int       `json:"dst_port,omitempty"`
 }

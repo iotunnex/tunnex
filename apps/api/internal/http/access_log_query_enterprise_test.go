@@ -34,7 +34,7 @@ func TestAccessLogPortKeysetAndDeniesFilter(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM organizations WHERE id=$1`, org) })
 
-	ing := accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: sqlc.New(pool)}, nil, nil)
+	ing := accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: sqlc.New(pool)}, accesslog.SQLDeviceResolver{Q: sqlc.New(pool)}, nil, nil)
 	batch := []accesslog.WireEvent{
 		{OccurredAt: time.Now().UTC(), Verdict: "allow", SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 443},
 		{OccurredAt: time.Now().UTC(), Verdict: "deny", SrcIP: "10.99.0.11", DstIP: "10.0.5.6", Protocol: "tcp", DstPort: 22},

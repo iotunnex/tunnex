@@ -200,7 +200,7 @@ func main() {
 	// + verbatim export are DEFERRED — v1 is PG-only.
 	retentionStop := make(chan struct{})
 	fq := sqlc.New(pool)
-	agentCh.SetFlowIngester(accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: fq}, flowHealth, nil))
+	agentCh.SetFlowIngester(accesslog.NewIngester(pool, accesslog.SQLGrantResolver{Q: fq}, accesslog.SQLDeviceResolver{Q: fq}, flowHealth, nil))
 	// D3 retention sweep: without this loop access_events grows unbounded and exhausts the DB
 	// disk. Run it on an interval: delete by ingest age + trim each org to the row cap. Drop-count
 	// + failure land on flowHealth.

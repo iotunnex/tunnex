@@ -30,6 +30,11 @@ type AllowEntry struct {
 	// flow/deny events (and the conntrack-kill) with the grant identity that matched.
 	// NEVER enforcement — EXCLUDED from CanonicalHash (the enforcement projection).
 	RuleID string `json:"rule_id,omitempty"`
+	// SrcDeviceID (v3, S7.5.4) is OBSERVABILITY metadata: the source device's uuid. The
+	// agent builds a src /32 -> SrcDeviceID map from the APPLIED Allow set and stamps it
+	// on flow events (device attribution without an src_ip->device DB guess). NEVER
+	// enforcement — EXCLUDED from CanonicalHash. MUST mirror policyspec field order/tags.
+	SrcDeviceID string `json:"src_device_id,omitempty"`
 }
 
 // Compiled is the per-node policy artifact. Mesh=true (mode off) => the agent keeps

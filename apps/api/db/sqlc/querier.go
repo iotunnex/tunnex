@@ -173,6 +173,12 @@ type Querier interface {
 	// lint:cross-org — keyed by device_id; the caller authorized the device via its
 	// org (GetDevice) before reading its health snapshot.
 	GetDeviceHealth(ctx context.Context, deviceID uuid.UUID) (DeviceHealth, error)
+	// lint:cross-org — org-scoped by the $2 arg; resolves a flow event's SRC device to its
+	// owning user (S7.5.4 v3 flow attribution: src_device_id -> src_user_id, a clean FK join,
+	// NEVER an src_ip->device guess). NO deleted_at filter: a since-revoked/deleted device's
+	// HISTORICAL flow must still attribute its user (access_events is an immutable record;
+	// src_device_id/src_user_id are plain uuids, not FKs, precisely so they survive deletion).
+	GetDeviceUserForOrg(ctx context.Context, arg GetDeviceUserForOrgParams) (uuid.UUID, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.

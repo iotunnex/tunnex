@@ -54,11 +54,16 @@ type AffectedDevice struct {
 
 // ProtocolVersion is the compiled-artifact wire version. Bump on any shape change.
 // v2 (S7.5.1): AllowEntry gains an OBSERVABILITY-only `rule_id` (flow-log
-// attribution) — additive, never enforcement. Old agents ignore unknown fields
-// (verified) and CanonicalHash is metadata-blind (hashes an enforcement-only
-// projection), so v1 and v2 artifacts with identical grants hash + enforce
-// IDENTICALLY. See docs/S7.5.1-decisions.md (D2 / A-4).
-const ProtocolVersion = 2
+// attribution). v3 (S7.5.4 slice 3): AllowEntry gains an OBSERVABILITY-only
+// `src_device_id` (the source device's uuid) so the agent stamps flow events with
+// device identity from the ARTIFACT (never an src_ip→device DB guess) and the CP
+// joins device→user CP-side. Both are additive, NEVER enforcement, and EXCLUDED
+// from CanonicalHash (the enforcement-only projection), so old agents ignore the
+// unknown field and artifacts with identical grants enforce IDENTICALLY across
+// versions. A version-number bump does re-converge the fleet ONCE on deploy
+// (A-4: one version served fleet-wide) — enforcement is unchanged, only the
+// metadata grows. See docs/S7.5.1-decisions.md (D2 / A-4), docs/S7.5.4-decisions.md (D4).
+const ProtocolVersion = 3
 
 // Protocol scopes an allow entry to an L4 protocol. "any" ignores ports.
 type Protocol string
@@ -86,6 +91,12 @@ type AllowEntry struct {
 	// (the enforcement projection), so staleness is metadata-blind. Empty on v1 wire /
 	// default-deny with no matching rule.
 	RuleID string `json:"rule_id,omitempty"`
+	// SrcDeviceID (v3, S7.5.4) is OBSERVABILITY metadata: the source device's uuid
+	// (devices.id). The agent maps a flow's src /32 -> this id from the APPLIED artifact
+	// and stamps it on the flow event, so the CP attributes flows to a device (then to a
+	// user, CP-side) WITHOUT any src_ip->device DB reconstruction. NEVER enforcement —
+	// EXCLUDED from CanonicalHash. Empty on v1/v2 wire / a src with no grant.
+	SrcDeviceID string `json:"src_device_id,omitempty"`
 }
 
 // Compiled is the per-node policy artifact. It expresses BOTH modes so S7.2 has a

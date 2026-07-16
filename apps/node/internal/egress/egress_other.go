@@ -22,6 +22,9 @@ func (m *Manager) Teardown(_ context.Context) {}
 // SetPolicy is a no-op off Linux (no forward chain to program).
 func (m *Manager) SetPolicy(_ *nodepolicy.Compiled) {}
 
+// DeviceForIP off Linux resolves nothing (no flow logging off Linux).
+func (m *Manager) DeviceForIP(_ string) string { return "" }
+
 // SetFlowLogGroup is a no-op off Linux (nflog is Linux-only; the agent runs on Linux
 // gateways — this only keeps non-Linux builds compiling).
 func (m *Manager) SetFlowLogGroup(_ int) {}

@@ -64,6 +64,7 @@ type Membership struct {
 // filters); a revoked device is simply absent, so its /32 leaves the output as both
 // a source and a destination (the A1/A2 requirement — no inherited grants on IP reuse).
 type Device struct {
+	ID         uuid.UUID // devices.id — stamped onto each AllowEntry as src_device_id (v3, S7.5.4)
 	UserID     uuid.UUID
 	NodeID     uuid.UUID
 	AssignedIP string
@@ -212,12 +213,13 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 					continue
 				}
 				add(d.NodeID, policyspec.AllowEntry{
-					SrcIP:    d.AssignedIP,
-					DstCIDR:  res.CIDR,
-					Protocol: normProto(res.Protocol),
-					PortLow:  res.PortLow,
-					PortHigh: res.PortHigh,
-					RuleID:   r.ID.String(),
+					SrcIP:       d.AssignedIP,
+					DstCIDR:     res.CIDR,
+					Protocol:    normProto(res.Protocol),
+					PortLow:     res.PortLow,
+					PortHigh:    res.PortHigh,
+					RuleID:      r.ID.String(),
+					SrcDeviceID: d.ID.String(),
 				})
 			case "group":
 				for _, dstIP := range groupDeviceIPs[r.DstGroupID] {
@@ -225,10 +227,11 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 						continue // a device reaching itself is meaningless
 					}
 					add(d.NodeID, policyspec.AllowEntry{
-						SrcIP:    d.AssignedIP,
-						DstCIDR:  dstIP + "/32",
-						Protocol: policyspec.ProtoAny, // device-to-device is L3
-						RuleID:   r.ID.String(),
+						SrcIP:       d.AssignedIP,
+						DstCIDR:     dstIP + "/32",
+						Protocol:    policyspec.ProtoAny, // device-to-device is L3
+						RuleID:      r.ID.String(),
+						SrcDeviceID: d.ID.String(),
 					})
 				}
 			}

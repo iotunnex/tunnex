@@ -62,3 +62,21 @@ func TestCanonicalHashRuleIDIsObservabilityOnly(t *testing.T) {
 		t.Fatal("changing an enforcement field (DstCIDR) MUST change the hash")
 	}
 }
+
+// TestCanonicalHashSrcDeviceIDIsObservabilityOnly (v3, S7.5.4): src_device_id, like
+// rule_id, must be INVISIBLE to the hash — adding/changing it must NOT move the hash, so
+// the v3 field bump never false-alarms an enforcing gateway.
+func TestCanonicalHashSrcDeviceIDIsObservabilityOnly(t *testing.T) {
+	base := policyspec.Compiled{Version: policyspec.ProtocolVersion, NodeID: "node-a", Mode: "enforcing"}
+	mk := func(devID string) policyspec.Compiled {
+		c := base
+		c.Allow = []policyspec.AllowEntry{{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: policyspec.ProtoTCP, PortLow: 5432, PortHigh: 5432, RuleID: "r1", SrcDeviceID: devID}}
+		return c
+	}
+	if policyspec.CanonicalHash(mk("")) != policyspec.CanonicalHash(mk("dev-1")) {
+		t.Fatal("src_device_id present vs absent must NOT change the hash")
+	}
+	if policyspec.CanonicalHash(mk("dev-1")) != policyspec.CanonicalHash(mk("dev-2")) {
+		t.Fatal("a DIFFERENT src_device_id must NOT change the hash")
+	}
+}
