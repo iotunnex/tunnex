@@ -87,7 +87,18 @@ func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.L
 		return nil, err
 	}
 	au := authUser(user)
-	return loginResponse{body: api.LoginResult{MfaRequired: false, User: &au}, sess: sess, setCookie: true, secure: s.cookieSecure, requestID: reqID}, nil
+	result := api.LoginResult{MfaRequired: false, User: &au}
+	// D8 grandfather: unenrolled user in an enforcing org gets a GATED session (enterprise only) —
+	// authenticated, but the middleware restricts it to enrollment until a confirmed TOTP exists.
+	if s.mfaEnforceEnabled && s.mfa != nil {
+		if gated, gerr := s.mfa.IsEnrollmentGated(ctx, user.ID); gerr == nil && gated {
+			tr := true
+			au.MfaEnrollmentRequired = &tr
+			result.User = &au
+			result.EnrollmentRequired = &tr
+		}
+	}
+	return loginResponse{body: result, sess: sess, setCookie: true, secure: s.cookieSecure, requestID: reqID}, nil
 }
 
 func authUser(user sqlc.User) api.AuthUser {
@@ -130,12 +141,21 @@ func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObje
 	if !ok {
 		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
 	}
+	au := api.AuthUser{
+		Id:            p.UserID,
+		Email:         openapi_types.Email(p.Email),
+		EmailVerified: p.EmailVerified,
+	}
+	// Carry the gate state so a gated client (session minted, enrollment-restricted) can route to
+	// the enrollment ceremony rather than hit dead 403s. Enterprise only.
+	if s.mfaEnforceEnabled && s.mfa != nil {
+		if gated, _ := s.mfa.IsEnrollmentGated(ctx, p.UserID); gated {
+			tr := true
+			au.MfaEnrollmentRequired = &tr
+		}
+	}
 	return api.CurrentUser200JSONResponse{
-		Body: api.AuthUser{
-			Id:            p.UserID,
-			Email:         openapi_types.Email(p.Email),
-			EmailVerified: p.EmailVerified,
-		},
+		Body:    au,
 		Headers: api.CurrentUser200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

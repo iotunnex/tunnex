@@ -37,6 +37,7 @@ var walkBodies = map[string]string{
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,
 	// S7.5.5 MFA: enroll/confirm is session-gated (mfaVerify is public; enroll-start/disenroll have no body).
 	"mfaenrollconfirm": `{"code":"123456"}`,
+	"setmfaenforce":    `{"enforce":false}`,
 	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
 	"creategroup":       `{"name":"Walk"}`,
 	"updategroup":       `{"name":"Walk"}`,

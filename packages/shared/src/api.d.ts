@@ -138,6 +138,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/mfa-enforce": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** Get org MFA enforcement (enterprise) */
+        get: operations["getMfaEnforce"];
+        /** Set org MFA enforcement (enterprise; unlock-then-opt-in, default OFF) */
+        put: operations["setMfaEnforce"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/members/{userId}/mfa-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin-reset a member's MFA — disenroll only (enterprise)
+         * @description S7.5.5. Clears the member's TOTP + recovery codes (never authenticates as them); audited + the member is notified.
+         */
+        post: operations["adminResetMfa"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/verify-email": {
         parameters: {
             query?: never;
@@ -1864,6 +1907,7 @@ export interface components {
             /** Format: email */
             email: string;
             email_verified: boolean;
+            mfa_enrollment_required?: boolean;
         };
         LoginResult: {
             /** @description true = complete the second step at /auth/mfa/verify (no session set). */
@@ -1873,6 +1917,11 @@ export interface components {
             challenge?: string;
             /** @description Challenge TTL in seconds. */
             challenge_expires_in?: number;
+            /** @description S7.5.5: session minted but gated — the org enforces MFA and the user must enroll before proceeding (D8). */
+            enrollment_required?: boolean;
+        };
+        MfaEnforce: {
+            enforce: boolean;
         };
         MfaEnrollResult: {
             /** @description otpauth:// URI for the QR code. */
@@ -2209,6 +2258,80 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AuthUser"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getMfaEnforce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enforcement state. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaEnforce"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setMfaEnforce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaEnforce"];
+            };
+        };
+        responses: {
+            /** @description Updated. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaEnforce"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    adminResetMfa: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MFA reset. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

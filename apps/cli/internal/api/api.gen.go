@@ -341,9 +341,10 @@ type AuditLogEntry struct {
 
 // AuthUser defines model for AuthUser.
 type AuthUser struct {
-	Email         openapi_types.Email `json:"email"`
-	EmailVerified bool                `json:"email_verified"`
-	Id            openapi_types.UUID  `json:"id"`
+	Email                 openapi_types.Email `json:"email"`
+	EmailVerified         bool                `json:"email_verified"`
+	Id                    openapi_types.UUID  `json:"id"`
+	MfaEnrollmentRequired *bool               `json:"mfa_enrollment_required,omitempty"`
 }
 
 // ChangeRoleRequest defines model for ChangeRoleRequest.
@@ -796,6 +797,9 @@ type LoginResult struct {
 	// ChallengeExpiresIn Challenge TTL in seconds.
 	ChallengeExpiresIn *int `json:"challenge_expires_in,omitempty"`
 
+	// EnrollmentRequired S7.5.5: session minted but gated — the org enforces MFA and the user must enroll before proceeding (D8).
+	EnrollmentRequired *bool `json:"enrollment_required,omitempty"`
+
 	// MfaRequired true = complete the second step at /auth/mfa/verify (no session set).
 	MfaRequired bool      `json:"mfa_required"`
 	User        *AuthUser `json:"user,omitempty"`
@@ -833,6 +837,11 @@ type MetaSsoProviders string
 // MfaCodeRequest defines model for MfaCodeRequest.
 type MfaCodeRequest struct {
 	Code string `json:"code"`
+}
+
+// MfaEnforce defines model for MfaEnforce.
+type MfaEnforce struct {
+	Enforce bool `json:"enforce"`
 }
 
 // MfaEnrollResult defines model for MfaEnrollResult.
@@ -1191,6 +1200,9 @@ type RevokeInvitationJSONRequestBody = EmailRequest
 // ChangeMemberRoleJSONRequestBody defines body for ChangeMemberRole for application/json ContentType.
 type ChangeMemberRoleJSONRequestBody = ChangeRoleRequest
 
+// SetMfaEnforceJSONRequestBody defines body for SetMfaEnforce for application/json ContentType.
+type SetMfaEnforceJSONRequestBody = MfaEnforce
+
 // IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
 type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
@@ -1535,6 +1547,9 @@ type ClientInterface interface {
 	// DeactivateMember request
 	DeactivateMember(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// AdminResetMfa request
+	AdminResetMfa(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ReactivateMember request
 	ReactivateMember(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1542,6 +1557,14 @@ type ClientInterface interface {
 	ChangeMemberRoleWithBody(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ChangeMemberRole(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body ChangeMemberRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetMfaEnforce request
+	GetMfaEnforce(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetMfaEnforceWithBody request with any body
+	SetMfaEnforceWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetMfaEnforce(ctx context.Context, orgId openapi_types.UUID, body SetMfaEnforceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListNodes request
 	ListNodes(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2718,6 +2741,18 @@ func (c *Client) DeactivateMember(ctx context.Context, orgId openapi_types.UUID,
 	return c.Client.Do(req)
 }
 
+func (c *Client) AdminResetMfa(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdminResetMfaRequest(c.Server, orgId, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ReactivateMember(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReactivateMemberRequest(c.Server, orgId, userId)
 	if err != nil {
@@ -2744,6 +2779,42 @@ func (c *Client) ChangeMemberRoleWithBody(ctx context.Context, orgId openapi_typ
 
 func (c *Client) ChangeMemberRole(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body ChangeMemberRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewChangeMemberRoleRequest(c.Server, orgId, userId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetMfaEnforce(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMfaEnforceRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetMfaEnforceWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetMfaEnforceRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetMfaEnforce(ctx context.Context, orgId openapi_types.UUID, body SetMfaEnforceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetMfaEnforceRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5793,6 +5864,47 @@ func NewDeactivateMemberRequest(server string, orgId openapi_types.UUID, userId 
 	return req, nil
 }
 
+// NewAdminResetMfaRequest generates requests for AdminResetMfa
+func NewAdminResetMfaRequest(server string, orgId openapi_types.UUID, userId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "userId", runtime.ParamLocationPath, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/members/%s/mfa-reset", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewReactivateMemberRequest generates requests for ReactivateMember
 func NewReactivateMemberRequest(server string, orgId openapi_types.UUID, userId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -5869,6 +5981,87 @@ func NewChangeMemberRoleRequestWithBody(server string, orgId openapi_types.UUID,
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/organizations/%s/members/%s/role", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetMfaEnforceRequest generates requests for GetMfaEnforce
+func NewGetMfaEnforceRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/mfa-enforce", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetMfaEnforceRequest calls the generic SetMfaEnforce builder with application/json body
+func NewSetMfaEnforceRequest(server string, orgId openapi_types.UUID, body SetMfaEnforceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetMfaEnforceRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewSetMfaEnforceRequestWithBody generates requests for SetMfaEnforce with any type of body
+func NewSetMfaEnforceRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/mfa-enforce", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6936,6 +7129,9 @@ type ClientWithResponsesInterface interface {
 	// DeactivateMemberWithResponse request
 	DeactivateMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeactivateMemberResponse, error)
 
+	// AdminResetMfaWithResponse request
+	AdminResetMfaWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*AdminResetMfaResponse, error)
+
 	// ReactivateMemberWithResponse request
 	ReactivateMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ReactivateMemberResponse, error)
 
@@ -6943,6 +7139,14 @@ type ClientWithResponsesInterface interface {
 	ChangeMemberRoleWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ChangeMemberRoleResponse, error)
 
 	ChangeMemberRoleWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body ChangeMemberRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*ChangeMemberRoleResponse, error)
+
+	// GetMfaEnforceWithResponse request
+	GetMfaEnforceWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetMfaEnforceResponse, error)
+
+	// SetMfaEnforceWithBodyWithResponse request with any body
+	SetMfaEnforceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetMfaEnforceResponse, error)
+
+	SetMfaEnforceWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetMfaEnforceJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMfaEnforceResponse, error)
 
 	// ListNodesWithResponse request
 	ListNodesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListNodesResponse, error)
@@ -8449,6 +8653,28 @@ func (r DeactivateMemberResponse) StatusCode() int {
 	return 0
 }
 
+type AdminResetMfaResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AdminResetMfaResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AdminResetMfaResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ReactivateMemberResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8487,6 +8713,52 @@ func (r ChangeMemberRoleResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ChangeMemberRoleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetMfaEnforceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *MfaEnforce
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMfaEnforceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMfaEnforceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SetMfaEnforceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *MfaEnforce
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetMfaEnforceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetMfaEnforceResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -9703,6 +9975,15 @@ func (c *ClientWithResponses) DeactivateMemberWithResponse(ctx context.Context, 
 	return ParseDeactivateMemberResponse(rsp)
 }
 
+// AdminResetMfaWithResponse request returning *AdminResetMfaResponse
+func (c *ClientWithResponses) AdminResetMfaWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*AdminResetMfaResponse, error) {
+	rsp, err := c.AdminResetMfa(ctx, orgId, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdminResetMfaResponse(rsp)
+}
+
 // ReactivateMemberWithResponse request returning *ReactivateMemberResponse
 func (c *ClientWithResponses) ReactivateMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ReactivateMemberResponse, error) {
 	rsp, err := c.ReactivateMember(ctx, orgId, userId, reqEditors...)
@@ -9727,6 +10008,32 @@ func (c *ClientWithResponses) ChangeMemberRoleWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseChangeMemberRoleResponse(rsp)
+}
+
+// GetMfaEnforceWithResponse request returning *GetMfaEnforceResponse
+func (c *ClientWithResponses) GetMfaEnforceWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetMfaEnforceResponse, error) {
+	rsp, err := c.GetMfaEnforce(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMfaEnforceResponse(rsp)
+}
+
+// SetMfaEnforceWithBodyWithResponse request with arbitrary body returning *SetMfaEnforceResponse
+func (c *ClientWithResponses) SetMfaEnforceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetMfaEnforceResponse, error) {
+	rsp, err := c.SetMfaEnforceWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetMfaEnforceResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetMfaEnforceWithResponse(ctx context.Context, orgId openapi_types.UUID, body SetMfaEnforceJSONRequestBody, reqEditors ...RequestEditorFn) (*SetMfaEnforceResponse, error) {
+	rsp, err := c.SetMfaEnforce(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetMfaEnforceResponse(rsp)
 }
 
 // ListNodesWithResponse request returning *ListNodesResponse
@@ -11929,6 +12236,32 @@ func ParseDeactivateMemberResponse(rsp *http.Response) (*DeactivateMemberRespons
 	return response, nil
 }
 
+// ParseAdminResetMfaResponse parses an HTTP response from a AdminResetMfaWithResponse call
+func ParseAdminResetMfaResponse(rsp *http.Response) (*AdminResetMfaResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AdminResetMfaResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseReactivateMemberResponse parses an HTTP response from a ReactivateMemberWithResponse call
 func ParseReactivateMemberResponse(rsp *http.Response) (*ReactivateMemberResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11969,6 +12302,72 @@ func ParseChangeMemberRoleResponse(rsp *http.Response) (*ChangeMemberRoleRespons
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetMfaEnforceResponse parses an HTTP response from a GetMfaEnforceWithResponse call
+func ParseGetMfaEnforceResponse(rsp *http.Response) (*GetMfaEnforceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMfaEnforceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MfaEnforce
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetMfaEnforceResponse parses an HTTP response from a SetMfaEnforceWithResponse call
+func ParseSetMfaEnforceResponse(rsp *http.Response) (*SetMfaEnforceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetMfaEnforceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MfaEnforce
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
