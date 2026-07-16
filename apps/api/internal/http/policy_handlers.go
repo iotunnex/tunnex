@@ -262,12 +262,20 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, policyspec.RuleInput{
-		SrcGroupID:    req.Body.SrcGroupId,
+	in := policyspec.RuleInput{
+		SrcUserID:     req.Body.SrcUserId,
 		DstKind:       string(req.Body.DstKind),
 		DstResourceID: req.Body.DstResourceId,
 		DstGroupID:    req.Body.DstGroupId,
-	})
+		ExpiresAt:     req.Body.ExpiresAt,
+	}
+	if req.Body.SrcKind != nil {
+		in.SrcKind = string(*req.Body.SrcKind)
+	}
+	if req.Body.SrcGroupId != nil {
+		in.SrcGroupID = *req.Body.SrcGroupId
+	}
+	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, in)
 	if err != nil {
 		return nil, err
 	}
@@ -363,8 +371,16 @@ func toAPIResource(r sqlc.Resource) api.Resource {
 
 func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 	out := api.PolicyRule{
-		Id: r.ID, OrgId: r.OrgID, SrcGroupId: r.SrcGroupID,
+		Id: r.ID, OrgId: r.OrgID, SrcKind: api.PolicyRuleSrcKind(r.SrcKind),
 		DstKind: api.PolicyRuleDstKind(r.DstKind), CreatedAt: r.CreatedAt,
+	}
+	if r.SrcGroupID.Valid {
+		u := uuid.UUID(r.SrcGroupID.Bytes)
+		out.SrcGroupId = &u
+	}
+	if r.SrcUserID.Valid {
+		u := uuid.UUID(r.SrcUserID.Bytes)
+		out.SrcUserId = &u
 	}
 	if r.DstResourceID.Valid {
 		u := uuid.UUID(r.DstResourceID.Bytes)
@@ -373,6 +389,10 @@ func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 	if r.DstGroupID.Valid {
 		u := uuid.UUID(r.DstGroupID.Bytes)
 		out.DstGroupId = &u
+	}
+	if r.ExpiresAt.Valid {
+		t := r.ExpiresAt.Time
+		out.ExpiresAt = &t
 	}
 	return out
 }

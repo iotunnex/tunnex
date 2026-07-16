@@ -79,13 +79,24 @@ WHERE id = $1 AND org_id = $2;
 
 -- ── policy_rules (allow grants) ─────────────────────────────────────────────────
 -- name: CreatePolicyRule :one
-INSERT INTO policy_rules (org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id)
-VALUES ($1, $2, $3, $4, $5)
+-- S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
+-- expires_at NULL = permanent, set = a temporary grant.
+INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, dst_kind, dst_resource_id, dst_group_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListPolicyRulesByOrg :many
+-- Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 SELECT * FROM policy_rules
 WHERE org_id = $1
+ORDER BY created_at;
+
+-- name: ListActivePolicyRulesForOrg :many
+-- COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
+-- an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The
+-- pure compiler stays clockless; this query applies now() at snapshot-build time.
+SELECT * FROM policy_rules
+WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at;
 
 -- name: DeletePolicyRule :execrows

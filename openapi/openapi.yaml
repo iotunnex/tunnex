@@ -1851,26 +1851,35 @@ components:
 
     PolicyRule:
       type: object
-      required: [id, org_id, src_group_id, dst_kind, created_at]
+      required: [id, org_id, src_kind, dst_kind, created_at]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
         org_id: { type: string, format: uuid }
-        src_group_id: { type: string, format: uuid }
+        # S7.5.4: the SOURCE subject is a group or a single user (exactly one src_* set).
+        src_kind: { type: string, enum: [group, user] }
+        src_group_id: { type: string, format: uuid, nullable: true }
+        src_user_id: { type: string, format: uuid, nullable: true }
         dst_kind: { type: string, enum: [resource, group] }
         dst_resource_id: { type: string, format: uuid, nullable: true }
         dst_group_id: { type: string, format: uuid, nullable: true }
+        # S7.5.4: null = permanent; set = a temporary grant that lapses at this instant.
+        expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
 
     CreatePolicyRuleRequest:
       type: object
-      required: [src_group_id, dst_kind]
+      required: [dst_kind]
       additionalProperties: false
       properties:
-        src_group_id: { type: string, format: uuid }
+        # src_kind defaults to "group" when omitted (back-compat). user => src_user_id.
+        src_kind: { type: string, enum: [group, user] }
+        src_group_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=group (or omitted). }
+        src_user_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=user (a current org member). }
         dst_kind: { type: string, enum: [resource, group] }
         dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
         dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }
+        expires_at: { type: string, format: date-time, nullable: true, description: "Set = a temporary grant that expires at this time (must be future); omit for a permanent grant." }
 
     ZeroTrustMode:
       type: object

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -274,8 +275,25 @@ func (s *Service) ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.
 }
 
 func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error) {
-	// Shape validation: exactly one dst_* set, matching dst_kind (the DB CHECKs
-	// this too; we return a clean 400 rather than a raw constraint error).
+	// SOURCE-subject shape (S7.5.4): "" defaults to "group" (back-compat). Exactly one
+	// of src_group_id / src_user_id, matching src_kind (the DB CHECK backstops it).
+	srcKind := in.SrcKind
+	if srcKind == "" {
+		srcKind = "group"
+	}
+	switch srcKind {
+	case "group":
+		if in.SrcGroupID == uuid.Nil || in.SrcUserID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=group requires src_group_id (and no src_user_id)")
+		}
+	case "user":
+		if in.SrcUserID == nil || in.SrcGroupID != uuid.Nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=user requires src_user_id (and no src_group_id)")
+		}
+	default:
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group or user")
+	}
+	// Destination shape: exactly one dst_* set, matching dst_kind.
 	switch in.DstKind {
 	case "resource":
 		if in.DstResourceID == nil || in.DstGroupID != nil {
@@ -288,14 +306,28 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 	default:
 		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource or group")
 	}
+	// A temporary grant must expire in the FUTURE (a past expiry is a no-op grant —
+	// reject it rather than silently create a rule that never compiles).
+	if in.ExpiresAt != nil && !in.ExpiresAt.After(time.Now()) {
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "expires_at must be in the future")
+	}
 	var r sqlc.PolicyRule
 	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
-		// Referenced src group + dst must belong to THIS org (no cross-tenant refs).
-		if _, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: in.SrcGroupID, OrgID: orgID}); e != nil {
-			if errors.Is(e, pgx.ErrNoRows) {
-				return apierr.BadRequest("group_not_found", "src group not found")
+		// Referenced src subject + dst must belong to THIS org (no cross-tenant refs).
+		if srcKind == "group" {
+			if _, e := q.GetUserGroup(ctx, sqlc.GetUserGroupParams{ID: in.SrcGroupID, OrgID: orgID}); e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					return apierr.BadRequest("group_not_found", "src group not found")
+				}
+				return e
 			}
-			return e
+		} else { // user — must be a CURRENT org member (the FK enforces it too; clean 400 here)
+			if _, e := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: *in.SrcUserID}); e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					return apierr.BadRequest("user_not_member", "src user is not a member of this org")
+				}
+				return e
+			}
 		}
 		if in.DstResourceID != nil {
 			if _, e := q.GetResource(ctx, sqlc.GetResourceParams{ID: *in.DstResourceID, OrgID: orgID}); e != nil {
@@ -315,14 +347,23 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		}
 		var e error
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
-			OrgID: orgID, SrcGroupID: in.SrcGroupID, DstKind: in.DstKind,
-			DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
+			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
 		if e != nil {
 			return conflictIfDup(e, "an identical rule already exists")
 		}
-		return writeAudit(ctx, q, orgID, "policy.rule_created", "policy_rule", r.ID.String(),
-			map[string]any{"src_group_id": in.SrcGroupID.String(), "dst_kind": in.DstKind})
+		meta := map[string]any{"src_kind": srcKind, "dst_kind": in.DstKind}
+		if srcKind == "user" {
+			meta["src_user_id"] = in.SrcUserID.String()
+		} else {
+			meta["src_group_id"] = in.SrcGroupID.String()
+		}
+		if in.ExpiresAt != nil {
+			meta["expires_at"] = in.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		return writeAudit(ctx, q, orgID, "policy.rule_created", "policy_rule", r.ID.String(), meta)
 	})
 	return r, err
 }
@@ -411,7 +452,10 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	if err != nil {
 		return Snapshot{}, err
 	}
-	rules, err := s.q.ListPolicyRulesByOrg(ctx, orgID)
+	// COMPILER INPUT: active rules only — expired temporary grants are excluded here
+	// (the clockless pure compiler can't filter by now(); the snapshot build applies
+	// it). The admin LIST uses ListPolicyRulesByOrg (shows expired rules distinctly).
+	rules, err := s.q.ListActivePolicyRulesForOrg(ctx, orgID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -431,7 +475,8 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	for _, r := range rules {
 		snap.Rules = append(snap.Rules, Rule{
 			ID:         r.ID,
-			SrcGroupID: r.SrcGroupID, DstKind: r.DstKind,
+			SrcKind:    r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
+			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 		})
 	}
@@ -628,6 +673,22 @@ func toPgUUID(id *uuid.UUID) pgtype.UUID {
 		return pgtype.UUID{Valid: false}
 	}
 	return pgtype.UUID{Bytes: *id, Valid: true}
+}
+
+// toPgUUIDVal maps a value UUID to nullable pg: uuid.Nil => SQL NULL (a per-user
+// rule has src_group_id NULL, and vice versa).
+func toPgUUIDVal(id uuid.UUID) pgtype.UUID {
+	if id == uuid.Nil {
+		return pgtype.UUID{Valid: false}
+	}
+	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+func toPgTimestamptz(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{Valid: false}
+	}
+	return pgtype.Timestamptz{Time: *t, Valid: true}
 }
 
 func fromPgUUID(v pgtype.UUID) uuid.UUID {

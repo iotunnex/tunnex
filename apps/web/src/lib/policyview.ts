@@ -193,7 +193,14 @@ export function ruleRow(
   resources: Resource[],
   loaded: LoadState,
 ): RuleRow {
-  const src = resolveGroup(rule.src_group_id, groups, loaded.groupsLoaded);
+  // S7.5.4: a rule's source is a group OR a single user. The rich per-user/temporary
+  // grant UI (user picker, expiry) is a later slice; here we keep the existing group
+  // path and render a per-user subject honestly (not as a broken group) so the table
+  // never mislabels a user rule.
+  const src: RefLabel =
+    rule.src_kind === "user"
+      ? { id: rule.src_user_id ?? "", label: `user ${short(rule.src_user_id ?? "")}`, state: "ok" }
+      : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   const dst =
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
