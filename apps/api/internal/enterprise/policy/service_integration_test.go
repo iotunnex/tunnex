@@ -310,7 +310,9 @@ func TestExtendGrantWindow(t *testing.T) {
 	f := seed(t, pool)
 	rid, _ := tempGrant(t, pool, f, time.Now().Add(30*time.Minute))
 	s := policy.NewService(pool)
-	s.SetNotifier(&fakeNotifier{})
+	// Notifier attached AFTER tempGrant, so .fired() strictly captures the EXTEND's push (if any).
+	n := &fakeNotifier{}
+	s.SetNotifier(n)
 	newExp := time.Now().Add(4 * time.Hour)
 	r, err := s.ExtendGrant(f.ctx, f.org, rid, newExp)
 	if err != nil {
@@ -318,6 +320,14 @@ func TestExtendGrantWindow(t *testing.T) {
 	}
 	if !r.ExpiresAt.Valid || r.ExpiresAt.Time.Sub(newExp).Abs() > time.Second {
 		t.Fatalf("window not moved: %+v", r.ExpiresAt)
+	}
+	// S7.5.4 box-walk RED: extend moves ONLY expires_at, which is NOT in the compiled
+	// enforcement artifact — so it must NOT trigger a push. Pre-fix ExtendGrant went through
+	// mutate's unconditional pushOrg, which recompiled the org and re-applied a byte-identical
+	// ruleset on every gateway (the wire showed the /32 allow's nft handle churn + counter reset),
+	// contradicting the ExtendPolicyRule comment's "no spurious push" intent. This pins it shut.
+	if n.fired() {
+		t.Fatalf("extend must NOT push (expires_at is not in the enforcement artifact); pushed: %v", n.calls)
 	}
 	if auditCount(t, pool, f.org, "policy.grant_extended") != 1 {
 		t.Fatal("extend must audit policy.grant_extended")
