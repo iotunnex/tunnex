@@ -1,15 +1,72 @@
 package http
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
+
+func mfaEnforceEditionRequired() error {
+	return apierr.New(http.StatusForbidden, "edition_required", "Organization MFA enforcement is a Tunnex Enterprise feature")
+}
+
+// GetMfaEnforce GET .../mfa-enforce — read the org's MFA enforce flag (enterprise; PermMfaManage).
+func (s apiServer) GetMfaEnforce(ctx context.Context, req api.GetMfaEnforceRequestObject) (api.GetMfaEnforceResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMfaManage); err != nil {
+		return nil, err
+	}
+	if !s.mfaEnforceEnabled {
+		return nil, mfaEnforceEditionRequired()
+	}
+	on, err := s.mfa.OrgEnforces(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetMfaEnforce200JSONResponse{Body: api.MfaEnforce{Enforce: on}, Headers: api.GetMfaEnforce200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+// SetMfaEnforce PUT .../mfa-enforce — toggle org MFA enforcement (enterprise; PermMfaManage;
+// unlock-then-opt-in, default OFF).
+func (s apiServer) SetMfaEnforce(ctx context.Context, req api.SetMfaEnforceRequestObject) (api.SetMfaEnforceResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMfaManage); err != nil {
+		return nil, err
+	}
+	if !s.mfaEnforceEnabled {
+		return nil, mfaEnforceEditionRequired()
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.mfa.SetOrgEnforce(ctx, req.OrgId, p.UserID, req.Body.Enforce); err != nil {
+		return nil, err
+	}
+	return api.SetMfaEnforce200JSONResponse{Body: api.MfaEnforce{Enforce: req.Body.Enforce}, Headers: api.SetMfaEnforce200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+// AdminResetMfa POST .../members/{userId}/mfa-reset — disenroll a member's MFA (enterprise;
+// PermMfaManage). Disenroll-only (never authenticates as them), audited + target-notified.
+func (s apiServer) AdminResetMfa(ctx context.Context, req api.AdminResetMfaRequestObject) (api.AdminResetMfaResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMfaManage); err != nil {
+		return nil, err
+	}
+	if !s.mfaEnforceEnabled {
+		return nil, mfaEnforceEditionRequired()
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.mfa.AdminReset(ctx, req.OrgId, p.UserID, req.UserId); err != nil {
+		return nil, err
+	}
+	return api.AdminResetMfa204Response{}, nil
+}
 
 // enrollmentGateAllow is the EXACT, minimal allowlist of operationIds a MFA-enforcement-gated user
 // (org enforces + no confirmed TOTP — D8) may reach: enroll (start/confirm), sign out, and read

@@ -147,6 +147,61 @@ paths:
               schema: { $ref: "#/components/schemas/AuthUser" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/mfa-enforce:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getMfaEnforce
+      summary: Get org MFA enforcement (enterprise)
+      tags: [auth]
+      responses:
+        "200":
+          description: Enforcement state.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaEnforce" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setMfaEnforce
+      summary: Set org MFA enforcement (enterprise; unlock-then-opt-in, default OFF)
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaEnforce" }
+      responses:
+        "200":
+          description: Updated.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaEnforce" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/members/{userId}/mfa-reset:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: adminResetMfa
+      summary: Admin-reset a member's MFA — disenroll only (enterprise)
+      description: "S7.5.5. Clears the member's TOTP + recovery codes (never authenticates as them); audited + the member is notified."
+      tags: [auth]
+      responses:
+        "204": { description: MFA reset. }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/verify-email:
     post:
       operationId: verifyEmail
@@ -2526,6 +2581,9 @@ components:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         email_verified: { type: boolean }
+        # S7.5.5: true when the org enforces MFA and the user has no confirmed TOTP — the session is
+        # gated to enrollment (D8). The client routes to the enrollment ceremony.
+        mfa_enrollment_required: { type: boolean }
 
     LoginResult:
       type: object
@@ -2536,6 +2594,14 @@ components:
         user: { $ref: "#/components/schemas/AuthUser" }
         challenge: { type: string, description: "Login MFA challenge token (present iff mfa_required)." }
         challenge_expires_in: { type: integer, description: "Challenge TTL in seconds." }
+        enrollment_required: { type: boolean, description: "S7.5.5: session minted but gated — the org enforces MFA and the user must enroll before proceeding (D8)." }
+
+    MfaEnforce:
+      type: object
+      required: [enforce]
+      additionalProperties: false
+      properties:
+        enforce: { type: boolean }
 
     MfaEnrollResult:
       type: object

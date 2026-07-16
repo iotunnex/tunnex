@@ -38,6 +38,12 @@ const (
 	// Same owner/admin grain (a require-mode check can disconnect devices). The
 	// self-REPORT endpoint carries no perm: it is device-owner-authed in the service.
 	PermDeviceHealthManage Permission = "device_health:manage"
+	// PermMfaManage governs ORG-LEVEL MFA (S7.5.5, enterprise): the enforce toggle + admin-reset
+	// of a member's MFA. Named per feature (NOT a policy/member reuse) — MFA governance is its own
+	// axis, and admin-reset is an account-takeover-adjacent power (disenroll-only, audited,
+	// target-notified). Owner/admin grain (mandating MFA / resetting a factor is security-sensitive).
+	// Self-service enrollment carries NO perm — it is user-owned (any authenticated user).
+	PermMfaManage Permission = "mfa:manage"
 )
 
 // Roles.
@@ -71,6 +77,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
 		PermDeviceHealthManage: true,
+		PermMfaManage:          true,
 	},
 	RoleOwner: {
 		PermOrgView:       true,
@@ -83,6 +90,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
 		PermDeviceHealthManage: true,
+		PermMfaManage:          true,
 	},
 }
 

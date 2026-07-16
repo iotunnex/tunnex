@@ -232,6 +232,108 @@ func TestCapThenFreshLogin(t *testing.T) {
 	}
 }
 
+// TestEnforceKeysOnConfirmed — the gate keys on CONFIRMED enrollment: an unconfirmed/abandoned
+// ceremony counts as UNENROLLED (the slice-1/slice-2 seam), and confirming flips the gate off.
+func TestEnforceKeysOnConfirmed(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s, clock := newSvc(t, pool)
+	setEnforce(t, pool, f.org, true)
+
+	// Unconfirmed enrollment -> still gated.
+	if _, _, err := s.StartEnrollment(context.Background(), f.userA); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if gated, err := s.IsEnrollmentGated(context.Background(), f.userA); err != nil || !gated {
+		t.Fatalf("unconfirmed enrollment must remain GATED, gated=%v err=%v", gated, err)
+	}
+	// Confirm -> gate lifts.
+	enrollConfirmOnly(t, s, clock, f.userA)
+	if gated, err := s.IsEnrollmentGated(context.Background(), f.userA); err != nil || gated {
+		t.Fatalf("confirmed enrollment must lift the gate, gated=%v err=%v", gated, err)
+	}
+}
+
+// TestFlipOnGrandfather — an existing UNENROLLED user is not gated until the org flips enforce ON;
+// then their next login is gated (enroll-on-next-login, no prior lockout event).
+func TestFlipOnGrandfather(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s, _ := newSvc(t, pool)
+	if gated, _ := s.IsEnrollmentGated(context.Background(), f.userA); gated {
+		t.Fatal("unenrolled user in a non-enforcing org must NOT be gated")
+	}
+	if err := s.SetOrgEnforce(context.Background(), f.org, f.userA, true); err != nil {
+		t.Fatalf("enforce on: %v", err)
+	}
+	if gated, _ := s.IsEnrollmentGated(context.Background(), f.userA); !gated {
+		t.Fatal("after flip-on, the unenrolled user must be gated")
+	}
+	if auditCount(t, pool, f.org, "mfa.enforce_enabled") != 1 {
+		t.Fatal("enforce-on must audit mfa.enforce_enabled")
+	}
+}
+
+// TestAdminResetDisenrollsAndAudits — admin-reset clears the target's factor (disenroll-only) and
+// audits mfa.admin_reset org-scoped.
+func TestAdminResetDisenrollsAndAudits(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s, clock := newSvc(t, pool)
+	enroll(t, s, clock, f.userB)
+	if ok, _ := s.HasConfirmedTOTP(context.Background(), f.userB); !ok {
+		t.Fatal("precondition: userB enrolled")
+	}
+	if err := s.AdminReset(context.Background(), f.org, f.userA, f.userB); err != nil {
+		t.Fatalf("admin reset: %v", err)
+	}
+	if ok, _ := s.HasConfirmedTOTP(context.Background(), f.userB); ok {
+		t.Fatal("admin-reset must disenroll the target")
+	}
+	if auditCount(t, pool, f.org, "mfa.admin_reset") != 1 {
+		t.Fatal("admin-reset must audit mfa.admin_reset")
+	}
+}
+
+func setEnforce(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, on bool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO org_mfa (org_id, enforce) VALUES ($1,$2) ON CONFLICT (org_id) DO UPDATE SET enforce=$2`, org, on); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func enrollConfirmOnly(t *testing.T, s *Service, clock *time.Time, user uuid.UUID) {
+	t.Helper()
+	if _, err := s.ConfirmEnrollment(context.Background(), user, codeAt(t, mustSecret(t, s, user), clock.Unix())); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+}
+
+// mustSecret re-reads the pending secret for a user (test-only, unseals via the same sealer).
+func mustSecret(t *testing.T, s *Service, user uuid.UUID) string {
+	t.Helper()
+	row, err := s.q.GetTOTP(context.Background(), user)
+	if err != nil {
+		t.Fatalf("get totp: %v", err)
+	}
+	sec, err := s.sealer.Open(string(row.SecretEnc))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	return string(sec)
+}
+
+func auditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, action string) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action=$2`, org, action).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func code(err error) string {
 	var a *apierr.Error
 	if err != nil && errors.As(err, &a) {
