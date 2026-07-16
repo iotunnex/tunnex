@@ -126,11 +126,12 @@ type DomainClaim struct {
 }
 
 type GroupMember struct {
-	OrgID     uuid.UUID `json:"org_id"`
-	GroupID   uuid.UUID `json:"group_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	CreatedAt time.Time `json:"created_at"`
-	Origin    string    `json:"origin"`
+	OrgID         uuid.UUID `json:"org_id"`
+	GroupID       uuid.UUID `json:"group_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	Origin        string    `json:"origin"`
+	IdpExternalID *string   `json:"idp_external_id"`
 }
 
 type IdpSyncConfig struct {

@@ -13,21 +13,27 @@ import (
 )
 
 const addIdpGroupMember = `-- name: AddIdpGroupMember :execrows
-INSERT INTO group_members (org_id, group_id, user_id, origin)
-VALUES ($1, $2, $3, 'idp_sync')
+INSERT INTO group_members (org_id, group_id, user_id, origin, idp_external_id)
+VALUES ($1, $2, $3, 'idp_sync', $4)
 ON CONFLICT (group_id, user_id) DO NOTHING
 `
 
 type AddIdpGroupMemberParams struct {
-	OrgID   uuid.UUID `json:"org_id"`
-	GroupID uuid.UUID `json:"group_id"`
-	UserID  uuid.UUID `json:"user_id"`
+	OrgID         uuid.UUID `json:"org_id"`
+	GroupID       uuid.UUID `json:"group_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	IdpExternalID *string   `json:"idp_external_id"`
 }
 
-// Idempotent add of a synced member. Explicit origin='idp_sync'. 0 rows on conflict = already
-// present (no state change).
+// Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
+// 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
 func (q *Queries) AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error) {
-	result, err := q.db.Exec(ctx, addIdpGroupMember, arg.OrgID, arg.GroupID, arg.UserID)
+	result, err := q.db.Exec(ctx, addIdpGroupMember,
+		arg.OrgID,
+		arg.GroupID,
+		arg.UserID,
+		arg.IdpExternalID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -251,34 +257,40 @@ func (q *Queries) ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfi
 	return items, nil
 }
 
-const listIdpGroupMemberIDs = `-- name: ListIdpGroupMemberIDs :many
-SELECT user_id
+const listIdpGroupMembers = `-- name: ListIdpGroupMembers :many
+SELECT user_id, idp_external_id
 FROM group_members
 WHERE org_id = $1 AND group_id = $2 AND origin = 'idp_sync'
 ORDER BY user_id
 `
 
-type ListIdpGroupMemberIDsParams struct {
+type ListIdpGroupMembersParams struct {
 	OrgID   uuid.UUID `json:"org_id"`
 	GroupID uuid.UUID `json:"group_id"`
 }
 
+type ListIdpGroupMembersRow struct {
+	UserID        uuid.UUID `json:"user_id"`
+	IdpExternalID *string   `json:"idp_external_id"`
+}
+
 // ── idp-origin membership (the reconcile target) ─────────────────────────────────
-// Current idp-origin members of one group (user ids). Filtered to origin='idp_sync' so a
-// hand-added row could never appear here and get computed into a removal (belt over disjoint).
-func (q *Queries) ListIdpGroupMemberIDs(ctx context.Context, arg ListIdpGroupMemberIDsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listIdpGroupMemberIDs, arg.OrgID, arg.GroupID)
+// Current idp-origin members of one group (user id + recorded directory external id). Filtered to
+// origin='idp_sync' so a hand-added row could never appear here and get computed into a removal
+// (belt over disjoint). The external id lets a later removal resolve delete-vs-moved (D3 sweep).
+func (q *Queries) ListIdpGroupMembers(ctx context.Context, arg ListIdpGroupMembersParams) ([]ListIdpGroupMembersRow, error) {
+	rows, err := q.db.Query(ctx, listIdpGroupMembers, arg.OrgID, arg.GroupID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []uuid.UUID{}
+	items := []ListIdpGroupMembersRow{}
 	for rows.Next() {
-		var user_id uuid.UUID
-		if err := rows.Scan(&user_id); err != nil {
+		var i ListIdpGroupMembersRow
+		if err := rows.Scan(&i.UserID, &i.IdpExternalID); err != nil {
 			return nil, err
 		}
-		items = append(items, user_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

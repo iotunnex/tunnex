@@ -36,16 +36,26 @@ type SyncGroup struct {
 	IdpGroupID string    // the external directory group id
 }
 
+// SyncedMember is one current idp_sync group_members row: the Tunnex user and the directory external
+// id recorded when it was synced. ExternalID may be "" for a legacy row predating external-id storage
+// — such a row can't be resolved on removal, so it only ever gets a group-removal (never a sweep).
+type SyncedMember struct {
+	UserID     uuid.UUID
+	ExternalID string
+}
+
 // Store is the persistence surface the reconciler needs. The slice-4 adapter implements it over
 // sqlc (Add/Remove write origin='idp_sync' rows + audit; PushOrg fires the org-wide <5s recompile).
 type Store interface {
 	ListIdpSyncGroups(ctx context.Context, orgID uuid.UUID, provider string) ([]SyncGroup, error)
-	ListIdpGroupMemberIDs(ctx context.Context, orgID, groupID uuid.UUID) ([]uuid.UUID, error)
+	ListIdpGroupMembers(ctx context.Context, orgID, groupID uuid.UUID) ([]SyncedMember, error)
 	// ResolveOrgUser maps a directory email to a Tunnex user that belongs to the org. found=false
 	// (no matching org user) → the member is skipped: sync grants EXISTING users, it does not
 	// JIT-provision (that's S2.5).
 	ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email string) (userID uuid.UUID, found bool, err error)
-	AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
+	// AddIdpGroupMember records the directory externalID with the membership so a later removal can
+	// resolve the user's directory status (D3 delete-sweep).
+	AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error
 	RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
 	RecordResult(ctx context.Context, orgID uuid.UUID, provider string, ok, advanceClock bool, errMsg string, now time.Time) error
 	PushOrg(ctx context.Context, orgID uuid.UUID)
@@ -54,8 +64,10 @@ type Store interface {
 // Deprovisioner cuts a user's access org-wide — the full DeactivateMember sweep (sessions + CLI
 // creds + peers out of desired-state + org-wide push). Behind an interface so the reconciler only
 // decides WHO to deprovision; the slice-4 adapter wires the real tenancy sweep + audit attribution.
+// It returns didAct=false when the user was ALREADY deactivated (idempotent no-op) so the reconciler
+// doesn't fire a redundant org-wide push on every poll for a still-listed disabled member (#7).
 type Deprovisioner interface {
-	DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, provider string) error
+	DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, provider string) (didAct bool, err error)
 }
 
 // NewReconciler builds a reconciler. now defaults to time.Now.
@@ -132,75 +144,106 @@ func (r *Reconciler) reconcileGroup(ctx context.Context, orgID uuid.UUID, provid
 //   - removes current members that are not in the desired-active set
 //   - routes StatusDisabled members to the full DeactivateMember sweep (org-wide access cut)
 //
-// A single org-wide push fires at the end iff anything changed.
-func (r *Reconciler) converge(ctx context.Context, orgID uuid.UUID, provider string, g SyncGroup, members []DirectoryMember) error {
-	desired := map[uuid.UUID]bool{}
-	var deprovision []uuid.UUID
+// A single org-wide push fires (via defer, #2) iff anything changed — even when a later per-user
+// error aborts the rest, so an already-committed removal always reaches the gateway. Per-user errors
+// are COLLECTED, never fatal (#3): one un-deprovisionable user (e.g. a sole-owner last_owner 409)
+// must not strand every other removal/sweep in the group. A non-nil return degrades config health.
+func (r *Reconciler) converge(ctx context.Context, orgID uuid.UUID, provider string, g SyncGroup, members []DirectoryMember) (err error) {
+	desired := map[uuid.UUID]string{}   // uid -> directory external id (recorded on the add)
+	deprovision := map[uuid.UUID]bool{} // uid listed as DISABLED in this group → full sweep
 	for _, m := range members {
-		uid, found, err := r.store.ResolveOrgUser(ctx, orgID, m.Email)
-		if err != nil {
-			return err
+		uid, found, e := r.store.ResolveOrgUser(ctx, orgID, m.Email)
+		if e != nil {
+			return e // a resolve failure before any mutation → fail-static (nothing changed yet)
 		}
 		if !found {
 			continue // sync grants existing org users only; unmatched directory members are skipped
 		}
 		switch m.Status {
 		case StatusActive:
-			desired[uid] = true
+			desired[uid] = m.ExternalID
 		case StatusDisabled:
-			// Disabled upstream → full sweep AND excluded from the desired set (also removed below).
-			deprovision = append(deprovision, uid)
+			deprovision[uid] = true // excluded from desired → also removed from the group below
 		case StatusGone:
-			// A gone user is normally simply absent from a group listing; if a provider ever
-			// returns one, treat it as not-desired (the absence path removes it from the group).
+			// A gone user is normally simply absent from a listing; if returned, treat as not-desired.
 		}
 	}
 
-	current, err := r.store.ListIdpGroupMemberIDs(ctx, orgID, g.ID)
-	if err != nil {
-		return err
-	}
-	currentSet := map[uuid.UUID]bool{}
-	for _, uid := range current {
-		currentSet[uid] = true
+	currentMembers, e := r.store.ListIdpGroupMembers(ctx, orgID, g.ID)
+	if e != nil {
+		return e
 	}
 
 	changed := false
-	// Adds — deterministic order for stable audit/logs.
-	for _, uid := range sortedKeys(desired) {
+	defer func() {
+		if changed {
+			r.store.PushOrg(ctx, orgID) // #2: committed changes propagate even if err != nil
+		}
+	}()
+	var errs []error
+
+	// Adds (grant). Fail-closed: collect + continue (a failed add just means fewer grants).
+	currentSet := map[uuid.UUID]bool{}
+	for _, m := range currentMembers {
+		currentSet[m.UserID] = true
+	}
+	for _, uid := range sortedUUIDKeys(desired) {
 		if !currentSet[uid] {
-			if err := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid); err != nil {
-				return err
+			if e := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid, desired[uid]); e != nil {
+				errs = append(errs, fmt.Errorf("add %s: %w", uid, e))
+				continue
 			}
 			changed = true
 		}
-	}
-	// Removes — anything currently in the group that isn't a desired-active member. (Disabled
-	// members are not in `desired`, so they are removed here too, in addition to the sweep.)
-	for _, uid := range current {
-		if !desired[uid] {
-			if err := r.store.RemoveIdpGroupMember(ctx, orgID, g.ID, uid); err != nil {
-				return err
-			}
-			changed = true
-		}
-	}
-	// Deprovision disabled members (org-wide sweep). Deterministic order.
-	sort.Slice(deprovision, func(i, j int) bool { return deprovision[i].String() < deprovision[j].String() })
-	for _, uid := range deprovision {
-		if err := r.deprov.DeactivateForSync(ctx, orgID, uid, provider); err != nil {
-			return err
-		}
-		changed = true
 	}
 
-	if changed {
-		r.store.PushOrg(ctx, orgID)
+	// Removes + D3 delete-sweep (1(a)). A member no longer desired leaves the group. If they were
+	// DELETED or DISABLED in the directory (ResolveUserStatus) — not merely moved out of this group —
+	// they also get the full sweep; an ACTIVE user (moved teams) keeps their account (Red 1). A
+	// member listed as disabled here is swept in the deprovision loop instead (skip the extra lookup).
+	for _, m := range currentMembers {
+		if _, keep := desired[m.UserID]; keep {
+			continue
+		}
+		if e := r.store.RemoveIdpGroupMember(ctx, orgID, g.ID, m.UserID); e != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", m.UserID, e))
+			continue
+		}
+		changed = true
+		if deprovision[m.UserID] || m.ExternalID == "" {
+			continue // disabled (swept below), or a legacy row we can't resolve → group-removal only
+		}
+		st, rerr := r.provider.ResolveUserStatus(ctx, m.ExternalID)
+		if rerr != nil {
+			errs = append(errs, fmt.Errorf("resolve %s: %w", m.UserID, rerr)) // ambiguous → NO sweep (fail-static)
+			continue
+		}
+		if st == StatusGone || st == StatusDisabled {
+			if did, de := r.deprov.DeactivateForSync(ctx, orgID, m.UserID, provider); de != nil {
+				errs = append(errs, fmt.Errorf("sweep %s: %w", m.UserID, de))
+			} else if did {
+				changed = true
+			}
+		}
+	}
+
+	// Deprovision members listed as DISABLED in this group (full sweep). Collect + continue (#3).
+	for _, uid := range sortedUUIDKeys(deprovision) {
+		if did, de := r.deprov.DeactivateForSync(ctx, orgID, uid, provider); de != nil {
+			errs = append(errs, fmt.Errorf("deprovision %s: %w", uid, de))
+			continue
+		} else if did {
+			changed = true
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }
 
-func sortedKeys(m map[uuid.UUID]bool) []uuid.UUID {
+func sortedUUIDKeys[V any](m map[uuid.UUID]V) []uuid.UUID {
 	out := make([]uuid.UUID, 0, len(m))
 	for k := range m {
 		out = append(out, k)

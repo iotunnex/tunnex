@@ -5,6 +5,7 @@ package idpsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -60,11 +61,17 @@ func NewEntraProvider(tenantID, clientID, clientSecret string, doer httpDoer) *E
 // --- token (client_credentials, cached) ---
 
 func (e *EntraProvider) accessToken(ctx context.Context) (string, error) {
+	// Fast path: a cached, unexpired token — held only for the map read, NOT across the HTTP call
+	// below (#8: holding the mutex across the token round-trip serialized every concurrent Graph
+	// fetch behind one network call).
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.token != "" && e.now().Before(e.tokenExp) {
-		return e.token, nil
+		t := e.token
+		e.mu.Unlock()
+		return t, nil
 	}
+	e.mu.Unlock()
+
 	form := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {e.clientID},
@@ -95,10 +102,15 @@ func (e *EntraProvider) accessToken(ctx context.Context) (string, error) {
 	if tok.AccessToken == "" {
 		return "", fmt.Errorf("entra token: empty access_token")
 	}
+	// Re-acquire only to publish the freshly-minted token. A concurrent refresh may mint twice
+	// (harmless); neither call holds the lock across its HTTP round-trip.
+	e.mu.Lock()
 	e.token = tok.AccessToken
 	// Refresh a minute early so an in-flight call never uses a just-expired token.
 	e.tokenExp = e.now().Add(time.Duration(tok.ExpiresIn)*time.Second - time.Minute)
-	return e.token, nil
+	t := e.token
+	e.mu.Unlock()
+	return t, nil
 }
 
 // graphGet issues an authenticated GET to a Graph URL (absolute, e.g. a nextLink) or a path under
@@ -129,11 +141,22 @@ type graphUser struct {
 	AccountEnabled    *bool  `json:"accountEnabled"`
 }
 
-func statusOf(accountEnabled *bool) UserStatus {
-	if accountEnabled != nil && !*accountEnabled {
-		return StatusDisabled
+// errAccountEnabledMissing is returned when Graph gives a null accountEnabled — the app can enumerate
+// members but not read their account state (typically GroupMember.Read.All granted, User.Read.All
+// NOT). A null is AMBIGUOUS, not "active": silently treating it as active is a deprovision fail-open
+// (a disabled user would read active and never be swept). So a null aborts the fetch → the reconciler
+// treats it as a transient failure → FAIL-STATIC (no membership change) + degraded health, surfacing
+// the misconfiguration instead of silently keeping offboarded users live.
+var errAccountEnabledMissing = errors.New("entra: accountEnabled not readable — grant the app User.Read.All (Application) so disabled users can be detected")
+
+func statusOf(accountEnabled *bool) (UserStatus, error) {
+	if accountEnabled == nil {
+		return StatusActive, errAccountEnabledMissing
 	}
-	return StatusActive // nil (not selected) or true → treat as active
+	if !*accountEnabled {
+		return StatusDisabled, nil
+	}
+	return StatusActive, nil
 }
 
 func emailOf(u graphUser) string {
@@ -149,6 +172,7 @@ func emailOf(u graphUser) string {
 func (e *EntraProvider) ListGroupMembers(ctx context.Context, groupID string) ([]DirectoryMember, error) {
 	next := fmt.Sprintf("/v1.0/groups/%s/members/microsoft.graph.user?$select=id,mail,userPrincipalName,accountEnabled&$top=999", url.PathEscape(groupID))
 	var out []DirectoryMember
+	firstPage := true // only a 404 on the GROUP endpoint means gone; a 404 on a continuation is transient
 	for next != "" {
 		resp, err := e.graphGet(ctx, next)
 		if err != nil {
@@ -156,7 +180,12 @@ func (e *EntraProvider) ListGroupMembers(ctx context.Context, groupID string) ([
 		}
 		if resp.StatusCode == http.StatusNotFound {
 			resp.Body.Close() //nolint:errcheck
-			return nil, ErrGroupGone
+			if firstPage {
+				return nil, ErrGroupGone
+			}
+			// #4: a 404 on an @odata.nextLink continuation is NOT authoritative-empty — treating it
+			// as ErrGroupGone would mass-delete a large group mid-pagination. Transient → fail-static.
+			return nil, fmt.Errorf("entra list group members: 404 on a continuation page (transient, not group-gone)")
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close() //nolint:errcheck
@@ -172,8 +201,15 @@ func (e *EntraProvider) ListGroupMembers(ctx context.Context, groupID string) ([
 			return nil, derr
 		}
 		for _, u := range page.Value {
-			out = append(out, DirectoryMember{ExternalID: u.ID, Email: emailOf(u), Status: statusOf(u.AccountEnabled)})
+			// #0: a null accountEnabled is ambiguous → abort the fetch (transient → fail-static),
+			// never silently keep a possibly-disabled member as active.
+			st, serr := statusOf(u.AccountEnabled)
+			if serr != nil {
+				return nil, serr
+			}
+			out = append(out, DirectoryMember{ExternalID: u.ID, Email: emailOf(u), Status: st})
 		}
+		firstPage = false
 		next = page.NextLink
 	}
 	return out, nil
@@ -196,5 +232,7 @@ func (e *EntraProvider) ResolveUserStatus(ctx context.Context, externalID string
 	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
 		return StatusActive, err
 	}
-	return statusOf(u.AccountEnabled), nil
+	// #0: null accountEnabled is ambiguous — surface the error so the caller fails static, never
+	// silently reports active for a user whose state we could not read.
+	return statusOf(u.AccountEnabled)
 }

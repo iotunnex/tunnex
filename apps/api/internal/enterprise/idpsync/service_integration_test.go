@@ -42,7 +42,9 @@ func (p *nopPusher) PushOrgNodes(context.Context, uuid.UUID) { p.calls++ }
 
 type nopDeprov struct{}
 
-func (nopDeprov) DeactivateForSync(context.Context, uuid.UUID, uuid.UUID, string) error { return nil }
+func (nopDeprov) DeactivateForSync(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	return true, nil
+}
 
 func testSealer(t *testing.T) *crypto.Sealer {
 	t.Helper()

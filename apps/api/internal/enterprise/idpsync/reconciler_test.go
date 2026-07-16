@@ -16,12 +16,22 @@ import (
 type fakeProvider struct {
 	members []DirectoryMember
 	listErr error
+	// resolve: per-externalID status for the D3 delete-sweep (default StatusActive); resolveErr
+	// makes ResolveUserStatus fail (ambiguous → no sweep).
+	resolve    map[string]UserStatus
+	resolveErr error
 }
 
 func (f *fakeProvider) ListGroupMembers(ctx context.Context, groupID string) ([]DirectoryMember, error) {
 	return f.members, f.listErr
 }
 func (f *fakeProvider) ResolveUserStatus(ctx context.Context, externalID string) (UserStatus, error) {
+	if f.resolveErr != nil {
+		return StatusActive, f.resolveErr
+	}
+	if st, ok := f.resolve[externalID]; ok {
+		return st, nil
+	}
 	return StatusActive, nil
 }
 
@@ -34,8 +44,10 @@ type recordCall struct {
 type fakeStore struct {
 	groups     []SyncGroup
 	current    map[uuid.UUID][]uuid.UUID // groupID → member user ids
+	ext        map[uuid.UUID]string      // userID → recorded directory external id (for current members)
 	byEmail    map[string]uuid.UUID      // resolvable org users
 	resolveErr error
+	removeErr  map[uuid.UUID]bool // RemoveIdpGroupMember returns an error for these users
 
 	added   []memberOp
 	removed []memberOp
@@ -43,13 +55,20 @@ type fakeStore struct {
 	records []recordCall
 }
 
-type memberOp struct{ group, user uuid.UUID }
+type memberOp struct {
+	group, user uuid.UUID
+	ext         string
+}
 
 func (s *fakeStore) ListIdpSyncGroups(ctx context.Context, orgID uuid.UUID, provider string) ([]SyncGroup, error) {
 	return s.groups, nil
 }
-func (s *fakeStore) ListIdpGroupMemberIDs(ctx context.Context, orgID, groupID uuid.UUID) ([]uuid.UUID, error) {
-	return s.current[groupID], nil
+func (s *fakeStore) ListIdpGroupMembers(ctx context.Context, orgID, groupID uuid.UUID) ([]SyncedMember, error) {
+	out := make([]SyncedMember, 0, len(s.current[groupID]))
+	for _, uid := range s.current[groupID] {
+		out = append(out, SyncedMember{UserID: uid, ExternalID: s.ext[uid]})
+	}
+	return out, nil
 }
 func (s *fakeStore) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email string) (uuid.UUID, bool, error) {
 	if s.resolveErr != nil {
@@ -58,12 +77,15 @@ func (s *fakeStore) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email s
 	uid, ok := s.byEmail[email]
 	return uid, ok, nil
 }
-func (s *fakeStore) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
-	s.added = append(s.added, memberOp{groupID, userID})
+func (s *fakeStore) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error {
+	s.added = append(s.added, memberOp{group: groupID, user: userID, ext: externalID})
 	return nil
 }
 func (s *fakeStore) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
-	s.removed = append(s.removed, memberOp{groupID, userID})
+	if s.removeErr[userID] {
+		return errors.New("remove failed for " + userID.String())
+	}
+	s.removed = append(s.removed, memberOp{group: groupID, user: userID})
 	return nil
 }
 func (s *fakeStore) RecordResult(ctx context.Context, orgID uuid.UUID, provider string, ok, advance bool, errMsg string, now time.Time) error {
@@ -72,11 +94,23 @@ func (s *fakeStore) RecordResult(ctx context.Context, orgID uuid.UUID, provider 
 }
 func (s *fakeStore) PushOrg(ctx context.Context, orgID uuid.UUID) { s.pushes++ }
 
-type fakeDeprov struct{ deactivated []uuid.UUID }
+type fakeDeprov struct {
+	attempted   []uuid.UUID        // every user DeactivateForSync was called for
+	deactivated []uuid.UUID        // users actually deactivated (didAct=true)
+	failFor     map[uuid.UUID]bool // return an error (e.g. sole-owner last_owner)
+	already     map[uuid.UUID]bool // already deactivated → didAct=false, no error (#7)
+}
 
-func (d *fakeDeprov) DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, provider string) error {
+func (d *fakeDeprov) DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, provider string) (bool, error) {
+	d.attempted = append(d.attempted, userID)
+	if d.failFor[userID] {
+		return false, errors.New("last_owner: " + userID.String())
+	}
+	if d.already[userID] {
+		return false, nil // idempotent no-op
+	}
 	d.deactivated = append(d.deactivated, userID)
-	return nil
+	return true, nil
 }
 
 // --- helpers ---
@@ -258,6 +292,133 @@ func TestClassifySyncHealth(t *testing.T) {
 				t.Errorf("ClassifySyncHealth = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func containsUUID(s []uuid.UUID, u uuid.UUID) bool {
+	for _, x := range s {
+		if x == u {
+			return true
+		}
+	}
+	return false
+}
+
+// #2: a committed removal must reach the gateway even when a LATER op in the same converge errors —
+// the push is deferred so an already-applied removal is never left un-propagated.
+func TestReconcile_MidApplyErrorStillPushesRemoval(t *testing.T) {
+	s := baseStore()
+	s.current[grp] = []uuid.UUID{uAli}
+	s.ext = map[uuid.UUID]string{uAli: "ext-ali"}
+	p := &fakeProvider{members: []DirectoryMember{{ExternalID: "ext-ali", Email: "alice@acme.com", Status: StatusDisabled}}}
+	d := &fakeDeprov{failFor: map[uuid.UUID]bool{uAli: true}} // the sweep fails AFTER the group-removal commits
+	run(t, p, s, d)
+
+	if len(s.removed) != 1 {
+		t.Fatalf("the group removal must have committed, got %+v", s.removed)
+	}
+	if s.pushes != 1 {
+		t.Fatalf("#2 VIOLATED: a committed removal was not pushed because a later op errored (pushes=%d)", s.pushes)
+	}
+	if len(s.records) != 1 || s.records[0].ok {
+		t.Errorf("the sweep error must degrade config health, got %+v", s.records)
+	}
+}
+
+// #3: one un-deprovisionable user (a sole-owner last_owner 409) must not strand deprovisioning of
+// the other disabled members in the same group.
+func TestReconcile_OneFailingDeprovDoesNotStrandSiblings(t *testing.T) {
+	s := baseStore()
+	p := &fakeProvider{members: []DirectoryMember{
+		{ExternalID: "ea", Email: "alice@acme.com", Status: StatusDisabled}, // sole owner → fails
+		{ExternalID: "eb", Email: "bob@acme.com", Status: StatusDisabled},   // ordinary → must still be swept
+	}}
+	d := &fakeDeprov{failFor: map[uuid.UUID]bool{uAli: true}}
+	run(t, p, s, d)
+
+	if !containsUUID(d.attempted, uBob) {
+		t.Fatalf("#3 VIOLATED: bob was stranded after alice's deprovision failed; attempted=%v", d.attempted)
+	}
+	if !containsUUID(d.deactivated, uBob) {
+		t.Fatalf("bob (an ordinary disabled member) must be deactivated; deactivated=%v", d.deactivated)
+	}
+	if len(s.records) != 1 || s.records[0].ok {
+		t.Errorf("alice's failure must degrade config health, got %+v", s.records)
+	}
+}
+
+// 1(a): a member removed from the group who is GONE (deleted) in the directory gets the full sweep;
+// one who is still ACTIVE (merely moved out of this group) keeps their account (Red 1 stays green).
+func TestReconcile_DeletedDirectoryUserSwept_MovedUserKept(t *testing.T) {
+	s := baseStore()
+	s.current[grp] = []uuid.UUID{uAli, uBob}
+	s.ext = map[uuid.UUID]string{uAli: "ext-ali", uBob: "ext-bob"}
+	// both absent from the group now; alice deleted upstream, bob just moved to another group.
+	p := &fakeProvider{members: []DirectoryMember{}, resolve: map[string]UserStatus{"ext-ali": StatusGone, "ext-bob": StatusActive}}
+	d := &fakeDeprov{}
+	run(t, p, s, d)
+
+	if len(s.removed) != 2 {
+		t.Fatalf("both must leave the group, got %+v", s.removed)
+	}
+	if len(d.deactivated) != 1 || d.deactivated[0] != uAli {
+		t.Fatalf("only the directory-GONE user is swept; the moved-but-active user is kept. got deactivated=%v", d.deactivated)
+	}
+}
+
+// A ResolveUserStatus error on a removed member is ambiguous → NO sweep (fail-static), degrade.
+func TestReconcile_ResolveErrorDoesNotSweep(t *testing.T) {
+	s := baseStore()
+	s.current[grp] = []uuid.UUID{uAli}
+	s.ext = map[uuid.UUID]string{uAli: "ext-ali"}
+	p := &fakeProvider{members: []DirectoryMember{}, resolveErr: errors.New("graph 503")}
+	d := &fakeDeprov{}
+	run(t, p, s, d)
+
+	if len(s.removed) != 1 {
+		t.Fatalf("the group removal is authoritative and proceeds, got %+v", s.removed)
+	}
+	if len(d.deactivated) != 0 {
+		t.Fatalf("an ambiguous resolve must NOT sweep, got %v", d.deactivated)
+	}
+	if len(s.records) != 1 || s.records[0].ok {
+		t.Errorf("the resolve error must degrade health, got %+v", s.records)
+	}
+}
+
+// #7: an already-deactivated user (idempotent no-op) must not fire a redundant org-wide push.
+func TestReconcile_AlreadyDeactivatedIsNoPush(t *testing.T) {
+	s := baseStore()
+	// uAli disabled upstream but NOT currently in the group (already removed a prior poll) → the only
+	// candidate action is the sweep, which is a no-op because uAli is already deactivated.
+	p := &fakeProvider{members: []DirectoryMember{{ExternalID: "ea", Email: "alice@acme.com", Status: StatusDisabled}}}
+	d := &fakeDeprov{already: map[uuid.UUID]bool{uAli: true}}
+	run(t, p, s, d)
+
+	if len(d.attempted) != 1 {
+		t.Fatalf("the sweep is still attempted, got %v", d.attempted)
+	}
+	if len(d.deactivated) != 0 {
+		t.Errorf("already-deactivated → no-op, got %v", d.deactivated)
+	}
+	if s.pushes != 0 {
+		t.Fatalf("#7 VIOLATED: an already-deactivated no-op fired a redundant push (pushes=%d)", s.pushes)
+	}
+	if len(s.records) != 1 || !s.records[0].ok {
+		t.Errorf("a clean poll with no real change is healthy, got %+v", s.records)
+	}
+}
+
+// #6: directory sync supports microsoft only in v1 — an unsupported provider is rejected at config
+// time (provider_not_supported), not accepted and surfaced as perpetual-degraded health.
+func TestSupportedProvider_MicrosoftOnly(t *testing.T) {
+	if err := supportedProvider("microsoft"); err != nil {
+		t.Fatalf("microsoft must be supported, got %v", err)
+	}
+	for _, p := range []string{"google", "okta", ""} {
+		if err := supportedProvider(p); err == nil {
+			t.Errorf("#6: provider %q must be rejected at config time", p)
+		}
 	}
 }
 

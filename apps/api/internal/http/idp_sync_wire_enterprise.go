@@ -22,7 +22,7 @@ import (
 // a tenancy import — the Deprovisioner interface is the whole decoupling point (S7.5.2 slice 3).
 type syncDeprovisioner struct{ members *tenancy.MembershipService }
 
-func (d syncDeprovisioner) DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, _ string) error {
+func (d syncDeprovisioner) DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, _ string) (bool, error) {
 	return d.members.DeactivateMemberBySync(ctx, orgID, userID, "disabled_in_directory")
 }
 

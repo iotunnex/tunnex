@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -75,9 +76,17 @@ func (s *Service) SetProviderFactory(f ProviderFactory) { s.factory = f }
 // SetClock overrides the clock (tests).
 func (s *Service) SetClock(now func() time.Time) { s.now = now }
 
+// perConfigPollTimeout bounds one org's reconcile so a large or hung tenant cannot stall the whole
+// poll tick for every other tenant (#5).
+const perConfigPollTimeout = 2 * time.Minute
+
 func supportedProvider(p string) error {
-	if p != "microsoft" && p != "google" {
-		return apierr.BadRequest("invalid_provider", "provider must be microsoft or google")
+	// v1 syncs Microsoft Entra only; Google is a planned fast-follow behind the same DirectoryProvider
+	// interface. The OpenAPI enum still lists google for forward-compat, so the sync-capability gate
+	// lives HERE — reject an unsupported provider at CONFIG time with a clean 400 (#6), instead of
+	// accepting it and surfacing only perpetual-degraded health at sync time.
+	if p != "microsoft" {
+		return apierr.BadRequest("provider_not_supported", "directory sync currently supports microsoft only")
 	}
 	return nil
 }
@@ -167,7 +176,11 @@ func (s *Service) PollAll(ctx context.Context) {
 		return
 	}
 	for _, cfg := range cfgs {
-		if err := s.reconcileConfig(ctx, cfg); err != nil {
+		// #5: bound each org so one huge/hung tenant can't consume the whole tick for everyone else.
+		cctx, cancel := context.WithTimeout(ctx, perConfigPollTimeout)
+		err := s.reconcileConfig(cctx, cfg)
+		cancel()
+		if err != nil {
 			s.logger.Warn("idp_sync_poll_config_degraded",
 				slog.String("org_id", cfg.OrgID.String()), slog.String("provider", cfg.Provider),
 				slog.String("error", err.Error()))
@@ -300,8 +313,20 @@ func (s *Service) ListIdpSyncGroups(ctx context.Context, orgID uuid.UUID, provid
 	return out, nil
 }
 
-func (s *Service) ListIdpGroupMemberIDs(ctx context.Context, orgID, groupID uuid.UUID) ([]uuid.UUID, error) {
-	return s.q.ListIdpGroupMemberIDs(ctx, sqlc.ListIdpGroupMemberIDsParams{OrgID: orgID, GroupID: groupID})
+func (s *Service) ListIdpGroupMembers(ctx context.Context, orgID, groupID uuid.UUID) ([]SyncedMember, error) {
+	rows, err := s.q.ListIdpGroupMembers(ctx, sqlc.ListIdpGroupMembersParams{OrgID: orgID, GroupID: groupID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SyncedMember, 0, len(rows))
+	for _, r := range rows {
+		ext := ""
+		if r.IdpExternalID != nil {
+			ext = *r.IdpExternalID
+		}
+		out = append(out, SyncedMember{UserID: r.UserID, ExternalID: ext})
+	}
+	return out, nil
 }
 
 func (s *Service) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email string) (uuid.UUID, bool, error) {
@@ -315,8 +340,12 @@ func (s *Service) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email str
 	return row.ID, true, nil
 }
 
-func (s *Service) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
-	n, err := s.q.AddIdpGroupMember(ctx, sqlc.AddIdpGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID})
+func (s *Service) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error {
+	var ext *string
+	if externalID != "" {
+		ext = &externalID
+	}
+	n, err := s.q.AddIdpGroupMember(ctx, sqlc.AddIdpGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID, IdpExternalID: ext})
 	if err != nil || n == 0 {
 		return err
 	}
@@ -423,7 +452,10 @@ func conflictIfDup(err error) error {
 	if err == nil {
 		return nil
 	}
-	if strings.Contains(err.Error(), "23505") || strings.Contains(strings.ToLower(err.Error()), "duplicate key") {
+	// #9: match the SQLSTATE structurally (like enterprise/policy/service.go), not the error text —
+	// a driver upgrade or a wrapped/localized message must not silently turn a 409 into a 500.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return apierr.New(http.StatusConflict, "conflict", "that directory group is already mapped")
 	}
 	return err

@@ -46,8 +46,12 @@ func TestDeactivateMemberBySyncAuditsSystemActorWithCause(t *testing.T) {
 	}
 
 	svc := &MembershipService{q: sqlc.New(tx), revoker: &fakeRevoker{}}
-	if err := svc.DeactivateMemberBySync(ctx, org, member, "disabled_in_directory"); err != nil {
+	didAct, err := svc.DeactivateMemberBySync(ctx, org, member, "disabled_in_directory")
+	if err != nil {
 		t.Fatalf("DeactivateMemberBySync: %v", err)
+	}
+	if !didAct {
+		t.Fatal("first deactivation must report didAct=true")
 	}
 
 	// The user is frozen.
@@ -57,6 +61,27 @@ func TestDeactivateMemberBySyncAuditsSystemActorWithCause(t *testing.T) {
 	}
 	if status != "deactivated" {
 		t.Fatalf("user status = %q, want deactivated", status)
+	}
+
+	// #7: re-deactivating an already-deactivated user is an idempotent no-op — didAct=false and NO
+	// second audit row (so a still-listed disabled member can't flood the audit log every poll).
+	var auditsBefore int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='user.deactivated'`, org).Scan(&auditsBefore); err != nil {
+		t.Fatal(err)
+	}
+	didAct2, err := svc.DeactivateMemberBySync(ctx, org, member, "disabled_in_directory")
+	if err != nil {
+		t.Fatalf("second DeactivateMemberBySync: %v", err)
+	}
+	if didAct2 {
+		t.Fatal("#7: re-deactivating an already-deactivated user must report didAct=false (no-op)")
+	}
+	var auditsAfter int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='user.deactivated'`, org).Scan(&auditsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if auditsAfter != auditsBefore {
+		t.Fatalf("#7: a no-op deactivation wrote %d extra audit rows (audit flood)", auditsAfter-auditsBefore)
 	}
 
 	// The audit row names the system actor, has NO human actor, and carries the cause.

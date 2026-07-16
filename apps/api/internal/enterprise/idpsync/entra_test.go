@@ -92,6 +92,39 @@ func TestListGroupMembers_PaginatesAndMapsStatus(t *testing.T) {
 	}
 }
 
+// #0: a null accountEnabled is ambiguous (app lacks User.Read.All) — ListGroupMembers must ERROR,
+// never silently map the member to active. The reconciler then fails static (no membership change).
+func TestListGroupMembers_NullAccountEnabledErrors(t *testing.T) {
+	m := &mockDoer{t: t, byURL: map[string][]cannedResp{
+		"/groups/grp-1/members": {
+			{200, `{"value":[{"id":"u1","mail":"alice@acme.com","accountEnabled":true},{"id":"u2","mail":"bob@acme.com"}]}`},
+		},
+	}}
+	p := newTestProvider(m)
+	if _, err := p.ListGroupMembers(context.Background(), "grp-1"); err == nil {
+		t.Fatal("a null accountEnabled must abort the fetch (no silent-active), got nil error")
+	}
+}
+
+// #4: a 404 on an @odata.nextLink CONTINUATION page is NOT ErrGroupGone — it's transient, so the
+// reconciler leaves membership untouched instead of mass-deleting a large group mid-pagination.
+func TestListGroupMembers_ContinuationPage404IsTransient(t *testing.T) {
+	m := &mockDoer{t: t, byURL: map[string][]cannedResp{
+		"/groups/grp-1/members": {
+			{200, `{"value":[{"id":"u1","mail":"alice@acme.com","accountEnabled":true}],"@odata.nextLink":"https://graph.test/v1.0/groups/grp-1/members/page2"}`},
+		},
+		"/members/page2": {{404, `{"error":{"code":"Request_ResourceNotFound"}}`}},
+	}}
+	p := newTestProvider(m)
+	_, err := p.ListGroupMembers(context.Background(), "grp-1")
+	if err == nil {
+		t.Fatal("a continuation-page 404 must be an error")
+	}
+	if err == ErrGroupGone {
+		t.Fatal("#4 VIOLATED: a continuation-page 404 was conflated with ErrGroupGone (would mass-delete the group)")
+	}
+}
+
 func TestListGroupMembers_GroupGone(t *testing.T) {
 	m := &mockDoer{t: t, byURL: map[string][]cannedResp{
 		"/groups/grp-x/members": {{404, `{"error":{"code":"Request_ResourceNotFound"}}`}},

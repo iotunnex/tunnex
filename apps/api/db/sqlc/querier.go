@@ -19,8 +19,8 @@ type Querier interface {
 	// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
 	// the audit event for a no-op re-add (idempotent, still 204).
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
-	// Idempotent add of a synced member. Explicit origin='idp_sync'. 0 rows on conflict = already
-	// present (no state change).
+	// Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
+	// 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
 	AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
@@ -268,9 +268,10 @@ type Querier interface {
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)
 	// ── idp-origin membership (the reconcile target) ─────────────────────────────────
-	// Current idp-origin members of one group (user ids). Filtered to origin='idp_sync' so a
-	// hand-added row could never appear here and get computed into a removal (belt over disjoint).
-	ListIdpGroupMemberIDs(ctx context.Context, arg ListIdpGroupMemberIDsParams) ([]uuid.UUID, error)
+	// Current idp-origin members of one group (user id + recorded directory external id). Filtered to
+	// origin='idp_sync' so a hand-added row could never appear here and get computed into a removal
+	// (belt over disjoint). The external id lets a later removal resolve delete-vs-moved (D3 sweep).
+	ListIdpGroupMembers(ctx context.Context, arg ListIdpGroupMembersParams) ([]ListIdpGroupMembersRow, error)
 	// ── idp_sync groups (the mappings to reconcile) ──────────────────────────────────
 	// Every Tunnex group bound to an IdP group for this org+provider — the units the reconciler
 	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.

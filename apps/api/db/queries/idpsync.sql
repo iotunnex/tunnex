@@ -85,19 +85,20 @@ WHERE org_id = $1 AND origin = 'idp_sync' AND idp_provider = $2
 ORDER BY id;
 
 -- ── idp-origin membership (the reconcile target) ─────────────────────────────────
--- name: ListIdpGroupMemberIDs :many
--- Current idp-origin members of one group (user ids). Filtered to origin='idp_sync' so a
--- hand-added row could never appear here and get computed into a removal (belt over disjoint).
-SELECT user_id
+-- name: ListIdpGroupMembers :many
+-- Current idp-origin members of one group (user id + recorded directory external id). Filtered to
+-- origin='idp_sync' so a hand-added row could never appear here and get computed into a removal
+-- (belt over disjoint). The external id lets a later removal resolve delete-vs-moved (D3 sweep).
+SELECT user_id, idp_external_id
 FROM group_members
 WHERE org_id = $1 AND group_id = $2 AND origin = 'idp_sync'
 ORDER BY user_id;
 
 -- name: AddIdpGroupMember :execrows
--- Idempotent add of a synced member. Explicit origin='idp_sync'. 0 rows on conflict = already
--- present (no state change).
-INSERT INTO group_members (org_id, group_id, user_id, origin)
-VALUES ($1, $2, $3, 'idp_sync')
+-- Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
+-- 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
+INSERT INTO group_members (org_id, group_id, user_id, origin, idp_external_id)
+VALUES ($1, $2, $3, 'idp_sync', $4)
 ON CONFLICT (group_id, user_id) DO NOTHING;
 
 -- name: RemoveIdpGroupMember :execrows

@@ -52,7 +52,7 @@ func TestOverviewPopulated(t *testing.T) {
 	dB := uuid.New()
 
 	recent := time.Now().Add(-30 * time.Second) // within the 3-min window
-	stale := time.Now().Add(-10 * time.Minute)   // outside it
+	stale := time.Now().Add(-10 * time.Minute)  // outside it
 	tOld := time.Now().Add(-2 * time.Hour)
 	tNew := time.Now().Add(-1 * time.Hour)
 

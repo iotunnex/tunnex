@@ -103,8 +103,12 @@ type fakePusher struct {
 	userPushes []uuid.UUID
 }
 
-func (f *fakePusher) PushUserNodes(_ context.Context, id uuid.UUID) { f.userPushes = append(f.userPushes, id) }
-func (f *fakePusher) PushOrgNodes(_ context.Context, id uuid.UUID)  { f.orgPushes = append(f.orgPushes, id) }
+func (f *fakePusher) PushUserNodes(_ context.Context, id uuid.UUID) {
+	f.userPushes = append(f.userPushes, id)
+}
+func (f *fakePusher) PushOrgNodes(_ context.Context, id uuid.UUID) {
+	f.orgPushes = append(f.orgPushes, id)
+}
 
 // S7.2 finding #1 (multi-node guard): deactivating a member must push ORG-WIDE, not
 // just the member's own device-nodes — a DIFFERENT node (node2) that referenced the
