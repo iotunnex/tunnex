@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, apiErrorMessage, type Member, type Org, type Role } from "../lib/api";
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
-import { Button, Card, ErrorText, Field, Input } from "../components/ui";
+import { Button, Card, ErrorText, Field, Input, Modal } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 const ROLES: Role[] = ["owner", "admin", "member"];
@@ -20,6 +20,8 @@ export default function Users() {
   const emailVerified = state.status === "authed" && state.user.email_verified;
   const [org, setOrg] = useState<Org | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [resetTarget, setResetTarget] = useState<Member | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // My role in this org comes from my own row in the roster — no extra endpoint.
@@ -154,14 +156,63 @@ export default function Users() {
                       Reactivate
                     </Button>
                   ))}
+
+                {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
+                    it clears the member's 2FA, never signs in as them. */}
+                {canManage && !isSelf && (
+                  <Button variant="ghost" onClick={() => setResetTarget(m)}>
+                    Reset 2FA
+                  </Button>
+                )}
               </div>
             </li>
           );
         })}
         {members.length === 0 && !error && <li className="text-sm text-slate-500">No members yet.</li>}
       </ul>
+      {resetTarget && (
+        <Modal
+          title="Reset two-factor authentication"
+          danger
+          onDismiss={() => setResetTarget(null)}
+          actions={
+            <>
+              <Button variant="ghost" onClick={() => setResetTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={doReset} disabled={resetBusy}>
+                {resetBusy ? "Resetting…" : "Reset 2FA"}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-300">
+            Remove two-factor authentication for <span className="font-semibold">{resetTarget.email}</span>?
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            Their 2FA and recovery codes are cleared and they will be notified by email. If your organization
+            requires MFA, they will be asked to set it up again at their next sign-in. This does not sign you in
+            as them.
+          </p>
+        </Modal>
+      )}
     </div>
   );
+
+  async function doReset() {
+    if (!org || !resetTarget) return;
+    const target = resetTarget;
+    setResetBusy(true);
+    await mutate(
+      () =>
+        api.POST("/api/v1/organizations/{orgId}/members/{userId}/mfa-reset", {
+          params: { path: { orgId: org.id, userId: target.user_id } },
+        }),
+      "Could not reset the member’s two-factor authentication.",
+    );
+    setResetBusy(false);
+    setResetTarget(null);
+  }
 }
 
 // InviteForm is enumeration-resistant by construction: the server returns the

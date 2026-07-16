@@ -2584,6 +2584,10 @@ components:
         # S7.5.5: true when the org enforces MFA and the user has no confirmed TOTP — the session is
         # gated to enrollment (D8). The client routes to the enrollment ceremony.
         mfa_enrollment_required: { type: boolean }
+        # S7.5.5 D11: the user's UNUSED recovery-code count — CARDINALITY ONLY, never the codes
+        # (nothing recoverable). Drives the low-remaining (<=3) + last-code warnings; returned on
+        # /auth/me and on mfa/verify (the verify moment is exactly when a just-burned code matters).
+        recovery_codes_remaining: { type: integer }
 
     LoginResult:
       type: object

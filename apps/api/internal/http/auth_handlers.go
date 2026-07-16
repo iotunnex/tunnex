@@ -154,6 +154,14 @@ func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObje
 			au.MfaEnrollmentRequired = &tr
 		}
 	}
+	if s.mfa != nil {
+		if enrolled, _ := s.mfa.HasConfirmedTOTP(ctx, p.UserID); enrolled {
+			if n, e := s.mfa.CountRecoveryRemaining(ctx, p.UserID); e == nil {
+				nn := n
+				au.RecoveryCodesRemaining = &nn
+			}
+		}
+	}
 	return api.CurrentUser200JSONResponse{
 		Body:    au,
 		Headers: api.CurrentUser200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},

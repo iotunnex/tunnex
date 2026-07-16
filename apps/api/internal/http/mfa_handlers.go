@@ -87,5 +87,11 @@ func (s apiServer) MfaVerify(ctx context.Context, req api.MfaVerifyRequestObject
 	if err != nil {
 		return nil, err
 	}
-	return mfaVerifyResponse{body: authUser(user), sess: sess, secure: s.cookieSecure, requestID: reqID(ctx)}, nil
+	au := authUser(user)
+	// D11: surface the remaining recovery-code count at the verify moment — the user who just burned
+	// a code (viaRecovery) is exactly who needs the low-remaining / last-code warning. Count only.
+	if n, e := s.mfa.CountRecoveryRemaining(ctx, user.ID); e == nil {
+		au.RecoveryCodesRemaining = &n
+	}
+	return mfaVerifyResponse{body: au, sess: sess, secure: s.cookieSecure, requestID: reqID(ctx)}, nil
 }

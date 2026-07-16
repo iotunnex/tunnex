@@ -5,6 +5,7 @@ import { can } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { DesktopSettings } from "../components/DesktopSettings";
+import { MfaSettings } from "../components/MfaSettings";
 
 const PROVIDERS = ["google", "microsoft"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -60,6 +61,12 @@ export default function Settings() {
           an org-admin one, so it shows regardless of role. */}
       <DesktopSettings />
 
+      {/* Self-service 2FA is per-USER (OPEN, every edition), so it shows for every signed-in user
+          regardless of org role — unlike the org-level enforce toggle below (enterprise, admin). */}
+      <div className="mt-6">
+        <MfaSettings />
+      </div>
+
       {org && !isAdmin && (
         <Card className="mt-6">
           <p className="text-sm text-slate-400">Organization settings are managed by owners and admins.</p>
@@ -80,9 +87,84 @@ export default function Settings() {
               <p className="mt-1 text-xs text-slate-500">SSO (Google / Microsoft) is a Tunnex Enterprise feature.</p>
             </Card>
           )}
+          {meta?.edition === "enterprise" ? (
+            <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
+          ) : (
+            <Card className="mt-4">
+              <h2 className="text-sm font-semibold text-slate-300">Require two-factor authentication</h2>
+              <p className="mt-1 text-xs text-slate-500">Org-wide MFA enforcement is a Tunnex Enterprise feature.</p>
+            </Card>
+          )}
         </>
       )}
     </div>
+  );
+}
+
+// OrgMfaEnforce — org-level MFA mandate (enterprise, S7.5.5). Unlock-then-opt-in: default OFF; on
+// toggle, unenrolled password users are prompted to enroll at their next sign-in (never locked out).
+function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
+  const [enforce, setEnforce] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .GET("/api/v1/organizations/{orgId}/mfa-enforce", { params: { path: { orgId } } })
+      .then(({ data }) => {
+        if (!cancelled && data) setEnforce(data.enforce);
+      })
+      .catch(() => {
+        if (!cancelled) setEnforce(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  async function toggle(next: boolean) {
+    setBusy(true);
+    setError(null);
+    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/mfa-enforce", {
+      params: { path: { orgId } },
+      body: { enforce: next },
+    });
+    setBusy(false);
+    if (error || !data) {
+      setError(apiErrorMessage(error, "Could not update MFA enforcement."));
+      return;
+    }
+    setEnforce(data.enforce);
+  }
+
+  return (
+    <Card className="mt-4">
+      <h2 className="text-sm font-semibold text-slate-300">Require two-factor authentication</h2>
+      <p className="mt-1 text-xs text-slate-400">
+        When on, members who sign in with a password must have 2FA — anyone without it is prompted to set it
+        up at their next sign-in (no one is locked out). SSO sign-ins are governed by your identity provider.
+      </p>
+      {/* D8 honesty: enforcement is a forward gate, not retroactive. */}
+      <p className="mt-1 text-xs text-slate-500">
+        Enforcement applies at sign-in, not to sessions already open — pre-existing sessions remain valid
+        until they expire naturally. To end current sessions immediately, deactivate the member.
+      </p>
+      {error && (
+        <div className="mt-2">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+      <div className="mt-3">
+        {enforce === null ? (
+          <p className="text-xs text-slate-500">Loading…</p>
+        ) : (
+          <Button variant="ghost" disabled={busy || !canEdit} onClick={() => toggle(!enforce)}>
+            {busy ? "Saving…" : enforce ? "Disable requirement" : "Require MFA for password sign-ins"}
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }
 
