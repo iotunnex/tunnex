@@ -322,6 +322,17 @@ func TestExtendGrantWindow(t *testing.T) {
 	if auditCount(t, pool, f.org, "policy.grant_extended") != 1 {
 		t.Fatal("extend must audit policy.grant_extended")
 	}
+	// [6] D7: the audit records the OLD->NEW window, and old != new (the pre-update value, not
+	// the post-update one — the fold-induced defect the re-review caught).
+	var oldA, newA string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT metadata->>'old_expires_at', metadata->>'new_expires_at' FROM audit_logs
+		 WHERE org_id=$1 AND action='policy.grant_extended'`, f.org).Scan(&oldA, &newA); err != nil {
+		t.Fatal(err)
+	}
+	if oldA == "" || newA == "" || oldA == newA {
+		t.Fatalf("extend audit must record distinct old->new window, got old=%q new=%q", oldA, newA)
+	}
 }
 
 // TestExtendRefusesPermanentAndLapsed — the two 409s: a permanent grant has no window,
