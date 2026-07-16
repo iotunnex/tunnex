@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   apiErrorMessage,
+  apiErrorCode,
   loadOne,
   type Loaded,
   type Meta,
@@ -16,6 +17,7 @@ import {
   type DeviceApproval,
   type Device,
   type HealthCheck,
+  type CreatePolicyRuleRequest,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
@@ -29,6 +31,9 @@ import {
   staleNoticeText,
   pruneStaleRuleIds,
   swapRule,
+  grantExpiry,
+  extendErrorCopy,
+  activeMembers,
   type LoadState,
 } from "../lib/policyview";
 import {
@@ -265,10 +270,12 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   const [rules, setRules] = useState<PolicyRule[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [loaded, setLoaded] = useState<LoadState>({ groupsLoaded: false, resourcesLoaded: false });
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loaded, setLoaded] = useState<LoadState>({ groupsLoaded: false, resourcesLoaded: false, membersLoaded: false });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
+  const [extendingGrant, setExtendingGrant] = useState<PolicyRule | null>(null);
   // SINGLE source of truth for the partial-swap warning: the SET of rule ids a create-then-
   // delete left un-deleted. The notice is DERIVED (staleNoticeText) — no separate state to
   // desync ([291]/[309]/[371]). Pruned ONLY on a successful load (amendment A), per-id (B).
@@ -277,10 +284,11 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
-    const [rr, gr, resr] = await Promise.all([
+    const [rr, gr, resr, mr] = await Promise.all([
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } })),
     ]);
     // The RULES fetch failing means the section cannot render truthfully — show retry, NOT
     // the reassuring "No rules — enforcing denies everything" ([2]). Amendment A: on this
@@ -291,10 +299,11 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     setRules(freshRules);
     setGroups((gr.ok ? (gr.data as UserGroup[]) : []) as UserGroup[]);
     setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
+    setMembers((mr.ok ? (mr.data as Member[]) : []) as Member[]);
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
-    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok });
-    setErr(gr.ok && resr.ok ? null : "Some groups/resources failed to load — names may show as unresolved. Refresh.");
+    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok });
+    setErr(gr.ok && resr.ok && mr.ok ? null : "Some groups/resources/members failed to load — names may show as unresolved. Refresh.");
     // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
     // longer present, keep the rest (B).
     setStaleRuleIds((prev) => pruneStaleRuleIds(prev, true, freshRules));
@@ -340,15 +349,26 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
           )}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
-              const row = ruleRow(r, groups, resources, loaded);
+              const row = ruleRow(r, groups, resources, members, loaded);
+              const exp = grantExpiry(r, Date.now());
               return (
                 <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm">
                   <span className="text-slate-200">
                     <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
                     <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
+                    {/* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant
+                        stays visible (audit-history), rendered distinctly — never hidden. */}
+                    {exp.state !== "permanent" && (
+                      <span className={`ml-2 text-xs ${exp.state === "expired" ? "text-rose-400" : "text-amber-300"}`}>· {exp.label}</span>
+                    )}
                   </span>
                   {canManage && (
                     <span className="flex gap-2">
+                      {exp.extendable && (
+                        <Button variant="ghost" onClick={() => setExtendingGrant(r)}>
+                          Extend
+                        </Button>
+                      )}
                       <Button variant="ghost" onClick={() => setEditing(r)}>
                         Edit
                       </Button>
@@ -372,6 +392,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
           orgId={orgId}
           groups={groups}
           resources={resources}
+          members={activeMembers(members)}
           editing={editing}
           onClose={() => {
             setCreating(false);
@@ -387,7 +408,80 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
           }}
         />
       )}
+      {extendingGrant && (
+        <ExtendGrantModal
+          orgId={orgId}
+          rule={extendingGrant}
+          onClose={() => setExtendingGrant(null)}
+          onDone={() => {
+            setExtendingGrant(null);
+            load();
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+// ExtendGrantModal moves a temporary grant's window forward (S7.5.4). A LAPSED grant is
+// refused by the server (409 grant_lapsed) — surfaced legibly here, not as a raw error;
+// this is a WINDOW BUMP (PUT expires_at), never a delete+recreate.
+function ExtendGrantModal({
+  orgId,
+  rule,
+  onClose,
+  onDone,
+}: {
+  orgId: string;
+  rule: PolicyRule;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const now = grantExpiry(rule, Date.now());
+  const [when, setWhen] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const iso = new Date(when).toISOString();
+    const { error } = await api.PUT("/api/v1/organizations/{orgId}/policies/{ruleId}", {
+      params: { path: { orgId, ruleId: rule.id } },
+      body: { expires_at: iso },
+    });
+    setBusy(false);
+    if (error) return setErr(extendErrorCopy(apiErrorCode(error))); // 409 grant_lapsed / not_temporary → legible copy
+    onDone();
+  }
+
+  return (
+    <Modal
+      title="Extend grant"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={busy || !when} onClick={submit}>
+            Extend
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-slate-400">
+          {now.state === "expired"
+            ? `This grant ${now.label}. Extending a lapsed grant is refused — create a new grant instead.`
+            : `This grant ${now.label}. Move its expiry to a later time (the grant is not re-created — only its window moves).`}
+        </p>
+        <Field label="New expiry">
+          <Input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </Field>
+        <ErrorText>{err}</ErrorText>
+      </div>
+    </Modal>
   );
 }
 
@@ -397,10 +491,18 @@ function RefText({ label, broken }: { label: string; broken: boolean }) {
 
 // RuleFormModal creates OR edits a rule. Editing = CREATE-THEN-DELETE (D-a5) via swapRule —
 // gap-free (allow-only union), never delete-first, with a LEGIBLE partial on delete-fail.
+// toLocalInput converts an ISO instant to a <input type="datetime-local"> value (local
+// time, "YYYY-MM-DDTHH:mm") so an edited grant prefills its current expiry.
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 function RuleFormModal({
   orgId,
   groups,
   resources,
+  members,
   editing,
   onClose,
   onDone,
@@ -408,21 +510,33 @@ function RuleFormModal({
   orgId: string;
   groups: UserGroup[];
   resources: Resource[];
+  members: Member[];
   editing: PolicyRule | null;
   onClose: () => void;
   onDone: (staleRuleId?: string) => void;
 }) {
+  const [srcKind, setSrcKind] = useState<"group" | "user">(editing?.src_kind ?? "group");
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
+  const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
   const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind ?? "group");
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");
+  // Temporary grant: an optional expiry (datetime-local). Empty = permanent.
+  const [expiresAt, setExpiresAt] = useState(editing?.expires_at ? toLocalInput(editing.expires_at) : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function bodyFor() {
-    return dstKind === "group"
-      ? { src_group_id: src, dst_kind: "group" as const, dst_group_id: dstGroup }
-      : { src_group_id: src, dst_kind: "resource" as const, dst_resource_id: dstResource };
+  function bodyFor(): CreatePolicyRuleRequest {
+    const srcPart =
+      srcKind === "user"
+        ? { src_kind: "user" as const, src_user_id: srcUser }
+        : { src_kind: "group" as const, src_group_id: src };
+    const dstPart =
+      dstKind === "group"
+        ? { dst_kind: "group" as const, dst_group_id: dstGroup }
+        : { dst_kind: "resource" as const, dst_resource_id: dstResource };
+    const expiry = expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {};
+    return { ...srcPart, ...dstPart, ...expiry };
   }
 
   async function submit() {
@@ -465,22 +579,49 @@ function RuleFormModal({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={busy || !src || (dstKind === "group" ? !dstGroup : !dstResource)} onClick={submit}>
+          <Button
+            disabled={busy || (srcKind === "group" ? !src : !srcUser) || (dstKind === "group" ? !dstGroup : !dstResource)}
+            onClick={submit}
+          >
             {editing ? "Save" : "Create"}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
-        <Field label="Source group">
-          <Select value={src} onChange={(e) => setSrc(e.target.value)}>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
+        <Field label="Source type">
+          <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user")}>
+            <option value="group">Group</option>
+            <option value="user">User (a single person)</option>
           </Select>
         </Field>
+        {srcKind === "group" ? (
+          <Field label="Source group">
+            <Select value={src} onChange={(e) => setSrc(e.target.value)}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
+          // D1 constraint mirrored client-side: only CURRENT active members are offered,
+          // so the picker never lets you build a rule the server would reject (user_not_member).
+          <Field label="Source user">
+            {members.length > 0 ? (
+              <Select value={srcUser} onChange={(e) => setSrcUser(e.target.value)}>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name || m.email}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input value="" disabled placeholder="No active members to grant" />
+            )}
+          </Field>
+        )}
         <Field label="Destination type">
           <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource")}>
             <option value="group">Group (device-to-device)</option>
@@ -508,6 +649,10 @@ function RuleFormModal({
             </Select>
           </Field>
         )}
+        {/* Temporary grant (optional): set an expiry to auto-revoke; leave empty for permanent. */}
+        <Field label="Expires (optional — leave empty for a permanent grant)">
+          <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+        </Field>
         <ErrorText>{err}</ErrorText>
       </div>
     </Modal>
