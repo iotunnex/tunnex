@@ -1908,6 +1908,7 @@ export interface components {
             email: string;
             email_verified: boolean;
             mfa_enrollment_required?: boolean;
+            recovery_codes_remaining?: number;
         };
         LoginResult: {
             /** @description true = complete the second step at /auth/mfa/verify (no session set). */

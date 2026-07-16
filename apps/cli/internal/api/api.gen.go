@@ -341,10 +341,11 @@ type AuditLogEntry struct {
 
 // AuthUser defines model for AuthUser.
 type AuthUser struct {
-	Email                 openapi_types.Email `json:"email"`
-	EmailVerified         bool                `json:"email_verified"`
-	Id                    openapi_types.UUID  `json:"id"`
-	MfaEnrollmentRequired *bool               `json:"mfa_enrollment_required,omitempty"`
+	Email                  openapi_types.Email `json:"email"`
+	EmailVerified          bool                `json:"email_verified"`
+	Id                     openapi_types.UUID  `json:"id"`
+	MfaEnrollmentRequired  *bool               `json:"mfa_enrollment_required,omitempty"`
+	RecoveryCodesRemaining *int                `json:"recovery_codes_remaining,omitempty"`
 }
 
 // ChangeRoleRequest defines model for ChangeRoleRequest.

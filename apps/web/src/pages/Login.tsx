@@ -122,7 +122,23 @@ function BrowserLogin() {
     const { data, error } = await api.POST("/api/v1/auth/mfa/verify", { body: { challenge, code } });
     setBusy(false);
     if (error || !data) {
-      setError(apiErrorMessage(error, "That code is not valid."));
+      // Legibility (loadOne): each failure is a distinct, named state — never a blank or a
+      // reassuring default. A capped-out or burned/expired challenge is DEAD (D7's cap is
+      // per-challenge), so route back to the password step; a wrong code stays on the code form.
+      const code = (error as { error?: { code?: string } } | undefined)?.error?.code;
+      if (code === "mfa_challenge_exhausted") {
+        setChallenge(null);
+        setCode("");
+        setError("Too many incorrect codes. Please sign in again.");
+        return;
+      }
+      if (code === "mfa_challenge_invalid") {
+        setChallenge(null);
+        setCode("");
+        setError("This sign-in has expired. Please sign in again.");
+        return;
+      }
+      setError(apiErrorMessage(error, "That code is not valid — check your authenticator app or use a recovery code."));
       return;
     }
     setUser(data);

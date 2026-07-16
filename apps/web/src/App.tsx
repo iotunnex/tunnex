@@ -3,6 +3,8 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "./brand";
 import { api } from "./lib/api";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { AuthLayout } from "./components/AuthLayout";
+import { MfaSettings } from "./components/MfaSettings";
 import { AppShell } from "./components/AppShell";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -55,6 +57,9 @@ export default function App() {
               device-code approval page. Authenticated but org-independent. */}
           <Route path="/cli-auth" element={<CliAuth />} />
           <Route path="/cli-device" element={<CliDevice />} />
+          {/* S7.5.5 D8: a MFA-enforcement-gated user (org requires 2FA, none set up) is routed here
+              by RequireAuth — enrollment only, until they confirm a TOTP. Org-independent. */}
+          <Route path="/enroll-mfa" element={<ForcedEnroll />} />
           <Route element={<RequireOrg><AppShell /></RequireOrg>}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
@@ -85,7 +90,32 @@ function RequireAuth() {
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
+  // S7.5.5 D8: an enrollment-gated user is confined to the enrollment ceremony until they set up
+  // 2FA. The SERVER enforces this (default-deny middleware, typed mfa_enrollment_required 403); this
+  // is the client-side routing so the user lands on the ceremony rather than hitting dead 403s.
+  if (state.user.mfa_enrollment_required && location.pathname !== "/enroll-mfa") {
+    return <Navigate to="/enroll-mfa" replace />;
+  }
   return <Outlet />;
+}
+
+// ForcedEnroll is the enrollment-gated landing (D8): the shared MfaSettings ceremony with a
+// blocking header + a sign-out escape. Confirming clears mfa_enrollment_required (MfaSettings updates
+// the auth user), and RequireAuth then releases the user to the app.
+function ForcedEnroll() {
+  const { logout } = useAuth();
+  return (
+    <AuthLayout>
+      <h1 className="text-xl font-semibold text-white">Set up two-factor authentication</h1>
+      <p className="mt-1 text-sm text-slate-400">Your organization requires 2FA. Finish setup to continue to Tunnex.</p>
+      <div className="mt-5">
+        <MfaSettings />
+      </div>
+      <button type="button" className="mt-4 text-xs text-slate-400 underline hover:text-slate-200" onClick={logout}>
+        Sign out
+      </button>
+    </AuthLayout>
+  );
 }
 
 // RequireNoOrg is RequireOrg's inverse, guarding the create-org step itself
