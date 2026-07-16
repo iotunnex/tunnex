@@ -369,6 +369,32 @@ func TestAdminResetClearsInflightChallenge(t *testing.T) {
 	}
 }
 
+// TestAuditLandsWithNullOrgWhenUnresolvable — finding #7, made EXECUTABLE (not comment-asserted): a
+// self-service MFA event for a user whose org can't be resolved (no membership) must still write a
+// first-class audit row — unscoped (null org_id), never dropped to slog only.
+func TestAuditLandsWithNullOrgWhenUnresolvable(t *testing.T) {
+	pool := testPool(t)
+	s, clock := newSvc(t, pool)
+	ctx := context.Background()
+	user := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, email) VALUES ($1,$2)`, user, "noorg-"+user.String()[:8]+"@ex.com"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, user) })
+
+	enroll(t, s, clock, user) // start + confirm -> mfa.enrolled audit, primaryOrg fails (no membership)
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_logs WHERE target_id=$1 AND action='mfa.enrolled' AND org_id IS NULL`,
+		user.String()).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("a membership-less user's mfa.enrolled audit must land UNSCOPED (null org), got %d null-org rows", n)
+	}
+}
+
 func code(err error) string {
 	var a *apierr.Error
 	if err != nil && errors.As(err, &a) {
