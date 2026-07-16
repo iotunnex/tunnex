@@ -53,3 +53,6 @@ apps/web/vite.config.d.ts
 apps/client/release/
 apps/client/build/helper/
 S.conf
+
+# stray go-build binary (cmd/walk-bootstrap dev tool)
+/apps/api/walk-bootstrap
