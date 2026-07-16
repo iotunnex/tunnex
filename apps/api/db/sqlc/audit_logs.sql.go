@@ -15,7 +15,7 @@ const insertAuditLog = `-- name: InsertAuditLog :one
 
 INSERT INTO audit_logs (org_id, actor_user_id, action, target_type, target_id, metadata)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at
+RETURNING id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at, actor_system
 `
 
 type InsertAuditLogParams struct {
@@ -48,12 +48,55 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 		&i.TargetID,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.ActorSystem,
+	)
+	return i, err
+}
+
+const insertSystemAuditLog = `-- name: InsertSystemAuditLog :one
+INSERT INTO audit_logs (org_id, actor_system, action, target_type, target_id, metadata)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at, actor_system
+`
+
+type InsertSystemAuditLogParams struct {
+	OrgID       pgtype.UUID `json:"org_id"`
+	ActorSystem *string     `json:"actor_system"`
+	Action      string      `json:"action"`
+	TargetType  *string     `json:"target_type"`
+	TargetID    *string     `json:"target_id"`
+	Metadata    []byte      `json:"metadata"`
+}
+
+// Append a system/service-initiated audit row: actor_user_id is NULL and the actor is NAMED in
+// actor_system (e.g. 'idp-sync'). The metadata carries the CAUSE. Used when no human initiated
+// the action (S7.5.2 idp-sync deprovisioning).
+func (q *Queries) InsertSystemAuditLog(ctx context.Context, arg InsertSystemAuditLogParams) (AuditLog, error) {
+	row := q.db.QueryRow(ctx, insertSystemAuditLog,
+		arg.OrgID,
+		arg.ActorSystem,
+		arg.Action,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Metadata,
+	)
+	var i AuditLog
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ActorUserID,
+		&i.Action,
+		&i.TargetType,
+		&i.TargetID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.ActorSystem,
 	)
 	return i, err
 }
 
 const listAuditLogsByOrg = `-- name: ListAuditLogsByOrg :many
-SELECT id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at FROM audit_logs
+SELECT id, org_id, actor_user_id, action, target_type, target_id, metadata, created_at, actor_system FROM audit_logs
 WHERE org_id = $1
   AND ($2::uuid IS NULL OR actor_user_id = $2)
   AND ($3::text IS NULL OR action = $3)
@@ -107,6 +150,7 @@ func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrg
 			&i.TargetID,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.ActorSystem,
 		); err != nil {
 			return nil, err
 		}

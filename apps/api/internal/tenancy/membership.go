@@ -55,19 +55,54 @@ func (s *MembershipService) WithDevicePusher(p DevicePusher) *MembershipService 
 // session. It refuses to deactivate the sole owner of any org (last-owner
 // invariant) so an org can never be orphaned.
 func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, targetUserID uuid.UUID) error {
+	_, err := s.deactivate(ctx, orgID, targetUserID, func(q *sqlc.Queries) error {
+		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})
+	})
+	return err
+}
+
+// DeactivateMemberBySync is the idp-sync (S7.5.2) deprovision path: the SAME full sweep as
+// DeactivateMember, but audited to a first-class NAMED system actor ("idp-sync") — not NULL, not a
+// borrowed admin — with the CAUSE in metadata, so a compliance reader sees "revoked by idp-sync
+// because <cause>" (same discipline as device.self_approved). cause is e.g. "disabled_in_directory".
+// Returns didAct=false when the user was ALREADY deactivated (idempotent no-op) so a still-listed
+// disabled member doesn't re-audit + re-push on every poll (#7).
+func (s *MembershipService) DeactivateMemberBySync(ctx context.Context, orgID, targetUserID uuid.UUID, cause string) (bool, error) {
+	return s.deactivate(ctx, orgID, targetUserID, func(q *sqlc.Queries) error {
+		return writeSystemAudit(ctx, q, orgID, "idp-sync", "user.deactivated", "user", targetUserID.String(),
+			map[string]any{"cause": cause})
+	})
+}
+
+// deactivate is the shared core: last-owner guard, status flip + CLI-cred sweep + audit (in one tx),
+// then live-session revoke + org-wide push. The audit row is written by writeAuditFn so the human
+// and system callers attribute the SAME action to different, legible actors. Returns didAct=false
+// (no error) when the user is ALREADY deactivated — an idempotent no-op: no second audit row, no
+// redundant sweep/push.
+func (s *MembershipService) deactivate(ctx context.Context, orgID, targetUserID uuid.UUID, writeAuditFn func(*sqlc.Queries) error) (bool, error) {
 	// target must belong to the acting org (authorization scope).
 	if _, err := s.q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return apierr.NotFound("member_not_found", "member not found")
+			return false, apierr.NotFound("member_not_found", "member not found")
 		}
-		return err
+		return false, err
+	}
+	// #7: already deactivated → idempotent no-op (no re-audit, no re-sweep, no re-push).
+	u, err := s.q.GetUserByID(ctx, targetUserID)
+	if err != nil {
+		return false, err
+	}
+	if u.Status == "deactivated" {
+		return false, nil
 	}
 	sole, err := s.q.CountOrgsWhereSoleOwner(ctx, targetUserID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if sole > 0 {
-		return apierr.Conflict("last_owner", "this user is the only owner of an organization and cannot be deactivated")
+		// Never orphan an org — even from sync. The sync caller degrades that config's health
+		// on this error so an operator sees "couldn't deprovision the sole owner".
+		return false, apierr.Conflict("last_owner", "this user is the only owner of an organization and cannot be deactivated")
 	}
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "deactivated"}); e != nil {
@@ -78,15 +113,15 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 		if e := cliauth.SweepUser(ctx, q, targetUserID); e != nil {
 			return e
 		}
-		return writeAudit(ctx, q, orgID, &actor, "user.deactivated", "user", targetUserID.String(), map[string]any{})
+		return writeAuditFn(q)
 	}); err != nil {
-		return err
+		return false, err
 	}
 	// Cut live access immediately (belt-and-suspenders with the SessionAuth
 	// status check that also 401s any in-flight session).
 	if s.revoker != nil {
 		if err := s.revoker.DeleteAllForUser(ctx, targetUserID); err != nil {
-			return err
+			return false, err
 		}
 	}
 	// Offboarding cascade: the user's peers fall out of every node's desired state
@@ -99,7 +134,7 @@ func (s *MembershipService) DeactivateMember(ctx context.Context, actor, orgID, 
 	if s.pusher != nil {
 		s.pusher.PushOrgNodes(ctx, orgID)
 	}
-	return nil
+	return true, nil
 }
 
 // ReactivateMember restores a frozen user; memberships/roles are intact.

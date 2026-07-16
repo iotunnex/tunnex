@@ -19,12 +19,20 @@ type Querier interface {
 	// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
 	// the audit event for a no-op re-add (idempotent, still 204).
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
+	// Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
+	// Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
+	// skips BOTH the audit and the org-wide re-push.
+	AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	// S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
 	// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
 	// Returns the owner so the caller can distinguish self-approval for the audit.
 	ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error)
+	// Flip an EXISTING manual group to idp_sync. The WHERE origin='manual' clause makes a re-bind of
+	// an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
+	// disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.
+	BindGroupToIdp(ctx context.Context, arg BindGroupToIdpParams) (UserGroup, error)
 	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
 	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
 	// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
@@ -56,6 +64,8 @@ type Querier interface {
 	// unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending
 	// is EXCLUDED from enforcement but INCLUDED in resource accounting (caps, pools, sweeps).
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
+	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
+	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
 	// Org roster size. Joins users to exclude soft-deleted accounts (whose
 	// membership row survives a soft-delete); deactivated members are still on the
 	// roster, so they are intentionally counted.
@@ -84,6 +94,9 @@ type Querier interface {
 	// status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
 	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
+	// ── group mapping (create / bind / unbind) ───────────────────────────────────────
+	// Create a fresh Tunnex group already bound to an IdP group (origin='idp_sync').
+	CreateIdpSyncGroup(ctx context.Context, arg CreateIdpSyncGroupParams) (UserGroup, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
@@ -102,6 +115,8 @@ type Querier interface {
 	// via its org). Clears a device's live status (on revoke) so a revoked device
 	// never reports stale online/handshake via the API.
 	DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error
+	// Clear a group's membership (used on un-map, after the origin flip back to manual).
+	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
@@ -132,6 +147,11 @@ type Querier interface {
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.
 	GetEnabledSSOConfigByProvider(ctx context.Context, arg GetEnabledSSOConfigByProviderParams) (SsoConfig, error)
+	// S7.5.2 IdP-group sync. Enterprise. All tenant-scoped by org_id.
+	// The reconciler reads the desired membership from a DirectoryProvider (Graph/etc.) and drives
+	// these to converge group_members(origin='idp_sync') — NEVER touching manual rows (disjoint by D1).
+	// ── sync configs (per org, per provider) ─────────────────────────────────────────
+	GetIdpSyncConfig(ctx context.Context, arg GetIdpSyncConfigParams) (IdpSyncConfig, error)
 	// lint:cross-org — the token hash IS the authorization key; lookup is by token,
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
@@ -142,6 +162,12 @@ type Querier interface {
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
 	GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, error)
+	// ── directory email → Tunnex org user ────────────────────────────────────────────
+	// Resolve a directory member's email to a Tunnex user that BELONGS to this org (membership
+	// join). A directory member with no matching org user is skipped by the reconciler (sync grants
+	// access to existing users; it does not JIT-provision — that's S2.5). Case-insensitive: the
+	// provider already lower-cases; users.email is stored lower-cased.
+	GetOrgUserByEmail(ctx context.Context, arg GetOrgUserByEmailParams) (GetOrgUserByEmailRow, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPlatformSecret(ctx context.Context, name string) (PlatformSecret, error)
@@ -177,6 +203,10 @@ type Querier interface {
 	// Create-if-absent; the caller reads-back on conflict. Never overwrites, so a
 	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
 	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error
+	// Append a system/service-initiated audit row: actor_user_id is NULL and the actor is NAMED in
+	// actor_system (e.g. 'idp-sync'). The metadata carries the CAUSE. Used when no human initiated
+	// the action (S7.5.2 idp-sync deprovisioning).
+	InsertSystemAuditLog(ctx context.Context, arg InsertSystemAuditLogParams) (AuditLog, error)
 	// Consume all outstanding tokens of a purpose for a user (e.g. before issuing a
 	// new password-reset token, so only the latest is valid).
 	InvalidateUserTokens(ctx context.Context, arg InvalidateUserTokensParams) error
@@ -231,9 +261,22 @@ type Querier interface {
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
+	// The poller's work-list: every org/provider with sync turned on. Deliberately CROSS-ORG — the
+	// background poller iterates all tenants; each config is reconciled org-scoped downstream.
+	// lint:cross-org
+	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)
+	// ── idp-origin membership (the reconcile target) ─────────────────────────────────
+	// Current idp-origin members of one group (user id + recorded directory external id). Filtered to
+	// origin='idp_sync' so a hand-added row could never appear here and get computed into a removal
+	// (belt over disjoint). The external id lets a later removal resolve delete-vs-moved (D3 sweep).
+	ListIdpGroupMembers(ctx context.Context, arg ListIdpGroupMembersParams) ([]ListIdpGroupMembersRow, error)
+	// ── idp_sync groups (the mappings to reconcile) ──────────────────────────────────
+	// Every Tunnex group bound to an IdP group for this org+provider — the units the reconciler
+	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.
+	ListIdpSyncGroups(ctx context.Context, arg ListIdpSyncGroupsParams) ([]ListIdpSyncGroupsRow, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
@@ -274,11 +317,22 @@ type Querier interface {
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	// One stamp for all three poll outcomes (the two-tier health, D2):
+	//   success  → ok=true,  advance_clock=true  (last_sync_at = now; error cleared)
+	//   transient→ ok=false, advance_clock=false (last_sync_at FROZEN at the last good sync — the
+	//              staleness the escalation tier measures; a Graph outage must NOT reset that clock)
+	//   gone     → ok=false, advance_clock=true  (fetch itself succeeded, so data is fresh: immediate
+	//              tier only, never escalates — a stable known-bad mapping, not a worsening outage)
+	// advance_clock also drives whether last_sync_error is cleared vs set.
+	RecordIdpSyncResult(ctx context.Context, arg RecordIdpSyncResultParams) error
 	// S7.3: pending -> revoked, FREEING the held pool IP (assigned_ip=NULL) so it returns to
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.
 	RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a
+	// manual membership even if one somehow shared the (group,user) key.
+	RemoveIdpGroupMember(ctx context.Context, arg RemoveIdpGroupMemberParams) (int64, error)
 	RemoveMember(ctx context.Context, arg RemoveMemberParams) (int64, error)
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
@@ -341,6 +395,8 @@ type Querier interface {
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
 	// lint:cross-org — keyed by id after cert authorization.
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
+	// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
+	UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) (UserGroup, error)
 	// Resize the org tunnel pool. The service refuses a shrink that would orphan
 	// live allocations (checked in Go before calling this); this just persists it.
 	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)
@@ -354,6 +410,10 @@ type Querier interface {
 	// row. Maps pubkey->active device on this node; an unknown pubkey is a no-op.
 	// rx/tx are raw gauges.
 	UpsertDeviceStatus(ctx context.Context, arg []UpsertDeviceStatusParams) *UpsertDeviceStatusBatchResults
+	// Connect / update a provider credential. The secret is pre-sealed (AES-GCM) by the caller;
+	// plaintext never reaches SQL. On re-set, credentials update but the sync-health columns are
+	// left intact (a credential rotation shouldn't fake a green health).
+	UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConfigParams) (IdpSyncConfig, error)
 	// Idempotent on (org_id, user_id).
 	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so

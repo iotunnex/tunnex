@@ -44,6 +44,9 @@ var walkBodies = map[string]string{
 	"createpolicyrule":  `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
 	"setzerotrustmode":  `{"mode":"off"}`,
 	"setdeviceapproval": `{"mode":"off"}`,
+	// S7.5.2 IdP-group sync gated ops (enterprise; each still 401s sessionless).
+	"putidpsyncconfig": `{"client_id":"x","client_secret":"y"}`,
+	"mapidpgroup":      `{"idp_group_id":"grp-walk"}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and

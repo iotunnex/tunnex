@@ -82,6 +82,11 @@ func toAuditLogEntry(a sqlc.AuditLog) api.AuditLogEntry {
 		id := openapi_types.UUID(uuid.UUID(a.ActorUserID.Bytes))
 		e.ActorId = &id
 	}
+	// A system/service-initiated event names its actor here (e.g. "idp-sync") instead of an
+	// actor_id — so a compliance reader can attribute the action (S7.5.2).
+	if a.ActorSystem != nil {
+		e.ActorSystem = a.ActorSystem
+	}
 	// details is the event metadata — secret-free by construction (the write side
 	// never puts secret material in it). Rendered as-is; malformed JSON degrades
 	// to an empty object rather than failing the whole page.

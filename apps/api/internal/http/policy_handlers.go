@@ -339,7 +339,17 @@ func (s apiServer) SetZeroTrustMode(ctx context.Context, req api.SetZeroTrustMod
 // ── mappers ─────────────────────────────────────────────────────────────────────
 
 func toAPIGroup(g sqlc.UserGroup) api.UserGroup {
-	return api.UserGroup{Id: g.ID, OrgId: g.OrgID, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+	out := api.UserGroup{Id: g.ID, OrgId: g.OrgID, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+	if g.Origin != "" { // S7.5.2: distinguish a directory-synced group from a manual one
+		o := api.UserGroupOrigin(g.Origin)
+		out.Origin = &o
+	}
+	if g.IdpProvider != nil {
+		p := api.UserGroupIdpProvider(*g.IdpProvider)
+		out.IdpProvider = &p
+	}
+	out.IdpGroupId = g.IdpGroupID
+	return out
 }
 
 func toAPIResource(r sqlc.Resource) api.Resource {

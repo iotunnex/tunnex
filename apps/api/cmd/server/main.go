@@ -158,11 +158,14 @@ func main() {
 	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
 	flowHealth := accesslog.NewHealth()
 
+	membersSvc := tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc)
+	idpSyncPort := apphttp.NewIdpSyncPort(pool, sealer, membersSvc, deviceSvc, logger)
+
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:                  tenancy.NewService(pool),
 		CliAuth:               cliAuthSvc,
 		Auth:                  authSvc,
-		Members:               tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc),
+		Members:               membersSvc,
 		Invites:               invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
 		Nodes:                 nodeSvc,
 		Devices:               deviceSvc,
@@ -170,6 +173,7 @@ func main() {
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
 		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
+		IdpSync:               idpSyncPort,
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
@@ -219,6 +223,11 @@ func main() {
 			}
 		}
 	}()
+	// S7.5.2 IdP-group sync poller (enterprise; no-op in the open build). Reconciles mapped
+	// directory groups every ~10min. Cancelled on shutdown.
+	pollCtx, pollCancel := context.WithCancel(context.Background())
+	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger)
+
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {
 		logger.Error("agent_channel_tls_failed", slog.String("error", err.Error()))
@@ -262,6 +271,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
+	pollCancel()         // stop the idp-sync poller
 	close(retentionStop) // stop the retention sweep loop
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))

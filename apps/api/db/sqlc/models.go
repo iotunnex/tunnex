@@ -41,6 +41,7 @@ type AuditLog struct {
 	TargetID    *string     `json:"target_id"`
 	Metadata    []byte      `json:"metadata"`
 	CreatedAt   time.Time   `json:"created_at"`
+	ActorSystem *string     `json:"actor_system"`
 }
 
 type AuthToken struct {
@@ -125,10 +126,27 @@ type DomainClaim struct {
 }
 
 type GroupMember struct {
-	OrgID     uuid.UUID `json:"org_id"`
-	GroupID   uuid.UUID `json:"group_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	CreatedAt time.Time `json:"created_at"`
+	OrgID         uuid.UUID `json:"org_id"`
+	GroupID       uuid.UUID `json:"group_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	Origin        string    `json:"origin"`
+	IdpExternalID *string   `json:"idp_external_id"`
+}
+
+type IdpSyncConfig struct {
+	ID            uuid.UUID          `json:"id"`
+	OrgID         uuid.UUID          `json:"org_id"`
+	Provider      string             `json:"provider"`
+	ClientID      string             `json:"client_id"`
+	SecretSealed  []byte             `json:"secret_sealed"`
+	TenantID      *string            `json:"tenant_id"`
+	Enabled       bool               `json:"enabled"`
+	LastSyncAt    pgtype.Timestamptz `json:"last_sync_at"`
+	LastSyncOk    bool               `json:"last_sync_ok"`
+	LastSyncError *string            `json:"last_sync_error"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 type Invitation struct {
@@ -260,4 +278,7 @@ type UserGroup struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Origin      string    `json:"origin"`
+	IdpProvider *string   `json:"idp_provider"`
+	IdpGroupID  *string   `json:"idp_group_id"`
 }

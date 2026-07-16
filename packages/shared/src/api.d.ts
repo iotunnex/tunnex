@@ -541,6 +541,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/idp-sync/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Connect / update a directory-sync provider credential (enterprise) */
+        put: operations["putIdpSyncConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/idp-sync/{provider}/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        /** Directory-sync two-tier health (enterprise) */
+        get: operations["getIdpSyncHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/idp-sync/{provider}/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile the org's mapped directory groups now (enterprise) */
+        post: operations["triggerIdpSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/idp-sync/{provider}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Map a directory group to a Tunnex group — new or an EMPTY manual group (enterprise) */
+        post: operations["mapIdpGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/idp-sync/{provider}/groups/{groupId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+                groupId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Un-map a directory group (reverts the Tunnex group to manual, empty) (enterprise) */
+        delete: operations["unmapIdpGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices": {
         parameters: {
             query?: never;
@@ -1147,6 +1248,50 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @enum {string} */
+            origin?: "manual" | "idp_sync";
+            /** @enum {string} */
+            idp_provider?: "microsoft" | "google";
+            idp_group_id?: string;
+        };
+        IdpSyncConfigRequest: {
+            client_id: string;
+            /** @description Sealed at rest (AES-GCM); never returned. */
+            client_secret: string;
+            /** @description Entra tenant id; omit for google. */
+            tenant_id?: string;
+            /** @default true */
+            enabled: boolean;
+        };
+        IdpSyncConfig: {
+            /** @enum {string} */
+            provider: "microsoft" | "google";
+            client_id: string;
+            secret_fingerprint?: string;
+            tenant_id?: string;
+            enabled: boolean;
+            /** Format: date-time */
+            last_sync_at?: string;
+            last_sync_ok: boolean;
+            last_sync_error?: string;
+            /** @description Two-tier derived health (D2). */
+            sync_health: string;
+        };
+        IdpSyncHealth: {
+            /** @enum {string} */
+            provider: "microsoft" | "google";
+            sync_health: string;
+            last_sync_ok: boolean;
+            /** Format: date-time */
+            last_sync_at?: string;
+            last_sync_error?: string;
+        };
+        IdpGroupMapRequest: {
+            /** @description The external directory group id. */
+            idp_group_id: string;
+            name?: string;
+            /** Format: uuid */
+            group_id?: string;
         };
         GroupRequest: {
             name: string;
@@ -1508,6 +1653,7 @@ export interface components {
             created_at: string;
             /** Format: uuid */
             actor_id?: string;
+            actor_system?: string;
             action: string;
             target_type?: string;
             target_id?: string;
@@ -2367,6 +2513,138 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AccessLogHealth"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    putIdpSyncConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdpSyncConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored config (secret never returned). Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdpSyncConfig"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getIdpSyncHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sync-health snapshot. Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdpSyncHealth"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    triggerIdpSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync ran; the resulting health snapshot. Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdpSyncHealth"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mapIdpGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdpGroupMapRequest"];
+            };
+        };
+        responses: {
+            /** @description The mapped (idp_sync) group. Open build → 403 edition_required. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGroup"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    unmapIdpGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                provider: "microsoft" | "google";
+                groupId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Un-mapped. Open build → 403 edition_required. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };
