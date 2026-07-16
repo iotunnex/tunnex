@@ -64,6 +64,10 @@ function BrowserLogin() {
   const [error, setError] = useState<string | null>(params.get("sso_error") ? ssoErrorText(params.get("sso_error")!) : null);
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<Meta | null>(null);
+  // S7.5.5: an MFA-pending login carries a challenge token (NOT a session) — the code step
+  // completes at /auth/mfa/verify. (Slice 3 polishes this UI; slice 1 keeps the flow working.)
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -92,12 +96,55 @@ function BrowserLogin() {
       setError(apiErrorMessage(error, "Invalid email or password."));
       return;
     }
-    setUser(data);
-    // Honor a `next` from RequireAuth, but ONLY a local path (leading single
-    // slash) so it can never become an open redirect to another origin.
+    if (data.mfa_required) {
+      setChallenge(data.challenge ?? null);
+      return; // NO session yet — the second step mints it
+    }
+    if (data.user) {
+      setUser(data.user);
+      finish();
+    }
+  }
+
+  // Honor a `next` from RequireAuth, but ONLY a local path (leading single slash) so it
+  // can never become an open redirect to another origin.
+  function finish() {
     const next = params.get("next");
     const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
     navigate(dest, { replace: true });
+  }
+
+  async function verify(e: FormEvent) {
+    e.preventDefault();
+    if (!challenge) return;
+    setBusy(true);
+    setError(null);
+    const { data, error } = await api.POST("/api/v1/auth/mfa/verify", { body: { challenge, code } });
+    setBusy(false);
+    if (error || !data) {
+      setError(apiErrorMessage(error, "That code is not valid."));
+      return;
+    }
+    setUser(data);
+    finish();
+  }
+
+  if (challenge) {
+    return (
+      <AuthLayout>
+        <h1 className="text-xl font-semibold text-white">Two-factor authentication</h1>
+        <p className="mt-1 text-sm text-slate-400">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+        <form onSubmit={verify} className="mt-5 space-y-4">
+          <Field label="Code">
+            <Input value={code} onChange={(e) => setCode(e.target.value)} required autoFocus autoComplete="one-time-code" />
+          </Field>
+          <ErrorText>{error}</ErrorText>
+          <Button type="submit" disabled={busy} className="w-full">
+            {busy ? "Verifying…" : "Verify"}
+          </Button>
+        </form>
+      </AuthLayout>
+    );
   }
 
   return (

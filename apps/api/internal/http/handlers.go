@@ -13,6 +13,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
+	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
@@ -93,6 +94,7 @@ type apiServer struct {
 	nodes     *nodes.Service
 	devices   *devices.Service
 	sessions  *session.Store
+	mfa       *mfa.Service // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	sso       ssoPort       // nil in the open build
 	policy    policyPort    // nil in the open build (Zero Trust, S7.1)
 	accessLog accessLogPort // nil in the open build (Zero Trust visibility, S7.5.1)

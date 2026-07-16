@@ -61,6 +61,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/mfa/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start TOTP enrollment (OPEN — all editions)
+         * @description S7.5.5. Returns the otpauth:// URI (QR) + base32 manual key ONCE. Verify-before-arm: the secret is unconfirmed until a valid code is submitted to /mfa/enroll/confirm.
+         */
+        post: operations["mfaEnrollStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/mfa/enroll/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm TOTP enrollment with a code (OPEN)
+         * @description S7.5.5. A valid code arms MFA and returns single-use recovery codes ONCE.
+         */
+        post: operations["mfaEnrollConfirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disenroll the current user's MFA (OPEN) */
+        delete: operations["mfaDisenroll"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/mfa/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a login MFA challenge (public — challenge-token bound)
+         * @description S7.5.5. Exchanges a login challenge + a TOTP or recovery code for a session cookie. The pending state is a challenge token, never a session (D6).
+         */
+        post: operations["mfaVerify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/verify-email": {
         parameters: {
             query?: never;
@@ -1788,6 +1865,32 @@ export interface components {
             email: string;
             email_verified: boolean;
         };
+        LoginResult: {
+            /** @description true = complete the second step at /auth/mfa/verify (no session set). */
+            mfa_required: boolean;
+            user?: components["schemas"]["AuthUser"];
+            /** @description Login MFA challenge token (present iff mfa_required). */
+            challenge?: string;
+            /** @description Challenge TTL in seconds. */
+            challenge_expires_in?: number;
+        };
+        MfaEnrollResult: {
+            /** @description otpauth:// URI for the QR code. */
+            otpauth_uri: string;
+            /** @description Base32 manual-entry key (shown once). */
+            secret: string;
+        };
+        MfaCodeRequest: {
+            code: string;
+        };
+        MfaVerifyRequest: {
+            challenge: string;
+            code: string;
+        };
+        MfaRecoveryCodes: {
+            /** @description Single-use recovery codes, shown ONCE. */
+            recovery_codes: string[];
+        };
         ActivityEntry: {
             action: string;
             target_type?: string;
@@ -2003,7 +2106,101 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credentials valid. */
+            /** @description Credentials valid. If MFA is required (self-enrolled or org-enforced), NO session cookie is set and `mfa_required=true` with a challenge; the client completes at /auth/mfa/verify. Otherwise the session cookie is set and `user` is returned.
+             *      */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mfaEnrollStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment started. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaEnrollResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mfaEnrollConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description MFA enrolled; recovery codes shown once. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaRecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mfaDisenroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MFA removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mfaVerify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description MFA passed; session established. */
             200: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];

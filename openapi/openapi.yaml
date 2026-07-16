@@ -72,7 +72,75 @@ paths:
             schema: { $ref: "#/components/schemas/LoginRequest" }
       responses:
         "200":
-          description: Credentials valid.
+          description: >
+            Credentials valid. If MFA is required (self-enrolled or org-enforced), NO session cookie is
+            set and `mfa_required=true` with a challenge; the client completes at /auth/mfa/verify.
+            Otherwise the session cookie is set and `user` is returned.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/mfa/enroll:
+    post:
+      operationId: mfaEnrollStart
+      summary: Start TOTP enrollment (OPEN — all editions)
+      description: "S7.5.5. Returns the otpauth:// URI (QR) + base32 manual key ONCE. Verify-before-arm: the secret is unconfirmed until a valid code is submitted to /mfa/enroll/confirm."
+      tags: [auth]
+      responses:
+        "200":
+          description: Enrollment started.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaEnrollResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/mfa/enroll/confirm:
+    post:
+      operationId: mfaEnrollConfirm
+      summary: Confirm TOTP enrollment with a code (OPEN)
+      description: "S7.5.5. A valid code arms MFA and returns single-use recovery codes ONCE."
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaCodeRequest" }
+      responses:
+        "200":
+          description: MFA enrolled; recovery codes shown once.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaRecoveryCodes" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/mfa:
+    delete:
+      operationId: mfaDisenroll
+      summary: Disenroll the current user's MFA (OPEN)
+      tags: [auth]
+      responses:
+        "204": { description: MFA removed. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/mfa/verify:
+    post:
+      operationId: mfaVerify
+      summary: Complete a login MFA challenge (public — challenge-token bound)
+      description: "S7.5.5. Exchanges a login challenge + a TOTP or recovery code for a session cookie. The pending state is a challenge token, never a session (D6)."
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaVerifyRequest" }
+      responses:
+        "200":
+          description: MFA passed; session established.
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
           content:
             application/json:
@@ -2458,6 +2526,46 @@ components:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         email_verified: { type: boolean }
+
+    LoginResult:
+      type: object
+      required: [mfa_required]
+      additionalProperties: false
+      properties:
+        mfa_required: { type: boolean, description: "true = complete the second step at /auth/mfa/verify (no session set)." }
+        user: { $ref: "#/components/schemas/AuthUser" }
+        challenge: { type: string, description: "Login MFA challenge token (present iff mfa_required)." }
+        challenge_expires_in: { type: integer, description: "Challenge TTL in seconds." }
+
+    MfaEnrollResult:
+      type: object
+      required: [otpauth_uri, secret]
+      additionalProperties: false
+      properties:
+        otpauth_uri: { type: string, description: "otpauth:// URI for the QR code." }
+        secret: { type: string, description: "Base32 manual-entry key (shown once)." }
+
+    MfaCodeRequest:
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code: { type: string, minLength: 1, maxLength: 20 }
+
+    MfaVerifyRequest:
+      type: object
+      required: [challenge, code]
+      additionalProperties: false
+      properties:
+        challenge: { type: string, minLength: 1, maxLength: 200 }
+        code: { type: string, minLength: 1, maxLength: 20 }
+
+    MfaRecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      additionalProperties: false
+      properties:
+        recovery_codes: { type: array, items: { type: string }, description: "Single-use recovery codes, shown ONCE." }
 
     ActivityEntry:
       type: object

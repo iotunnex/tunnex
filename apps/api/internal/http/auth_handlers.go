@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
@@ -33,24 +34,30 @@ func (s apiServer) Signup(ctx context.Context, req api.SignupRequestObject) (api
 	}, nil
 }
 
-// loginResponse is a custom oapi response object: its Visit sets the session
-// cookie (the strict interface hands Visit the ResponseWriter).
+// loginResponse is a custom oapi response object: its Visit sets the session cookie
+// ONLY when the login fully authenticated (setCookie). On an MFA challenge (D6) no
+// cookie is set — the pending state is a challenge token, never a session.
 type loginResponse struct {
-	body      api.AuthUser
+	body      api.LoginResult
 	sess      session.Session
+	setCookie bool
 	secure    bool
 	requestID string
 }
 
 func (r loginResponse) VisitLoginResponse(w http.ResponseWriter) error {
-	session.SetCookie(w, r.sess, r.secure)
+	if r.setCookie {
+		session.SetCookie(w, r.sess, r.secure)
+	}
 	w.Header().Set("X-Request-Id", r.requestID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	return json.NewEncoder(w).Encode(r.body)
 }
 
-// Login verifies credentials, then establishes a fresh session (fixation-safe).
+// Login verifies credentials. If the user has an armed TOTP (self-enrolled — S7.5.5 D1), NO
+// session is minted; a challenge token is returned and the client completes at /auth/mfa/verify.
+// Otherwise a fresh session is established (fixation-safe).
 func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.LoginResponseObject, error) {
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
@@ -59,20 +66,32 @@ func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.L
 	if err != nil {
 		return nil, err
 	}
+	reqID := middleware.GetReqID(ctx)
+
+	if s.mfa != nil {
+		challenged, cerr := s.mfa.HasConfirmedTOTP(ctx, user.ID)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if challenged {
+			token, ttl, e := s.mfa.CreateChallenge(ctx, user.ID)
+			if e != nil {
+				return nil, e
+			}
+			return loginResponse{body: api.LoginResult{MfaRequired: true, Challenge: &token, ChallengeExpiresIn: &ttl}, requestID: reqID}, nil
+		}
+	}
+
 	sess, err := s.sessions.Create(ctx, user.ID)
 	if err != nil {
 		return nil, err
 	}
-	return loginResponse{
-		body: api.AuthUser{
-			Id:            user.ID,
-			Email:         openapi_types.Email(user.Email),
-			EmailVerified: user.EmailVerifiedAt.Valid,
-		},
-		sess:      sess,
-		secure:    s.cookieSecure,
-		requestID: middleware.GetReqID(ctx),
-	}, nil
+	au := authUser(user)
+	return loginResponse{body: api.LoginResult{MfaRequired: false, User: &au}, sess: sess, setCookie: true, secure: s.cookieSecure, requestID: reqID}, nil
+}
+
+func authUser(user sqlc.User) api.AuthUser {
+	return api.AuthUser{Id: user.ID, Email: openapi_types.Email(user.Email), EmailVerified: user.EmailVerifiedAt.Valid}
 }
 
 // logoutResponse clears the session cookie in its Visit.

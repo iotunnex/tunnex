@@ -26,6 +26,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
+	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
@@ -153,6 +154,7 @@ func main() {
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
+	mfaSvc := mfa.NewService(pool, sealer, logger)
 
 	// S7.5.1 access-log health is SHARED: the flow-event Ingester (mTLS channel) records
 	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
@@ -170,6 +172,7 @@ func main() {
 		Nodes:                 nodeSvc,
 		Devices:               deviceSvc,
 		Sessions:              sessions,
+		Mfa:                   mfaSvc,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
 		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
