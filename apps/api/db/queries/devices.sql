@@ -158,11 +158,14 @@ ORDER BY assigned_ip;
 -- fetches the peers for its own node). A peer is present only while BOTH the
 -- device is active AND its owning user is active — so deactivating a user drops
 -- their peers from every node's desired state (and reactivation restores them).
+-- NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
+-- device drops from desired state regardless of approval status; the conjunction
+-- with status='active' excludes a pending+blocked device exactly once.
 SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
 WHERE d.node_id = $1
-  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at;
 

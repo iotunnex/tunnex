@@ -908,6 +908,96 @@ paths:
               schema: { $ref: "#/components/schemas/DeviceApproval" }
         default: { $ref: "#/components/responses/Error" }
 
+  # ── Device health / posture checks (S7.5.3, ENTERPRISE) ─────────────────────
+  # Per-check org opt-in (default OFF); the desktop client self-reports facts.
+  # CLIENT-REPORTED, NOT ATTESTED: deters honest non-compliance and gives an audit
+  # trail; a compromised device can misreport. Edition-gated: the open build
+  # returns 403 edition_required. Config RBAC: device_health:manage; the report
+  # endpoint is device-OWNER-authed (self-report).
+  /api/v1/organizations/{orgId}/health-checks:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listHealthChecks
+      summary: List the org's configured posture checks (enterprise)
+      tags: [devices]
+      responses:
+        "200":
+          description: Configured checks (a check with no entry is off).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/HealthCheck" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/health-checks/{checkKind}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: checkKind
+        in: path
+        required: true
+        schema: { type: string, enum: [os_version, disk_encryption] }
+    put:
+      operationId: putHealthCheck
+      summary: Opt the org into a posture check, or change its mode/param (enterprise)
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HealthCheckInput" }
+      responses:
+        "200":
+          description: The configured check (with the would-fail blast radius, best-effort).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthCheck" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteHealthCheck
+      summary: Turn a posture check off (idempotent; blocked devices unblock on their next report, enterprise)
+      tags: [devices]
+      responses:
+        "204":
+          description: Check off.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/devices/{deviceId}/health:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reportDeviceHealth
+      summary: Self-report device posture facts (owner only; server evaluates, enterprise)
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceHealthReport" }
+      responses:
+        "200":
+          description: The server's evaluation of this report.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceHealthResult" }
+        default: { $ref: "#/components/responses/Error" }
+
   # ── Zero Trust policy (S7.1, ENTERPRISE) ────────────────────────────────────
   # Model only (groups, resources, allow-rules, org mode). Enforcement is S7.2.
   # Every endpoint is edition-gated: the open build returns 403 edition_required.
@@ -2132,6 +2222,76 @@ components:
             On ENABLING (PUT off->on only), the count of existing active devices that stay
             active (grandfathered — a flip must not black-hole the fleet). Best-effort;
             absent when disabling.
+
+    HealthCheck:
+      type: object
+      required: [kind, mode]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [os_version, disk_encryption]
+          description: "S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b)."
+        mode:
+          type: string
+          enum: [warn, require]
+          description: >
+            warn = surface + audit only, never gates. require = a fresh non-compliant
+            report excludes the device from every gateway within seconds.
+        param:
+          type: object
+          nullable: true
+          description: >
+            Check parameters. os_version: {"min":{"macos":"14.0","windows":"10.0"}} —
+            a platform absent from "min" is not enforced. disk_encryption: none.
+        would_fail_count:
+          type: integer
+          description: >
+            On PUT only: how many devices' LAST report would fail this check
+            (best-effort blast radius). The config write itself blocks nothing —
+            a device's gate only ever flips on its own next report (D4 grandfather).
+
+    HealthCheckInput:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        mode: { type: string, enum: [warn, require] }
+        param: { type: object, nullable: true }
+
+    DeviceHealthReport:
+      type: object
+      required: [platform, os_version, disk_encrypted]
+      additionalProperties: false
+      description: >
+        Client-reported posture facts (S7.5.3). NOT attestation — a compromised
+        device can misreport; posture checks deter honest non-compliance and give
+        an audit trail (defense-in-depth, not a guarantee).
+      properties:
+        platform: { type: string, enum: [macos, windows, linux, other] }
+        os_version: { type: string, maxLength: 100 }
+        disk_encrypted: { type: boolean }
+        # Client-claimed collection time (informational); the server clock decides staleness.
+        collected_at: { type: string, format: date-time }
+
+    DeviceHealthResult:
+      type: object
+      required: [state, blocked, failed_checks]
+      additionalProperties: false
+      properties:
+        state: { type: string, enum: [compliant, noncompliant] }
+        # True while a require-mode check fails: the device is excluded from desired
+        # state (tunnel drops within seconds) until a later compliant report.
+        blocked: { type: boolean }
+        failed_checks:
+          type: array
+          items:
+            type: object
+            required: [kind, mode]
+            additionalProperties: false
+            properties:
+              kind: { type: string, enum: [os_version, disk_encryption] }
+              mode: { type: string, enum: [warn, require] }
 
     InviteRequest:
       type: object

@@ -47,6 +47,9 @@ var walkBodies = map[string]string{
 	// S7.5.2 IdP-group sync gated ops (enterprise; each still 401s sessionless).
 	"putidpsyncconfig": `{"client_id":"x","client_secret":"y"}`,
 	"mapidpgroup":      `{"idp_group_id":"grp-walk"}`,
+	// S7.5.3 device health gated ops (enterprise; each still 401s sessionless).
+	"puthealthcheck":     `{"mode":"warn"}`,
+	"reportdevicehealth": `{"platform":"macos","os_version":"14.0","disk_encrypted":true}`,
 }
 
 // TestSessionlessMutationsAre401 walks EVERY operation in the OpenAPI spec and
@@ -82,6 +85,7 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 			reqPath = strings.ReplaceAll(reqPath, "{groupId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{resourceId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{ruleId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{checkKind}", "disk_encryption")
 
 			var body io.Reader
 			if b, ok := walkBodies[strings.ToLower(op.OperationID)]; ok {

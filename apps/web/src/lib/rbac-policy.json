@@ -1,6 +1,7 @@
 {
   "admin": [
     "device:approve",
+    "device_health:manage",
     "member:invite",
     "member:list",
     "member:manage",
@@ -15,6 +16,7 @@
   ],
   "owner": [
     "device:approve",
+    "device_health:manage",
     "member:invite",
     "member:list",
     "member:manage",

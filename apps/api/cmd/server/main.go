@@ -175,6 +175,7 @@ func main() {
 		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		IdpSync:               idpSyncPort,
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
+		DeviceHealthEnabled:   apphttp.NewDeviceHealthEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
@@ -227,6 +228,12 @@ func main() {
 	// directory groups every ~10min. Cancelled on shutdown.
 	pollCtx, pollCancel := context.WithCancel(context.Background())
 	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger)
+	// S7.5.3 device-health staleness sweep (enterprise only): a stale report is
+	// ABSENCE, and absence never blocks — clears health_blocked past the TTL and
+	// pushes the affected orgs. Shares pollCtx (cancelled on shutdown).
+	if apphttp.NewDeviceHealthEdition() {
+		go deviceSvc.StartHealthSweeper(pollCtx)
+	}
 
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {

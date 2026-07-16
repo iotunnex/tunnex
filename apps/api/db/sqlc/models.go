@@ -89,21 +89,34 @@ type CliDeviceCode struct {
 }
 
 type Device struct {
-	ID         uuid.UUID          `json:"id"`
-	OrgID      uuid.UUID          `json:"org_id"`
-	UserID     uuid.UUID          `json:"user_id"`
-	NodeID     uuid.UUID          `json:"node_id"`
-	Name       string             `json:"name"`
-	Platform   string             `json:"platform"`
-	PublicKey  string             `json:"public_key"`
-	AssignedIp *string            `json:"assigned_ip"`
-	Status     string             `json:"status"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
-	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
-	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
-	FullTunnel bool               `json:"full_tunnel"`
-	ApprovedBy pgtype.UUID        `json:"approved_by"`
+	ID            uuid.UUID          `json:"id"`
+	OrgID         uuid.UUID          `json:"org_id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	NodeID        uuid.UUID          `json:"node_id"`
+	Name          string             `json:"name"`
+	Platform      string             `json:"platform"`
+	PublicKey     string             `json:"public_key"`
+	AssignedIp    *string            `json:"assigned_ip"`
+	Status        string             `json:"status"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	FullTunnel    bool               `json:"full_tunnel"`
+	ApprovedBy    pgtype.UUID        `json:"approved_by"`
+	HealthBlocked bool               `json:"health_blocked"`
+}
+
+type DeviceHealth struct {
+	DeviceID       uuid.UUID          `json:"device_id"`
+	Platform       string             `json:"platform"`
+	OsVersion      string             `json:"os_version"`
+	DiskEncrypted  bool               `json:"disk_encrypted"`
+	EvaluatedState string             `json:"evaluated_state"`
+	FailedChecks   []byte             `json:"failed_checks"`
+	CollectedAt    pgtype.Timestamptz `json:"collected_at"`
+	ReportedAt     time.Time          `json:"reported_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 type DeviceStatus struct {
@@ -200,6 +213,15 @@ type NodeJoinToken struct {
 	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
 	ConsumedNodeID pgtype.UUID        `json:"consumed_node_id"`
 	CreatedAt      time.Time          `json:"created_at"`
+}
+
+type OrgHealthCheck struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	CheckKind string    `json:"check_kind"`
+	Mode      string    `json:"mode"`
+	Param     []byte    `json:"param"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Organization struct {
