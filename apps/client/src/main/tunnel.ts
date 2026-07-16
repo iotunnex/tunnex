@@ -1,4 +1,4 @@
-import { HelperConnection, PROTOCOL_VERSION, type TunnelConfig, type TunnelStatus } from "./helperclient";
+import { HelperConnection, PROTOCOL_VERSION, type PostureStatus, type TunnelConfig, type TunnelStatus } from "./helperclient";
 
 // helperSocketPath is the local endpoint the privileged helper listens on. It is
 // platform-specific (a unix socket on macOS, a named pipe on Windows). The helper
@@ -70,6 +70,16 @@ export class TunnelController {
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "status" });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel status failed"));
     return this.withAddress(r.status ?? { state: "down" });
+  }
+
+  // posture reads local posture facts via the helper (S7.5.3) — read-only, never
+  // touches tunnel state or connection ownership. Throws on refusal (incl. an
+  // OLD helper's unknown_verb); the caller treats any throw as "facts
+  // indeterminate" and reports them ABSENT, never guessed.
+  async posture(): Promise<PostureStatus> {
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "posture_status" });
+    if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "posture status failed"));
+    return r.posture ?? {};
   }
 
   private startHeartbeat(): void {

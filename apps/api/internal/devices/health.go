@@ -50,10 +50,14 @@ const (
 )
 
 // HealthFacts is one client self-report (raw facts; the server evaluates).
+// DiskEncrypted nil = the client could NOT determine the fact (reported ABSENT,
+// never guessed) — taxonomy class 2: the configured check is SKIPPED (absence
+// never blocks) and stored as NULL, the "unknown" the dashboard surfaces.
+// Distinct from a garbled POSITIVE value (class 1), which gates.
 type HealthFacts struct {
 	Platform      string // macos | windows | linux | other
 	OSVersion     string
-	DiskEncrypted bool
+	DiskEncrypted *bool
 	CollectedAt   *time.Time // client-claimed; informational only
 }
 
@@ -94,7 +98,10 @@ func evaluateHealth(checks []HealthCheckConfig, f HealthFacts) HealthEvaluation 
 		failed := false
 		switch c.Kind {
 		case CheckDiskEncryption:
-			failed = !f.DiskEncrypted
+			if f.DiskEncrypted == nil {
+				continue // fact reported ABSENT (client couldn't read it) — absence never blocks
+			}
+			failed = !*f.DiskEncrypted
 		case CheckOSVersion:
 			var p osVersionParam
 			if err := json.Unmarshal(c.Param, &p); err != nil {
@@ -254,6 +261,7 @@ func (s *Service) ReportHealth(ctx context.Context, orgID, actorID, deviceID uui
 		}
 		if _, e := q.UpsertDeviceHealth(ctx, sqlc.UpsertDeviceHealthParams{
 			DeviceID: deviceID, Platform: facts.Platform, OsVersion: facts.OSVersion,
+			// nil = fact reported absent (client couldn't read it) — stored NULL.
 			DiskEncrypted: facts.DiskEncrypted, EvaluatedState: ev.State,
 			FailedChecks: fc, CollectedAt: collected,
 		}); e != nil {

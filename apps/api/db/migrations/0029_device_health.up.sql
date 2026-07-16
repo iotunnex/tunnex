@@ -11,7 +11,11 @@ CREATE TABLE device_health (
     device_id       uuid PRIMARY KEY REFERENCES devices (id) ON DELETE CASCADE,
     platform        text NOT NULL CHECK (platform IN ('macos', 'windows', 'linux', 'other')),
     os_version      text NOT NULL,
-    disk_encrypted  boolean NOT NULL,
+    -- NULL = the client could NOT determine this fact (e.g. the FileVault query
+    -- failed): reported ABSENT, never guessed. An absent fact is class-2 of the
+    -- three-way taxonomy (absence never blocks) — the check is skipped and the
+    -- NULL is the "unknown" the dashboard surfaces.
+    disk_encrypted  boolean,
     -- The last evaluation of these facts against the org's checks (D2 continuous
     -- eval). 'noncompliant' can be warn-only; blocking lives on devices.health_blocked.
     evaluated_state text NOT NULL CHECK (evaluated_state IN ('compliant', 'noncompliant')),

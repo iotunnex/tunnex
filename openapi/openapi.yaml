@@ -2261,7 +2261,7 @@ components:
 
     DeviceHealthReport:
       type: object
-      required: [platform, os_version, disk_encrypted]
+      required: [platform, os_version]
       additionalProperties: false
       description: >
         Client-reported posture facts (S7.5.3). NOT attestation — a compromised
@@ -2270,6 +2270,9 @@ components:
       properties:
         platform: { type: string, enum: [macos, windows, linux, other] }
         os_version: { type: string, maxLength: 100 }
+        # Omit when the client could NOT determine the fact (e.g. the FileVault
+        # query failed): reported ABSENT, never guessed. An absent fact never
+        # blocks (taxonomy class 2) — the check is skipped, surfaced as unknown.
         disk_encrypted: { type: boolean }
         # Client-claimed collection time (informational); the server clock decides staleness.
         collected_at: { type: string, format: date-time }

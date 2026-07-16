@@ -225,7 +225,7 @@ type UpsertDeviceHealthParams struct {
 	DeviceID       uuid.UUID          `json:"device_id"`
 	Platform       string             `json:"platform"`
 	OsVersion      string             `json:"os_version"`
-	DiskEncrypted  bool               `json:"disk_encrypted"`
+	DiskEncrypted  *bool              `json:"disk_encrypted"`
 	EvaluatedState string             `json:"evaluated_state"`
 	FailedChecks   []byte             `json:"failed_checks"`
 	CollectedAt    pgtype.Timestamptz `json:"collected_at"`

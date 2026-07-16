@@ -93,10 +93,17 @@ const (
 	VerbTunnelUp   Verb = "tunnel_up"   // bring the tunnel up from a validated config
 	VerbTunnelDown Verb = "tunnel_down" // tear the tunnel down (idempotent)
 	VerbStatus     Verb = "status"      // read-only handshake/transfer stats
+	// VerbPostureStatus (S7.5.3) reads device posture facts the app cannot read
+	// unprivileged (FileVault/BitLocker state). STRICTLY READ-ONLY: no config, no
+	// state change, no ownership — the privileged surface grows by reads only.
+	// ADDITIVE at ProtocolVersion 1: an older helper answers unknown_verb and the
+	// app degrades to reporting the fact ABSENT (never guessed) — a version bump
+	// would instead refuse ALL verbs from a paired old helper, including tunnel_up.
+	VerbPostureStatus Verb = "posture_status"
 )
 
 func validVerb(v Verb) bool {
-	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus
+	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus
 }
 
 // Request is one app→helper message. Config is REQUIRED for tunnel_up and must be
@@ -108,13 +115,15 @@ type Request struct {
 	Config   *TunnelConfig `json:"config,omitempty"`
 }
 
-// Response is one helper→app reply. Status is set only for a successful status/up.
+// Response is one helper→app reply. Status is set only for a successful status/up;
+// Posture only for a successful posture_status.
 type Response struct {
-	Version int           `json:"version"`
-	OK      bool          `json:"ok"`
-	Code    string        `json:"code,omitempty"`  // stable machine code on failure
-	Error   string        `json:"error,omitempty"` // human message on failure
-	Status  *TunnelStatus `json:"status,omitempty"`
+	Version int            `json:"version"`
+	OK      bool           `json:"ok"`
+	Code    string         `json:"code,omitempty"`  // stable machine code on failure
+	Error   string         `json:"error,omitempty"` // human message on failure
+	Status  *TunnelStatus  `json:"status,omitempty"`
+	Posture *PostureStatus `json:"posture,omitempty"`
 }
 
 // TunnelStatus is read-only live state (no secrets — never echoes keys).
@@ -124,6 +133,14 @@ type TunnelStatus struct {
 	LastHandshakeSec int64  `json:"last_handshake_sec,omitempty"` // unix seconds, 0 = never
 	RxBytes          uint64 `json:"rx_bytes,omitempty"`
 	TxBytes          uint64 `json:"tx_bytes,omitempty"`
+}
+
+// PostureStatus is read-only, locally-read device posture (S7.5.3). No secrets.
+// A nil field means the helper COULD NOT DETERMINE that fact (query failed /
+// unparseable output): it is reported absent upstream, never guessed — the
+// server's absence-never-blocks taxonomy depends on this honesty.
+type PostureStatus struct {
+	DiskEncrypted *bool `json:"disk_encrypted"` // FileVault (macOS) / BitLocker system drive (Windows)
 }
 
 // ProtocolError is a typed helper error carrying a stable machine code.

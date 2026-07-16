@@ -1,5 +1,5 @@
 import os from "node:os";
-import type { DeviceApi } from "./deviceconfig";
+import type { DeviceApi, HealthFacts, HealthReportResult } from "./deviceconfig";
 
 // createErr surfaces the server's TYPED error code (body.error.code) when present, so
 // a caller can match on it — e.g. the S3.7 `gateway_no_egress` full-tunnel refusal the
@@ -109,6 +109,22 @@ export class HttpDeviceApi implements DeviceApi {
     if (!r.ok) throw new Error(`list_organizations_failed: ${r.status}`);
     const orgs = (await r.json()) as Array<{ id: string }>;
     return orgs.map((o) => o.id);
+  }
+
+  // reportHealth POSTs one posture self-report (S7.5.3). Terminal answers RETURN
+  // ("unsupported" on 403 — open edition; "gone" on 404 — device no longer exists)
+  // so the monitor stops cleanly; anything else throws (inconclusive → backoff).
+  async reportHealth(deviceId: string, orgId: string, facts: HealthFacts): Promise<HealthReportResult | "unsupported" | "gone"> {
+    if (!orgId) throw new Error("no_org: inconclusive");
+    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/devices/${deviceId}/health`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(facts),
+    });
+    if (r.status === 403) return "unsupported";
+    if (r.status === 404 || r.status === 410) return "gone";
+    if (!r.ok) throw new Error(`report_health_failed: ${r.status}`);
+    return (await r.json()) as HealthReportResult;
   }
 
   async revokeDevice(deviceId: string): Promise<void> {

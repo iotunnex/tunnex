@@ -1660,7 +1660,7 @@ export interface components {
             /** @enum {string} */
             platform: "macos" | "windows" | "linux" | "other";
             os_version: string;
-            disk_encrypted: boolean;
+            disk_encrypted?: boolean;
             /** Format: date-time */
             collected_at?: string;
         };

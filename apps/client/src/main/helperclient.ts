@@ -7,7 +7,7 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export type AuthMode = "path_check" | "code_signing";
-export type Verb = "tunnel_up" | "tunnel_down" | "status";
+export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status";
 
 export interface TunnelConfig {
   private_key: string;
@@ -41,12 +41,20 @@ export interface TunnelStatus {
   address?: string;
 }
 
+// PostureStatus mirrors apps/helper PostureStatus (S7.5.3): read-only local
+// posture facts. null/undefined = the helper could not determine the fact —
+// reported ABSENT upstream, never guessed.
+export interface PostureStatus {
+  disk_encrypted?: boolean | null;
+}
+
 export interface HelperResponse {
   version: number;
   ok: boolean;
   code?: string;
   error?: string;
   status?: TunnelStatus;
+  posture?: PostureStatus;
 }
 
 // encodeFrame length-prefixes a JSON value. Throws if it would exceed the cap

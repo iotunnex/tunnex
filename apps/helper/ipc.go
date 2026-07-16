@@ -88,6 +88,10 @@ type Server struct {
 	writeTimeout time.Duration
 	sem          chan struct{} // caps concurrent connections against a local flood
 
+	// posture reads local device posture facts (S7.5.3) — the platform collector
+	// by default, injectable so dispatch tests never exec fdesetup/powershell.
+	posture func() PostureStatus
+
 	mu    sync.Mutex
 	owner net.Conn // the connection that brought the current tunnel up (nil if down)
 }
@@ -103,6 +107,7 @@ func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Se
 		readTimeout:  defaultReadTimeout,
 		writeTimeout: defaultWriteTimeout,
 		sem:          make(chan struct{}, defaultMaxConns),
+		posture:      collectPosture,
 	}
 }
 
@@ -258,6 +263,12 @@ func (s *Server) dispatch(req *Request) *Response {
 			return errorResponse(codeOf(err), err.Error())
 		}
 		return okResponse(&st)
+	case VerbPostureStatus:
+		// Read-only, never fails: an unreadable fact comes back nil (reported
+		// absent upstream, never guessed) rather than an error — the caller has
+		// nothing to retry and absence is a first-class honest answer.
+		p := s.posture()
+		return &Response{Version: ProtocolVersion, OK: true, Posture: &p}
 	default:
 		return errorResponse("unknown_verb", "unknown verb")
 	}

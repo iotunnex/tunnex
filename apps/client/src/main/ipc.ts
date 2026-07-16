@@ -8,6 +8,8 @@ import { HttpDeviceApi } from "./httpdeviceapi";
 import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
 import { ApprovalMonitor } from "./approvalmonitor";
+import { HealthMonitor } from "./healthmonitor";
+import type { HealthFacts } from "./deviceconfig";
 import { ensureHelperInstalled } from "./helperinstall";
 import { notifyTunnel } from "./notify";
 import { trayStateFor, type TrayState } from "./tray";
@@ -96,6 +98,7 @@ export function registerIpc(
   // authoritative. Runs at most once per monitor (RevocationMonitor fires once).
   const onRevoked = async (origin: string): Promise<void> => {
     stopMonitor();
+    stopHealthMonitor(); // the device is gone — nothing left to report on
     await tunnel.down().catch(() => {});
     await clearTunnelConfigForOrigin(origin, deviceApiFor(origin), tunnelStore).catch(() => {});
     lastSynth = { state: "revoked" }; // survive a renderer remount until next connect/disconnect
@@ -131,6 +134,33 @@ export function registerIpc(
     await onRevoked(origin);
   };
 
+  // --- device-health report monitor (S7.5.3 — sibling of the revocation monitor) --
+  // App-level SINGLETON. Runs while connected; self-reports posture facts on the
+  // 10-min jittered cadence. Stops on disconnect / logout / origin change, and
+  // stops ITSELF on a terminal server answer (403 open-edition / 404 gone).
+  let healthMonitor: HealthMonitor | null = null;
+  const stopHealthMonitor = (): void => {
+    healthMonitor?.stop();
+    healthMonitor = null;
+  };
+  // collectHealthFacts gathers what main can read directly (platform, OS product
+  // version) + the privileged fact via the helper's read-only posture verb. A fact
+  // that can't be determined (helper old/unreachable, query failed) is OMITTED —
+  // reported absent, never guessed (the taxonomy's absence class).
+  const collectHealthFacts = async (): Promise<HealthFacts> => {
+    const platform =
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : process.platform === "linux" ? "linux" : "other";
+    const os_version = (process as NodeJS.Process & { getSystemVersion?: () => string }).getSystemVersion?.() ?? "";
+    const facts: HealthFacts = { platform, os_version };
+    try {
+      const p = await tunnel.posture();
+      if (typeof p.disk_encrypted === "boolean") facts.disk_encrypted = p.disk_encrypted;
+    } catch {
+      /* helper old (unknown_verb) or unreachable — the fact stays absent */
+    }
+    return facts;
+  };
+
   // --- the tunnel controller -----------------------------------------------------
   let requestedFullTunnel = DEFAULT_FULL_TUNNEL; // set by connect() before up()
   const tunnel = new TunnelController(
@@ -146,7 +176,10 @@ export function registerIpc(
       if (status.state === "failed") {
         // The helper died / fail-closed: the monitor is moot (no tunnel to watch) and
         // the user must be told loudly. onLost fires once, so this fires once.
+        // The health monitor is connection-scoped too (its posture reads ride the
+        // same helper connection) — it restarts on the next connect.
         stopMonitor();
+        stopHealthMonitor();
         notifyTunnel("failed");
       }
     },
@@ -161,6 +194,7 @@ export function registerIpc(
     // deviceId below, an old monitor must not linger and later tear down THIS tunnel.
     stopMonitor();
     stopApprovalMonitor();
+    stopHealthMonitor();
     lastSynth = null; // a fresh connect clears any stale revoked/pending state
     requestedFullTunnel = fullTunnel;
     // LEGACY MIGRATION (reduction 2, TERMINAL FORM — outcome-degraded): a stored config from
@@ -237,6 +271,12 @@ export function registerIpc(
     if (cred && sc?.deviceId) {
       monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
+      // S7.5.3: self-report posture while connected. First report early (~15s),
+      // then every 10min (+ fixed jitter). Terminal 403 (open edition) stops it
+      // until the next connect. Result surfacing (warn banner / blocked state)
+      // is the S7.5.3 UI slice; the report loop is what matters here.
+      healthMonitor = new HealthMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), collectHealthFacts);
+      healthMonitor.start();
     }
     emit(status);
     notifyTunnel("connected");
@@ -246,6 +286,7 @@ export function registerIpc(
   const disconnect = async (): Promise<void> => {
     stopMonitor();
     stopApprovalMonitor(); // also cancel any awaiting-approval poll (disconnect = stop waiting)
+    stopHealthMonitor();
     lastSynth = null;
     await tunnel.down();
     emit({ state: "down" });
@@ -275,6 +316,7 @@ export function registerIpc(
     const cred = store.load();
     stopMonitor();
     stopApprovalMonitor();
+    stopHealthMonitor();
     lastSynth = null;
     await tunnel.down().catch(() => {});
     emitTray("disconnected");
@@ -318,6 +360,7 @@ export function registerIpc(
       // auto-revoke the old-origin device/config — it stays origin-keyed for the UI.
       stopMonitor();
       stopApprovalMonitor();
+      stopHealthMonitor();
       lastSynth = null;
       await tunnel.down().catch(() => {});
       emitTray("disconnected");

@@ -13,8 +13,10 @@ func diskCheck(mode string) HealthCheckConfig {
 	return HealthCheckConfig{Kind: CheckDiskEncryption, Mode: mode}
 }
 
+func bp(b bool) *bool { return &b }
+
 func TestEvaluateHealthNoChecksIsCompliant(t *testing.T) {
-	ev := evaluateHealth(nil, HealthFacts{Platform: "macos", OSVersion: "14.5", DiskEncrypted: false})
+	ev := evaluateHealth(nil, HealthFacts{Platform: "macos", OSVersion: "14.5", DiskEncrypted: bp(false)})
 	if ev.State != "compliant" || ev.Blocked || len(ev.FailedChecks) != 0 {
 		t.Fatalf("no configured checks must evaluate compliant (default-off by construction): %+v", ev)
 	}
@@ -24,13 +26,17 @@ func TestEvaluateHealthDiskEncryption(t *testing.T) {
 	cases := []struct {
 		name      string
 		mode      string
-		encrypted bool
+		encrypted *bool
 		wantState string
 		wantBlock bool
 	}{
-		{"require+encrypted passes", ModeRequire, true, "compliant", false},
-		{"require+unencrypted blocks", ModeRequire, false, "noncompliant", true},
-		{"warn+unencrypted never gates", ModeWarn, false, "noncompliant", false},
+		{"require+encrypted passes", ModeRequire, bp(true), "compliant", false},
+		{"require+unencrypted blocks", ModeRequire, bp(false), "noncompliant", true},
+		{"warn+unencrypted never gates", ModeWarn, bp(false), "noncompliant", false},
+		// Taxonomy class 2: a fact the client could NOT determine is reported
+		// ABSENT (nil) and NEVER blocks — even under a require-mode check. This
+		// is absence, not a garbled positive (which would gate).
+		{"require+indeterminate fact never blocks", ModeRequire, nil, "compliant", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -65,7 +71,7 @@ func TestEvaluateHealthOSVersionPerPlatform(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ev := evaluateHealth([]HealthCheckConfig{check},
-				HealthFacts{Platform: c.platform, OSVersion: c.version, DiskEncrypted: true})
+				HealthFacts{Platform: c.platform, OSVersion: c.version, DiskEncrypted: bp(true)})
 			if ev.Blocked != c.wantBlock {
 				t.Fatalf("platform=%s version=%s: blocked=%v, want %v", c.platform, c.version, ev.Blocked, c.wantBlock)
 			}
@@ -77,7 +83,7 @@ func TestEvaluateHealthUnparseableVersionBlocksUnderRequire(t *testing.T) {
 	// A garbled version under an opted-in require min is a POSITIVE bad report
 	// (not absence): it gates. Absence semantics apply only to missing reports.
 	ev := evaluateHealth([]HealthCheckConfig{osCheck(ModeRequire, `{"macos":"14.0"}`)},
-		HealthFacts{Platform: "macos", OSVersion: "garbage", DiskEncrypted: true})
+		HealthFacts{Platform: "macos", OSVersion: "garbage", DiskEncrypted: bp(true)})
 	if !ev.Blocked {
 		t.Fatal("unparseable os_version under a require-mode min must block")
 	}
@@ -85,12 +91,12 @@ func TestEvaluateHealthUnparseableVersionBlocksUnderRequire(t *testing.T) {
 
 func TestEvaluateHealthWarnAndRequireCombine(t *testing.T) {
 	checks := []HealthCheckConfig{diskCheck(ModeWarn), osCheck(ModeRequire, `{"macos":"14.0"}`)}
-	ev := evaluateHealth(checks, HealthFacts{Platform: "macos", OSVersion: "13.0", DiskEncrypted: false})
+	ev := evaluateHealth(checks, HealthFacts{Platform: "macos", OSVersion: "13.0", DiskEncrypted: bp(false)})
 	if !ev.Blocked || ev.State != "noncompliant" || len(ev.FailedChecks) != 2 {
 		t.Fatalf("want both checks failed and blocked (require wins): %+v", ev)
 	}
 	// Warn-only failure must not block.
-	ev = evaluateHealth(checks, HealthFacts{Platform: "macos", OSVersion: "14.1", DiskEncrypted: false})
+	ev = evaluateHealth(checks, HealthFacts{Platform: "macos", OSVersion: "14.1", DiskEncrypted: bp(false)})
 	if ev.Blocked || ev.State != "noncompliant" || len(ev.FailedChecks) != 1 {
 		t.Fatalf("warn-only failure must surface without gating: %+v", ev)
 	}

@@ -477,7 +477,7 @@ type DeviceApprovalMode string
 // DeviceHealthReport Client-reported posture facts (S7.5.3). NOT attestation — a compromised device can misreport; posture checks deter honest non-compliance and give an audit trail (defense-in-depth, not a guarantee).
 type DeviceHealthReport struct {
 	CollectedAt   *time.Time                 `json:"collected_at,omitempty"`
-	DiskEncrypted bool                       `json:"disk_encrypted"`
+	DiskEncrypted *bool                      `json:"disk_encrypted,omitempty"`
 	OsVersion     string                     `json:"os_version"`
 	Platform      DeviceHealthReportPlatform `json:"platform"`
 }
