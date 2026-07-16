@@ -162,13 +162,28 @@ func (s *Service) CreateChallenge(ctx context.Context, userID uuid.UUID) (string
 // authenticated user id (the handler then mints the full session). viaRecovery flags a
 // recovery-code login (a security signal). The challenge + TOTP rows are locked so the
 // attempt-count, replay clock, and burn all serialize.
+type verifyOutcome int
+
+const (
+	outOK verifyOutcome = iota
+	outChallengeGone
+	outInvalid
+	outExhausted
+)
+
 func (s *Service) VerifyChallenge(ctx context.Context, rawToken, code string) (sqlc.User, bool, error) {
 	var userID uuid.UUID
 	var viaRecovery bool
+	var outcome verifyOutcome
+	// The tx COMMITS regardless of the code being right or wrong — the attempt-count increment
+	// and the burn-on-exhaustion MUST persist. A wrong code is signalled by an outcome value,
+	// NOT by returning an error (which would roll back the increment — the terminal cap would
+	// then never fire). Only a genuine infra error rolls back.
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		ch, e := q.GetMfaChallengeForUpdate(ctx, hashToken(rawToken))
 		if errors.Is(e, pgx.ErrNoRows) {
-			return apierr.New(401, "mfa_challenge_invalid", "this login challenge is invalid or has expired — sign in again")
+			outcome = outChallengeGone
+			return nil
 		}
 		if e != nil {
 			return e
@@ -189,6 +204,7 @@ func (s *Service) VerifyChallenge(ctx context.Context, rawToken, code string) (s
 				if e := q.SetTOTPLastTimestep(ctx, sqlc.SetTOTPLastTimestepParams{UserID: ch.UserID, LastUsedTimestep: &ts}); e != nil {
 					return e
 				}
+				outcome = outOK
 				return q.DeleteMfaChallenge(ctx, ch.ID) // burn on success
 			}
 		} else if !errors.Is(e, pgx.ErrNoRows) {
@@ -198,6 +214,7 @@ func (s *Service) VerifyChallenge(ctx context.Context, rawToken, code string) (s
 		// Recovery code (atomic single-use).
 		if _, e := q.ConsumeRecoveryCode(ctx, sqlc.ConsumeRecoveryCodeParams{UserID: ch.UserID, CodeHash: HashCode(code)}); e == nil {
 			viaRecovery = true
+			outcome = outOK
 			if e := q.DeleteMfaChallenge(ctx, ch.ID); e != nil { // burn on success
 				return e
 			}
@@ -206,21 +223,28 @@ func (s *Service) VerifyChallenge(ctx context.Context, rawToken, code string) (s
 			return e
 		}
 
-		// Wrong. Count against the terminal cap; burn on exhaustion.
+		// Wrong. Count against the terminal cap; burn on exhaustion. Committed either way.
 		n, e := q.IncrementMfaChallengeAttempts(ctx, ch.ID)
 		if e != nil {
 			return e
 		}
 		if int(n) >= maxAttempts {
-			if e := q.DeleteMfaChallenge(ctx, ch.ID); e != nil {
-				return e
-			}
-			return apierr.New(401, "mfa_challenge_exhausted", "too many attempts — sign in again")
+			outcome = outExhausted
+			return q.DeleteMfaChallenge(ctx, ch.ID)
 		}
-		return apierr.New(401, "invalid_code", "that code is not valid")
+		outcome = outInvalid
+		return nil
 	})
 	if err != nil {
 		return sqlc.User{}, false, err
+	}
+	switch outcome {
+	case outChallengeGone:
+		return sqlc.User{}, false, apierr.New(401, "mfa_challenge_invalid", "this login challenge is invalid or has expired — sign in again")
+	case outExhausted:
+		return sqlc.User{}, false, apierr.New(401, "mfa_challenge_exhausted", "too many attempts — sign in again")
+	case outInvalid:
+		return sqlc.User{}, false, apierr.New(401, "invalid_code", "that code is not valid")
 	}
 	user, err := s.q.GetUserByID(ctx, userID)
 	if err != nil {

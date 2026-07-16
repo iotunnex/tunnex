@@ -709,6 +709,8 @@ Ledgered at story-end review (S5.1 5/n+):
 - **Expired/consumed CLI-code GC**: `cli_auth_codes` (60s) and `cli_device_codes` (15m) rows are
   never deleted after expiry/consumption → unbounded growth. Add a periodic
   `DELETE … WHERE expires_at < now() OR consumed_at IS NOT NULL` sweep (a cron/boot job). → S11 hardening.
+  **S7.5.5 adds `mfa_challenges` to this SAME class** — burned-on-resolution but expired-and-abandoned rows
+  accumulate; rides the same GC fix (`DeleteExpiredMfaChallenges` query already exists). No sweeper built now.
 - **Rate limits for the public CLI endpoints** (cliToken code-guessing; cliDeviceStart/cliDeviceToken
   device-code brute-force + phishing amplification) → S11.3. The device-flow phishing surface is
   inherent to device-code flows; mitigated now by the anti-phishing warning on /cli-device, fully
