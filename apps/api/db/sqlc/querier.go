@@ -56,6 +56,7 @@ type Querier interface {
 	// gates). System-wide by design: clears health_blocked wherever the backing
 	// report has gone stale, returning the affected devices for auditing + org push.
 	ClearStaleHealthBlocks(ctx context.Context, ttl pgtype.Interval) ([]ClearStaleHealthBlocksRow, error)
+	// lint:cross-org — user-scoped credential.
 	// Arm enrollment: only an UNCONFIRMED row flips to confirmed, stamping the confirming code's
 	// timestep as the replay clock so the very first login can't replay the confirmation code.
 	ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64, error)
@@ -70,6 +71,7 @@ type Querier interface {
 	// lint:cross-org — the token itself is the credential; the org comes from the
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
+	// lint:cross-org — user-scoped credential.
 	// Atomic single-use: only an UNUSED code for THIS user is burned; returns its id on success,
 	// 0 rows if already used / not found (no which-code oracle to the caller).
 	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (uuid.UUID, error)
@@ -101,6 +103,7 @@ type Querier interface {
 	// global deactivation; each row's org_id is used in the correlated subquery.
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// lint:cross-org — user-scoped credential.
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateCliAuthCode(ctx context.Context, arg CreateCliAuthCodeParams) (CliAuthCode, error)
@@ -120,6 +123,7 @@ type Querier interface {
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
 	// ── mfa_challenges (the login second-step token — NOT a session) ───────────────────
+	// lint:cross-org — user-scoped login challenge (pre-session, no org context).
 	CreateMfaChallenge(ctx context.Context, arg CreateMfaChallengeParams) error
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
@@ -147,16 +151,20 @@ type Querier interface {
 	// audit-gap by construction). Composes with ExtendPolicyRule on the row lock: a grant an
 	// extend rescued (expires_at moved to the future) no longer matches expires_at <= now().
 	DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error)
+	// lint:cross-org — user-scoped login challenge (GC, ledgered to S11).
 	DeleteExpiredMfaChallenges(ctx context.Context) error
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
+	// lint:cross-org — user-scoped login challenge.
 	// Burn — on SUCCESS or on cap exhaustion (a token never survives its own resolution).
 	DeleteMfaChallenge(ctx context.Context, id uuid.UUID) error
 	// Turn a check OFF (delete the opt-in row).
 	DeleteOrgHealthCheck(ctx context.Context, arg DeleteOrgHealthCheckParams) (int64, error)
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
+	// lint:cross-org — user-scoped credential.
 	DeleteRecoveryCodesForUser(ctx context.Context, userID uuid.UUID) error
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
+	// lint:cross-org — user-scoped credential.
 	// Disenroll (self re-enroll clears via upsert; explicit delete for self-disenroll + admin-reset).
 	DeleteTOTP(ctx context.Context, userID uuid.UUID) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
@@ -184,6 +192,7 @@ type Querier interface {
 	// credential_expired UX line).
 	GetCliCredentialByHash(ctx context.Context, tokenHash []byte) (CliCredential, error)
 	GetCliDeviceCodeByDeviceHash(ctx context.Context, deviceCodeHash []byte) (CliDeviceCode, error)
+	// lint:cross-org — user-scoped credential.
 	// Verify path: read the CONFIRMED secret + replay clock under a row lock, so the replay-guard
 	// read+update can't interleave with a concurrent verify.
 	GetConfirmedTOTPForUpdate(ctx context.Context, userID uuid.UUID) (UserTotp, error)
@@ -220,13 +229,14 @@ type Querier interface {
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
+	// lint:cross-org — user-scoped login challenge; the token itself is the credential.
 	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
 	GetMfaChallengeForUpdate(ctx context.Context, tokenHash []byte) (MfaChallenge, error)
 	// lint:cross-org — the mTLS client cert IS the identity; the org comes from the
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
-	// ── org_mfa (enforce flag — slice 2 logic) ────────────────────────────────────────
+	// ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
 	GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, error)
@@ -250,6 +260,7 @@ type Querier interface {
 	GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleForUpdateParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
+	// lint:cross-org — user-scoped credential.
 	GetTOTP(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -258,6 +269,7 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
+	// lint:cross-org — user-scoped login challenge.
 	IncrementMfaChallengeAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
 	// hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
@@ -279,6 +291,7 @@ type Querier interface {
 	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
 	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error
 	// ── user_recovery_codes (single-use, hashed) ──────────────────────────────────────
+	// lint:cross-org — user-scoped credential.
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	// Append a system/service-initiated audit row: actor_user_id is NULL and the actor is NAMED in
 	// actor_system (e.g. 'idp-sync'). The metadata carries the CAUSE. Used when no human initiated
@@ -466,6 +479,7 @@ type Querier interface {
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
+	// lint:cross-org — user-scoped credential.
 	// Replay guard: advance the last-accepted timestep after a successful verify.
 	SetTOTPLastTimestep(ctx context.Context, arg SetTOTPLastTimestepParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
@@ -529,7 +543,10 @@ type Querier interface {
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
 	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
 	// S7.5.5 MFA / TOTP queries. Auth-plane; enrollment OPEN, enforce enterprise (app layer).
+	// The user_totp / user_recovery_codes / mfa_challenges tables are USER-scoped credentials (like a
+	// user's password), NOT org tenant data — every query below is `-- lint:cross-org` by design.
 	// ── user_totp (verify-before-arm + replay guard) ──────────────────────────────────
+	// lint:cross-org — user-scoped credential (keyed by user, not org).
 	// Start/RE-start enrollment: store a fresh SEALED secret, unconfirmed. Re-generating before
 	// confirming replaces the old secret and clears the replay clock — an unconfirmed secret never
 	// gates login, so overwriting it is safe.

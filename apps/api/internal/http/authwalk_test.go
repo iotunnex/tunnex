@@ -35,6 +35,8 @@ var walkBodies = map[string]string{
 	// S5.1 CLI-auth gated ops (cliToken/cliDeviceStart/cliDeviceToken are public).
 	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,
+	// S7.5.5 MFA: enroll/confirm is session-gated (mfaVerify is public; enroll-start/disenroll have no body).
+	"mfaenrollconfirm": `{"code":"123456"}`,
 	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
 	"creategroup":       `{"name":"Walk"}`,
 	"updategroup":       `{"name":"Walk"}`,

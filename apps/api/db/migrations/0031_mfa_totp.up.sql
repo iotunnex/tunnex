@@ -46,3 +46,5 @@ CREATE TABLE org_mfa (
     enforce    boolean NOT NULL DEFAULT false,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON org_mfa
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
