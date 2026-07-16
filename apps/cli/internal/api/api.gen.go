@@ -788,6 +788,19 @@ type LoginRequest struct {
 	Password string              `json:"password"`
 }
 
+// LoginResult defines model for LoginResult.
+type LoginResult struct {
+	// Challenge Login MFA challenge token (present iff mfa_required).
+	Challenge *string `json:"challenge,omitempty"`
+
+	// ChallengeExpiresIn Challenge TTL in seconds.
+	ChallengeExpiresIn *int `json:"challenge_expires_in,omitempty"`
+
+	// MfaRequired true = complete the second step at /auth/mfa/verify (no session set).
+	MfaRequired bool      `json:"mfa_required"`
+	User        *AuthUser `json:"user,omitempty"`
+}
+
 // Member defines model for Member.
 type Member struct {
 	Email         openapi_types.Email `json:"email"`
@@ -816,6 +829,32 @@ type MetaEdition string
 
 // MetaSsoProviders defines model for Meta.SsoProviders.
 type MetaSsoProviders string
+
+// MfaCodeRequest defines model for MfaCodeRequest.
+type MfaCodeRequest struct {
+	Code string `json:"code"`
+}
+
+// MfaEnrollResult defines model for MfaEnrollResult.
+type MfaEnrollResult struct {
+	// OtpauthUri otpauth:// URI for the QR code.
+	OtpauthUri string `json:"otpauth_uri"`
+
+	// Secret Base32 manual-entry key (shown once).
+	Secret string `json:"secret"`
+}
+
+// MfaRecoveryCodes defines model for MfaRecoveryCodes.
+type MfaRecoveryCodes struct {
+	// RecoveryCodes Single-use recovery codes, shown ONCE.
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+// MfaVerifyRequest defines model for MfaVerifyRequest.
+type MfaVerifyRequest struct {
+	Challenge string `json:"challenge"`
+	Code      string `json:"code"`
+}
 
 // Node defines model for Node.
 type Node struct {
@@ -1083,6 +1122,12 @@ type AcceptInvitationJSONRequestBody = AcceptInviteRequest
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// MfaEnrollConfirmJSONRequestBody defines body for MfaEnrollConfirm for application/json ContentType.
+type MfaEnrollConfirmJSONRequestBody = MfaCodeRequest
+
+// MfaVerifyJSONRequestBody defines body for MfaVerify for application/json ContentType.
+type MfaVerifyJSONRequestBody = MfaVerifyRequest
+
 // RequestPasswordResetJSONRequestBody defines body for RequestPasswordReset for application/json ContentType.
 type RequestPasswordResetJSONRequestBody = PasswordResetRequest
 
@@ -1292,6 +1337,22 @@ type ClientInterface interface {
 
 	// CurrentUser request
 	CurrentUser(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MfaDisenroll request
+	MfaDisenroll(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MfaEnrollStart request
+	MfaEnrollStart(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MfaEnrollConfirmWithBody request with any body
+	MfaEnrollConfirmWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	MfaEnrollConfirm(ctx context.Context, body MfaEnrollConfirmJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MfaVerifyWithBody request with any body
+	MfaVerifyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	MfaVerify(ctx context.Context, body MfaVerifyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestPasswordResetWithBody request with any body
 	RequestPasswordResetWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1771,6 +1832,78 @@ func (c *Client) Logout(ctx context.Context, reqEditors ...RequestEditorFn) (*ht
 
 func (c *Client) CurrentUser(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCurrentUserRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaDisenroll(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaDisenrollRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaEnrollStart(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaEnrollStartRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaEnrollConfirmWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaEnrollConfirmRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaEnrollConfirm(ctx context.Context, body MfaEnrollConfirmJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaEnrollConfirmRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaVerifyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaVerifyRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MfaVerify(ctx context.Context, body MfaVerifyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMfaVerifyRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3351,6 +3484,140 @@ func NewCurrentUserRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewMfaDisenrollRequest generates requests for MfaDisenroll
+func NewMfaDisenrollRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/mfa")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewMfaEnrollStartRequest generates requests for MfaEnrollStart
+func NewMfaEnrollStartRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/mfa/enroll")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewMfaEnrollConfirmRequest calls the generic MfaEnrollConfirm builder with application/json body
+func NewMfaEnrollConfirmRequest(server string, body MfaEnrollConfirmJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewMfaEnrollConfirmRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewMfaEnrollConfirmRequestWithBody generates requests for MfaEnrollConfirm with any type of body
+func NewMfaEnrollConfirmRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/mfa/enroll/confirm")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewMfaVerifyRequest calls the generic MfaVerify builder with application/json body
+func NewMfaVerifyRequest(server string, body MfaVerifyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewMfaVerifyRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewMfaVerifyRequestWithBody generates requests for MfaVerify with any type of body
+func NewMfaVerifyRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/mfa/verify")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -6472,6 +6739,22 @@ type ClientWithResponsesInterface interface {
 	// CurrentUserWithResponse request
 	CurrentUserWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*CurrentUserResponse, error)
 
+	// MfaDisenrollWithResponse request
+	MfaDisenrollWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MfaDisenrollResponse, error)
+
+	// MfaEnrollStartWithResponse request
+	MfaEnrollStartWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MfaEnrollStartResponse, error)
+
+	// MfaEnrollConfirmWithBodyWithResponse request with any body
+	MfaEnrollConfirmWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MfaEnrollConfirmResponse, error)
+
+	MfaEnrollConfirmWithResponse(ctx context.Context, body MfaEnrollConfirmJSONRequestBody, reqEditors ...RequestEditorFn) (*MfaEnrollConfirmResponse, error)
+
+	// MfaVerifyWithBodyWithResponse request with any body
+	MfaVerifyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MfaVerifyResponse, error)
+
+	MfaVerifyWithResponse(ctx context.Context, body MfaVerifyJSONRequestBody, reqEditors ...RequestEditorFn) (*MfaVerifyResponse, error)
+
 	// RequestPasswordResetWithBodyWithResponse request with any body
 	RequestPasswordResetWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestPasswordResetResponse, error)
 
@@ -6941,7 +7224,7 @@ func (r AcceptInvitationResponse) StatusCode() int {
 type LoginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *AuthUser
+	JSON200      *LoginResult
 	JSONDefault  *Error
 }
 
@@ -7000,6 +7283,97 @@ func (r CurrentUserResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CurrentUserResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MfaDisenrollResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MfaDisenrollResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MfaDisenrollResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MfaEnrollStartResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *MfaEnrollResult
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MfaEnrollStartResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MfaEnrollStartResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MfaEnrollConfirmResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *MfaRecoveryCodes
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MfaEnrollConfirmResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MfaEnrollConfirmResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MfaVerifyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AuthUser
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MfaVerifyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MfaVerifyResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -8694,6 +9068,58 @@ func (c *ClientWithResponses) CurrentUserWithResponse(ctx context.Context, reqEd
 	return ParseCurrentUserResponse(rsp)
 }
 
+// MfaDisenrollWithResponse request returning *MfaDisenrollResponse
+func (c *ClientWithResponses) MfaDisenrollWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MfaDisenrollResponse, error) {
+	rsp, err := c.MfaDisenroll(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaDisenrollResponse(rsp)
+}
+
+// MfaEnrollStartWithResponse request returning *MfaEnrollStartResponse
+func (c *ClientWithResponses) MfaEnrollStartWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MfaEnrollStartResponse, error) {
+	rsp, err := c.MfaEnrollStart(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaEnrollStartResponse(rsp)
+}
+
+// MfaEnrollConfirmWithBodyWithResponse request with arbitrary body returning *MfaEnrollConfirmResponse
+func (c *ClientWithResponses) MfaEnrollConfirmWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MfaEnrollConfirmResponse, error) {
+	rsp, err := c.MfaEnrollConfirmWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaEnrollConfirmResponse(rsp)
+}
+
+func (c *ClientWithResponses) MfaEnrollConfirmWithResponse(ctx context.Context, body MfaEnrollConfirmJSONRequestBody, reqEditors ...RequestEditorFn) (*MfaEnrollConfirmResponse, error) {
+	rsp, err := c.MfaEnrollConfirm(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaEnrollConfirmResponse(rsp)
+}
+
+// MfaVerifyWithBodyWithResponse request with arbitrary body returning *MfaVerifyResponse
+func (c *ClientWithResponses) MfaVerifyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MfaVerifyResponse, error) {
+	rsp, err := c.MfaVerifyWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaVerifyResponse(rsp)
+}
+
+func (c *ClientWithResponses) MfaVerifyWithResponse(ctx context.Context, body MfaVerifyJSONRequestBody, reqEditors ...RequestEditorFn) (*MfaVerifyResponse, error) {
+	rsp, err := c.MfaVerify(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMfaVerifyResponse(rsp)
+}
+
 // RequestPasswordResetWithBodyWithResponse request with arbitrary body returning *RequestPasswordResetResponse
 func (c *ClientWithResponses) RequestPasswordResetWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestPasswordResetResponse, error) {
 	rsp, err := c.RequestPasswordResetWithBody(ctx, contentType, body, reqEditors...)
@@ -9834,7 +10260,7 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest AuthUser
+		var dest LoginResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9887,6 +10313,131 @@ func ParseCurrentUserResponse(rsp *http.Response) (*CurrentUserResponse, error) 
 	}
 
 	response := &CurrentUserResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AuthUser
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMfaDisenrollResponse parses an HTTP response from a MfaDisenrollWithResponse call
+func ParseMfaDisenrollResponse(rsp *http.Response) (*MfaDisenrollResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MfaDisenrollResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMfaEnrollStartResponse parses an HTTP response from a MfaEnrollStartWithResponse call
+func ParseMfaEnrollStartResponse(rsp *http.Response) (*MfaEnrollStartResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MfaEnrollStartResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MfaEnrollResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMfaEnrollConfirmResponse parses an HTTP response from a MfaEnrollConfirmWithResponse call
+func ParseMfaEnrollConfirmResponse(rsp *http.Response) (*MfaEnrollConfirmResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MfaEnrollConfirmResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MfaRecoveryCodes
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMfaVerifyResponse parses an HTTP response from a MfaVerifyWithResponse call
+func ParseMfaVerifyResponse(rsp *http.Response) (*MfaVerifyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MfaVerifyResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

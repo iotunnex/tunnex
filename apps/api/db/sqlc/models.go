@@ -185,6 +185,15 @@ type Membership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type MfaChallenge struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash []byte    `json:"token_hash"`
+	Attempts  int32     `json:"attempts"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Node struct {
 	ID                uuid.UUID          `json:"id"`
 	OrgID             uuid.UUID          `json:"org_id"`
@@ -221,6 +230,12 @@ type OrgHealthCheck struct {
 	Mode      string    `json:"mode"`
 	Param     []byte    `json:"param"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type OrgMfa struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	Enforce   bool      `json:"enforce"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -306,4 +321,21 @@ type UserGroup struct {
 	Origin      string    `json:"origin"`
 	IdpProvider *string   `json:"idp_provider"`
 	IdpGroupID  *string   `json:"idp_group_id"`
+}
+
+type UserRecoveryCode struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	CodeHash  []byte             `json:"code_hash"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	CreatedAt time.Time          `json:"created_at"`
+}
+
+type UserTotp struct {
+	UserID           uuid.UUID          `json:"user_id"`
+	SecretEnc        []byte             `json:"secret_enc"`
+	Confirmed        bool               `json:"confirmed"`
+	LastUsedTimestep *int64             `json:"last_used_timestep"`
+	CreatedAt        time.Time          `json:"created_at"`
+	ConfirmedAt      pgtype.Timestamptz `json:"confirmed_at"`
 }

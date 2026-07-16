@@ -56,6 +56,9 @@ type Querier interface {
 	// gates). System-wide by design: clears health_blocked wherever the backing
 	// report has gone stale, returning the affected devices for auditing + org push.
 	ClearStaleHealthBlocks(ctx context.Context, ttl pgtype.Interval) ([]ClearStaleHealthBlocksRow, error)
+	// Arm enrollment: only an UNCONFIRMED row flips to confirmed, stamping the confirming code's
+	// timestep as the replay clock so the very first login can't replay the confirmation code.
+	ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64, error)
 	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
 	// given purpose. A reset token therefore cannot be consumed as a verification
 	// token and vice-versa.
@@ -67,6 +70,9 @@ type Querier interface {
 	// lint:cross-org — the token itself is the credential; the org comes from the
 	// returned row. Single-use + expiring.
 	ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
+	// Atomic single-use: only an UNUSED code for THIS user is burned; returns its id on success,
+	// 0 rows if already used / not found (no which-code oracle to the caller).
+	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (uuid.UUID, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
@@ -95,6 +101,7 @@ type Querier interface {
 	// global deactivation; each row's org_id is used in the correlated subquery.
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateCliAuthCode(ctx context.Context, arg CreateCliAuthCodeParams) (CliAuthCode, error)
 	// CLI credential flow (S5.1). All secrets arrive here PRE-HASHED (sha-256); the
@@ -112,6 +119,8 @@ type Querier interface {
 	CreateIdpSyncGroup(ctx context.Context, arg CreateIdpSyncGroupParams) (UserGroup, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
+	// ── mfa_challenges (the login second-step token — NOT a session) ───────────────────
+	CreateMfaChallenge(ctx context.Context, arg CreateMfaChallengeParams) error
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
@@ -138,12 +147,18 @@ type Querier interface {
 	// audit-gap by construction). Composes with ExtendPolicyRule on the row lock: a grant an
 	// extend rescued (expires_at moved to the future) no longer matches expires_at <= now().
 	DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error)
+	DeleteExpiredMfaChallenges(ctx context.Context) error
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
+	// Burn — on SUCCESS or on cap exhaustion (a token never survives its own resolution).
+	DeleteMfaChallenge(ctx context.Context, id uuid.UUID) error
 	// Turn a check OFF (delete the opt-in row).
 	DeleteOrgHealthCheck(ctx context.Context, arg DeleteOrgHealthCheckParams) (int64, error)
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
+	DeleteRecoveryCodesForUser(ctx context.Context, userID uuid.UUID) error
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
+	// Disenroll (self re-enroll clears via upsert; explicit delete for self-disenroll + admin-reset).
+	DeleteTOTP(ctx context.Context, userID uuid.UUID) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
 	// lint:cross-org — retention housekeeping enumerates the orgs that actually HOLD events so the
 	// per-org row-cap sweep bounds every such org's hot-window disk use. This MUST include
@@ -169,6 +184,9 @@ type Querier interface {
 	// credential_expired UX line).
 	GetCliCredentialByHash(ctx context.Context, tokenHash []byte) (CliCredential, error)
 	GetCliDeviceCodeByDeviceHash(ctx context.Context, deviceCodeHash []byte) (CliDeviceCode, error)
+	// Verify path: read the CONFIRMED secret + replay clock under a row lock, so the replay-guard
+	// read+update can't interleave with a concurrent verify.
+	GetConfirmedTOTPForUpdate(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetDevice(ctx context.Context, arg GetDeviceParams) (Device, error)
 	// Row-locking read (S7.3 finding #6): Revoke reads the PRIOR status in-tx to label the
 	// audit (device.cancelled for pending vs device.revoked for active). FOR UPDATE serializes
@@ -202,10 +220,14 @@ type Querier interface {
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
+	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
+	GetMfaChallengeForUpdate(ctx context.Context, tokenHash []byte) (MfaChallenge, error)
 	// lint:cross-org — the mTLS client cert IS the identity; the org comes from the
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
+	// ── org_mfa (enforce flag — slice 2 logic) ────────────────────────────────────────
+	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
 	GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, error)
 	// ── directory email → Tunnex org user ────────────────────────────────────────────
@@ -228,6 +250,7 @@ type Querier interface {
 	GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleForUpdateParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
+	GetTOTP(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserGroup(ctx context.Context, arg GetUserGroupParams) (UserGroup, error)
@@ -235,6 +258,7 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
+	IncrementMfaChallengeAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
 	// hot-window and the JSONL source-of-truth stream. seq comes from BumpOrgFlowSeq (a per-org
 	// locked counter), so it is unique by construction — this is a PLAIN insert (NO
@@ -254,6 +278,8 @@ type Querier interface {
 	// Create-if-absent; the caller reads-back on conflict. Never overwrites, so a
 	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
 	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error
+	// ── user_recovery_codes (single-use, hashed) ──────────────────────────────────────
+	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	// Append a system/service-initiated audit row: actor_user_id is NULL and the actor is NAMED in
 	// actor_system (e.g. 'idp-sync'). The metadata carries the CAUSE. Used when no human initiated
 	// the action (S7.5.2 idp-sync deprovisioning).
@@ -440,6 +466,8 @@ type Querier interface {
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
+	// Replay guard: advance the last-accepted timestep after a successful verify.
+	SetTOTPLastTimestep(ctx context.Context, arg SetTOTPLastTimestepParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
@@ -495,10 +523,17 @@ type Querier interface {
 	// Opt-in a check (or change its mode/param). A row's existence IS the opt-in
 	// (no row = off — the unlock-then-opt-in convention, default-off by construction).
 	UpsertOrgHealthCheck(ctx context.Context, arg UpsertOrgHealthCheckParams) (OrgHealthCheck, error)
+	UpsertOrgMfaEnforce(ctx context.Context, arg UpsertOrgMfaEnforceParams) error
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
 	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
+	// S7.5.5 MFA / TOTP queries. Auth-plane; enrollment OPEN, enforce enterprise (app layer).
+	// ── user_totp (verify-before-arm + replay guard) ──────────────────────────────────
+	// Start/RE-start enrollment: store a fresh SEALED secret, unconfirmed. Re-generating before
+	// confirming replaces the old secret and clears the replay clock — an unconfirmed secret never
+	// gates login, so overwriting it is safe.
+	UpsertUnconfirmedTOTP(ctx context.Context, arg UpsertUnconfirmedTOTPParams) error
 	// Used by the seed with a fixed id; idempotent.
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 }
