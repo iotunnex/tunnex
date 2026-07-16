@@ -87,6 +87,12 @@ DELETE FROM mfa_challenges WHERE id = $1;
 -- lint:cross-org — user-scoped login challenge (GC, ledgered to S11).
 DELETE FROM mfa_challenges WHERE expires_at <= now();
 
+-- name: DeleteMfaChallengesForUser :exec
+-- lint:cross-org — user-scoped login challenges. Full MFA revocation (disenroll / admin-reset) burns
+-- the target's outstanding challenges too — a challenge is claimed state; revocation releases it, so
+-- a mid-login target gets a clean "sign in again", not attempts-to-exhaustion (finding #6).
+DELETE FROM mfa_challenges WHERE user_id = $1;
+
 -- ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 -- name: GetOrgMfa :one
 SELECT * FROM org_mfa WHERE org_id = $1;

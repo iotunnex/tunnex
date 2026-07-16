@@ -7,6 +7,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 )
 
@@ -83,7 +84,7 @@ func (s apiServer) MfaVerify(ctx context.Context, req api.MfaVerifyRequestObject
 	if err != nil {
 		return nil, err
 	}
-	sess, err := s.sessions.Create(ctx, user.ID)
+	sess, err := s.sessions.Create(ctx, user.ID, authctx.AuthLocalPassword)
 	if err != nil {
 		return nil, err
 	}

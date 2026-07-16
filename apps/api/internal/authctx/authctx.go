@@ -17,11 +17,24 @@ import (
 // Principal is the authenticated caller and the orgs they belong to (with role).
 // It is populated by the auth layer (a session-backed AuthFunc from S2); tests
 // inject one directly.
+// Auth methods a principal can be minted with. Stamped ONCE at the credential/session mint seam
+// and IMMUTABLE for that principal's lifetime (session fixation: the method a session was born with
+// never changes). The S7.5.5 MFA-enrollment gate keys on this so D5's exemptions hold at the
+// middleware (SSO + bearer are exempt by construction, not by route/header sniffing). An empty
+// method = a legacy session minted before the marker existed; it is treated as NON-local (exempt),
+// which aligns with D8 (enforcement governs new LOGINS, not live sessions — legacy sessions age out).
+const (
+	AuthLocalPassword = "local_password"
+	AuthSSO           = "sso"
+	AuthBearer        = "bearer"
+)
+
 type Principal struct {
 	UserID        uuid.UUID
 	SessionID     string // the session backing this principal (for logout)
 	Email         string
 	EmailVerified bool
+	AuthMethod    string // how this principal authenticated (AuthLocalPassword | AuthSSO | AuthBearer | "")
 	Roles         map[uuid.UUID]string // orgID -> role
 }
 

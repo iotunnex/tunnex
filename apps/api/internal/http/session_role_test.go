@@ -70,7 +70,7 @@ func TestSessionAuthResolvesRolePerRequest(t *testing.T) {
 		}
 	}
 
-	sess, err := store.Create(ctx, user)
+	sess, err := store.Create(ctx, user, "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
