@@ -103,6 +103,29 @@ ORDER BY created_at;
 DELETE FROM policy_rules
 WHERE id = $1 AND org_id = $2;
 
+-- name: ExtendPolicyRule :one
+-- S7.5.4: move a temporary grant's window IN PLACE (never delete+recreate — that would
+-- churn the /32 out+back and cause a spurious push). The `expires_at > now()` predicate
+-- is the LAPSE GUARD: a grant that has already expired matches 0 rows, so extend and the
+-- expiry sweeper compose deterministically on the row lock — a grant lapsing mid-extend
+-- resolves to extended-OR-(0 rows -> 409 grant_lapsed), never torn. Only a TEMPORARY
+-- (expires_at NOT NULL), still-LIVE grant can be extended.
+UPDATE policy_rules
+SET expires_at = sqlc.arg(new_expires_at)
+WHERE id = $1 AND org_id = $2 AND expires_at IS NOT NULL AND expires_at > now()
+RETURNING *;
+
+-- name: ListExpiredGrantsForSweep :many
+-- The expiry sweeper's window: temporary grants that lapsed since the last tick. FOR
+-- UPDATE locks each so a concurrent ExtendPolicyRule (which takes the same row lock via
+-- its UPDATE) serializes — the sweeper audits grant_expired ONLY for grants still expired
+-- under the lock; an extend that won the lock moved expires_at to the future, so the row
+-- no longer matches expires_at <= now() and is not falsely audited as expired.
+SELECT id, org_id FROM policy_rules
+WHERE expires_at > sqlc.arg(since) AND expires_at <= sqlc.arg(now)
+ORDER BY org_id
+FOR UPDATE;
+
 -- ── compiler inputs ─────────────────────────────────────────────────────────────
 -- name: ListActiveDevicesForOrg :many
 -- Every active device whose owner is an active, CURRENT org member, org-wide (all

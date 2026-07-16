@@ -3,6 +3,8 @@
 package http
 
 import (
+	"context"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
@@ -13,3 +15,6 @@ import (
 func NewPolicyPort(_ *pgxpool.Pool, _ *nodepush.Hub) policyPort {
 	return nil
 }
+
+// StartPolicyGrantSweeper is a no-op in the open build (no policy, no grants).
+func StartPolicyGrantSweeper(_ context.Context, _ *pgxpool.Pool, _ *nodepush.Hub) {}

@@ -381,6 +381,133 @@ func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID)
 	})
 }
 
+// ── temporary-grant lifecycle (S7.5.4 slice 2) ──────────────────────────────────
+
+// grantSweepInterval paces the expiry sweeper. Expiry is a PROMISE (a grant that
+// says "expires 5:00" leaving at 5:04 is a poor look), so it is tighter than the
+// health staleness cadence (5 min).
+const grantSweepInterval = time.Minute
+
+// ExtendGrant moves a temporary grant's window IN PLACE (window-extensible, never
+// delete+recreate — the recreate would churn the /32 and cause a spurious push).
+// The DB lapse-guard (expires_at > now()) makes extend and the sweeper compose on
+// the row lock: a lapsed grant is terminal (409 grant_lapsed), only a live one moves.
+func (s *Service) ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error) {
+	if !newExpiresAt.After(time.Now()) {
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "expires_at must be in the future")
+	}
+	var r sqlc.PolicyRule
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+		var e error
+		r, e = q.ExtendPolicyRule(ctx, sqlc.ExtendPolicyRuleParams{
+			ID: ruleID, OrgID: orgID, NewExpiresAt: pgtype.Timestamptz{Time: newExpiresAt, Valid: true},
+		})
+		if errors.Is(e, pgx.ErrNoRows) {
+			// 0 rows: disambiguate not-found / permanent / already-lapsed for an honest 4xx.
+			existing, ge := q.GetPolicyRuleForOrg(ctx, sqlc.GetPolicyRuleForOrgParams{ID: ruleID, OrgID: orgID})
+			if errors.Is(ge, pgx.ErrNoRows) {
+				return apierr.NotFound("rule_not_found", "rule not found")
+			}
+			if ge != nil {
+				return ge
+			}
+			if !existing.ExpiresAt.Valid {
+				return apierr.Conflict("not_temporary", "this is a permanent grant — it has no expiry to extend")
+			}
+			return apierr.Conflict("grant_lapsed", "this grant already expired — create a new one")
+		}
+		if e != nil {
+			return e
+		}
+		return writeAudit(ctx, q, orgID, "policy.grant_extended", "policy_rule", ruleID.String(),
+			map[string]any{"expires_at": newExpiresAt.UTC().Format(time.RFC3339)})
+	})
+	return r, err
+}
+
+// SweepExpiredGrants pushes + audits the temporary grants that lapsed in (since, now].
+// Grants are NOT deleted — they linger as visible-but-inert rows (the admin list shows
+// them expired; the compiler filter already excludes them). The FOR UPDATE lock on the
+// window rows composes with ExtendGrant: a grant a concurrent extend rescued (expires_at
+// moved to the future) no longer matches the window and is not falsely audited expired.
+// Pushes each affected org (F1: a lapsed grant's /32 must leave every org gateway, not
+// just the subject's own node). System actor (no human lapses a grant), cause grant_expired.
+func (s *Service) SweepExpiredGrants(ctx context.Context, since, now time.Time) (int, error) {
+	var expired []sqlc.ListExpiredGrantsForSweepRow
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		rows, e := q.ListExpiredGrantsForSweep(ctx, sqlc.ListExpiredGrantsForSweepParams{
+			Since: pgtype.Timestamptz{Time: since, Valid: true},
+			Now:   pgtype.Timestamptz{Time: now, Valid: true},
+		})
+		if e != nil {
+			return e
+		}
+		expired = rows
+		for _, r := range rows {
+			if e := writeSystemAudit(ctx, q, r.OrgID, "policy.grant_expired", "policy_rule", r.ID.String(),
+				map[string]any{"cause": "grant_expired"}); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, r := range expired {
+		if !seen[r.OrgID] {
+			seen[r.OrgID] = true
+			s.pushOrg(ctx, r.OrgID)
+		}
+	}
+	return len(expired), nil
+}
+
+// StartGrantExpirySweeper runs the expiry sweep on an interval until ctx ends. It
+// tracks the last sweep instant in memory; a grant that lapses during downtime is
+// missed by the window (no prompt push/audit) but the compiler filter still excludes
+// it, so it drops on the next reconcile/trigger — bounded + SAFE-direction (a lingering
+// ADDITIVE allow, never a wrongful cut). Enterprise-only (started in main).
+func (s *Service) StartGrantExpirySweeper(ctx context.Context) {
+	last := time.Now()
+	t := time.NewTicker(grantSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			if n, err := s.SweepExpiredGrants(ctx, last, now); err != nil {
+				slog.Warn("grant_expiry_sweep_failed", slog.String("error", err.Error()))
+			} else if n > 0 {
+				slog.Info("grant_expiry_swept", slog.Int("count", n))
+			}
+			last = now
+		}
+	}
+}
+
+// writeSystemAudit records a SYSTEM-actor audit row (0027) in the caller's tx — the
+// sweeper's grant_expired lapses have no human initiator.
+func writeSystemAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
+	raw := []byte("{}")
+	if meta != nil {
+		b, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		raw = b
+	}
+	as := "policy-grants"
+	tt, tid := targetType, targetID
+	_, err := q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+		OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, ActorSystem: &as,
+		Action: action, TargetType: &tt, TargetID: &tid, Metadata: raw,
+	})
+	return err
+}
+
 // ── enforcement mode ──────────────────────────────────────────────────────────
 
 func (s *Service) GetMode(ctx context.Context, orgID uuid.UUID) (string, error) {

@@ -3,6 +3,8 @@
 package http
 
 import (
+	"context"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/enterprise/policy"
@@ -16,4 +18,13 @@ func NewPolicyPort(pool *pgxpool.Pool, hub *nodepush.Hub) policyPort {
 	svc := policy.NewService(pool)
 	svc.SetNotifier(hub)
 	return svc
+}
+
+// StartPolicyGrantSweeper runs the S7.5.4 temporary-grant expiry sweep (enterprise
+// only): a lapsed grant's /32 is pushed off every org gateway promptly (the compiler
+// filter is the correctness backstop; this is promptness). No-op in the open build.
+func StartPolicyGrantSweeper(ctx context.Context, pool *pgxpool.Pool, hub *nodepush.Hub) {
+	svc := policy.NewService(pool)
+	svc.SetNotifier(hub)
+	go svc.StartGrantExpirySweeper(ctx)
 }

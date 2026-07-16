@@ -42,6 +42,7 @@ var walkBodies = map[string]string{
 	"createresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
 	"updateresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
 	"createpolicyrule":  `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
+	"extendgrant":       `{"expires_at":"2099-01-01T00:00:00Z"}`,
 	"setzerotrustmode":  `{"mode":"off"}`,
 	"setdeviceapproval": `{"mode":"off"}`,
 	// S7.5.2 IdP-group sync gated ops (enterprise; each still 401s sessionless).

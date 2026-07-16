@@ -635,6 +635,12 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
+// ExtendGrantRequest defines model for ExtendGrantRequest.
+type ExtendGrantRequest struct {
+	// ExpiresAt The grant's new expiry (must be in the future).
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // GenericMessage defines model for GenericMessage.
 type GenericMessage struct {
 	Message string `json:"message"`
@@ -1146,6 +1152,9 @@ type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 // CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
 type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
 
+// ExtendGrantJSONRequestBody defines body for ExtendGrant for application/json ContentType.
+type ExtendGrantJSONRequestBody = ExtendGrantRequest
+
 // ResizePoolJSONRequestBody defines body for ResizePool for application/json ContentType.
 type ResizePoolJSONRequestBody = PoolCidrRequest
 
@@ -1497,6 +1506,11 @@ type ClientInterface interface {
 
 	// DeletePolicyRule request
 	DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExtendGrantWithBody request with any body
+	ExtendGrantWithBody(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ExtendGrant(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ResizePoolWithBody request with any body
 	ResizePoolWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2705,6 +2719,30 @@ func (c *Client) CreatePolicyRule(ctx context.Context, orgId openapi_types.UUID,
 
 func (c *Client) DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeletePolicyRuleRequest(c.Server, orgId, ruleId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ExtendGrantWithBody(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExtendGrantRequestWithBody(c.Server, orgId, ruleId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ExtendGrant(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExtendGrantRequest(c.Server, orgId, ruleId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5861,6 +5899,60 @@ func NewDeletePolicyRuleRequest(server string, orgId openapi_types.UUID, ruleId 
 	return req, nil
 }
 
+// NewExtendGrantRequest calls the generic ExtendGrant builder with application/json body
+func NewExtendGrantRequest(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewExtendGrantRequestWithBody(server, orgId, ruleId, "application/json", bodyReader)
+}
+
+// NewExtendGrantRequestWithBody generates requests for ExtendGrant with any type of body
+func NewExtendGrantRequestWithBody(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ruleId", runtime.ParamLocationPath, ruleId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/policies/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewResizePoolRequest calls the generic ResizePool builder with application/json body
 func NewResizePoolRequest(server string, orgId openapi_types.UUID, body ResizePoolJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -6593,6 +6685,11 @@ type ClientWithResponsesInterface interface {
 
 	// DeletePolicyRuleWithResponse request
 	DeletePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePolicyRuleResponse, error)
+
+	// ExtendGrantWithBodyWithResponse request with any body
+	ExtendGrantWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExtendGrantResponse, error)
+
+	ExtendGrantWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*ExtendGrantResponse, error)
 
 	// ResizePoolWithBodyWithResponse request with any body
 	ResizePoolWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResizePoolResponse, error)
@@ -8181,6 +8278,29 @@ func (r DeletePolicyRuleResponse) StatusCode() int {
 	return 0
 }
 
+type ExtendGrantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PolicyRule
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ExtendGrantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExtendGrantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ResizePoolResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9260,6 +9380,23 @@ func (c *ClientWithResponses) DeletePolicyRuleWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseDeletePolicyRuleResponse(rsp)
+}
+
+// ExtendGrantWithBodyWithResponse request with arbitrary body returning *ExtendGrantResponse
+func (c *ClientWithResponses) ExtendGrantWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExtendGrantResponse, error) {
+	rsp, err := c.ExtendGrantWithBody(ctx, orgId, ruleId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExtendGrantResponse(rsp)
+}
+
+func (c *ClientWithResponses) ExtendGrantWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody, reqEditors ...RequestEditorFn) (*ExtendGrantResponse, error) {
+	rsp, err := c.ExtendGrant(ctx, orgId, ruleId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExtendGrantResponse(rsp)
 }
 
 // ResizePoolWithBodyWithResponse request with arbitrary body returning *ResizePoolResponse
@@ -11498,6 +11635,39 @@ func ParseDeletePolicyRuleResponse(rsp *http.Response) (*DeletePolicyRuleRespons
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseExtendGrantResponse parses an HTTP response from a ExtendGrantWithResponse call
+func ParseExtendGrantResponse(rsp *http.Response) (*ExtendGrantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExtendGrantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PolicyRule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

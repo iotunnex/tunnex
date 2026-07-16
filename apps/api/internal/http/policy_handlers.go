@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -32,6 +33,7 @@ type policyPort interface {
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
 	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
+	ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error)
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
 	SetMode(ctx context.Context, orgID uuid.UUID, mode string) (mode_ string, affected []policyspec.AffectedDevice, err error)
 }
@@ -293,6 +295,24 @@ func (s apiServer) DeletePolicyRule(ctx context.Context, req api.DeletePolicyRul
 		return nil, err
 	}
 	return api.DeletePolicyRule204Response{Headers: api.DeletePolicyRule204ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+// ExtendGrant PUT .../policies/{ruleId} — extend a temporary grant's window (S7.5.4).
+func (s apiServer) ExtendGrant(ctx context.Context, req api.ExtendGrantRequestObject) (api.ExtendGrantResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermPolicyManage); err != nil {
+		return nil, err
+	}
+	if s.policy == nil {
+		return nil, policyEditionRequired()
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	r, err := s.policy.ExtendGrant(ctx, req.OrgId, req.RuleId, req.Body.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 // ── enforcement mode ──────────────────────────────────────────────────────────
