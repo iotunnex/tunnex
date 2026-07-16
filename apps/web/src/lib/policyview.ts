@@ -167,10 +167,20 @@ export interface RuleRow {
 export interface LoadState {
   groupsLoaded: boolean;
   resourcesLoaded: boolean;
+  membersLoaded?: boolean; // S7.5.4: for resolving a per-user subject to a member name
 }
 
 function short(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+function resolveUser(id: string, members: Member[], loaded: boolean): RefLabel {
+  const m = members.find((x) => x.user_id === id);
+  if (m) return { id, label: m.name || m.email, state: "ok" };
+  if (!loaded) return { id, label: `unresolved user ${short(id)} — refresh`, state: "unresolved" };
+  // A per-user grant whose subject is no longer a member (the src_user_id→memberships
+  // cascade should delete such a rule, so this is a transient/edge render, shown honestly).
+  return { id, label: `removed user ${short(id)}`, state: "deleted" };
 }
 
 function resolveGroup(id: string, groups: UserGroup[], loaded: boolean): RefLabel {
@@ -191,21 +201,85 @@ export function ruleRow(
   rule: PolicyRule,
   groups: UserGroup[],
   resources: Resource[],
+  members: Member[],
   loaded: LoadState,
 ): RuleRow {
-  // S7.5.4: a rule's source is a group OR a single user. The rich per-user/temporary
-  // grant UI (user picker, expiry) is a later slice; here we keep the existing group
-  // path and render a per-user subject honestly (not as a broken group) so the table
-  // never mislabels a user rule.
+  // S7.5.4: a rule's source is a group OR a single user — resolve each to a name,
+  // honestly (a removed-user or deleted-group ref shows distinctly, never mislabeled).
   const src: RefLabel =
     rule.src_kind === "user"
-      ? { id: rule.src_user_id ?? "", label: `user ${short(rule.src_user_id ?? "")}`, state: "ok" }
+      ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
       : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   const dst =
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
       : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
   return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok" };
+}
+
+// ── S7.5.4 temporary-grant expiry (the linger model — expired grants stay VISIBLE) ────
+
+export type GrantExpiryState = "permanent" | "active" | "expired";
+
+export interface GrantExpiry {
+  state: GrantExpiryState;
+  label: string; // "permanent" | "expires in 3h" | "expired 2h ago"
+  /** A temporary grant offers Extend. A LAPSED one still offers it (the server 409s
+   *  grant_lapsed, surfaced legibly) — the linger model shows expired-but-present. */
+  extendable: boolean;
+}
+
+export function grantExpiry(rule: Pick<PolicyRule, "expires_at">, now: number): GrantExpiry {
+  if (!rule.expires_at) return { state: "permanent", label: "permanent", extendable: false };
+  const exp = new Date(rule.expires_at).getTime();
+  if (exp <= now) return { state: "expired", label: `expired ${compactSpan(now - exp)} ago`, extendable: true };
+  return { state: "active", label: `expires in ${compactSpan(exp - now)}`, extendable: true };
+}
+
+function compactSpan(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+// extendErrorCopy maps the server's typed 409 codes to legible copy (never a raw error).
+export function extendErrorCopy(code: string | undefined): string {
+  switch (code) {
+    case "grant_lapsed":
+      return "This grant already expired — create a new one instead of extending.";
+    case "not_temporary":
+      return "This is a permanent grant — it has no expiry to extend.";
+    default:
+      return "Could not extend the grant.";
+  }
+}
+
+// ── S7.5.4 flow-event source attribution legibility (v3 device/user, rider 1) ─────────
+// The report-absent law (same as the S7.5.3 posture tri-state): a device stamped but user
+// unresolved shows "device X · user unknown" — never a blank/dash that reads as "no device"
+// or as fine. Absence is VISIBLY absence.
+export interface FlowAttribution {
+  deviceId?: string | null;
+  userId?: string | null;
+  deviceName?: string; // resolved display name if available
+  userName?: string;
+}
+
+export function attributionLabel(a: FlowAttribution): string {
+  const dev = a.deviceId ? a.deviceName ?? `device ${short(a.deviceId)}` : null;
+  const user = a.userId ? a.userName ?? a.userId : null;
+  if (!dev && !user) return "unattributed"; // no device stamped (src had no grant) — honest, not blank
+  if (dev && !user) return `${dev} · user unknown`; // device known, user unresolved — ABSENCE visible
+  if (!dev && user) return user; // (unusual: user derives from device CP-side)
+  return `${dev} · ${user}`;
+}
+
+// activeMembers filters a roster to CURRENT active members — the D1 constraint mirrored
+// client-side so the user picker never offers a non-member (which the server would 4xx).
+export function activeMembers(members: Member[]): Member[] {
+  return members.filter((m) => m.status === "active");
 }
 
 // ── D-a5: rule edit = CREATE-THEN-DELETE, gap-free, with a LEGIBLE partial outcome ──

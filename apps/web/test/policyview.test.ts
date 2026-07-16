@@ -9,6 +9,10 @@ import {
   staleNoticeText,
   pruneStaleRuleIds,
   accessView,
+  grantExpiry,
+  extendErrorCopy,
+  attributionLabel,
+  activeMembers,
   type LoadState,
 } from "../src/lib/policyview";
 import { loadOne, type Loaded } from "../src/lib/api";
@@ -74,18 +78,18 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("resolves group→group and group→resource to names", () => {
     const g2g: PolicyRule = { id: "1", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(g2g, groups, resources, LOADED);
+    const row = ruleRow(g2g, groups, resources, [], LOADED);
     expect(row.src.label).toBe("Engineering");
     expect(row.dst.label).toBe("Databases");
     expect(row.broken).toBe(false);
 
     const g2r: PolicyRule = { id: "2", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    expect(ruleRow(g2r, groups, resources, LOADED).dst.label).toBe("10.0.5.0/24");
+    expect(ruleRow(g2r, groups, resources, [], LOADED).dst.label).toBe("10.0.5.0/24");
   });
 
   it("referent ABSENT from a LOADED set → 'deleted' (not omitted, broken=true)", () => {
     const rule: PolicyRule = { id: "3", src_group_id: "g-gone", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(rule, groups, resources, LOADED);
+    const row = ruleRow(rule, groups, resources, [], LOADED);
     expect(row.src.state).toBe("deleted");
     expect(row.src.label).toMatch(/deleted group/i);
     expect(row.broken).toBe(true);
@@ -94,7 +98,7 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("set FAILED TO LOAD → 'unresolved — refresh', NOT 'deleted' (no false alarm)", () => {
     const rule: PolicyRule = { id: "4", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(rule, [], resources, { groupsLoaded: false, resourcesLoaded: true });
+    const row = ruleRow(rule, [], resources, [], { groupsLoaded: false, resourcesLoaded: true });
     expect(row.src.state).toBe("unresolved");
     expect(row.src.label).toMatch(/unresolved group.*refresh/i);
     expect(row.src.label).not.toMatch(/deleted/i); // must NOT lie about why
@@ -102,7 +106,7 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("resource set failed to load → dst unresolved, not deleted", () => {
     const rule: PolicyRule = { id: "5", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    const row = ruleRow(rule, groups, [], { groupsLoaded: true, resourcesLoaded: false });
+    const row = ruleRow(rule, groups, [], [], { groupsLoaded: true, resourcesLoaded: false });
     expect(row.dst.state).toBe("unresolved");
     expect(row.dst.label).toMatch(/refresh/i);
   });
@@ -251,5 +255,75 @@ describe("D-a5 swapRule — CREATE-THEN-DELETE, gap-free, LEGIBLE partial", () =
     );
     expect(out).toEqual({ outcome: "partial", newId: "new-1", oldId: "old-1", error: "delete failed" });
     // Caller uses this to show BOTH rules + a retry — never a silent duplicate.
+  });
+});
+
+const M = (id: string, name: string, status: "active" | "deactivated" = "active") =>
+  ({ user_id: id, name, email: `${name}@x`, status } as Member);
+
+describe("S7.5.4 ruleRow user subject", () => {
+  const rule = { id: "r1", src_kind: "user", src_user_id: "u1", dst_kind: "resource", dst_resource_id: "res1" } as PolicyRule;
+  const resources = [R("res1", "db")];
+  it("resolves a per-user subject to the member name", () => {
+    const row = ruleRow(rule, [], resources, [M("u1", "alice")], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    expect(row.src.label).toBe("alice");
+    expect(row.src.state).toBe("ok");
+  });
+  it("a removed user (not in a loaded roster) shows distinctly, never mislabeled", () => {
+    const row = ruleRow(rule, [], resources, [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    expect(row.src.label).toMatch(/removed user/);
+    expect(row.src.state).toBe("deleted");
+    expect(row.broken).toBe(true);
+  });
+  it("a FAILED roster load reads unresolved (refresh), not removed", () => {
+    const row = ruleRow(rule, [], resources, [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: false });
+    expect(row.src.state).toBe("unresolved");
+  });
+});
+
+describe("S7.5.4 grantExpiry (linger model)", () => {
+  const now = 1_000_000_000_000;
+  it("no expiry = permanent, not extendable", () => {
+    expect(grantExpiry({ expires_at: null }, now)).toEqual({ state: "permanent", label: "permanent", extendable: false });
+  });
+  it("future expiry = active, extendable", () => {
+    const g = grantExpiry({ expires_at: new Date(now + 3 * 3600_000).toISOString() }, now);
+    expect(g.state).toBe("active");
+    expect(g.label).toMatch(/expires in 3h/);
+    expect(g.extendable).toBe(true);
+  });
+  it("past expiry = expired-but-EXTENDABLE (linger: shown + the extend 409s legibly)", () => {
+    const g = grantExpiry({ expires_at: new Date(now - 2 * 3600_000).toISOString() }, now);
+    expect(g.state).toBe("expired");
+    expect(g.label).toMatch(/expired 2h ago/);
+    expect(g.extendable).toBe(true); // the server refuses with 409 grant_lapsed, surfaced legibly
+  });
+});
+
+describe("S7.5.4 extendErrorCopy", () => {
+  it("maps typed 409 codes to legible copy, never a raw error", () => {
+    expect(extendErrorCopy("grant_lapsed")).toMatch(/already expired/);
+    expect(extendErrorCopy("not_temporary")).toMatch(/permanent grant/);
+    expect(extendErrorCopy(undefined)).toMatch(/Could not extend/);
+  });
+});
+
+describe("S7.5.4 attributionLabel (rider 1 — absence is visible)", () => {
+  it("device present + user unresolved shows 'device X · user unknown', never blank", () => {
+    expect(attributionLabel({ deviceId: "dev-abc12345", userId: null })).toBe("device dev-abc1… · user unknown");
+    expect(attributionLabel({ deviceId: "d", userId: null, deviceName: "alice-laptop" })).toBe("alice-laptop · user unknown");
+  });
+  it("both resolved shows device · user", () => {
+    expect(attributionLabel({ deviceId: "d", userId: "u", deviceName: "laptop", userName: "alice" })).toBe("laptop · alice");
+  });
+  it("no device stamped reads 'unattributed', not a blank/dash", () => {
+    expect(attributionLabel({ deviceId: null, userId: null })).toBe("unattributed");
+  });
+});
+
+describe("S7.5.4 activeMembers (D1 picker constraint)", () => {
+  it("offers only current active members", () => {
+    const out = activeMembers([M("u1", "alice"), M("u2", "bob", "deactivated")]);
+    expect(out.map((m) => m.user_id)).toEqual(["u1"]);
   });
 });

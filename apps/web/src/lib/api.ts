@@ -24,6 +24,9 @@ export type Resource = components["schemas"]["Resource"];
 export type PolicyRule = components["schemas"]["PolicyRule"];
 export type ZeroTrustMode = components["schemas"]["ZeroTrustMode"];
 export type AffectedDevice = components["schemas"]["AffectedDevice"];
+// S7.5.4 — per-user + temporary grants.
+export type CreatePolicyRuleRequest = components["schemas"]["CreatePolicyRuleRequest"];
+export type ExtendGrantRequest = components["schemas"]["ExtendGrantRequest"];
 export type DeviceApproval = components["schemas"]["DeviceApproval"];
 // S7.5.3 — device posture config DTO. (HealthCheckInput / DeviceHealthResult are
 // consumed by the Electron client, not the SPA — the web app only reads/writes the
