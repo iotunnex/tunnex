@@ -397,7 +397,17 @@ func (s *Service) ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newE
 		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "expires_at must be in the future")
 	}
 	var r sqlc.PolicyRule
-	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+	// withTx, NOT mutate: extend moves only expires_at, which is NOT in the compiled
+	// enforcement artifact (the CanonicalHash projection excludes it — a grant's window
+	// never changes its src/dst allow tuple). A push here would recompile the whole org
+	// and re-apply a BYTE-IDENTICAL ruleset on every gateway — the "spurious push" the
+	// ExtendPolicyRule comment says the in-place update avoids. It's safe to skip because
+	// nothing on the data plane consumes expires_at: lapse is enforced by the compiler's
+	// active-rules filter on the next real recompile + the expiry sweeper's delete-push.
+	// This endpoint is extend-ONLY (ExtendGrantRequest is expires_at-only, additionalProperties
+	// false; ExtendPolicyRule SETs only expires_at) — no artifact-affecting field can flow
+	// through it, so dropping the push can never hide an edit that SHOULD push. (S7.5.4 box-walk)
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// Read the CURRENT window FIRST, under a row lock, so (a) old_expires_at is the true
 		// PRE-update value for the D7 old->new audit, and (b) the sweeper's DELETE can't
 		// interleave between this read and the UPDATE (extend and sweep serialize on this lock).
