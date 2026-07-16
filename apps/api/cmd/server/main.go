@@ -179,6 +179,7 @@ func main() {
 		IdpSync:               idpSyncPort,
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
 		DeviceHealthEnabled:   apphttp.NewDeviceHealthEdition(),
+		MfaEnforceEnabled:     apphttp.NewMfaEnforceEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,

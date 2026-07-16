@@ -50,6 +50,21 @@ func (s *Service) OrgEnforcesForUser(ctx context.Context, userID uuid.UUID) (boo
 	return s.q.UserInEnforcingOrg(ctx, userID)
 }
 
+// IsEnrollmentGated reports whether the user must enroll before proceeding (D8): their org enforces
+// MFA AND they have no CONFIRMED TOTP. An unconfirmed/abandoned ceremony counts as unenrolled. The
+// caller applies this only in the enterprise edition (downgrade-release: open never gates).
+func (s *Service) IsEnrollmentGated(ctx context.Context, userID uuid.UUID) (bool, error) {
+	enforced, err := s.q.UserInEnforcingOrg(ctx, userID)
+	if err != nil || !enforced {
+		return false, err
+	}
+	confirmed, err := s.HasConfirmedTOTP(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return !confirmed, nil
+}
+
 // SetOrgEnforce toggles org-level MFA enforcement (enterprise; PermMfaManage-gated at the handler),
 // audited org-scoped with the acting admin.
 func (s *Service) SetOrgEnforce(ctx context.Context, orgID, actor uuid.UUID, enforce bool) error {
