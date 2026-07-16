@@ -48,6 +48,7 @@ type fakeStore struct {
 	byEmail    map[string]uuid.UUID      // resolvable org users
 	resolveErr error
 	removeErr  map[uuid.UUID]bool // RemoveIdpGroupMember returns an error for these users
+	addNoop    map[uuid.UUID]bool // AddIdpGroupMember returns didChange=false (concurrent conflict)
 
 	added   []memberOp
 	removed []memberOp
@@ -77,16 +78,19 @@ func (s *fakeStore) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email s
 	uid, ok := s.byEmail[email]
 	return uid, ok, nil
 }
-func (s *fakeStore) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error {
+func (s *fakeStore) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) (bool, error) {
+	if s.addNoop[userID] {
+		return false, nil // ON CONFLICT DO NOTHING — a concurrent converge already inserted
+	}
 	s.added = append(s.added, memberOp{group: groupID, user: userID, ext: externalID})
-	return nil
+	return true, nil
 }
-func (s *fakeStore) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
+func (s *fakeStore) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) (bool, error) {
 	if s.removeErr[userID] {
-		return errors.New("remove failed for " + userID.String())
+		return false, errors.New("remove failed for " + userID.String())
 	}
 	s.removed = append(s.removed, memberOp{group: groupID, user: userID})
-	return nil
+	return true, nil
 }
 func (s *fakeStore) RecordResult(ctx context.Context, orgID uuid.UUID, provider string, ok, advance bool, errMsg string, now time.Time) error {
 	s.records = append(s.records, recordCall{ok, advance, errMsg})
@@ -406,6 +410,22 @@ func TestReconcile_AlreadyDeactivatedIsNoPush(t *testing.T) {
 	}
 	if len(s.records) != 1 || !s.records[0].ok {
 		t.Errorf("a clean poll with no real change is healthy, got %+v", s.records)
+	}
+}
+
+// Re-review survivor (low): an idempotent no-op add (ON CONFLICT DO NOTHING under a concurrent
+// Trigger+PollAll race) must NOT fire a redundant org-wide push — didChange=false → changed stays false.
+func TestReconcile_NoopAddDoesNotPush(t *testing.T) {
+	s := baseStore()
+	s.addNoop = map[uuid.UUID]bool{uAli: true} // the insert loses the race → 0 rows
+	p := &fakeProvider{members: []DirectoryMember{{ExternalID: "x1", Email: "alice@acme.com", Status: StatusActive}}}
+	run(t, p, s, &fakeDeprov{})
+
+	if len(s.added) != 0 {
+		t.Fatalf("no-op add recorded a change, got %+v", s.added)
+	}
+	if s.pushes != 0 {
+		t.Fatalf("a no-op add must not fire a redundant push, got pushes=%d", s.pushes)
 	}
 }
 

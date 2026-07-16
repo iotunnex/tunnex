@@ -54,9 +54,11 @@ type Store interface {
 	// JIT-provision (that's S2.5).
 	ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email string) (userID uuid.UUID, found bool, err error)
 	// AddIdpGroupMember records the directory externalID with the membership so a later removal can
-	// resolve the user's directory status (D3 delete-sweep).
-	AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error
-	RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
+	// resolve the user's directory status (D3 delete-sweep). didChange=false on an idempotent no-op
+	// (row already present, e.g. a concurrent converge won the insert) so the reconciler doesn't fire
+	// a redundant org-wide push for a row it didn't actually change.
+	AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) (didChange bool, err error)
+	RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) (didChange bool, err error)
 	RecordResult(ctx context.Context, orgID uuid.UUID, provider string, ok, advanceClock bool, errMsg string, now time.Time) error
 	PushOrg(ctx context.Context, orgID uuid.UUID)
 }
@@ -189,11 +191,14 @@ func (r *Reconciler) converge(ctx context.Context, orgID uuid.UUID, provider str
 	}
 	for _, uid := range sortedUUIDKeys(desired) {
 		if !currentSet[uid] {
-			if e := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid, desired[uid]); e != nil {
+			did, e := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid, desired[uid])
+			if e != nil {
 				errs = append(errs, fmt.Errorf("add %s: %w", uid, e))
 				continue
 			}
-			changed = true
+			if did { // false on an idempotent no-op → no redundant push
+				changed = true
+			}
 		}
 	}
 
@@ -205,9 +210,13 @@ func (r *Reconciler) converge(ctx context.Context, orgID uuid.UUID, provider str
 		if _, keep := desired[m.UserID]; keep {
 			continue
 		}
-		if e := r.store.RemoveIdpGroupMember(ctx, orgID, g.ID, m.UserID); e != nil {
+		did, e := r.store.RemoveIdpGroupMember(ctx, orgID, g.ID, m.UserID)
+		if e != nil {
 			errs = append(errs, fmt.Errorf("remove %s: %w", m.UserID, e))
 			continue
+		}
+		if !did {
+			continue // already removed by a concurrent converge — it owns the sweep decision
 		}
 		changed = true
 		if deprovision[m.UserID] || m.ExternalID == "" {

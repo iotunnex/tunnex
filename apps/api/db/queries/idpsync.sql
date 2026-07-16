@@ -96,7 +96,8 @@ ORDER BY user_id;
 
 -- name: AddIdpGroupMember :execrows
 -- Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
--- 0 rows on conflict = already present (no state change → the caller skips the audit + re-push).
+-- Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
+-- skips BOTH the audit and the org-wide re-push.
 INSERT INTO group_members (org_id, group_id, user_id, origin, idp_external_id)
 VALUES ($1, $2, $3, 'idp_sync', $4)
 ON CONFLICT (group_id, user_id) DO NOTHING;

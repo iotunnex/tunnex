@@ -340,24 +340,30 @@ func (s *Service) ResolveOrgUser(ctx context.Context, orgID uuid.UUID, email str
 	return row.ID, true, nil
 }
 
-func (s *Service) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) error {
+func (s *Service) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID, externalID string) (bool, error) {
 	var ext *string
 	if externalID != "" {
 		ext = &externalID
 	}
 	n, err := s.q.AddIdpGroupMember(ctx, sqlc.AddIdpGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID, IdpExternalID: ext})
-	if err != nil || n == 0 {
-		return err
+	if err != nil {
+		return false, err
 	}
-	return s.systemAudit(ctx, orgID, "group.member_synced_added", groupID, userID, "present_in_directory_group")
+	if n == 0 {
+		return false, nil // already present (ON CONFLICT DO NOTHING) — no audit, no push
+	}
+	return true, s.systemAudit(ctx, orgID, "group.member_synced_added", groupID, userID, "present_in_directory_group")
 }
 
-func (s *Service) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error {
+func (s *Service) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) (bool, error) {
 	n, err := s.q.RemoveIdpGroupMember(ctx, sqlc.RemoveIdpGroupMemberParams{OrgID: orgID, GroupID: groupID, UserID: userID})
-	if err != nil || n == 0 {
-		return err
+	if err != nil {
+		return false, err
 	}
-	return s.systemAudit(ctx, orgID, "group.member_synced_removed", groupID, userID, "absent_from_directory_group")
+	if n == 0 {
+		return false, nil // nothing to remove (concurrent converge already did) — no audit, no push
+	}
+	return true, s.systemAudit(ctx, orgID, "group.member_synced_removed", groupID, userID, "absent_from_directory_group")
 }
 
 func (s *Service) RecordResult(ctx context.Context, orgID uuid.UUID, provider string, ok, advanceClock bool, errMsg string, now time.Time) error {
