@@ -287,3 +287,20 @@ func (q *Queries) UpsertUnconfirmedTOTP(ctx context.Context, arg UpsertUnconfirm
 	_, err := q.db.Exec(ctx, upsertUnconfirmedTOTP, arg.UserID, arg.SecretEnc)
 	return err
 }
+
+const userInEnforcingOrg = `-- name: UserInEnforcingOrg :one
+SELECT EXISTS (
+    SELECT 1 FROM org_mfa om
+    JOIN memberships m ON m.org_id = om.org_id
+    WHERE m.user_id = $1 AND om.enforce
+)
+`
+
+// lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
+// The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).
+func (q *Queries) UserInEnforcingOrg(ctx context.Context, userID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, userInEnforcingOrg, userID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}

@@ -154,7 +154,7 @@ func main() {
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
-	mfaSvc := mfa.NewService(pool, sealer, logger)
+	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
 	// S7.5.1 access-log health is SHARED: the flow-event Ingester (mTLS channel) records
 	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
