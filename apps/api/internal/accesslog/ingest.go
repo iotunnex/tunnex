@@ -31,22 +31,46 @@ const DenyAggregateThreshold = 5
 // WireEvent is the agent→CP flow-event shape (mirrors node flowlog.Event). Defined here so
 // the api module never imports the node module. Verdict is "allow" | "deny".
 type WireEvent struct {
-	OccurredAt time.Time `json:"occurred_at"`
-	Verdict    string    `json:"verdict"`
-	RuleID     string    `json:"rule_id,omitempty"`
-	PolicyHash string    `json:"policy_hash"`
-	SrcIP      string    `json:"src_ip"`
-	DstIP      string    `json:"dst_ip"`
-	Protocol   string    `json:"protocol"`
-	DstPort    int       `json:"dst_port,omitempty"`
+	OccurredAt  time.Time `json:"occurred_at"`
+	Verdict     string    `json:"verdict"`
+	RuleID      string    `json:"rule_id,omitempty"`
+	PolicyHash  string    `json:"policy_hash"`
+	SrcIP       string    `json:"src_ip"`
+	SrcDeviceID string    `json:"src_device_id,omitempty"` // v3: agent-stamped from the artifact ("" = unresolved)
+	DstIP       string    `json:"dst_ip"`
+	Protocol    string    `json:"protocol"`
+	DstPort     int       `json:"dst_port,omitempty"`
 }
 
 // GrantResolver maps a kernel-stamped rule_id to the grant's destination, captured AT EVENT
-// TIME so it survives a later rule delete. This is the ONLY attribution enrichment — there
-// is NO src_ip→device lookup anywhere (that would be a racy IP-map reconstruction; the
-// agent-stamped rule_id → grant is authoritative). ok=false = the rule was already deleted.
+// TIME so it survives a later rule delete. NO src_ip→device lookup anywhere (that would be a
+// racy IP-map reconstruction; attribution rides authoritative agent-stamped identity). The
+// v3 device identity (src_device_id) is stamped BY THE AGENT from the compiled artifact's
+// /32→device map — the CP only joins device→user (an ID FK, DeviceResolver), never src_ip.
+// ok=false = the rule was already deleted.
 type GrantResolver interface {
 	ResolveGrant(ctx context.Context, orgID, ruleID uuid.UUID) (dstResource, dstGroup *uuid.UUID, ok bool)
+}
+
+// DeviceResolver joins an agent-stamped src_device_id to its owning user (S7.5.4 v3). This
+// is an ID→ID FK join, NEVER an src_ip→device guess. ok=false = the device is unknown (a
+// stale/foreign id) — the event keeps src_device_id, src_user_id stays nil.
+type DeviceResolver interface {
+	ResolveUser(ctx context.Context, orgID, deviceID uuid.UUID) (userID *uuid.UUID, ok bool)
+}
+
+// SQLDeviceResolver is the production DeviceResolver: src_device_id → owning user via the
+// DB, org-scoped, NO deleted_at filter (a since-deleted device's historical flow still
+// attributes its user). Mirrors SQLGrantResolver.
+type SQLDeviceResolver struct{ Q *sqlc.Queries }
+
+// ResolveUser implements DeviceResolver.
+func (r SQLDeviceResolver) ResolveUser(ctx context.Context, orgID, deviceID uuid.UUID) (*uuid.UUID, bool) {
+	uid, err := r.Q.GetDeviceUserForOrg(ctx, sqlc.GetDeviceUserForOrgParams{ID: deviceID, OrgID: orgID})
+	if err != nil {
+		return nil, false
+	}
+	return &uid, true
 }
 
 // SQLGrantResolver is the production GrantResolver: rule_id → the grant's destination via
@@ -81,20 +105,21 @@ func (r SQLGrantResolver) ResolveGrant(ctx context.Context, orgID, ruleID uuid.U
 // rolled-back batch releases its reserved range (no burn, no false gap), and the counter is
 // never swept so seq is monotonic + sweep-proof.
 type Ingester struct {
-	mu     sync.Mutex // serializes IngestBatch (seq reservation + inserts) — defensive over the DB row lock
-	pool   *pgxpool.Pool
-	grants GrantResolver
-	health *Health
-	now    func() time.Time
+	mu      sync.Mutex // serializes IngestBatch (seq reservation + inserts) — defensive over the DB row lock
+	pool    *pgxpool.Pool
+	grants  GrantResolver
+	devices DeviceResolver // v3: src_device_id → user join (may be nil = no device attribution)
+	health  *Health
+	now     func() time.Time
 }
 
-// NewIngester wires the pool (for the per-batch tx), the grant resolver, and the health
-// surface. now defaults to time.Now; health may be nil.
-func NewIngester(pool *pgxpool.Pool, grants GrantResolver, health *Health, now func() time.Time) *Ingester {
+// NewIngester wires the pool (for the per-batch tx), the grant + device resolvers, and the
+// health surface. now defaults to time.Now; health + devices may be nil.
+func NewIngester(pool *pgxpool.Pool, grants GrantResolver, devices DeviceResolver, health *Health, now func() time.Time) *Ingester {
 	if now == nil {
 		now = time.Now
 	}
-	return &Ingester{pool: pool, grants: grants, health: health, now: now}
+	return &Ingester{pool: pool, grants: grants, devices: devices, health: health, now: now}
 }
 
 // IngestBatch persists one agent report: the observed events (enriched + aggregated) plus,
@@ -200,10 +225,30 @@ func (c *grantCache) resolve(ctx context.Context, orgID, ruleID uuid.UUID) (*uui
 	return res, grp, ok
 }
 
+// deviceCache memoizes device→user joins per batch — many flows share a src device, so this
+// avoids an N+1 (mirrors grantCache). nil resolver => never joins (device stays unattributed).
+type deviceCache struct {
+	r    DeviceResolver
+	seen map[uuid.UUID]*uuid.UUID
+}
+
+func (c *deviceCache) resolve(ctx context.Context, orgID, deviceID uuid.UUID) *uuid.UUID {
+	if c == nil || c.r == nil {
+		return nil
+	}
+	if u, ok := c.seen[deviceID]; ok {
+		return u
+	}
+	u, _ := c.r.ResolveUser(ctx, orgID, deviceID)
+	c.seen[deviceID] = u
+	return u
+}
+
 // aggregate enriches each wire event (grant-only) and collapses per-source deny floods.
 func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire []WireEvent) []Event {
 	out := make([]Event, 0, len(wire))
-	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}} // one grant lookup per distinct rule_id per batch
+	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}}     // one grant lookup per distinct rule_id per batch
+	dc := &deviceCache{r: i.devices, seen: map[uuid.UUID]*uuid.UUID{}} // one device→user lookup per distinct device per batch
 	denyBySrc := map[string][]WireEvent{}
 	for _, w := range wire {
 		switch w.Verdict {
@@ -212,9 +257,9 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 		case wireTerminated:
 			// A flow torn down by a rule-revoke — enriched on the REVOKED grant's rule_id (the
 			// carried binding), NEVER aggregated (each termination is a distinct event).
-			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionTerminated))
+			out = append(out, i.enrich(ctx, gc, dc, orgID, nodeID, w, DecisionTerminated))
 		default: // allow
-			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionAllow))
+			out = append(out, i.enrich(ctx, gc, dc, orgID, nodeID, w, DecisionAllow))
 		}
 	}
 	// Deterministic order: aggregate/emit denies by src.
@@ -230,7 +275,7 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 			// full window BOUNDS — OccurredAt = first deny seen, WindowEnd = last — so a SIEM
 			// has src + count + [start,end] without the individual lines.
 			last := ds[len(ds)-1]
-			agg := i.enrich(ctx, gc, orgID, nodeID, last, DecisionDenyAggregate)
+			agg := i.enrich(ctx, gc, dc, orgID, nodeID, last, DecisionDenyAggregate)
 			agg.OccurredAt = ds[0].OccurredAt.UTC() // window START
 			agg.DenyCount = len(ds)
 			end := last.OccurredAt.UTC() // window END
@@ -239,16 +284,18 @@ func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire 
 			continue
 		}
 		for _, w := range ds {
-			out = append(out, i.enrich(ctx, gc, orgID, nodeID, w, DecisionDeny))
+			out = append(out, i.enrich(ctx, gc, dc, orgID, nodeID, w, DecisionDeny))
 		}
 	}
 	return out
 }
 
-// enrich builds an Event from a wire event. Attribution is GRANT-ONLY: rule_id → the
-// grant's destination (resource/group). NO src_ip→device/user lookup (device/user stay nil
-// — a racy IP map is forbidden). src_ip is kept as the raw observed fact.
-func (i *Ingester) enrich(ctx context.Context, gc *grantCache, orgID, nodeID uuid.UUID, w WireEvent, d Decision) Event {
+// enrich builds an Event from a wire event. Attribution: rule_id → the grant's destination
+// (resource/group), and — v3 — the AGENT-STAMPED src_device_id → its owning user (CP-side ID
+// join). There is STILL NO src_ip→device lookup: device identity arrives stamped from the
+// artifact, and the CP joins only device→user (an ID FK, never a racy IP-map). src_ip is kept
+// as the raw observed fact.
+func (i *Ingester) enrich(ctx context.Context, gc *grantCache, dc *deviceCache, orgID, nodeID uuid.UUID, w WireEvent, d Decision) Event {
 	e := Event{
 		OrgID: orgID, NodeID: &nodeID, OccurredAt: w.OccurredAt.UTC(), Decision: d,
 		SrcIP: w.SrcIP, DstIP: w.DstIP, Protocol: w.Protocol, DstPort: w.DstPort,
@@ -259,6 +306,12 @@ func (i *Ingester) enrich(ctx context.Context, gc *grantCache, orgID, nodeID uui
 			e.DstResourceID, e.DstGroupID = res, grp // grant dst captured at event time
 		}
 	}
+	// v3: the agent stamped src_device_id from the applied artifact — capture it and join to
+	// the owning user (per-batch memoized). An unresolvable/foreign id keeps the device id and
+	// leaves the user nil (report-absent, never guessed — the S7.5.1/7.5.2 no-IP-guess law).
+	if did, err := uuid.Parse(w.SrcDeviceID); err == nil {
+		e.SrcDeviceID = &did
+		e.SrcUserID = dc.resolve(ctx, orgID, did)
+	}
 	return e
 }
-

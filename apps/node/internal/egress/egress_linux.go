@@ -51,6 +51,12 @@ var ruleIDRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 type Manager struct {
 	wgIface string
 	policy  atomic.Pointer[nodepolicy.Compiled]
+	// deviceByIP is the src /32 -> device_id map (S7.5.4 v3), rebuilt atomically on each
+	// SetPolicy from the applied Allow set. It is the AUTHORITATIVE /32->device mapping
+	// the CP compiled (the same snapshot that assigned the /32) — the flow-log stamper
+	// consults it so a flow event carries device identity WITHOUT any src_ip->device DB
+	// guess (the forbidden racy IP-map). Observability only; never touches enforcement.
+	deviceByIP atomic.Pointer[map[string]string]
 	// policyReceived distinguishes "no policy fetched YET" (cold start, before the first
 	// desired-state delivery) from "policy fetched, value nil = legacy mesh". THREE states
 	// (finding #2): (a) received + mesh/nil -> blanket; (b) received + enforcing -> grants;
@@ -109,6 +115,27 @@ func (m *Manager) SetFlowLogGroup(group int) { m.flowLogGroup = group }
 func (m *Manager) SetPolicy(p *nodepolicy.Compiled) {
 	m.policy.Store(p)
 	m.policyReceived.Store(true)
+	// Rebuild the src /32 -> device_id map (v3 flow-log attribution). Every device with
+	// any grant appears as a source /32 in Allow, so this is the full authoritative map.
+	byIP := map[string]string{}
+	if p != nil {
+		for _, e := range p.Allow {
+			if e.SrcIP != "" && e.SrcDeviceID != "" {
+				byIP[e.SrcIP] = e.SrcDeviceID
+			}
+		}
+	}
+	m.deviceByIP.Store(&byIP)
+}
+
+// DeviceForIP returns the source device's uuid for a flow's src /32, from the APPLIED
+// artifact map (S7.5.4 v3). "" when the src has no grant (default-deny source) or no
+// policy has been received — reported as unresolved, never guessed. Cheap map read.
+func (m *Manager) DeviceForIP(srcIP string) string {
+	if mp := m.deviceByIP.Load(); mp != nil {
+		return (*mp)[srcIP]
+	}
+	return ""
 }
 
 // AppliedStatus reports the version + canonical hash of the policy CURRENTLY IN FORCE

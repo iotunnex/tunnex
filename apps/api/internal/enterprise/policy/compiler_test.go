@@ -300,6 +300,33 @@ func TestRuleRecreateHashStableStampVaries(t *testing.T) {
 	}
 }
 
+// S7.5.4 v3 — each AllowEntry carries the SOURCE device's id (src_device_id), so the
+// agent can stamp flow events with device identity from the artifact. Observability: it
+// varies with the device but must not perturb the enforcement hash.
+func TestSrcDeviceIDStampedFromSourceDevice(t *testing.T) {
+	devA := uuid.New()
+	snap := policy.Snapshot{
+		Mode:      policy.ModeEnforcing,
+		Resources: []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+		Rules:     []policy.Rule{{SrcKind: "user", SrcUserID: uAlice, DstKind: "resource", DstResourceID: rDB}},
+		Devices:   []policy.Device{{ID: devA, UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	}
+	a := allowsFor(policy.Compile(snap), nodeA)
+	if len(a) != 1 || a[0].SrcDeviceID != devA.String() {
+		t.Fatalf("src_device_id must be the source device's id, got %+v", a)
+	}
+	// Hash-blind: a different device id (same grant/IP) must not change the enforcement hash.
+	snap.Devices[0].ID = uuid.New()
+	b := policy.Compile(snap)[nodeA]
+	first := policy.Compile(policy.Snapshot{
+		Mode: policy.ModeEnforcing, Resources: snap.Resources, Rules: snap.Rules,
+		Devices: []policy.Device{{ID: devA, UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	})[nodeA]
+	if policyspec.CanonicalHash(first) != policyspec.CanonicalHash(b) {
+		t.Fatal("src_device_id must not perturb the enforcement hash")
+	}
+}
+
 // Determinism: equal input compiles to byte-identical output (the reconcile
 // no-op contract). Compile the same rich snapshot twice and compare JSON.
 func TestCompileDeterministic(t *testing.T) {

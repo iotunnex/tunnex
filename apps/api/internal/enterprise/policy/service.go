@@ -621,7 +621,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		if d.AssignedIp != nil {
 			ip = *d.AssignedIp
 		}
-		snap.Devices = append(snap.Devices, Device{UserID: d.UserID, NodeID: d.NodeID, AssignedIP: ip})
+		snap.Devices = append(snap.Devices, Device{ID: d.ID, UserID: d.UserID, NodeID: d.NodeID, AssignedIP: ip})
 	}
 	return snap, nil
 }

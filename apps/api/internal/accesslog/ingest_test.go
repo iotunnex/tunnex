@@ -24,6 +24,57 @@ func (s stubGrants) ResolveGrant(_ context.Context, _ uuid.UUID, ruleID uuid.UUI
 	return nil, nil, false // deleted / unknown rule
 }
 
+type stubDevices struct {
+	user  *uuid.UUID
+	known uuid.UUID
+}
+
+func (s stubDevices) ResolveUser(_ context.Context, _ uuid.UUID, deviceID uuid.UUID) (*uuid.UUID, bool) {
+	if deviceID == s.known {
+		return s.user, true
+	}
+	return nil, false // unknown / foreign device id
+}
+
+// TestIngestStampsDeviceAndJoinsUser (S7.5.4 v3): an agent-stamped src_device_id is
+// captured and joined to its owning user CP-side; an UNKNOWN device keeps its id but the
+// user stays nil (report-absent, never guessed — no src_ip→device reconstruction).
+func TestIngestStampsDeviceAndJoinsUser(t *testing.T) {
+	q, pool, org := ingestPool(t)
+	ctx := context.Background()
+	node := uuid.New()
+	dev, user, foreign := uuid.New(), uuid.New(), uuid.New()
+	ing := NewIngester(pool, stubGrants{}, stubDevices{user: &user, known: dev}, nil, nil)
+
+	now := time.Now().UTC()
+	batch := []WireEvent{
+		{OccurredAt: now, Verdict: "allow", SrcIP: "10.99.0.10", SrcDeviceID: dev.String(), DstIP: "10.0.5.5", Protocol: "tcp"},
+		{OccurredAt: now, Verdict: "allow", SrcIP: "10.99.0.11", SrcDeviceID: foreign.String(), DstIP: "10.0.5.6", Protocol: "tcp"},
+	}
+	if err := ing.IngestBatch(ctx, org, node, batch, 0); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	rows, err := q.ListAccessEvents(ctx, sqlc.ListAccessEventsParams{OrgID: org, BeforeCreatedAt: time.Now().Add(time.Hour), BeforeID: maxUUID, PageLimit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySrc := map[string]Event{}
+	for _, r := range rows {
+		bySrc[FromRow(r).SrcIP] = FromRow(r)
+	}
+	known := bySrc["10.99.0.10"]
+	if known.SrcDeviceID == nil || *known.SrcDeviceID != dev || known.SrcUserID == nil || *known.SrcUserID != user {
+		t.Fatalf("known device must stamp device + join user, got %+v", known)
+	}
+	unknown := bySrc["10.99.0.11"]
+	if unknown.SrcDeviceID == nil || *unknown.SrcDeviceID != foreign {
+		t.Fatalf("unknown device: id must still be captured, got %+v", unknown)
+	}
+	if unknown.SrcUserID != nil {
+		t.Fatalf("unknown device: user must stay NIL (never guessed), got %v", unknown.SrcUserID)
+	}
+}
+
 func ingestPool(t *testing.T) (*sqlc.Queries, *pgxpool.Pool, uuid.UUID) {
 	t.Helper()
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
@@ -49,7 +100,7 @@ func TestIngestEnrichAggregateGapSeq(t *testing.T) {
 	node := uuid.New()
 	rule := uuid.New()
 	res := uuid.New()
-	ing := NewIngester(pool, stubGrants{dstResource: &res, known: rule}, nil, func() time.Time { return time.Unix(1000, 0).UTC() })
+	ing := NewIngester(pool, stubGrants{dstResource: &res, known: rule}, nil, nil, func() time.Time { return time.Unix(1000, 0).UTC() })
 
 	now := time.Now().UTC()
 	batch := []WireEvent{
@@ -116,7 +167,7 @@ func TestIngestEnrichAggregateGapSeq(t *testing.T) {
 func TestIngestDenyUnderThresholdNotAggregated(t *testing.T) {
 	q, pool, org := ingestPool(t)
 	ctx := context.Background()
-	ing := NewIngester(pool, stubGrants{}, nil, nil)
+	ing := NewIngester(pool, stubGrants{}, nil, nil, nil)
 	batch := []WireEvent{}
 	for p := 0; p < DenyAggregateThreshold; p++ { // exactly threshold, not over
 		batch = append(batch, WireEvent{OccurredAt: time.Now().UTC(), Verdict: "deny", SrcIP: "10.99.0.7", DstIP: "10.0.0.1", Protocol: "tcp", DstPort: p + 1})
@@ -139,7 +190,7 @@ func TestIngestDenyUnderThresholdNotAggregated(t *testing.T) {
 func TestIngestSeqContiguousAcrossBatches(t *testing.T) {
 	q, pool, org := ingestPool(t)
 	ctx := context.Background()
-	ing := NewIngester(pool, stubGrants{}, nil, nil)
+	ing := NewIngester(pool, stubGrants{}, nil, nil, nil)
 	mk := func(ip string) []WireEvent {
 		return []WireEvent{
 			{OccurredAt: time.Now().UTC(), Verdict: "allow", SrcIP: ip, DstIP: "10.0.0.1", Protocol: "tcp"},
@@ -172,7 +223,7 @@ func TestIngestTerminatedKeyedOnRuleID(t *testing.T) {
 	ctx := context.Background()
 	rule := uuid.New()
 	res := uuid.New()
-	ing := NewIngester(pool, stubGrants{dstResource: &res, known: rule}, nil, nil)
+	ing := NewIngester(pool, stubGrants{dstResource: &res, known: rule}, nil, nil, nil)
 	batch := []WireEvent{
 		{OccurredAt: time.Now().UTC(), Verdict: "terminated", RuleID: rule.String(), SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 5432},
 		{OccurredAt: time.Now().UTC(), Verdict: "terminated", RuleID: rule.String(), SrcIP: "10.99.0.10", DstIP: "10.0.5.6", Protocol: "tcp", DstPort: 5433},

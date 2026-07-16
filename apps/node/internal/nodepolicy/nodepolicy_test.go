@@ -88,3 +88,21 @@ func TestWireRuleIDCapturedButHashBlind(t *testing.T) {
 		t.Fatal("captured rule_id must not perturb the applied-hash (metadata-blind staleness)")
 	}
 }
+
+// TestWireSrcDeviceIDCapturedButHashBlind (v3, S7.5.4): the agent decodes src_device_id
+// from a v3 wire artifact (for flow-event stamping) but it stays OUT of the applied hash.
+func TestWireSrcDeviceIDCapturedButHashBlind(t *testing.T) {
+	wire := `{"version":3,"node_id":"node-a","mode":"enforcing","mesh":false,"allow":[{"src_ip":"10.99.0.10","dst_cidr":"10.0.5.0/24","protocol":"tcp","port_low":5432,"port_high":5432,"rule_id":"r1","src_device_id":"dev-uuid-1"}]}`
+	var withDev nodepolicy.Compiled
+	if err := json.Unmarshal([]byte(wire), &withDev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if withDev.Allow[0].SrcDeviceID != "dev-uuid-1" {
+		t.Fatalf("agent must capture src_device_id for event stamping, got %q", withDev.Allow[0].SrcDeviceID)
+	}
+	noDev := withDev
+	noDev.Allow = []nodepolicy.AllowEntry{{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "r1"}}
+	if nodepolicy.CanonicalHash(&withDev) != nodepolicy.CanonicalHash(&noDev) {
+		t.Fatal("captured src_device_id must not perturb the applied-hash")
+	}
+}

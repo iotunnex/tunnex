@@ -18,7 +18,7 @@ func (f *fakeSource) Overruns() int64        { return f.overrun.Load() }
 // stamp: an allow record carries rule_id + the applied hash; a deny carries none; a foreign
 // record is skipped. Attribution is the kernel prefix, never a packet re-derivation.
 func TestPumpStamp(t *testing.T) {
-	p := NewPump(&fakeSource{}, NewBuffer(8), func() string { return "abc123" })
+	p := NewPump(&fakeSource{}, NewBuffer(8), func() string { return "abc123" }, nil)
 	rid := "019f5a14-1c1b-7343-bfb9-76e94a54b574"
 
 	e, ok := p.stamp(Record{Prefix: EncodePrefix(rid), SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp", DstPort: 5432})
@@ -34,10 +34,27 @@ func TestPumpStamp(t *testing.T) {
 	}
 }
 
+// S7.5.4 v3 — the pump stamps src_device_id from the deviceFn (the applied artifact's
+// /32→device map). A src with no mapping stamps "" (unresolved, never guessed).
+func TestPumpStampSrcDevice(t *testing.T) {
+	byIP := map[string]string{"10.99.0.10": "dev-alice"}
+	p := NewPump(&fakeSource{}, NewBuffer(8), nil, func(srcIP string) string { return byIP[srcIP] })
+
+	e, ok := p.stamp(Record{Prefix: EncodePrefix("r1"), SrcIP: "10.99.0.10", DstIP: "10.0.5.5", Protocol: "tcp"})
+	if !ok || e.SrcDeviceID != "dev-alice" {
+		t.Fatalf("mapped src must stamp its device id, got %q", e.SrcDeviceID)
+	}
+	// A src not in the map (e.g. a denied packet from a non-granted device) → unresolved.
+	e, ok = p.stamp(Record{Prefix: EncodePrefix("r1"), SrcIP: "10.99.0.99", DstIP: "10.0.5.5", Protocol: "tcp"})
+	if !ok || e.SrcDeviceID != "" {
+		t.Fatalf("unmapped src must stamp empty device id (never guessed), got %q", e.SrcDeviceID)
+	}
+}
+
 // Run pumps records into the buffer; Drain returns them.
 func TestPumpRunBuffers(t *testing.T) {
 	src := &fakeSource{ch: make(chan Record, 4)}
-	p := NewPump(src, NewBuffer(16), nil)
+	p := NewPump(src, NewBuffer(16), nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	go p.Run(ctx)
 
@@ -61,7 +78,7 @@ func TestPumpRunBuffers(t *testing.T) {
 func TestPumpDrainFoldsKernelOverrun(t *testing.T) {
 	src := &fakeSource{ch: make(chan Record)}
 	buf := NewBuffer(2)
-	p := NewPump(src, buf, nil)
+	p := NewPump(src, buf, nil, nil)
 
 	// Overflow the buffer by 3 (cap 2) → 3 buffer drops.
 	for i := 0; i < 5; i++ {

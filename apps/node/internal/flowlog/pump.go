@@ -38,13 +38,15 @@ type Pump struct {
 	src         Source
 	buf         *Buffer
 	hashFn      func() string
+	deviceFn    func(srcIP string) string // v3: src /32 -> device_id from the applied artifact ("" = unresolved)
 	lastOverrun int64
 }
 
 // NewPump wires a Source to a Buffer. hashFn returns the CURRENTLY-applied policy hash to
-// stamp per event (nil → empty hash).
-func NewPump(src Source, buf *Buffer, hashFn func() string) *Pump {
-	return &Pump{src: src, buf: buf, hashFn: hashFn}
+// stamp per event (nil → empty hash). deviceFn resolves a flow's src /32 to its device_id
+// from the applied artifact (nil → no device stamping).
+func NewPump(src Source, buf *Buffer, hashFn func() string, deviceFn func(srcIP string) string) *Pump {
+	return &Pump{src: src, buf: buf, hashFn: hashFn, deviceFn: deviceFn}
 }
 
 // Run pumps records into the buffer until ctx is cancelled or the source closes.
@@ -79,9 +81,13 @@ func (p *Pump) stamp(rec Record) (Event, bool) {
 	if p.hashFn != nil {
 		h = p.hashFn()
 	}
+	dev := ""
+	if p.deviceFn != nil {
+		dev = p.deviceFn(rec.SrcIP) // "" when the src has no grant — unresolved, never guessed
+	}
 	return Event{
 		OccurredAt: rec.At, Verdict: verdict, RuleID: ruleID, PolicyHash: h,
-		SrcIP: rec.SrcIP, DstIP: rec.DstIP, Protocol: rec.Protocol, DstPort: rec.DstPort,
+		SrcIP: rec.SrcIP, SrcDeviceID: dev, DstIP: rec.DstIP, Protocol: rec.Protocol, DstPort: rec.DstPort,
 	}, true
 }
 
