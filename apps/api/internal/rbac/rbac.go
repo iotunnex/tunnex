@@ -30,6 +30,14 @@ const (
 	// owner/admin grain, since approving a device GRANTS network access (security-sensitive,
 	// above org:update).
 	PermDeviceApprove Permission = "device:approve"
+	// PermDeviceHealthManage governs device HEALTH posture (S7.5.3, enterprise):
+	// configuring the org's per-check posture requirements (warn/require). Named per
+	// feature — deliberately NOT a reuse of PermDeviceApprove: approval (known-device)
+	// and health (healthy-device) are orthogonal governance axes, and reusing the
+	// approve perm would silently grant posture control to every existing approver.
+	// Same owner/admin grain (a require-mode check can disconnect devices). The
+	// self-REPORT endpoint carries no perm: it is device-owner-authed in the service.
+	PermDeviceHealthManage Permission = "device_health:manage"
 )
 
 // Roles.
@@ -59,9 +67,10 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermOrgUpdate:    true,
 		PermMemberInvite: true,
 		PermMemberManage:  true,
-		PermPolicyView:    true,
-		PermPolicyManage:  true,
-		PermDeviceApprove: true,
+		PermPolicyView:         true,
+		PermPolicyManage:       true,
+		PermDeviceApprove:      true,
+		PermDeviceHealthManage: true,
 	},
 	RoleOwner: {
 		PermOrgView:       true,
@@ -70,9 +79,10 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermOrgDelete:     true,
 		PermMemberInvite:  true,
 		PermMemberManage:  true,
-		PermPolicyView:    true,
-		PermPolicyManage:  true,
-		PermDeviceApprove: true,
+		PermPolicyView:         true,
+		PermPolicyManage:       true,
+		PermDeviceApprove:      true,
+		PermDeviceHealthManage: true,
 	},
 }
 

@@ -26,9 +26,13 @@ RETURNING node_id;
 
 -- name: ListPendingDevicesByOrg :many
 -- The approval queue (S7.3): devices awaiting admin approval, oldest first.
-SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+-- device_health joined (S7.5.3): a pending device may already be reporting posture
+-- (both facts surface independently — the D7 orthogonality).
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
 ORDER BY d.created_at;
 
@@ -74,16 +78,20 @@ WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: ListDevicesByUser :many
-SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
 ORDER BY d.created_at;
 
 -- name: ListDevicesByOrg :many
-SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
 ORDER BY d.created_at;
 
@@ -158,11 +166,14 @@ ORDER BY assigned_ip;
 -- fetches the peers for its own node). A peer is present only while BOTH the
 -- device is active AND its owning user is active — so deactivating a user drops
 -- their peers from every node's desired state (and reactivation restores them).
+-- NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
+-- device drops from desired state regardless of approval status; the conjunction
+-- with status='active' excludes a pending+blocked device exactly once.
 SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
 WHERE d.node_id = $1
-  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at;
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -39,10 +40,22 @@ type Querier interface {
 	// so seq is monotonic + sweep-proof (review #6). The batch's seqs are (returned-n+1)..returned.
 	BumpOrgFlowSeq(ctx context.Context, arg BumpOrgFlowSeqParams) (int64, error)
 	ChangeMemberRole(ctx context.Context, arg ChangeMemberRoleParams) (Membership, error)
+	// lint:cross-org — the DOWNGRADE-RELEASE sweep (the enforcement mirror of
+	// unlock-then-opt-in): when the device-health feature is OFF (open build), NO
+	// device may remain posture-blocked — disabling a feature must RELEASE its
+	// enforcement, not petrify it. Unconditional (no TTL): every health_blocked
+	// device is freed. Returns the affected devices for auditing + org push. Runs at
+	// open-build boot; idempotent (no blocks -> no rows).
+	ClearAllHealthBlocks(ctx context.Context) ([]ClearAllHealthBlocksRow, error)
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
 	// pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
 	ClearNodePolicyDesyncSince(ctx context.Context, arg ClearNodePolicyDesyncSinceParams) error
+	// lint:cross-org — the staleness sweep (D4: a report gone quiet past the TTL is
+	// ABSENCE, and absence never blocks — only a FRESH positive non-compliant report
+	// gates). System-wide by design: clears health_blocked wherever the backing
+	// report has gone stale, returning the affected devices for auditing + org push.
+	ClearStaleHealthBlocks(ctx context.Context, ttl pgtype.Interval) ([]ClearStaleHealthBlocksRow, error)
 	// Single-use + purpose-bound: only matches an unconsumed, unexpired token of the
 	// given purpose. A reset token therefore cannot be consumed as a verification
 	// token and vice-versa.
@@ -117,6 +130,8 @@ type Querier interface {
 	DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
+	// Turn a check OFF (delete the opt-in row).
+	DeleteOrgHealthCheck(ctx context.Context, arg DeleteOrgHealthCheckParams) (int64, error)
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (int64, error)
@@ -143,6 +158,12 @@ type Querier interface {
 	// against a concurrently-committing Approve (pending->active) so the label can't be stale —
 	// audit_logs is APPEND-ONLY, so a mislabel is a permanent error in the forensic record.
 	GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdateParams) (Device, error)
+	// S7.5.3 device health (posture v1). Facts are CLIENT-REPORTED (not attested);
+	// evaluation is server-side, continuous (on every report), and enforcement rides
+	// the existing exclude-then-push machinery via devices.health_blocked.
+	// lint:cross-org — keyed by device_id; the caller authorized the device via its
+	// org (GetDevice) before reading its health snapshot.
+	GetDeviceHealth(ctx context.Context, deviceID uuid.UUID) (DeviceHealth, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
 	// before an org context exists; org_id is a column on the returned row.
@@ -234,7 +255,8 @@ type Querier interface {
 	// nodes) — the compiler resolves group destinations to these devices' /32s and keys
 	// allows by src /32. The memberships join is load-bearing: a removed member's device
 	// must not participate in policy (as a source OR a destination) even if the device
-	// itself was never revoked.
+	// itself was never revoked. NOT health_blocked (S7.5.3): a health-blocked device's
+	// /32 leaves the compiled allow-sets (source AND destination) the same way.
 	ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error)
 	// S7.2 decision 2a: the devices whose internet egress is governed by policy once the
 	// org enters enforcing mode -- enumerated (count + names) in the mode-enable response
@@ -250,6 +272,9 @@ type Querier interface {
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops
 	// their peers from every node's desired state (and reactivation restores them).
+	// NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
+	// device drops from desired state regardless of approval status; the conjunction
+	// with status='active' excludes a pending+blocked device exactly once.
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
@@ -258,6 +283,10 @@ type Querier interface {
 	// rather than an OR-expansion the planner can't use.
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListCliCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]CliCredential, error)
+	// The org's reporting devices with their latest facts — the blast-radius input
+	// (D4): on enabling a check, count how many devices' LAST report would fail it
+	// (best-effort, post-commit; the config write itself never blocks anything).
+	ListDeviceHealthForOrg(ctx context.Context, orgID uuid.UUID) ([]DeviceHealth, error)
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
@@ -287,6 +316,7 @@ type Querier interface {
 	// devices may span orgs and all affected nodes must be nudged to reconcile.
 	ListNodeIDsForUserActiveDevices(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
+	ListOrgHealthChecks(ctx context.Context, orgID uuid.UUID) ([]OrgHealthCheck, error)
 	// The org roster for the Users page: membership joined to the user record so the
 	// UI has name/email/status/verified in one query. Soft-deleted users are
 	// excluded (their membership row survives a soft-delete); deactivated members
@@ -297,6 +327,8 @@ type Querier interface {
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	// The approval queue (S7.3): devices awaiting admin approval, oldest first.
+	// device_health joined (S7.5.3): a pending device may already be reporting posture
+	// (both facts surface independently — the D7 orthogonality).
 	ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error)
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
@@ -357,6 +389,10 @@ type Querier interface {
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
+	// lint:cross-org — keyed by device_id inside the report/sweep transaction (org
+	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
+	// row so the caller sees org/node for the push.
+	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
 	// lint:cross-org — keyed by id after cert authorization; the node reports its
 	// locally-generated WireGuard public key and its public endpoint (host:port that
 	// peer configs dial). Returns rows affected so the caller can distinguish a real
@@ -404,6 +440,11 @@ type Querier interface {
 	UpdateOrganizationName(ctx context.Context, arg UpdateOrganizationNameParams) (Organization, error)
 	UpdateResource(ctx context.Context, arg UpdateResourceParams) (Resource, error)
 	UpdateUserGroup(ctx context.Context, arg UpdateUserGroupParams) (UserGroup, error)
+	// lint:cross-org — keyed by device_id; ownership + org checked by the service
+	// (GetDevice + owner match) in the same transaction. Snapshot-only (v1): the
+	// latest report replaces the prior one; reported_at is the SERVER clock that
+	// staleness (D4) is measured against.
+	UpsertDeviceHealth(ctx context.Context, arg UpsertDeviceHealthParams) (DeviceHealth, error)
 	// lint:cross-org — keyed by node_id (agent is cert-authorized) + pubkey. Batched
 	// (pgx.Batch) so a whole report is a single round-trip; no per-peer write
 	// amplification and the write lands on the lean status table, not the devices
@@ -416,6 +457,9 @@ type Querier interface {
 	UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConfigParams) (IdpSyncConfig, error)
 	// Idempotent on (org_id, user_id).
 	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
+	// Opt-in a check (or change its mode/param). A row's existence IS the opt-in
+	// (no row = off — the unlock-then-opt-in convention, default-off by construction).
+	UpsertOrgHealthCheck(ctx context.Context, arg UpsertOrgHealthCheckParams) (OrgHealthCheck, error)
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)

@@ -73,7 +73,7 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked
 `
 
 type CreateDeviceParams struct {
@@ -120,6 +120,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.DeletedAt,
 		&i.FullTunnel,
 		&i.ApprovedBy,
+		&i.HealthBlocked,
 	)
 	return i, err
 }
@@ -137,7 +138,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -165,12 +166,13 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.DeletedAt,
 		&i.FullTunnel,
 		&i.ApprovedBy,
+		&i.HealthBlocked,
 	)
 	return i, err
 }
 
 const getDeviceForUpdate = `-- name: GetDeviceForUpdate :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -203,6 +205,7 @@ func (q *Queries) GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdate
 		&i.DeletedAt,
 		&i.FullTunnel,
 		&i.ApprovedBy,
+		&i.HealthBlocked,
 	)
 	return i, err
 }
@@ -338,7 +341,7 @@ SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
 WHERE d.node_id = $1
-  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -352,6 +355,9 @@ type ListActivePeersForNodeRow struct {
 // fetches the peers for its own node). A peer is present only while BOTH the
 // device is active AND its owning user is active — so deactivating a user drops
 // their peers from every node's desired state (and reactivation restores them).
+// NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
+// device drops from desired state regardless of approval status; the conjunction
+// with status='active' excludes a pending+blocked device exactly once.
 func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error) {
 	rows, err := q.db.Query(ctx, listActivePeersForNode, nodeID)
 	if err != nil {
@@ -373,9 +379,11 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -385,6 +393,11 @@ type ListDevicesByOrgRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error) {
@@ -412,9 +425,15 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.DeletedAt,
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
+			&i.Device.HealthBlocked,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -427,9 +446,11 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -444,6 +465,11 @@ type ListDevicesByUserRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error) {
@@ -471,9 +497,15 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.DeletedAt,
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
+			&i.Device.HealthBlocked,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -514,9 +546,11 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 }
 
 const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
+LEFT JOIN device_health dh ON dh.device_id = d.id
 WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -526,9 +560,16 @@ type ListPendingDevicesByOrgRow struct {
 	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
 	RxBytes         *int64             `json:"rx_bytes"`
 	TxBytes         *int64             `json:"tx_bytes"`
+	EvaluatedState  *string            `json:"evaluated_state"`
+	FailedChecks    []byte             `json:"failed_checks"`
+	OsVersion       *string            `json:"os_version"`
+	DiskEncrypted   *bool              `json:"disk_encrypted"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
 // The approval queue (S7.3): devices awaiting admin approval, oldest first.
+// device_health joined (S7.5.3): a pending device may already be reporting posture
+// (both facts surface independently — the D7 orthogonality).
 func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDevicesByOrg, orgID)
 	if err != nil {
@@ -554,9 +595,15 @@ func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) 
 			&i.Device.DeletedAt,
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
+			&i.Device.HealthBlocked,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
+			&i.EvaluatedState,
+			&i.FailedChecks,
+			&i.OsVersion,
+			&i.DiskEncrypted,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}

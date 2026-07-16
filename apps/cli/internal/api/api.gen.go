@@ -45,6 +45,25 @@ const (
 	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
 )
 
+// Defines values for DeviceHealthFailedChecksKind.
+const (
+	DeviceHealthFailedChecksKindDiskEncryption DeviceHealthFailedChecksKind = "disk_encryption"
+	DeviceHealthFailedChecksKindOsVersion      DeviceHealthFailedChecksKind = "os_version"
+)
+
+// Defines values for DeviceHealthFailedChecksMode.
+const (
+	DeviceHealthFailedChecksModeRequire DeviceHealthFailedChecksMode = "require"
+	DeviceHealthFailedChecksModeWarn    DeviceHealthFailedChecksMode = "warn"
+)
+
+// Defines values for DeviceHealthState.
+const (
+	DeviceHealthStateCompliant    DeviceHealthState = "compliant"
+	DeviceHealthStateNoncompliant DeviceHealthState = "noncompliant"
+	DeviceHealthStateUnknown      DeviceHealthState = "unknown"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -56,6 +75,50 @@ const (
 const (
 	DeviceApprovalModeOff DeviceApprovalMode = "off"
 	DeviceApprovalModeOn  DeviceApprovalMode = "on"
+)
+
+// Defines values for DeviceHealthReportPlatform.
+const (
+	Linux   DeviceHealthReportPlatform = "linux"
+	Macos   DeviceHealthReportPlatform = "macos"
+	Other   DeviceHealthReportPlatform = "other"
+	Windows DeviceHealthReportPlatform = "windows"
+)
+
+// Defines values for DeviceHealthResultFailedChecksKind.
+const (
+	DeviceHealthResultFailedChecksKindDiskEncryption DeviceHealthResultFailedChecksKind = "disk_encryption"
+	DeviceHealthResultFailedChecksKindOsVersion      DeviceHealthResultFailedChecksKind = "os_version"
+)
+
+// Defines values for DeviceHealthResultFailedChecksMode.
+const (
+	DeviceHealthResultFailedChecksModeRequire DeviceHealthResultFailedChecksMode = "require"
+	DeviceHealthResultFailedChecksModeWarn    DeviceHealthResultFailedChecksMode = "warn"
+)
+
+// Defines values for DeviceHealthResultState.
+const (
+	DeviceHealthResultStateCompliant    DeviceHealthResultState = "compliant"
+	DeviceHealthResultStateNoncompliant DeviceHealthResultState = "noncompliant"
+)
+
+// Defines values for HealthCheckKind.
+const (
+	DiskEncryption HealthCheckKind = "disk_encryption"
+	OsVersion      HealthCheckKind = "os_version"
+)
+
+// Defines values for HealthCheckMode.
+const (
+	HealthCheckModeRequire HealthCheckMode = "require"
+	HealthCheckModeWarn    HealthCheckMode = "warn"
+)
+
+// Defines values for HealthCheckInputMode.
+const (
+	HealthCheckInputModeRequire HealthCheckInputMode = "require"
+	HealthCheckInputModeWarn    HealthCheckInputMode = "warn"
 )
 
 // Defines values for HealthResponseStatus.
@@ -399,21 +462,39 @@ type CreatePolicyRuleRequestDstKind string
 // Device defines model for Device.
 type Device struct {
 	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
-	ApprovedBy      *openapi_types.UUID `json:"approved_by"`
-	AssignedIp      *string             `json:"assigned_ip,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
-	Id              openapi_types.UUID  `json:"id"`
-	LastHandshakeAt *time.Time          `json:"last_handshake_at,omitempty"`
-	Name            string              `json:"name"`
-	NodeId          openapi_types.UUID  `json:"node_id"`
-	Online          *bool               `json:"online,omitempty"`
-	Platform        *string             `json:"platform,omitempty"`
-	PublicKey       string              `json:"public_key"`
-	RxBytes         *int64              `json:"rx_bytes,omitempty"`
-	Status          DeviceStatus        `json:"status"`
-	TxBytes         *int64              `json:"tx_bytes,omitempty"`
-	UserId          openapi_types.UUID  `json:"user_id"`
+	ApprovedBy          *openapi_types.UUID `json:"approved_by"`
+	AssignedIp          *string             `json:"assigned_ip,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	HealthBlocked       *bool               `json:"health_blocked,omitempty"`
+	HealthDiskEncrypted *bool               `json:"health_disk_encrypted,omitempty"`
+	HealthFailedChecks  *[]struct {
+		Kind DeviceHealthFailedChecksKind `json:"kind"`
+		Mode DeviceHealthFailedChecksMode `json:"mode"`
+	} `json:"health_failed_checks,omitempty"`
+	HealthOsVersion  *string            `json:"health_os_version,omitempty"`
+	HealthReportedAt *time.Time         `json:"health_reported_at,omitempty"`
+	HealthState      *DeviceHealthState `json:"health_state,omitempty"`
+	Id               openapi_types.UUID `json:"id"`
+	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
+	Name             string             `json:"name"`
+	NodeId           openapi_types.UUID `json:"node_id"`
+	Online           *bool              `json:"online,omitempty"`
+	Platform         *string            `json:"platform,omitempty"`
+	PublicKey        string             `json:"public_key"`
+	RxBytes          *int64             `json:"rx_bytes,omitempty"`
+	Status           DeviceStatus       `json:"status"`
+	TxBytes          *int64             `json:"tx_bytes,omitempty"`
+	UserId           openapi_types.UUID `json:"user_id"`
 }
+
+// DeviceHealthFailedChecksKind defines model for Device.HealthFailedChecks.Kind.
+type DeviceHealthFailedChecksKind string
+
+// DeviceHealthFailedChecksMode defines model for Device.HealthFailedChecks.Mode.
+type DeviceHealthFailedChecksMode string
+
+// DeviceHealthState defines model for Device.HealthState.
+type DeviceHealthState string
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string
@@ -429,6 +510,36 @@ type DeviceApproval struct {
 
 // DeviceApprovalMode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
 type DeviceApprovalMode string
+
+// DeviceHealthReport Client-reported posture facts (S7.5.3). NOT attestation — a compromised device can misreport; posture checks deter honest non-compliance and give an audit trail (defense-in-depth, not a guarantee).
+type DeviceHealthReport struct {
+	CollectedAt   *time.Time                 `json:"collected_at,omitempty"`
+	DiskEncrypted *bool                      `json:"disk_encrypted,omitempty"`
+	OsVersion     string                     `json:"os_version"`
+	Platform      DeviceHealthReportPlatform `json:"platform"`
+}
+
+// DeviceHealthReportPlatform defines model for DeviceHealthReport.Platform.
+type DeviceHealthReportPlatform string
+
+// DeviceHealthResult defines model for DeviceHealthResult.
+type DeviceHealthResult struct {
+	Blocked      bool `json:"blocked"`
+	FailedChecks []struct {
+		Kind DeviceHealthResultFailedChecksKind `json:"kind"`
+		Mode DeviceHealthResultFailedChecksMode `json:"mode"`
+	} `json:"failed_checks"`
+	State DeviceHealthResultState `json:"state"`
+}
+
+// DeviceHealthResultFailedChecksKind defines model for DeviceHealthResult.FailedChecks.Kind.
+type DeviceHealthResultFailedChecksKind string
+
+// DeviceHealthResultFailedChecksMode defines model for DeviceHealthResult.FailedChecks.Mode.
+type DeviceHealthResultFailedChecksMode string
+
+// DeviceHealthResultState defines model for DeviceHealthResult.State.
+type DeviceHealthResultState string
 
 // DomainClaimRequest defines model for DomainClaimRequest.
 type DomainClaimRequest struct {
@@ -518,6 +629,36 @@ type GroupRequest struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
 }
+
+// HealthCheck defines model for HealthCheck.
+type HealthCheck struct {
+	// Kind S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b).
+	Kind HealthCheckKind `json:"kind"`
+
+	// Mode warn = surface + audit only, never gates. require = a fresh non-compliant report excludes the device from every gateway within seconds.
+	Mode HealthCheckMode `json:"mode"`
+
+	// Param Check parameters. os_version: {"min":{"macos":"14.0","windows":"10.0"}} — a platform absent from "min" is not enforced. disk_encryption: none.
+	Param *map[string]interface{} `json:"param"`
+
+	// WouldFailCount On PUT only: how many devices' LAST report would fail this check (best-effort blast radius). The config write itself blocks nothing — a device's gate only ever flips on its own next report (D4 grandfather).
+	WouldFailCount *int `json:"would_fail_count,omitempty"`
+}
+
+// HealthCheckKind S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b).
+type HealthCheckKind string
+
+// HealthCheckMode warn = surface + audit only, never gates. require = a fresh non-compliant report excludes the device from every gateway within seconds.
+type HealthCheckMode string
+
+// HealthCheckInput defines model for HealthCheckInput.
+type HealthCheckInput struct {
+	Mode  HealthCheckInputMode    `json:"mode"`
+	Param *map[string]interface{} `json:"param"`
+}
+
+// HealthCheckInputMode defines model for HealthCheckInput.Mode.
+type HealthCheckInputMode string
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -930,6 +1071,9 @@ type SetDeviceApprovalJSONRequestBody = DeviceApproval
 // CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
 type CreateDeviceJSONRequestBody = CreateDeviceRequest
 
+// ReportDeviceHealthJSONRequestBody defines body for ReportDeviceHealth for application/json ContentType.
+type ReportDeviceHealthJSONRequestBody = DeviceHealthReport
+
 // CreateDomainClaimJSONRequestBody defines body for CreateDomainClaim for application/json ContentType.
 type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 
@@ -944,6 +1088,9 @@ type UpdateGroupJSONRequestBody = GroupRequest
 
 // AddGroupMemberJSONRequestBody defines body for AddGroupMember for application/json ContentType.
 type AddGroupMemberJSONRequestBody = AddGroupMemberRequest
+
+// PutHealthCheckJSONRequestBody defines body for PutHealthCheck for application/json ContentType.
+type PutHealthCheckJSONRequestBody = HealthCheckInput
 
 // PutIdpSyncConfigJSONRequestBody defines body for PutIdpSyncConfig for application/json ContentType.
 type PutIdpSyncConfigJSONRequestBody = IdpSyncConfigRequest
@@ -1189,6 +1336,11 @@ type ClientInterface interface {
 	// ApproveDevice request
 	ApproveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReportDeviceHealthWithBody request with any body
+	ReportDeviceHealthWithBody(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ReportDeviceHealth(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, body ReportDeviceHealthJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RejectDevice request
 	RejectDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1231,6 +1383,17 @@ type ClientInterface interface {
 
 	// RemoveGroupMember request
 	RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListHealthChecks request
+	ListHealthChecks(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteHealthCheck request
+	DeleteHealthCheck(ctx context.Context, orgId openapi_types.UUID, checkKind string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutHealthCheckWithBody request with any body
+	PutHealthCheckWithBody(ctx context.Context, orgId openapi_types.UUID, checkKind string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutHealthCheck(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PutIdpSyncConfigWithBody request with any body
 	PutIdpSyncConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1934,6 +2097,30 @@ func (c *Client) ApproveDevice(ctx context.Context, orgId openapi_types.UUID, de
 	return c.Client.Do(req)
 }
 
+func (c *Client) ReportDeviceHealthWithBody(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReportDeviceHealthRequestWithBody(c.Server, orgId, deviceId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReportDeviceHealth(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, body ReportDeviceHealthJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReportDeviceHealthRequest(c.Server, orgId, deviceId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) RejectDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRejectDeviceRequest(c.Server, orgId, deviceId)
 	if err != nil {
@@ -2116,6 +2303,54 @@ func (c *Client) AddGroupMember(ctx context.Context, orgId openapi_types.UUID, g
 
 func (c *Client) RemoveGroupMember(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRemoveGroupMemberRequest(c.Server, orgId, groupId, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListHealthChecks(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListHealthChecksRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteHealthCheck(ctx context.Context, orgId openapi_types.UUID, checkKind string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteHealthCheckRequest(c.Server, orgId, checkKind)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutHealthCheckWithBody(ctx context.Context, orgId openapi_types.UUID, checkKind string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutHealthCheckRequestWithBody(c.Server, orgId, checkKind, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutHealthCheck(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutHealthCheckRequest(c.Server, orgId, checkKind, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4091,6 +4326,60 @@ func NewApproveDeviceRequest(server string, orgId openapi_types.UUID, deviceId o
 	return req, nil
 }
 
+// NewReportDeviceHealthRequest calls the generic ReportDeviceHealth builder with application/json body
+func NewReportDeviceHealthRequest(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID, body ReportDeviceHealthJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReportDeviceHealthRequestWithBody(server, orgId, deviceId, "application/json", bodyReader)
+}
+
+// NewReportDeviceHealthRequestWithBody generates requests for ReportDeviceHealth with any type of body
+func NewReportDeviceHealthRequestWithBody(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "deviceId", runtime.ParamLocationPath, deviceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/devices/%s/health", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRejectDeviceRequest generates requests for RejectDevice
 func NewRejectDeviceRequest(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -4582,6 +4871,135 @@ func NewRemoveGroupMemberRequest(server string, orgId openapi_types.UUID, groupI
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListHealthChecksRequest generates requests for ListHealthChecks
+func NewListHealthChecksRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/health-checks", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteHealthCheckRequest generates requests for DeleteHealthCheck
+func NewDeleteHealthCheckRequest(server string, orgId openapi_types.UUID, checkKind string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "checkKind", runtime.ParamLocationPath, checkKind)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/health-checks/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutHealthCheckRequest calls the generic PutHealthCheck builder with application/json body
+func NewPutHealthCheckRequest(server string, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutHealthCheckRequestWithBody(server, orgId, checkKind, "application/json", bodyReader)
+}
+
+// NewPutHealthCheckRequestWithBody generates requests for PutHealthCheck with any type of body
+func NewPutHealthCheckRequestWithBody(server string, orgId openapi_types.UUID, checkKind string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "checkKind", runtime.ParamLocationPath, checkKind)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/health-checks/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -6014,6 +6432,11 @@ type ClientWithResponsesInterface interface {
 	// ApproveDeviceWithResponse request
 	ApproveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveDeviceResponse, error)
 
+	// ReportDeviceHealthWithBodyWithResponse request with any body
+	ReportDeviceHealthWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReportDeviceHealthResponse, error)
+
+	ReportDeviceHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, body ReportDeviceHealthJSONRequestBody, reqEditors ...RequestEditorFn) (*ReportDeviceHealthResponse, error)
+
 	// RejectDeviceWithResponse request
 	RejectDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RejectDeviceResponse, error)
 
@@ -6056,6 +6479,17 @@ type ClientWithResponsesInterface interface {
 
 	// RemoveGroupMemberWithResponse request
 	RemoveGroupMemberWithResponse(ctx context.Context, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveGroupMemberResponse, error)
+
+	// ListHealthChecksWithResponse request
+	ListHealthChecksWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListHealthChecksResponse, error)
+
+	// DeleteHealthCheckWithResponse request
+	DeleteHealthCheckWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, reqEditors ...RequestEditorFn) (*DeleteHealthCheckResponse, error)
+
+	// PutHealthCheckWithBodyWithResponse request with any body
+	PutHealthCheckWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutHealthCheckResponse, error)
+
+	PutHealthCheckWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PutHealthCheckResponse, error)
 
 	// PutIdpSyncConfigWithBodyWithResponse request with any body
 	PutIdpSyncConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error)
@@ -6948,6 +7382,29 @@ func (r ApproveDeviceResponse) StatusCode() int {
 	return 0
 }
 
+type ReportDeviceHealthResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DeviceHealthResult
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ReportDeviceHealthResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReportDeviceHealthResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type RejectDeviceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7190,6 +7647,74 @@ func (r RemoveGroupMemberResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RemoveGroupMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListHealthChecksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]HealthCheck
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListHealthChecksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListHealthChecksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteHealthCheckResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteHealthCheckResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteHealthCheckResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutHealthCheckResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *HealthCheck
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r PutHealthCheckResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutHealthCheckResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -8281,6 +8806,23 @@ func (c *ClientWithResponses) ApproveDeviceWithResponse(ctx context.Context, org
 	return ParseApproveDeviceResponse(rsp)
 }
 
+// ReportDeviceHealthWithBodyWithResponse request with arbitrary body returning *ReportDeviceHealthResponse
+func (c *ClientWithResponses) ReportDeviceHealthWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReportDeviceHealthResponse, error) {
+	rsp, err := c.ReportDeviceHealthWithBody(ctx, orgId, deviceId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReportDeviceHealthResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReportDeviceHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, body ReportDeviceHealthJSONRequestBody, reqEditors ...RequestEditorFn) (*ReportDeviceHealthResponse, error) {
+	rsp, err := c.ReportDeviceHealth(ctx, orgId, deviceId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReportDeviceHealthResponse(rsp)
+}
+
 // RejectDeviceWithResponse request returning *RejectDeviceResponse
 func (c *ClientWithResponses) RejectDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RejectDeviceResponse, error) {
 	rsp, err := c.RejectDevice(ctx, orgId, deviceId, reqEditors...)
@@ -8418,6 +8960,41 @@ func (c *ClientWithResponses) RemoveGroupMemberWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseRemoveGroupMemberResponse(rsp)
+}
+
+// ListHealthChecksWithResponse request returning *ListHealthChecksResponse
+func (c *ClientWithResponses) ListHealthChecksWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListHealthChecksResponse, error) {
+	rsp, err := c.ListHealthChecks(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListHealthChecksResponse(rsp)
+}
+
+// DeleteHealthCheckWithResponse request returning *DeleteHealthCheckResponse
+func (c *ClientWithResponses) DeleteHealthCheckWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, reqEditors ...RequestEditorFn) (*DeleteHealthCheckResponse, error) {
+	rsp, err := c.DeleteHealthCheck(ctx, orgId, checkKind, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteHealthCheckResponse(rsp)
+}
+
+// PutHealthCheckWithBodyWithResponse request with arbitrary body returning *PutHealthCheckResponse
+func (c *ClientWithResponses) PutHealthCheckWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutHealthCheckResponse, error) {
+	rsp, err := c.PutHealthCheckWithBody(ctx, orgId, checkKind, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutHealthCheckResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutHealthCheckWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PutHealthCheckResponse, error) {
+	rsp, err := c.PutHealthCheck(ctx, orgId, checkKind, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutHealthCheckResponse(rsp)
 }
 
 // PutIdpSyncConfigWithBodyWithResponse request with arbitrary body returning *PutIdpSyncConfigResponse
@@ -9872,6 +10449,39 @@ func ParseApproveDeviceResponse(rsp *http.Response) (*ApproveDeviceResponse, err
 	return response, nil
 }
 
+// ParseReportDeviceHealthResponse parses an HTTP response from a ReportDeviceHealthWithResponse call
+func ParseReportDeviceHealthResponse(rsp *http.Response) (*ReportDeviceHealthResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReportDeviceHealthResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeviceHealthResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRejectDeviceResponse parses an HTTP response from a RejectDeviceWithResponse call
 func ParseRejectDeviceResponse(rsp *http.Response) (*RejectDeviceResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10188,6 +10798,98 @@ func ParseRemoveGroupMemberResponse(rsp *http.Response) (*RemoveGroupMemberRespo
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListHealthChecksResponse parses an HTTP response from a ListHealthChecksWithResponse call
+func ParseListHealthChecksResponse(rsp *http.Response) (*ListHealthChecksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListHealthChecksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []HealthCheck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteHealthCheckResponse parses an HTTP response from a DeleteHealthCheckWithResponse call
+func ParseDeleteHealthCheckResponse(rsp *http.Response) (*DeleteHealthCheckResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteHealthCheckResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutHealthCheckResponse parses an HTTP response from a PutHealthCheckWithResponse call
+func ParsePutHealthCheckResponse(rsp *http.Response) (*PutHealthCheckResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutHealthCheckResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HealthCheck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

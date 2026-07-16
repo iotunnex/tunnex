@@ -20,6 +20,13 @@ vendor/
 .env
 .env.local
 *.local
+
+# Box-walk scratch: WireGuard configs carry device PRIVATE KEYS — gitignored AT
+# CREATION so a walk never commits key material (walk EVIDENCE lives in
+# walk-artifacts/ as nft/pcap/json; scratch keys stay local-only).
+*.wgconf
+walk-artifacts/**/scratch/
+walk-artifacts/**/*.conf
 # Runtime secrets material only — ROOT-ANCHORED so it never eats the
 # apps/api/internal/secrets SOURCE package (that unanchored `secrets/` silently
 # kept the S0.3 crypto code out of git and broke every fresh clone / CI build).

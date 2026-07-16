@@ -5,7 +5,7 @@
 // TunnelEvent is the set of tunnel transitions worth a desktop notification. These
 // mirror the states the renderer already reacts to (up / down / kill-switch fail /
 // revoked) — a revoked device in particular must disconnect LOUDLY, not silently.
-export type TunnelEvent = "connected" | "disconnected" | "failed" | "revoked" | "pending" | "approved" | "migrated" | "migrate_retry";
+export type TunnelEvent = "connected" | "disconnected" | "failed" | "revoked" | "pending" | "approved" | "migrated" | "migrate_retry" | "posture_blocked";
 
 // messageFor is the pure copy map. The wording matches the renderer's TunnelControl
 // states so the tray/notification and the window agree.
@@ -30,5 +30,10 @@ export function messageFor(ev: TunnelEvent): { title: string; body: string } {
       return { title: "Tunnex device replaced", body: "This device was replaced for a security update — click Connect to finish (a fresh key will be issued)." };
     case "migrate_retry":
       return { title: "Tunnex couldn't replace this device", body: "Reconnect to retry the device update. If it keeps failing, ask an admin to remove the old device." };
+    case "posture_blocked":
+      return {
+        title: "Tunnex blocked by posture policy",
+        body: "Your device no longer meets this network's posture requirements, so access was blocked. Fix it (e.g. turn on disk encryption or update your OS) and it reconnects automatically.",
+      };
   }
 }

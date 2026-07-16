@@ -9,7 +9,7 @@ import { trayMenuModel, trayStateFor } from "../src/main/trayview";
 // throw. The Electron wiring (notify.ts / tray.ts) is live-verified at S6.5a packaging.
 
 test("notify: every tunnel event has non-empty, distinct copy", () => {
-  const events = ["connected", "disconnected", "failed", "revoked", "pending", "approved", "migrated", "migrate_retry"] as const;
+  const events = ["connected", "disconnected", "failed", "revoked", "pending", "approved", "migrated", "migrate_retry", "posture_blocked"] as const;
   const titles = new Set<string>();
   for (const ev of events) {
     const { title, body } = messageFor(ev);
@@ -60,5 +60,14 @@ test("tray: trayStateFor mirrors the renderer's handshake-liveness (no drift)", 
   const mr = trayMenuModel("migrate_retry");
   assert.ok(mr.showConnect && !mr.showDisconnect); // reconnect retries; nothing to disconnect
   assert.match(mr.statusLabel, /replace device|retry/i);
+  // S7.5.3 [2]: a server-side require-mode block surfaces as a DISTINCT state — the
+  // interface is up but the gateway dropped the peer, so the tray must NOT read
+  // "connected". Reconnect wouldn't help (still non-compliant); it auto-reconnects on
+  // the next compliant report, so offer disconnect only.
+  assert.equal(trayStateFor({ state: "posture_blocked" }), "posture_blocked");
+  const pb = trayMenuModel("posture_blocked");
+  assert.ok(!pb.showConnect && pb.showDisconnect);
+  assert.match(pb.statusLabel, /posture/i);
+  assert.match(messageFor("posture_blocked").body, /posture|encryption|update/i);
   assert.equal(trayStateFor({ state: "down" }), "disconnected");
 });

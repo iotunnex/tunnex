@@ -287,7 +287,7 @@ FROM devices d
 JOIN users u ON u.id = d.user_id
 JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
 WHERE d.org_id = $1
-  AND d.status = 'active' AND d.deleted_at IS NULL
+  AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
   AND d.assigned_ip IS NOT NULL AND d.assigned_ip <> ''
 ORDER BY d.assigned_ip
@@ -305,7 +305,8 @@ type ListActiveDevicesForOrgRow struct {
 // nodes) — the compiler resolves group destinations to these devices' /32s and keys
 // allows by src /32. The memberships join is load-bearing: a removed member's device
 // must not participate in policy (as a source OR a destination) even if the device
-// itself was never revoked.
+// itself was never revoked. NOT health_blocked (S7.5.3): a health-blocked device's
+// /32 leaves the compiled allow-sets (source AND destination) the same way.
 func (q *Queries) ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveDevicesForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listActiveDevicesForOrg, orgID)
 	if err != nil {

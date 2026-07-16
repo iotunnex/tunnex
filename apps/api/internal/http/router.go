@@ -49,8 +49,11 @@ type Deps struct {
 	// DeviceApprovalEnabled => false in the open build (S7.3 device posture endpoints
 	// return edition_required). Named per-feature (NewDeviceApprovalEdition).
 	DeviceApprovalEnabled bool
-	CookieSecure          bool
-	AppBaseURL            string
+	// DeviceHealthEnabled => false in the open build (S7.5.3 device health/posture-check
+	// endpoints return edition_required). Named per-feature (NewDeviceHealthEdition).
+	DeviceHealthEnabled bool
+	CookieSecure        bool
+	AppBaseURL          string
 	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
 	// (S6.2 desktop; app://tunnex). Empty = no CORS (pure same-origin).
 	CORSAllowedOrigins []string
@@ -150,7 +153,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

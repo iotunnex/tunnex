@@ -175,6 +175,7 @@ func main() {
 		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		IdpSync:               idpSyncPort,
 		DeviceApprovalEnabled: apphttp.NewDeviceApprovalEdition(),
+		DeviceHealthEnabled:   apphttp.NewDeviceHealthEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
@@ -227,6 +228,24 @@ func main() {
 	// directory groups every ~10min. Cancelled on shutdown.
 	pollCtx, pollCancel := context.WithCancel(context.Background())
 	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger)
+	// S7.5.3 device-health staleness sweep (enterprise only): a stale report is
+	// ABSENCE, and absence never blocks — clears health_blocked past the TTL and
+	// pushes the affected orgs. Shares pollCtx (cancelled on shutdown).
+	if apphttp.NewDeviceHealthEdition() {
+		go deviceSvc.StartHealthSweeper(pollCtx)
+	} else {
+		// DOWNGRADE-RELEASE ([1]): device-health is OFF in this build, so no report
+		// will arrive and the sweeper never runs — a device left health_blocked by a
+		// prior ENTERPRISE deployment would be excluded from every gateway FOREVER
+		// (silent permanent network loss). Disabling a feature must RELEASE its
+		// enforcement (the downgrade mirror of unlock-then-opt-in). Best-effort at
+		// boot; the interval reconcile still converges if the push is missed.
+		if n, err := deviceSvc.ReleaseAllHealthBlocks(context.Background()); err != nil {
+			logger.Warn("health_downgrade_release_failed", slog.String("error", err.Error()))
+		} else if n > 0 {
+			logger.Info("health_downgrade_release", slog.Int("released", n))
+		}
+	}
 
 	agentTLS, err := agentCh.TLSConfig("tunnex-control")
 	if err != nil {

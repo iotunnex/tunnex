@@ -50,6 +50,25 @@ const (
 	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
 )
 
+// Defines values for DeviceHealthFailedChecksKind.
+const (
+	DeviceHealthFailedChecksKindDiskEncryption DeviceHealthFailedChecksKind = "disk_encryption"
+	DeviceHealthFailedChecksKindOsVersion      DeviceHealthFailedChecksKind = "os_version"
+)
+
+// Defines values for DeviceHealthFailedChecksMode.
+const (
+	DeviceHealthFailedChecksModeRequire DeviceHealthFailedChecksMode = "require"
+	DeviceHealthFailedChecksModeWarn    DeviceHealthFailedChecksMode = "warn"
+)
+
+// Defines values for DeviceHealthState.
+const (
+	DeviceHealthStateCompliant    DeviceHealthState = "compliant"
+	DeviceHealthStateNoncompliant DeviceHealthState = "noncompliant"
+	DeviceHealthStateUnknown      DeviceHealthState = "unknown"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -61,6 +80,50 @@ const (
 const (
 	DeviceApprovalModeOff DeviceApprovalMode = "off"
 	DeviceApprovalModeOn  DeviceApprovalMode = "on"
+)
+
+// Defines values for DeviceHealthReportPlatform.
+const (
+	Linux   DeviceHealthReportPlatform = "linux"
+	Macos   DeviceHealthReportPlatform = "macos"
+	Other   DeviceHealthReportPlatform = "other"
+	Windows DeviceHealthReportPlatform = "windows"
+)
+
+// Defines values for DeviceHealthResultFailedChecksKind.
+const (
+	DeviceHealthResultFailedChecksKindDiskEncryption DeviceHealthResultFailedChecksKind = "disk_encryption"
+	DeviceHealthResultFailedChecksKindOsVersion      DeviceHealthResultFailedChecksKind = "os_version"
+)
+
+// Defines values for DeviceHealthResultFailedChecksMode.
+const (
+	DeviceHealthResultFailedChecksModeRequire DeviceHealthResultFailedChecksMode = "require"
+	DeviceHealthResultFailedChecksModeWarn    DeviceHealthResultFailedChecksMode = "warn"
+)
+
+// Defines values for DeviceHealthResultState.
+const (
+	DeviceHealthResultStateCompliant    DeviceHealthResultState = "compliant"
+	DeviceHealthResultStateNoncompliant DeviceHealthResultState = "noncompliant"
+)
+
+// Defines values for HealthCheckKind.
+const (
+	DiskEncryption HealthCheckKind = "disk_encryption"
+	OsVersion      HealthCheckKind = "os_version"
+)
+
+// Defines values for HealthCheckMode.
+const (
+	HealthCheckModeRequire HealthCheckMode = "require"
+	HealthCheckModeWarn    HealthCheckMode = "warn"
+)
+
+// Defines values for HealthCheckInputMode.
+const (
+	HealthCheckInputModeRequire HealthCheckInputMode = "require"
+	HealthCheckInputModeWarn    HealthCheckInputMode = "warn"
 )
 
 // Defines values for HealthResponseStatus.
@@ -404,21 +467,39 @@ type CreatePolicyRuleRequestDstKind string
 // Device defines model for Device.
 type Device struct {
 	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
-	ApprovedBy      *openapi_types.UUID `json:"approved_by"`
-	AssignedIp      *string             `json:"assigned_ip,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
-	Id              openapi_types.UUID  `json:"id"`
-	LastHandshakeAt *time.Time          `json:"last_handshake_at,omitempty"`
-	Name            string              `json:"name"`
-	NodeId          openapi_types.UUID  `json:"node_id"`
-	Online          *bool               `json:"online,omitempty"`
-	Platform        *string             `json:"platform,omitempty"`
-	PublicKey       string              `json:"public_key"`
-	RxBytes         *int64              `json:"rx_bytes,omitempty"`
-	Status          DeviceStatus        `json:"status"`
-	TxBytes         *int64              `json:"tx_bytes,omitempty"`
-	UserId          openapi_types.UUID  `json:"user_id"`
+	ApprovedBy          *openapi_types.UUID `json:"approved_by"`
+	AssignedIp          *string             `json:"assigned_ip,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	HealthBlocked       *bool               `json:"health_blocked,omitempty"`
+	HealthDiskEncrypted *bool               `json:"health_disk_encrypted,omitempty"`
+	HealthFailedChecks  *[]struct {
+		Kind DeviceHealthFailedChecksKind `json:"kind"`
+		Mode DeviceHealthFailedChecksMode `json:"mode"`
+	} `json:"health_failed_checks,omitempty"`
+	HealthOsVersion  *string            `json:"health_os_version,omitempty"`
+	HealthReportedAt *time.Time         `json:"health_reported_at,omitempty"`
+	HealthState      *DeviceHealthState `json:"health_state,omitempty"`
+	Id               openapi_types.UUID `json:"id"`
+	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
+	Name             string             `json:"name"`
+	NodeId           openapi_types.UUID `json:"node_id"`
+	Online           *bool              `json:"online,omitempty"`
+	Platform         *string            `json:"platform,omitempty"`
+	PublicKey        string             `json:"public_key"`
+	RxBytes          *int64             `json:"rx_bytes,omitempty"`
+	Status           DeviceStatus       `json:"status"`
+	TxBytes          *int64             `json:"tx_bytes,omitempty"`
+	UserId           openapi_types.UUID `json:"user_id"`
 }
+
+// DeviceHealthFailedChecksKind defines model for Device.HealthFailedChecks.Kind.
+type DeviceHealthFailedChecksKind string
+
+// DeviceHealthFailedChecksMode defines model for Device.HealthFailedChecks.Mode.
+type DeviceHealthFailedChecksMode string
+
+// DeviceHealthState defines model for Device.HealthState.
+type DeviceHealthState string
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string
@@ -434,6 +515,36 @@ type DeviceApproval struct {
 
 // DeviceApprovalMode S7.3 device posture. off = devices enroll active (default); on = new devices enroll PENDING until an admin approves.
 type DeviceApprovalMode string
+
+// DeviceHealthReport Client-reported posture facts (S7.5.3). NOT attestation — a compromised device can misreport; posture checks deter honest non-compliance and give an audit trail (defense-in-depth, not a guarantee).
+type DeviceHealthReport struct {
+	CollectedAt   *time.Time                 `json:"collected_at,omitempty"`
+	DiskEncrypted *bool                      `json:"disk_encrypted,omitempty"`
+	OsVersion     string                     `json:"os_version"`
+	Platform      DeviceHealthReportPlatform `json:"platform"`
+}
+
+// DeviceHealthReportPlatform defines model for DeviceHealthReport.Platform.
+type DeviceHealthReportPlatform string
+
+// DeviceHealthResult defines model for DeviceHealthResult.
+type DeviceHealthResult struct {
+	Blocked      bool `json:"blocked"`
+	FailedChecks []struct {
+		Kind DeviceHealthResultFailedChecksKind `json:"kind"`
+		Mode DeviceHealthResultFailedChecksMode `json:"mode"`
+	} `json:"failed_checks"`
+	State DeviceHealthResultState `json:"state"`
+}
+
+// DeviceHealthResultFailedChecksKind defines model for DeviceHealthResult.FailedChecks.Kind.
+type DeviceHealthResultFailedChecksKind string
+
+// DeviceHealthResultFailedChecksMode defines model for DeviceHealthResult.FailedChecks.Mode.
+type DeviceHealthResultFailedChecksMode string
+
+// DeviceHealthResultState defines model for DeviceHealthResult.State.
+type DeviceHealthResultState string
 
 // DomainClaimRequest defines model for DomainClaimRequest.
 type DomainClaimRequest struct {
@@ -523,6 +634,36 @@ type GroupRequest struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
 }
+
+// HealthCheck defines model for HealthCheck.
+type HealthCheck struct {
+	// Kind S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b).
+	Kind HealthCheckKind `json:"kind"`
+
+	// Mode warn = surface + audit only, never gates. require = a fresh non-compliant report excludes the device from every gateway within seconds.
+	Mode HealthCheckMode `json:"mode"`
+
+	// Param Check parameters. os_version: {"min":{"macos":"14.0","windows":"10.0"}} — a platform absent from "min" is not enforced. disk_encryption: none.
+	Param *map[string]interface{} `json:"param"`
+
+	// WouldFailCount On PUT only: how many devices' LAST report would fail this check (best-effort blast radius). The config write itself blocks nothing — a device's gate only ever flips on its own next report (D4 grandfather).
+	WouldFailCount *int `json:"would_fail_count,omitempty"`
+}
+
+// HealthCheckKind S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b).
+type HealthCheckKind string
+
+// HealthCheckMode warn = surface + audit only, never gates. require = a fresh non-compliant report excludes the device from every gateway within seconds.
+type HealthCheckMode string
+
+// HealthCheckInput defines model for HealthCheckInput.
+type HealthCheckInput struct {
+	Mode  HealthCheckInputMode    `json:"mode"`
+	Param *map[string]interface{} `json:"param"`
+}
+
+// HealthCheckInputMode defines model for HealthCheckInput.Mode.
+type HealthCheckInputMode string
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -935,6 +1076,9 @@ type SetDeviceApprovalJSONRequestBody = DeviceApproval
 // CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
 type CreateDeviceJSONRequestBody = CreateDeviceRequest
 
+// ReportDeviceHealthJSONRequestBody defines body for ReportDeviceHealth for application/json ContentType.
+type ReportDeviceHealthJSONRequestBody = DeviceHealthReport
+
 // CreateDomainClaimJSONRequestBody defines body for CreateDomainClaim for application/json ContentType.
 type CreateDomainClaimJSONRequestBody = DomainClaimRequest
 
@@ -949,6 +1093,9 @@ type UpdateGroupJSONRequestBody = GroupRequest
 
 // AddGroupMemberJSONRequestBody defines body for AddGroupMember for application/json ContentType.
 type AddGroupMemberJSONRequestBody = AddGroupMemberRequest
+
+// PutHealthCheckJSONRequestBody defines body for PutHealthCheck for application/json ContentType.
+type PutHealthCheckJSONRequestBody = HealthCheckInput
 
 // PutIdpSyncConfigJSONRequestBody defines body for PutIdpSyncConfig for application/json ContentType.
 type PutIdpSyncConfigJSONRequestBody = IdpSyncConfigRequest
@@ -1093,6 +1240,9 @@ type ServerInterface interface {
 	// Approve a pending device (peer + grants land org-wide within seconds, enterprise)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/approve)
 	ApproveDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
+	// Self-report device posture facts (owner only; server evaluates, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/health)
+	ReportDeviceHealth(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
 	// Reject a pending device (revoked, tunnel address freed, enterprise)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
 	RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID)
@@ -1126,6 +1276,15 @@ type ServerInterface interface {
 	// Remove a member from a group (enterprise)
 	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
 	RemoveGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID)
+	// List the org's configured posture checks (enterprise)
+	// (GET /api/v1/organizations/{orgId}/health-checks)
+	ListHealthChecks(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID)
+	// Turn a posture check off (idempotent; blocked devices unblock on their next report, enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/health-checks/{checkKind})
+	DeleteHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string)
+	// Opt the org into a posture check, or change its mode/param (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/health-checks/{checkKind})
+	PutHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string)
 	// Connect / update a directory-sync provider credential (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/idp-sync/{provider})
 	PutIdpSyncConfig(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, provider string)
@@ -1423,6 +1582,12 @@ func (_ Unimplemented) ApproveDevice(w http.ResponseWriter, r *http.Request, org
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Self-report device posture facts (owner only; server evaluates, enterprise)
+// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/health)
+func (_ Unimplemented) ReportDeviceHealth(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Reject a pending device (revoked, tunnel address freed, enterprise)
 // (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
 func (_ Unimplemented) RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
@@ -1486,6 +1651,24 @@ func (_ Unimplemented) AddGroupMember(w http.ResponseWriter, r *http.Request, or
 // Remove a member from a group (enterprise)
 // (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
 func (_ Unimplemented) RemoveGroupMember(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, groupId openapi_types.UUID, userId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List the org's configured posture checks (enterprise)
+// (GET /api/v1/organizations/{orgId}/health-checks)
+func (_ Unimplemented) ListHealthChecks(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Turn a posture check off (idempotent; blocked devices unblock on their next report, enterprise)
+// (DELETE /api/v1/organizations/{orgId}/health-checks/{checkKind})
+func (_ Unimplemented) DeleteHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Opt the org into a posture check, or change its mode/param (enterprise)
+// (PUT /api/v1/organizations/{orgId}/health-checks/{checkKind})
+func (_ Unimplemented) PutHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2623,6 +2806,48 @@ func (siw *ServerInterfaceWrapper) ApproveDevice(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ReportDeviceHealth operation middleware
+func (siw *ServerInterfaceWrapper) ReportDeviceHealth(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deviceId" -------------
+	var deviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deviceId", chi.URLParam(r, "deviceId"), &deviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deviceId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReportDeviceHealth(w, r, orgId, deviceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RejectDevice operation middleware
 func (siw *ServerInterfaceWrapper) RejectDevice(w http.ResponseWriter, r *http.Request) {
 
@@ -3049,6 +3274,123 @@ func (siw *ServerInterfaceWrapper) RemoveGroupMember(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveGroupMember(w, r, orgId, groupId, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListHealthChecks operation middleware
+func (siw *ServerInterfaceWrapper) ListHealthChecks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHealthChecks(w, r, orgId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteHealthCheck operation middleware
+func (siw *ServerInterfaceWrapper) DeleteHealthCheck(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "checkKind" -------------
+	var checkKind string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "checkKind", chi.URLParam(r, "checkKind"), &checkKind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "checkKind", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteHealthCheck(w, r, orgId, checkKind)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutHealthCheck operation middleware
+func (siw *ServerInterfaceWrapper) PutHealthCheck(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "orgId" -------------
+	var orgId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", chi.URLParam(r, "orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "orgId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "checkKind" -------------
+	var checkKind string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "checkKind", chi.URLParam(r, "checkKind"), &checkKind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "checkKind", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutHealthCheck(w, r, orgId, checkKind)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4347,6 +4689,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/approve", wrapper.ApproveDevice)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/health", wrapper.ReportDeviceHealth)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/organizations/{orgId}/devices/{deviceId}/reject", wrapper.RejectDevice)
 	})
 	r.Group(func(r chi.Router) {
@@ -4378,6 +4723,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/groups/{groupId}/members/{userId}", wrapper.RemoveGroupMember)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/organizations/{orgId}/health-checks", wrapper.ListHealthChecks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/organizations/{orgId}/health-checks/{checkKind}", wrapper.DeleteHealthCheck)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/health-checks/{checkKind}", wrapper.PutHealthCheck)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/organizations/{orgId}/idp-sync/{provider}", wrapper.PutIdpSyncConfig)
@@ -5791,6 +6145,47 @@ func (response ApproveDevicedefaultJSONResponse) VisitApproveDeviceResponse(w ht
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ReportDeviceHealthRequestObject struct {
+	OrgId    openapi_types.UUID `json:"orgId"`
+	DeviceId openapi_types.UUID `json:"deviceId"`
+	Body     *ReportDeviceHealthJSONRequestBody
+}
+
+type ReportDeviceHealthResponseObject interface {
+	VisitReportDeviceHealthResponse(w http.ResponseWriter) error
+}
+
+type ReportDeviceHealth200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ReportDeviceHealth200JSONResponse struct {
+	Body    DeviceHealthResult
+	Headers ReportDeviceHealth200ResponseHeaders
+}
+
+func (response ReportDeviceHealth200JSONResponse) VisitReportDeviceHealthResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ReportDeviceHealthdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ReportDeviceHealthdefaultJSONResponse) VisitReportDeviceHealthResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type RejectDeviceRequestObject struct {
 	OrgId    openapi_types.UUID `json:"orgId"`
 	DeviceId openapi_types.UUID `json:"deviceId"`
@@ -6211,6 +6606,123 @@ type RemoveGroupMemberdefaultJSONResponse struct {
 }
 
 func (response RemoveGroupMemberdefaultJSONResponse) VisitRemoveGroupMemberResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListHealthChecksRequestObject struct {
+	OrgId openapi_types.UUID `json:"orgId"`
+}
+
+type ListHealthChecksResponseObject interface {
+	VisitListHealthChecksResponse(w http.ResponseWriter) error
+}
+
+type ListHealthChecks200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListHealthChecks200JSONResponse struct {
+	Body    []HealthCheck
+	Headers ListHealthChecks200ResponseHeaders
+}
+
+func (response ListHealthChecks200JSONResponse) VisitListHealthChecksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListHealthChecksdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response ListHealthChecksdefaultJSONResponse) VisitListHealthChecksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteHealthCheckRequestObject struct {
+	OrgId     openapi_types.UUID `json:"orgId"`
+	CheckKind string             `json:"checkKind"`
+}
+
+type DeleteHealthCheckResponseObject interface {
+	VisitDeleteHealthCheckResponse(w http.ResponseWriter) error
+}
+
+type DeleteHealthCheck204ResponseHeaders struct {
+	XRequestId string
+}
+
+type DeleteHealthCheck204Response struct {
+	Headers DeleteHealthCheck204ResponseHeaders
+}
+
+func (response DeleteHealthCheck204Response) VisitDeleteHealthCheckResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteHealthCheckdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteHealthCheckdefaultJSONResponse) VisitDeleteHealthCheckResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type PutHealthCheckRequestObject struct {
+	OrgId     openapi_types.UUID `json:"orgId"`
+	CheckKind string             `json:"checkKind"`
+	Body      *PutHealthCheckJSONRequestBody
+}
+
+type PutHealthCheckResponseObject interface {
+	VisitPutHealthCheckResponse(w http.ResponseWriter) error
+}
+
+type PutHealthCheck200ResponseHeaders struct {
+	XRequestId string
+}
+
+type PutHealthCheck200JSONResponse struct {
+	Body    HealthCheck
+	Headers PutHealthCheck200ResponseHeaders
+}
+
+func (response PutHealthCheck200JSONResponse) VisitPutHealthCheckResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type PutHealthCheckdefaultJSONResponse struct {
+	Body       Error
+	Headers    ErrorResponseHeaders
+	StatusCode int
+}
+
+func (response PutHealthCheckdefaultJSONResponse) VisitPutHealthCheckResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(response.StatusCode)
@@ -7470,6 +7982,9 @@ type StrictServerInterface interface {
 	// Approve a pending device (peer + grants land org-wide within seconds, enterprise)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/approve)
 	ApproveDevice(ctx context.Context, request ApproveDeviceRequestObject) (ApproveDeviceResponseObject, error)
+	// Self-report device posture facts (owner only; server evaluates, enterprise)
+	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/health)
+	ReportDeviceHealth(ctx context.Context, request ReportDeviceHealthRequestObject) (ReportDeviceHealthResponseObject, error)
 	// Reject a pending device (revoked, tunnel address freed, enterprise)
 	// (POST /api/v1/organizations/{orgId}/devices/{deviceId}/reject)
 	RejectDevice(ctx context.Context, request RejectDeviceRequestObject) (RejectDeviceResponseObject, error)
@@ -7503,6 +8018,15 @@ type StrictServerInterface interface {
 	// Remove a member from a group (enterprise)
 	// (DELETE /api/v1/organizations/{orgId}/groups/{groupId}/members/{userId})
 	RemoveGroupMember(ctx context.Context, request RemoveGroupMemberRequestObject) (RemoveGroupMemberResponseObject, error)
+	// List the org's configured posture checks (enterprise)
+	// (GET /api/v1/organizations/{orgId}/health-checks)
+	ListHealthChecks(ctx context.Context, request ListHealthChecksRequestObject) (ListHealthChecksResponseObject, error)
+	// Turn a posture check off (idempotent; blocked devices unblock on their next report, enterprise)
+	// (DELETE /api/v1/organizations/{orgId}/health-checks/{checkKind})
+	DeleteHealthCheck(ctx context.Context, request DeleteHealthCheckRequestObject) (DeleteHealthCheckResponseObject, error)
+	// Opt the org into a posture check, or change its mode/param (enterprise)
+	// (PUT /api/v1/organizations/{orgId}/health-checks/{checkKind})
+	PutHealthCheck(ctx context.Context, request PutHealthCheckRequestObject) (PutHealthCheckResponseObject, error)
 	// Connect / update a directory-sync provider credential (enterprise)
 	// (PUT /api/v1/organizations/{orgId}/idp-sync/{provider})
 	PutIdpSyncConfig(ctx context.Context, request PutIdpSyncConfigRequestObject) (PutIdpSyncConfigResponseObject, error)
@@ -8577,6 +9101,40 @@ func (sh *strictHandler) ApproveDevice(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
+// ReportDeviceHealth operation middleware
+func (sh *strictHandler) ReportDeviceHealth(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
+	var request ReportDeviceHealthRequestObject
+
+	request.OrgId = orgId
+	request.DeviceId = deviceId
+
+	var body ReportDeviceHealthJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReportDeviceHealth(ctx, request.(ReportDeviceHealthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReportDeviceHealth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReportDeviceHealthResponseObject); ok {
+		if err := validResponse.VisitReportDeviceHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RejectDevice operation middleware
 func (sh *strictHandler) RejectDevice(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, deviceId openapi_types.UUID) {
 	var request RejectDeviceRequestObject
@@ -8899,6 +9457,93 @@ func (sh *strictHandler) RemoveGroupMember(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveGroupMemberResponseObject); ok {
 		if err := validResponse.VisitRemoveGroupMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListHealthChecks operation middleware
+func (sh *strictHandler) ListHealthChecks(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID) {
+	var request ListHealthChecksRequestObject
+
+	request.OrgId = orgId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListHealthChecks(ctx, request.(ListHealthChecksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListHealthChecks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListHealthChecksResponseObject); ok {
+		if err := validResponse.VisitListHealthChecksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteHealthCheck operation middleware
+func (sh *strictHandler) DeleteHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string) {
+	var request DeleteHealthCheckRequestObject
+
+	request.OrgId = orgId
+	request.CheckKind = checkKind
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteHealthCheck(ctx, request.(DeleteHealthCheckRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteHealthCheck")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteHealthCheckResponseObject); ok {
+		if err := validResponse.VisitDeleteHealthCheckResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutHealthCheck operation middleware
+func (sh *strictHandler) PutHealthCheck(w http.ResponseWriter, r *http.Request, orgId openapi_types.UUID, checkKind string) {
+	var request PutHealthCheckRequestObject
+
+	request.OrgId = orgId
+	request.CheckKind = checkKind
+
+	var body PutHealthCheckJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutHealthCheck(ctx, request.(PutHealthCheckRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutHealthCheck")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutHealthCheckResponseObject); ok {
+		if err := validResponse.VisitPutHealthCheckResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -9767,187 +10412,202 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"p/8bAAD//7wN/1jLFAEA",
+	"H4sIAAAAAAAC/+y93XIbObIg/CoZ/E5EU5/5I/90zzlSODbUssejM7blENV9Zs7YS4NVySJGRaAGQIli",
+	"OxwxVxtxbjfmAXZv9sH6STaQAIpVVPFXokT37E23TIJAIpHITOTvl0Ykx5kUKIxuHH1pjJDFqOjPC/xb",
+	"jtqcxfYfMepI8cxwKRpHjVOpFKbM/gvOXsFQKjAjrkG5nxwDS7UElmXIlAYuQKO6RgWpTHSn0WrYcVxh",
+	"3DgyKsdWQ0cjHDO7jplm2DhqaKO4SBpfv361g3UmhUYC6rVSUtk/IikMCmP/ZFmW8oig6f5VWwC/lGb8",
+	"F4XDxlHj/+vONtp13+qum41WqW6QvoCwsgW5hJg/tT1q2g43dSv44d0ZEr/SMn5l+7OTKMLMnIlrbtAP",
+	"o93EMbdQsPSDkhkqw+3OhyzV2GpkpY++NAQbo/3/mN28RZGYUePo2eFhax6JrUbGtJ5IFdcNHnMR/v30",
+	"Wc1vjbxCseqHt373tXzIf/GTfCqGycFfMTJ2eosFrV9fh7Ncf/eRQmYw7jP64VCqsf2rETODbcPH2KjZ",
+	"TIwR19yRCIp8bGFjaSonDfudmPr/9VmSKEyYoUlQjbmwSzVajYRlpW2UJxbTfiRzt4sqMX3MDw+f41O6",
+	"JgwyVG0tcxUh2B9BsRQ0M6lMW0dMQCTTlGUaD47hvf9dwjIYM3WFqjPbGRcGE1QEgTb9RMk86/O4gpA8",
+	"53EtLrTp86zm0rmvLDClL+dWUuj2sO5iaw4TMl57ShlFuVIFAVRxfpKgMO0oldEVDFM5ATmwPMixLEsd",
+	"0Hx/fglmhJCxxB6v/YLGH1j8rkdOmZJGRjKtRaLK07X3ovFvt/fwAVVbqgTGUkgjBY9AWzYhIoSmYWNL",
+	"SHjNY/qgS/QRo8HI/rq6By7MDy9qiUaraBENTLiI5aSPoob/V+8IuKGAIl4XdXPsgZBSus8OIdUjLl3e",
+	"Au6CiEtHsZjJvJXJH5CllmFtxGgUWknDpejHSmYZ1iDkQk40xJiiwRgGU6KrlGkDxW9BTxAzaLIE4QlE",
+	"LFv3iGarDxlP6xa/XLQYWimGMTQzpgxnadfNcAC//v0fBOKHNzCSpu3Pb8ymMEBIlJxwkZS4zEDKFJmo",
+	"QmNX7NM667LfuUO/jdaazdafpuHX3ExfC6OmG54li4xn/7cInkVGqnUv7DbCxzCVoPErLPrWff5lBe78",
+	"Nipw1KIqjt9YmfAOxwNU22kZucY10TIHZPhhLWDDIUYG41d4zSPcEKJ1hYlXj9bgPTS0Fs485uatTB6T",
+	"1txgPdUGx7WzbacJGcZTvXhLTjO/hZA1Yb5HWqcF6gh+ton6kzOjnzSqDQ8Nx4ynlS26T2r2SF/0r1Hx",
+	"IcfyRkv8cpt7Q0PCqnOL1O30dMREghcy3fIZoWSKZYVYTgQqi/N4zC3Kx8Q8atTeeYZu56kFMOX2NKTi",
+	"v2wJYmT1wmjE0hRFgjWq0h9PX0Pv2fc/QDEImgOm8YcXuUqh94eTtv1SDknsnb49+06Dx6kiQVx63Dx9",
+	"9q+Vx82L5zVnrzDmCiPTzxW/Dc5bKbMBi65AinRK0nZkTHbU7T599rvOYeew8/SIHgWRVbLd86AbsTR1",
+	"v1Fh9F+Ojp5+WjKyycQU7BctwBsWmdQqHsxAxszoGEZSG8vX7AM8SjvwsZHKiKX2448NYApB4TDXGBOA",
+	"r9732jqTcsgGKR50PooqUurfldrYJ9Kt7b+ORhJjMNLpQQEZBdzXqAbM8DE0T9+etTWPEaKZRaF72rv4",
+	"/fyhbPzirBxQa56AAuirqdVZALYg19toOReOHQPz0/tHh4wRmpqLJMV2rrEFI6ZHGAOzGp02B51a5nOT",
+	"cYW6z0WdeSZGSPkQaTUyv0RSxBqaPxwe1L8ei5NcjlXaWBhdAeIWJluNm3Yi204IzyM1TwOqTxXGVuVj",
+	"6QM8/wO8m/xmyEWCKlNcmFpZtqZAJHXZ3raNFg8qzNz5pty+bnWeZSnHGFI2wBSa2Ek6xa0/ALIaxDhk",
+	"eWo66wkdWq665TmJW8LggrvjNLqTLFPyGu+gcYY7VGICz59txgNm8yyFtWeYMlve9Jhm6Ndf+A8yTSEq",
+	"CPwYBF6jAj2SExG4o4VxjQt++8baP9W1uzbVZd9xwcf5GDK7fBhWYgP1HKCC9OqEvZFUBkb5mHluhXZS",
+	"jO2cdg8DJSeLtuGkrLPOBmG5/NTKKC2DVTNXCQsbMqPqyc/Ykfv8Ul6h2I525wjiLiKsPNUCAr4DoFtB",
+	"6AVpUJ3mfn8PmtO7XBt4/aeT08u3f4YxM9GIKCz8iP5BJDhhGgYyF6RmMANjLkxntc5SL8+qm5qDcTnq",
+	"t+IaVTk0Z7kcaJnmBoEGTaH5b4cQs6newCw5J7Kq8/8RpxjD02ftEd5ApqQctuWwrTFSaI4dylEDs+9e",
+	"sPe69lYXToHblqgYY3tFMbZqNgyQKVQlJtiCTOGQ31j9UNz0oelWJrO3QOUAcDoo9IhRBtVWigiPQRsy",
+	"aTkV6Rg0ihiYho+Nk7JSdQQ/uoWd8kzgOu35Y8Pptuv4KyrirorW1Rxmpti8UUw4qiFJ6ljMdpd2mKdp",
+	"3+RCYFr/3qxxCT2tVd03sbRnKTN20NzE39e6mvJByqP+FU5rtaWtjUleNQlg117KCnq3VNzFkCf1PpHC",
+	"UrXMo+jtWRYRKGIukj4jTYgtOK9M8WtmcAG+agXCStqroiHINvr0XCVM+Dtyvz7HFWJDp3ky97Mfns//",
+	"KmPGoLKM5L//hbV/OWz/26cnzXbx58H//y/rkgktt5hGPsiUR9OLfFuLybyvbc4Z4OGByQgF2LFXXMQv",
+	"6QcVJu4JX+RpajnenM2t6o6zU5SNNMEB12g1aOJ6r+RtT91aoIbfbAWtVtEmjsi5A6z8urT1usPcynjs",
+	"7iPG/cG0RtP9Xef5EUxGFLxAw1xgg7t5HbCbh5eQKCbiITMj0oK79kEv2ywy/Bqh6dW2cO9BDodWlqGB",
+	"l1ampzziVpyFBbbCMdOaJwLjRc67bR7HI/KN9QepjK4WmTP9mJjrqz6KSE0zs2Ko8+P0oxFGV854b3Cs",
+	"NzyzeeKX2mpr3hdYBsZ+UncRxl7ZDRNMmBKzOJTVpk0CwE9TR4n+A6YUm5Y2X4Kz7pT8KIWZVFueVmG3",
+	"CTuzMinljF7uQoryP3NxJeSkHkGbWDFGTMR6xK5wK1PG3Xz+IuUCF4jSkpayqVqibvqDqfE61hpuc8NM",
+	"ritBJHT5iaSu5RX5Mr0CUItus9l6W2tNNCT8eobqwtLjN1LBz0qnYtnCs7HZrsI6F0XMnAt4/f7kx7dn",
+	"799A88NPl5aHtp3+LgUZ1Q9a/imYCwNyCHjDteEiAc+FHRPWzh6uDZuGL5pV3v3r3/8BDIYpz2Bsn55C",
+	"GhikLLpqj2SKtMYwRTQHHfgRtWnjcCiVOQY20CiMF5tcs0HKRVJ5WZSOb1xvVfld57mHEzKpTa6wYzcK",
+	"LwvoUSiZpjCTLGTMOzgGKeAlCJzMj/zw+v0ri7RcGJ4CE0A+nCBr6C1X8NDhsGEv1Grmt5DrOUJwMRUX",
+	"GAKGlhJDrSEzMMCABhiyyGho9n7X+b7z/KAD788vweqGlly5FP7ULG9Tcsw1xgGPERMw5tpNeFzM56QP",
+	"hccoGEmBdNKiHbhjhMBEDInFskUaPX6NYjwlpKPQ2OaiHWNmRi2iEQZJzuy7DoOzZP4hkabk4N7MKbuG",
+	"XK3KlJXvvDJXDEc/ZpG0l97Ffdi/Ui7yG0sO9lqspohi0go4q0mEHiOb8Yul6sg/p3KxvsxfuXRw5AQs",
+	"z6O09kjlmHFxmjI+3vL1RBPMPyK/rz4Hn6+0jrpZVkK4lR3A3NiHU+RDZues+lZU6pF7GJBxCq5ZmiMw",
+	"DQwu/3QJ7peWSVv54QAleSWc03m62h1TAmDxDn+myfb0EF6PGU+3g21xDEbFGbTSuut+VQscicvtoGMJ",
+	"CrOAB9eaxCKtaqjo9bs2ikjGGENkJyfHBoJ911k9xofS10mJv0ou+tuFZXsVcJGVcMVvQ4xlzaOm0Hbm",
+	"jqAEq0NEGYLWHC5rVlh2eNtZ+Fi/hO7ac4HTk/KR1Ib/rZqCNrZqlvVfPvNWrkKPr64wt7la5IUEig3U",
+	"tJ5hImYqdgGlgOIaU5khBabjNaopKVPPbm5mGRNwOpIaBchrVDBgCj+Ki9+fwu/+9fB3oKXX3WdJJJ89",
+	"ufd5/Bm45aNDrrRpRynTGoYc05h+0/tw8lFYVe307RkpezpXQxYhOH9NOj2Gz/ZO0STasEHqoMyUTBQb",
+	"j5nhEdj360xdn2M9a6FnnWiPHq3egjGLRlxgWyGLCR6HRPsjUsdv2DhL7RkJafpDmYt4RbhedZnfW9y0",
+	"U7zG1O5ykOJY+1CAa5by2OHXSvVcoXMiFUrSytSYV7RqnQ4yRq1ZXSTWH/IxE6XN3mQpc9H1tY6k2bmv",
+	"yjLyvilgCeNCm/mUorX8fAHq2xdjXnIQGSy8Px4vG/pu7End3uUraejpw8woxATI4dDZDhzlt9wz06c5",
+	"DVKsxeTCE/kP+wTmGiZKigQm3HjVheZejbrFOGs13qBAxaN3s6U3wEcJ4DtAMItu3lSMx/Gm0UNBLVnf",
+	"tnXn2OlZIGiQmAHshdjYNm6hRDNzOs3hEnPeRipEnbOmbh/uvXhq3yBbPuZumVq+7zyvmgPADoXm9dMj",
+	"mL34WjD34DuG168u7O1xUwwOKiaUbV+KVejsexFeFqLsibc/SJFOWz5kKGEGdQc88uClFZAK9ahixTDg",
+	"7B6AN1Gax2T9CpYwGCo59sLaTjZhU2IFpaggkoZrv2FbjYwpNq7h2oRc+hINKt0pofcIvny0FPKxcWT/",
+	"YJHUHxtHHxtPX3QOPzZaH4NFwn14aD/8+tVbe4LNIZjeaEN+NntAQhpAMZQqwrgzf4xHFlHotrjAuTKj",
+	"vonM05gcF0vsk2SVFOn0CEaUOiOmwRb3Hbw96V2Gs6DJSP46rutorzmYGRNh4JJ3WMxzfdCBS9KNxJAn",
+	"MFHcIHCjMR0CvdFpnyMrGhxW3JrfaTpUF25MBDNMeabtC5QbDXIiQOBNQR/NVy/KLqyDervlhlaK0p09",
+	"E1m+Kf/Z2IhSIsAVJ7quObOwUm3zrlhfkbmVLt2pzwhUwbk577K1Z2gpwA8By0arqiRFiNy0WcYbC6K2",
+	"8xpV8i2/RoGaFGeTV43FV+vZksiXEECvw/FZnDmRzbaUUxuluPI4W+KntxcNbwwqwVL/gJCWPdofACfV",
+	"aNVj+h6EYAXGBSjrTUV0WoSmbPI0IQP7ojQcFPbWLLCtuvy+qYg20pFmvypeUkvGyKtFUTHymsdOpSuM",
+	"1jxSUsuhabQaiZRJWs8UXDhZf1XUNi0/KrJB5whjItuGo4IYFb/GGNxAaL56Vh+Mb1CwRWieN52HrbVK",
+	"hzM7ijnsVAFdSR1bRoKWiWRV+Kcb67Bco2ghS2eZC9A8ed1rvzl9dxBCnxWaXAlc526ViNP7vebYe4le",
+	"Kvify0URRjFwA4DHxyDH3BALdkS0xtuxdEzV7S85j60Sjb/VK1e9S2vTf/l3cyDWYpYqZbgArnjTjFH6",
+	"bX9B2OoFm4AsknOoLAfQUKeMxUyPBpKpGAY5T2OnVvthKRdX0JSKJ1zAE+i6j9tuvf9Gk7z89e//58AL",
+	"ffQOWSPJChUe/G44FnnZvXeXH9qpFcUxppyU9oyZUQdOUi2BXoQhZssOteqv0xhzZZVfFzfr4mWtWqzQ",
+	"KI7XZJBJmVkQqb/xe7xVReviM3tgL0Dr3jIaw4ILMxv/XXJxhxj8pcb426AtW34rpbXqSViOi9LYOky8",
+	"lQkXD37QywrbrHe0xQx1m9rKsHTPGcQW71tmjd3fvVga8hQj/Ulsue6n928Eo32Uopfm8FhGWv2xGrbp",
+	"obqRFeRlLkVAGFI09QLhqGU/yLxqiEKYx0vWVknc1oaMVSzw89TswZtfr2737/1L+y4uzxptTck03ZBO",
+	"Nwk61Ijifi5BRsHf/RgTxeK6eir/iUrCpcqtAjs73YMjYOCydOH0/H3v9cXPJ5dnP78OjwPNE/uODHLe",
+	"G9m+0+DWC7apMQrTgbA4vIQmy7J06rxCB3B+AU0m/GCKZ6NvrYDPlUJh0ikZk7hI3ODZyJP3r1w9I7ce",
+	"F0ALQsyHQ1TaGcwmIxaSqIRRMoUsZQK9lSrLyaI48UYo53ZDpTQYObH6z/nPry98tJZdscmAyAU+NsKG",
+	"nC2OCWBCyCkjFWQ2yqFq6gZZKDRPUZg2RdxRwB05/FyBGrwhDcvnGAaahoiJ70ybQrnGXITiQ+QjUVhG",
+	"vV2jCNKKgy3MElM7kdLZ5NpRKjUFnhHOmu6VYm92sLwG0MgbYzHorHgs1+jR5PBLqT5U/Uchu4qtAtac",
+	"jHg0cnZmOSzO/ACewIDFCcJPf/KW5RctUMjI40NYYVYPTSqhcf/eO3//Y31NnjmC7tfbwOupukXLDw6O",
+	"aOGTVz+f9c4v/jy/J0/itBN7NDHXWcqm4LySzsn7eQ6Mz/ZI7P61YVN/2vaEffK7YRTT6G9NM1g1r3Cq",
+	"IZUJj1z4DNcHHfgcIz0MfACz9xD//uyid9k+fXvS64WYPgpngmYkxxlPsT1iegS5YNeMp84ZW72coA0V",
+	"HoKCpB3lcQNjZELDx0Zk6dhAQW4fGy14//rn1xceJ1MKHHSfMNAZRnzII8JUBz5HUlyjSrhIPMzCsq7U",
+	"XTSNxhBZNV2Smk90pCJwEXNlvWIcyFxEeEDLFBGqLGVqfAyf3fXpO/T4JbTJoytaAeNf/+t/MZ8jnjFt",
+	"vD/ATek8gc6L4FatWPz89qxyYDlQ3zMdkrp5dNUv+A6lT4Zt2q/LMJF2UD67TXWLEE79aZP89UIvmA8v",
+	"KUupOtF4rpLza1TXHCdbpf3q+lRtp1Yt+NK+ARZ8dSvavVIWLLJ7Y74WVkWzWObXrxbPWqVXBMhbxQYD",
+	"wAV0t0FZgNki8ewBCj3crUKUZaky7Uc8VvVWY6mS7zQMU2bgP7jCN7kVjiyOlX2y299C8+zD9Qs4PXt1",
+	"UW8xDPlwt5XlLN5wt8sugl2lvJu5ag6lxeoPLRuxTY9rVWqST4+66wkpZHpOH89NXw77irkCLwopQiTu",
+	"RzJNuebrRLrPYJv520vbKVatQ9YH/5C8QI2GzLFqy/jYPanWuuJtXNnvvsZ5zhI9H6K47IoKrA+a57nx",
+	"4utmYKlk7aKmd0oEpSF+tdbCtNCVyUofpExPebxl7cN6EfAeJ47LW/7uWP1BB6h0hX1WMS6sojnA8K9Z",
+	"TVD/iANiUmu4Huzydbu6QM1/QctlUh5tuilJbH0W21CjeNAIvbZS4QXFKm2isvBslQUbdGR/H+f1CrUJ",
+	"JX5d9QkfIfn0sHPY+b5z2H32ogWHVJntsHtYL7EfQw3Z4LJZBb4/4snIM38+tvzjh++/f/49MX/376cL",
+	"GUHp9GmqVE7uYaZSfeRCtacq2yay4jSP6/nZ/ShBBfPwotxrQAVQmylDgSLvxkjuJ4TgN3Xc9RUc5g+r",
+	"7kh6PBHbxjvewenwAGX3t3FW9LS8vyiAufDPTaMCNvz90kCUJc79onzFUCp4F8zn0DTFG63i/j97dXAM",
+	"uaCal4MpvCkCADYsGrUwIGC2k6UH9PPm9oU7BPLUefbX9DmsGUyzLPzlHpj5ypCZGjBXsvOelhe+ytfG",
+	"kX5FcbB0tdu0MroOkDu4j3fcmuMnwuA2JYPmo2VTp/1axglcwzin3JhjZxRO8wQoHeHGRQ6RUPb5IvdQ",
+	"e2jdmPOfNCoKTXyQNiSVYPtt9cb58MbaAXcI7LkPvdSFxlSzz0VOBRstdGQkfjgVsIz4zdS//0QlyXvy",
+	"bgv3qS923y+Vb+uXLMaLi1/MvHvNEHDuK1/YqdpuqqIIxGQkNbqKnwINYEL2yAFGcozBD9lO5LX9uniS",
+	"Uu2LEHhUDkUvXJkTpkSbibgdOauWc3v5/Cs5wKkGhQlTcYpaHzsHmffveb+MK9PxhBiA7sAJRfB3cZyZ",
+	"6VwJDftwpk+EFEhFqgPyOtAj7w4xEQ+aRnjpt9kv3E+CYwzNmOqBRD5PwDt8+kL23fCjih/o9OS9n6ZV",
+	"uE81teexIHHjI+TXM7BXOxvU5c7VZoG4yh8pJiya2nMQV2hgjHp0XKKCl6Ggb5t6Bz0B7+qKgboY1RT4",
+	"mPlptq3z4fSAXHEz7dk9+roMVF/xJHcxf7R50jvo49nlHBmTubKh8opjGG4Zgv8o3M0QtN7XqL23JuAt",
+	"43/EqevSxcVQ1sXXky+77XzZJx/OiD4uab4Ol5ZeuSbn3MzvTH5834dJDsGo3IyOPgr75RsZiNtCoLuU",
+	"L4pKkw/ODricZtij9cEpJESoCQpU5C4lkuPmo2h+HrOr2TefD1o0R6z40JD/2UFDYYUwN7hNmSKfQ3IG",
+	"NxTZ7zZl9+jq4bqAjMZh52nnkNhthoJlvHHUeN457DynN4MZ0Yl1Wca710+75BTrOlcYmZulk+iWY5Hg",
+	"PYspbtZ+T22UGkWa5o8ynt5f87VKDv7XKjXaJ+Z877dnh4f3vrgPm6trAed9hcQbXdxyoJ3Ess9bGd4F",
+	"eZye3FfDuNYs9Ln+VwV+ilZ2s8vaOPrLp1ZD5+MxU9NiQ8DAZ4cIGfsoA+cKZvBXSaGpzvhvWKJDrrlu",
+	"fLIzFxSUm1E3Snk3FLLHMh3N3c3z8z+evW73Xvd6Z+fv4fz92z9Dk6kkx9hHeFBHLukrxf76X//b8YWD",
+	"IyrpSyEwVOloVkLW3S8mZkWfblWZ9QEtAyum0mFbYUEnPm9KG5mi36wVT2kMMjcpv6Z0q1B7dzAFhW0P",
+	"hxN7vtY1eDZVCDpXHNte2UxyYTrws49Gc+G6IXUvdrOUCww7t/4Agc1aJTR30S/CMp+F/SIILy7khc2K",
+	"yIdstJj09nKPAl8ZF7iAHw6142u8VJK5VB2lstknQL06ilYMjr1VeU+5WcCOmE9dS5IHZkG1fSZqGFHR",
+	"NoKOwRIjxsehGkKBXF2uxD7femNf+NGXih7wl09fKwzqHbeSdBaJf/r2rLZVRthkislBiVFFKW/b4Qt4",
+	"1Yw5uDwyrBF6b7k2ldLNunFHAlhLZay2wbjtRblFEnQp7QVS3+kS19PQLNlAdAhhc0xuzAwqztKDxyWG",
+	"4rQtrp1PLGyEanqUNzNGw2Jm2KyNTmlDeruz736Z/eMs/uoEVop1dVx6VnToSGb2PcE8nOAikrSDyYyQ",
+	"K8qvnc160IETq4xjDLkIMclei7iWV06ilUQVp4A3mftqJ66+nFRJe5wbZoo6JVVKvSAoqoTjM2Ip65ou",
+	"G6nZlrnPlOzy5pc24l3lrP1062K8qLPPUvQWNHmM40waytuWiuJDU4UsnrZ9gFcFf/tBoA54y45C36jF",
+	"lMrHY4w5M7gBUc4KitdrTlRnLOrAhdc9GWjqw1F0xCj6h7h+HBqYgfkWGUFXmgbR4CR1SByfzWO3lMk0",
+	"1aQMdqBnn9mjacJR+Khcqm92ix1r196q0rGoVdEUHNSXl28XiPpSK47GbsVtXbuXGu76yldMSOUEtB3s",
+	"8hX3TqGnjZRqPLTpMIdFdzB/4pRHZjU6vTFxdn3h0A3Vexe/PK/jM21fy4XKcwBP4LpeR/bmqJIZaU67",
+	"Dhcynp3UUuLy3Yh2p0vWNj16YH1yrhhPDWGfhJrmwdxnL7yVR/byT3hqTyDC8AaaMbhvQ330uyt4m7sO",
+	"qUy42FZn9Leg8LMsZ9QvDg+rDLLvS0CHcrwe/cf+8RR3Iyl0PrbSz3HS//E/aRIuqHRXP1HMviTPQwFf",
+	"ljoxVNEdQkp10TXn/P3p66W34dK/8Hd6FypurYd/WVWzIheo0NVWNSW02vuhbzWf2UshQD3GgqXeEz5J",
+	"rqisGK5J72sRunOvW4yNZBprELKMuinVynalNSJqTBrYui6aNzkPBtkBQtMlV9wtJMDMmnhmCrXVbki3",
+	"KMxNrcLWRkRftTDUtojqwImYwphrWqcFCkk3kSqYehbcvcs73bcd37Tf4B1rFYUi2i58ez9NqYG0S9YK",
+	"Z5t4UiVrl/fP5va+3oWk5Ho6Gu3LCiy21p/Q92fFL3ZEc6Vl9ljLISCDjYxFzvlIuVEunWUvScpBbV/G",
+	"vHyKgU5KxFBDKqTkLObbvWedp4EkK/aiY+g96zwDpEqpXI88jw62badtdW5xNsr13xGJVeoIPDBtFS3D",
+	"a6iqZBN0hVX3kopcRfDyEZdoaAGfccanxdRzNrPdWJ4dpchUkOWWPkgWB6tYmXz4MIjvWhKyi65jRHor",
+	"kwTJPbOXKPdmonJ0f8mFvRz1LrwmqaukdFH2OLr5vtPO2uPrJ/c+nFAJZIWjaazIAZmbEUgBqWTxMbw4",
+	"fGqPgBqduAKJjnDDdLcP5dTBT1fgka6ZVRnsNiz1OrUhNMjdA4vgZemMbwO5+rhD+G7b3ool0tzDXMmw",
+	"2hG7rc3iWovtPnsEkd4BPxYU9RIpxR2BHMJkhJba6XY4ixJ5iPWe8g2aGRhUyQKKajGbEFPXx2YtJiqf",
+	"kvjgRDWXCrl36mIAFnwA4H6aetH4MIisAFc7T5IjmvmojQVEoyljYjGRuIyKHZFFNV1jj5lMRfaysY/J",
+	"mnGdwGekIl/djN1MmA6OLcuauKY26XtJUa6OHsWcRCwtnklNjSK2T6WyI8nt7mAN8tKy+yUEHH8tAk8W",
+	"+tt7Wp6GMet4L0uZAIs9lxvlOHxt+YX+lqOalvykrmHA4lXWnCc0WFp/onnH6nN3CeZotaJ9kCml8mYD",
+	"jaZVRIME8xgWBQdZls1R5VsZFcUZ1gf2vtlc7xyKuKZy7aUS6WktV1Meue0Wk539tqdleMc+FuHNxfmU",
+	"Ei1cVoSL5yakuHrgRlpNk3p41NCaVMmdKO0+5W45vWaBmn8Wf5j19f/p4m1hxfYxtUaCYNecCpsbuZdM",
+	"9EdMuAAm6Iy8p2kTqnXdwNpFLmK9UHaP+tehFuUOJPNjGpJXC+YQSbnPFhfmhWRRBcaH1K6pl5UJoUs2",
+	"k3gdg8wxlZRqywya2vA0hWeHzw7soz8oIcHBbnUa74Rhi9//F7TwzyXJ33hUjexsWFVDuAbvUW3NED5i",
+	"GgaIAoKhaS9ChywiKzahXFPkEMHcruwq5eJqKYWMfbnKWjvRW/Shn70PJ64JhK8F2aYAtZ/OfKmDEY+d",
+	"KPH19GSGwiUeHBCtyty+MOgD588Y5CJ23bOublPKGzRURHOHfIHmr43OyVI5HVuchvjA/XTMOmdpfBtc",
+	"aPojaoHPYaWDKap2luUGnX2FGmRJTdCLyYJrTxeV8U75u2W6ggGmUiTay9nbQbHnlUUfIia2UjBsjZDY",
+	"CoT7FOIq51AXTrb6+ScqxFAbYUUPNaqpWf5JB85KF9kTlG/sRYlF9lJ/FJ+lSvopH3PTV8iiEcafyc/q",
+	"whrLGqczlTmn2UyHcRzho3DpZTDOU8OztD5qnwCtnNuOPN+3FtpIdXl6b4BUaXRBmLbLMa2e3X6QZzAB",
+	"VAlrCYku4kLdL1Ilt4Kpq9Txij6/RR2rnD/uZ/GeYKwnh6btdrgB2lr1r9A3aJaj4/BBCXUPCfQNmo3Q",
+	"vPodT3R617j3jJlodPs8b5dL2BH/W1yX4YGfbuuQlbeq7yN5OTxWpaBGY7jVhJqUZ2516OOiRAUf+8oV",
+	"B3dgkhTLo3Ubry2IS1ORTmjkazfwFnnXFNmIUUy79j99liQK7XOg6woX0xm4JV38XlBbYYgYHywyKVE2",
+	"ve5bNDTKt6TAu693MF91ZqFZNVdaqj5tp+bOLa3usHRGVyRw7Vu8YDJSlOo36opyhfJYoexIURzrVvO8",
+	"Tw+hJJcIZB0d+QQyllA2i6NBTxAtEDhBbVzP5Q78HifkRGUCPhNGPvty2JRSyLShaTpwXjwhffTk86CH",
+	"9ots1/1x3Lt6UKUq6A4HXQqW9Tfj17//gyqQo2lnLPG3plItXSGL6WV98PiSaF1Ok8qkO2vPtEgXcbT0",
+	"ViZ/CB2ZdhcAMrfUojiQAvyix4JgmR5J8y3R3slsFzof6Kk2OA778aUF7GPcyp4JYrbIgLy3NJbH3Njd",
+	"rRBldthbO2qFHPs9Tw0qGEyBRZTbT/aJZpEjT+qgD+RcKLZYZKS6D4FgYXBtVZY5/qo7mFUVApeA/5Ke",
+	"5YtgHSo53koaLl81Wr6qkfctgb9Bmf59WaQ/3ROR7i/Kovr8y4Q6tY1GYRTHbYX6vslrtyfLPC2vHBJz",
+	"cK08bsvpb0o2+1SdkNi1TDKXkwtZukvBPLdSXRi0d2eMZYx7ZCXwhm6YwyqBuUiihgJsD2k5yOuiEWpP",
+	"+P7NBnWH+3C2gtWk9ZO3FLgzI/9pqUk5JUnmwrjqcOQ34SLZl1oBvVU0SA2tPNCumz9F87kqXGP3LF9F",
+	"pmvylOWK2Kuij8vuZdmiEniLUu73ym8Tiio25UQU/xhK5XVPfQzMZ15S90T92KylPuiXtEJ/Drv0xrgl",
+	"HskPUwVheT5i8Mf40gFNH6dRpPFlijpZWvUC+NAXAmwXtf0O9sx34/fRzdA+mmbFtxDkRITn0524SdeH",
+	"XCzlKh/cmL1mLsAmjBvfU5FY8x5pu/NC42855vujuaxNK1/cH2QYKJUOeQAYW7XzBnB2w119xYkSe13l",
+	"zgwVOPbFNlWUzAiVKgJbJH7yhBQwapopyIPTnvDYNQ7kAjRGUsS6Bfelt5SpZ2av/K0SzwX1XHS0UzK5",
+	"7krvd0u4RR9H9w8QaEuuC6SzE7ffacBrlubOJUe1fqjwgoV9bxR+V1ZUqqApgj3mXCEMWWSc2ogqOBBd",
+	"OWG/KdzRnVH4V9/N4Ld7Z+wON+C37gd7w28dODXs1lfBa4Gv6B6iiIcK7ae7oRa75G+bWuwON6IWOoX9",
+	"qj/IqjJZ4ZhKePle1LMa9lWpvC2dyDHjQj8UVax6txI0pynj413JxtkKj/R2rUCw+OlKA4rH669//wdk",
+	"OZXs8F2jfU2iyz9dgsJIqphqLAkXPz/dl0crbaKI3HfERiaUiGUkO9fNnllKvT6b4tGJ2KWGPBQRu9X+",
+	"XxLPeqQY0nYgsgeDcSDGa86o+OGr973SZbojXVKPnuVm2TduyEMYTmaNjtawnTi49skum2tUbYfRRcfi",
+	"Wrjsi/XV4Xo3V5/mfiTJVaKj2nJJJKnooPbNZjojoZUUtObd7n6h/68VAz+jh28r+P2Vj3vfBH2tR3xc",
+	"+BPZabT3ft3tw4e528FRu093+wIpXrsLCtsO2sGub3rXOwJXy/V3fuBDSPfSguvIdw/aPgl45gjrOx08",
+	"rf8UXKbewRDH5fPcUVHPyiIbMZw6D0ccVxs+7IvH9CSOiwqgYGQgs93xhe4Xy31WqAQXZM6ZP+TVhqrx",
+	"HnmRHDQz5LqWE/DPoSHUz+xOfsdOV+cjc30Cl0sh53o5dQMfQgqVFlxHCrm22DkFeRGQ1G/H/uXqaAhJ",
+	"Ya3UlVMOh3vXwsjFqkazXQRfUNjNt+LHr5BU9wv9/49crPOsKR/5OjyMRtrT3JcojFwJYNWTs+CVZdkx",
+	"DFIZXRXhQxpyQZ8A5d4jVyDwxnhX5Wq/zWMyv+Js16ppJXU/dBttNWKur/ooIjV1h/lp/WDXD7mZJ5T7",
+	"12hKK5wJC8YDv54q3G9BGNocx/OBaNRuWeZp3B4ynlbaMbdgYC8FDodS7Y1SdZ7N4l65IK2qcoGow4Kv",
+	"lc+NpljYLtH8PYS78jhr66mISoXfHteduVGVuLV6sC+7R2dx1puKyMnOHd2kyhqPZIuo7nNR4IiRLkSc",
+	"6uQ1NUYKTdFLwnnHDr6ltMFTKQRGBro+gx4YuFJ5Uk2J6ot6QeWmGnd+zNTcqZL74jd3tWpf3e9YdhZn",
+	"uzTthenfsb008NkLNWZZ5h7yWd8SxIE3931DV+gdy8q3xj9ISUj5NuruE9dYdAKuMeXrdx8u/wxjJnKW",
+	"3peJYPGtWs9x8JMYz9HkKu36J9F2J/gtHZgDuubMmsoycl/QrHJ2RvqjagGOMzM92GuDww642A6tkluR",
+	"9epCA16e777MQHWhRYrDVETtb7i8wKuqUmAmsm04qlBh4J/sNmxHs0bxJEH1z6PhXLoN+wvyqHfQfguK",
+	"iWMfyKbzlHJ0vuEreYGRFBFPsWQb9OrUnGDTIOTkHtSLUnOw/Yjc3Hknui160D2758V9iEtt4eJi+0XI",
+	"ZtO18PPN+IuAzaJzJ9OjgWQqpnLA+2LecRv1fvQisbC+HN/CDnUrabZc8PoxSddVbd456VIh973tglIi",
+	"XerBuW81tSsNEqFp3210pVog0zh0b6VM3fuizYdMk1iRy7CHtPntpFGEnJvN+mvWU8g6oT8PGfWzfsAP",
+	"2Xb2L+hnXrCUo3+U1AYVcBGlHYiRRYZS9ONqnXSH7P1xpc5HgXRnkD/uQ+M+YhMWsalXxR43iGaZ/Wh/",
+	"Ql0DREVUy3d61iNrqBB/Qe0LFLaK5qe+sYauJ8zNKUb9E1DMxTYUc7F3FHNRppgSj/LUc18EIdPfBinU",
+	"uTRPyU3soxBlurN6NbSMXeDOeo5M0Tu34w40T13bKoVDNFFope1kV+dgT5yKoWt9wdMsRUHz4seT03bC",
+	"qGm6wmGuUUOMY0mWmKJAIGW0b8nbhIxXFKZ6TyMeQlmyK62jKhFE+6QkuWphGIPwuAoH4f69P7oPwdP9",
+	"q+Si7RpgPfbz6UzrHP9dcnHp+3HtgrMU8z9SQlZp/eU1sOzBeENUU4/kRFBLmL0xOtmzAgaaiyTFdq6R",
+	"6L0EdQ3lr0mSX+z/9qX6gYNll/aC96GL6Tf6ZKdzbyoUOGEpTHiawgC9hKo8/9YmA3mN6prjZJmD8lwl",
+	"52HYbrtnFMvUN7SCAO2+PIsKI3UAjGIn6FWk4QkojKg1vlV+uZl+A1V4ycfCV2gmH8gRc5GnD6SfzNZb",
+	"R0shuPYqfytN5aStLFjfRoJ2Cd+7LJE5W+aR9IMyXS3O2LYHt3cNymY0dXdvabjz3S92vrVStuco5NvM",
+	"294Ii48ZF+KOZeecX6btiMfqId8meb3Xkf+CH6TcVd1vO/Upj9U31iQMmizVcuYpz4U3tbiaywJmaTm+",
+	"B7IiTN7jM+bF4b/dGxrcMZ9KMUz54p7oeqS4uHIpIKCNYiKGlF8jXV23rj4GIQXCBNXM+rQ3Llr+Sznq",
+	"5T+4wje5VRhDQTt77aCZKDlp6zxDpdGAVH7fbZ0PNJo7dVdTqGWuVlVBvyhGPYRCF1ZbS50LkO2TSufE",
+	"AhS4/Tb0ugLtu+GrYfpH0uZmRLVEl/Nj9q0Azxw93V2nKyiz+yX8uZZiVyGRb7Qcz6bIfFTVrjicnZbl",
+	"2cebf/ggNz/U5tmzm/9TyGG795uvtZzL/1xk1utpWcqV3NHZFIv8vMCsZ7W8WeaeT1cUEnzG4pgZVJyl",
+	"ZFiTIp0CgyucWq2Xi4QwtT8lVS6QUUBer3de7Kmog1A5Wp9jNcvGdN5Rt+lbBRW/maQEH3rfKsXjf9qo",
+	"8VOVJu+fUxXz39XX3WPX+5Qa63Ln52kvvAyrz8g7le78BZVsG5Vr0x7LGJfxl/9EJamz7Ltar8v98Zjq",
+	"Qt9ekzYUQ6kiHAcQ9+g1seCa3j7a+7+qNaf6cCrFSpIqN2fbw55rt0iq0m/NCRwpwK/XjlFM11I9XBbS",
+	"L6VrP/9az6Qy2nIgaqid8msUqHUH3kvAG4NKsBRizFDEKCKOGliojeH46S02svu8yKIRx9IgAY2Kys5z",
+	"Dcxu63FP3Xerbxz95VPVOuHwbQ9ggGX2Tn2W7SlWf21RKK84nuRmZCezWsAAmUJVfGIXoH4dde2Je2yM",
+	"bal4wgU0aVgMAxxxERMtYpwgiISLG0tSuUobR41u4+unr/83AAD//9udNwBoKQEA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

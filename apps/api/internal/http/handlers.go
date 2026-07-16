@@ -101,8 +101,11 @@ type apiServer struct {
 	// wire files), not a proxy behind s.policy — device posture and Zero Trust policy
 	// are distinct enterprise features (F2 / ledgered S12.1 refactor).
 	deviceApprovalEnabled bool
-	cookieSecure          bool
-	appBaseURL            string
+	// deviceHealthEnabled gates device health / posture checks (S7.5.3) — its own
+	// named per-feature edition bool (approval ≠ health: orthogonal capabilities).
+	deviceHealthEnabled bool
+	cookieSecure        bool
+	appBaseURL          string
 }
 
 // GetHealth implements GET /healthz.

@@ -23,6 +23,27 @@ export interface DeviceApi {
   // Self-heals a stale cached config (device revoked/GC'd) — an EXISTENCE check, not a
   // config re-fetch, so D2 holds. orgId is always known (legacy configs re-mint, never query).
   deviceExists(deviceId: string, orgId: string): Promise<boolean>;
+  // reportHealth self-reports posture facts (S7.5.3). Terminal non-retryable answers are
+  // RETURNED (not thrown) so the monitor can stop cleanly: "unsupported" = 403 (open
+  // edition / no permission — reporting is pointless until something changes),
+  // "gone" = 404/410 (device no longer exists). Any other failure THROWS (inconclusive
+  // — retry with backoff, same discipline as deviceStatus).
+  reportHealth(deviceId: string, orgId: string, facts: HealthFacts): Promise<HealthReportResult | "unsupported" | "gone">;
+}
+
+// HealthFacts are the client-collected posture facts (S7.5.3). disk_encrypted is
+// OMITTED when the helper could not determine it — reported absent, never guessed.
+export interface HealthFacts {
+  platform: "macos" | "windows" | "linux" | "other";
+  os_version: string;
+  disk_encrypted?: boolean;
+}
+
+// HealthReportResult is the server's evaluation of one report.
+export interface HealthReportResult {
+  state: "compliant" | "noncompliant";
+  blocked: boolean;
+  failed_checks: Array<{ kind: string; mode: string }>;
 }
 
 // PendingApprovalError aborts the ConfigProvider (resolveTunnelConfig) when the device

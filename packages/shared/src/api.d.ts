@@ -761,6 +761,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/health-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List the org's configured posture checks (enterprise) */
+        get: operations["listHealthChecks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/health-checks/{checkKind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                checkKind: "os_version" | "disk_encryption";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Opt the org into a posture check, or change its mode/param (enterprise) */
+        put: operations["putHealthCheck"];
+        post?: never;
+        /** Turn a posture check off (idempotent; blocked devices unblock on their next report, enterprise) */
+        delete: operations["deleteHealthCheck"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/devices/{deviceId}/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Self-report device posture facts (owner only; server evaluates, enterprise) */
+        post: operations["reportDeviceHealth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/groups": {
         parameters: {
             query?: never;
@@ -1543,6 +1603,19 @@ export interface components {
             rx_bytes?: number;
             /** Format: int64 */
             tx_bytes?: number;
+            /** @enum {string} */
+            health_state?: "compliant" | "noncompliant" | "unknown";
+            health_blocked?: boolean;
+            health_os_version?: string;
+            health_disk_encrypted?: boolean;
+            /** Format: date-time */
+            health_reported_at?: string;
+            health_failed_checks?: {
+                /** @enum {string} */
+                kind: "os_version" | "disk_encryption";
+                /** @enum {string} */
+                mode: "warn" | "require";
+            }[];
         };
         CreateDeviceRequest: {
             name: string;
@@ -1569,6 +1642,51 @@ export interface components {
             /** @description On ENABLING (PUT off->on only), the count of existing active devices that stay active (grandfathered — a flip must not black-hole the fleet). Best-effort; absent when disabling.
              *      */
             grandfathered_count?: number;
+        };
+        HealthCheck: {
+            /**
+             * @description S7.5.3 posture check kind (v1: os_version, disk_encryption; EDR is S7.5.3b).
+             * @enum {string}
+             */
+            kind: "os_version" | "disk_encryption";
+            /**
+             * @description warn = surface + audit only, never gates. require = a fresh non-compliant report excludes the device from every gateway within seconds.
+             *
+             * @enum {string}
+             */
+            mode: "warn" | "require";
+            /** @description Check parameters. os_version: {"min":{"macos":"14.0","windows":"10.0"}} — a platform absent from "min" is not enforced. disk_encryption: none.
+             *      */
+            param?: Record<string, never>;
+            /** @description On PUT only: how many devices' LAST report would fail this check (best-effort blast radius). The config write itself blocks nothing — a device's gate only ever flips on its own next report (D4 grandfather).
+             *      */
+            would_fail_count?: number;
+        };
+        HealthCheckInput: {
+            /** @enum {string} */
+            mode: "warn" | "require";
+            param?: Record<string, never>;
+        };
+        /** @description Client-reported posture facts (S7.5.3). NOT attestation — a compromised device can misreport; posture checks deter honest non-compliance and give an audit trail (defense-in-depth, not a guarantee).
+         *      */
+        DeviceHealthReport: {
+            /** @enum {string} */
+            platform: "macos" | "windows" | "linux" | "other";
+            os_version: string;
+            disk_encrypted?: boolean;
+            /** Format: date-time */
+            collected_at?: string;
+        };
+        DeviceHealthResult: {
+            /** @enum {string} */
+            state: "compliant" | "noncompliant";
+            blocked: boolean;
+            failed_checks: {
+                /** @enum {string} */
+                kind: "os_version" | "disk_encryption";
+                /** @enum {string} */
+                mode: "warn" | "require";
+            }[];
         };
         InviteRequest: {
             /** Format: email */
@@ -2841,6 +2959,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceApproval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listHealthChecks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configured checks (a check with no entry is off). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheck"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    putHealthCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                checkKind: "os_version" | "disk_encryption";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthCheckInput"];
+            };
+        };
+        responses: {
+            /** @description The configured check (with the would-fail blast radius, best-effort). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthCheck"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteHealthCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                checkKind: "os_version" | "disk_encryption";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Check off. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    reportDeviceHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceHealthReport"];
+            };
+        };
+        responses: {
+            /** @description The server's evaluation of this report. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceHealthResult"];
                 };
             };
             default: components["responses"]["Error"];
