@@ -152,6 +152,13 @@ SET zero_trust_mode = $2
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
 
+-- name: GetPolicyRuleForUpdate :one
+-- Row-locking read (S7.5.4): ExtendGrant reads the CURRENT window (for the old->new audit +
+-- disambiguation) under FOR UPDATE, so the expiry sweeper's DELETE can't interleave between
+-- the read and the UPDATE — extend and sweep serialize on this lock (extended-or-terminal,
+-- never torn, and old_expires_at is the true pre-update value).
+SELECT * FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE;
+
 -- name: GetPolicyRuleForOrg :one
 -- Resolve one rule (org-scoped) — S7.5.1 ingest enriches an allow event's kernel-stamped
 -- rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so

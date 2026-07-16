@@ -316,6 +316,37 @@ func (q *Queries) GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForO
 	return i, err
 }
 
+const getPolicyRuleForUpdate = `-- name: GetPolicyRuleForUpdate :one
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
+`
+
+type GetPolicyRuleForUpdateParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// Row-locking read (S7.5.4): ExtendGrant reads the CURRENT window (for the old->new audit +
+// disambiguation) under FOR UPDATE, so the expiry sweeper's DELETE can't interleave between
+// the read and the UPDATE — extend and sweep serialize on this lock (extended-or-terminal,
+// never torn, and old_expires_at is the true pre-update value).
+func (q *Queries) GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleForUpdateParams) (PolicyRule, error) {
+	row := q.db.QueryRow(ctx, getPolicyRuleForUpdate, arg.ID, arg.OrgID)
+	var i PolicyRule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.SrcGroupID,
+		&i.DstKind,
+		&i.DstResourceID,
+		&i.DstGroupID,
+		&i.CreatedAt,
+		&i.SrcKind,
+		&i.SrcUserID,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getResource = `-- name: GetResource :one
 SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at FROM resources
 WHERE id = $1 AND org_id = $2

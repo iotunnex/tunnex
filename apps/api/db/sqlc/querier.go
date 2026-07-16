@@ -221,6 +221,11 @@ type Querier interface {
 	// rule_id into the grant's destination (resource/group) it named, captured AT EVENT TIME so
 	// it survives a later rule delete. Returns no rows if the rule was already deleted.
 	GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForOrgParams) (PolicyRule, error)
+	// Row-locking read (S7.5.4): ExtendGrant reads the CURRENT window (for the old->new audit +
+	// disambiguation) under FOR UPDATE, so the expiry sweeper's DELETE can't interleave between
+	// the read and the UPDATE — extend and sweep serialize on this lock (extended-or-terminal,
+	// never torn, and old_expires_at is the true pre-update value).
+	GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleForUpdateParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)

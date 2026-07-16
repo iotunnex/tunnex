@@ -398,34 +398,33 @@ func (s *Service) ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newE
 	}
 	var r sqlc.PolicyRule
 	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+		// Read the CURRENT window FIRST, under a row lock, so (a) old_expires_at is the true
+		// PRE-update value for the D7 old->new audit, and (b) the sweeper's DELETE can't
+		// interleave between this read and the UPDATE (extend and sweep serialize on this lock).
+		existing, ge := q.GetPolicyRuleForUpdate(ctx, sqlc.GetPolicyRuleForUpdateParams{ID: ruleID, OrgID: orgID})
+		if errors.Is(ge, pgx.ErrNoRows) {
+			return apierr.NotFound("rule_not_found", "rule not found")
+		}
+		if ge != nil {
+			return ge
+		}
+		if !existing.ExpiresAt.Valid {
+			return apierr.Conflict("not_temporary", "this is a permanent grant — it has no expiry to extend")
+		}
+		if !existing.ExpiresAt.Time.After(time.Now()) {
+			return apierr.Conflict("grant_lapsed", "this grant already expired — create a new one")
+		}
+		oldExpiry := existing.ExpiresAt.Time.UTC().Format(time.RFC3339) // captured BEFORE the update
 		var e error
 		r, e = q.ExtendPolicyRule(ctx, sqlc.ExtendPolicyRuleParams{
 			ID: ruleID, OrgID: orgID, NewExpiresAt: pgtype.Timestamptz{Time: newExpiresAt, Valid: true},
 		})
-		if errors.Is(e, pgx.ErrNoRows) {
-			// 0 rows: disambiguate not-found / permanent / already-lapsed for an honest 4xx.
-			existing, ge := q.GetPolicyRuleForOrg(ctx, sqlc.GetPolicyRuleForOrgParams{ID: ruleID, OrgID: orgID})
-			if errors.Is(ge, pgx.ErrNoRows) {
-				return apierr.NotFound("rule_not_found", "rule not found")
-			}
-			if ge != nil {
-				return ge
-			}
-			if !existing.ExpiresAt.Valid {
-				return apierr.Conflict("not_temporary", "this is a permanent grant — it has no expiry to extend")
-			}
-			return apierr.Conflict("grant_lapsed", "this grant already expired — create a new one")
-		}
 		if e != nil {
-			return e
+			return e // the row is locked + verified-live above, so 0-rows can't happen here
 		}
 		// D7: the audit shows the old->new window (who moved a grant's window, from when).
-		old := "permanent"
-		if existing, ge := q.GetPolicyRuleForOrg(ctx, sqlc.GetPolicyRuleForOrgParams{ID: ruleID, OrgID: orgID}); ge == nil && existing.ExpiresAt.Valid {
-			old = existing.ExpiresAt.Time.UTC().Format(time.RFC3339)
-		}
 		return writeAudit(ctx, q, orgID, "policy.grant_extended", "policy_rule", ruleID.String(),
-			map[string]any{"old_expires_at": old, "new_expires_at": newExpiresAt.UTC().Format(time.RFC3339)})
+			map[string]any{"old_expires_at": oldExpiry, "new_expires_at": newExpiresAt.UTC().Format(time.RFC3339)})
 	})
 	return r, err
 }
