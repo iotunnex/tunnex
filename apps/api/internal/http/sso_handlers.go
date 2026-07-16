@@ -90,7 +90,7 @@ func (s apiServer) SsoCallback(ctx context.Context, req api.SsoCallbackRequestOb
 		// arbitrary error text), falling back to a generic code otherwise.
 		return ssoCallbackResponse{location: s.appBaseURL + "/login?sso_error=" + ssoErrorCode(err)}, nil
 	}
-	sess, err := s.sessions.Create(ctx, userID) // SSO mints a fresh session (fixation rule)
+	sess, err := s.sessions.Create(ctx, userID, authctx.AuthSSO) // SSO mints a fresh session (fixation rule)
 	if err != nil {
 		return nil, err
 	}

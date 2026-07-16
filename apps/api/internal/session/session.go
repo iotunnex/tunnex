@@ -36,6 +36,11 @@ type Session struct {
 	UserID    uuid.UUID `json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"` // absolute lifetime
+	// AuthMethod is how this session was minted (authctx.AuthLocalPassword | AuthSSO). Immutable for
+	// the session's life (fixation rule). Empty on legacy sessions minted before the marker existed.
+	// No Redis migration needed: legacy sessions decode with "" and age out; the MFA gate reads "" as
+	// non-local (exempt), consistent with D8 (enforce governs new logins, not live sessions).
+	AuthMethod string `json:"auth_method,omitempty"`
 }
 
 // Store persists sessions in Redis.
@@ -67,18 +72,20 @@ func (s *Store) Client() *redis.Client { return s.rdb }
 func sessKey(id string) string          { return "sess:" + id }
 func userKey(u uuid.UUID) string        { return "usess:" + u.String() }
 
-// Create mints a brand-new session for userID (fresh id => fixation-safe).
-func (s *Store) Create(ctx context.Context, userID uuid.UUID) (Session, error) {
+// Create mints a brand-new session for userID (fresh id => fixation-safe). authMethod records HOW
+// the user authenticated (authctx.AuthLocalPassword | AuthSSO) — stamped once, immutable thereafter.
+func (s *Store) Create(ctx context.Context, userID uuid.UUID, authMethod string) (Session, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return Session{}, err
 	}
 	now := s.now()
 	sess := Session{
-		ID:        base64.RawURLEncoding.EncodeToString(b),
-		UserID:    userID,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.absolute),
+		ID:         base64.RawURLEncoding.EncodeToString(b),
+		UserID:     userID,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(s.absolute),
+		AuthMethod: authMethod,
 	}
 	data, err := json.Marshal(sess)
 	if err != nil {

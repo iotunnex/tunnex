@@ -97,10 +97,7 @@ func (s *Service) OrgEnforces(ctx context.Context, orgID uuid.UUID) (bool, error
 // is NOTIFIED best-effort (a silently-reset factor by a compromised admin must surface to the owner).
 func (s *Service) AdminReset(ctx context.Context, orgID, actorAdmin, targetUser uuid.UUID) error {
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		if _, e := q.DeleteTOTP(ctx, targetUser); e != nil {
-			return e
-		}
-		if e := q.DeleteRecoveryCodesForUser(ctx, targetUser); e != nil {
+		if e := revokeAllMfa(ctx, q, targetUser); e != nil {
 			return e
 		}
 		return s.auditOrg(ctx, q, orgID, actorAdmin, "mfa.admin_reset", "user", targetUser.String(),
@@ -137,6 +134,15 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 // prior unconfirmed attempt), and returns the otpauth URI (QR) + the base32 manual key ONCE. The
 // account label on the URI is the user's email (resolved here so the handler needn't thread it).
 func (s *Service) StartEnrollment(ctx context.Context, userID uuid.UUID) (uri, manualKey string, err error) {
+	// Refuse over a CONFIRMED factor (finding #3): UpsertUnconfirmedTOTP would silently set
+	// confirmed=false and replace the secret, destroying a working second factor without the
+	// deliberate disable step. Re-enrollment = disenroll first (the UI's "turn off 2FA"). An
+	// UNCONFIRMED row is NOT confirmed, so starting over mid-ceremony still works (restartable).
+	if existing, e := s.q.GetTOTP(ctx, userID); e == nil && existing.Confirmed {
+		return "", "", apierr.Conflict("already_enrolled", "Two-factor authentication is already on. Turn it off first to set it up again.")
+	} else if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+		return "", "", e
+	}
 	user, err := s.q.GetUserByID(ctx, userID)
 	if err != nil {
 		return "", "", err
@@ -335,14 +341,25 @@ func (s *Service) VerifyChallenge(ctx context.Context, rawToken, code string) (s
 // Disenroll removes the user's TOTP + recovery codes (self re-enroll / admin reset), audited.
 func (s *Service) Disenroll(ctx context.Context, actor, target uuid.UUID, action string) error {
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
-		if _, e := q.DeleteTOTP(ctx, target); e != nil {
-			return e
-		}
-		if e := q.DeleteRecoveryCodesForUser(ctx, target); e != nil {
+		if e := revokeAllMfa(ctx, q, target); e != nil {
 			return e
 		}
 		return s.audit(ctx, q, target, actor, action, nil)
 	})
+}
+
+// revokeAllMfa clears a user's ENTIRE MFA state in one place — TOTP, recovery codes, AND outstanding
+// login challenges (findings #6 + #10). Both Disenroll (self) and AdminReset share it, so a future
+// change to "what a full revocation clears" can't drift between the two paths. A challenge is claimed
+// state; revocation releases it, so a mid-login target gets a clean re-login, not attempts-to-exhaustion.
+func revokeAllMfa(ctx context.Context, q *sqlc.Queries, userID uuid.UUID) error {
+	if _, e := q.DeleteTOTP(ctx, userID); e != nil {
+		return e
+	}
+	if e := q.DeleteRecoveryCodesForUser(ctx, userID); e != nil {
+		return e
+	}
+	return q.DeleteMfaChallengesForUser(ctx, userID)
 }
 
 // CountRecoveryRemaining returns the user's unused recovery-code count (low-remaining warnings).
@@ -354,18 +371,24 @@ func (s *Service) CountRecoveryRemaining(ctx context.Context, userID uuid.UUID) 
 // audit scopes a user-global MFA event to the user's PRIMARY (earliest) membership org — a
 // single-org user (the common case) is exact; a multi-org user gets a deterministic primary.
 func (s *Service) audit(ctx context.Context, q *sqlc.Queries, subjectUser, actor uuid.UUID, action string, meta map[string]any) error {
-	orgID, err := s.primaryOrg(ctx, q, subjectUser)
-	if err != nil {
+	// Never DROP a security-relevant audit (finding #7). If the user's org can't be resolved (no
+	// membership / transient query error), write the row with a NULL org_id — the schema allows it
+	// (org_id is nullable, ON DELETE SET NULL) — rather than leaving only a slog line. Same law as
+	// the S7.5.4 sweeper: a factor-change audit must land, org-scoped when it can be, unscoped when
+	// it can't, never nowhere.
+	orgParam := pgtype.UUID{}
+	if orgID, err := s.primaryOrg(ctx, q, subjectUser); err == nil {
+		orgParam = pgtype.UUID{Bytes: [16]byte(orgID), Valid: true}
+	} else {
 		s.logger.Warn("mfa_audit_org_unresolved", slog.String("user_id", subjectUser.String()), slog.String("action", action))
-		return nil // never fail the security action on an audit-scope miss; slog carries it
 	}
 	b := []byte("{}")
 	if meta != nil {
 		b, _ = json.Marshal(meta)
 	}
 	tt, tid := "user", subjectUser.String()
-	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
-		OrgID:       pgtype.UUID{Bytes: [16]byte(orgID), Valid: true},
+	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       orgParam,
 		ActorUserID: pgtype.UUID{Bytes: [16]byte(actor), Valid: true},
 		Action:      action, TargetType: &tt, TargetID: &tid, Metadata: b,
 	})

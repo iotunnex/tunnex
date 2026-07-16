@@ -82,21 +82,29 @@ func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.L
 		}
 	}
 
-	sess, err := s.sessions.Create(ctx, user.ID)
+	// D8 grandfather: unenrolled user in an enforcing org gets a GATED session (enterprise only) —
+	// authenticated, but the middleware restricts it to enrollment until a confirmed TOTP exists.
+	// Resolve the gate state BEFORE minting the session so a resolution error fails the login
+	// cleanly (no dangling session, no guessed flag — finding #4).
+	enrollmentRequired := false
+	if s.mfaEnforceEnabled && s.mfa != nil {
+		gated, gerr := s.mfa.IsEnrollmentGated(ctx, user.ID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		enrollmentRequired = gated
+	}
+	sess, err := s.sessions.Create(ctx, user.ID, authctx.AuthLocalPassword)
 	if err != nil {
 		return nil, err
 	}
 	au := authUser(user)
 	result := api.LoginResult{MfaRequired: false, User: &au}
-	// D8 grandfather: unenrolled user in an enforcing org gets a GATED session (enterprise only) —
-	// authenticated, but the middleware restricts it to enrollment until a confirmed TOTP exists.
-	if s.mfaEnforceEnabled && s.mfa != nil {
-		if gated, gerr := s.mfa.IsEnrollmentGated(ctx, user.ID); gerr == nil && gated {
-			tr := true
-			au.MfaEnrollmentRequired = &tr
-			result.User = &au
-			result.EnrollmentRequired = &tr
-		}
+	if enrollmentRequired {
+		tr := true
+		au.MfaEnrollmentRequired = &tr
+		result.User = &au
+		result.EnrollmentRequired = &tr
 	}
 	return loginResponse{body: result, sess: sess, setCookie: true, secure: s.cookieSecure, requestID: reqID}, nil
 }
@@ -147,9 +155,16 @@ func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObje
 		EmailVerified: p.EmailVerified,
 	}
 	// Carry the gate state so a gated client (session minted, enrollment-restricted) can route to
-	// the enrollment ceremony rather than hit dead 403s. Enterprise only.
+	// the enrollment ceremony rather than hit dead 403s. Enterprise only. The gate-state error is
+	// NEVER swallowed (finding #4): guessing false would route a gated user into the app (where the
+	// middleware still 403s) and guessing true would gate a healthy one — so on a resolution error
+	// we SURFACE it (loadOne applied server-side), not invent an answer in either direction.
 	if s.mfaEnforceEnabled && s.mfa != nil {
-		if gated, _ := s.mfa.IsEnrollmentGated(ctx, p.UserID); gated {
+		gated, gerr := s.mfa.IsEnrollmentGated(ctx, p.UserID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		if gated {
 			tr := true
 			au.MfaEnrollmentRequired = &tr
 		}

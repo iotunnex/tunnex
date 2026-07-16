@@ -73,11 +73,16 @@ func (s apiServer) AdminResetMfa(ctx context.Context, req api.AdminResetMfaReque
 // their own state (me carries enrollment_required so the client can route). Everything else — incl.
 // disenroll (nothing to disenroll; self-cycling) and cliAuthorize (must not birth a credential that
 // outlives the gate) — is DENIED. Keyed by operationId (route identity), not path-string.
+// The allowlist admits EXACTLY what a gated user needs to become UN-gated. Enrollment requires a
+// verified email, so email verification is UPSTREAM of enrollment — same class as the enroll ops
+// themselves (finding #5: the happy-path allowlist dead-ended the unverified+enforced intersection).
 var enrollmentGateAllow = map[string]bool{
-	"mfaEnrollStart":   true,
-	"mfaEnrollConfirm": true,
-	"logout":           true,
-	"currentUser":      true,
+	"mfaEnrollStart":      true,
+	"mfaEnrollConfirm":    true,
+	"verifyEmail":         true,
+	"resendVerification":  true,
+	"logout":              true,
+	"currentUser":         true,
 }
 
 // mfaEnrollmentGate is the DEFAULT-DENY authorization overlay for the D8 grandfather path (Option A):
@@ -102,6 +107,15 @@ func (s apiServer) mfaEnrollmentGate(swagger *openapi3.T) (func(http.Handler) ht
 			p, ok := authctx.PrincipalFrom(r.Context())
 			if !ok || p == nil {
 				next.ServeHTTP(w, r) // unauthenticated → the auth layer owns the 401
+				return
+			}
+			// D5 (LOCKED): org MFA enforcement applies to LOCAL-PASSWORD logins only. SSO sessions
+			// (the IdP owns the second factor) and bearer credentials (CLI/automation, minted downstream
+			// of a browser session that already passed MFA) are EXEMPT — by construction, via the
+			// principal's immutable mint-time method, NOT a route/header sniff. This is the middleware
+			// half of the exemption the login seam alone couldn't guarantee.
+			if p.AuthMethod != authctx.AuthLocalPassword {
+				next.ServeHTTP(w, r)
 				return
 			}
 			gated, err := s.mfa.IsEnrollmentGated(r.Context(), p.UserID)

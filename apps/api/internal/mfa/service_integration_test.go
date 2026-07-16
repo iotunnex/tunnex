@@ -334,6 +334,41 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, action string) 
 	return n
 }
 
+// TestStartEnrollmentRefusesOverConfirmed — finding #3: re-starting over a CONFIRMED factor is
+// refused (would silently wipe it); re-starting over an UNCONFIRMED one still works (restartable).
+func TestStartEnrollmentRefusesOverConfirmed(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s, clock := newSvc(t, pool)
+	enroll(t, s, clock, f.userA) // confirmed
+	if _, _, err := s.StartEnrollment(context.Background(), f.userA); code(err) != "already_enrolled" {
+		t.Fatalf("start over a CONFIRMED factor must be refused (already_enrolled), got %v", err)
+	}
+	// Restartable-ceremony property survives: over an UNCONFIRMED row, start-again is allowed.
+	if _, _, e := s.StartEnrollment(context.Background(), f.userB); e != nil {
+		t.Fatalf("first start: %v", e)
+	}
+	if _, _, e := s.StartEnrollment(context.Background(), f.userB); e != nil {
+		t.Fatalf("restart over an unconfirmed enrollment must be allowed: %v", e)
+	}
+}
+
+// TestAdminResetClearsInflightChallenge — finding #6: admin-reset burns the target's outstanding
+// challenge, so a mid-login target gets a clean "sign in again", not attempts-to-exhaustion.
+func TestAdminResetClearsInflightChallenge(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s, clock := newSvc(t, pool)
+	enroll(t, s, clock, f.userB)
+	tok, _, _ := s.CreateChallenge(context.Background(), f.userB) // mid-login
+	if err := s.AdminReset(context.Background(), f.org, f.userA, f.userB); err != nil {
+		t.Fatalf("admin reset: %v", err)
+	}
+	if _, _, err := s.VerifyChallenge(context.Background(), tok, "000000"); code(err) != "mfa_challenge_invalid" {
+		t.Fatalf("admin-reset must burn the in-flight challenge (clean re-login), got %v", err)
+	}
+}
+
 func code(err error) string {
 	var a *apierr.Error
 	if err != nil && errors.As(err, &a) {

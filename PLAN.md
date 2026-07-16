@@ -1569,7 +1569,10 @@ produce a mesh artifact; short-circuit to the blanket-mesh artifact. (#10) redun
 fetch — an identical `Compiled` re-renders + re-applies each cycle (the idempotence guard makes it a
 kernel no-op, but it still burns an `nft` transaction); skip apply when the applied hash already
 matches. None change behavior; all are throughput optimizations. **Trigger = policy-fetch load becomes
-measurable.** Documented in docs/S7.2-decisions.md.
+measurable.** Documented in docs/S7.2-decisions.md. **S7.5.5 adds two to this class (review #8/#9):** the
+MFA-enrollment gate runs a `UserInEnforcingOrg` query on EVERY authenticated request (enterprise), and
+`/auth/me` double-reads `user_totp` (IsEnrollmentGated + HasConfirmedTOTP both `GetTOTP`) — a principal-
+attached enforce flag / a single TOTP fetch would remove both. Correctness-neutral; same trigger.
 
 ## EPIC 12 — Commercial / Licensing Infrastructure *(trigger: FIRST PAYING-CUSTOMER INTENT — build-on-intent, not calendar)*
 

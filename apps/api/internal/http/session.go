@@ -46,6 +46,7 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 			SessionID:     sess.ID,
 			Email:         user.Email,
 			EmailVerified: user.EmailVerifiedAt.Valid,
+			AuthMethod:    sess.AuthMethod, // rides the session's mint-time method (immutable)
 			Roles:         roles,
 		}
 	}

@@ -106,6 +106,18 @@ func (q *Queries) DeleteMfaChallenge(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteMfaChallengesForUser = `-- name: DeleteMfaChallengesForUser :exec
+DELETE FROM mfa_challenges WHERE user_id = $1
+`
+
+// lint:cross-org — user-scoped login challenges. Full MFA revocation (disenroll / admin-reset) burns
+// the target's outstanding challenges too — a challenge is claimed state; revocation releases it, so
+// a mid-login target gets a clean "sign in again", not attempts-to-exhaustion (finding #6).
+func (q *Queries) DeleteMfaChallengesForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteMfaChallengesForUser, userID)
+	return err
+}
+
 const deleteRecoveryCodesForUser = `-- name: DeleteRecoveryCodesForUser :exec
 DELETE FROM user_recovery_codes WHERE user_id = $1
 `

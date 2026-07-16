@@ -158,6 +158,10 @@ type Querier interface {
 	// lint:cross-org — user-scoped login challenge.
 	// Burn — on SUCCESS or on cap exhaustion (a token never survives its own resolution).
 	DeleteMfaChallenge(ctx context.Context, id uuid.UUID) error
+	// lint:cross-org — user-scoped login challenges. Full MFA revocation (disenroll / admin-reset) burns
+	// the target's outstanding challenges too — a challenge is claimed state; revocation releases it, so
+	// a mid-login target gets a clean "sign in again", not attempts-to-exhaustion (finding #6).
+	DeleteMfaChallengesForUser(ctx context.Context, userID uuid.UUID) error
 	// Turn a check OFF (delete the opt-in row).
 	DeleteOrgHealthCheck(ctx context.Context, arg DeleteOrgHealthCheckParams) (int64, error)
 	DeletePolicyRule(ctx context.Context, arg DeletePolicyRuleParams) (int64, error)
