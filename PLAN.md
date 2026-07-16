@@ -714,7 +714,9 @@ Ledgered at story-end review (S5.1 5/n+):
 - **Rate limits for the public CLI endpoints** (cliToken code-guessing; cliDeviceStart/cliDeviceToken
   device-code brute-force + phishing amplification) → S11.3. The device-flow phishing surface is
   inherent to device-code flows; mitigated now by the anti-phishing warning on /cli-device, fully
-  addressed by the rate limit.
+  addressed by the rate limit. **LAW (S7.5.5-found): a rate-limit/attempt counter must NOT share a tx
+  with the refused request's failure path — a counter that rolls back with the refusal is no limit
+  (the MFA cap bug). Commit the counter; map the refusal to an error AFTER commit (outcome-not-error).**
 
 Ledgered at implementation sign-off (MERGED item):
 - **User-scoped credential surface** = admin revoke of another user's CLI credential + the
