@@ -419,26 +419,30 @@ func (s *Service) ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newE
 		if e != nil {
 			return e
 		}
+		// D7: the audit shows the old->new window (who moved a grant's window, from when).
+		old := "permanent"
+		if existing, ge := q.GetPolicyRuleForOrg(ctx, sqlc.GetPolicyRuleForOrgParams{ID: ruleID, OrgID: orgID}); ge == nil && existing.ExpiresAt.Valid {
+			old = existing.ExpiresAt.Time.UTC().Format(time.RFC3339)
+		}
 		return writeAudit(ctx, q, orgID, "policy.grant_extended", "policy_rule", ruleID.String(),
-			map[string]any{"expires_at": newExpiresAt.UTC().Format(time.RFC3339)})
+			map[string]any{"old_expires_at": old, "new_expires_at": newExpiresAt.UTC().Format(time.RFC3339)})
 	})
 	return r, err
 }
 
-// SweepExpiredGrants pushes + audits the temporary grants that lapsed in (since, now].
-// Grants are NOT deleted — they linger as visible-but-inert rows (the admin list shows
-// them expired; the compiler filter already excludes them). The FOR UPDATE lock on the
-// window rows composes with ExtendGrant: a grant a concurrent extend rescued (expires_at
-// moved to the future) no longer matches the window and is not falsely audited expired.
-// Pushes each affected org (F1: a lapsed grant's /32 must leave every org gateway, not
-// just the subject's own node). System actor (no human lapses a grant), cause grant_expired.
-func (s *Service) SweepExpiredGrants(ctx context.Context, since, now time.Time) (int, error) {
-	var expired []sqlc.ListExpiredGrantsForSweepRow
+// SweepExpiredGrants DELETEs the currently-expired temporary grants (the story-end
+// AMENDMENT — delete-on-sweep replaced linger; see docs/S7.5.4-decisions.md). Each lapse
+// is audited grant_expired (SYSTEM actor grant-expiry, cause, SAME-TX with the delete),
+// then each affected org is pushed org-wide (F1: a lapsed grant's /32 must leave EVERY
+// gateway, not just the subject's node — incl. a non-hosting gateway that had the /32 as a
+// group destination). STATELESS: every expired grant is deleted each call, so a failed or
+// interrupted (downtime) tick leaves rows for the next tick — no window to skip, no lapse
+// unaudited. Composes with ExtendGrant on the row lock (an extend that moved expires_at to
+// the future is no longer <= now(), so it is neither deleted nor falsely audited expired).
+func (s *Service) SweepExpiredGrants(ctx context.Context) (int, error) {
+	var expired []sqlc.DeleteExpiredGrantsRow
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		rows, e := q.ListExpiredGrantsForSweep(ctx, sqlc.ListExpiredGrantsForSweepParams{
-			Since: pgtype.Timestamptz{Time: since, Valid: true},
-			Now:   pgtype.Timestamptz{Time: now, Valid: true},
-		})
+		rows, e := q.DeleteExpiredGrants(ctx)
 		if e != nil {
 			return e
 		}
@@ -464,26 +468,23 @@ func (s *Service) SweepExpiredGrants(ctx context.Context, since, now time.Time) 
 	return len(expired), nil
 }
 
-// StartGrantExpirySweeper runs the expiry sweep on an interval until ctx ends. It
-// tracks the last sweep instant in memory; a grant that lapses during downtime is
-// missed by the window (no prompt push/audit) but the compiler filter still excludes
-// it, so it drops on the next reconcile/trigger — bounded + SAFE-direction (a lingering
-// ADDITIVE allow, never a wrongful cut). Enterprise-only (started in main).
+// StartGrantExpirySweeper runs the stateless expiry sweep on an interval until ctx ends.
+// No in-memory window: a sweep error just retries next tick (the rows are still expired),
+// and a grant that lapses during downtime is deleted+audited on the next tick after
+// restart — the audit trail has no hole. Enterprise-only (started in main).
 func (s *Service) StartGrantExpirySweeper(ctx context.Context) {
-	last := time.Now()
 	t := time.NewTicker(grantSweepInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case now := <-t.C:
-			if n, err := s.SweepExpiredGrants(ctx, last, now); err != nil {
+		case <-t.C:
+			if n, err := s.SweepExpiredGrants(ctx); err != nil {
 				slog.Warn("grant_expiry_sweep_failed", slog.String("error", err.Error()))
 			} else if n > 0 {
 				slog.Info("grant_expiry_swept", slog.Int("count", n))
 			}
-			last = now
 		}
 	}
 }

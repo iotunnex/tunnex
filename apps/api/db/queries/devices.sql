@@ -180,9 +180,11 @@ ORDER BY d.created_at;
 -- name: GetDeviceUserForOrg :one
 -- lint:cross-org — org-scoped by the $2 arg; resolves a flow event's SRC device to its
 -- owning user (S7.5.4 v3 flow attribution: src_device_id -> src_user_id, a clean FK join,
--- NEVER an src_ip->device guess). NO deleted_at filter: a since-revoked/deleted device's
--- HISTORICAL flow must still attribute its user (access_events is an immutable record;
--- src_device_id/src_user_id are plain uuids, not FKs, precisely so they survive deletion).
+-- NEVER an src_ip->device guess).
+-- lint:allow-deleted — DELIBERATELY no deleted_at filter (the REVIEWED escape, not an
+-- incidental substring [8]): a since-revoked/deleted device's HISTORICAL flow must still
+-- attribute its user (access_events is an immutable record; src_device_id/src_user_id are
+-- plain uuids, not FKs, precisely so they survive the device/user deletion).
 SELECT user_id FROM devices WHERE id = $1 AND org_id = $2;
 
 -- name: ListNodeIDsForUserActiveDevices :many

@@ -130,6 +130,14 @@ type Querier interface {
 	// via its org). Clears a device's live status (on revoke) so a revoked device
 	// never reports stale online/handshake via the API.
 	DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) error
+	// The expiry sweeper (S7.5.4 story-end AMENDMENT — delete-on-sweep, replaced linger). A
+	// lapsed temporary grant is DELETED (not lingered), returning id+org for the same-tx
+	// grant_expired audit + the org-wide push. STATELESS — no window/`last` cursor: every
+	// currently-expired grant is deleted each tick, so a failed or interrupted (downtime) tick
+	// simply leaves rows for the NEXT tick to delete+audit (closes the window-skip + downtime-
+	// audit-gap by construction). Composes with ExtendPolicyRule on the row lock: a grant an
+	// extend rescued (expires_at moved to the future) no longer matches expires_at <= now().
+	DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error)
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
 	// Turn a check OFF (delete the opt-in row).
@@ -175,9 +183,11 @@ type Querier interface {
 	GetDeviceHealth(ctx context.Context, deviceID uuid.UUID) (DeviceHealth, error)
 	// lint:cross-org — org-scoped by the $2 arg; resolves a flow event's SRC device to its
 	// owning user (S7.5.4 v3 flow attribution: src_device_id -> src_user_id, a clean FK join,
-	// NEVER an src_ip->device guess). NO deleted_at filter: a since-revoked/deleted device's
-	// HISTORICAL flow must still attribute its user (access_events is an immutable record;
-	// src_device_id/src_user_id are plain uuids, not FKs, precisely so they survive deletion).
+	// NEVER an src_ip->device guess).
+	// lint:allow-deleted — DELIBERATELY no deleted_at filter (the REVIEWED escape, not an
+	// incidental substring [8]): a since-revoked/deleted device's HISTORICAL flow must still
+	// attribute its user (access_events is an immutable record; src_device_id/src_user_id are
+	// plain uuids, not FKs, precisely so they survive the device/user deletion).
 	GetDeviceUserForOrg(ctx context.Context, arg GetDeviceUserForOrgParams) (uuid.UUID, error)
 	GetDomainClaim(ctx context.Context, arg GetDomainClaimParams) (DomainClaim, error)
 	// lint:cross-org — SSO callback resolves the config by (provider, client_id)
@@ -313,12 +323,6 @@ type Querier interface {
 	// background poller iterates all tenants; each config is reconciled org-scoped downstream.
 	// lint:cross-org
 	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
-	// The expiry sweeper's window: temporary grants that lapsed since the last tick. FOR
-	// UPDATE locks each so a concurrent ExtendPolicyRule (which takes the same row lock via
-	// its UPDATE) serializes — the sweeper audits grant_expired ONLY for grants still expired
-	// under the lock; an extend that won the lock moved expires_at to the future, so the row
-	// no longer matches expires_at <= now() and is not falsely audited as expired.
-	ListExpiredGrantsForSweep(ctx context.Context, arg ListExpiredGrantsForSweepParams) ([]ListExpiredGrantsForSweepRow, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)

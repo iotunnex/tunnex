@@ -66,12 +66,12 @@ func TestIngestStampsDeviceAndJoinsUser(t *testing.T) {
 	if known.SrcDeviceID == nil || *known.SrcDeviceID != dev || known.SrcUserID == nil || *known.SrcUserID != user {
 		t.Fatalf("known device must stamp device + join user, got %+v", known)
 	}
+	// [9]: an UNVERIFIED/foreign device id is DROPPED (not persisted) — both device + user nil,
+	// so the immutable log never holds an id that doesn't belong to this org (cross-tenant seed).
+	_ = foreign
 	unknown := bySrc["10.99.0.11"]
-	if unknown.SrcDeviceID == nil || *unknown.SrcDeviceID != foreign {
-		t.Fatalf("unknown device: id must still be captured, got %+v", unknown)
-	}
-	if unknown.SrcUserID != nil {
-		t.Fatalf("unknown device: user must stay NIL (never guessed), got %v", unknown.SrcUserID)
+	if unknown.SrcDeviceID != nil || unknown.SrcUserID != nil {
+		t.Fatalf("unverified device: BOTH device + user must be dropped to unattributed, got %+v", unknown)
 	}
 }
 

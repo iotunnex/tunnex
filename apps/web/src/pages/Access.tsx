@@ -491,13 +491,6 @@ function RefText({ label, broken }: { label: string; broken: boolean }) {
 
 // RuleFormModal creates OR edits a rule. Editing = CREATE-THEN-DELETE (D-a5) via swapRule —
 // gap-free (allow-only union), never delete-first, with a LEGIBLE partial on delete-fail.
-// toLocalInput converts an ISO instant to a <input type="datetime-local"> value (local
-// time, "YYYY-MM-DDTHH:mm") so an edited grant prefills its current expiry.
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
-
 function RuleFormModal({
   orgId,
   groups,
@@ -522,7 +515,10 @@ function RuleFormModal({
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");
   // Temporary grant: an optional expiry (datetime-local). Empty = permanent.
-  const [expiresAt, setExpiresAt] = useState(editing?.expires_at ? toLocalInput(editing.expires_at) : "");
+  // Expiry is a CREATE-only field ([2]/[3] fix): editing a rule is create-then-delete, and a
+  // same-(src,dst) edit carrying an expiry collides on the unique index (or resubmits a past
+  // expiry). Changing a temporary grant's window goes through Extend (a window bump), not Edit.
+  const [expiresAt, setExpiresAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -535,7 +531,7 @@ function RuleFormModal({
       dstKind === "group"
         ? { dst_kind: "group" as const, dst_group_id: dstGroup }
         : { dst_kind: "resource" as const, dst_resource_id: dstResource };
-    const expiry = expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {};
+    const expiry = !editing && expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {};
     return { ...srcPart, ...dstPart, ...expiry };
   }
 
@@ -649,10 +645,14 @@ function RuleFormModal({
             </Select>
           </Field>
         )}
-        {/* Temporary grant (optional): set an expiry to auto-revoke; leave empty for permanent. */}
-        <Field label="Expires (optional — leave empty for a permanent grant)">
-          <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-        </Field>
+        {/* Temporary grant (CREATE only): set an expiry to auto-revoke; empty = permanent.
+            Editing an existing rule changes its src/dst; change a temporary grant's window
+            with Extend (a window bump), not Edit. */}
+        {!editing && (
+          <Field label="Expires (optional — leave empty for a permanent grant)">
+            <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+          </Field>
+        )}
         <ErrorText>{err}</ErrorText>
       </div>
     </Modal>

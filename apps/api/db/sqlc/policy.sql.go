@@ -157,6 +157,44 @@ func (q *Queries) CreateUserGroup(ctx context.Context, arg CreateUserGroupParams
 	return i, err
 }
 
+const deleteExpiredGrants = `-- name: DeleteExpiredGrants :many
+DELETE FROM policy_rules
+WHERE expires_at IS NOT NULL AND expires_at <= now()
+RETURNING id, org_id
+`
+
+type DeleteExpiredGrantsRow struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// The expiry sweeper (S7.5.4 story-end AMENDMENT — delete-on-sweep, replaced linger). A
+// lapsed temporary grant is DELETED (not lingered), returning id+org for the same-tx
+// grant_expired audit + the org-wide push. STATELESS — no window/`last` cursor: every
+// currently-expired grant is deleted each tick, so a failed or interrupted (downtime) tick
+// simply leaves rows for the NEXT tick to delete+audit (closes the window-skip + downtime-
+// audit-gap by construction). Composes with ExtendPolicyRule on the row lock: a grant an
+// extend rescued (expires_at moved to the future) no longer matches expires_at <= now().
+func (q *Queries) DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error) {
+	rows, err := q.db.Query(ctx, deleteExpiredGrants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeleteExpiredGrantsRow{}
+	for rows.Next() {
+		var i DeleteExpiredGrantsRow
+		if err := rows.Scan(&i.ID, &i.OrgID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deletePolicyRule = `-- name: DeletePolicyRule :execrows
 DELETE FROM policy_rules
 WHERE id = $1 AND org_id = $2
@@ -413,48 +451,6 @@ func (q *Queries) ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UU
 			&i.SrcUserID,
 			&i.ExpiresAt,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listExpiredGrantsForSweep = `-- name: ListExpiredGrantsForSweep :many
-SELECT id, org_id FROM policy_rules
-WHERE expires_at > $1 AND expires_at <= $2
-ORDER BY org_id
-FOR UPDATE
-`
-
-type ListExpiredGrantsForSweepParams struct {
-	Since pgtype.Timestamptz `json:"since"`
-	Now   pgtype.Timestamptz `json:"now"`
-}
-
-type ListExpiredGrantsForSweepRow struct {
-	ID    uuid.UUID `json:"id"`
-	OrgID uuid.UUID `json:"org_id"`
-}
-
-// The expiry sweeper's window: temporary grants that lapsed since the last tick. FOR
-// UPDATE locks each so a concurrent ExtendPolicyRule (which takes the same row lock via
-// its UPDATE) serializes — the sweeper audits grant_expired ONLY for grants still expired
-// under the lock; an extend that won the lock moved expires_at to the future, so the row
-// no longer matches expires_at <= now() and is not falsely audited as expired.
-func (q *Queries) ListExpiredGrantsForSweep(ctx context.Context, arg ListExpiredGrantsForSweepParams) ([]ListExpiredGrantsForSweepRow, error) {
-	rows, err := q.db.Query(ctx, listExpiredGrantsForSweep, arg.Since, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListExpiredGrantsForSweepRow{}
-	for rows.Next() {
-		var i ListExpiredGrantsForSweepRow
-		if err := rows.Scan(&i.ID, &i.OrgID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
