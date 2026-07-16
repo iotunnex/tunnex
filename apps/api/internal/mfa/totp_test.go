@@ -28,6 +28,30 @@ func codeAt(t *testing.T, secret string, unix int64) string {
 	return hotp(key, Timestep(unix))
 }
 
+// TestTOTP6238TimeVectors validates the TOTP time-step layer (T -> counter = T/30) against the
+// PUBLISHED RFC 6238 Appendix B vectors (SHA1 seed "12345678901234567890"). App B is 8-digit; our
+// 6-digit truncation is the low-6 of those. This exercises the LARGE-counter time derivation that
+// RFC 4226 App D (small counts 0..9) does not — the 6238 layer, not just the HMAC core.
+func TestTOTP6238TimeVectors(t *testing.T) {
+	key := []byte("12345678901234567890")
+	cases := []struct {
+		unix int64
+		want string // low-6 of the App-B 8-digit SHA1 code
+	}{
+		{59, "287082"},
+		{1111111109, "081804"},
+		{1111111111, "050471"},
+		{1234567890, "005924"},
+		{2000000000, "279037"},
+		{20000000000, "353130"},
+	}
+	for _, c := range cases {
+		if got := hotp(key, Timestep(c.unix)); got != c.want {
+			t.Fatalf("TOTP(T=%d, step=%d) = %s, want %s (RFC 6238 App B low-6)", c.unix, Timestep(c.unix), got, c.want)
+		}
+	}
+}
+
 func TestValidateAcceptsCurrentCode(t *testing.T) {
 	secret, _ := GenerateSecret()
 	now := int64(1_700_000_000)
