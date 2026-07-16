@@ -27,12 +27,18 @@ const (
 	ModeEnforcing = "enforcing"
 )
 
-// Rule is an allow grant: members of SrcGroupID may reach the destination. DstKind
-// selects which Dst*ID is meaningful ("resource" => static cidr:ports; "group" =>
-// that group's members' device /32s).
+// Rule is an allow grant: the SOURCE subject may reach the destination. SrcKind
+// selects the subject ("group" => members of SrcGroupID; "user" => the single
+// SrcUserID, S7.5.4). DstKind selects which Dst*ID is meaningful ("resource" =>
+// static cidr:ports; "group" => that group's members' device /32s). A per-user
+// rule resolves to that user's device /32s CP-side, IDENTICALLY to a group — the
+// artifact stays IP-only, no wire-version bump. Expired temporary rules are
+// filtered OUT of the Snapshot before Compile (the pure compiler is clockless).
 type Rule struct {
 	ID            uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
+	SrcKind       string    // "group" | "user" ("" treated as group for legacy rows)
 	SrcGroupID    uuid.UUID
+	SrcUserID     uuid.UUID
 	DstKind       string
 	DstResourceID uuid.UUID
 	DstGroupID    uuid.UUID
@@ -186,11 +192,17 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 			continue
 		}
 		owner := userGroups[d.UserID]
-		if len(owner) == 0 {
-			continue // owner in no groups => no grants (default-deny)
-		}
 		for _, r := range s.Rules {
-			if !owner[r.SrcGroupID] {
+			// Source-subject match (S7.5.4): a "user" rule matches iff this device's
+			// owner IS that user; a "group" rule matches iff the owner is in the group
+			// (the pre-S7.5.4 path, and the default for legacy blank src_kind).
+			var matched bool
+			if r.SrcKind == "user" {
+				matched = r.SrcUserID == d.UserID
+			} else {
+				matched = owner[r.SrcGroupID]
+			}
+			if !matched {
 				continue
 			}
 			switch r.DstKind {

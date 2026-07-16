@@ -45,6 +45,12 @@ const (
 	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
 )
 
+// Defines values for CreatePolicyRuleRequestSrcKind.
+const (
+	CreatePolicyRuleRequestSrcKindGroup CreatePolicyRuleRequestSrcKind = "group"
+	CreatePolicyRuleRequestSrcKindUser  CreatePolicyRuleRequestSrcKind = "user"
+)
+
 // Defines values for DeviceHealthFailedChecksKind.
 const (
 	DeviceHealthFailedChecksKindDiskEncryption DeviceHealthFailedChecksKind = "disk_encryption"
@@ -196,6 +202,12 @@ const (
 const (
 	PolicyRuleDstKindGroup    PolicyRuleDstKind = "group"
 	PolicyRuleDstKindResource PolicyRuleDstKind = "resource"
+)
+
+// Defines values for PolicyRuleSrcKind.
+const (
+	PolicyRuleSrcKindGroup PolicyRuleSrcKind = "group"
+	PolicyRuleSrcKindUser  PolicyRuleSrcKind = "user"
 )
 
 // Defines values for ResourceProtocol.
@@ -453,11 +465,23 @@ type CreatePolicyRuleRequest struct {
 
 	// DstResourceId Required when dst_kind=resource.
 	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
-	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+
+	// ExpiresAt Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
+	ExpiresAt *time.Time `json:"expires_at"`
+
+	// SrcGroupId Required when src_kind=group (or omitted).
+	SrcGroupId *openapi_types.UUID             `json:"src_group_id"`
+	SrcKind    *CreatePolicyRuleRequestSrcKind `json:"src_kind,omitempty"`
+
+	// SrcUserId Required when src_kind=user (a current org member).
+	SrcUserId *openapi_types.UUID `json:"src_user_id"`
 }
 
 // CreatePolicyRuleRequestDstKind defines model for CreatePolicyRuleRequest.DstKind.
 type CreatePolicyRuleRequestDstKind string
+
+// CreatePolicyRuleRequestSrcKind defines model for CreatePolicyRuleRequest.SrcKind.
+type CreatePolicyRuleRequestSrcKind string
 
 // Device defines model for Device.
 type Device struct {
@@ -858,13 +882,19 @@ type PolicyRule struct {
 	DstGroupId    *openapi_types.UUID `json:"dst_group_id"`
 	DstKind       PolicyRuleDstKind   `json:"dst_kind"`
 	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	ExpiresAt     *time.Time          `json:"expires_at"`
 	Id            openapi_types.UUID  `json:"id"`
 	OrgId         openapi_types.UUID  `json:"org_id"`
-	SrcGroupId    openapi_types.UUID  `json:"src_group_id"`
+	SrcGroupId    *openapi_types.UUID `json:"src_group_id"`
+	SrcKind       PolicyRuleSrcKind   `json:"src_kind"`
+	SrcUserId     *openapi_types.UUID `json:"src_user_id"`
 }
 
 // PolicyRuleDstKind defines model for PolicyRule.DstKind.
 type PolicyRuleDstKind string
+
+// PolicyRuleSrcKind defines model for PolicyRule.SrcKind.
+type PolicyRuleSrcKind string
 
 // PoolCidrRequest defines model for PoolCidrRequest.
 type PoolCidrRequest struct {

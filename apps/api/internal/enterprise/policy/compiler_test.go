@@ -206,6 +206,51 @@ func TestResourceDestinationScope(t *testing.T) {
 	}
 }
 
+// S7.5.4 — a per-USER rule (src_kind=user) resolves to exactly that user's device
+// /32s, and ONLY that user's — a groupless user still gets their direct grant, and a
+// different user in the same org gets nothing from it.
+func TestPerUserSubjectResolvesToThatUserOnly(t *testing.T) {
+	snap := policy.Snapshot{
+		Mode:      policy.ModeEnforcing,
+		Resources: []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+		// A per-user grant for Alice — NOTE: no group memberships at all.
+		Rules: []policy.Rule{{SrcKind: "user", SrcUserID: uAlice, DstKind: "resource", DstResourceID: rDB}},
+		Devices: []policy.Device{
+			{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"},
+			{UserID: uBob, NodeID: nodeA, AssignedIP: "10.99.0.11"}, // Bob: no grant
+		},
+	}
+	a := allowsFor(policy.Compile(snap), nodeA)
+	if len(a) != 1 {
+		t.Fatalf("per-user grant must emit exactly Alice's /32, got %+v", a)
+	}
+	if a[0].SrcIP != "10.99.0.10" || a[0].DstCIDR != "10.0.5.0/24" {
+		t.Fatalf("wrong src: %+v (Bob must get nothing; a groupless user still gets a direct grant)", a[0])
+	}
+}
+
+// S7.5.4 — a per-user grant and a group grant COMPOSE: the compiler is additive, and
+// a user with both a group membership and a direct grant gets both destinations.
+func TestPerUserAndGroupGrantsCompose(t *testing.T) {
+	snap := policy.Snapshot{
+		Mode: policy.ModeEnforcing,
+		Resources: []policy.Resource{
+			{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"},
+			{ID: gServers, CIDR: "10.0.6.0/24", Protocol: "any"}, // reuse a distinct uuid as a resource id
+		},
+		Rules: []policy.Rule{
+			{SrcKind: "group", SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB},
+			{SrcKind: "user", SrcUserID: uAlice, DstKind: "resource", DstResourceID: gServers},
+		},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Devices:     []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	}
+	a := allowsFor(policy.Compile(snap), nodeA)
+	if len(a) != 2 {
+		t.Fatalf("group + per-user grants must compose to 2 entries, got %+v", a)
+	}
+}
+
 // Duplicate grants (two rules resolving to the same entry) collapse to one.
 func TestDuplicateGrantsDeduped(t *testing.T) {
 	snap := policy.Snapshot{

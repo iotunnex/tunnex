@@ -115,6 +115,8 @@ type Querier interface {
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
+	// S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
+	// expires_at NULL = permanent, set = a temporary grant.
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
@@ -276,6 +278,10 @@ type Querier interface {
 	// device drops from desired state regardless of approval status; the conjunction
 	// with status='active' excludes a pending+blocked device exactly once.
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
+	// COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
+	// an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The
+	// pure compiler stays clockless; this query applies now() at snapshot-build time.
+	ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
 	// nullable, so the S4.3 dashboard passes none (latest N). The cursor is written
@@ -330,6 +336,7 @@ type Querier interface {
 	// device_health joined (S7.5.3): a pending device may already be reporting posture
 	// (both facts surface independently — the D7 orthogonality).
 	ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error)
+	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)

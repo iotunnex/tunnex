@@ -1399,8 +1399,12 @@ export interface components {
             id: string;
             /** Format: uuid */
             org_id: string;
+            /** @enum {string} */
+            src_kind: "group" | "user";
             /** Format: uuid */
-            src_group_id: string;
+            src_group_id?: string | null;
+            /** Format: uuid */
+            src_user_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group";
             /** Format: uuid */
@@ -1408,11 +1412,23 @@ export interface components {
             /** Format: uuid */
             dst_group_id?: string | null;
             /** Format: date-time */
+            expires_at?: string | null;
+            /** Format: date-time */
             created_at: string;
         };
         CreatePolicyRuleRequest: {
-            /** Format: uuid */
-            src_group_id: string;
+            /** @enum {string} */
+            src_kind?: "group" | "user";
+            /**
+             * Format: uuid
+             * @description Required when src_kind=group (or omitted).
+             */
+            src_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Required when src_kind=user (a current org member).
+             */
+            src_user_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group";
             /**
@@ -1425,6 +1441,11 @@ export interface components {
              * @description Required when dst_kind=group.
              */
             dst_group_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
+             */
+            expires_at?: string | null;
         };
         ZeroTrustMode: {
             /**

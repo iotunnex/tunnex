@@ -247,13 +247,16 @@ type PlatformSecret struct {
 }
 
 type PolicyRule struct {
-	ID            uuid.UUID   `json:"id"`
-	OrgID         uuid.UUID   `json:"org_id"`
-	SrcGroupID    uuid.UUID   `json:"src_group_id"`
-	DstKind       string      `json:"dst_kind"`
-	DstResourceID pgtype.UUID `json:"dst_resource_id"`
-	DstGroupID    pgtype.UUID `json:"dst_group_id"`
-	CreatedAt     time.Time   `json:"created_at"`
+	ID            uuid.UUID          `json:"id"`
+	OrgID         uuid.UUID          `json:"org_id"`
+	SrcGroupID    pgtype.UUID        `json:"src_group_id"`
+	DstKind       string             `json:"dst_kind"`
+	DstResourceID pgtype.UUID        `json:"dst_resource_id"`
+	DstGroupID    pgtype.UUID        `json:"dst_group_id"`
+	CreatedAt     time.Time          `json:"created_at"`
+	SrcKind       string             `json:"src_kind"`
+	SrcUserID     pgtype.UUID        `json:"src_user_id"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
 type Resource struct {

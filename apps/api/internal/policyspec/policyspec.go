@@ -10,7 +10,11 @@
 // reconcile-idempotence guard). Allow entries are sorted + de-duplicated.
 package policyspec
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // ResourceInput and RuleInput are the NEUTRAL CRUD payload DTOs for the policy
 // API. They live here (not in internal/enterprise/policy) so the open-build http
@@ -26,12 +30,18 @@ type ResourceInput struct {
 	PortHigh *int
 }
 
-// RuleInput is a policy allow-rule create payload.
+// RuleInput is a policy allow-rule create payload. S7.5.4: the SOURCE subject is
+// a group (SrcKind="group", SrcGroupID) OR a single user (SrcKind="user",
+// SrcUserID); ExpiresAt set makes it a temporary grant (nil = permanent). SrcKind
+// blank is treated as "group" (back-compat with pre-S7.5.4 callers).
 type RuleInput struct {
+	SrcKind       string // "" | group | user
 	SrcGroupID    uuid.UUID
+	SrcUserID     *uuid.UUID
 	DstKind       string // resource | group
 	DstResourceID *uuid.UUID
 	DstGroupID    *uuid.UUID
+	ExpiresAt     *time.Time // nil = permanent; set = temporary grant
 }
 
 // AffectedDevice is a full-tunnel device whose internet egress becomes policy-

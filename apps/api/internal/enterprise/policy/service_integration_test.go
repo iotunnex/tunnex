@@ -185,6 +185,82 @@ func ruleTo(srcGroup, dstResource uuid.UUID) policyspec.RuleInput {
 	return policyspec.RuleInput{SrcGroupID: srcGroup, DstKind: "resource", DstResourceID: &dstResource}
 }
 
+// TestPerUserGrantDropsOnMemberRemoval is the S7.5.4 D1 rider proof (the F1
+// committed-removal-must-push class): a per-user grant's src_user_id → memberships
+// ON DELETE CASCADE deletes the rule row STRUCTURALLY when the member is removed —
+// AND that removal must reach the WIRE: the compiled artifact, rebuilt after the
+// cascade, must no longer contain that user's /32. Cascade-correct-in-DB but
+// stale-in-compile would be the S7.5.2 committed-removal-must-push bug.
+func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	ctx := f.ctx
+	exec := func(sql string, args ...any) {
+		if _, err := pool.Exec(context.Background(), sql, args...); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+	// A second member (bob) with an active device — the subject of the per-user grant.
+	bob, bobDev := uuid.New(), uuid.New()
+	exec(`INSERT INTO users (id, email) VALUES ($1,$2)`, bob, "bob-"+bob.String()[:8]+"@ex.com")
+	exec(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,'member')`, f.org, bob)
+	exec(`INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, assigned_ip)
+	      VALUES ($1,$2,$3,$4,'bob-laptop','pkbob','10.99.0.11')`, bobDev, f.org, bob, f.node)
+
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	res, err := s.CreateResource(ctx, f.org, policyResource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rid := res.ID
+	// A PER-USER grant for bob (not a group).
+	if _, err := s.CreatePolicyRule(ctx, f.org, policyspec.RuleInput{
+		SrcKind: "user", SrcUserID: &bob, DstKind: "resource", DstResourceID: &rid,
+	}); err != nil {
+		t.Fatalf("create per-user rule: %v", err)
+	}
+	if _, _, err := s.SetMode(ctx, f.org, policy.ModeEnforcing); err != nil {
+		t.Fatal(err)
+	}
+
+	// BEFORE removal: bob's /32 is granted the resource in the compiled artifact.
+	compiledHas := func(srcIP string) bool {
+		snap, err := s.BuildSnapshot(context.Background(), f.org)
+		if err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		for _, c := range policy.Compile(snap) {
+			for _, e := range c.Allow {
+				if e.SrcIP == srcIP && e.DstCIDR == "10.0.5.0/24" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !compiledHas("10.99.0.11") {
+		t.Fatal("per-user grant must put bob's /32 in the compiled artifact before removal")
+	}
+
+	// REMOVE bob from the org (delete the memberships row — the cascade trigger).
+	exec(`DELETE FROM memberships WHERE org_id=$1 AND user_id=$2`, f.org, bob)
+
+	// (a) STRUCTURAL cascade: the per-user policy_rules row is gone.
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM policy_rules WHERE org_id=$1 AND src_user_id=$2`, f.org, bob).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("membership removal must cascade-delete the per-user grant, %d rows remain", n)
+	}
+	// (b) WIRE freshness: the rebuilt artifact no longer grants bob's /32.
+	if compiledHas("10.99.0.11") {
+		t.Fatal("cascade-correct but gateway-STALE: bob's /32 still in the compiled artifact after removal")
+	}
+}
+
 // TestAuditedDeletesPersistMetadata pins the S7.4a-walk finding: every audited DELETE goes
 // through writeAudit with nil meta, which inserted SQL NULL into audit_logs.metadata (NOT
 // NULL) → 23502 → the mutation 500'd + rolled back (so the rule/group/resource could never
