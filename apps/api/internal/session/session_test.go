@@ -28,11 +28,11 @@ func TestCreateGetDelete(t *testing.T) {
 	ctx := context.Background()
 	uid := uuid.New()
 
-	s1, err := store.Create(ctx, uid)
+	s1, err := store.Create(ctx, uid, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	s2, err := store.Create(ctx, uid)
+	s2, err := store.Create(ctx, uid, "")
 	if err != nil {
 		t.Fatalf("create2: %v", err)
 	}
@@ -63,9 +63,9 @@ func TestDeleteAllForUser(t *testing.T) {
 	uid := uuid.New()
 	other := uuid.New()
 
-	a, _ := store.Create(ctx, uid)
-	b, _ := store.Create(ctx, uid)
-	c, _ := store.Create(ctx, other)
+	a, _ := store.Create(ctx, uid, "")
+	b, _ := store.Create(ctx, uid, "")
+	c, _ := store.Create(ctx, other, "")
 
 	if err := store.DeleteAllForUser(ctx, uid); err != nil {
 		t.Fatalf("delete all: %v", err)
@@ -86,7 +86,7 @@ func TestAbsoluteExpiry(t *testing.T) {
 	cur := time.Now()
 	store.now = func() time.Time { return cur } // controllable clock
 
-	s, _ := store.Create(ctx, uuid.New()) // ExpiresAt = cur + 30m
+	s, _ := store.Create(ctx, uuid.New(), "") // ExpiresAt = cur + 30m
 	cur = cur.Add(31 * time.Minute)       // advance past the absolute lifetime
 	if _, err := store.Get(ctx, s.ID); err != ErrNotFound {
 		t.Fatalf("expired session: want ErrNotFound, got %v", err)
