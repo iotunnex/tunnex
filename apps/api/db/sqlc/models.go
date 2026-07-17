@@ -5,6 +5,7 @@
 package sqlc
 
 import (
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -211,6 +212,7 @@ type Node struct {
 	Capabilities      []byte             `json:"capabilities"`
 	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
 	PolicyReportedAt  pgtype.Timestamptz `json:"policy_reported_at"`
+	SiteID            pgtype.UUID        `json:"site_id"`
 }
 
 type NodeJoinToken struct {
@@ -284,6 +286,24 @@ type Resource struct {
 	PortHigh  *int32    `json:"port_high"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Site struct {
+	ID            uuid.UUID `json:"id"`
+	OrgID         uuid.UUID `json:"org_id"`
+	Name          string    `json:"name"`
+	LinkTransport string    `json:"link_transport"`
+	LinkMtu       *int32    `json:"link_mtu"`
+	DnsForwarding []byte    `json:"dns_forwarding"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type SiteSubnet struct {
+	ID        uuid.UUID    `json:"id"`
+	SiteID    uuid.UUID    `json:"site_id"`
+	Cidr      netip.Prefix `json:"cidr"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 type SsoConfig struct {

@@ -24,6 +24,9 @@ type Querier interface {
 	// Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
 	// skips BOTH the audit and the org-wide re-push.
 	AddIdpGroupMember(ctx context.Context, arg AddIdpGroupMemberParams) (int64, error)
+	// lint:cross-org — site_id is org-checked by the caller (GetSite) before this insert; site_subnets
+	// has no org_id column of its own (it inherits the site's org via the FK).
+	AddSiteSubnet(ctx context.Context, arg AddSiteSubnetParams) (SiteSubnet, error)
 	// The browser leg binds the human's identity to the pending device code.
 	ApproveCliDeviceCode(ctx context.Context, arg ApproveCliDeviceCodeParams) (int64, error)
 	// S7.3: pending -> active, recording the approver (approved_by). Only a PENDING device
@@ -34,6 +37,10 @@ type Querier interface {
 	// an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
 	// disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.
 	BindGroupToIdp(ctx context.Context, arg BindGroupToIdpParams) (UserGroup, error)
+	// Bind a gateway node to a site IN THE SAME ORG. The EXISTS guard refuses a cross-org bind (a
+	// node must not bind to another org's site). The single-node-per-site partial unique index makes a
+	// second bind to an already-occupied site a unique violation, which the service maps to a typed 409.
+	BindNodeToSite(ctx context.Context, arg BindNodeToSiteParams) (int64, error)
 	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
 	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
 	// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
@@ -133,6 +140,7 @@ type Querier interface {
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
+	CreateSite(ctx context.Context, arg CreateSiteParams) (Site, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Zero Trust policy model (S7.1). Enterprise feature; model-only (no data plane).
 	// All tenant tables scope by org_id (tenant-lint). Policy objects are hard-deleted
@@ -168,6 +176,7 @@ type Querier interface {
 	// lint:cross-org — user-scoped credential.
 	DeleteRecoveryCodesForUser(ctx context.Context, userID uuid.UUID) error
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
+	DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, error)
 	// lint:cross-org — user-scoped credential.
 	// Disenroll (self re-enroll clears via upsert; explicit delete for self-disenroll + admin-reset).
 	DeleteTOTP(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -264,6 +273,10 @@ type Querier interface {
 	GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleForUpdateParams) (PolicyRule, error)
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
+	GetSite(ctx context.Context, arg GetSiteParams) (Site, error)
+	// lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
+	// the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
+	GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, error)
 	// lint:cross-org — user-scoped credential.
 	GetTOTP(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -410,6 +423,9 @@ type Querier interface {
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
+	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
+	ListSitesByOrg(ctx context.Context, orgID uuid.UUID) ([]Site, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
 	// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
@@ -514,6 +530,7 @@ type Querier interface {
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
 	// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
 	UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) (UserGroup, error)
+	UnbindNode(ctx context.Context, arg UnbindNodeParams) (int64, error)
 	// Resize the org tunnel pool. The service refuses a shrink that would orphan
 	// live allocations (checked in Go before calling this); this just persists it.
 	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)

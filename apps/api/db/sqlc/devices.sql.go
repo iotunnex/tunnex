@@ -234,7 +234,7 @@ func (q *Queries) GetDeviceUserForOrg(ctx context.Context, arg GetDeviceUserForO
 }
 
 const getOrgNode = `-- name: GetOrgNode :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes
 WHERE id = $1 AND org_id = $2 AND status = 'active'
 `
 
@@ -264,6 +264,7 @@ func (q *Queries) GetOrgNode(ctx context.Context, arg GetOrgNodeParams) (Node, e
 		&i.Capabilities,
 		&i.PolicyDesyncSince,
 		&i.PolicyReportedAt,
+		&i.SiteID,
 	)
 	return i, err
 }
