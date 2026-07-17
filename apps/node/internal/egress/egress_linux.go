@@ -75,6 +75,10 @@ type Manager struct {
 	// control plane surfaces `unsupported_policy_version`. Cleared when a supported version
 	// arrives.
 	refusedVersion atomic.Int64
+	// maxPolicyVersion is the highest compiled-artifact Version this agent applies (defaults to
+	// nodepolicy.MaxSupportedVersion). A field, not the const directly, so the interlock red can pin
+	// an OLD-max agent (S8.1 Slice 3) and feed it the current-version artifact.
+	maxPolicyVersion int
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
@@ -109,7 +113,9 @@ type Manager struct {
 }
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
-func New(wgIface string) *Manager { return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now} }
+func New(wgIface string) *Manager {
+	return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
+}
 
 // SetFlowLogGroup enables flow logging by pointing the forward-chain log clauses at an
 // nflog group (>0). 0 disables it. Non-terminal + best-effort: the log clause NEVER changes
@@ -126,7 +132,7 @@ func (m *Manager) SetPolicy(p *nodepolicy.Compiled) {
 	// to legacy mesh (fail-OPEN). It records the refused version (forcing DENY-ALL in
 	// forwardRules) and reports it. The last-good policy is left in place but overridden by
 	// the deny-all refusal; a supported version clears the refusal.
-	if p != nil && p.Version > nodepolicy.MaxSupportedVersion {
+	if p != nil && p.Version > m.maxPolicyVersion {
 		m.refusedVersion.Store(int64(p.Version))
 		m.policyReceived.Store(true) // past cold-start: the refusal, not the cold deny, is the reason
 		return

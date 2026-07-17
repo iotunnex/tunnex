@@ -15,18 +15,18 @@ import (
 // just update one golden.
 func TestCanonicalHashGolden(t *testing.T) {
 	enforcing := &nodepolicy.Compiled{
-		Version: 1, NodeID: "node-a", Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Version: 4, NodeID: "node-a", Mode: nodepolicy.ModeEnforcing, Mesh: false,
 		Allow: []nodepolicy.AllowEntry{
 			{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432},
 			{SrcIP: "10.99.0.10", DstCIDR: "10.99.0.20/32", Protocol: "any"},
 		},
 	}
-	if got := nodepolicy.CanonicalHash(enforcing); got != "1cd3184dcfa7" {
-		t.Fatalf("enforcing golden = %q, want 1cd3184dcfa7 (policyspec twin must match)", got)
+	if got := nodepolicy.CanonicalHash(enforcing); got != "56814207daee" {
+		t.Fatalf("enforcing golden = %q, want 56814207daee (policyspec twin must match)", got)
 	}
-	mesh := &nodepolicy.Compiled{Version: 1, NodeID: "node-a", Mode: nodepolicy.ModeOff, Mesh: true}
-	if got := nodepolicy.CanonicalHash(mesh); got != "a44457394212" {
-		t.Fatalf("mesh golden = %q, want a44457394212 (policyspec twin must match)", got)
+	mesh := &nodepolicy.Compiled{Version: 4, NodeID: "node-a", Mode: nodepolicy.ModeOff, Mesh: true}
+	if got := nodepolicy.CanonicalHash(mesh); got != "5696d2570ee8" {
+		t.Fatalf("mesh golden = %q, want 5696d2570ee8 (policyspec twin must match)", got)
 	}
 	if nodepolicy.CanonicalHash(nil) != "" {
 		t.Fatal("nil policy must hash to empty (mesh/none)")
@@ -38,13 +38,13 @@ func TestCanonicalHashGolden(t *testing.T) {
 // i.e. decode(marshal(x)) re-marshals to the same canonical bytes. This is the
 // property staleness comparison actually depends on.
 func TestCanonicalHashSurvivesWireRoundTrip(t *testing.T) {
-	wire := `{"version":1,"node_id":"node-a","mode":"enforcing","mesh":false,"allow":[{"src_ip":"10.99.0.10","dst_cidr":"10.0.5.0/24","protocol":"tcp","port_low":5432,"port_high":5432},{"src_ip":"10.99.0.10","dst_cidr":"10.99.0.20/32","protocol":"any"}]}`
+	wire := `{"version":4,"node_id":"node-a","mode":"enforcing","mesh":false,"allow":[{"src_ip":"10.99.0.10","dst_cidr":"10.0.5.0/24","protocol":"tcp","port_low":5432,"port_high":5432},{"src_ip":"10.99.0.10","dst_cidr":"10.99.0.20/32","protocol":"any"}]}`
 	var c nodepolicy.Compiled
 	if err := json.Unmarshal([]byte(wire), &c); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got := nodepolicy.CanonicalHash(&c); got != "1cd3184dcfa7" {
-		t.Fatalf("round-trip hash = %q, want 1cd3184dcfa7", got)
+	if got := nodepolicy.CanonicalHash(&c); got != "56814207daee" {
+		t.Fatalf("round-trip hash = %q, want 56814207daee", got)
 	}
 }
 

@@ -63,7 +63,15 @@ type AffectedDevice struct {
 // versions. A version-number bump does re-converge the fleet ONCE on deploy
 // (A-4: one version served fleet-wide) — enforcement is unchanged, only the
 // metadata grows. See docs/S7.5.1-decisions.md (D2 / A-4), docs/S7.5.4-decisions.md (D4).
-const ProtocolVersion = 3
+//
+// v4 (S8.1 Slice 3, EPIC 8): sites become a policy DESTINATION KIND. Option A (ruled) — NO new wire
+// field: a `device→site-subnet` grant compiles to a same-shape AllowEntry{Src, Dst: site-subnet-CIDR}
+// (the KIND is a CP-side rule fact, resolved to DstCIDR at compile). The enforcement-significant change
+// IS this version bump — `Version` is IN CanonicalHash (hash.go), so v4 changes every gateway's hash and
+// (with S8.1 D1's gate) an agent at maxSupported<4 REFUSES it (deny-all + unsupported_policy_version)
+// rather than silently mis-enforcing. This is what makes Version-in-hash safe under mixed versions —
+// the A-4 warning at hash.go:25-28 fires and its answer ships here. See docs/S8.1-decisions.md D2/D3.
+const ProtocolVersion = 4
 
 // Protocol scopes an allow entry to an L4 protocol. "any" ignores ports.
 type Protocol string

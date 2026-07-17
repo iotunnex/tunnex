@@ -33,11 +33,11 @@ import (
 
 // ProtocolVersion is the control-plane protocol version, kept in lockstep with
 // policyspec.ProtocolVersion (TestProtocolVersionConstantsAgree). v2 (S7.5.1): rule_id.
-// v3 (S7.5.4): src_device_id — both additive + hash-invisible. Bumping is safe:
-// EnrollAgent only rejects agents reporting a version GREATER than the CP (a newer
-// agent vs an older CP), so older agents (report ≤3, not > 3) are still served — the CP
-// serves v3, an older agent ignores the unknown field, and the hash is metadata-blind.
-const ProtocolVersion = 3
+// v3 (S7.5.4): src_device_id — both additive + hash-invisible. v4 (S8.1 Slice 3): sites as a
+// destination kind — Option A, no new wire field, but Version IS in-hash so v4 is a real hash change,
+// and S8.1 D1's agent gate makes an agent at maxSupported<4 REFUSE it rather than mis-enforce (the
+// v4 bump is no longer "safe to safe-ignore" — it is the enforcement boundary the gate protects).
+const ProtocolVersion = 4
 
 const joinTokenTTL = time.Hour
 

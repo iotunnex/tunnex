@@ -457,6 +457,36 @@ func TestUnsupportedVersionRefusedIsDenyAll(t *testing.T) {
 	}
 }
 
+// TestInterlockOldMaxAgentRefusesSitesBump is the S8.1 Slice-3 INTERLOCK red (distinct from Slice 1's
+// SYNTHETIC max+1 red). It simulates a GATED agent PINNED at the pre-sites maxSupported (3) — the
+// go-forward guarantee — receiving the REAL current-version sites artifact (Version =
+// nodepolicy.MaxSupportedVersion, which Slice 3 bumped to 4): it deny-alls + records the refusal.
+//
+// It CATCHES A NON-BUMP: if Slice 3 forgot to increment the version (MaxSupportedVersion stayed 3), the
+// fed version would equal the pinned max, `4 > 3` becomes `3 > 3` (false), the old agent would ACCEPT
+// the sites artifact, and the guard below fails loudly. (This simulates a GATED old binary; a genuinely
+// UNGATED pre-S8.1 binary has no gate and silently accepts — the go-forward-only residual, papered in
+// D1, owed the upgrade-order sentence in the S8 upgrade docs.)
+func TestInterlockOldMaxAgentRefusesSitesBump(t *testing.T) {
+	const preSitesMax = 3 // the pre-S8.1 maxSupported — this test simulates THAT exact gated agent
+	if nodepolicy.MaxSupportedVersion <= preSitesMax {
+		t.Fatalf("NON-BUMP: Slice 3 must increment MaxSupportedVersion above the pre-sites max %d (got %d) — "+
+			"otherwise the sites artifact is applied unbumped and the version gate never fires", preSitesMax, nodepolicy.MaxSupportedVersion)
+	}
+	m := New("wg0")
+	m.maxPolicyVersion = preSitesMax // pin the OLD-max gated agent
+	// The REAL current sites artifact (Mesh:true — a would-open shape, to prove refusal overrides it).
+	m.SetPolicy(&nodepolicy.Compiled{Version: nodepolicy.MaxSupportedVersion, Mode: "enforcing", Mesh: true})
+	if m.RefusedVersion() != nodepolicy.MaxSupportedVersion {
+		t.Fatalf("a gated agent at the pre-sites max (%d) must REFUSE the current v%d sites artifact; RefusedVersion=%d",
+			preSitesMax, nodepolicy.MaxSupportedVersion, m.RefusedVersion())
+	}
+	rs := m.ruleset("10.99.0.1/24")
+	if strings.Contains(rs, blanketV4) || strings.Contains(rs, "ip daddr") {
+		t.Fatal("the refused sites artifact must render DENY-ALL, not mesh/allows")
+	}
+}
+
 // Finding #1: a half-set / inverted port range fails CLOSED (rule skipped), never
 // widening to all-ports.
 func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {

@@ -25,7 +25,10 @@ const (
 // can't interpret) and reports the refused version so the control plane surfaces
 // `unsupported_policy_version` with the "upgrade the agent" remedy. Bump this in lockstep
 // with policyspec.ProtocolVersion whenever the agent gains support for the new shape.
-const MaxSupportedVersion = 3
+// v4 (S8.1 Slice 3): this agent now SUPPORTS the sites bump (Option A — same-shape wire, a
+// device→site-subnet grant is a plain AllowEntry), so it applies v4 rather than refusing it. An
+// agent still at 3 (pre-Slice-3 binary) refuses v4 — the go-forward interlock (D1).
+const MaxSupportedVersion = 4
 
 // AllowEntry is one compiled default-deny grant: SrcIP (a device /32 host) may reach
 // DstCIDR on Protocol within [PortLow,PortHigh]. PortLow==0 means all ports.

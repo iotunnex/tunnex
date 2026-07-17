@@ -14,18 +14,18 @@ import (
 // drifted struct, do NOT just update one golden.
 func TestCanonicalHashGolden(t *testing.T) {
 	enforcing := policyspec.Compiled{
-		Version: 1, NodeID: "node-a", Mode: "enforcing", Mesh: false,
+		Version: 4, NodeID: "node-a", Mode: "enforcing", Mesh: false,
 		Allow: []policyspec.AllowEntry{
 			{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: policyspec.ProtoTCP, PortLow: 5432, PortHigh: 5432},
 			{SrcIP: "10.99.0.10", DstCIDR: "10.99.0.20/32", Protocol: policyspec.ProtoAny},
 		},
 	}
-	if got := policyspec.CanonicalHash(enforcing); got != "1cd3184dcfa7" {
-		t.Fatalf("enforcing golden = %q, want 1cd3184dcfa7 (nodepolicy twin must match)", got)
+	if got := policyspec.CanonicalHash(enforcing); got != "56814207daee" {
+		t.Fatalf("enforcing golden = %q, want 56814207daee (nodepolicy twin must match)", got)
 	}
-	mesh := policyspec.Compiled{Version: 1, NodeID: "node-a", Mode: "off", Mesh: true}
-	if got := policyspec.CanonicalHash(mesh); got != "a44457394212" {
-		t.Fatalf("mesh golden = %q, want a44457394212 (nodepolicy twin must match)", got)
+	mesh := policyspec.Compiled{Version: 4, NodeID: "node-a", Mode: "off", Mesh: true}
+	if got := policyspec.CanonicalHash(mesh); got != "5696d2570ee8" {
+		t.Fatalf("mesh golden = %q, want 5696d2570ee8 (nodepolicy twin must match)", got)
 	}
 }
 
