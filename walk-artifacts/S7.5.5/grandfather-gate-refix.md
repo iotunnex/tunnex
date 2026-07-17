@@ -27,7 +27,7 @@ defect — the enrollment-gate BRICK + tautological guard".
 | 2 | GET /auth/me (allowlisted) | 200 | no error code | **FIX** — was 403 `mfa_enrollment_required` |
 | 3 | GET /organizations/{realOrg}/devices (non-allowlisted), pre-enroll | 403 | `mfa_enrollment_required` | gate HOLDS default-deny for a gated user |
 | 4 | POST /auth/mfa/enroll (allowlisted) | 200 | secret returned (32 chars) | **FIX** — was 403 |
-| 5 | (compute RFC-6238 TOTP from the secret) | — | 6 digits | — |
+| 5 | client-side only: compute RFC-6238 TOTP from the step-4 secret (NO wire call) | n/a | 6 digits | not an API request — kept in the numbering so 4→6 has no gap |
 | 6 | POST /auth/mfa/enroll/confirm | 200 | `recovery_codes` issued | valid code arms MFA; gate flips |
 | 7 | GET /organizations/{realOrg}/devices (same op), post-confirm | 200 | no `mfa_enrollment_required` | gate RELEASED on confirm |
 
