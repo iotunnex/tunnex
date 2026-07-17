@@ -96,6 +96,14 @@ function RequireAuth() {
   if (state.user.mfa_enrollment_required && location.pathname !== "/enroll-mfa") {
     return <Navigate to="/enroll-mfa" replace />;
   }
+  // WF-3 (S7.5.5 UI-walk): the INVERSE redirect — once the gate CLEARS (enrollment confirmed, or an
+  // already-enrolled user lands here on a stale flag), release the user to the app. Without this the
+  // ForcedEnroll page has no exit: confirming clears mfa_enrollment_required but nothing routes away
+  // from /enroll-mfa, so a now-enrolled user is trapped on the ceremony's "turn off 2FA" view (the
+  // ForcedEnroll comment claimed a release the code never performed). Symmetric with the guard above.
+  if (!state.user.mfa_enrollment_required && location.pathname === "/enroll-mfa") {
+    return <Navigate to="/dashboard" replace />;
+  }
   return <Outlet />;
 }
 
