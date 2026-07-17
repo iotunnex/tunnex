@@ -346,12 +346,15 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 	for _, fam := range []string{"-4", "-6"} {
 		out, err := run(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
 		if err != nil {
-			// P7: a family may be UNAVAILABLE (e.g. `ip -6` on an ipv6.disable=1 host) — that is not a
-			// reconcile fault. Treat it as an empty set + log; never fail the whole reconcile over a
-			// family this gateway doesn't use (which would flap runOnce → unhealthy every tick). This also
-			// gives a non-site gateway (P9: cidrs empty, nothing of ours to prune) its pre-S8.2 no-op.
-			slog.Debug("site_route_enumerate_skipped", "family", fam, "iface", b.iface, "error", err.Error())
-			continue
+			// P7 (R3-scoped): tolerate ONLY the -6 family — it may be UNAVAILABLE (ipv6.disable=1), and
+			// site subnets are v4-only today, so a v6 enumeration failure is not a reconcile fault. The -4
+			// family is LOAD-BEARING: a persistent v4 enumeration failure would SILENTLY SKIP a needed
+			// prune (stale route → blackhole while green), so it MUST surface as a reconcile error.
+			if fam == "-6" {
+				slog.Debug("site_route_enumerate_v6_skipped", "iface", b.iface, "error", err.Error())
+				continue
+			}
+			return err
 		}
 		var toks []string
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
