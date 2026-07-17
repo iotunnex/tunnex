@@ -429,6 +429,14 @@ func TestUnsupportedVersionRefusedIsDenyAll(t *testing.T) {
 	if m.RefusedVersion() != nodepolicy.MaxSupportedVersion+1 {
 		t.Fatalf("RefusedVersion = %d, want %d", m.RefusedVersion(), nodepolicy.MaxSupportedVersion+1)
 	}
+	// Note-2 pin: the agent must NEVER report the refused artifact's hash as applied — that would
+	// read synced-and-healthy to the CP desync detector, contradicting the degraded kind. Structural:
+	// SetPolicy does not STORE the refused artifact, so applyAndTrack only ever hashes the last-good
+	// (or nil) policy — the refused artifact is never passed to CanonicalHash. Here (never applied) the
+	// applied hash is empty, and specifically not the refused artifact's hash.
+	if _, h, _, _ := m.AppliedStatus(); h == nodepolicy.CanonicalHash(tooNew) {
+		t.Fatal("refused artifact's hash must not be reported as applied (would read synced-healthy)")
+	}
 	rs := m.ruleset("10.99.0.1/24")
 	if strings.Contains(rs, blanketV4) {
 		t.Fatalf("a refused (unsupported-version) artifact must NOT render the mesh, even with Mesh:true; got:\n%s", rs)
