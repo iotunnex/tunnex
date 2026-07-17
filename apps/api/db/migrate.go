@@ -36,6 +36,21 @@ func Up(databaseURL string) error {
 	return nil
 }
 
+// MigrateTo migrates up OR down to EXACTLY the given version. Migration tests use this so they target
+// their OWN version (not "the latest") — otherwise adding a later migration silently changes what
+// DownOne rolls back and breaks earlier migration tests.
+func MigrateTo(databaseURL string, version uint) error {
+	m, err := newMigrator(databaseURL)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migrate to %d: %w", version, err)
+	}
+	return nil
+}
+
 // DownOne rolls back a single migration.
 func DownOne(databaseURL string) error {
 	m, err := newMigrator(databaseURL)

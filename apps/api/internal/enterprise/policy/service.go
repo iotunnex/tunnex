@@ -296,15 +296,19 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 	// Destination shape: exactly one dst_* set, matching dst_kind.
 	switch in.DstKind {
 	case "resource":
-		if in.DstResourceID == nil || in.DstGroupID != nil {
-			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=resource requires dst_resource_id (and no dst_group_id)")
+		if in.DstResourceID == nil || in.DstGroupID != nil || in.DstSiteID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=resource requires dst_resource_id (and no dst_group_id/dst_site_id)")
 		}
 	case "group":
-		if in.DstGroupID == nil || in.DstResourceID != nil {
-			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=group requires dst_group_id (and no dst_resource_id)")
+		if in.DstGroupID == nil || in.DstResourceID != nil || in.DstSiteID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=group requires dst_group_id (and no dst_resource_id/dst_site_id)")
+		}
+	case "site":
+		if in.DstSiteID == nil || in.DstResourceID != nil || in.DstGroupID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=site requires dst_site_id (and no dst_resource_id/dst_group_id)")
 		}
 	default:
-		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource or group")
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource, group, or site")
 	}
 	// A temporary grant must expire in the FUTURE (a past expiry is a no-op grant —
 	// reject it rather than silently create a rule that never compiles).
@@ -345,11 +349,21 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 				return e
 			}
 		}
+		if in.DstSiteID != nil { // S8.1: the dst site must exist in THIS org. A SUBNETLESS site is
+			// ALLOWED (ruled) — it is a valid target that compiles to nothing until subnets are added;
+			// refusing would impose an ordering dependency.
+			if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: *in.DstSiteID, OrgID: orgID}); e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					return apierr.BadRequest("site_not_found", "dst site not found")
+				}
+				return e
+			}
+		}
 		var e error
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
 			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
-			ExpiresAt: toPgTimestamptz(in.ExpiresAt),
+			DstSiteID: toPgUUID(in.DstSiteID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
 		if e != nil {
 			return conflictIfDup(e, "an identical rule already exists")
@@ -608,6 +622,10 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	if err != nil {
 		return Snapshot{}, err
 	}
+	siteSubnets, err := s.q.ListSiteSubnetsForOrg(ctx, orgID) // S8.1: dst_kind='site' resolution input
+	if err != nil {
+		return Snapshot{}, err
+	}
 	snap := Snapshot{Mode: org.ZeroTrustMode}
 	for _, r := range rules {
 		snap.Rules = append(snap.Rules, Rule{
@@ -615,7 +633,11 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 			SrcKind:    r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
+			DstSiteID:     fromPgUUID(r.DstSiteID),
 		})
+	}
+	for _, ss := range siteSubnets {
+		snap.SiteSubnets = append(snap.SiteSubnets, SiteSubnet{SiteID: ss.SiteID, CIDR: ss.Cidr.String()})
 	}
 	for _, r := range resources {
 		snap.Resources = append(snap.Resources, Resource{

@@ -136,7 +136,8 @@ type Querier interface {
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
 	// S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
-	// expires_at NULL = permanent, set = a temporary grant.
+	// expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈ {resource,group,site}
+	// (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
@@ -425,6 +426,10 @@ type Querier interface {
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
+	// lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
+	// S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
+	// one AllowEntry per the target site's subnets.
+	ListSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteSubnetsForOrgRow, error)
 	ListSitesByOrg(ctx context.Context, orgID uuid.UUID) ([]Site, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a

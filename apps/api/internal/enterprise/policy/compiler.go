@@ -42,6 +42,15 @@ type Rule struct {
 	DstKind       string
 	DstResourceID uuid.UUID
 	DstGroupID    uuid.UUID
+	DstSiteID     uuid.UUID // S8.1: dst_kind='site' — resolved to the site's subnet CIDRs
+}
+
+// SiteSubnet is one routed LAN of a site (S8.1). The compiler expands a dst_kind='site' rule to one
+// AllowEntry per the target site's subnets — a site with zero subnets compiles to nothing (no grant,
+// not an error), a site with N subnets to N grants (the ruled resolution edges).
+type SiteSubnet struct {
+	SiteID uuid.UUID
+	CIDR   string
 }
 
 // Resource is a static destination (a CIDR + optional L4 scope).
@@ -77,6 +86,7 @@ type Snapshot struct {
 	Resources   []Resource
 	Memberships []Membership
 	Devices     []Device
+	SiteSubnets []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
 }
 
 // Compile produces the compiled artifact for every node that has at least one
@@ -132,6 +142,30 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	resourceByID := make(map[uuid.UUID]Resource, len(s.Resources))
 	for _, r := range s.Resources {
 		resourceByID[r.ID] = r
+	}
+
+	// site -> sorted, de-duplicated subnet CIDRs (destination resolution for dst_kind='site', S8.1).
+	// A site with zero subnets is simply absent here → its rules compile to nothing (the ruled edge).
+	siteCIDRs := map[uuid.UUID][]string{}
+	{
+		seen := map[uuid.UUID]map[string]bool{}
+		for _, ss := range s.SiteSubnets {
+			if ss.CIDR == "" {
+				continue
+			}
+			m := seen[ss.SiteID]
+			if m == nil {
+				m = map[string]bool{}
+				seen[ss.SiteID] = m
+			}
+			if !m[ss.CIDR] {
+				m[ss.CIDR] = true
+				siteCIDRs[ss.SiteID] = append(siteCIDRs[ss.SiteID], ss.CIDR)
+			}
+		}
+		for id := range siteCIDRs {
+			sort.Strings(siteCIDRs[id])
+		}
 	}
 
 	// group -> sorted, de-duplicated member device /32 hosts (destination resolution
@@ -230,6 +264,19 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 						SrcIP:       d.AssignedIP,
 						DstCIDR:     dstIP + "/32",
 						Protocol:    policyspec.ProtoAny, // device-to-device is L3
+						RuleID:      r.ID.String(),
+						SrcDeviceID: d.ID.String(),
+					})
+				}
+			case "site":
+				// S8.1 Option A: expand to ONE same-shape AllowEntry per the target site's subnet
+				// (a plain Dst-CIDR grant — the site KIND stays CP-side, never on the wire). A
+				// subnetless site yields nothing; a multi-subnet site yields one grant per subnet.
+				for _, cidr := range siteCIDRs[r.DstSiteID] {
+					add(d.NodeID, policyspec.AllowEntry{
+						SrcIP:       d.AssignedIP,
+						DstCIDR:     cidr,
+						Protocol:    policyspec.ProtoAny, // a site subnet is an L3 LAN
 						RuleID:      r.ID.String(),
 						SrcDeviceID: d.ID.String(),
 					})

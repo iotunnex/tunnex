@@ -37,9 +37,9 @@ func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) 
 }
 
 const createPolicyRule = `-- name: CreatePolicyRule :one
-INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, dst_kind, dst_resource_id, dst_group_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at
+INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, dst_kind, dst_resource_id, dst_group_id, dst_site_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id
 `
 
 type CreatePolicyRuleParams struct {
@@ -50,12 +50,14 @@ type CreatePolicyRuleParams struct {
 	DstKind       string             `json:"dst_kind"`
 	DstResourceID pgtype.UUID        `json:"dst_resource_id"`
 	DstGroupID    pgtype.UUID        `json:"dst_group_id"`
+	DstSiteID     pgtype.UUID        `json:"dst_site_id"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
 // ── policy_rules (allow grants) ─────────────────────────────────────────────────
 // S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
-// expires_at NULL = permanent, set = a temporary grant.
+// expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈ {resource,group,site}
+// (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
 func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error) {
 	row := q.db.QueryRow(ctx, createPolicyRule,
 		arg.OrgID,
@@ -65,6 +67,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		arg.DstKind,
 		arg.DstResourceID,
 		arg.DstGroupID,
+		arg.DstSiteID,
 		arg.ExpiresAt,
 	)
 	var i PolicyRule
@@ -79,6 +82,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		&i.SrcKind,
 		&i.SrcUserID,
 		&i.ExpiresAt,
+		&i.DstSiteID,
 	)
 	return i, err
 }
@@ -253,7 +257,7 @@ const extendPolicyRule = `-- name: ExtendPolicyRule :one
 UPDATE policy_rules
 SET expires_at = $3
 WHERE id = $1 AND org_id = $2 AND expires_at IS NOT NULL AND expires_at > now()
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id
 `
 
 type ExtendPolicyRuleParams struct {
@@ -282,12 +286,13 @@ func (q *Queries) ExtendPolicyRule(ctx context.Context, arg ExtendPolicyRulePara
 		&i.SrcKind,
 		&i.SrcUserID,
 		&i.ExpiresAt,
+		&i.DstSiteID,
 	)
 	return i, err
 }
 
 const getPolicyRuleForOrg = `-- name: GetPolicyRuleForOrg :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at FROM policy_rules WHERE id = $1 AND org_id = $2
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id FROM policy_rules WHERE id = $1 AND org_id = $2
 `
 
 type GetPolicyRuleForOrgParams struct {
@@ -312,12 +317,13 @@ func (q *Queries) GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForO
 		&i.SrcKind,
 		&i.SrcUserID,
 		&i.ExpiresAt,
+		&i.DstSiteID,
 	)
 	return i, err
 }
 
 const getPolicyRuleForUpdate = `-- name: GetPolicyRuleForUpdate :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
 `
 
 type GetPolicyRuleForUpdateParams struct {
@@ -343,6 +349,7 @@ func (q *Queries) GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleF
 		&i.SrcKind,
 		&i.SrcUserID,
 		&i.ExpiresAt,
+		&i.DstSiteID,
 	)
 	return i, err
 }
@@ -453,7 +460,7 @@ func (q *Queries) ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) 
 }
 
 const listActivePolicyRulesForOrg = `-- name: ListActivePolicyRulesForOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id FROM policy_rules
 WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at
 `
@@ -481,6 +488,7 @@ func (q *Queries) ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UU
 			&i.SrcKind,
 			&i.SrcUserID,
 			&i.ExpiresAt,
+			&i.DstSiteID,
 		); err != nil {
 			return nil, err
 		}
@@ -570,7 +578,7 @@ func (q *Queries) ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID
 }
 
 const listPolicyRulesByOrg = `-- name: ListPolicyRulesByOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id FROM policy_rules
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -596,6 +604,7 @@ func (q *Queries) ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]
 			&i.SrcKind,
 			&i.SrcUserID,
 			&i.ExpiresAt,
+			&i.DstSiteID,
 		); err != nil {
 			return nil, err
 		}

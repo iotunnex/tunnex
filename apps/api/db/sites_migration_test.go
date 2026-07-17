@@ -56,8 +56,8 @@ func TestSitesMigrationUpDownUpWithPopulatedRows(t *testing.T) {
 		return ok
 	}
 
-	// UP: full migrate to the latest (0032).
-	if err := db.Up(dsn); err != nil {
+	// UP to EXACTLY 0032 (not "latest" — a later migration must not change what DownOne rolls back).
+	if err := db.MigrateTo(dsn, 32); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	if !tableExists("sites") {
@@ -100,8 +100,8 @@ func TestSitesMigrationUpDownUpWithPopulatedRows(t *testing.T) {
 		t.Fatal("nodes.site_id column must be dropped after down")
 	}
 
-	// UP again: re-applies cleanly (up -> down -> up).
-	if err := db.Up(dsn); err != nil {
+	// UP again to 0032 (up -> down -> up).
+	if err := db.MigrateTo(dsn, 32); err != nil {
 		t.Fatalf("re-up: %v", err)
 	}
 	if !tableExists("sites") {

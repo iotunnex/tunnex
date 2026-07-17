@@ -38,9 +38,10 @@ type RuleInput struct {
 	SrcKind       string // "" | group | user
 	SrcGroupID    uuid.UUID
 	SrcUserID     *uuid.UUID
-	DstKind       string // resource | group
+	DstKind       string // resource | group | site (S8.1)
 	DstResourceID *uuid.UUID
 	DstGroupID    *uuid.UUID
+	DstSiteID     *uuid.UUID // S8.1: set iff DstKind=="site"
 	ExpiresAt     *time.Time // nil = permanent; set = temporary grant
 }
 

@@ -189,6 +189,42 @@ func (q *Queries) ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]Site
 	return items, nil
 }
 
+const listSiteSubnetsForOrg = `-- name: ListSiteSubnetsForOrg :many
+SELECT ss.site_id, ss.cidr
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE s.org_id = $1
+ORDER BY ss.site_id, ss.cidr
+`
+
+type ListSiteSubnetsForOrgRow struct {
+	SiteID uuid.UUID    `json:"site_id"`
+	Cidr   netip.Prefix `json:"cidr"`
+}
+
+// lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
+// S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
+// one AllowEntry per the target site's subnets.
+func (q *Queries) ListSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteSubnetsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listSiteSubnetsForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSiteSubnetsForOrgRow{}
+	for rows.Next() {
+		var i ListSiteSubnetsForOrgRow
+		if err := rows.Scan(&i.SiteID, &i.Cidr); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSitesByOrg = `-- name: ListSitesByOrg :many
 SELECT id, org_id, name, link_transport, link_mtu, dns_forwarding, created_at, updated_at FROM sites WHERE org_id = $1 ORDER BY created_at
 `

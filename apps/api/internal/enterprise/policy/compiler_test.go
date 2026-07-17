@@ -446,3 +446,73 @@ func richSnapshot(mode string) policy.Snapshot {
 		},
 	}
 }
+
+// TestSiteSubnetDestinationResolution — S8.1 Slice-3 enforcing-gates + resolution-edge reds (D3,
+// Option A). A dst_kind='site' rule compiles to one same-shape AllowEntry per the target site's
+// subnet; enforcing GATES it (only the GRANTED device reaches the subnet). Ruled edges: zero subnets
+// → no grant (not an error); N subnets → N grants.
+func TestSiteSubnetDestinationResolution(t *testing.T) {
+	siteHQ := uuid.MustParse("00000000-0000-0000-0000-00000051e001")
+	base := func(subnets []policy.SiteSubnet) policy.Snapshot {
+		return policy.Snapshot{
+			Mode: policy.ModeEnforcing,
+			Devices: []policy.Device{
+				{ID: uuid.New(), UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}, // granted (in gAdmins)
+				{ID: uuid.New(), UserID: uBob, NodeID: nodeA, AssignedIP: "10.99.0.11"},   // NOT in gAdmins
+			},
+			Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+			Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "group", SrcGroupID: gAdmins, DstKind: "site", DstSiteID: siteHQ}},
+			SiteSubnets: subnets,
+		}
+	}
+
+	// Edge 1: a subnetless site -> NO grant (compiles to nothing, not an error).
+	if none := allowsFor(policy.Compile(base(nil)), nodeA); len(none) != 0 {
+		t.Fatalf("a dst=site rule against a SUBNETLESS site must compile to nothing, got %+v", none)
+	}
+
+	one := allowsFor(policy.Compile(base([]policy.SiteSubnet{{SiteID: siteHQ, CIDR: "10.20.0.0/24"}})), nodeA)
+	// Enforcing GATES: the granted device reaches the subnet...
+	if !hasAllow(one, "10.99.0.10", "10.20.0.0/24") {
+		t.Fatalf("enforcing must GRANT the granted device to the site subnet, got %+v", one)
+	}
+	// ...and the NON-granted device does NOT (default-deny holds for site subnets too).
+	if hasAllow(one, "10.99.0.11", "10.20.0.0/24") {
+		t.Fatalf("a non-granted device must NOT reach the site subnet, got %+v", one)
+	}
+
+	// Edge 2: N subnets -> N grants (one AllowEntry per subnet), granted device only.
+	multi := allowsFor(policy.Compile(base([]policy.SiteSubnet{
+		{SiteID: siteHQ, CIDR: "10.20.0.0/24"}, {SiteID: siteHQ, CIDR: "10.21.0.0/24"},
+	})), nodeA)
+	if !hasAllow(multi, "10.99.0.10", "10.20.0.0/24") || !hasAllow(multi, "10.99.0.10", "10.21.0.0/24") {
+		t.Fatalf("a site with 2 subnets must compile to 2 grants, got %+v", multi)
+	}
+	if len(multi) != 2 {
+		t.Fatalf("want exactly 2 grants (one per subnet, granted device only), got %d: %+v", len(multi), multi)
+	}
+}
+
+// TestSiteSubnetDowngradeToMesh — S8.1 D11 downgrade-to-mesh red. The SAME site-dst snapshot under
+// off-mode compiles to the legacy MESH (Mesh=true, no grant-gating): enterprise->open releases the
+// enforcing gate on the site subnet to the off-mode mesh. Enforcing gates it; off reaches it ungated.
+func TestSiteSubnetDowngradeToMesh(t *testing.T) {
+	siteHQ := uuid.MustParse("00000000-0000-0000-0000-00000051e002")
+	snap := func(mode string) policy.Snapshot {
+		return policy.Snapshot{
+			Mode:        mode,
+			Devices:     []policy.Device{{ID: uuid.New(), UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+			Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+			Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "group", SrcGroupID: gAdmins, DstKind: "site", DstSiteID: siteHQ}},
+			SiteSubnets: []policy.SiteSubnet{{SiteID: siteHQ, CIDR: "10.20.0.0/24"}},
+		}
+	}
+	// Enforcing: GATED (the grant is the only reason the subnet is reachable).
+	if enf := policy.Compile(snap(policy.ModeEnforcing))[nodeA]; enf.Mesh || !hasAllow(enf.Allow, "10.99.0.10", "10.20.0.0/24") {
+		t.Fatalf("enforcing must gate the site subnet via the grant, got mesh=%v allow=%+v", enf.Mesh, enf.Allow)
+	}
+	// Off (downgrade): MESH — the subnet is reachable via the blanket, no grant-gating.
+	if off := policy.Compile(snap(policy.ModeOff))[nodeA]; !off.Mesh || len(off.Allow) != 0 {
+		t.Fatalf("off-mode must be the legacy mesh (no site-subnet grant-gating), got mesh=%v allow=%+v", off.Mesh, off.Allow)
+	}
+}

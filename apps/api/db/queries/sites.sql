@@ -36,3 +36,13 @@ UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 -- lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
 -- the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
 SELECT * FROM nodes WHERE site_id = $1;
+
+-- name: ListSiteSubnetsForOrg :many
+-- lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
+-- S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
+-- one AllowEntry per the target site's subnets.
+SELECT ss.site_id, ss.cidr
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE s.org_id = $1
+ORDER BY ss.site_id, ss.cidr;
