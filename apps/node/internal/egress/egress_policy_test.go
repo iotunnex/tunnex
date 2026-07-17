@@ -412,6 +412,43 @@ func TestNeverReceivedIsDenyAllNotMesh(t *testing.T) {
 	}
 }
 
+// S8.1 D1 fail-closed gate: an artifact whose Version exceeds MaxSupportedVersion is REFUSED —
+// the agent goes DENY-ALL (never a best-effort apply of a shape it can't interpret, and NEVER a
+// fall-through to the legacy mesh — fail-OPEN) and reports the refused version. The Mesh:true here
+// is deliberate: a too-new artifact that WOULD open the blanket must still deny-all. A subsequent
+// supported version clears the refusal and renders normally.
+func TestUnsupportedVersionRefusedIsDenyAll(t *testing.T) {
+	m := New("wg0")
+	tooNew := &nodepolicy.Compiled{
+		Version: nodepolicy.MaxSupportedVersion + 1,
+		Mode:    "enforcing",
+		Mesh:    true, // would normally open the blanket mesh — the refusal MUST override this
+		Allow:   []nodepolicy.AllowEntry{{SrcIP: "10.0.0.1", DstCIDR: "10.0.5.0/24", Protocol: "any"}},
+	}
+	m.SetPolicy(tooNew)
+	if m.RefusedVersion() != nodepolicy.MaxSupportedVersion+1 {
+		t.Fatalf("RefusedVersion = %d, want %d", m.RefusedVersion(), nodepolicy.MaxSupportedVersion+1)
+	}
+	rs := m.ruleset("10.99.0.1/24")
+	if strings.Contains(rs, blanketV4) {
+		t.Fatalf("a refused (unsupported-version) artifact must NOT render the mesh, even with Mesh:true; got:\n%s", rs)
+	}
+	if strings.Contains(rs, "ip daddr") {
+		t.Fatal("a refused artifact must emit NO allow rules")
+	}
+	if !strings.Contains(rs, "policy drop") || !strings.Contains(rs, "tunnex_default_drop") {
+		t.Fatal("a refused artifact must be deny-all (policy drop + default_drop counter)")
+	}
+	// A supported version CLEARS the refusal and renders normally.
+	m.SetPolicy(&nodepolicy.Compiled{Version: nodepolicy.MaxSupportedVersion, Mesh: true})
+	if m.RefusedVersion() != 0 {
+		t.Fatal("a supported version must CLEAR the refusal")
+	}
+	if !strings.Contains(m.ruleset("10.99.0.1/24"), blanketV4) {
+		t.Fatal("after clearing the refusal, a mesh policy must render the blanket mesh")
+	}
+}
+
 // Finding #1: a half-set / inverted port range fails CLOSED (rule skipped), never
 // widening to all-ports.
 func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {

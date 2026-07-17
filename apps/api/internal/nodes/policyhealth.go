@@ -20,6 +20,11 @@ const (
 	KindConverging     PolicyDegradedKind = "converging"       // pushed!=applied, fresh, age < T — a normal push settling
 	KindSilentDesync   PolicyDegradedKind = "silent_desync"    // pushed!=applied, fresh, age >= T — stuck (the S7.2 nightmare)
 	KindDesyncUnknown  PolicyDegradedKind = "desync_unknown"   // can't determine: pushed-hash unavailable, or stamped + reports stale
+	// KindUnsupportedPolicyVersion (S8.1 D1): the agent REFUSED the compiled artifact — its
+	// Version exceeds what the agent can apply — and went deny-all. UNIQUE remedy: upgrade the
+	// agent (every other kind's remedy is CP-side). Highest priority: a refusing gateway isn't
+	// stale or apply-failing, it's version-incapable — distinguish it so the operator upgrades.
+	KindUnsupportedPolicyVersion PolicyDegradedKind = "unsupported_policy_version"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -63,6 +68,7 @@ type KindInput struct {
 	DesyncSince        time.Time     // CP-stamped onset of term-3 (zero = not stamped)
 	ReportAge          time.Duration // now − last_seen_at (report freshness)
 	Now                time.Time
+	UnsupportedVersion bool          // agent-reported: it REFUSED a too-new artifact (S8.1 D1) → highest-priority kind
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -74,6 +80,7 @@ type TransitionRule struct {
 }
 
 var transitionTable = []TransitionRule{
+	{KindUnsupportedPolicyVersion, "agent REFUSED a too-new artifact (UnsupportedVersion) — checked FIRST, remedy = upgrade the agent"},
 	{KindHealthy, "not degraded: no error, pushed==applied, reports fresh"},
 	{KindApplyFailing, "policy_error set AND policy_failing_since set"},
 	{KindStuckEnforcing, "policy_error set AND policy_failing_since EMPTY (pushed=='' && applied!='')"},
@@ -86,6 +93,12 @@ var transitionTable = []TransitionRule{
 // a live apply error is self-evident from the agent's last report; the desync path needs a
 // FRESH applied hash (a server-side compare is meaningless on a stale one).
 func degradedKind(in KindInput) PolicyDegradedKind {
+	// S8.1 D1 — HIGHEST priority: the agent refused a too-new artifact and went deny-all. This is
+	// a version-incapability, not a stale/failing apply; its remedy (upgrade the agent) is unique,
+	// so it must not be masked by the desync/apply-error paths below.
+	if in.UnsupportedVersion {
+		return KindUnsupportedPolicyVersion
+	}
 	// Agent-reported apply failure (from the last report — a reported fact, not a server compare).
 	// [fold 3] mirror the bool's TERM-2: policy_failing_since alone (error empty) is a failing
 	// enforcing apply — apply_failing, NEVER the benign desync path. Order: failing_since first.

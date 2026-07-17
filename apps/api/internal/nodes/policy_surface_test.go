@@ -110,6 +110,40 @@ func TestPolicyDegraded(t *testing.T) {
 	}
 }
 
+// S8.1 D1 + Condition 1 — the operator-visible surface. A gateway that REFUSED a too-new
+// artifact (reports policy_refused_version > 0) must surface, IN THE PolicyHealthForNodes
+// OUTPUT the operator badge/API reads, both Degraded=true AND Kind=unsupported_policy_version —
+// not stop at the node's self-report. Edition-independent: the version gate is on the agent, so
+// even the open build (no policy engine) surfaces it. Priority: it outranks a co-present apply
+// error (unique remedy — upgrade the agent). A node reporting no refusal (0/absent) is never it.
+func TestUnsupportedPolicyVersionSurfaces(t *testing.T) {
+	org := uuid.New()
+	mk := func(caps map[string]any) sqlc.Node { return sqlc.Node{ID: uuid.New(), Capabilities: capsJSON(caps)} }
+	health := func(s *Service, n sqlc.Node) PolicyHealth {
+		return s.PolicyHealthForNodes(context.Background(), org, []sqlc.Node{n})[n.ID]
+	}
+	// Both editions: open (no provider) AND enterprise (a provider present).
+	for _, svc := range []*Service{{}, {policy: fakeProvider{pol: nil}}} {
+		h := health(svc, mk(map[string]any{"policy_refused_version": 4}))
+		if !h.Degraded {
+			t.Fatal("a refused (unsupported-version) gateway MUST be degraded (it is deny-all)")
+		}
+		if h.Kind != KindUnsupportedPolicyVersion {
+			t.Fatalf("refused gateway must surface unsupported_policy_version in the health OUTPUT, got %q", h.Kind)
+		}
+	}
+	// Priority: refused OUTRANKS a co-present apply error (its remedy differs — upgrade the agent).
+	enfSvc := &Service{policy: fakeProvider{pol: &policyspec.Compiled{Version: 1, Mode: "enforcing"}}}
+	if h := health(enfSvc, mk(map[string]any{"policy_refused_version": 5, "policy_error": "nft: apply failed"})); h.Kind != KindUnsupportedPolicyVersion {
+		t.Fatalf("refused must OUTRANK apply_failing, got %q", h.Kind)
+	}
+	// No refusal reported (0/absent) → never unsupported_policy_version (backward-compat: old agents
+	// report nothing; they must not be spuriously flagged).
+	if h := health(&Service{}, mk(map[string]any{"policy_hash": "x"})); h.Kind == KindUnsupportedPolicyVersion {
+		t.Fatal("a node not reporting a refusal must not surface unsupported_policy_version")
+	}
+}
+
 // Finding #D guard: the DesiredState fail-closed/off fallbacks and the compiler stamp the
 // policy artifact Version from TWO independent constants. They must stay equal, or a
 // fallback artifact's canonical hash forks from the compiler's and false-alarms every

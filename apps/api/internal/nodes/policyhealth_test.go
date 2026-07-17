@@ -44,6 +44,12 @@ func TestDegradedKind(t *testing.T) {
 		{"reports-stop — stale + mismatch + old onset → desync_unknown", KindInput{PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: ReportFreshnessWindow, Now: now, DesyncSince: now.Add(-10 * time.Minute)}, KindDesyncUnknown},
 		// [X-3 reconverge] applied catches up to pushed → healthy (convergence is a STATE predicate).
 		{"reconverge — applied == pushed → healthy", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindHealthy},
+
+		// [S8.1 D1] the agent refused a too-new artifact → unsupported_policy_version (deny-all,
+		// version-incapable). Highest priority: it OUTRANKS the desync/apply paths because its remedy
+		// is unique (upgrade the agent) — even when an apply error + a stuck desync are ALSO present.
+		{"S8.1 — unsupported_policy_version (agent refused)", KindInput{UnsupportedVersion: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindUnsupportedPolicyVersion},
+		{"S8.1 — refused OUTRANKS apply-error + silent-desync", KindInput{UnsupportedVersion: true, PolicyError: "boom", PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindUnsupportedPolicyVersion},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

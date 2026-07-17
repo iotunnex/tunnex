@@ -379,6 +379,10 @@ type AppliedPolicy struct {
 	// onset: when apply FIRST started failing. The stale alarm measures from here,
 	// so a normal push that applies cleanly never registers stale (finding #3).
 	FailingSince string `json:"policy_failing_since"`
+	// RefusedVersion (S8.1 D1) is the compiled-artifact version the agent REFUSED as
+	// unsupported (> its MaxSupportedVersion), or 0 when none. Surfaced as the distinct
+	// `unsupported_policy_version` health kind (remedy: upgrade the agent).
+	RefusedVersion int `json:"policy_refused_version"`
 }
 
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
@@ -415,11 +419,12 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	// it server-side from the typed report so a compromised agent can't inject
 	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
 	caps, err := json.Marshal(map[string]any{
-		"egress_nat":           egressNAT,
-		"policy_version":       applied.Version,
-		"policy_hash":          applied.Hash,
-		"policy_error":         applied.Error,
-		"policy_failing_since": applied.FailingSince,
+		"egress_nat":             egressNAT,
+		"policy_version":         applied.Version,
+		"policy_hash":            applied.Hash,
+		"policy_error":           applied.Error,
+		"policy_failing_since":   applied.FailingSince,
+		"policy_refused_version": applied.RefusedVersion,
 	})
 	if err != nil {
 		return err
@@ -486,6 +491,9 @@ type NodeCapabilities struct {
 	// first started failing (empty when healthy). The stale window measures from
 	// here, not the applied-hash age -- so a normal push never false-alarms (#3).
 	PolicyFailingSince string `json:"policy_failing_since"`
+	// PolicyRefusedVersion (S8.1 D1) is the compiled-artifact version the agent REFUSED
+	// as unsupported (0 = none). Drives the `unsupported_policy_version` health kind.
+	PolicyRefusedVersion int `json:"policy_refused_version"`
 }
 
 // zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
@@ -562,7 +570,9 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 	now := time.Now()
 	for _, n := range nodes {
 		caps := Capabilities(n.Capabilities)
-		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" // terms (1) + (2)
+		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
+		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0
 		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
@@ -574,6 +584,10 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// (Normally the open agent reports neither field — this is the structural guarantee.)
 		kind := KindHealthy
 		switch {
+		case !enterprise && caps.PolicyRefusedVersion > 0:
+			// S8.1 D1: the version gate is on the AGENT — edition-independent. An open-build
+			// gateway has no policy engine (no desync path) but still refuses a too-new artifact.
+			kind = KindUnsupportedPolicyVersion
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
@@ -588,6 +602,7 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				DesyncSince:        tsTime(n.PolicyDesyncSince),
 				ReportAge:          reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
 				Now:                now,
+				UnsupportedVersion: caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
 			})
 		}
 		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}

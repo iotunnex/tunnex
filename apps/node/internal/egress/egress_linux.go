@@ -68,6 +68,13 @@ type Manager struct {
 	// boundary. This SPLITS the chunk-1 absent=Mesh decision: nil-WITHIN-a-received-policy
 	// = mesh (unchanged); NEVER-received != mesh = deny.
 	policyReceived atomic.Bool
+	// refusedVersion is the compiled-artifact Version the agent last REFUSED because it
+	// exceeds nodepolicy.MaxSupportedVersion (S8.1 D1 fail-closed gate). 0 = none refused.
+	// A refusal forces the forward chain to DENY-ALL (never a best-effort apply of a shape
+	// the agent can't interpret, never a fall-through to legacy mesh) and is reported so the
+	// control plane surfaces `unsupported_policy_version`. Cleared when a supported version
+	// arrives.
+	refusedVersion atomic.Int64
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
@@ -113,6 +120,18 @@ func (m *Manager) SetFlowLogGroup(group int) { m.flowLogGroup = group }
 // policy has now been received — flipping the forward chain out of the cold-start
 // deny-all state. Called on EVERY desired-state delivery (including nil for off orgs).
 func (m *Manager) SetPolicy(p *nodepolicy.Compiled) {
+	// S8.1 D1 fail-closed gate: an artifact whose Version exceeds what this agent can apply
+	// is REFUSED — the agent does NOT store it as the active policy (rendering its fields
+	// would be a best-effort apply of a shape it can't interpret) and does NOT fall through
+	// to legacy mesh (fail-OPEN). It records the refused version (forcing DENY-ALL in
+	// forwardRules) and reports it. The last-good policy is left in place but overridden by
+	// the deny-all refusal; a supported version clears the refusal.
+	if p != nil && p.Version > nodepolicy.MaxSupportedVersion {
+		m.refusedVersion.Store(int64(p.Version))
+		m.policyReceived.Store(true) // past cold-start: the refusal, not the cold deny, is the reason
+		return
+	}
+	m.refusedVersion.Store(0)
 	m.policy.Store(p)
 	m.policyReceived.Store(true)
 	// Rebuild the src /32 -> device_id map (v3 flow-log attribution). Every device with
@@ -147,6 +166,11 @@ func (m *Manager) AppliedStatus() (version int, hash string, failingSince time.T
 	defer m.mu.Unlock()
 	return m.appliedVersion, m.appliedHash, m.failingSince, m.applyErr
 }
+
+// RefusedVersion returns the compiled-artifact Version the agent last REFUSED as
+// unsupported (S8.1 D1), or 0 when none. The reconcile loop reports this so the control
+// plane surfaces `unsupported_policy_version` (remedy: upgrade the agent).
+func (m *Manager) RefusedVersion() int { return int(m.refusedVersion.Load()) }
 
 // desiredVersion returns the version of the policy the loop last handed us (0 = mesh/
 // none). The control plane compares this to AppliedStatus to detect staleness.
@@ -282,6 +306,12 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 		// COLD START, no policy fetched yet -> DENY-ALL (drop + ct only, no accepts).
 		// Fail-closed until the first desired-state delivery, so an enforcing gateway is
 		// never briefly wide-open on restart (finding #2). NOT the same as nil-in-received.
+		return dropCounter, dropCounter
+	}
+	if m.refusedVersion.Load() > 0 {
+		// S8.1 D1: an unsupported-version artifact was refused -> DENY-ALL (the same
+		// fail-closed shape as cold start). NEVER fall through to the mesh/enforcing render
+		// below, which would apply a shape the agent can't interpret or open the mesh.
 		return dropCounter, dropCounter
 	}
 	if pol == nil || pol.Mesh {

@@ -18,6 +18,15 @@ const (
 	ModeEnforcing = "enforcing"
 )
 
+// MaxSupportedVersion is the highest compiled-artifact Version this agent can APPLY
+// (== the policyspec.ProtocolVersion it was built against). S8.1 D1 fail-closed gate:
+// an artifact with Version > MaxSupportedVersion is a SEMANTIC shape the agent does not
+// understand — the agent REFUSES it (deny-all, never a best-effort apply of fields it
+// can't interpret) and reports the refused version so the control plane surfaces
+// `unsupported_policy_version` with the "upgrade the agent" remedy. Bump this in lockstep
+// with policyspec.ProtocolVersion whenever the agent gains support for the new shape.
+const MaxSupportedVersion = 3
+
 // AllowEntry is one compiled default-deny grant: SrcIP (a device /32 host) may reach
 // DstCIDR on Protocol within [PortLow,PortHigh]. PortLow==0 means all ports.
 type AllowEntry struct {

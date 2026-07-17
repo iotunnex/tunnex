@@ -154,6 +154,10 @@ type PolicyStatus struct {
 	// FailingSince (RFC3339, empty when healthy) is the mismatch onset — the control
 	// plane's stale alarm measures elapsed time from here, not the applied-hash age.
 	FailingSince string
+	// RefusedVersion (S8.1 D1) is the compiled-artifact Version the agent REFUSED as
+	// unsupported (> MaxSupportedVersion), or 0 when none. The control plane surfaces this
+	// as `unsupported_policy_version` (remedy: upgrade the agent) — distinct from staleness.
+	RefusedVersion int
 }
 
 // ReportInfo reports the node's locally-generated WireGuard public key, its public
@@ -164,7 +168,7 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 	body, _ := json.Marshal(map[string]any{
 		"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT,
 		"policy_version": ps.Version, "policy_hash": ps.Hash, "policy_error": ps.Error,
-		"policy_failing_since": ps.FailingSince,
+		"policy_failing_since": ps.FailingSince, "policy_refused_version": ps.RefusedVersion,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

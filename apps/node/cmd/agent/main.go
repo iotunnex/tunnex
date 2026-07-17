@@ -284,7 +284,7 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		// canonical hash of what is IN FORCE, plus the last apply error. The control
 		// plane compares against what it pushed — a stale gateway must be visible.
 		v, h, failingSince, applyErr := egressMgr.AppliedStatus()
-		ps := control.PolicyStatus{Version: v, Hash: h}
+		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion()}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
 			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)
