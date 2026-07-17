@@ -115,3 +115,70 @@ func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 		t.Fatalf("the replacement node B must be the site's gateway, got %v (%v)", n.ID, err)
 	}
 }
+
+// TestApproveSubnetDisjointness — S8.1 Slice-4 D5/D7: approval runs the ONE disjointness validator.
+// A subnet overlapping an APPROVED site subnet or the pool is REFUSED (typed, stays pending, audited);
+// an ADJACENT (touching-but-disjoint) subnet is APPROVED; approvals + refusals are both audited.
+func TestApproveSubnetDisjointness(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "adv-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org); _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor) })
+	site, err := svc.RegisterSite(ctx, org, "hq")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	add := func(cidr string) sqlc.SiteSubnet {
+		s, e := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix(cidr))
+		if e != nil {
+			t.Fatalf("add %s: %v", cidr, e)
+		}
+		return s
+	}
+	status := func(id uuid.UUID) string {
+		var st string
+		_ = pool.QueryRow(ctx, `SELECT status FROM site_subnets WHERE id=$1`, id).Scan(&st)
+		return st
+	}
+
+	// Disjoint → APPROVED.
+	s1 := add("10.20.0.0/24")
+	if err := svc.ApproveSubnet(ctx, actor, org, s1.ID); err != nil {
+		t.Fatalf("disjoint approve: %v", err)
+	}
+	if status(s1.ID) != "approved" {
+		t.Fatal("disjoint subnet must be approved")
+	}
+	// Overlaps the approved s1 → REFUSED (stays pending).
+	s2 := add("10.20.0.128/25")
+	if err := svc.ApproveSubnet(ctx, actor, org, s2.ID); err == nil || status(s2.ID) != "pending" {
+		t.Fatalf("overlapping-approved must be refused + stay pending (err=%v status=%s)", err, status(s2.ID))
+	}
+	// Overlaps the POOL (10.99.0.0/24) → REFUSED.
+	s3 := add("10.99.0.0/25")
+	if err := svc.ApproveSubnet(ctx, actor, org, s3.ID); err == nil {
+		t.Fatal("overlapping-pool must be refused")
+	}
+	// ADJACENT to approved s1 (10.20.1.0/24 touches but does not overlap 10.20.0.0/24) → APPROVED.
+	s4 := add("10.20.1.0/24")
+	if err := svc.ApproveSubnet(ctx, actor, org, s4.ID); err != nil || status(s4.ID) != "approved" {
+		t.Fatalf("adjacent-but-disjoint must approve (err=%v status=%s)", err, status(s4.ID))
+	}
+
+	var refused, approved int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.subnet_approval_refused'`, org).Scan(&refused)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.subnet_approved'`, org).Scan(&approved)
+	if refused < 2 {
+		t.Fatalf("both refusals must be audited (outcome-not-error), got %d", refused)
+	}
+	if approved < 2 {
+		t.Fatalf("both approvals must be audited, got %d", approved)
+	}
+}

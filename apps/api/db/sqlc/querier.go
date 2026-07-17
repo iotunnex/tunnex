@@ -33,6 +33,9 @@ type Querier interface {
 	// can be approved (pgx.ErrNoRows => not pending: already active / rejected / wrong org).
 	// Returns the owner so the caller can distinguish self-approval for the audit.
 	ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (uuid.UUID, error)
+	// lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before approval. Idempotent-ish:
+	// approving an already-approved subnet is a no-op UPDATE.
+	ApproveSiteSubnet(ctx context.Context, id uuid.UUID) (SiteSubnet, error)
 	// Flip an EXISTING manual group to idp_sync. The WHERE origin='manual' clause makes a re-bind of
 	// an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
 	// disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.
@@ -278,6 +281,8 @@ type Querier interface {
 	// lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
 	// the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
 	GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, error)
+	// lint:cross-org — org-scoped via the join to sites.org_id.
+	GetSiteSubnetForOrg(ctx context.Context, arg GetSiteSubnetForOrgParams) (GetSiteSubnetForOrgRow, error)
 	// lint:cross-org — user-scoped credential.
 	GetTOTP(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -421,14 +426,17 @@ type Querier interface {
 	// device_health joined (S7.5.3): a pending device may already be reporting posture
 	// (both facts surface independently — the D7 orthogonality).
 	ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingDevicesByOrgRow, error)
+	// lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
+	ListPendingSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingSiteSubnetsForOrgRow, error)
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
 	// lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
-	// S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
-	// one AllowEntry per the target site's subnets.
+	// S8.1 compiler input: every APPROVED (site_id, cidr) in the org (D5 — a pending advertisement does NOT
+	// propagate), so the compiler expands a dst_kind='site' rule to one AllowEntry per the target site's
+	// APPROVED subnets. This same set is the resize disjointness input.
 	ListSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteSubnetsForOrgRow, error)
 	ListSitesByOrg(ctx context.Context, orgID uuid.UUID) ([]Site, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)

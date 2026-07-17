@@ -305,6 +305,7 @@ type SiteSubnet struct {
 	SiteID    uuid.UUID    `json:"site_id"`
 	Cidr      netip.Prefix `json:"cidr"`
 	CreatedAt time.Time    `json:"created_at"`
+	Status    string       `json:"status"`
 }
 
 type SsoConfig struct {

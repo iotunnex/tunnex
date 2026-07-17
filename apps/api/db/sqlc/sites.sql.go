@@ -15,7 +15,7 @@ import (
 
 const addSiteSubnet = `-- name: AddSiteSubnet :one
 INSERT INTO site_subnets (site_id, cidr) VALUES ($1, $2)
-RETURNING id, site_id, cidr, created_at
+RETURNING id, site_id, cidr, created_at, status
 `
 
 type AddSiteSubnetParams struct {
@@ -33,6 +33,27 @@ func (q *Queries) AddSiteSubnet(ctx context.Context, arg AddSiteSubnetParams) (S
 		&i.SiteID,
 		&i.Cidr,
 		&i.CreatedAt,
+		&i.Status,
+	)
+	return i, err
+}
+
+const approveSiteSubnet = `-- name: ApproveSiteSubnet :one
+UPDATE site_subnets SET status = 'approved' WHERE id = $1
+RETURNING id, site_id, cidr, created_at, status
+`
+
+// lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before approval. Idempotent-ish:
+// approving an already-approved subnet is a no-op UPDATE.
+func (q *Queries) ApproveSiteSubnet(ctx context.Context, id uuid.UUID) (SiteSubnet, error) {
+	row := q.db.QueryRow(ctx, approveSiteSubnet, id)
+	var i SiteSubnet
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.Cidr,
+		&i.CreatedAt,
+		&i.Status,
 	)
 	return i, err
 }
@@ -159,8 +180,81 @@ func (q *Queries) GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, er
 	return i, err
 }
 
+const getSiteSubnetForOrg = `-- name: GetSiteSubnetForOrg :one
+SELECT ss.id, ss.site_id, ss.cidr, ss.status
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE ss.id = $1 AND s.org_id = $2
+`
+
+type GetSiteSubnetForOrgParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+type GetSiteSubnetForOrgRow struct {
+	ID     uuid.UUID    `json:"id"`
+	SiteID uuid.UUID    `json:"site_id"`
+	Cidr   netip.Prefix `json:"cidr"`
+	Status string       `json:"status"`
+}
+
+// lint:cross-org — org-scoped via the join to sites.org_id.
+func (q *Queries) GetSiteSubnetForOrg(ctx context.Context, arg GetSiteSubnetForOrgParams) (GetSiteSubnetForOrgRow, error) {
+	row := q.db.QueryRow(ctx, getSiteSubnetForOrg, arg.ID, arg.OrgID)
+	var i GetSiteSubnetForOrgRow
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.Cidr,
+		&i.Status,
+	)
+	return i, err
+}
+
+const listPendingSiteSubnetsForOrg = `-- name: ListPendingSiteSubnetsForOrg :many
+SELECT ss.id, ss.site_id, ss.cidr, ss.status
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE s.org_id = $1 AND ss.status = 'pending'
+ORDER BY ss.created_at
+`
+
+type ListPendingSiteSubnetsForOrgRow struct {
+	ID     uuid.UUID    `json:"id"`
+	SiteID uuid.UUID    `json:"site_id"`
+	Cidr   netip.Prefix `json:"cidr"`
+	Status string       `json:"status"`
+}
+
+// lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
+func (q *Queries) ListPendingSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListPendingSiteSubnetsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listPendingSiteSubnetsForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingSiteSubnetsForOrgRow{}
+	for rows.Next() {
+		var i ListPendingSiteSubnetsForOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SiteID,
+			&i.Cidr,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSiteSubnets = `-- name: ListSiteSubnets :many
-SELECT id, site_id, cidr, created_at FROM site_subnets WHERE site_id = $1 ORDER BY created_at
+SELECT id, site_id, cidr, created_at, status FROM site_subnets WHERE site_id = $1 ORDER BY created_at
 `
 
 // lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
@@ -178,6 +272,7 @@ func (q *Queries) ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]Site
 			&i.SiteID,
 			&i.Cidr,
 			&i.CreatedAt,
+			&i.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -193,7 +288,7 @@ const listSiteSubnetsForOrg = `-- name: ListSiteSubnetsForOrg :many
 SELECT ss.site_id, ss.cidr
 FROM site_subnets ss
 JOIN sites s ON s.id = ss.site_id
-WHERE s.org_id = $1
+WHERE s.org_id = $1 AND ss.status = 'approved'
 ORDER BY ss.site_id, ss.cidr
 `
 
@@ -203,8 +298,9 @@ type ListSiteSubnetsForOrgRow struct {
 }
 
 // lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
-// S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
-// one AllowEntry per the target site's subnets.
+// S8.1 compiler input: every APPROVED (site_id, cidr) in the org (D5 — a pending advertisement does NOT
+// propagate), so the compiler expands a dst_kind='site' rule to one AllowEntry per the target site's
+// APPROVED subnets. This same set is the resize disjointness input.
 func (q *Queries) ListSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteSubnetsForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listSiteSubnetsForOrg, orgID)
 	if err != nil {

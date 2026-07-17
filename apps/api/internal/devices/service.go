@@ -28,6 +28,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
+	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
@@ -351,6 +352,21 @@ func (s *Service) ResizePool(ctx context.Context, actor, orgID uuid.UUID, newCID
 		shrink := oldP.Bits() <= newP.Bits() && oldP.Contains(newP.Addr())
 		if !grow && !shrink {
 			return apierr.BadRequest("illegal_resize", "the new range must contain, or be contained by, the current range")
+		}
+		// S8.1 (S4.5b touch, D5/D7): the resized pool must stay DISJOINT from APPROVED site subnets —
+		// growing the pool into a site's LAN would route device-/32s toward a site link (the
+		// silent-ambiguity class). The SAME disjointness validator as advertisement-approval, the other
+		// direction (typed illegal_resize). Pool is invalid here (we ARE the pool being resized).
+		subs, e := q.ListSiteSubnetsForOrg(ctx, orgID) // approved-only
+		if e != nil {
+			return e
+		}
+		var sitePfx []netip.Prefix
+		for _, ss := range subs {
+			sitePfx = append(sitePfx, ss.Cidr)
+		}
+		if ov, ok := subnetguard.Check(newP, sitePfx, netip.Prefix{}, nil); !ok {
+			return apierr.BadRequest("illegal_resize", "the new pool overlaps the approved site subnet "+ov.With.String()+"; resize refused")
 		}
 		// SINGLE read: the same device rows feed both the orphan check and the 409
 		// objects, so the check and the build can't drift (no phantom orphan, no

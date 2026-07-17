@@ -39,10 +39,32 @@ SELECT * FROM nodes WHERE site_id = $1;
 
 -- name: ListSiteSubnetsForOrg :many
 -- lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
--- S8.1 compiler input: every (site_id, cidr) in the org, so it can expand a dst_kind='site' rule to
--- one AllowEntry per the target site's subnets.
+-- S8.1 compiler input: every APPROVED (site_id, cidr) in the org (D5 — a pending advertisement does NOT
+-- propagate), so the compiler expands a dst_kind='site' rule to one AllowEntry per the target site's
+-- APPROVED subnets. This same set is the resize disjointness input.
 SELECT ss.site_id, ss.cidr
 FROM site_subnets ss
 JOIN sites s ON s.id = ss.site_id
-WHERE s.org_id = $1
+WHERE s.org_id = $1 AND ss.status = 'approved'
 ORDER BY ss.site_id, ss.cidr;
+
+-- name: GetSiteSubnetForOrg :one
+-- lint:cross-org — org-scoped via the join to sites.org_id.
+SELECT ss.id, ss.site_id, ss.cidr, ss.status
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE ss.id = $1 AND s.org_id = $2;
+
+-- name: ApproveSiteSubnet :one
+-- lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before approval. Idempotent-ish:
+-- approving an already-approved subnet is a no-op UPDATE.
+UPDATE site_subnets SET status = 'approved' WHERE id = $1
+RETURNING *;
+
+-- name: ListPendingSiteSubnetsForOrg :many
+-- lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
+SELECT ss.id, ss.site_id, ss.cidr, ss.status
+FROM site_subnets ss
+JOIN sites s ON s.id = ss.site_id
+WHERE s.org_id = $1 AND ss.status = 'pending'
+ORDER BY ss.created_at;

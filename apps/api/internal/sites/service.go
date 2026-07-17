@@ -7,22 +7,55 @@ package sites
 
 import (
 	"context"
+	"encoding/json"
 	"net/netip"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
+	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
 )
 
 type Service struct {
-	q *sqlc.Queries
+	pool *pgxpool.Pool
+	q    *sqlc.Queries
 }
 
-func NewService(pool *pgxpool.Pool) *Service { return &Service{q: sqlc.New(pool)} }
+func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool, q: sqlc.New(pool)} }
+
+func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(s.q.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// audit writes one append-only audit row. It RETURNS its error (never swallows): swallowing an
+// InsertAuditLog failure inside a tx poisons the tx and surfaces later as a mystery commit-rollback.
+func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actor, subnetID uuid.UUID, action string, meta map[string]any) error {
+	b, _ := json.Marshal(meta)
+	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
+		Action:      action,
+		TargetType:  strptr("site_subnet"),
+		TargetID:    strptr(subnetID.String()),
+		Metadata:    b,
+	})
+	return err
+}
+
+func strptr(s string) *string { return &s }
 
 // RegisterSite creates a site entity in the org. A duplicate name in the org is a 409.
 func (s *Service) RegisterSite(ctx context.Context, orgID uuid.UUID, name string) (sqlc.Site, error) {
@@ -96,6 +129,71 @@ func (s *Service) UnbindNode(ctx context.Context, orgID, nodeID uuid.UUID) error
 	}
 	if n == 0 {
 		return apierr.NotFound("node_not_found", "no such node in this organization")
+	}
+	return nil
+}
+
+// ListPendingSubnets returns the org's advertised-but-unapproved subnets (the admin review queue).
+func (s *Service) ListPendingSubnets(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListPendingSiteSubnetsForOrgRow, error) {
+	return s.q.ListPendingSiteSubnetsForOrg(ctx, orgID)
+}
+
+// ApproveSubnet approves an advertised (pending) site subnet after the ONE disjointness validator
+// (D5/D7): it must be disjoint from the org's OTHER approved site subnets, the device pool CIDR, and
+// reserved ranges. On refusal it stays pending and the refusal is AUDITED (outcome-not-error — the
+// audit must survive the failed approval, so it is written OUTSIDE the approve tx, S7.5.5 law). On
+// success the approval is audited in-tx. Idempotent: approving an already-approved subnet is a no-op.
+// (v1 reserved ranges = none — a seam; the validator already takes the third input.)
+func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid.UUID) error {
+	var refusal *subnetguard.Overlap
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		sub, e := q.GetSiteSubnetForOrg(ctx, sqlc.GetSiteSubnetForOrgParams{ID: subnetID, OrgID: orgID})
+		if e != nil {
+			if e == pgx.ErrNoRows {
+				return apierr.NotFound("subnet_not_found", "no such site subnet in this organization")
+			}
+			return e
+		}
+		if sub.Status == "approved" {
+			return nil // idempotent no-op
+		}
+		// The candidate must be disjoint from the org's OTHER approved subnets + the pool.
+		approved, e := q.ListSiteSubnetsForOrg(ctx, orgID) // approved-only
+		if e != nil {
+			return e
+		}
+		var others []netip.Prefix
+		for _, a := range approved {
+			if a.Cidr != sub.Cidr {
+				others = append(others, a.Cidr)
+			}
+		}
+		org, e := q.GetOrganizationByID(ctx, orgID)
+		if e != nil {
+			return e
+		}
+		pool, _ := netip.ParsePrefix(org.PoolCidr) // invalid → skipped by the validator
+		if ov, ok := subnetguard.Check(sub.Cidr, others, pool, nil); !ok {
+			refusal = &ov // signal refusal; the tx COMMITS as a no-op, the audit + error happen OUTSIDE
+			return nil
+		}
+		if _, e := q.ApproveSiteSubnet(ctx, subnetID); e != nil {
+			return e
+		}
+		if e := s.audit(ctx, q, orgID, actor, subnetID, "site.subnet_approved", map[string]any{"cidr": sub.Cidr.String()}); e != nil {
+			return e
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if refusal != nil {
+		// AUDIT the refusal in its own committed op (it must survive the refusal), then return typed.
+		_ = s.audit(ctx, s.q, orgID, actor, subnetID, "site.subnet_approval_refused",
+			map[string]any{"overlap_class": string(refusal.Class), "overlaps": refusal.With.String()})
+		return apierr.Conflict("subnet_not_disjoint",
+			"this subnet overlaps the "+string(refusal.Class)+" range "+refusal.With.String()+"; approval refused")
 	}
 	return nil
 }

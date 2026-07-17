@@ -505,3 +505,40 @@ func TestFullTunnelRequiresGatewayEgress(t *testing.T) {
 		t.Fatalf("full-tunnel on egress-capable gateway should be allowed: %v", err)
 	}
 }
+
+// TestResizePoolRefusesApprovedSiteOverlap — S8.1 Slice-4 S4.5b touch (D5/D7): growing the pool over an
+// APPROVED site subnet is refused (typed illegal_resize, the ONE validator's other direction). A PENDING
+// (unapproved) subnet does NOT block — only approved subnets count.
+func TestResizePoolRefusesApprovedSiteOverlap(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, _ := setup(t, tx, 10)
+	if _, err := tx.Exec(ctx, "UPDATE organizations SET pool_cidr='10.0.1.0/24' WHERE id=$1", org); err != nil {
+		t.Fatalf("set pool: %v", err)
+	}
+	site := uuid.New()
+	if _, err := tx.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'hq')", site, org); err != nil {
+		t.Fatalf("seed site: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO site_subnets (id,site_id,cidr,status) VALUES ($1,$2,'10.5.0.0/24','approved')", uuid.New(), site); err != nil {
+		t.Fatalf("seed approved subnet: %v", err)
+	}
+	// Grow to 10.0.0.0/8: contains the old pool AND the approved site subnet 10.5.0.0/24 -> refused.
+	_, err := svc.ResizePool(ctx, user, org, "10.0.0.0/8")
+	if err == nil {
+		t.Fatal("growing the pool over an APPROVED site subnet must be refused (illegal_resize)")
+	}
+	var ae *apierr.Error
+	if !errors.As(err, &ae) || ae.Code != "illegal_resize" {
+		t.Fatalf("want a typed illegal_resize, got %v", err)
+	}
+	// A PENDING subnet must NOT block: drop the approved one, keep only a pending overlap, grow succeeds.
+	if _, err := tx.Exec(ctx, "DELETE FROM site_subnets WHERE cidr='10.5.0.0/24'"); err != nil {
+		t.Fatalf("del: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO site_subnets (id,site_id,cidr,status) VALUES ($1,$2,'10.6.0.0/24','pending')", uuid.New(), site); err != nil {
+		t.Fatalf("seed pending: %v", err)
+	}
+	if _, err := svc.ResizePool(ctx, user, org, "10.0.0.0/8"); err != nil {
+		t.Fatalf("a PENDING site subnet must NOT block a resize (only approved counts), got %v", err)
+	}
+}
