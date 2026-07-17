@@ -65,6 +65,37 @@ func TestPolicyRuleSiteDstCascade(t *testing.T) {
 	}
 }
 
+// TestPolicyRuleDstCheckAdditiveOnly proves 0033's CHECK widening is ADDITIVE ONLY: `site` joined the
+// allowed dst kinds, and every OLD rejection still rejects (nothing previously invalid became valid
+// besides `site`). CHECK-widening is exactly where an accidental loosening hides.
+func TestPolicyRuleDstCheckAdditiveOnly(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org, group, site := seedSiteDstRule(t, ctx, pool) // valid site rule already inserted (site IS now allowed)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	rejects := func(name, sql string, args ...any) {
+		if _, e := pool.Exec(ctx, sql, args...); e == nil {
+			t.Fatalf("%s: expected a CHECK rejection (23514), got success — the widening LEAKED", name)
+		}
+	}
+	// dst_kind CHECK: an unknown kind is STILL rejected (only 'site' was added).
+	rejects("unknown dst_kind", `INSERT INTO policy_rules (org_id,src_kind,src_group_id,dst_kind,dst_site_id) VALUES ($1,'group',$2,'bogus',$3)`, org, group, site)
+	// exactly-one CHECK: dst_kind='site' with a NULL dst_site_id is STILL rejected.
+	rejects("site kind, null site id", `INSERT INTO policy_rules (org_id,src_kind,src_group_id,dst_kind,dst_site_id) VALUES ($1,'group',$2,'site',NULL)`, org, group)
+	// exactly-one CHECK: dst_kind='site' with ALSO a group id set is STILL rejected (no cross-contamination).
+	rejects("site kind + group id", `INSERT INTO policy_rules (org_id,src_kind,src_group_id,dst_kind,dst_site_id,dst_group_id) VALUES ($1,'group',$2,'site',$3,$2)`, org, group, site)
+}
+
 // TestPolicyRuleSiteDstMigrationUpDownUp is the 0033 [7] red: the down-migration must survive a
 // POPULATED dst_kind='site' rule (which has dst_resource_id/dst_group_id NULL — the restored 2-kind
 // exactly-one CHECK would abort on it unless the down purges site rows first). Isolated throwaway DB.
