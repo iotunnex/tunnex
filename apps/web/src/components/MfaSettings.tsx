@@ -72,7 +72,11 @@ export function MfaSettings() {
     setRecovery(data.recovery_codes);
     setPhase("idle");
     setCode("");
-    void refresh();
+    // WF-5: do NOT refresh()/clear the gate here. On the forced-enroll path clearing
+    // mfa_enrollment_required fires RequireAuth's release-to-app redirect, which would unmount this
+    // component and DESTROY the one-time recovery-codes modal before the user can save them. The gate
+    // clears only when the user acknowledges the codes (modal onDismiss → refresh), so the recovery
+    // codes always survive the ceremony.
   }
 
   async function disable() {
@@ -177,7 +181,13 @@ export function MfaSettings() {
           caption="Each code works once, in place of your authenticator. Store them somewhere safe — they are shown only now and let you sign in if you lose your device."
           secret={recovery.join("\n")}
           copyLabel="Copy codes"
-          onDismiss={() => setRecovery(null)}
+          onDismiss={() => {
+            setRecovery(null);
+            // WF-5: clear the gate ONLY now (after the codes are acknowledged). On the forced-enroll
+            // path this is what releases the user to the app (RequireAuth), so the recovery modal is
+            // never skipped; on the Settings path it just refreshes the enrolled/remaining state.
+            void refresh();
+          }}
         />
       )}
     </section>
