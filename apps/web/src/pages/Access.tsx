@@ -34,6 +34,7 @@ import {
   grantExpiry,
   extendErrorCopy,
   activeMembers,
+  canEditRuleInModal,
   type LoadState,
 } from "../lib/policyview";
 import {
@@ -369,9 +370,11 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
                           Extend
                         </Button>
                       )}
-                      <Button variant="ghost" onClick={() => setEditing(r)}>
-                        Edit
-                      </Button>
+                      {canEditRuleInModal(r.dst_kind) && (
+                        <Button variant="ghost" onClick={() => setEditing(r)}>
+                          Edit
+                        </Button>
+                      )}
                       <Button variant="danger" onClick={() => del(r.id)}>
                         Delete
                       </Button>

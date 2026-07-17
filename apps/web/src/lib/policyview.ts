@@ -314,3 +314,12 @@ export async function swapRule(
 export function swapPartialMessage(oldIdShort: string): string {
   return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
 }
+
+// canEditRuleInModal: the rule-edit modal only creates group/resource grants (create-then-delete). A
+// site-dst rule (S8.1) must NOT be editable there — editing would silently rewrite it into a
+// group/resource rule, a policy MUTATION disguised as a display limitation. Site-dst rules are managed
+// via the API / the S8.3 site UI. (The read-side dst_kind coercion in the modal is display-only; this
+// blocks the WRITE path.)
+export function canEditRuleInModal(dstKind: string): boolean {
+  return dstKind !== "site";
+}
