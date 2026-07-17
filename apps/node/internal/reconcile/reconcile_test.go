@@ -18,6 +18,7 @@ type fakeBackend struct {
 	peers     []Peer
 	routes    []string
 	stats     []PeerStat
+	statsErr  error
 	applyN    int
 	configErr error
 }
@@ -40,16 +41,27 @@ func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string) error {
 	f.routes = append([]string(nil), cidrs...)
 	return nil
 }
-func (f *fakeBackend) setStat(s PeerStat) { f.mu.Lock(); f.stats = []PeerStat{s}; f.mu.Unlock() }
+func (f *fakeBackend) setStat(s PeerStat)  { f.mu.Lock(); f.stats = []PeerStat{s}; f.statsErr = nil; f.mu.Unlock() }
+func (f *fakeBackend) setStatsErr(e error) { f.mu.Lock(); f.statsErr = e; f.mu.Unlock() }
 func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.statsErr != nil {
+		return nil, f.statsErr
+	}
 	return append([]PeerStat(nil), f.stats...), nil
 }
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Peer(nil), f.peers...), nil
+	// R2 fixture-fidelity: the kernel/`wg show dump` read path CANNOT know SiteLink, so the fake must not
+	// either — strip it on read (a test double must not be more capable than the real substrate).
+	out := make([]Peer, len(f.peers))
+	for i, p := range f.peers {
+		p.SiteLink = false
+		out[i] = p
+	}
+	return out, nil
 }
 func (f *fakeBackend) ApplyPeers(_ context.Context, p []Peer) error {
 	f.mu.Lock()
@@ -174,20 +186,24 @@ func TestRunOnceProgramsAndPrunesSiteRoutes(t *testing.T) {
 	}
 }
 
-// TestSiteLinkEndpointChangeIsDirty — S8.2 B4: a SITE-LINK peer's endpoint change IS caught by the
-// dirty-check (the spoke must re-dial the hub's new static endpoint), while a device peer's roamed
-// endpoint is NOT (TestReconcileIgnoresRoamedEndpoint stays armed — the per-peer static-endpoint split).
+// TestSiteLinkEndpointChangeIsDirty — S8.2 B4 + R2: the ACTUAL peer set comes from the kernel (wg dump)
+// and NEVER carries SiteLink; only the DESIRED (CP) side does. A converged site-link peer must be a
+// steady-state no-op (the R2 perpetual-dirty regression would fail here); a hub endpoint change must be
+// dirty (re-dial); a device peer's roamed endpoint stays ignored.
 func TestSiteLinkEndpointChangeIsDirty(t *testing.T) {
-	a := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "old:51820", SiteLink: true}
-	b := a
-	b.Endpoint = "new:51820"
-	if peersEqual([]Peer{a}, []Peer{b}) {
-		t.Fatal("a site-link peer's endpoint change MUST be dirty (spoke re-dials the hub)")
+	actualHub := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "old:51820"} // kernel shape: SiteLink=false
+	desiredSame := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "old:51820", SiteLink: true}
+	if !peersEqual([]Peer{actualHub}, []Peer{desiredSame}) {
+		t.Fatal("R2: a converged site-link peer (actual has no SiteLink) must be a steady-state NO-OP, not perpetually dirty")
 	}
-	d1 := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}, Endpoint: "1.2.3.4:5"} // roaming device
-	d2 := d1
-	d2.Endpoint = "6.7.8.9:10"
-	if !peersEqual([]Peer{d1}, []Peer{d2}) {
+	desiredNew := desiredSame
+	desiredNew.Endpoint = "new:51820"
+	if peersEqual([]Peer{actualHub}, []Peer{desiredNew}) {
+		t.Fatal("B4: a site-link peer endpoint change MUST be dirty (spoke re-dials the hub)")
+	}
+	actualDev := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}, Endpoint: "1.2.3.4:5"}
+	desiredDev := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}, Endpoint: "6.7.8.9:10"} // device: SiteLink=false
+	if !peersEqual([]Peer{actualDev}, []Peer{desiredDev}) {
 		t.Fatal("a device peer's roamed endpoint must be IGNORED (no re-apply every reconcile)")
 	}
 }
@@ -216,6 +232,12 @@ func TestSiteLinkStaleComputation(t *testing.T) {
 	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "dev", SiteLink: false}})
 	if sink.Load() {
 		t.Fatal("device peers must not drive site-link staleness")
+	}
+	// R4: a Stats ERROR with site-link peers present → over-report STALE (maybe-dead reads dead).
+	b.setStatsErr(errors.New("wg dump failed"))
+	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
+	if !sink.Load() {
+		t.Fatal("R4: a Stats error with site-link peers must over-report stale (never false-green)")
 	}
 }
 

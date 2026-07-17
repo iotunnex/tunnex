@@ -64,11 +64,11 @@ func TestSiteLinkNoHubNoRoutes(t *testing.T) {
 	if peers, routes := siteLinkGraphFrom(topo, node); len(peers) != 0 || len(routes) != 0 {
 		t.Fatalf("no hub → no peers + no routes (no silent blackhole), got peers=%d routes=%d", len(peers), len(routes))
 	}
-	if !siteHubMissing(topo, node) {
+	if !siteHubMissing(siteTopoHasHub(topo), topo, node) {
 		t.Fatal("no hub + remote subnets → siteHubMissing must be true (surfaces site_hub_down)")
 	}
 	topo.gws[1].Endpoint = "b.example:51820" // give one gateway an endpoint → a hub now exists
-	if siteHubMissing(topo, node) {
+	if siteHubMissing(siteTopoHasHub(topo), topo, node) {
 		t.Fatal("a hub exists → siteHubMissing must be false")
 	}
 }

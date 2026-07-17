@@ -139,7 +139,11 @@ func (r *Reconciler) updateSiteLinkStale(ctx context.Context, desired []Peer) {
 	}
 	stats, err := r.backend.Stats(ctx)
 	if err != nil {
-		return // can't determine this tick → keep the last value (don't flap on a transient stats error)
+		// R4: there ARE site-link peers but we can't confirm them UP → report STALE (over-report; a
+		// maybe-dead link reads dead until proven alive, incl. cold start before the first Stats). Silence
+		// here would be the dead-while-green class; the annoyance of a brief false site_link_down heals.
+		r.siteLinkStale.Store(true)
+		return
 	}
 	hs := make(map[string]int64, len(stats))
 	for _, s := range stats {
@@ -290,21 +294,26 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func peersEqual(a, b []Peer) bool {
-	if len(a) != len(b) {
+// peersEqual compares the ACTUAL peer set (from the kernel/wg dump) against the DESIRED set (from the
+// control plane). It keys by public key — NOT two independently-canon'd sorted lists — because the
+// Endpoint check is ASYMMETRIC: only the DESIRED side carries SiteLink (CP intent); the actual side (wg
+// dump) never can (R2). So a SITE-LINK peer's static Endpoint is compared using the DESIRED peer's flag,
+// while a device peer's roaming endpoint is ignored. Keying canon on SiteLink (the pre-R2 shape) made
+// every real site-link peer perpetually dirty (actual.SiteLink=false ≠ desired.SiteLink=true).
+func peersEqual(actual, desired []Peer) bool {
+	if len(actual) != len(desired) {
 		return false
 	}
-	ka, kb := make([]string, len(a)), make([]string, len(b))
-	for i := range a {
-		ka[i] = canon(a[i])
+	am := make(map[string]Peer, len(actual))
+	for _, p := range actual {
+		am[p.PublicKey] = p
 	}
-	for i := range b {
-		kb[i] = canon(b[i])
-	}
-	sort.Strings(ka)
-	sort.Strings(kb)
-	for i := range ka {
-		if ka[i] != kb[i] {
+	for _, d := range desired {
+		a, ok := am[d.PublicKey]
+		if !ok || canon(a) != canon(d) { // canon = pubkey + sorted allowed-ips (endpoint-blind)
+			return false
+		}
+		if d.SiteLink && a.Endpoint != d.Endpoint { // site-link static endpoint must match (B4)
 			return false
 		}
 	}
@@ -328,13 +337,5 @@ func peersEqual(a, b []Peer) bool {
 func canon(p Peer) string {
 	ips := append([]string(nil), p.AllowedIPs...)
 	sort.Strings(ips)
-	key := p.PublicKey + "|" + strings.Join(ips, ",")
-	// B4: a SITE-LINK peer's Endpoint is control-plane-managed (the spoke dials the hub's static
-	// endpoint), so a hub endpoint change MUST be caught → include it in the dirty-check. A device peer's
-	// Endpoint is its roaming NAT source port → EXCLUDED (else ApplyPeers fires every reconcile). This is
-	// the per-peer static-endpoint distinction the EPIC-8 boundary comment above pre-flagged.
-	if p.SiteLink {
-		key += "|" + p.Endpoint
-	}
-	return key
+	return p.PublicKey + "|" + strings.Join(ips, ",") // endpoint-blind; peersEqual compares endpoints per SiteLink (B4/R2)
 }

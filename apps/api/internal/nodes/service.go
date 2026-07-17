@@ -326,16 +326,21 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	if node.SiteID.Valid {
 		topo, terr := s.loadSiteTopology(ctx, node.OrgID)
 		if terr != nil {
-			// DesiredState-ATOMIC LAW (B3, sibling of the swallowed-audit law): a multi-section artifact
-			// assembly error FAILS the whole fetch — it NEVER serves a valid-looking artifact with a
-			// silently missing site-link section (that would make the agent tear down its live peers +
-			// routes). Failing the fetch makes the agent's existing last-good / fail-static behavior retain
-			// them across the blip, for free.
-			return DesiredState{}, terr
+			// DesiredState-ATOMIC LAW (AMENDED, R1): silently-empty is still forbidden, but a section's
+			// failure is handled per PRECEDENCE, not all-or-nothing. The device peers + policy are
+			// SECURITY-carrying (a revocation must reach the agent within its <5s SLA) — they MUST serve
+			// fresh. The site-link section is AUXILIARY — on its failure it is OMITTED-AND-SURFACED: the
+			// agent's site peers age out and site_link_down (H5) fires, so the degradation is VISIBLE, not
+			// silent. Failing the whole fetch here (the pre-R1 shape) would withhold the fresh device peers
+			// and delay revocation — security < availability inverted. (Legal only because H5 wired the
+			// surface; it would have been reassuring-green before.)
+			slog.Warn("site_topology_load_failed_omitting_section",
+				slog.String("node_id", node.ID.String()), slog.String("error", terr.Error()))
+		} else {
+			peers, _ := siteLinkGraphFrom(topo, node)
+			ds.Peers = append(ds.Peers, peers...)
+			ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 		}
-		peers, _ := siteLinkGraphFrom(topo, node)
-		ds.Peers = append(ds.Peers, peers...)
-		ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 	}
 	return ds, nil
 }
@@ -413,7 +418,7 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 
 	var peers []Peer
 	switch {
-	case hub != nil && hub.ID == node.ID:
+	case hub.ID == node.ID: // this node IS the hub (guaranteed non-nil by the B2 guard above)
 		for i := range topo.gws {
 			g := &topo.gws[i]
 			if g.ID == node.ID {
@@ -426,7 +431,7 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 			sort.Strings(ips)
 			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint, SiteLink: true})
 		}
-	case hub != nil:
+	default: // this node is a SPOKE → peer only with the hub
 		if len(routeCIDRs) > 0 {
 			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint, SiteLink: true})
 		}
@@ -471,17 +476,23 @@ func (s *Service) pushedHash(topo siteTopology, node sqlc.Node, routeless *polic
 	return policyspec.CanonicalHash(*final)
 }
 
-// siteHubMissing reports whether a site gateway has REMOTE site subnets to reach but the org has NO hub
-// (no gateway carries a public endpoint) — the B2 no-carrier condition, surfaced as site_hub_down so it
-// is never a silent no-op. False for a non-site node, when a hub exists, or when nothing is remote.
-func siteHubMissing(topo siteTopology, node sqlc.Node) bool {
-	if !node.SiteID.Valid {
-		return false
-	}
+// siteTopoHasHub reports whether ANY gateway carries a public endpoint (a hub exists). Org-wide +
+// node-independent, so the batch health path computes it ONCE (R5: was an O(N·G) per-node rescan).
+func siteTopoHasHub(topo siteTopology) bool {
 	for _, g := range topo.gws {
 		if g.Endpoint != "" {
-			return false // a hub exists → carrier present
+			return true
 		}
+	}
+	return false
+}
+
+// siteHubMissing reports the B2 no-carrier condition for ONE node, given a precomputed hubExists: a site
+// gateway with REMOTE site subnets to reach but no hub — surfaced as site_hub_down so it is never a
+// silent no-op. False for a non-site node, when a hub exists, or when nothing is remote.
+func siteHubMissing(hubExists bool, topo siteTopology, node sqlc.Node) bool {
+	if hubExists || !node.SiteID.Valid {
+		return false
 	}
 	mySite := uuid.UUID(node.SiteID.Bytes)
 	for sid, cidrs := range topo.subnets {
@@ -776,6 +787,7 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			topoOK = false // topology unavailable → term (3) can't be evaluated; hub-health can't determine
 		}
 	}
+	hubExists := siteTopoHasHub(topo) // R5: computed ONCE for the batch (node-independent)
 	var pushed map[uuid.UUID]string
 	pushKnown := false
 	if enterprise && topoOK {
@@ -800,7 +812,7 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// gateway has remote subnets to reach but the org has NO hub (no carrier) — CP-derived from the
 		// topology. site_link_down (H5): agent-reported stale/absent site-link handshake. Both are
 		// blackholes that must never read green.
-		siteHubDown := topoOK && siteHubMissing(topo, n)
+		siteHubDown := topoOK && siteHubMissing(hubExists, topo, n)
 		siteLinkDown := caps.SiteLinkStale
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.

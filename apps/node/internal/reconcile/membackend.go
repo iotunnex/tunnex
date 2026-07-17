@@ -23,7 +23,13 @@ func (m *MemBackend) Configure(context.Context, InterfaceConfig) error { return 
 func (m *MemBackend) Peers(context.Context) ([]Peer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]Peer(nil), m.peers...), nil
+	// R2 fixture-fidelity: the real kernel read path cannot express SiteLink → strip it on read.
+	out := make([]Peer, len(m.peers))
+	for i, p := range m.peers {
+		p.SiteLink = false
+		out[i] = p
+	}
+	return out, nil
 }
 
 func (m *MemBackend) ApplyPeers(_ context.Context, peers []Peer) error {
