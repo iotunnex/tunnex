@@ -383,9 +383,12 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 			return conflictIfDup(e, "an identical rule already exists")
 		}
 		meta := map[string]any{"src_kind": srcKind, "dst_kind": in.DstKind}
-		if srcKind == "user" {
+		switch srcKind { // M6: a site source must audit its src_site_id, never a nil-UUID group (misattribution)
+		case "user":
 			meta["src_user_id"] = in.SrcUserID.String()
-		} else {
+		case "site":
+			meta["src_site_id"] = in.SrcSiteID.String()
+		default:
 			meta["src_group_id"] = in.SrcGroupID.String()
 		}
 		if in.ExpiresAt != nil {
@@ -659,7 +662,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		return Snapshot{}, err
 	}
 	for _, sn := range siteNodes {
-		snap.SiteNodes = append(snap.SiteNodes, SiteNode{SiteID: fromPgUUID(sn.SiteID), NodeID: sn.ID})
+		snap.SiteNodes = append(snap.SiteNodes, SiteNode{SiteID: fromPgUUID(sn.SiteID), NodeID: sn.ID, Endpoint: sn.Endpoint})
 	}
 	for _, r := range resources {
 		snap.Resources = append(snap.Resources, Resource{

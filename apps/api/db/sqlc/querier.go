@@ -438,9 +438,10 @@ type Querier interface {
 	// input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
 	// yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).
 	ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error)
-	// S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
-	// compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
-	// gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
+	// S8.2 compiler input: the (site_id, node_id, endpoint) binding for every site-bound gateway in the org.
+	// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
+	// hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
+	// org-scoped via the node row (nodes.org_id).
 	ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)

@@ -346,7 +346,12 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 	for _, fam := range []string{"-4", "-6"} {
 		out, err := run(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
 		if err != nil {
-			return err // can't enumerate → surface it, never guess
+			// P7: a family may be UNAVAILABLE (e.g. `ip -6` on an ipv6.disable=1 host) — that is not a
+			// reconcile fault. Treat it as an empty set + log; never fail the whole reconcile over a
+			// family this gateway doesn't use (which would flap runOnce → unhealthy every tick). This also
+			// gives a non-site gateway (P9: cidrs empty, nothing of ours to prune) its pre-S8.2 no-op.
+			slog.Debug("site_route_enumerate_skipped", "family", fam, "iface", b.iface, "error", err.Error())
+			continue
 		}
 		var toks []string
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -355,6 +360,10 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 			}
 		}
 		for _, p := range routesToPrune(toks, desired) {
+			// P8: log every deletion naming the route — our routes carry metric 8021, but a foreign route
+			// that happens to share it is indistinguishable here, so the deletion must be LEGIBLE (the
+			// metric-collision residual limitation made visible, not silent).
+			slog.Info("site_route_pruned", "dst", p.String(), "iface", b.iface, "metric", siteRouteMetric)
 			if _, err := run(ctx, "ip", "route", "del", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
 				return err
 			}

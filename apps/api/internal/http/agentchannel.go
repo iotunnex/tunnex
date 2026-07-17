@@ -173,12 +173,14 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		PolicyFailing string `json:"policy_failing_since"`
 		// S8.1 D1: the compiled-artifact version the agent REFUSED as unsupported (0 = none).
 		PolicyRefusedVersion int `json:"policy_refused_version"`
+		// S8.2 H5: a site-link peer has a stale/absent handshake (site-to-site link down).
+		SiteLinkStale bool `json:"site_link_stale"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion}
+	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale}
 	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {

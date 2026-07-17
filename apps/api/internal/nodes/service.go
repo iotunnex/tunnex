@@ -53,6 +53,11 @@ type Peer struct {
 	PublicKey  string   `json:"public_key"`
 	AllowedIPs []string `json:"allowed_ips"`
 	Endpoint   string   `json:"endpoint,omitempty"`
+	// SiteLink (S8.2) marks a gateway-DIALED site-link peer whose Endpoint is control-plane-managed
+	// (static), NOT a roaming client. The agent's peer dirty-check compares Endpoint only for these (B4),
+	// and reports their handshake staleness for the site-link health surface (H5). Device peers roam →
+	// SiteLink=false → endpoint-blind.
+	SiteLink bool `json:"site_link,omitempty"`
 }
 
 // DesiredState is what an agent should converge its interface to. Version lets
@@ -321,13 +326,16 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	if node.SiteID.Valid {
 		topo, terr := s.loadSiteTopology(ctx, node.OrgID)
 		if terr != nil {
-			// A topology-load error must not fail the whole fetch (peers/policy already built); log + skip.
-			slog.Warn("site_topology_load_failed", slog.String("node_id", node.ID.String()), slog.String("error", terr.Error()))
-		} else {
-			peers, _ := siteLinkGraphFrom(topo, node)
-			ds.Peers = append(ds.Peers, peers...)
-			ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
+			// DesiredState-ATOMIC LAW (B3, sibling of the swallowed-audit law): a multi-section artifact
+			// assembly error FAILS the whole fetch — it NEVER serves a valid-looking artifact with a
+			// silently missing site-link section (that would make the agent tear down its live peers +
+			// routes). Failing the fetch makes the agent's existing last-good / fail-static behavior retain
+			// them across the blip, for free.
+			return DesiredState{}, terr
 		}
+		peers, _ := siteLinkGraphFrom(topo, node)
+		ds.Peers = append(ds.Peers, peers...)
+		ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 	}
 	return ds, nil
 }
@@ -376,6 +384,12 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 			hub = g
 		}
 	}
+	// B2: no hub (every gateway is NAT'd, no public endpoint) → NO carrier for site traffic, so emit NO
+	// routes and NO peers. Installing routes with no peer to carry them is the silent blackhole; the
+	// no-hub condition is surfaced CP-side as site_hub_down (PolicyHealthForNodes), never a silent no-op.
+	if hub == nil {
+		return nil, nil
+	}
 	mySite := uuid.UUID(node.SiteID.Bytes)
 	routeSeen := map[string]bool{}
 	var routeCIDRs []string
@@ -410,11 +424,11 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 				continue // a spoke advertising no subnets yet contributes no crypto-routing
 			}
 			sort.Strings(ips)
-			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint})
+			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint, SiteLink: true})
 		}
 	case hub != nil:
 		if len(routeCIDRs) > 0 {
-			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint})
+			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint, SiteLink: true})
 		}
 	}
 	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
@@ -455,6 +469,27 @@ func (s *Service) pushedHash(topo siteTopology, node sqlc.Node, routeless *polic
 		return ""
 	}
 	return policyspec.CanonicalHash(*final)
+}
+
+// siteHubMissing reports whether a site gateway has REMOTE site subnets to reach but the org has NO hub
+// (no gateway carries a public endpoint) — the B2 no-carrier condition, surfaced as site_hub_down so it
+// is never a silent no-op. False for a non-site node, when a hub exists, or when nothing is remote.
+func siteHubMissing(topo siteTopology, node sqlc.Node) bool {
+	if !node.SiteID.Valid {
+		return false
+	}
+	for _, g := range topo.gws {
+		if g.Endpoint != "" {
+			return false // a hub exists → carrier present
+		}
+	}
+	mySite := uuid.UUID(node.SiteID.Bytes)
+	for sid, cidrs := range topo.subnets {
+		if sid != mySite && len(cidrs) > 0 {
+			return true // remote subnets exist but no hub to carry them
+		}
+	}
+	return false
 }
 
 // validEndpoint reports whether s is a clean host:port with a numeric port and
@@ -532,6 +567,10 @@ type AppliedPolicy struct {
 	// unsupported (> its MaxSupportedVersion), or 0 when none. Surfaced as the distinct
 	// `unsupported_policy_version` health kind (remedy: upgrade the agent).
 	RefusedVersion int `json:"policy_refused_version"`
+	// SiteLinkStale (S8.2 H5) is agent-computed: at least one of this gateway's SITE-LINK peers (the
+	// hub, or a spoke) has a stale/absent WG handshake — site-to-site traffic on that link is dead.
+	// Surfaced as site_link_down so a down bridge is never green-on-the-dashboard.
+	SiteLinkStale bool `json:"site_link_stale"`
 }
 
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
@@ -574,6 +613,7 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_error":           applied.Error,
 		"policy_failing_since":   applied.FailingSince,
 		"policy_refused_version": applied.RefusedVersion,
+		"site_link_stale":        applied.SiteLinkStale,
 	})
 	if err != nil {
 		return err
@@ -655,6 +695,9 @@ type NodeCapabilities struct {
 	// PolicyRefusedVersion (S8.1 D1) is the compiled-artifact version the agent REFUSED
 	// as unsupported (0 = none). Drives the `unsupported_policy_version` health kind.
 	PolicyRefusedVersion int `json:"policy_refused_version"`
+	// SiteLinkStale (S8.2 H5) — agent-computed: a site-link peer has a stale/absent handshake.
+	// Drives the `site_link_down` health kind (a dead bridge is never green).
+	SiteLinkStale bool `json:"site_link_stale"`
 }
 
 // zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
@@ -714,52 +757,54 @@ type PolicyHealth struct {
 func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]PolicyHealth {
 	out := make(map[uuid.UUID]PolicyHealth, len(nodes))
 	enterprise := s.policy != nil
+	// Site topology — loaded ONCE for the batch, in BOTH editions (site-link routing + its health are
+	// CORE, D11). Only when some node is a site gateway. Drives site_hub_down (B2: no carrier) AND
+	// finalizes the pushed hash (enterprise) the SAME way the served artifact is (#1: no false desync).
+	var topo siteTopology
+	topoOK := true
+	anySite := false
+	for _, n := range nodes {
+		if n.SiteID.Valid {
+			anySite = true
+			break
+		}
+	}
+	if anySite {
+		if t, terr := s.loadSiteTopology(ctx, orgID); terr == nil {
+			topo = t
+		} else {
+			topoOK = false // topology unavailable → term (3) can't be evaluated; hub-health can't determine
+		}
+	}
 	var pushed map[uuid.UUID]string
 	pushKnown := false
-	if enterprise {
+	if enterprise && topoOK {
 		ids := make([]uuid.UUID, len(nodes))
 		for i, n := range nodes {
 			ids[i] = n.ID
 		}
-		// err (transient compile/DB) -> pushKnown stays false: term (3) can't be evaluated, but
-		// the agent-reported terms (1)+(2) still apply. A transient control-plane hiccup is not
-		// on its own a gateway fault, so it does not manufacture a degraded bool. The pushed hash is
-		// finalized (route-attach + version) the SAME way the served artifact is — one site-topology
-		// load for the whole batch — so a route-carrying gateway compares clean, not false-desynced (#1).
+		// err (transient compile/DB) -> pushKnown stays false: term (3) can't be evaluated, but the
+		// agent-reported terms still apply. A transient control-plane hiccup is not a gateway fault.
 		if arts, err := s.policy.CompiledArtifactsForNodes(ctx, orgID, ids); err == nil {
-			// Load the site topology ONCE for the batch — but only if some node is a site gateway
-			// (finalizeArtifact no-ops for non-site nodes, so skip the queries for a site-less org).
-			var topo siteTopology
-			anySite := false
+			pushed = make(map[uuid.UUID]string, len(nodes))
 			for _, n := range nodes {
-				if n.SiteID.Valid {
-					anySite = true
-					break
-				}
+				pushed[n.ID] = s.pushedHash(topo, n, arts[n.ID])
 			}
-			topoOK := true
-			if anySite {
-				if t, terr := s.loadSiteTopology(ctx, orgID); terr == nil {
-					topo = t
-				} else {
-					topoOK = false // topology unavailable → term (3) can't be evaluated this cycle
-				}
-			}
-			if topoOK {
-				pushed = make(map[uuid.UUID]string, len(nodes))
-				for _, n := range nodes {
-					pushed[n.ID] = s.pushedHash(topo, n, arts[n.ID])
-				}
-				pushKnown = true
-			}
+			pushKnown = true
 		}
 	}
 	now := time.Now()
 	for _, n := range nodes {
 		caps := Capabilities(n.Capabilities)
+		// Site-link health (S8.2, edition-independent — routing is core). site_hub_down (B2): this site
+		// gateway has remote subnets to reach but the org has NO hub (no carrier) — CP-derived from the
+		// topology. site_link_down (H5): agent-reported stale/absent site-link handshake. Both are
+		// blackholes that must never read green.
+		siteHubDown := topoOK && siteHubMissing(topo, n)
+		siteLinkDown := caps.SiteLinkStale
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
-		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown
 		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
@@ -775,6 +820,10 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			// S8.1 D1: the version gate is on the AGENT — edition-independent. An open-build
 			// gateway has no policy engine (no desync path) but still refuses a too-new artifact.
 			kind = KindUnsupportedPolicyVersion
+		case !enterprise && siteHubDown:
+			kind = KindSiteHubDown // edition-independent (routing/peers are core, D11)
+		case !enterprise && siteLinkDown:
+			kind = KindSiteLinkDown
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
@@ -790,6 +839,8 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				ReportAge:          reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
 				Now:                now,
 				UnsupportedVersion: caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
+				SiteHubDown:        siteHubDown,                   // S8.2 Item 7/9 (B2)
+				SiteLinkDown:       siteLinkDown,                  // S8.2 H5
 			})
 		}
 		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}

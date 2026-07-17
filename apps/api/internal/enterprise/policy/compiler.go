@@ -59,8 +59,9 @@ type SiteSubnet struct {
 // sites — the transit endpoints whose forward chain the LAN traffic crosses. A site gateway ALSO gets a
 // compiled artifact even with no local devices (so its forward chain is programmed for site traffic).
 type SiteNode struct {
-	SiteID uuid.UUID
-	NodeID uuid.UUID
+	SiteID   uuid.UUID
+	NodeID   uuid.UUID
+	Endpoint string // public WG endpoint; a non-empty endpoint makes this gateway hub-eligible (B1/Item 7)
 }
 
 // Resource is a static destination (a CIDR + optional L4 scope).
@@ -125,12 +126,20 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		nodeSet[d.NodeID] = true
 	}
 	siteNode := map[uuid.UUID]uuid.UUID{} // site_id -> its bound gateway node (S8.2 src placement)
+	var hubNode uuid.UUID                 // B1: the transit HUB — the site gateway with a public endpoint
 	for _, sn := range s.SiteNodes {
 		if sn.NodeID == uuid.Nil {
 			continue
 		}
 		siteNode[sn.SiteID] = sn.NodeID
 		nodeSet[sn.NodeID] = true
+		// Hub designation MUST match siteLinkGraphFrom (core): the endpoint-bearing gateway, lowest node
+		// id if several. A site→site grant is placed on the hub too (it forwards spoke↔spoke traffic), so
+		// its default-deny forward chain accepts the transited pair — without this the hub silently drops
+		// site-to-site between two spoke sites (B1; the paper's packet-walk step 4).
+		if sn.Endpoint != "" && (hubNode == uuid.Nil || sn.NodeID.String() < hubNode.String()) {
+			hubNode = sn.NodeID
+		}
 	}
 
 	out := make(map[uuid.UUID]policyspec.Compiled, len(nodeSet))
@@ -324,6 +333,12 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		if r.DstKind == "site" {
 			if n := siteNode[r.DstSiteID]; n != uuid.Nil {
 				enforceNodes[n] = true
+			}
+			// B1: the transit HUB forwards spoke↔spoke traffic, so it needs the grant too. The map dedups
+			// when the hub IS the src or dst gateway (no duplicate emission). Site→site only — a
+			// site→resource/group source egresses via its own gateway, never the hub.
+			if hubNode != uuid.Nil {
+				enforceNodes[hubNode] = true
 			}
 		}
 		// Destination templates (SrcIP filled per source CIDR below), resolved once.
