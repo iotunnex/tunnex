@@ -16,23 +16,30 @@ import (
 // stubHashProvider controls the pushed hash the CP sees for a node (and can force a compile
 // fault). Distinct from policy_surface_test's fakeProvider so the desync inputs are direct.
 type stubHashProvider struct {
-	pushed string
-	err    error
+	pol *policyspec.Compiled // the ROUTE-LESS pushed artifact; core pushedHash finalizes+hashes it
+	err error
 }
 
 func (s stubHashProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID) (*policyspec.Compiled, error) {
-	return nil, s.err
+	return s.pol, s.err
 }
-func (s stubHashProvider) CompiledHashesForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+func (s stubHashProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	out := make(map[uuid.UUID]string, len(ids))
+	out := make(map[uuid.UUID]*policyspec.Compiled, len(ids))
 	for _, id := range ids {
-		out[id] = s.pushed
+		out[id] = s.pol
 	}
 	return out, nil
 }
+
+// enfArt builds a distinct ENFORCING route-less artifact (its NodeID tag varies the CanonicalHash); a
+// non-site node's pushedHash == CanonicalHash(enfArt(tag)). canon is that hash.
+func enfArt(tag string) *policyspec.Compiled {
+	return &policyspec.Compiled{Version: policyspec.ProtocolVersion, NodeID: tag, Mode: "enforcing"}
+}
+func canon(pol *policyspec.Compiled) string { return policyspec.CanonicalHash(*pol) }
 
 func desyncPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -78,16 +85,18 @@ func desyncSince(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) pgtype.Timestam
 func TestTrackDesync(t *testing.T) {
 	pool := desyncPool(t)
 	ctx := context.Background()
-	svc := func(pushed string) *Service { return &Service{pool: pool, q: sqlc.New(pool), policy: stubHashProvider{pushed: pushed}} }
+	svc := func(pol *policyspec.Compiled) *Service {
+		return &Service{pool: pool, q: sqlc.New(pool), policy: stubHashProvider{pol: pol}}
+	}
 
 	t.Run("stamp on enforcing mismatch, then idempotent onset", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc("new").trackDesync(ctx, n, "old") // pushed != applied
+		svc(enfArt("new")).trackDesync(ctx, n, "old") // pushed(canon) != applied
 		first := desyncSince(t, pool, n.ID)
 		if !first.Valid {
 			t.Fatal("mismatch must STAMP policy_desync_since")
 		}
-		svc("new").trackDesync(ctx, n, "old") // still mismatched → onset PRESERVED (WHERE IS NULL)
+		svc(enfArt("new")).trackDesync(ctx, n, "old") // still mismatched → onset PRESERVED (WHERE IS NULL)
 		if again := desyncSince(t, pool, n.ID); !again.Valid || !again.Time.Equal(first.Time) {
 			t.Fatalf("repeated mismatch must preserve the first onset: %v vs %v", again.Time, first.Time)
 		}
@@ -95,8 +104,8 @@ func TestTrackDesync(t *testing.T) {
 
 	t.Run("clear on reconvergence (applied == pushed)", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc("h").trackDesync(ctx, n, "old") // stamp
-		svc("h").trackDesync(ctx, n, "h")   // applied caught up → CLEAR
+		svc(enfArt("h")).trackDesync(ctx, n, "old")               // stamp
+		svc(enfArt("h")).trackDesync(ctx, n, canon(enfArt("h")))  // applied caught up → CLEAR
 		if desyncSince(t, pool, n.ID).Valid {
 			t.Fatal("reconvergence must CLEAR the stamp")
 		}
@@ -116,11 +125,11 @@ func TestTrackDesync(t *testing.T) {
 			}
 		}
 		applied := policyspec.CanonicalHash(mk("rule-uuid-1")) // node applied the ORIGINAL rule's artifact
-		pushed := policyspec.CanonicalHash(mk("rule-uuid-2"))  // admin deleted+recreated → new uuid, same grant
-		if applied != pushed {
-			t.Fatalf("precondition: rule_id-only change must not move the hash (%s vs %s)", applied, pushed)
+		p2 := mk("rule-uuid-2")                                // admin deleted+recreated → new uuid, same grant
+		if applied != policyspec.CanonicalHash(p2) {
+			t.Fatalf("precondition: rule_id-only change must not move the hash")
 		}
-		svc(pushed).trackDesync(ctx, n, applied) // pushed == applied → the real writer must NOT stamp
+		svc(&p2).trackDesync(ctx, n, applied) // pushed(canon) == applied → the real writer must NOT stamp
 		if desyncSince(t, pool, n.ID).Valid {
 			t.Fatal("a rule_id-only recreate must NOT stamp policy_desync_since")
 		}
@@ -128,8 +137,8 @@ func TestTrackDesync(t *testing.T) {
 
 	t.Run("clear on non-enforcing (pushed == '')", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc("h").trackDesync(ctx, n, "old") // stamp under enforcing
-		svc("").trackDesync(ctx, n, "old")  // org went off/mesh → pushed "" → CLEAR
+		svc(enfArt("h")).trackDesync(ctx, n, "old") // stamp under enforcing
+		svc(nil).trackDesync(ctx, n, "old")         // org went off/mesh → route-less nil → pushed "" → CLEAR
 		if desyncSince(t, pool, n.ID).Valid {
 			t.Fatal("non-enforcing must CLEAR the stamp")
 		}
@@ -137,10 +146,10 @@ func TestTrackDesync(t *testing.T) {
 
 	t.Run("revert-to-clear then re-push re-stamps a NEW onset (per-episode)", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc("new").trackDesync(ctx, n, "old") // episode 1: stamp
+		svc(enfArt("new")).trackDesync(ctx, n, "old") // episode 1: stamp
 		t1 := desyncSince(t, pool, n.ID)
-		svc("old").trackDesync(ctx, n, "old") // revert target back to applied → CLEAR
-		svc("newer").trackDesync(ctx, n, "old") // episode 2: fresh mismatch → NEW onset
+		svc(enfArt("old")).trackDesync(ctx, n, canon(enfArt("old"))) // revert target back to applied → CLEAR
+		svc(enfArt("newer")).trackDesync(ctx, n, "old")              // episode 2: fresh mismatch → NEW onset
 		t2 := desyncSince(t, pool, n.ID)
 		if !t2.Valid || t2.Time.Before(t1.Time) {
 			t.Fatalf("a new episode must stamp a NEW onset (not the cleared one): t1=%v t2=%v", t1.Time, t2.Time)
@@ -158,7 +167,7 @@ func TestTrackDesync(t *testing.T) {
 
 	t.Run("compile fault (provider error) never stamps/clears", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc("new").trackDesync(ctx, n, "old") // stamp first
+		svc(enfArt("new")).trackDesync(ctx, n, "old") // stamp first
 		faulted := &Service{pool: pool, q: sqlc.New(pool), policy: stubHashProvider{err: context.DeadlineExceeded}}
 		faulted.trackDesync(ctx, n, "old") // can't-determine → leave the stamp UNTOUCHED
 		if !desyncSince(t, pool, n.ID).Valid {
@@ -196,7 +205,7 @@ func TestPolicyHealthForNodes(t *testing.T) {
 	}
 
 	// [1] enterprise, pushed != applied, REPORT stale → desync_unknown (NOT converging/silent/healthy).
-	ent := &Service{pool: pool, q: q, policy: stubHashProvider{pushed: "pushed"}}
+	ent := &Service{pool: pool, q: q, policy: stubHashProvider{pol: enfArt("pushed")}}
 	h := ent.PolicyHealthForNodes(ctx, org, []sqlc.Node{n})[id]
 	if !h.Degraded {
 		t.Fatal("enforcing mismatch must set the authoritative bool")

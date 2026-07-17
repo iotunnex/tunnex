@@ -24,19 +24,14 @@ func (f fakeProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID) (*p
 	return f.pol, f.err
 }
 
-func (f fakeProvider) CompiledHashesForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+func (f fakeProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	// Mirror the real CompiledHashesForNodes: only ENFORCING nodes get a non-empty pushed
-	// hash; off / mesh -> "" (no enforcement boundary).
-	h := ""
-	if f.pol != nil && !f.pol.Mesh {
-		h = policyspec.CanonicalHash(*f.pol)
-	}
-	out := make(map[uuid.UUID]string, len(ids))
+	// Route-less pushed artifact; the core pushedHash finalizes + hashes it (enforcing → hash, mesh → "").
+	out := make(map[uuid.UUID]*policyspec.Compiled, len(ids))
 	for _, id := range ids {
-		out[id] = h
+		out[id] = f.pol
 	}
 	return out, nil
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -287,36 +288,76 @@ func (b *wgctrlBackend) ApplyPeers(ctx context.Context, peers []Peer) error {
 	return err
 }
 
+// siteRouteMetric tags every S8.2 kernel route we own. The prune enumerates + deletes ONLY routes
+// carrying BOTH `proto static` AND this metric, so an operator's / routing-daemon's own static route on
+// wg0 (any other metric, or none) is NEVER touched (review #2). We picked a distinct metric over a
+// dedicated routing table: a table needs an `ip rule` to steer forwarding into it (policy routing on the
+// data path); a metric scopes ownership without touching how packets are routed (a lone route to a
+// prefix is selected regardless of metric).
+const siteRouteMetric = 8021
+
+// parseRouteDst canonicalizes a route destination token to a netip.Prefix. `ip route show` prints a host
+// route as a BARE address (no /32), so a desired "10.1.0.5/32" must compare equal to an enumerated
+// "10.1.0.5" (review #3: string compare churned /32 routes install→delete every tick). A bare address
+// becomes a full-length prefix.
+func parseRouteDst(tok string) (netip.Prefix, bool) {
+	if p, err := netip.ParsePrefix(tok); err == nil {
+		return p.Masked(), true
+	}
+	if a, err := netip.ParseAddr(tok); err == nil {
+		return netip.PrefixFrom(a, a.BitLen()), true
+	}
+	return netip.Prefix{}, false
+}
+
+// routesToPrune is the PURE prune decision: enumerated route-destination tokens minus the desired set,
+// compared as canonical prefixes (so /32 host-route normalization can't cause a spurious prune). Unknown
+// tokens are skipped (never guessed into a delete).
+func routesToPrune(enumerated []string, desired map[netip.Prefix]bool) []netip.Prefix {
+	var del []netip.Prefix
+	for _, tok := range enumerated {
+		p, ok := parseRouteDst(tok)
+		if !ok || desired[p] {
+			continue
+		}
+		del = append(del, p)
+	}
+	return del
+}
+
 // ApplyRoutes reconciles the S8.2 site-to-site kernel routes on the tunnel iface. It installs each
-// desired remote-subnet route with `proto static` (idempotent replace — heals a flushed route on the
-// next tick) and PRUNES any of OUR routes (proto static, this iface) no longer desired — the full-sweep
-// contract on the wire (a site unbind/subnet removal drops out of the desired set → its route is
-// deleted). The `proto static` scoping is load-bearing: the interface's own on-link pool route is
-// `proto kernel`, so it is NEVER enumerated here and can never be pruned by us.
+// desired remote-subnet route (proto static + our metric; idempotent replace heals a flushed route) and
+// PRUNES only OUR routes (proto static + siteRouteMetric) no longer desired — the full-sweep contract.
+// Enumerates BOTH families (review #4: v6 inputs are refused today, but the prune must not silently miss
+// a family if S8.4 admits v6 subnets).
 func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
-	desired := make(map[string]bool, len(cidrs))
+	metric := strconv.Itoa(siteRouteMetric)
+	desired := make(map[netip.Prefix]bool, len(cidrs))
 	for _, c := range cidrs {
-		desired[c] = true
-		if _, err := run(ctx, "ip", "route", "replace", c, "dev", b.iface, "proto", "static"); err != nil {
+		p, ok := parseRouteDst(c)
+		if !ok {
+			continue // malformed CP input — never install a bad route
+		}
+		desired[p] = true
+		if _, err := run(ctx, "ip", "route", "replace", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
 			return err
 		}
 	}
-	// Enumerate ONLY our routes and prune the stale ones. If we can't enumerate, surface it (never guess).
-	out, err := run(ctx, "ip", "route", "show", "dev", b.iface, "proto", "static")
-	if err != nil {
-		return err
-	}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
+	for _, fam := range []string{"-4", "-6"} {
+		out, err := run(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
+		if err != nil {
+			return err // can't enumerate → surface it, never guess
 		}
-		cidr := fields[0]
-		if cidr == "" || desired[cidr] {
-			continue
+		var toks []string
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if f := strings.Fields(line); len(f) > 0 {
+				toks = append(toks, f[0])
+			}
 		}
-		if _, err := run(ctx, "ip", "route", "del", cidr, "dev", b.iface, "proto", "static"); err != nil {
-			return err
+		for _, p := range routesToPrune(toks, desired) {
+			if _, err := run(ctx, "ip", "route", "del", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
