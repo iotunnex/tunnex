@@ -2,16 +2,41 @@ package sites
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"os"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 )
+
+// TestSiteTransportCheckRefusesUnknown is the D4 refuse-don't-guess confirmation (Slice-2 ruling 1):
+// the link_transport CHECK constraint must REJECT a non-wireguard value with a loud 23514, not
+// silently accept it — the schema twin of the version gate's refuse-don't-guess. A future transport
+// (ipsec) is unusable until its migration lands.
+func TestSiteTransportCheckRefusesUnknown(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug) VALUES ($1,'S',$2)`, org, "tck-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	_, err := pool.Exec(ctx, `INSERT INTO sites (org_id,name,link_transport) VALUES ($1,'ipsec-site','ipsec')`, org)
+	if err == nil {
+		t.Fatal("link_transport='ipsec' must be REFUSED by the CHECK until its migration lands (refuse-don't-guess)")
+	}
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "23514" {
+		t.Fatalf("want a CHECK violation (23514), got %v", err)
+	}
+}
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
