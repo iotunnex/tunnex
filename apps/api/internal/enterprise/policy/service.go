@@ -695,48 +695,48 @@ func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) 
 		return &c, nil
 	}
 	if snap.Mode == ModeEnforcing {
+		// Content-derived version (#6, per the Slice-1 RequiredVersion law): an empty deny-all needs no
+		// v5 feature. The CORE finalizeArtifact/pushedHash attach routes + re-derive the version, so a
+		// device-less SITE gateway still lands at v5 consistently across the served + pushed paths.
 		return &policyspec.Compiled{
-			Version: policyspec.ProtocolVersion, NodeID: nodeID.String(),
+			Version: policyspec.RequiredVersion(policyspec.Compiled{Mode: ModeEnforcing}), NodeID: nodeID.String(),
 			Mode: ModeEnforcing, Mesh: false, // deny-all: no blanket even with no devices
 		}, nil
 	}
 	return nil, nil // off / no policy -> agent keeps the legacy mesh
 }
 
-// CompiledHashesForNodes returns each requested node's canonical PUSHED hash, building
-// the org snapshot ONCE (finding #5: the ListNodes read path called CompiledForNode per
-// node, rebuilding the whole snapshot — 6 queries + a compile — N times for one org).
-// Per node it reproduces CompiledForNode's pick-or-fallback exactly, so the hash a node
-// is compared against here is identical to the one it would be served. A node with no
-// compiled entry maps to the enforcing deny-all hash (fail-closed) or "" when off.
-func (s *Service) CompiledHashesForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+// CompiledArtifactsForNodes returns each requested node's ROUTE-LESS compiled artifact, building the org
+// snapshot ONCE (finding #5). Route-less BY DESIGN: the CORE finalizeArtifact/pushedHash attach the site
+// routes + derive the version, so the pushed-hash baseline is computed the SAME way the served artifact
+// is — the #1 single-source fix (two compile paths can no longer disagree). Per node it reproduces
+// CompiledForNode's pick-or-fallback: the compiled entry, else the enforcing deny-all (content-derived
+// version), else nil for off / no-policy (the core pushedHash renders nil + non-enforcing as "").
+func (s *Service) CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	snap, err := s.BuildSnapshot(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[uuid.UUID]string, len(nodeIDs))
-	// OFF mode: there is no enforcement boundary, so no node has a meaningful pushed hash
-	// — return "" for every node. The status layer reads "" as "in sync" (finding #C: an
-	// off org must never show policy-out-of-sync, and a device-having off node whose agent
-	// applied a mesh artifact must not compare against it).
-	if snap.Mode != ModeEnforcing {
-		for _, id := range nodeIDs {
-			out[id] = ""
-		}
-		return out, nil
-	}
+	out := make(map[uuid.UUID]*policyspec.Compiled, len(nodeIDs))
 	compiled := Compile(snap)
+	enforcing := snap.Mode == ModeEnforcing
 	for _, id := range nodeIDs {
 		if c, ok := compiled[id]; ok {
-			out[id] = policyspec.CanonicalHash(c)
+			cc := c
+			out[id] = &cc
 			continue
 		}
-		// Enforcing node with no active devices -> the deny-all fallback CompiledForNode
-		// serves (SAME policyspec.ProtocolVersion the DesiredState fail-closed path uses).
-		out[id] = policyspec.CanonicalHash(policyspec.Compiled{
-			Version: policyspec.ProtocolVersion, NodeID: id.String(),
-			Mode: ModeEnforcing, Mesh: false,
-		})
+		if enforcing {
+			// Enforcing node with no active devices → the deny-all fallback (content-derived version,
+			// #6), IDENTICAL to what CompiledForNode serves; the core finalize re-derives v5 for a
+			// device-less SITE gateway consistently on both paths.
+			out[id] = &policyspec.Compiled{
+				Version: policyspec.RequiredVersion(policyspec.Compiled{Mode: ModeEnforcing}), NodeID: id.String(),
+				Mode: ModeEnforcing, Mesh: false,
+			}
+			continue
+		}
+		out[id] = nil // off / no policy — pushedHash renders "" (no enforcement boundary, finding #C)
 	}
 	return out, nil
 }

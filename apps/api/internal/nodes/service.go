@@ -78,10 +78,12 @@ type DesiredState struct {
 // mesh); the enterprise build wires the policy engine via SetPolicyProvider.
 type PolicyProvider interface {
 	CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error)
-	// CompiledHashesForNodes returns each node's canonical pushed-hash with a SINGLE
-	// org snapshot build — the batch read-path counterpart to CompiledForNode that the
-	// node-list status uses to avoid an N+1 recompile per node (finding #5).
-	CompiledHashesForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]string, error)
+	// CompiledArtifactsForNodes returns each node's ROUTE-LESS compiled artifact with a SINGLE org
+	// snapshot build — the batch counterpart to CompiledForNode. Route-less by design: the CORE
+	// finalizeArtifact/pushedHash attach the site routes + derive the version, so the pushed-hash
+	// baseline is computed the SAME way the served artifact is (the #1 single-source fix). nil for a node
+	// with no enforcement artifact (off / device-less-off). Avoids an N+1 recompile per node (finding #5).
+	CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error)
 }
 
 // Service provides node control-plane operations.
@@ -312,76 +314,77 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	}
 
 	// S8.2 site-to-site plumbing (CORE, all editions): if this node is a site gateway, add its site-link
-	// WG peers (hub-and-spoke) + the kernel routes to remote site subnets. Routes ride Compiled.Routes
-	// (explicit intent, hash-blind); the grant in Allow still gates reachability (routed ≠ permitted).
-	slPeers, routes, slErr := s.siteLinkGraph(ctx, node)
-	if slErr != nil {
-		// A site-link build error must not fail the whole fetch (peers/policy already built); log + skip.
-		slog.Warn("site_link_graph_failed", slog.String("node_id", node.ID.String()), slog.String("error", slErr.Error()))
-	} else {
-		ds.Peers = append(ds.Peers, slPeers...)
-		if len(routes) > 0 {
-			switch {
-			case ds.Policy != nil:
-				ds.Policy.Routes = routes
-				ds.Policy.Version = policyspec.RequiredVersion(*ds.Policy)
-			case s.policy == nil:
-				// Open build (no policy engine, no health/hash path to disturb): synthesize a mesh
-				// artifact carrying the routes so an open-edition self-hoster still routes between sites.
-				c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes}
-				c.Version = policyspec.RequiredVersion(c)
-				ds.Policy = &c
-			}
+	// WG peers (hub-and-spoke) + kernel routes, from the org's site topology loaded ONCE. finalizeArtifact
+	// is the SINGLE SOURCE that attaches routes + derives the content version — the SAME step the
+	// pushed-hash path (trackDesync / PolicyHealthForNodes) calls, so the served artifact and the desync
+	// baseline can NEVER disagree about the artifact's contents (the #1 fix: two compile paths agreeing).
+	if node.SiteID.Valid {
+		topo, terr := s.loadSiteTopology(ctx, node.OrgID)
+		if terr != nil {
+			// A topology-load error must not fail the whole fetch (peers/policy already built); log + skip.
+			slog.Warn("site_topology_load_failed", slog.String("node_id", node.ID.String()), slog.String("error", terr.Error()))
+		} else {
+			peers, _ := siteLinkGraphFrom(topo, node)
+			ds.Peers = append(ds.Peers, peers...)
+			ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 		}
 	}
 	return ds, nil
 }
 
-// siteLinkGraph builds a site-gateway node's site-link WG peers + kernel routes (S8.2 hub-and-spoke,
-// Item 6/7). Returns (nil, nil, nil) when the node is not a site gateway or there is no remote site to
-// reach. Topology: the single HUB is the site gateway with a public endpoint (v1; deterministic by
-// lowest node id if several — multi-hub reserved). A spoke peers ONLY with the hub (its AllowedIPs =
-// ALL remote site subnets, so it reaches other spokes VIA the hub); the hub peers with every spoke
-// (each peer's AllowedIPs = that spoke's own subnets); the hub forwards between them. Routes = every
-// remote site's approved subnets, programmed as kernel routes via the tunnel iface. Deterministic
-// (sorted) so a steady-state reconcile is a no-op. Full-sweep: an unbound/deleted site simply drops out
-// of ListSiteGatewaysForOrg / ListSiteSubnetsForOrg, so its peers + routes vanish on the next fetch.
-func (s *Service) siteLinkGraph(ctx context.Context, node sqlc.Node) ([]Peer, []policyspec.Route, error) {
-	if !node.SiteID.Valid {
-		return nil, nil, nil // not a site gateway
-	}
-	gws, err := s.q.ListSiteGatewaysForOrg(ctx, node.OrgID)
+// siteTopology is the org's site-link input, loaded ONCE (loadSiteTopology) and consumed per-node by the
+// PURE siteLinkGraphFrom / finalizeArtifact. Loading once lets the batch pushed-hash path finalize N
+// nodes off a single pair of org queries instead of N (and the served path uses the same shape).
+type siteTopology struct {
+	gws     []sqlc.ListSiteGatewaysForOrgRow
+	subnets map[uuid.UUID][]string // site_id -> approved subnet CIDRs
+}
+
+// loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
+// deleted site drops out of ListSiteGatewaysForOrg / ListSiteSubnetsForOrg, so its peers + routes vanish.
+func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTopology, error) {
+	gws, err := s.q.ListSiteGatewaysForOrg(ctx, orgID)
 	if err != nil {
-		return nil, nil, err
+		return siteTopology{}, err
 	}
-	subs, err := s.q.ListSiteSubnetsForOrg(ctx, node.OrgID) // approved (site_id, cidr)
+	subs, err := s.q.ListSiteSubnetsForOrg(ctx, orgID) // approved (site_id, cidr)
 	if err != nil {
-		return nil, nil, err
+		return siteTopology{}, err
 	}
-	siteSubnets := map[uuid.UUID][]string{}
+	sub := map[uuid.UUID][]string{}
 	for _, ss := range subs {
-		siteSubnets[ss.SiteID] = append(siteSubnets[ss.SiteID], ss.Cidr.String())
+		sub[ss.SiteID] = append(sub[ss.SiteID], ss.Cidr.String())
 	}
-	// Designate the hub: the site gateway with a non-empty endpoint (v1 single-hub; lowest node id wins
-	// if several, deterministic). A NAT'd spoke has no reachable endpoint.
+	return siteTopology{gws: gws, subnets: sub}, nil
+}
+
+// siteLinkGraphFrom builds a site-gateway node's site-link WG peers + kernel routes from a loaded
+// topology (S8.2 hub-and-spoke, Item 6/7) — PURE. Returns (nil, nil) when the node is not a site gateway
+// or there is no remote site to reach. HUB = the site gateway with a public endpoint (v1; deterministic
+// by lowest node id if several — multi-hub reserved). A spoke peers ONLY with the hub (AllowedIPs = ALL
+// remote subnets, reaching other spokes VIA the hub); the hub peers with every spoke (each peer's
+// AllowedIPs = that spoke's OWN subnets); the hub forwards between them. Routes = every remote site's
+// approved subnets. Deterministic (sorted) so a steady-state reconcile is a no-op.
+func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.Route) {
+	if !node.SiteID.Valid {
+		return nil, nil
+	}
 	var hub *sqlc.ListSiteGatewaysForOrgRow
-	for i := range gws {
-		g := &gws[i]
+	for i := range topo.gws {
+		g := &topo.gws[i]
 		if g.Endpoint != "" && (hub == nil || g.ID.String() < hub.ID.String()) {
 			hub = g
 		}
 	}
 	mySite := uuid.UUID(node.SiteID.Bytes)
-	// Route set = every OTHER site's approved subnets (dedup, sorted).
 	routeSeen := map[string]bool{}
 	var routeCIDRs []string
-	for i := range gws {
-		g := &gws[i]
-		gSite := uuid.UUID(g.SiteID.Bytes)
-		if gSite == mySite {
+	for i := range topo.gws {
+		g := &topo.gws[i]
+		if uuid.UUID(g.SiteID.Bytes) == mySite {
 			continue
 		}
-		for _, c := range siteSubnets[gSite] {
+		for _, c := range topo.subnets[uuid.UUID(g.SiteID.Bytes)] {
 			if !routeSeen[c] {
 				routeSeen[c] = true
 				routeCIDRs = append(routeCIDRs, c)
@@ -395,17 +398,14 @@ func (s *Service) siteLinkGraph(ctx context.Context, node sqlc.Node) ([]Peer, []
 	}
 
 	var peers []Peer
-	isHub := hub != nil && hub.ID == node.ID
 	switch {
-	case isHub:
-		// The hub peers with every spoke; each spoke-peer's AllowedIPs = that spoke's own subnets.
-		for i := range gws {
-			g := &gws[i]
+	case hub != nil && hub.ID == node.ID:
+		for i := range topo.gws {
+			g := &topo.gws[i]
 			if g.ID == node.ID {
 				continue
 			}
-			gSite := uuid.UUID(g.SiteID.Bytes)
-			ips := append([]string(nil), siteSubnets[gSite]...)
+			ips := append([]string(nil), topo.subnets[uuid.UUID(g.SiteID.Bytes)]...)
 			if len(ips) == 0 {
 				continue // a spoke advertising no subnets yet contributes no crypto-routing
 			}
@@ -413,14 +413,48 @@ func (s *Service) siteLinkGraph(ctx context.Context, node sqlc.Node) ([]Peer, []
 			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint})
 		}
 	case hub != nil:
-		// A spoke peers ONLY with the hub; AllowedIPs = all remote subnets (reach other spokes via hub).
 		if len(routeCIDRs) > 0 {
 			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint})
 		}
 	}
-	// Deterministic peer order (syncconf is a set, but a stable list keeps the reconcile a no-op).
 	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
-	return peers, routes, nil
+	return peers, routes
+}
+
+// finalizeArtifact is THE SINGLE SOURCE OF TRUTH for a site gateway's served/hashed compiled artifact
+// (the #1 fix). It attaches the node's site-to-site kernel routes to the route-less compiled artifact
+// and derives the content version — and BOTH the served desired-state AND the pushed-hash desync
+// baseline call it, so the two paths can never disagree about the artifact's contents. A non-site node
+// or a node with no remote routes is returned unchanged. A nil route-less artifact WITH routes (open
+// build, or an off-mode node that would carry routes) is synthesized as a mesh artifact carrying them.
+func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *policyspec.Compiled) *policyspec.Compiled {
+	if !node.SiteID.Valid {
+		return pol
+	}
+	_, routes := siteLinkGraphFrom(topo, node)
+	if len(routes) == 0 {
+		return pol
+	}
+	if pol != nil {
+		pol.Routes = routes
+		pol.Version = policyspec.RequiredVersion(*pol)
+		return pol
+	}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes}
+	c.Version = policyspec.RequiredVersion(c)
+	return &c
+}
+
+// pushedHash is the desync baseline for one node: the CanonicalHash of its FINALIZED artifact, or "" for
+// a non-enforcing (off/mesh) artifact — an off org has no enforcement boundary, so it never shows
+// policy-desynced (finding #C). Because it finalizes the SAME way the served artifact does, a route-
+// carrying ENFORCING gateway's pushed hash matches what the agent applies — no false silent_desync (#1).
+func (s *Service) pushedHash(topo siteTopology, node sqlc.Node, routeless *policyspec.Compiled) string {
+	final := s.finalizeArtifact(topo, node, routeless)
+	if final == nil || final.Mode != "enforcing" {
+		return ""
+	}
+	return policyspec.CanonicalHash(*final)
 }
 
 // validEndpoint reports whether s is a clean host:port with a numeric port and
@@ -565,11 +599,23 @@ func (s *Service) trackDesync(ctx context.Context, node sqlc.Node, appliedHash s
 	if s.policy == nil {
 		return // open build — desync tracking is enterprise-only; silent, no write
 	}
-	hashes, err := s.policy.CompiledHashesForNodes(ctx, node.OrgID, []uuid.UUID{node.ID})
+	arts, err := s.policy.CompiledArtifactsForNodes(ctx, node.OrgID, []uuid.UUID{node.ID})
 	if err != nil {
-		return // pushed hash unavailable (compile fault) → can't-determine; never stamp/clear
+		return // pushed artifact unavailable (compile fault) → can't-determine; never stamp/clear
 	}
-	pushed := hashes[node.ID]
+	// The pushed hash is finalized the SAME way the served artifact is (route-attach + version), so a
+	// route-carrying enforcing gateway compares clean instead of a false silent_desync (the #1 fix). Only
+	// a SITE gateway needs the topology (finalizeArtifact no-ops for non-site nodes) — skip the queries
+	// otherwise.
+	var topo siteTopology
+	if node.SiteID.Valid {
+		t, terr := s.loadSiteTopology(ctx, node.OrgID)
+		if terr != nil {
+			return // topology unavailable → can't-determine; never stamp/clear on a partial baseline
+		}
+		topo = t
+	}
+	pushed := s.pushedHash(topo, node, arts[node.ID])
 	if pushed == "" || pushed == appliedHash {
 		// non-enforcing (off/mesh) OR reconverged — convergence is a STATE predicate, so a
 		// revert-to-clear (target moved back to the applied hash) legitimately clears.
@@ -677,9 +723,35 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		}
 		// err (transient compile/DB) -> pushKnown stays false: term (3) can't be evaluated, but
 		// the agent-reported terms (1)+(2) still apply. A transient control-plane hiccup is not
-		// on its own a gateway fault, so it does not manufacture a degraded bool.
-		if h, err := s.policy.CompiledHashesForNodes(ctx, orgID, ids); err == nil {
-			pushed, pushKnown = h, true
+		// on its own a gateway fault, so it does not manufacture a degraded bool. The pushed hash is
+		// finalized (route-attach + version) the SAME way the served artifact is — one site-topology
+		// load for the whole batch — so a route-carrying gateway compares clean, not false-desynced (#1).
+		if arts, err := s.policy.CompiledArtifactsForNodes(ctx, orgID, ids); err == nil {
+			// Load the site topology ONCE for the batch — but only if some node is a site gateway
+			// (finalizeArtifact no-ops for non-site nodes, so skip the queries for a site-less org).
+			var topo siteTopology
+			anySite := false
+			for _, n := range nodes {
+				if n.SiteID.Valid {
+					anySite = true
+					break
+				}
+			}
+			topoOK := true
+			if anySite {
+				if t, terr := s.loadSiteTopology(ctx, orgID); terr == nil {
+					topo = t
+				} else {
+					topoOK = false // topology unavailable → term (3) can't be evaluated this cycle
+				}
+			}
+			if topoOK {
+				pushed = make(map[uuid.UUID]string, len(nodes))
+				for _, n := range nodes {
+					pushed[n.ID] = s.pushedHash(topo, n, arts[n.ID])
+				}
+				pushKnown = true
+			}
 		}
 	}
 	now := time.Now()
