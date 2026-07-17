@@ -44,6 +44,11 @@ const (
 	// target-notified). Owner/admin grain (mandating MFA / resetting a factor is security-sensitive).
 	// Self-service enrollment carries NO perm — it is user-owned (any authenticated user).
 	PermMfaManage Permission = "mfa:manage"
+	// PermSiteManage governs SITE-TO-SITE (S8.1, EPIC 8): registering site gateways, binding a node,
+	// adding subnets, and APPROVING advertised subnets (a compromised gateway must not hijack routes —
+	// approval is an admin checkpoint). Named per feature (site governance is its own axis).
+	// Owner/admin grain (site routing + advertisement approval are network-shaping powers).
+	PermSiteManage Permission = "site:manage"
 )
 
 // Roles.
@@ -78,6 +83,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermDeviceApprove:      true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
+		PermSiteManage:         true,
 	},
 	RoleOwner: {
 		PermOrgView:       true,
@@ -91,6 +97,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermDeviceApprove:      true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
+		PermSiteManage:         true,
 	},
 }
 

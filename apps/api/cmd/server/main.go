@@ -30,6 +30,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
@@ -153,6 +154,7 @@ func main() {
 	nodes.LogPolicyHealthTuning(logger) // S7.4b: assumed R + derived T (operator discoverability)
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
+	siteSvc := sites.NewService(pool)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
@@ -171,6 +173,7 @@ func main() {
 		Invites:               invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
 		Nodes:                 nodeSvc,
 		Devices:               deviceSvc,
+		Sites:                 siteSvc,
 		Sessions:              sessions,
 		Mfa:                   mfaSvc,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),

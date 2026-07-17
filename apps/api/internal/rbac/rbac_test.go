@@ -58,3 +58,18 @@ func TestCanManageMembershipMatrix(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteManagePermGrants is the S8.1 site:manage deliberate-red: a non-holder (member) is refused
+// by construction (the grant table), owner+admin hold it, and it is mutating (email-gated at the
+// handler). The handler 403 rides authorize(..., PermSiteManage) — this pins the grants that back it.
+func TestSiteManagePermGrants(t *testing.T) {
+	if Can(RoleMember, PermSiteManage) {
+		t.Fatal("a member must NOT hold site:manage (register/bind/advertise/approve are admin powers)")
+	}
+	if !Can(RoleAdmin, PermSiteManage) || !Can(RoleOwner, PermSiteManage) {
+		t.Fatal("owner and admin must hold site:manage")
+	}
+	if !IsMutating(PermSiteManage) {
+		t.Fatal("site:manage is mutating (must be email-verified gated)")
+	}
+}

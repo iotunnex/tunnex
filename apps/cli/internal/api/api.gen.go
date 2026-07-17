@@ -43,6 +43,7 @@ const (
 const (
 	CreatePolicyRuleRequestDstKindGroup    CreatePolicyRuleRequestDstKind = "group"
 	CreatePolicyRuleRequestDstKindResource CreatePolicyRuleRequestDstKind = "resource"
+	CreatePolicyRuleRequestDstKindSite     CreatePolicyRuleRequestDstKind = "site"
 )
 
 // Defines values for CreatePolicyRuleRequestSrcKind.
@@ -203,6 +204,7 @@ const (
 const (
 	PolicyRuleDstKindGroup    PolicyRuleDstKind = "group"
 	PolicyRuleDstKindResource PolicyRuleDstKind = "resource"
+	PolicyRuleDstKindSite     PolicyRuleDstKind = "site"
 )
 
 // Defines values for PolicyRuleSrcKind.
@@ -223,6 +225,17 @@ const (
 	ResourceRequestProtocolAny ResourceRequestProtocol = "any"
 	ResourceRequestProtocolTcp ResourceRequestProtocol = "tcp"
 	ResourceRequestProtocolUdp ResourceRequestProtocol = "udp"
+)
+
+// Defines values for SiteLinkTransport.
+const (
+	Wireguard SiteLinkTransport = "wireguard"
+)
+
+// Defines values for SiteSubnetStatus.
+const (
+	Approved SiteSubnetStatus = "approved"
+	Pending  SiteSubnetStatus = "pending"
 )
 
 // Defines values for SsoConfigViewProvider.
@@ -322,6 +335,12 @@ type AddGroupMemberRequest struct {
 	UserId openapi_types.UUID `json:"user_id"`
 }
 
+// AddSiteSubnetRequest defines model for AddSiteSubnetRequest.
+type AddSiteSubnetRequest struct {
+	// Cidr IPv4 CIDR to advertise (e.g. 10.20.0.0/24).
+	Cidr string `json:"cidr"`
+}
+
 // AffectedDevice defines model for AffectedDevice.
 type AffectedDevice struct {
 	Id   openapi_types.UUID `json:"id"`
@@ -347,6 +366,11 @@ type AuthUser struct {
 	Id                     openapi_types.UUID  `json:"id"`
 	MfaEnrollmentRequired  *bool               `json:"mfa_enrollment_required,omitempty"`
 	RecoveryCodesRemaining *int                `json:"recovery_codes_remaining,omitempty"`
+}
+
+// BindSiteNodeRequest defines model for BindSiteNodeRequest.
+type BindSiteNodeRequest struct {
+	NodeId openapi_types.UUID `json:"node_id"`
 }
 
 // ChangeRoleRequest defines model for ChangeRoleRequest.
@@ -468,6 +492,9 @@ type CreatePolicyRuleRequest struct {
 
 	// DstResourceId Required when dst_kind=resource.
 	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+
+	// DstSiteId Required when dst_kind=site (S8.1); the compiler resolves it to the site's approved subnet CIDRs.
+	DstSiteId *openapi_types.UUID `json:"dst_site_id"`
 
 	// ExpiresAt Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
 	ExpiresAt *time.Time `json:"expires_at"`
@@ -938,6 +965,7 @@ type PolicyRule struct {
 	DstGroupId    *openapi_types.UUID `json:"dst_group_id"`
 	DstKind       PolicyRuleDstKind   `json:"dst_kind"`
 	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
+	DstSiteId     *openapi_types.UUID `json:"dst_site_id"`
 	ExpiresAt     *time.Time          `json:"expires_at"`
 	Id            openapi_types.UUID  `json:"id"`
 	OrgId         openapi_types.UUID  `json:"org_id"`
@@ -956,6 +984,11 @@ type PolicyRuleSrcKind string
 type PoolCidrRequest struct {
 	// Cidr New pool CIDR (IPv4). Must contain or be contained by the current range.
 	Cidr string `json:"cidr"`
+}
+
+// RegisterSiteRequest defines model for RegisterSiteRequest.
+type RegisterSiteRequest struct {
+	Name string `json:"name"`
 }
 
 // ResizeConflict defines model for ResizeConflict.
@@ -999,6 +1032,34 @@ type SignupRequest struct {
 	Name     *string             `json:"name,omitempty"`
 	Password string              `json:"password"`
 }
+
+// Site defines model for Site.
+type Site struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	LinkMtu   *int               `json:"link_mtu"`
+
+	// LinkTransport Reserved enum (D4); wireguard-only in v1.
+	LinkTransport SiteLinkTransport `json:"link_transport"`
+	Name          string            `json:"name"`
+}
+
+// SiteLinkTransport Reserved enum (D4); wireguard-only in v1.
+type SiteLinkTransport string
+
+// SiteSubnet defines model for SiteSubnet.
+type SiteSubnet struct {
+	// Cidr IPv4 CIDR of the routed LAN (e.g. 10.20.0.0/24).
+	Cidr   string             `json:"cidr"`
+	Id     openapi_types.UUID `json:"id"`
+	SiteId openapi_types.UUID `json:"site_id"`
+
+	// Status Advertised subnets are pending until approved (D5).
+	Status SiteSubnetStatus `json:"status"`
+}
+
+// SiteSubnetStatus Advertised subnets are pending until approved (D5).
+type SiteSubnetStatus string
 
 // SsoConfigRequest defines model for SsoConfigRequest.
 type SsoConfigRequest struct {
@@ -1222,6 +1283,15 @@ type CreateResourceJSONRequestBody = ResourceRequest
 
 // UpdateResourceJSONRequestBody defines body for UpdateResource for application/json ContentType.
 type UpdateResourceJSONRequestBody = ResourceRequest
+
+// RegisterSiteJSONRequestBody defines body for RegisterSite for application/json ContentType.
+type RegisterSiteJSONRequestBody = RegisterSiteRequest
+
+// BindSiteNodeJSONRequestBody defines body for BindSiteNode for application/json ContentType.
+type BindSiteNodeJSONRequestBody = BindSiteNodeRequest
+
+// AddSiteSubnetJSONRequestBody defines body for AddSiteSubnet for application/json ContentType.
+type AddSiteSubnetJSONRequestBody = AddSiteSubnetRequest
 
 // SetSsoConfigJSONRequestBody defines body for SetSsoConfig for application/json ContentType.
 type SetSsoConfigJSONRequestBody = SsoConfigRequest
@@ -1618,6 +1688,30 @@ type ClientInterface interface {
 	UpdateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListPendingSiteSubnets request
+	ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApproveSiteSubnet request
+	ApproveSiteSubnet(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSites request
+	ListSites(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RegisterSiteWithBody request with any body
+	RegisterSiteWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RegisterSite(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// BindSiteNodeWithBody request with any body
+	BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AddSiteSubnetWithBody request with any body
+	AddSiteSubnetWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AddSiteSubnet(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body AddSiteSubnetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSsoConfig request
 	GetSsoConfig(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3045,6 +3139,114 @@ func (c *Client) UpdateResourceWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateResourceRequest(c.Server, orgId, resourceId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPendingSiteSubnetsRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ApproveSiteSubnet(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApproveSiteSubnetRequest(c.Server, orgId, subnetId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSites(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSitesRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RegisterSiteWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRegisterSiteRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RegisterSite(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRegisterSiteRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBindSiteNodeRequestWithBody(c.Server, orgId, siteId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBindSiteNodeRequest(c.Server, orgId, siteId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddSiteSubnetWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddSiteSubnetRequestWithBody(c.Server, orgId, siteId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddSiteSubnet(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body AddSiteSubnetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddSiteSubnetRequest(c.Server, orgId, siteId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6638,6 +6840,270 @@ func NewUpdateResourceRequestWithBody(server string, orgId openapi_types.UUID, r
 	return req, nil
 }
 
+// NewListPendingSiteSubnetsRequest generates requests for ListPendingSiteSubnets
+func NewListPendingSiteSubnetsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/site-subnets/pending", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApproveSiteSubnetRequest generates requests for ApproveSiteSubnet
+func NewApproveSiteSubnetRequest(server string, orgId openapi_types.UUID, subnetId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "subnetId", runtime.ParamLocationPath, subnetId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/site-subnets/%s/approve", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListSitesRequest generates requests for ListSites
+func NewListSitesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRegisterSiteRequest calls the generic RegisterSite builder with application/json body
+func NewRegisterSiteRequest(server string, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRegisterSiteRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewRegisterSiteRequestWithBody generates requests for RegisterSite with any type of body
+func NewRegisterSiteRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewBindSiteNodeRequest calls the generic BindSiteNode builder with application/json body
+func NewBindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewBindSiteNodeRequestWithBody(server, orgId, siteId, "application/json", bodyReader)
+}
+
+// NewBindSiteNodeRequestWithBody generates requests for BindSiteNode with any type of body
+func NewBindSiteNodeRequestWithBody(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/bind", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewAddSiteSubnetRequest calls the generic AddSiteSubnet builder with application/json body
+func NewAddSiteSubnetRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, body AddSiteSubnetJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAddSiteSubnetRequestWithBody(server, orgId, siteId, "application/json", bodyReader)
+}
+
+// NewAddSiteSubnetRequestWithBody generates requests for AddSiteSubnet with any type of body
+func NewAddSiteSubnetRequestWithBody(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/subnets", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetSsoConfigRequest generates requests for GetSsoConfig
 func NewGetSsoConfigRequest(server string, orgId openapi_types.UUID, provider string) (*http.Request, error) {
 	var err error
@@ -7200,6 +7666,30 @@ type ClientWithResponsesInterface interface {
 	UpdateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
 
 	UpdateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
+
+	// ListPendingSiteSubnetsWithResponse request
+	ListPendingSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingSiteSubnetsResponse, error)
+
+	// ApproveSiteSubnetWithResponse request
+	ApproveSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveSiteSubnetResponse, error)
+
+	// ListSitesWithResponse request
+	ListSitesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSitesResponse, error)
+
+	// RegisterSiteWithBodyWithResponse request with any body
+	RegisterSiteWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error)
+
+	RegisterSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error)
+
+	// BindSiteNodeWithBodyWithResponse request with any body
+	BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
+
+	BindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
+
+	// AddSiteSubnetWithBodyWithResponse request with any body
+	AddSiteSubnetWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddSiteSubnetResponse, error)
+
+	AddSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body AddSiteSubnetJSONRequestBody, reqEditors ...RequestEditorFn) (*AddSiteSubnetResponse, error)
 
 	// GetSsoConfigWithResponse request
 	GetSsoConfigWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*GetSsoConfigResponse, error)
@@ -9064,6 +9554,142 @@ func (r UpdateResourceResponse) StatusCode() int {
 	return 0
 }
 
+type ListPendingSiteSubnetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]SiteSubnet
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPendingSiteSubnetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPendingSiteSubnetsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ApproveSiteSubnetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ApproveSiteSubnetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApproveSiteSubnetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListSitesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Site
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSitesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSitesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RegisterSiteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *Site
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RegisterSiteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RegisterSiteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type BindSiteNodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r BindSiteNodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BindSiteNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AddSiteSubnetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *SiteSubnet
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AddSiteSubnetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AddSiteSubnetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetSsoConfigResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10201,6 +10827,84 @@ func (c *ClientWithResponses) UpdateResourceWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseUpdateResourceResponse(rsp)
+}
+
+// ListPendingSiteSubnetsWithResponse request returning *ListPendingSiteSubnetsResponse
+func (c *ClientWithResponses) ListPendingSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingSiteSubnetsResponse, error) {
+	rsp, err := c.ListPendingSiteSubnets(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPendingSiteSubnetsResponse(rsp)
+}
+
+// ApproveSiteSubnetWithResponse request returning *ApproveSiteSubnetResponse
+func (c *ClientWithResponses) ApproveSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveSiteSubnetResponse, error) {
+	rsp, err := c.ApproveSiteSubnet(ctx, orgId, subnetId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApproveSiteSubnetResponse(rsp)
+}
+
+// ListSitesWithResponse request returning *ListSitesResponse
+func (c *ClientWithResponses) ListSitesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSitesResponse, error) {
+	rsp, err := c.ListSites(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSitesResponse(rsp)
+}
+
+// RegisterSiteWithBodyWithResponse request with arbitrary body returning *RegisterSiteResponse
+func (c *ClientWithResponses) RegisterSiteWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error) {
+	rsp, err := c.RegisterSiteWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRegisterSiteResponse(rsp)
+}
+
+func (c *ClientWithResponses) RegisterSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error) {
+	rsp, err := c.RegisterSite(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRegisterSiteResponse(rsp)
+}
+
+// BindSiteNodeWithBodyWithResponse request with arbitrary body returning *BindSiteNodeResponse
+func (c *ClientWithResponses) BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error) {
+	rsp, err := c.BindSiteNodeWithBody(ctx, orgId, siteId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBindSiteNodeResponse(rsp)
+}
+
+func (c *ClientWithResponses) BindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error) {
+	rsp, err := c.BindSiteNode(ctx, orgId, siteId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBindSiteNodeResponse(rsp)
+}
+
+// AddSiteSubnetWithBodyWithResponse request with arbitrary body returning *AddSiteSubnetResponse
+func (c *ClientWithResponses) AddSiteSubnetWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddSiteSubnetResponse, error) {
+	rsp, err := c.AddSiteSubnetWithBody(ctx, orgId, siteId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddSiteSubnetResponse(rsp)
+}
+
+func (c *ClientWithResponses) AddSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body AddSiteSubnetJSONRequestBody, reqEditors ...RequestEditorFn) (*AddSiteSubnetResponse, error) {
+	rsp, err := c.AddSiteSubnet(ctx, orgId, siteId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddSiteSubnetResponse(rsp)
 }
 
 // GetSsoConfigWithResponse request returning *GetSsoConfigResponse
@@ -12784,6 +13488,190 @@ func ParseUpdateResourceResponse(rsp *http.Response) (*UpdateResourceResponse, e
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPendingSiteSubnetsResponse parses an HTTP response from a ListPendingSiteSubnetsWithResponse call
+func ParseListPendingSiteSubnetsResponse(rsp *http.Response) (*ListPendingSiteSubnetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPendingSiteSubnetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []SiteSubnet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApproveSiteSubnetResponse parses an HTTP response from a ApproveSiteSubnetWithResponse call
+func ParseApproveSiteSubnetResponse(rsp *http.Response) (*ApproveSiteSubnetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApproveSiteSubnetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSitesResponse parses an HTTP response from a ListSitesWithResponse call
+func ParseListSitesResponse(rsp *http.Response) (*ListSitesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSitesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Site
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRegisterSiteResponse parses an HTTP response from a RegisterSiteWithResponse call
+func ParseRegisterSiteResponse(rsp *http.Response) (*RegisterSiteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RegisterSiteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Site
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseBindSiteNodeResponse parses an HTTP response from a BindSiteNodeWithResponse call
+func ParseBindSiteNodeResponse(rsp *http.Response) (*BindSiteNodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BindSiteNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAddSiteSubnetResponse parses an HTTP response from a AddSiteSubnetWithResponse call
+func ParseAddSiteSubnetResponse(rsp *http.Response) (*AddSiteSubnetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AddSiteSubnetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest SiteSubnet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

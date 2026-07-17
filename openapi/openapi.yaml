@@ -1806,6 +1806,93 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  # ── S8.1 site-to-site (EPIC 8): site model + subnet advertisement/approval (site:manage) ──
+  /api/v1/organizations/{orgId}/sites:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSites
+      summary: List the org's sites (S8.1)
+      tags: [sites]
+      responses:
+        "200":
+          description: Sites.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Site" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: registerSite
+      summary: Register a site gateway (S8.1; site:manage)
+      tags: [sites]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RegisterSiteRequest" } } }
+      responses:
+        "201":
+          description: Created.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/sites/{siteId}/subnets:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: addSiteSubnet
+      summary: Advertise a subnet on a site — pending approval (S8.1; site:manage)
+      tags: [sites]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AddSiteSubnetRequest" } } }
+      responses:
+        "201":
+          description: Advertised (pending approval).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteSubnet" } } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/sites/{siteId}/bind:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: bindSiteNode
+      summary: Bind a gateway node to a site — single-node v1 (S8.1; site:manage)
+      tags: [sites]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/BindSiteNodeRequest" } } }
+      responses:
+        "204": { description: Bound. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/site-subnets/pending:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listPendingSiteSubnets
+      summary: List advertised-but-unapproved subnets — the review queue (S8.1; site:manage)
+      tags: [sites]
+      responses:
+        "200":
+          description: Pending advertisements.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SiteSubnet" } } } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/site-subnets/{subnetId}/approve:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: subnetId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveSiteSubnet
+      summary: Approve an advertised subnet after disjointness (S8.1; site:manage)
+      tags: [sites]
+      responses:
+        "204": { description: Approved. }
+        default: { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2004,9 +2091,10 @@ components:
         src_kind: { type: string, enum: [group, user] }
         src_group_id: { type: string, format: uuid, nullable: true }
         src_user_id: { type: string, format: uuid, nullable: true }
-        dst_kind: { type: string, enum: [resource, group] }
+        dst_kind: { type: string, enum: [resource, group, site] }
         dst_resource_id: { type: string, format: uuid, nullable: true }
         dst_group_id: { type: string, format: uuid, nullable: true }
+        dst_site_id: { type: string, format: uuid, nullable: true }
         # S7.5.4: null = permanent; set = a temporary grant that lapses at this instant.
         expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
@@ -2020,10 +2108,50 @@ components:
         src_kind: { type: string, enum: [group, user] }
         src_group_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=group (or omitted). }
         src_user_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=user (a current org member). }
-        dst_kind: { type: string, enum: [resource, group] }
+        dst_kind: { type: string, enum: [resource, group, site] }
         dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
         dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }
+        dst_site_id: { type: string, format: uuid, nullable: true, description: "Required when dst_kind=site (S8.1); the compiler resolves it to the site's approved subnet CIDRs." }
         expires_at: { type: string, format: date-time, nullable: true, description: "Set = a temporary grant that expires at this time (must be future); omit for a permanent grant." }
+
+    # ── S8.1 site-to-site ──
+    Site:
+      type: object
+      required: [id, name, link_transport, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        link_transport: { type: string, enum: [wireguard], description: "Reserved enum (D4); wireguard-only in v1." }
+        link_mtu: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+    SiteSubnet:
+      type: object
+      required: [id, site_id, cidr, status]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        cidr: { type: string, description: "IPv4 CIDR of the routed LAN (e.g. 10.20.0.0/24)." }
+        status: { type: string, enum: [pending, approved], description: "Advertised subnets are pending until approved (D5)." }
+    RegisterSiteRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 100 }
+    AddSiteSubnetRequest:
+      type: object
+      required: [cidr]
+      additionalProperties: false
+      properties:
+        cidr: { type: string, description: "IPv4 CIDR to advertise (e.g. 10.20.0.0/24)." }
+    BindSiteNodeRequest:
+      type: object
+      required: [node_id]
+      additionalProperties: false
+      properties:
+        node_id: { type: string, format: uuid }
 
     ExtendGrantRequest:
       type: object

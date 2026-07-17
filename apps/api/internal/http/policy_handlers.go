@@ -269,6 +269,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 		DstKind:       string(req.Body.DstKind),
 		DstResourceID: req.Body.DstResourceId,
 		DstGroupID:    req.Body.DstGroupId,
+		DstSiteID:     req.Body.DstSiteId, // S8.1: dst_kind=site
 		ExpiresAt:     req.Body.ExpiresAt,
 	}
 	if req.Body.SrcKind != nil {

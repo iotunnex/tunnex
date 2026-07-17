@@ -17,6 +17,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
@@ -93,6 +94,7 @@ type apiServer struct {
 	invites   *invites.Service
 	nodes     *nodes.Service
 	devices   *devices.Service
+	sites     *sites.Service
 	sessions  *session.Store
 	mfa       *mfa.Service // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	sso       ssoPort       // nil in the open build

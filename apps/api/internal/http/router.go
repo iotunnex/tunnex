@@ -25,6 +25,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
@@ -42,6 +43,7 @@ type Deps struct {
 	Invites   *invites.Service
 	Nodes     *nodes.Service
 	Devices   *devices.Service
+	Sites     *sites.Service
 	Sessions  *session.Store
 	Mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	SSO       ssoPort       // nil => open build (SSO endpoints return edition_required)
@@ -158,7 +160,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, sites: d.Sites, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL}
 	// Default-deny MFA-enrollment gate (S7.5.5 D8, enterprise): runs after auth attaches the
 	// principal; a gated user is restricted to enrollment. Registered before the routes so it
 	// wraps every operation (self-arming — a new endpoint is gated by construction).

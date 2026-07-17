@@ -9,7 +9,8 @@
     "org:update",
     "org:view",
     "policy:manage",
-    "policy:view"
+    "policy:view",
+    "site:manage"
   ],
   "member": [
     "member:list",
@@ -26,6 +27,7 @@
     "org:update",
     "org:view",
     "policy:manage",
-    "policy:view"
+    "policy:view",
+    "site:manage"
   ]
 }

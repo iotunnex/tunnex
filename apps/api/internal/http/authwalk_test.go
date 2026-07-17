@@ -39,13 +39,17 @@ var walkBodies = map[string]string{
 	"mfaenrollconfirm": `{"code":"123456"}`,
 	"setmfaenforce":    `{"enforce":false}`,
 	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
-	"creategroup":       `{"name":"Walk"}`,
-	"updategroup":       `{"name":"Walk"}`,
-	"addgroupmember":    `{"user_id":"00000000-0000-0000-0000-000000000000"}`,
-	"createresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
-	"updateresource":    `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
-	"createpolicyrule":  `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
-	"extendgrant":       `{"expires_at":"2099-01-01T00:00:00Z"}`,
+	"creategroup":      `{"name":"Walk"}`,
+	"updategroup":      `{"name":"Walk"}`,
+	"addgroupmember":   `{"user_id":"00000000-0000-0000-0000-000000000000"}`,
+	"createresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"updateresource":   `{"name":"Walk","cidr":"10.0.0.0/24","protocol":"any"}`,
+	"createpolicyrule": `{"src_group_id":"00000000-0000-0000-0000-000000000000","dst_kind":"group","dst_group_id":"00000000-0000-0000-0000-000000000000"}`,
+	"extendgrant":      `{"expires_at":"2099-01-01T00:00:00Z"}`,
+	// S8.1 site-to-site gated ops (site:manage; each still 401s sessionless. approveSiteSubnet + listPending have no body).
+	"registersite":      `{"name":"Walk"}`,
+	"addsitesubnet":     `{"cidr":"10.20.0.0/24"}`,
+	"bindsitenode":      `{"node_id":"00000000-0000-0000-0000-000000000000"}`,
 	"setzerotrustmode":  `{"mode":"off"}`,
 	"setdeviceapproval": `{"mode":"off"}`,
 	// S7.5.2 IdP-group sync gated ops (enterprise; each still 401s sessionless).
@@ -89,6 +93,8 @@ func TestSessionlessRequestsAre401(t *testing.T) {
 			reqPath = strings.ReplaceAll(reqPath, "{groupId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{resourceId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{ruleId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{siteId}", uuid.NewString())
+			reqPath = strings.ReplaceAll(reqPath, "{subnetId}", uuid.NewString())
 			reqPath = strings.ReplaceAll(reqPath, "{checkKind}", "disk_encryption")
 
 			var body io.Reader

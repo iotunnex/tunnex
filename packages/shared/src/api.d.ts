@@ -1388,6 +1388,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List the org's sites (S8.1) */
+        get: operations["listSites"];
+        put?: never;
+        /** Register a site gateway (S8.1; site:manage) */
+        post: operations["registerSite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/sites/{siteId}/subnets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Advertise a subnet on a site — pending approval (S8.1; site:manage) */
+        post: operations["addSiteSubnet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/sites/{siteId}/bind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind a gateway node to a site — single-node v1 (S8.1; site:manage) */
+        post: operations["bindSiteNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/site-subnets/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List advertised-but-unapproved subnets — the review queue (S8.1; site:manage) */
+        get: operations["listPendingSiteSubnets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/site-subnets/{subnetId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                subnetId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve an advertised subnet after disjointness (S8.1; site:manage) */
+        post: operations["approveSiteSubnet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1531,11 +1630,13 @@ export interface components {
             /** Format: uuid */
             src_user_id?: string | null;
             /** @enum {string} */
-            dst_kind: "resource" | "group";
+            dst_kind: "resource" | "group" | "site";
             /** Format: uuid */
             dst_resource_id?: string | null;
             /** Format: uuid */
             dst_group_id?: string | null;
+            /** Format: uuid */
+            dst_site_id?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: date-time */
@@ -1555,7 +1656,7 @@ export interface components {
              */
             src_user_id?: string | null;
             /** @enum {string} */
-            dst_kind: "resource" | "group";
+            dst_kind: "resource" | "group" | "site";
             /**
              * Format: uuid
              * @description Required when dst_kind=resource.
@@ -1567,10 +1668,52 @@ export interface components {
              */
             dst_group_id?: string | null;
             /**
+             * Format: uuid
+             * @description Required when dst_kind=site (S8.1); the compiler resolves it to the site's approved subnet CIDRs.
+             */
+            dst_site_id?: string | null;
+            /**
              * Format: date-time
              * @description Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
              */
             expires_at?: string | null;
+        };
+        Site: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * @description Reserved enum (D4); wireguard-only in v1.
+             * @enum {string}
+             */
+            link_transport: "wireguard";
+            link_mtu?: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SiteSubnet: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_id: string;
+            /** @description IPv4 CIDR of the routed LAN (e.g. 10.20.0.0/24). */
+            cidr: string;
+            /**
+             * @description Advertised subnets are pending until approved (D5).
+             * @enum {string}
+             */
+            status: "pending" | "approved";
+        };
+        RegisterSiteRequest: {
+            name: string;
+        };
+        AddSiteSubnetRequest: {
+            /** @description IPv4 CIDR to advertise (e.g. 10.20.0.0/24). */
+            cidr: string;
+        };
+        BindSiteNodeRequest: {
+            /** Format: uuid */
+            node_id: string;
         };
         ExtendGrantRequest: {
             /**
@@ -4280,6 +4423,159 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResizeConflict"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sites. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    registerSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterSiteRequest"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addSiteSubnet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddSiteSubnetRequest"];
+            };
+        };
+        responses: {
+            /** @description Advertised (pending approval). */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSubnet"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    bindSiteNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindSiteNodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Bound. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listPendingSiteSubnets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending advertisements. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSubnet"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    approveSiteSubnet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                subnetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

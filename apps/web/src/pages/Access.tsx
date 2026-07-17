@@ -511,7 +511,9 @@ function RuleFormModal({
   const [srcKind, setSrcKind] = useState<"group" | "user">(editing?.src_kind ?? "group");
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
-  const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind ?? "group");
+  // S8.1: dst_kind may be "site" over the wire, but this rule-edit modal only creates group/resource
+  // grants (site-dst rule management is the API + the S8.3 site UI, not here) — coerce for the form.
+  const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind === "resource" ? "resource" : "group");
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");
   // Temporary grant: an optional expiry (datetime-local). Empty = permanent.
