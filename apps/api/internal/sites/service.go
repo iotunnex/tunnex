@@ -133,6 +133,22 @@ func (s *Service) UnbindNode(ctx context.Context, orgID, nodeID uuid.UUID) error
 	return nil
 }
 
+// UnbindSiteNode detaches the site's gateway node (D6 replace-node = unbind-old then bind-new). 404
+// when the site has no bound gateway. Finds the bound node via GetSiteNode, then unbinds it.
+func (s *Service) UnbindSiteNode(ctx context.Context, orgID, siteID uuid.UUID) error {
+	if _, err := s.GetSite(ctx, orgID, siteID); err != nil { // org-check
+		return err
+	}
+	n, err := s.q.GetSiteNode(ctx, pgtype.UUID{Bytes: siteID, Valid: true})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return apierr.NotFound("site_no_gateway", "this site has no bound gateway to unbind")
+		}
+		return err
+	}
+	return s.UnbindNode(ctx, orgID, n.ID)
+}
+
 // ListPendingSubnets returns the org's advertised-but-unapproved subnets (the admin review queue).
 func (s *Service) ListPendingSubnets(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListPendingSiteSubnetsForOrgRow, error) {
 	return s.q.ListPendingSiteSubnetsForOrg(ctx, orgID)
@@ -157,16 +173,20 @@ func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid
 		if sub.Status == "approved" {
 			return nil // idempotent no-op
 		}
-		// The candidate must be disjoint from the org's OTHER approved subnets + the pool.
+		// The candidate must be disjoint from the org's approved subnets + the pool. The candidate is
+		// PENDING, so it is NOT in the approved-only list — pass the WHOLE approved set to the validator.
+		// (A prior `a.Cidr != sub.Cidr` filter here was a BYPASS wearing a convenience costume: it
+		// exempted the exact-duplicate-CIDR collision — the ONE class the org-wide check most needs,
+		// since site_subnets uniqueness is per-SITE, not per-org, so two sites CAN advertise the same
+		// CIDR. Its stated purpose — exclude the candidate from its own list — was already satisfied
+		// structurally. See the validator-input-filtering law in docs/S8.1-decisions.md.)
 		approved, e := q.ListSiteSubnetsForOrg(ctx, orgID) // approved-only
 		if e != nil {
 			return e
 		}
-		var others []netip.Prefix
+		others := make([]netip.Prefix, 0, len(approved))
 		for _, a := range approved {
-			if a.Cidr != sub.Cidr {
-				others = append(others, a.Cidr)
-			}
+			others = append(others, a.Cidr)
 		}
 		org, e := q.GetOrganizationByID(ctx, orgID)
 		if e != nil {

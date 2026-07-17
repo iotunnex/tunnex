@@ -116,6 +116,9 @@ type DeleteSiteParams struct {
 	OrgID uuid.UUID `json:"org_id"`
 }
 
+// DELIBERATELY UNWIRED until S8.3 (delete-site is a destructive op that needs the confirm-naming-target
+// UI grain). Kept because the cascade behavior it triggers (dst_kind='site' rules + subnets cascade,
+// ON DELETE CASCADE) is exercised by TestPolicyRuleSiteDstCascade — do NOT drop this in a cleanup pass.
 func (q *Queries) DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSite, arg.ID, arg.OrgID)
 	if err != nil {

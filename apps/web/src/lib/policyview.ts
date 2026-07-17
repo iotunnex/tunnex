@@ -210,10 +210,16 @@ export function ruleRow(
     rule.src_kind === "user"
       ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
       : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
-  const dst =
+  // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site label, NOT the
+  // resource branch (which would render a valid site rule as a broken 'deleted resource', the
+  // never-mislabeled invariant. No site name is loaded here yet — the S8.3 site UI supplies it — so
+  // show a stable "site <id>" at state ok; display + edit are now both site-aware).
+  const dst: RefLabel =
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
-      : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
+      : rule.dst_kind === "site"
+        ? { id: rule.dst_site_id ?? "", label: `site ${short(rule.dst_site_id ?? "")}`, state: "ok" }
+        : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
   return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok" };
 }
 

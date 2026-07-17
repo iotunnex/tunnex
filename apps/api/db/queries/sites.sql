@@ -9,6 +9,9 @@ SELECT * FROM sites WHERE id = $1 AND org_id = $2;
 SELECT * FROM sites WHERE org_id = $1 ORDER BY created_at;
 
 -- name: DeleteSite :execrows
+-- DELIBERATELY UNWIRED until S8.3 (delete-site is a destructive op that needs the confirm-naming-target
+-- UI grain). Kept because the cascade behavior it triggers (dst_kind='site' rules + subnets cascade,
+-- ON DELETE CASCADE) is exercised by TestPolicyRuleSiteDstCascade — do NOT drop this in a cleanup pass.
 DELETE FROM sites WHERE id = $1 AND org_id = $2;
 
 -- name: AddSiteSubnet :one

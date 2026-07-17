@@ -87,6 +87,32 @@ func (s apiServer) BindSiteNode(ctx context.Context, req api.BindSiteNodeRequest
 	return api.BindSiteNode204Response{}, nil
 }
 
+// UnbindSiteNode detaches the site's gateway (D6 replace-node = unbind then bind a new node).
+func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeRequestObject) (api.UnbindSiteNodeResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId); err != nil {
+		return nil, err
+	}
+	return api.UnbindSiteNode204Response{}, nil
+}
+
+func (s apiServer) ListSiteSubnets(ctx context.Context, req api.ListSiteSubnetsRequestObject) (api.ListSiteSubnetsResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	list, err := s.sites.ListSubnets(ctx, req.OrgId, req.SiteId)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.SiteSubnet, len(list))
+	for i, x := range list {
+		out[i] = api.SiteSubnet{Id: x.ID, SiteId: x.SiteID, Cidr: x.Cidr.String(), Status: api.SiteSubnetStatus(x.Status)}
+	}
+	return api.ListSiteSubnets200JSONResponse{Body: out, Headers: api.ListSiteSubnets200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 func (s apiServer) ListPendingSiteSubnets(ctx context.Context, req api.ListPendingSiteSubnetsRequestObject) (api.ListPendingSiteSubnetsResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err

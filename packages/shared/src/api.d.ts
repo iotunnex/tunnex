@@ -1418,7 +1418,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /** List a site's subnets (S8.1; site:manage) */
+        get: operations["listSiteSubnets"];
         put?: never;
         /** Advertise a subnet on a site — pending approval (S8.1; site:manage) */
         post: operations["addSiteSubnet"];
@@ -1442,7 +1443,8 @@ export interface paths {
         put?: never;
         /** Bind a gateway node to a site — single-node v1 (S8.1; site:manage) */
         post: operations["bindSiteNode"];
-        delete?: never;
+        /** Unbind the site's gateway node — D6 replace-node (S8.1; site:manage) */
+        delete: operations["unbindSiteNode"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4479,6 +4481,31 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listSiteSubnets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The site's subnets. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSubnet"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     addSiteSubnet: {
         parameters: {
             query?: never;
@@ -4525,6 +4552,28 @@ export interface operations {
         };
         responses: {
             /** @description Bound. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    unbindSiteNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unbound. */
             204: {
                 headers: {
                     [name: string]: unknown;

@@ -1838,6 +1838,16 @@ paths:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSiteSubnets
+      summary: List a site's subnets (S8.1; site:manage)
+      tags: [sites]
+      responses:
+        "200":
+          description: The site's subnets.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SiteSubnet" } } } }
+        default: { $ref: "#/components/responses/Error" }
     post:
       operationId: addSiteSubnet
       summary: Advertise a subnet on a site — pending approval (S8.1; site:manage)
@@ -1865,6 +1875,13 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/BindSiteNodeRequest" } } }
       responses:
         "204": { description: Bound. }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: unbindSiteNode
+      summary: Unbind the site's gateway node — D6 replace-node (S8.1; site:manage)
+      tags: [sites]
+      responses:
+        "204": { description: Unbound. }
         default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/site-subnets/pending:

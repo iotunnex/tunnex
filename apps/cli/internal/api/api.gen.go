@@ -1703,10 +1703,16 @@ type ClientInterface interface {
 
 	RegisterSite(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// UnbindSiteNode request
+	UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// BindSiteNodeWithBody request with any body
 	BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSiteSubnets request
+	ListSiteSubnets(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// AddSiteSubnetWithBody request with any body
 	AddSiteSubnetWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3209,6 +3215,18 @@ func (c *Client) RegisterSite(ctx context.Context, orgId openapi_types.UUID, bod
 	return c.Client.Do(req)
 }
 
+func (c *Client) UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnbindSiteNodeRequest(c.Server, orgId, siteId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewBindSiteNodeRequestWithBody(c.Server, orgId, siteId, contentType, body)
 	if err != nil {
@@ -3223,6 +3241,18 @@ func (c *Client) BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.U
 
 func (c *Client) BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewBindSiteNodeRequest(c.Server, orgId, siteId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSiteSubnets(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSiteSubnetsRequest(c.Server, orgId, siteId)
 	if err != nil {
 		return nil, err
 	}
@@ -6996,6 +7026,47 @@ func NewRegisterSiteRequestWithBody(server string, orgId openapi_types.UUID, con
 	return req, nil
 }
 
+// NewUnbindSiteNodeRequest generates requests for UnbindSiteNode
+func NewUnbindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/bind", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewBindSiteNodeRequest calls the generic BindSiteNode builder with application/json body
 func NewBindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -7046,6 +7117,47 @@ func NewBindSiteNodeRequestWithBody(server string, orgId openapi_types.UUID, sit
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListSiteSubnetsRequest generates requests for ListSiteSubnets
+func NewListSiteSubnetsRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/subnets", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -7681,10 +7793,16 @@ type ClientWithResponsesInterface interface {
 
 	RegisterSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error)
 
+	// UnbindSiteNodeWithResponse request
+	UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error)
+
 	// BindSiteNodeWithBodyWithResponse request with any body
 	BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
 
 	BindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
+
+	// ListSiteSubnetsWithResponse request
+	ListSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSiteSubnetsResponse, error)
 
 	// AddSiteSubnetWithBodyWithResponse request with any body
 	AddSiteSubnetWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddSiteSubnetResponse, error)
@@ -9645,6 +9763,28 @@ func (r RegisterSiteResponse) StatusCode() int {
 	return 0
 }
 
+type UnbindSiteNodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r UnbindSiteNodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnbindSiteNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type BindSiteNodeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9661,6 +9801,29 @@ func (r BindSiteNodeResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r BindSiteNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListSiteSubnetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]SiteSubnet
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSiteSubnetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSiteSubnetsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -10873,6 +11036,15 @@ func (c *ClientWithResponses) RegisterSiteWithResponse(ctx context.Context, orgI
 	return ParseRegisterSiteResponse(rsp)
 }
 
+// UnbindSiteNodeWithResponse request returning *UnbindSiteNodeResponse
+func (c *ClientWithResponses) UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error) {
+	rsp, err := c.UnbindSiteNode(ctx, orgId, siteId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnbindSiteNodeResponse(rsp)
+}
+
 // BindSiteNodeWithBodyWithResponse request with arbitrary body returning *BindSiteNodeResponse
 func (c *ClientWithResponses) BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error) {
 	rsp, err := c.BindSiteNodeWithBody(ctx, orgId, siteId, contentType, body, reqEditors...)
@@ -10888,6 +11060,15 @@ func (c *ClientWithResponses) BindSiteNodeWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseBindSiteNodeResponse(rsp)
+}
+
+// ListSiteSubnetsWithResponse request returning *ListSiteSubnetsResponse
+func (c *ClientWithResponses) ListSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSiteSubnetsResponse, error) {
+	rsp, err := c.ListSiteSubnets(ctx, orgId, siteId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSiteSubnetsResponse(rsp)
 }
 
 // AddSiteSubnetWithBodyWithResponse request with arbitrary body returning *AddSiteSubnetResponse
@@ -13626,6 +13807,32 @@ func ParseRegisterSiteResponse(rsp *http.Response) (*RegisterSiteResponse, error
 	return response, nil
 }
 
+// ParseUnbindSiteNodeResponse parses an HTTP response from a UnbindSiteNodeWithResponse call
+func ParseUnbindSiteNodeResponse(rsp *http.Response) (*UnbindSiteNodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnbindSiteNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseBindSiteNodeResponse parses an HTTP response from a BindSiteNodeWithResponse call
 func ParseBindSiteNodeResponse(rsp *http.Response) (*BindSiteNodeResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13640,6 +13847,39 @@ func ParseBindSiteNodeResponse(rsp *http.Response) (*BindSiteNodeResponse, error
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSiteSubnetsResponse parses an HTTP response from a ListSiteSubnetsWithResponse call
+func ParseListSiteSubnetsResponse(rsp *http.Response) (*ListSiteSubnetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSiteSubnetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []SiteSubnet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

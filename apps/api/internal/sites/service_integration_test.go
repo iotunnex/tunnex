@@ -182,3 +182,86 @@ func TestApproveSubnetDisjointness(t *testing.T) {
 		t.Fatalf("both approvals must be audited, got %d", approved)
 	}
 }
+
+// TestApproveSubnetCrossSiteDuplicate is the #1 story-end-review regression red. site_subnets
+// uniqueness is per-SITE, so two DIFFERENT sites CAN advertise the same CIDR — and the disjointness
+// check must catch it. A prior candidate-self-filter (a.Cidr != sub.Cidr) BYPASSED exactly this class;
+// the original red's fixture had only ONE site, so it passed green over the bypass. This is the missing
+// fixture family: two sites, same CIDR (exact) + a contained CIDR (containment) — both must refuse.
+func TestApproveSubnetCrossSiteDuplicate(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "xd-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "x-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	siteA, _ := svc.RegisterSite(ctx, org, "site-a")
+	siteB, _ := svc.RegisterSite(ctx, org, "site-b")
+	addTo := func(siteID uuid.UUID, cidr string) sqlc.SiteSubnet {
+		s, e := svc.AddSubnet(ctx, org, siteID, netip.MustParsePrefix(cidr))
+		if e != nil {
+			t.Fatalf("add %s: %v", cidr, e)
+		}
+		return s
+	}
+	status := func(id uuid.UUID) string {
+		var st string
+		_ = pool.QueryRow(ctx, `SELECT status FROM site_subnets WHERE id=$1`, id).Scan(&st)
+		return st
+	}
+	// Approve 10.30.0.0/24 on site A.
+	a1 := addTo(siteA.ID, "10.30.0.0/24")
+	if err := svc.ApproveSubnet(ctx, actor, org, a1.ID); err != nil {
+		t.Fatalf("approve A: %v", err)
+	}
+	// site B, EXACT-DUPLICATE CIDR across sites → REFUSED (the bypass class the filter exempted).
+	b1 := addTo(siteB.ID, "10.30.0.0/24")
+	if err := svc.ApproveSubnet(ctx, actor, org, b1.ID); err == nil || status(b1.ID) != "pending" {
+		t.Fatalf("an exact-duplicate CIDR across sites must be refused (err=%v status=%s)", err, status(b1.ID))
+	}
+	// site B, CONTAINED CIDR (10.30.0.0/25 ⊂ site A's /24) → REFUSED (containment via the same path).
+	b2 := addTo(siteB.ID, "10.30.0.0/25")
+	if err := svc.ApproveSubnet(ctx, actor, org, b2.ID); err == nil || status(b2.ID) != "pending" {
+		t.Fatalf("a contained CIDR across sites must be refused (err=%v status=%s)", err, status(b2.ID))
+	}
+}
+
+// TestUnbindSiteNode is the #3 fold red (D6 replace-node via API): UnbindSiteNode detaches the site's
+// gateway; a second unbind (no gateway) is a typed 404.
+func TestUnbindSiteNode(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	q := sqlc.New(pool)
+	ctx := context.Background()
+	org, node := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug) VALUES ($1,'S',$2)`, org, "ub-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-ub-"+node.String()[:8]); e != nil {
+		t.Fatalf("node: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+	site, _ := svc.RegisterSite(ctx, org, "hq")
+	if err := svc.BindNode(ctx, org, site.ID, node); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	// Unbind detaches the gateway.
+	if err := svc.UnbindSiteNode(ctx, org, site.ID); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	if _, err := q.GetSiteNode(ctx, pgtype.UUID{Bytes: site.ID, Valid: true}); err == nil {
+		t.Fatal("the site must have no bound gateway after unbind")
+	}
+	// A second unbind (no gateway) is a typed 404.
+	if err := svc.UnbindSiteNode(ctx, org, site.ID); err == nil {
+		t.Fatal("unbinding a site with no gateway must 404")
+	}
+}

@@ -339,3 +339,18 @@ describe("canEditRuleInModal — site-dst rules are NOT editable in the group/re
     expect(canEditRuleInModal("site")).toBe(false);
   });
 });
+
+import { ruleRow } from "../src/lib/policyview";
+
+describe("ruleRow — a site-dst rule renders as a site, NEVER a broken 'deleted resource' (S8.1 #2)", () => {
+  it("dst_kind='site' → site label, state ok, not broken", () => {
+    const rule = {
+      id: "r1", org_id: "o", src_kind: "group", src_group_id: "g1",
+      dst_kind: "site", dst_site_id: "00000000-0000-0000-0000-0000000051e1", created_at: "x",
+    } as any;
+    const row = ruleRow(rule, [{ id: "g1", name: "Admins" } as any], [], [], { groupsLoaded: true, resourcesLoaded: true } as any);
+    expect(row.dst.state).toBe("ok");
+    expect(row.dst.label).toMatch(/^site /);
+    expect(row.broken).toBe(false);
+  });
+});
