@@ -15,8 +15,11 @@ test("owner sees org settings; SSO config is gated to the enterprise edition", a
   await login(page, OWNER);
   await expect(page.getByText("Organization", { exact: true })).toBeVisible();
   await expect(page.getByText("slug: demo")).toBeVisible();
-  // Open edition: no SSO config form, just the enterprise note (watch-item b).
-  await expect(page.getByText(/Tunnex Enterprise feature/i)).toBeVisible();
+  // Open edition: no SSO config form, just the edition-gated notes. S7.5.5 added a SECOND enterprise
+  // note (org-wide MFA enforcement) beside SSO, so assert EACH specifically — a bare /Tunnex Enterprise
+  // feature/ now matches both and trips Playwright strict mode.
+  await expect(page.getByText(/SSO .*is a Tunnex Enterprise feature/i)).toBeVisible();
+  await expect(page.getByText(/Org-wide MFA enforcement is a Tunnex Enterprise feature/i)).toBeVisible();
   await expect(page.getByLabel("Client ID")).toHaveCount(0);
 });
 
