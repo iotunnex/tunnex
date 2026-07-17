@@ -8,11 +8,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
 type fakeBackend struct {
 	mu        sync.Mutex
 	peers     []Peer
+	routes    []string
 	applyN    int
 	configErr error
 }
@@ -24,6 +27,17 @@ func (f *fakeBackend) Configure(context.Context, InterfaceConfig) error {
 	return f.configErr
 }
 func (f *fakeBackend) applyCount() int { f.mu.Lock(); defer f.mu.Unlock(); return f.applyN }
+func (f *fakeBackend) appliedRoutes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.routes...)
+}
+func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes = append([]string(nil), cidrs...)
+	return nil
+}
 func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) { return nil, nil }
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
@@ -110,6 +124,46 @@ func TestReconcileIgnoresRoamedEndpoint(t *testing.T) {
 	b.roam("k1", "203.0.113.9:55555")
 	if changed, _ := r.Reconcile(ctx, desired); changed || b.applyCount() != 1 {
 		t.Fatalf("further roam must stay a no-op: applyN=%d", b.applyCount())
+	}
+}
+
+// TestRunOnceProgramsAndPrunesSiteRoutes — S8.2 Slice-2 agent red: the reconcile loop programs the
+// kernel routes carried in Policy.Routes (explicit intent, NEVER inferred from peer AllowedIPs), and a
+// subsequent fetch carrying fewer routes shrinks the delivered set — the full-sweep contract (a site
+// unbind drops its route). A nil Policy (mesh) clears routes.
+func TestRunOnceProgramsAndPrunesSiteRoutes(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	ctx := context.Background()
+	c := &fakeClient{watch: make(chan struct{})}
+
+	c.set(DesiredState{Policy: &nodepolicy.Compiled{
+		Version: 5, Mode: nodepolicy.ModeEnforcing,
+		Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}, {DstCIDR: "10.3.0.0/24"}},
+	}})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if got := b.appliedRoutes(); len(got) != 2 {
+		t.Fatalf("both site routes must be programmed, got %v", got)
+	}
+	// A site unbind: the next fetch drops 10.3.0.0/24 → the desired set shrinks → prune.
+	c.set(DesiredState{Policy: &nodepolicy.Compiled{
+		Version: 5, Mode: nodepolicy.ModeEnforcing, Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}},
+	}})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce 2: %v", err)
+	}
+	if got := b.appliedRoutes(); len(got) != 1 || got[0] != "10.2.0.0/24" {
+		t.Fatalf("the dropped route must be pruned (full-sweep), got %v", got)
+	}
+	// nil Policy (mesh) → routes cleared.
+	c.set(DesiredState{})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce 3: %v", err)
+	}
+	if got := b.appliedRoutes(); len(got) != 0 {
+		t.Fatalf("nil policy must clear routes, got %v", got)
 	}
 }
 

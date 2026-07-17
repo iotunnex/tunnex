@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -309,7 +310,117 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			}
 		}
 	}
+
+	// S8.2 site-to-site plumbing (CORE, all editions): if this node is a site gateway, add its site-link
+	// WG peers (hub-and-spoke) + the kernel routes to remote site subnets. Routes ride Compiled.Routes
+	// (explicit intent, hash-blind); the grant in Allow still gates reachability (routed ≠ permitted).
+	slPeers, routes, slErr := s.siteLinkGraph(ctx, node)
+	if slErr != nil {
+		// A site-link build error must not fail the whole fetch (peers/policy already built); log + skip.
+		slog.Warn("site_link_graph_failed", slog.String("node_id", node.ID.String()), slog.String("error", slErr.Error()))
+	} else {
+		ds.Peers = append(ds.Peers, slPeers...)
+		if len(routes) > 0 {
+			switch {
+			case ds.Policy != nil:
+				ds.Policy.Routes = routes
+				ds.Policy.Version = policyspec.RequiredVersion(*ds.Policy)
+			case s.policy == nil:
+				// Open build (no policy engine, no health/hash path to disturb): synthesize a mesh
+				// artifact carrying the routes so an open-edition self-hoster still routes between sites.
+				c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes}
+				c.Version = policyspec.RequiredVersion(c)
+				ds.Policy = &c
+			}
+		}
+	}
 	return ds, nil
+}
+
+// siteLinkGraph builds a site-gateway node's site-link WG peers + kernel routes (S8.2 hub-and-spoke,
+// Item 6/7). Returns (nil, nil, nil) when the node is not a site gateway or there is no remote site to
+// reach. Topology: the single HUB is the site gateway with a public endpoint (v1; deterministic by
+// lowest node id if several — multi-hub reserved). A spoke peers ONLY with the hub (its AllowedIPs =
+// ALL remote site subnets, so it reaches other spokes VIA the hub); the hub peers with every spoke
+// (each peer's AllowedIPs = that spoke's own subnets); the hub forwards between them. Routes = every
+// remote site's approved subnets, programmed as kernel routes via the tunnel iface. Deterministic
+// (sorted) so a steady-state reconcile is a no-op. Full-sweep: an unbound/deleted site simply drops out
+// of ListSiteGatewaysForOrg / ListSiteSubnetsForOrg, so its peers + routes vanish on the next fetch.
+func (s *Service) siteLinkGraph(ctx context.Context, node sqlc.Node) ([]Peer, []policyspec.Route, error) {
+	if !node.SiteID.Valid {
+		return nil, nil, nil // not a site gateway
+	}
+	gws, err := s.q.ListSiteGatewaysForOrg(ctx, node.OrgID)
+	if err != nil {
+		return nil, nil, err
+	}
+	subs, err := s.q.ListSiteSubnetsForOrg(ctx, node.OrgID) // approved (site_id, cidr)
+	if err != nil {
+		return nil, nil, err
+	}
+	siteSubnets := map[uuid.UUID][]string{}
+	for _, ss := range subs {
+		siteSubnets[ss.SiteID] = append(siteSubnets[ss.SiteID], ss.Cidr.String())
+	}
+	// Designate the hub: the site gateway with a non-empty endpoint (v1 single-hub; lowest node id wins
+	// if several, deterministic). A NAT'd spoke has no reachable endpoint.
+	var hub *sqlc.ListSiteGatewaysForOrgRow
+	for i := range gws {
+		g := &gws[i]
+		if g.Endpoint != "" && (hub == nil || g.ID.String() < hub.ID.String()) {
+			hub = g
+		}
+	}
+	mySite := uuid.UUID(node.SiteID.Bytes)
+	// Route set = every OTHER site's approved subnets (dedup, sorted).
+	routeSeen := map[string]bool{}
+	var routeCIDRs []string
+	for i := range gws {
+		g := &gws[i]
+		gSite := uuid.UUID(g.SiteID.Bytes)
+		if gSite == mySite {
+			continue
+		}
+		for _, c := range siteSubnets[gSite] {
+			if !routeSeen[c] {
+				routeSeen[c] = true
+				routeCIDRs = append(routeCIDRs, c)
+			}
+		}
+	}
+	sort.Strings(routeCIDRs)
+	routes := make([]policyspec.Route, 0, len(routeCIDRs))
+	for _, c := range routeCIDRs {
+		routes = append(routes, policyspec.Route{DstCIDR: c})
+	}
+
+	var peers []Peer
+	isHub := hub != nil && hub.ID == node.ID
+	switch {
+	case isHub:
+		// The hub peers with every spoke; each spoke-peer's AllowedIPs = that spoke's own subnets.
+		for i := range gws {
+			g := &gws[i]
+			if g.ID == node.ID {
+				continue
+			}
+			gSite := uuid.UUID(g.SiteID.Bytes)
+			ips := append([]string(nil), siteSubnets[gSite]...)
+			if len(ips) == 0 {
+				continue // a spoke advertising no subnets yet contributes no crypto-routing
+			}
+			sort.Strings(ips)
+			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint})
+		}
+	case hub != nil:
+		// A spoke peers ONLY with the hub; AllowedIPs = all remote subnets (reach other spokes via hub).
+		if len(routeCIDRs) > 0 {
+			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint})
+		}
+	}
+	// Deterministic peer order (syncconf is a set, but a stable list keeps the reconcile a no-op).
+	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
+	return peers, routes, nil
 }
 
 // validEndpoint reports whether s is a clean host:port with a numeric port and
