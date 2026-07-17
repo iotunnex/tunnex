@@ -50,6 +50,14 @@ func TestDegradedKind(t *testing.T) {
 		// is unique (upgrade the agent) — even when an apply error + a stuck desync are ALSO present.
 		{"S8.1 — unsupported_policy_version (agent refused)", KindInput{UnsupportedVersion: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindUnsupportedPolicyVersion},
 		{"S8.1 — refused OUTRANKS apply-error + silent-desync", KindInput{UnsupportedVersion: true, PolicyError: "boom", PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindUnsupportedPolicyVersion},
+
+		// [S8.2 Item 7/9] site-link reachability kinds — hub-down distinct from spoke link-down, ranked
+		// below version-refused but above the policy apply/desync kinds (the site gateway's headline).
+		{"S8.2 — site_hub_down", KindInput{SiteHubDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteHubDown},
+		{"S8.2 — site_link_down (spoke)", KindInput{SiteLinkDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteLinkDown},
+		{"S8.2 — hub-down OUTRANKS a spoke link-down", KindInput{SiteHubDown: true, SiteLinkDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteHubDown},
+		{"S8.2 — hub-down OUTRANKS apply-error + silent-desync", KindInput{SiteHubDown: true, PolicyError: "boom", PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindSiteHubDown},
+		{"S8.2 — version-refused still OUTRANKS hub-down", KindInput{UnsupportedVersion: true, SiteHubDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindUnsupportedPolicyVersion},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -262,6 +262,14 @@ func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
 		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
 	}
 	v4fwd, v6fwd := m.forwardRules(pol, m.policyReceived.Load())
+	// S8.2 D9 MSS clamp: on the INTRA-TUNNEL forward path (wg0→wg0 — device-to-device and site-to-site,
+	// where a client-WG session can ride a site-WG link and PMTUD fails silently inside the tunnels),
+	// clamp each TCP SYN's MSS down to the path MTU. This is the classic "ping works, large transfer
+	// freezes" fix. HONEST SCOPE (reassuring-comment law): it clamps TCP ONLY (UDP/ICMP-dependent PMTUD
+	// is unaffected — those rely on the link MTU / fragmentation) and only NEW connections (the SYN);
+	// it does not otherwise change forwarding. Node-local rendered rule, OUTSIDE CanonicalHash (the
+	// masquerade class, D2) — no version bump, twin goldens untouched. Non-terminal: it modifies then
+	// continues to the grant/drop below.
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
@@ -271,6 +279,7 @@ table ip tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
+    iifname "%[1]s" oifname "%[1]s" tcp flags syn tcp option maxseg size set rt mtu
 %[3]s  }
 }
 add table ip6 tunnex
