@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "./brand";
 import { api } from "./lib/api";
+import { resolveMfaGateRoute } from "./lib/authroute";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { AuthLayout } from "./components/AuthLayout";
 import { MfaSettings } from "./components/MfaSettings";
@@ -90,19 +91,15 @@ function RequireAuth() {
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
-  // S7.5.5 D8: an enrollment-gated user is confined to the enrollment ceremony until they set up
-  // 2FA. The SERVER enforces this (default-deny middleware, typed mfa_enrollment_required 403); this
-  // is the client-side routing so the user lands on the ceremony rather than hitting dead 403s.
-  if (state.user.mfa_enrollment_required && location.pathname !== "/enroll-mfa") {
-    return <Navigate to="/enroll-mfa" replace />;
-  }
-  // WF-3 (S7.5.5 UI-walk): the INVERSE redirect — once the gate CLEARS (enrollment confirmed, or an
-  // already-enrolled user lands here on a stale flag), release the user to the app. Without this the
-  // ForcedEnroll page has no exit: confirming clears mfa_enrollment_required but nothing routes away
-  // from /enroll-mfa, so a now-enrolled user is trapped on the ceremony's "turn off 2FA" view (the
-  // ForcedEnroll comment claimed a release the code never performed). Symmetric with the guard above.
-  if (!state.user.mfa_enrollment_required && location.pathname === "/enroll-mfa") {
-    return <Navigate to="/dashboard" replace />;
+  // S7.5.5 D8: an enrollment-gated user is confined to the enrollment ceremony until they set up 2FA;
+  // once the gate clears they are released back to the app (WF-3 — the inverse redirect the original
+  // code was missing, which trapped a now-enrolled user on /enroll-mfa). The SERVER enforces the gate
+  // (default-deny middleware, typed mfa_enrollment_required 403); this is the client routing so the
+  // user lands on the ceremony rather than hitting dead 403s. Decision is a pure fn (authroute.ts),
+  // table-pinned in BOTH directions (resolveMfaGateRoute).
+  const gateRoute = resolveMfaGateRoute(Boolean(state.user.mfa_enrollment_required), location.pathname);
+  if (gateRoute) {
+    return <Navigate to={gateRoute} replace />;
   }
   return <Outlet />;
 }
