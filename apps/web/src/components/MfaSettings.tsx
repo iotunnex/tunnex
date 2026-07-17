@@ -181,6 +181,7 @@ export function MfaSettings() {
           caption="Each code works once, in place of your authenticator. Store them somewhere safe — they are shown only now and let you sign in if you lose your device."
           secret={recovery.join("\n")}
           copyLabel="Copy codes"
+          downloadFilename="tunnex-recovery-codes.txt"
           onDismiss={() => {
             setRecovery(null);
             // WF-5: clear the gate ONLY now (after the codes are acknowledged). On the forced-enroll
