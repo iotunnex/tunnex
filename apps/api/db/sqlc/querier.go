@@ -434,6 +434,10 @@ type Querier interface {
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	// S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
+	// input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
+	// yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).
+	ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error)
 	// S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
 	// compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
 	// gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).

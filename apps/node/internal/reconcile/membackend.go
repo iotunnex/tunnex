@@ -9,8 +9,9 @@ import (
 // adapter arrives with the WireGuard device lifecycle in S3.2). It lets the full
 // enroll->reconcile loop run end-to-end without NET_ADMIN or a WG device.
 type MemBackend struct {
-	mu    sync.Mutex
-	peers []Peer
+	mu     sync.Mutex
+	peers  []Peer
+	routes []string
 }
 
 // NewMemBackend returns an empty in-memory backend.
@@ -29,6 +30,14 @@ func (m *MemBackend) ApplyPeers(_ context.Context, peers []Peer) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.peers = append([]Peer(nil), peers...)
+	return nil
+}
+
+// ApplyRoutes records the desired route set (the in-memory backend has no kernel FIB).
+func (m *MemBackend) ApplyRoutes(_ context.Context, cidrs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.routes = append([]string(nil), cidrs...)
 	return nil
 }
 

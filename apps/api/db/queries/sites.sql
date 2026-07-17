@@ -40,6 +40,13 @@ UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 -- the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
 SELECT * FROM nodes WHERE site_id = $1;
 
+-- name: ListSiteGatewaysForOrg :many
+-- S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
+-- input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
+-- yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).
+SELECT id, site_id, wg_public_key, endpoint FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '';
+
 -- name: ListSiteNodesForOrg :many
 -- S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
 -- compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site

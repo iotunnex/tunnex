@@ -91,11 +91,20 @@ const ProtocolVersion = 5
 // agents keep working) while an artifact using a v5 feature is stamped v5 (and old agents refuse it via
 // D1 rather than silently mis-enforcing). Pure/deterministic — same Compiled → same version.
 //
-//	v5 trigger: any AllowEntry whose source is a CIDR (a site LAN), i.e. SrcIP carries a prefix. A
-//	device source is a bare host ("10.99.0.7"); a site source carries "/" ("10.1.0.0/24"). An old
-//	agent's allowMatch (ParseAddr) would SKIP a CIDR source — silent under-enforcement — so it must
-//	refuse the whole artifact instead. (Slice 2 adds a second trigger: a non-empty Routes section.)
+//	v5 triggers (S8.2): (1) any AllowEntry whose source is a CIDR (a site LAN) — a device source is a
+//	bare host ("10.99.0.7"), a site source carries "/" ("10.1.0.0/24"), and an old agent's allowMatch
+//	(ParseAddr) would SKIP it (silent under-enforcement); (2) a non-empty Routes section — an old agent
+//	has no kernel-route code, so it would silently not-route. Either way the old agent must REFUSE the
+//	whole artifact, not partially render it.
+//
+// LAW (S8.2 Slice-1): every enforcement-significant content addition MUST add its trigger here in the
+// SAME change (see docs/S8.2-decisions.md). A new field that changes the wire's rendered shape but
+// leaves this function untouched is a silent-accept bug — the artifact would carry new content at an old
+// version and old agents would accept it. The D2 checklist asks "RequiredVersion updated? y/n".
 func RequiredVersion(c Compiled) int {
+	if len(c.Routes) > 0 {
+		return 5
+	}
 	for _, e := range c.Allow {
 		if strings.Contains(e.SrcIP, "/") {
 			return 5
@@ -142,6 +151,19 @@ type AllowEntry struct {
 	SrcDeviceID string `json:"src_device_id,omitempty"`
 }
 
+// Route is one kernel-route intent (S8.2): the agent must program a route to DstCIDR via the tunnel
+// interface (wg0) so packets destined to a remote SITE subnet reach the WG interface at all (today the
+// kernel only knows the pool route). This is EXPLICIT propagation output (the overruled-into shape) —
+// the agent programs it as INTENT, never inferring routes from a peer's AllowedIPs (which would fuse
+// WG crypto-routing with kernel-FIB intent). D2-classified: reachability PLUMBING, NOT enforcement (the
+// grant in Allow is the permission; a routed-but-ungranted subnet is DROPPED at the forward chain) —
+// so Route is EXCLUDED from CanonicalHash (route drift is caught by the site-link health surface, not
+// the policy-desync hash). But a Route STILL requires a v5 agent to RENDER, so its presence triggers
+// RequiredVersion=5 (an old agent must REFUSE, not silently ignore the section).
+type Route struct {
+	DstCIDR string `json:"dst_cidr"` // a remote site subnet to route via the tunnel interface
+}
+
 // Compiled is the per-node policy artifact. It expresses BOTH modes so S7.2 has a
 // single code path (mode is a compiler INPUT, not an enforcement special-case):
 //
@@ -160,4 +182,8 @@ type Compiled struct {
 	Mode    string       `json:"mode"` // "off" | "enforcing"
 	Mesh    bool         `json:"mesh"`
 	Allow   []AllowEntry `json:"allow"`
+	// Routes (v5, S8.2) is the site-to-site kernel-route intent — PLUMBING, out of CanonicalHash, but
+	// present triggers RequiredVersion=5 (an old agent refuses rather than ignoring the routes). Carried
+	// in BOTH modes: an off-mode gateway still needs the kernel route to reach a remote site subnet.
+	Routes []Route `json:"routes,omitempty"`
 }

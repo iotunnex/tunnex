@@ -256,6 +256,46 @@ func (q *Queries) ListPendingSiteSubnetsForOrg(ctx context.Context, orgID uuid.U
 	return items, nil
 }
 
+const listSiteGatewaysForOrg = `-- name: ListSiteGatewaysForOrg :many
+SELECT id, site_id, wg_public_key, endpoint FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> ''
+`
+
+type ListSiteGatewaysForOrgRow struct {
+	ID          uuid.UUID   `json:"id"`
+	SiteID      pgtype.UUID `json:"site_id"`
+	WgPublicKey string      `json:"wg_public_key"`
+	Endpoint    string      `json:"endpoint"`
+}
+
+// S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
+// input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
+// yet can't be a peer, so it is excluded. endpoint is ” for a NAT'd spoke (it dials out).
+func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listSiteGatewaysForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSiteGatewaysForOrgRow{}
+	for rows.Next() {
+		var i ListSiteGatewaysForOrgRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SiteID,
+			&i.WgPublicKey,
+			&i.Endpoint,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSiteNodesForOrg = `-- name: ListSiteNodesForOrg :many
 SELECT id, site_id FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL

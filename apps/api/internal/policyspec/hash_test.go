@@ -38,6 +38,22 @@ func TestCanonicalHashGolden(t *testing.T) {
 	}
 }
 
+// TestRequiredVersionRoutesTriggerV5 — S8.2 Slice-1 LAW guard (the first customer is Slice 2's Routes[]).
+// A Compiled carrying a Routes[] section MUST derive RequiredVersion >= 5: an old agent has no kernel-
+// route code, so it must REFUSE rather than silently not-route. This red-fails if a future change adds
+// routes to the enforcement/render shape without teaching RequiredVersion. Routes are ALSO hash-blind
+// (plumbing, out of the CanonicalHash enforcement projection).
+func TestRequiredVersionRoutesTriggerV5(t *testing.T) {
+	withRoutes := policyspec.Compiled{NodeID: "n", Mode: "off", Mesh: true, Routes: []policyspec.Route{{DstCIDR: "10.2.0.0/24"}}}
+	if v := policyspec.RequiredVersion(withRoutes); v < 5 {
+		t.Fatalf("a Compiled with Routes[] must derive RequiredVersion >= 5 (the LAW guard); got %d", v)
+	}
+	noRoutes := policyspec.Compiled{NodeID: "n", Mode: "off", Mesh: true}
+	if policyspec.CanonicalHash(withRoutes) != policyspec.CanonicalHash(noRoutes) {
+		t.Fatal("Routes[] must be hash-blind (plumbing, out of the projection) — adding routes changed CanonicalHash")
+	}
+}
+
 // TestCanonicalHashRuleIDIsObservabilityOnly is the A-1/A-3 red pair: rule_id
 // (observability) must be INVISIBLE to the hash in BOTH directions, and an
 // enforcement-field change MUST move the hash. This is the "observability, never

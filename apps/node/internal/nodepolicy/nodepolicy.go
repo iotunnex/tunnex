@@ -63,6 +63,16 @@ type Compiled struct {
 	Mode    string       `json:"mode"`
 	Mesh    bool         `json:"mesh"`
 	Allow   []AllowEntry `json:"allow"`
+	// Routes (v5, S8.2) is the site-to-site kernel-route intent — reachability PLUMBING, EXCLUDED from
+	// CanonicalHash (hashView omits it, like policyspec), so route drift never disturbs the policy hash.
+	// The agent programs each as a kernel route via the tunnel iface. Mirror of policyspec.Compiled.
+	Routes []Route `json:"routes,omitempty"`
+}
+
+// Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site
+// subnet is reachable. Mirror of policyspec.Route. PLUMBING, never in the hash.
+type Route struct {
+	DstCIDR string `json:"dst_cidr"`
 }
 
 // hashAllow / hashView are the ENFORCEMENT-ONLY projection hashed by CanonicalHash —

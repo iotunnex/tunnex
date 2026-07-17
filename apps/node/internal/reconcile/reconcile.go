@@ -73,6 +73,11 @@ type WGBackend interface {
 	Configure(ctx context.Context, cfg InterfaceConfig) error
 	Peers(ctx context.Context) ([]Peer, error)
 	ApplyPeers(ctx context.Context, peers []Peer) error
+	// ApplyRoutes reconciles the kernel routes to remote SITE subnets (S8.2): install each desired
+	// route via the tunnel iface (idempotent — heals a flushed route next tick) and PRUNE our routes
+	// no longer desired (the full-sweep contract: a site unbind/subnet removal drops the route). Only
+	// agent-owned routes are touched; the interface's own on-link route is never pruned.
+	ApplyRoutes(ctx context.Context, cidrs []string) error
 	// Stats reports per-peer live telemetry (handshake/bytes/endpoint).
 	Stats(ctx context.Context) ([]PeerStat, error)
 }
@@ -164,6 +169,18 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	}
 	changed, err := r.Reconcile(ctx, ds.Peers)
 	if err != nil {
+		r.healthy.Store(false)
+		return false, err
+	}
+	// S8.2: converge the site-to-site kernel routes (from Policy.Routes — explicit intent, never
+	// inferred from a peer's AllowedIPs). After peers so the interface + crypto-routing exist.
+	var routes []string
+	if ds.Policy != nil {
+		for _, rt := range ds.Policy.Routes {
+			routes = append(routes, rt.DstCIDR)
+		}
+	}
+	if err := r.backend.ApplyRoutes(ctx, routes); err != nil {
 		r.healthy.Store(false)
 		return false, err
 	}

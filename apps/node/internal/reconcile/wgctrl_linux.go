@@ -286,3 +286,38 @@ func (b *wgctrlBackend) ApplyPeers(ctx context.Context, peers []Peer) error {
 	_, err = run(ctx, "wg", "syncconf", b.iface, f.Name())
 	return err
 }
+
+// ApplyRoutes reconciles the S8.2 site-to-site kernel routes on the tunnel iface. It installs each
+// desired remote-subnet route with `proto static` (idempotent replace — heals a flushed route on the
+// next tick) and PRUNES any of OUR routes (proto static, this iface) no longer desired — the full-sweep
+// contract on the wire (a site unbind/subnet removal drops out of the desired set → its route is
+// deleted). The `proto static` scoping is load-bearing: the interface's own on-link pool route is
+// `proto kernel`, so it is NEVER enumerated here and can never be pruned by us.
+func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
+	desired := make(map[string]bool, len(cidrs))
+	for _, c := range cidrs {
+		desired[c] = true
+		if _, err := run(ctx, "ip", "route", "replace", c, "dev", b.iface, "proto", "static"); err != nil {
+			return err
+		}
+	}
+	// Enumerate ONLY our routes and prune the stale ones. If we can't enumerate, surface it (never guess).
+	out, err := run(ctx, "ip", "route", "show", "dev", b.iface, "proto", "static")
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		cidr := fields[0]
+		if cidr == "" || desired[cidr] {
+			continue
+		}
+		if _, err := run(ctx, "ip", "route", "del", cidr, "dev", b.iface, "proto", "static"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
