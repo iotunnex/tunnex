@@ -516,3 +516,73 @@ func TestSiteSubnetDowngradeToMesh(t *testing.T) {
 		t.Fatalf("off-mode must be the legacy mesh (no site-subnet grant-gating), got mesh=%v allow=%+v", off.Mesh, off.Allow)
 	}
 }
+
+// TestSiteSourceResolution — S8.2 Slice-1: a src_kind='site' rule makes a site's LAN the SOURCE. The
+// compiler resolves it to the source site's subnet CIDR(s), emits AllowEntry{Src: site-CIDR, Dst}, and
+// places the grant on the gateway nodes bound to the involved sites (src site + a site destination — the
+// transit endpoints whose forward chain the LAN traffic crosses). Ruled edges: a subnetless source site
+// grants nothing; an UNBOUND source site (no gateway) has no node to enforce on. Version is content-
+// derived (D1b): a CIDR source flips the artifact to v5.
+func TestSiteSourceResolution(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-00000051e0a1")
+	siteB := uuid.MustParse("00000000-0000-0000-0000-00000051e0b1")
+	base := func(bindA bool, subs []policy.SiteSubnet) policy.Snapshot {
+		nodes := []policy.SiteNode{{SiteID: siteB, NodeID: nodeB}}
+		if bindA {
+			nodes = append(nodes, policy.SiteNode{SiteID: siteA, NodeID: nodeA})
+		}
+		return policy.Snapshot{
+			Mode:        policy.ModeEnforcing,
+			Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "site", SrcSiteID: siteA, DstKind: "site", DstSiteID: siteB}},
+			SiteSubnets: subs,
+			SiteNodes:   nodes,
+		}
+	}
+	subs := []policy.SiteSubnet{{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}}
+
+	out := policy.Compile(base(true, subs))
+	// The site→site grant lands on BOTH involved gateways (transit endpoints).
+	for _, n := range []uuid.UUID{nodeA, nodeB} {
+		if !hasAllow(allowsFor(out, n), "10.1.0.0/24", "10.2.0.0/24") {
+			t.Fatalf("site→site grant must be on node %v's forward chain, got %+v", n, allowsFor(out, n))
+		}
+	}
+	// Content-derived version: a CIDR source flips the artifact to v5 (D1b).
+	if v := out[nodeA].Version; v != 5 {
+		t.Fatalf("a CIDR-source artifact must be v5 (content-derived), got %d", v)
+	}
+
+	// Edge: a subnetless SOURCE site → nothing (even though the dst has subnets).
+	noneSrc := base(true, []policy.SiteSubnet{{SiteID: siteB, CIDR: "10.2.0.0/24"}})
+	if got := allowsFor(policy.Compile(noneSrc), nodeA); len(got) != 0 {
+		t.Fatalf("a subnetless SOURCE site must grant nothing, got %+v", got)
+	}
+
+	// Edge: an UNBOUND source site (no gateway node) → nodeA gets no artifact at all.
+	if _, ok := policy.Compile(base(false, subs))[nodeA]; ok {
+		t.Fatalf("an unbound source site's node must not appear in the output")
+	}
+}
+
+// TestContentDerivedVersion — S8.2 D1b: the emitted Version is the MINIMUM the artifact's content
+// requires. A device-only org (no CIDR source) stays v4 — byte-identical, old gated agents keep working,
+// no fleet re-converge. Only an artifact carrying a site-LAN (CIDR) source is v5.
+func TestContentDerivedVersion(t *testing.T) {
+	dev := policy.Compile(policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Rules:       []policy.Rule{{SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB}},
+		Resources:   []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24"}},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Devices:     []policy.Device{{ID: uuid.New(), UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	})
+	if v := dev[nodeA].Version; v != 4 {
+		t.Fatalf("a device-only artifact must stay v4 (content-derived), got %d", v)
+	}
+	off := policy.Compile(policy.Snapshot{
+		Mode:    policy.ModeOff,
+		Devices: []policy.Device{{ID: uuid.New(), UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+	})
+	if v := off[nodeA].Version; v != 4 {
+		t.Fatalf("an off-mode mesh artifact must be v4, got %d", v)
+	}
+}

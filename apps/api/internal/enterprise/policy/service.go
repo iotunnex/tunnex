@@ -290,8 +290,12 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		if in.SrcUserID == nil || in.SrcGroupID != uuid.Nil {
 			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=user requires src_user_id (and no src_group_id)")
 		}
+	case "site": // S8.2: a site's LAN as the SOURCE subject
+		if in.SrcSiteID == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=site requires src_site_id (and no src_group_id/src_user_id)")
+		}
 	default:
-		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group or user")
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, or site")
 	}
 	// Destination shape: exactly one dst_* set, matching dst_kind.
 	switch in.DstKind {
@@ -325,10 +329,19 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 				}
 				return e
 			}
-		} else { // user — must be a CURRENT org member (the FK enforces it too; clean 400 here)
+		} else if srcKind == "user" { // must be a CURRENT org member (the FK enforces it too; clean 400 here)
 			if _, e := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: *in.SrcUserID}); e != nil {
 				if errors.Is(e, pgx.ErrNoRows) {
 					return apierr.BadRequest("user_not_member", "src user is not a member of this org")
+				}
+				return e
+			}
+		} else { // site (S8.2) — the source site must exist in THIS org. A SUBNETLESS source site is
+			// ALLOWED (symmetric to the dst ruling): it compiles to nothing until subnets are added, so
+			// refusing would impose an ordering dependency.
+			if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: *in.SrcSiteID, OrgID: orgID}); e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					return apierr.BadRequest("site_not_found", "src site not found")
 				}
 				return e
 			}
@@ -362,7 +375,8 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		var e error
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
-			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			SrcSiteID: toPgUUID(in.SrcSiteID),
+			DstKind:   in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
 		if e != nil {
@@ -631,6 +645,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		snap.Rules = append(snap.Rules, Rule{
 			ID:         r.ID,
 			SrcKind:    r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
+			SrcSiteID:     fromPgUUID(r.SrcSiteID), // S8.2: src_kind='site' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 			DstSiteID:     fromPgUUID(r.DstSiteID),
@@ -638,6 +653,13 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	}
 	for _, ss := range siteSubnets {
 		snap.SiteSubnets = append(snap.SiteSubnets, SiteSubnet{SiteID: ss.SiteID, CIDR: ss.Cidr.String()})
+	}
+	siteNodes, err := s.q.ListSiteNodesForOrg(ctx, orgID) // S8.2: (site_id, node_id) for src placement
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, sn := range siteNodes {
+		snap.SiteNodes = append(snap.SiteNodes, SiteNode{SiteID: fromPgUUID(sn.SiteID), NodeID: sn.ID})
 	}
 	for _, r := range resources {
 		snap.Resources = append(snap.Resources, Resource{

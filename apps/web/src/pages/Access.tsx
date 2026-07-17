@@ -370,7 +370,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
                           Extend
                         </Button>
                       )}
-                      {canEditRuleInModal(r.dst_kind) && (
+                      {canEditRuleInModal(r) && (
                         <Button variant="ghost" onClick={() => setEditing(r)}>
                           Edit
                         </Button>
@@ -511,7 +511,9 @@ function RuleFormModal({
   onClose: () => void;
   onDone: (staleRuleId?: string) => void;
 }) {
-  const [srcKind, setSrcKind] = useState<"group" | "user">(editing?.src_kind ?? "group");
+  // S8.2: src_kind may be "site" over the wire, but this modal only creates group/user sources (a
+  // site-source rule is blocked from the modal by canEditRuleInModal) — coerce for the form.
+  const [srcKind, setSrcKind] = useState<"group" | "user">(editing?.src_kind === "user" ? "user" : "group");
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
   // S8.1: dst_kind may be "site" over the wire, but this rule-edit modal only creates group/resource

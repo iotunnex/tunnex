@@ -36,9 +36,10 @@ const (
 // filtered OUT of the Snapshot before Compile (the pure compiler is clockless).
 type Rule struct {
 	ID            uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
-	SrcKind       string    // "group" | "user" ("" treated as group for legacy rows)
+	SrcKind       string    // "group" | "user" | "site" (S8.2) ("" treated as group for legacy rows)
 	SrcGroupID    uuid.UUID
 	SrcUserID     uuid.UUID
+	SrcSiteID     uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
 	DstKind       string
 	DstResourceID uuid.UUID
 	DstGroupID    uuid.UUID
@@ -51,6 +52,15 @@ type Rule struct {
 type SiteSubnet struct {
 	SiteID uuid.UUID
 	CIDR   string
+}
+
+// SiteNode binds a site to its gateway node (nodes.site_id, single-node v1). The compiler needs it to
+// place a site-SOURCE grant (S8.2): a site→dst grant lands on the gateway node(s) bound to the involved
+// sites — the transit endpoints whose forward chain the LAN traffic crosses. A site gateway ALSO gets a
+// compiled artifact even with no local devices (so its forward chain is programmed for site traffic).
+type SiteNode struct {
+	SiteID uuid.UUID
+	NodeID uuid.UUID
 }
 
 // Resource is a static destination (a CIDR + optional L4 scope).
@@ -87,6 +97,7 @@ type Snapshot struct {
 	Memberships []Membership
 	Devices     []Device
 	SiteSubnets []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
+	SiteNodes   []SiteNode   // S8.2: (site_id, node_id) bindings for src_kind='site' node placement
 }
 
 // Compile produces the compiled artifact for every node that has at least one
@@ -103,7 +114,9 @@ type Snapshot struct {
 func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	mesh := s.Mode == ModeOff
 
-	// Nodes in play = nodes that have at least one active device.
+	// Nodes in play = nodes that have at least one active device, PLUS every site-bound gateway node
+	// (S8.2): a site gateway gets a compiled artifact even with no local devices, so its forward chain is
+	// programmed for site-to-site traffic (an absent artifact would leave it cold-start deny-all forever).
 	nodeSet := map[uuid.UUID]bool{}
 	for _, d := range s.Devices {
 		if d.AssignedIP == "" {
@@ -111,18 +124,22 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		}
 		nodeSet[d.NodeID] = true
 	}
+	siteNode := map[uuid.UUID]uuid.UUID{} // site_id -> its bound gateway node (S8.2 src placement)
+	for _, sn := range s.SiteNodes {
+		if sn.NodeID == uuid.Nil {
+			continue
+		}
+		siteNode[sn.SiteID] = sn.NodeID
+		nodeSet[sn.NodeID] = true
+	}
 
 	out := make(map[uuid.UUID]policyspec.Compiled, len(nodeSet))
 
 	if mesh {
 		for nodeID := range nodeSet {
-			out[nodeID] = policyspec.Compiled{
-				Version: policyspec.ProtocolVersion,
-				NodeID:  nodeID.String(),
-				Mode:    ModeOff,
-				Mesh:    true,
-				Allow:   nil,
-			}
+			c := policyspec.Compiled{NodeID: nodeID.String(), Mode: ModeOff, Mesh: true, Allow: nil}
+			c.Version = policyspec.RequiredVersion(c) // content-derived (S8.2 D1b); mesh has no v5 feature
+			out[nodeID] = c
 		}
 		return out
 	}
@@ -285,16 +302,68 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		}
 	}
 
+	// ── site-SOURCE grants (S8.2): a site's LAN as the SOURCE subject. No device is involved — the
+	// source is the site's subnet CIDRs, and the grant lands on the gateway node(s) bound to the involved
+	// sites (the source site + a site destination), the transit endpoints whose forward chain the LAN
+	// traffic crosses. A subnetless source site grants nothing (symmetric to the dst edge); an unbound
+	// site (no gateway) has no node to program, so it grants nothing until bound. Hub/relay transit-node
+	// placement is Slice 2 (the topology graph) — Slice 1 places the endpoints, correct for the
+	// co-located/direct case and provable now.
+	for _, r := range s.Rules {
+		if r.SrcKind != "site" {
+			continue
+		}
+		srcCIDRs := siteCIDRs[r.SrcSiteID]
+		if len(srcCIDRs) == 0 {
+			continue // subnetless source site
+		}
+		enforceNodes := map[uuid.UUID]bool{}
+		if n := siteNode[r.SrcSiteID]; n != uuid.Nil {
+			enforceNodes[n] = true
+		}
+		if r.DstKind == "site" {
+			if n := siteNode[r.DstSiteID]; n != uuid.Nil {
+				enforceNodes[n] = true
+			}
+		}
+		// Destination templates (SrcIP filled per source CIDR below), resolved once.
+		var dsts []policyspec.AllowEntry
+		switch r.DstKind {
+		case "resource":
+			if res, ok := resourceByID[r.DstResourceID]; ok && res.CIDR != "" {
+				dsts = append(dsts, policyspec.AllowEntry{DstCIDR: res.CIDR, Protocol: normProto(res.Protocol), PortLow: res.PortLow, PortHigh: res.PortHigh})
+			}
+		case "group":
+			for _, dstIP := range groupDeviceIPs[r.DstGroupID] {
+				dsts = append(dsts, policyspec.AllowEntry{DstCIDR: dstIP + "/32", Protocol: policyspec.ProtoAny})
+			}
+		case "site":
+			for _, cidr := range siteCIDRs[r.DstSiteID] {
+				dsts = append(dsts, policyspec.AllowEntry{DstCIDR: cidr, Protocol: policyspec.ProtoAny})
+			}
+		}
+		for node := range enforceNodes {
+			for _, sc := range srcCIDRs {
+				for _, d := range dsts {
+					add(node, policyspec.AllowEntry{
+						SrcIP:    sc, // a CIDR — the site LAN source (the v5 content trigger, RequiredVersion)
+						DstCIDR:  d.DstCIDR,
+						Protocol: d.Protocol,
+						PortLow:  d.PortLow,
+						PortHigh: d.PortHigh,
+						RuleID:   r.ID.String(),
+					})
+				}
+			}
+		}
+	}
+
 	for nodeID := range nodeSet {
 		list := acc[nodeID].list
 		sortAllows(list)
-		out[nodeID] = policyspec.Compiled{
-			Version: policyspec.ProtocolVersion,
-			NodeID:  nodeID.String(),
-			Mode:    ModeEnforcing,
-			Mesh:    false,
-			Allow:   list, // may be nil/empty => deny-all (empty != permissive)
-		}
+		c := policyspec.Compiled{NodeID: nodeID.String(), Mode: ModeEnforcing, Mesh: false, Allow: list}
+		c.Version = policyspec.RequiredVersion(c) // content-derived (S8.2 D1b): v5 iff a CIDR source present
+		out[nodeID] = c
 	}
 	return out
 }

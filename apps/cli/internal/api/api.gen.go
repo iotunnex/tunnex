@@ -49,6 +49,7 @@ const (
 // Defines values for CreatePolicyRuleRequestSrcKind.
 const (
 	CreatePolicyRuleRequestSrcKindGroup CreatePolicyRuleRequestSrcKind = "group"
+	CreatePolicyRuleRequestSrcKindSite  CreatePolicyRuleRequestSrcKind = "site"
 	CreatePolicyRuleRequestSrcKindUser  CreatePolicyRuleRequestSrcKind = "user"
 )
 
@@ -210,6 +211,7 @@ const (
 // Defines values for PolicyRuleSrcKind.
 const (
 	PolicyRuleSrcKindGroup PolicyRuleSrcKind = "group"
+	PolicyRuleSrcKindSite  PolicyRuleSrcKind = "site"
 	PolicyRuleSrcKindUser  PolicyRuleSrcKind = "user"
 )
 
@@ -502,6 +504,9 @@ type CreatePolicyRuleRequest struct {
 	// SrcGroupId Required when src_kind=group (or omitted).
 	SrcGroupId *openapi_types.UUID             `json:"src_group_id"`
 	SrcKind    *CreatePolicyRuleRequestSrcKind `json:"src_kind,omitempty"`
+
+	// SrcSiteId Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source).
+	SrcSiteId *openapi_types.UUID `json:"src_site_id"`
 
 	// SrcUserId Required when src_kind=user (a current org member).
 	SrcUserId *openapi_types.UUID `json:"src_user_id"`
@@ -971,6 +976,7 @@ type PolicyRule struct {
 	OrgId         openapi_types.UUID  `json:"org_id"`
 	SrcGroupId    *openapi_types.UUID `json:"src_group_id"`
 	SrcKind       PolicyRuleSrcKind   `json:"src_kind"`
+	SrcSiteId     *openapi_types.UUID `json:"src_site_id"`
 	SrcUserId     *openapi_types.UUID `json:"src_user_id"`
 }
 

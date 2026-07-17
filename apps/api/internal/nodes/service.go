@@ -37,7 +37,7 @@ import (
 // destination kind — Option A, no new wire field, but Version IS in-hash so v4 is a real hash change,
 // and S8.1 D1's agent gate makes an agent at maxSupported<4 REFUSE it rather than mis-enforce (the
 // v4 bump is no longer "safe to safe-ignore" — it is the enforcement boundary the gate protects).
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 const joinTokenTTL = time.Hour
 
@@ -300,8 +300,12 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			// decode as mesh = fail-OPEN.)
 			slog.Warn("policy_compile_failed_failing_closed",
 				slog.String("node_id", node.ID.String()), slog.String("error", err.Error()))
+			// Content-derived version (S8.2 D1b): a deny-all has an empty Allow → RequiredVersion == 4,
+			// byte-identical to the compiler's device-less enforcing fallback for the SAME node, so the
+			// pushed/applied hashes still agree (finding #D preserved — no fork).
 			ds.Policy = &policyspec.Compiled{
-				Version: policyspec.ProtocolVersion, NodeID: node.ID.String(), Mode: "enforcing", Mesh: false,
+				Version: policyspec.RequiredVersion(policyspec.Compiled{Mode: "enforcing"}),
+				NodeID:  node.ID.String(), Mode: "enforcing", Mesh: false,
 			}
 		}
 	}

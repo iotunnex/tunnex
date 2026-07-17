@@ -1626,11 +1626,13 @@ export interface components {
             /** Format: uuid */
             org_id: string;
             /** @enum {string} */
-            src_kind: "group" | "user";
+            src_kind: "group" | "user" | "site";
             /** Format: uuid */
             src_group_id?: string | null;
             /** Format: uuid */
             src_user_id?: string | null;
+            /** Format: uuid */
+            src_site_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site";
             /** Format: uuid */
@@ -1646,7 +1648,7 @@ export interface components {
         };
         CreatePolicyRuleRequest: {
             /** @enum {string} */
-            src_kind?: "group" | "user";
+            src_kind?: "group" | "user" | "site";
             /**
              * Format: uuid
              * @description Required when src_kind=group (or omitted).
@@ -1657,6 +1659,11 @@ export interface components {
              * @description Required when src_kind=user (a current org member).
              */
             src_user_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source).
+             */
+            src_site_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site";
             /**

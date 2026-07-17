@@ -330,13 +330,16 @@ describe("S7.5.4 activeMembers (D1 picker constraint)", () => {
 
 import { canEditRuleInModal } from "../src/lib/policyview";
 
-describe("canEditRuleInModal — site-dst rules are NOT editable in the group/resource modal (S8.1)", () => {
-  it("group and resource rules are editable", () => {
-    expect(canEditRuleInModal("group")).toBe(true);
-    expect(canEditRuleInModal("resource")).toBe(true);
+describe("canEditRuleInModal — site rules are NOT editable in the group/resource modal (S8.1 dst, S8.2 src)", () => {
+  it("group and resource rules (with a group/user source) are editable", () => {
+    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "group" })).toBe(true);
+    expect(canEditRuleInModal({ src_kind: "user", dst_kind: "resource" })).toBe(true);
   });
-  it("a site-dst rule is NOT editable here (would silently rewrite it — write-guard, not display)", () => {
-    expect(canEditRuleInModal("site")).toBe(false);
+  it("a site-DST rule is NOT editable here (would silently rewrite it — write-guard, not display)", () => {
+    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "site" })).toBe(false);
+  });
+  it("a site-SRC rule (S8.2) is NOT editable here either (same write-guard)", () => {
+    expect(canEditRuleInModal({ src_kind: "site", dst_kind: "group" })).toBe(false);
   });
 });
 

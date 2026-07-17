@@ -266,6 +266,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	}
 	in := policyspec.RuleInput{
 		SrcUserID:     req.Body.SrcUserId,
+		SrcSiteID:     req.Body.SrcSiteId, // S8.2: src_kind=site
 		DstKind:       string(req.Body.DstKind),
 		DstResourceID: req.Body.DstResourceId,
 		DstGroupID:    req.Body.DstGroupId,
@@ -403,6 +404,10 @@ func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 		u := uuid.UUID(r.SrcUserID.Bytes)
 		out.SrcUserId = &u
 	}
+	if r.SrcSiteID.Valid { // S8.2: src_kind=site
+		u := uuid.UUID(r.SrcSiteID.Bytes)
+		out.SrcSiteId = &u
+	}
 	if r.DstResourceID.Valid {
 		u := uuid.UUID(r.DstResourceID.Bytes)
 		out.DstResourceId = &u
@@ -410,6 +415,10 @@ func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 	if r.DstGroupID.Valid {
 		u := uuid.UUID(r.DstGroupID.Bytes)
 		out.DstGroupId = &u
+	}
+	if r.DstSiteID.Valid { // S8.1 (response mapping completed in S8.2): dst_kind=site
+		u := uuid.UUID(r.DstSiteID.Bytes)
+		out.DstSiteId = &u
 	}
 	if r.ExpiresAt.Valid {
 		t := r.ExpiresAt.Time
