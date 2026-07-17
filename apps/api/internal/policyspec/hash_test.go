@@ -27,6 +27,15 @@ func TestCanonicalHashGolden(t *testing.T) {
 	if got := policyspec.CanonicalHash(mesh); got != "5696d2570ee8" {
 		t.Fatalf("mesh golden = %q, want 5696d2570ee8 (nodepolicy twin must match)", got)
 	}
+	// S8.2 v5 twin: a CIDR-SOURCE (site LAN) grant. SrcIP carries a prefix (a new hashed value shape)
+	// and the version is 5 — pins that both modules hash the v5 site-source shape IDENTICALLY.
+	siteSrc := policyspec.Compiled{
+		Version: 5, NodeID: "node-a", Mode: "enforcing", Mesh: false,
+		Allow: []policyspec.AllowEntry{{SrcIP: "10.1.0.0/24", DstCIDR: "10.2.0.0/24", Protocol: policyspec.ProtoAny}},
+	}
+	if got := policyspec.CanonicalHash(siteSrc); got != "92a15b8df267" {
+		t.Fatalf("v5 site-source golden = %q, want 92a15b8df267 (nodepolicy twin must match)", got)
+	}
 }
 
 // TestCanonicalHashRuleIDIsObservabilityOnly is the A-1/A-3 red pair: rule_id

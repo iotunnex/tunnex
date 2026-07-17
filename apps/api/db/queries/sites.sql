@@ -40,6 +40,13 @@ UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 -- the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
 SELECT * FROM nodes WHERE site_id = $1;
 
+-- name: ListSiteNodesForOrg :many
+-- S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
+-- compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
+-- gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
+SELECT id, site_id FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL;
+
 -- name: ListSiteSubnetsForOrg :many
 -- lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
 -- S8.1 compiler input: every APPROVED (site_id, cidr) in the org (D5 — a pending advertisement does NOT

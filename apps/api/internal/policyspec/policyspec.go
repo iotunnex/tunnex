@@ -11,6 +11,7 @@
 package policyspec
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,10 +36,11 @@ type ResourceInput struct {
 // SrcUserID); ExpiresAt set makes it a temporary grant (nil = permanent). SrcKind
 // blank is treated as "group" (back-compat with pre-S7.5.4 callers).
 type RuleInput struct {
-	SrcKind       string // "" | group | user
+	SrcKind       string // "" | group | user | site (S8.2)
 	SrcGroupID    uuid.UUID
 	SrcUserID     *uuid.UUID
-	DstKind       string // resource | group | site (S8.1)
+	SrcSiteID     *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
+	DstKind       string     // resource | group | site (S8.1)
 	DstResourceID *uuid.UUID
 	DstGroupID    *uuid.UUID
 	DstSiteID     *uuid.UUID // S8.1: set iff DstKind=="site"
@@ -72,7 +74,35 @@ type AffectedDevice struct {
 // (with S8.1 D1's gate) an agent at maxSupported<4 REFUSES it (deny-all + unsupported_policy_version)
 // rather than silently mis-enforcing. This is what makes Version-in-hash safe under mixed versions —
 // the A-4 warning at hash.go:25-28 fires and its answer ships here. See docs/S8.1-decisions.md D2/D3.
-const ProtocolVersion = 4
+//
+// v5 (S8.2 Slice 1, EPIC 8): a site's LAN becomes a policy SOURCE (src_kind='site'). A site→dst grant
+// compiles to AllowEntry{Src: site-subnet-CIDR, Dst: ...} — the source is a CIDR, not a device /32. This
+// is enforcement-significant (the agent's source match widens host→prefix), so it is gated by D1. But the
+// bump is CONTENT-DERIVED (S8.2 D1b): the CP stamps Version = RequiredVersion(artifact) = 5 ONLY when the
+// artifact actually carries a v5 feature (a CIDR source), else 4. So an org NOT using site-source grants
+// keeps a byte-identical v4 artifact (hash unchanged, no re-converge, old agents do not refuse); only
+// orgs adopting site-to-site flip to v5 and (via D1) deny-all their un-upgraded gateways loudly. The
+// constant below is the CEILING — the max shape the CP can emit — not what every artifact carries.
+const ProtocolVersion = 5
+
+// RequiredVersion is the MINIMUM agent version required to correctly render this artifact (S8.2 D1b,
+// content-derived version). It returns the OLDEST protocol version whose shape fully covers the
+// artifact's content, so a gateway serving only pre-v5 features keeps a pre-v5 artifact (and old gated
+// agents keep working) while an artifact using a v5 feature is stamped v5 (and old agents refuse it via
+// D1 rather than silently mis-enforcing). Pure/deterministic — same Compiled → same version.
+//
+//	v5 trigger: any AllowEntry whose source is a CIDR (a site LAN), i.e. SrcIP carries a prefix. A
+//	device source is a bare host ("10.99.0.7"); a site source carries "/" ("10.1.0.0/24"). An old
+//	agent's allowMatch (ParseAddr) would SKIP a CIDR source — silent under-enforcement — so it must
+//	refuse the whole artifact instead. (Slice 2 adds a second trigger: a non-empty Routes section.)
+func RequiredVersion(c Compiled) int {
+	for _, e := range c.Allow {
+		if strings.Contains(e.SrcIP, "/") {
+			return 5
+		}
+	}
+	return 4
+}
 
 // Protocol scopes an allow entry to an L4 protocol. "any" ignores ports.
 type Protocol string
@@ -89,7 +119,11 @@ const (
 // S7.2 programs each entry as an accept in the gateway forward chain; anything not
 // covered by an entry is dropped.
 type AllowEntry struct {
-	SrcIP    string   `json:"src_ip"`             // device assigned host address, no prefix (e.g. "10.99.0.7")
+	// SrcIP is the source match. A DEVICE source is a bare host address, no prefix ("10.99.0.7"). A SITE
+	// source (v5, S8.2) is a LAN CIDR ("10.1.0.0/24") — the agent's allowMatch parses it as a prefix. The
+	// presence of a "/" here is the content-derived v5 trigger (RequiredVersion). Kept the json tag
+	// `src_ip` for wire-compat; the field name stays SrcIP though it now also holds a CIDR.
+	SrcIP    string   `json:"src_ip"`
 	DstCIDR  string   `json:"dst_cidr"`           // destination prefix (e.g. "10.0.5.0/24", "10.99.0.9/32", "0.0.0.0/0")
 	Protocol Protocol `json:"protocol"`           // any | tcp | udp
 	PortLow  int      `json:"port_low,omitempty"` // 0 => all ports

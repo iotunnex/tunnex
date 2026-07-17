@@ -209,7 +209,9 @@ export function ruleRow(
   const src: RefLabel =
     rule.src_kind === "user"
       ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
-      : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
+      : rule.src_kind === "site" // S8.2: a site LAN as the source — a stable "site <id>" label, not a broken group
+        ? { id: rule.src_site_id ?? "", label: `site ${short(rule.src_site_id ?? "")}`, state: "ok" }
+        : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site label, NOT the
   // resource branch (which would render a valid site rule as a broken 'deleted resource', the
   // never-mislabeled invariant. No site name is loaded here yet — the S8.3 site UI supplies it — so
@@ -321,11 +323,11 @@ export function swapPartialMessage(oldIdShort: string): string {
   return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
 }
 
-// canEditRuleInModal: the rule-edit modal only creates group/resource grants (create-then-delete). A
-// site-dst rule (S8.1) must NOT be editable there — editing would silently rewrite it into a
-// group/resource rule, a policy MUTATION disguised as a display limitation. Site-dst rules are managed
-// via the API / the S8.3 site UI. (The read-side dst_kind coercion in the modal is display-only; this
-// blocks the WRITE path.)
-export function canEditRuleInModal(dstKind: string): boolean {
-  return dstKind !== "site";
+// canEditRuleInModal: the rule-edit modal only creates group/resource grants with a group/user source
+// (create-then-delete). A rule whose DST is a site (S8.1) OR whose SRC is a site (S8.2) must NOT be
+// editable there — editing would silently rewrite it into a group/resource rule, a policy MUTATION
+// disguised as a display limitation. Site rules are managed via the API / the S8.3 site UI. (The
+// read-side kind coercion in the modal is display-only; this blocks the WRITE path.)
+export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }): boolean {
+  return rule.dst_kind !== "site" && rule.src_kind !== "site";
 }

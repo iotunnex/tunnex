@@ -28,7 +28,7 @@ const (
 // v4 (S8.1 Slice 3): this agent now SUPPORTS the sites bump (Option A — same-shape wire, a
 // device→site-subnet grant is a plain AllowEntry), so it applies v4 rather than refusing it. An
 // agent still at 3 (pre-Slice-3 binary) refuses v4 — the go-forward interlock (D1).
-const MaxSupportedVersion = 4
+const MaxSupportedVersion = 5
 
 // AllowEntry is one compiled default-deny grant: SrcIP (a device /32 host) may reach
 // DstCIDR on Protocol within [PortLow,PortHigh]. PortLow==0 means all ports.

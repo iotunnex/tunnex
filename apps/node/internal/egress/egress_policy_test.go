@@ -487,6 +487,56 @@ func TestInterlockOldMaxAgentRefusesSitesBump(t *testing.T) {
 	}
 }
 
+// TestSiteSourceCIDRRendersAndRoutedButDropped — S8.2 Slice-1 SECURITY SPINE (D3 routed-but-dropped) +
+// the LAN-source render. An enforcing v5 artifact with a site→site grant renders a CIDR-SOURCE accept
+// (`ip saddr <LAN-CIDR>`) — the v4 renderer's ParseAddr would have skipped it. The SAME enforcing gateway
+// WITHOUT the grant renders default-deny: a routed site subnet with no grant is DROPPED at the forward
+// chain (routing ≠ permission), provable at the enforcement layer BEFORE any propagation plumbing exists.
+func TestSiteSourceCIDRRendersAndRoutedButDropped(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{
+		Version: 5, Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Allow: []nodepolicy.AllowEntry{{SrcIP: "10.1.0.0/24", DstCIDR: "10.2.0.0/24", Protocol: "any"}},
+	})
+	if rs := m.ruleset("10.99.0.1/24"); !strings.Contains(rs, "ip saddr 10.1.0.0/24 ip daddr 10.2.0.0/24 counter accept") {
+		t.Fatalf("a v5 site→site (CIDR source) grant must render a LAN-source accept; got:\n%s", rs)
+	}
+	// Routed-but-DROPPED: the same enforcing gateway WITHOUT the grant → no accept for that subnet.
+	m.SetPolicy(&nodepolicy.Compiled{Version: 4, Mode: nodepolicy.ModeEnforcing, Mesh: false})
+	rs2 := m.ruleset("10.99.0.1/24")
+	if strings.Contains(rs2, "10.2.0.0/24") {
+		t.Fatalf("a routed site subnet with NO grant must be DROPPED (no accept); got:\n%s", rs2)
+	}
+	if !strings.Contains(rs2, "policy drop") {
+		t.Fatal("routed-but-dropped must keep the default-deny drop")
+	}
+}
+
+// TestInterlockV4AgentRefusesV5 — S8.2 Slice-1 interlock: a GATED agent pinned at the pre-S8.2 max (4)
+// receiving the REAL v5 LAN-source artifact REFUSES it (deny-all + records the refusal) rather than
+// silently SKIPPING the CIDR source (which the old allowMatch would do → office-to-office blackholes
+// while green). This is the go-forward guarantee on the exact v4→v5 event the box-walk's Leg-1 proves
+// live. Catches a non-bump: if S8.2 forgot to bump above 4, the v5 feature would ride v4 and the old
+// agent would accept it.
+func TestInterlockV4AgentRefusesV5(t *testing.T) {
+	const preS82Max = 4
+	if nodepolicy.MaxSupportedVersion <= preS82Max {
+		t.Fatalf("NON-BUMP: S8.2 must bump MaxSupportedVersion above %d (got %d)", preS82Max, nodepolicy.MaxSupportedVersion)
+	}
+	m := New("wg0")
+	m.maxPolicyVersion = preS82Max // pin the pre-S8.2 gated agent
+	m.SetPolicy(&nodepolicy.Compiled{
+		Version: 5, Mode: "enforcing", Mesh: false,
+		Allow: []nodepolicy.AllowEntry{{SrcIP: "10.1.0.0/24", DstCIDR: "10.2.0.0/24", Protocol: "any"}},
+	})
+	if m.RefusedVersion() != 5 {
+		t.Fatalf("a v4-max agent must REFUSE a v5 artifact; RefusedVersion=%d", m.RefusedVersion())
+	}
+	if rs := m.ruleset("10.99.0.1/24"); strings.Contains(rs, "ip daddr") {
+		t.Fatal("a refused v5 artifact must render DENY-ALL (no accepts)")
+	}
+}
+
 // Finding #1: a half-set / inverted port range fails CLOSED (rule skipped), never
 // widening to all-ports.
 func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {

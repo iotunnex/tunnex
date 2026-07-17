@@ -256,6 +256,39 @@ func (q *Queries) ListPendingSiteSubnetsForOrg(ctx context.Context, orgID uuid.U
 	return items, nil
 }
 
+const listSiteNodesForOrg = `-- name: ListSiteNodesForOrg :many
+SELECT id, site_id FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL
+`
+
+type ListSiteNodesForOrgRow struct {
+	ID     uuid.UUID   `json:"id"`
+	SiteID pgtype.UUID `json:"site_id"`
+}
+
+// S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
+// compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
+// gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
+func (q *Queries) ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listSiteNodesForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSiteNodesForOrgRow{}
+	for rows.Next() {
+		var i ListSiteNodesForOrgRow
+		if err := rows.Scan(&i.ID, &i.SiteID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSiteSubnets = `-- name: ListSiteSubnets :many
 SELECT id, site_id, cidr, created_at, status FROM site_subnets WHERE site_id = $1 ORDER BY created_at
 `

@@ -28,6 +28,14 @@ func TestCanonicalHashGolden(t *testing.T) {
 	if got := nodepolicy.CanonicalHash(mesh); got != "5696d2570ee8" {
 		t.Fatalf("mesh golden = %q, want 5696d2570ee8 (policyspec twin must match)", got)
 	}
+	// S8.2 v5 twin: a CIDR-SOURCE (site LAN) grant — must hash IDENTICALLY to the policyspec side.
+	siteSrc := &nodepolicy.Compiled{
+		Version: 5, NodeID: "node-a", Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Allow: []nodepolicy.AllowEntry{{SrcIP: "10.1.0.0/24", DstCIDR: "10.2.0.0/24", Protocol: "any"}},
+	}
+	if got := nodepolicy.CanonicalHash(siteSrc); got != "92a15b8df267" {
+		t.Fatalf("v5 site-source golden = %q, want 92a15b8df267 (policyspec twin must match)", got)
+	}
 	if nodepolicy.CanonicalHash(nil) != "" {
 		t.Fatal("nil policy must hash to empty (mesh/none)")
 	}

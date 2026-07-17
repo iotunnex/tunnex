@@ -138,9 +138,9 @@ type Querier interface {
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
-	// S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
-	// expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈ {resource,group,site}
-	// (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
+	// S7.5.4: src_kind ∈ {group,user}; S8.2: {group,user,site} (exactly one of src_group_id/src_user_id/
+	// src_site_id, CHECK-enforced). expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈
+	// {resource,group,site} (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
@@ -434,6 +434,10 @@ type Querier interface {
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	// S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
+	// compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
+	// gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
+	ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
 	// lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The

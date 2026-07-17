@@ -367,9 +367,23 @@ func denyDrop(group int) string {
 // as ifaceRE. Ports are integers. A v6 destination is skipped (v4 spokes have no route to
 // it; v6 stays default-deny).
 func allowMatch(e nodepolicy.AllowEntry) (string, bool) {
-	src, err := netip.ParseAddr(e.SrcIP)
-	if err != nil || !src.Is4() {
-		return "", false
+	// SOURCE match: a DEVICE source is a bare host ("10.99.0.7"); a SITE source (v5, S8.2) is a LAN CIDR
+	// ("10.1.0.0/24"). Accept BOTH, fail closed on anything else. Re-emit canonically (never the raw CP
+	// string) so nothing can inject nft statements. The v4 renderer used ParseAddr only — a CIDR source
+	// was SKIPPED (silent under-enforcement), which is exactly why a CIDR source triggers the v5 gate.
+	var srcMatch string
+	if strings.Contains(e.SrcIP, "/") {
+		p, err := netip.ParsePrefix(e.SrcIP)
+		if err != nil || !p.Addr().Is4() {
+			return "", false
+		}
+		srcMatch = p.Masked().String()
+	} else {
+		a, err := netip.ParseAddr(e.SrcIP)
+		if err != nil || !a.Is4() {
+			return "", false
+		}
+		srcMatch = a.String()
 	}
 	dst, err := netip.ParsePrefix(e.DstCIDR)
 	if err != nil || !dst.Addr().Is4() {
@@ -413,7 +427,7 @@ func allowMatch(e nodepolicy.AllowEntry) (string, bool) {
 		// (finding #6).
 		return "", false
 	}
-	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter", src.String(), dst.Masked().String(), clause), true
+	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter", srcMatch, dst.Masked().String(), clause), true
 }
 
 // renderAllow is the ENFORCEMENT-ONLY accept line (no observation). rule_id-INDEPENDENT.

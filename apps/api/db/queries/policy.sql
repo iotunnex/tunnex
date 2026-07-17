@@ -79,11 +79,11 @@ WHERE id = $1 AND org_id = $2;
 
 -- ── policy_rules (allow grants) ─────────────────────────────────────────────────
 -- name: CreatePolicyRule :one
--- S7.5.4: src_kind ∈ {group,user} (exactly one of src_group_id/src_user_id, CHECK-enforced);
--- expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈ {resource,group,site}
--- (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
-INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, dst_kind, dst_resource_id, dst_group_id, dst_site_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+-- S7.5.4: src_kind ∈ {group,user}; S8.2: {group,user,site} (exactly one of src_group_id/src_user_id/
+-- src_site_id, CHECK-enforced). expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind ∈
+-- {resource,group,site} (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
+INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, dst_kind, dst_resource_id, dst_group_id, dst_site_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: ListPolicyRulesByOrg :many

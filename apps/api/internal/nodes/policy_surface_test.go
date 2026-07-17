@@ -223,13 +223,16 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 				}
 				return
 			}
-			// ENFORCING: explicit deny-all, and the SAME policyspec.ProtocolVersion the
-			// compiler stamps (#D) so its hash matches CompiledForNode's fallback.
+			// ENFORCING: explicit deny-all, stamped with the CONTENT-DERIVED version (S8.2 D1b) — a
+			// deny-all has an empty Allow, so RequiredVersion == 4, byte-identical to the compiler's
+			// device-less enforcing fallback for the same node (#D preserved: its hash matches
+			// CompiledForNode's, no false desync). NOT the ProtocolVersion ceiling (now 5).
 			if ds.Policy == nil || ds.Policy.Mesh || ds.Policy.Mode != tc.wantMode {
 				t.Fatalf("enforcing error must fail closed (deny-all enforcing); got %+v", ds.Policy)
 			}
-			if ds.Policy.Version != policyspec.ProtocolVersion {
-				t.Fatalf("fail-closed artifact must use policyspec.ProtocolVersion (%d); got %d", policyspec.ProtocolVersion, ds.Policy.Version)
+			wantVer := policyspec.RequiredVersion(policyspec.Compiled{Mode: "enforcing"})
+			if ds.Policy.Version != wantVer {
+				t.Fatalf("fail-closed artifact must use the content-derived version (%d); got %d", wantVer, ds.Policy.Version)
 			}
 			if len(ds.Policy.Allow) != 0 {
 				t.Fatalf("enforcing fail-closed must be deny-all (no allows); got %+v", ds.Policy.Allow)
