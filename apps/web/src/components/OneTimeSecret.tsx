@@ -32,11 +32,27 @@ function legacyCopy(text: string): boolean {
   }
 }
 
+// downloadText saves the secret as a file. Uses a Blob object-URL — works in an
+// INSECURE (plain-HTTP) context too (no secure-context requirement), matching the
+// self-host POC case where the async Clipboard API is unavailable.
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function OneTimeSecretModal({
   title,
   caption,
   secret,
   copyLabel = "Copy",
+  downloadFilename,
   leadingActions,
   onDismiss,
 }: {
@@ -44,6 +60,9 @@ export function OneTimeSecretModal({
   caption: ReactNode;
   secret: string;
   copyLabel?: string;
+  // When set, a Download button is shown that saves the secret to this filename —
+  // the offline fallback to Copy for the codes a user must keep (recovery codes).
+  downloadFilename?: string;
   leadingActions?: ReactNode;
   onDismiss: () => void;
 }) {
@@ -83,6 +102,11 @@ export function OneTimeSecretModal({
         </pre>
         <div className="mt-4 flex items-center justify-between">
           <div className="flex gap-2">
+            {downloadFilename && (
+              <Button variant="ghost" onClick={() => downloadText(downloadFilename, secret)}>
+                Download
+              </Button>
+            )}
             {leadingActions}
             <Button variant="ghost" onClick={copy}>
               {copied ? "Copied" : copyFailed ? "Select + ⌘C to copy" : copyLabel}
