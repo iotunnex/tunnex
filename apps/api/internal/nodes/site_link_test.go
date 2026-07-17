@@ -47,6 +47,32 @@ func TestPushedHashMatchesServedForRoutedGateway(t *testing.T) {
 	}
 }
 
+// TestSiteLinkNoHubNoRoutes — S8.2 B2: no gateway has a public endpoint (all NAT'd) → no carrier, so
+// siteLinkGraphFrom emits ZERO routes + ZERO peers (routes with no peer to carry them are the silent
+// blackhole), and siteHubMissing flags the condition so it surfaces as site_hub_down.
+func TestSiteLinkNoHubNoRoutes(t *testing.T) {
+	siteA, siteB := uuid.New(), uuid.New()
+	nodeA := uuid.New()
+	topo := siteTopology{
+		gws: []sqlc.ListSiteGatewaysForOrgRow{
+			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KA"},      // no endpoint
+			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KB"}, // no endpoint
+		},
+		subnets: map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
+	}
+	node := sqlc.Node{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}}
+	if peers, routes := siteLinkGraphFrom(topo, node); len(peers) != 0 || len(routes) != 0 {
+		t.Fatalf("no hub → no peers + no routes (no silent blackhole), got peers=%d routes=%d", len(peers), len(routes))
+	}
+	if !siteHubMissing(topo, node) {
+		t.Fatal("no hub + remote subnets → siteHubMissing must be true (surfaces site_hub_down)")
+	}
+	topo.gws[1].Endpoint = "b.example:51820" // give one gateway an endpoint → a hub now exists
+	if siteHubMissing(topo, node) {
+		t.Fatal("a hub exists → siteHubMissing must be false")
+	}
+}
+
 func sliceHas(xs []string, s string) bool {
 	for _, x := range xs {
 		if x == s {

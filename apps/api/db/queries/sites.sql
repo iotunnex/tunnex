@@ -48,10 +48,11 @@ SELECT id, site_id, wg_public_key, endpoint FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '';
 
 -- name: ListSiteNodesForOrg :many
--- S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
--- compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
--- gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
-SELECT id, site_id FROM nodes
+-- S8.2 compiler input: the (site_id, node_id, endpoint) binding for every site-bound gateway in the org.
+-- The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
+-- hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
+-- org-scoped via the node row (nodes.org_id).
+SELECT id, site_id, endpoint FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL;
 
 -- name: ListSiteSubnetsForOrg :many

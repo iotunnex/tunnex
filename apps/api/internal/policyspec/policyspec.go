@@ -157,8 +157,9 @@ type AllowEntry struct {
 // the agent programs it as INTENT, never inferring routes from a peer's AllowedIPs (which would fuse
 // WG crypto-routing with kernel-FIB intent). D2-classified: reachability PLUMBING, NOT enforcement (the
 // grant in Allow is the permission; a routed-but-ungranted subnet is DROPPED at the forward chain) —
-// so Route is EXCLUDED from CanonicalHash (route drift is caught by the site-link health surface, not
-// the policy-desync hash). But a Route STILL requires a v5 agent to RENDER, so its presence triggers
+// so Route is EXCLUDED from CanonicalHash (a flushed route self-heals on the next reconcile; a DEAD
+// site link surfaces via the site_link_down/site_hub_down health kinds, wired in S8.2 — not via the
+// policy-desync hash). But a Route STILL requires a v5 agent to RENDER, so its presence triggers
 // RequiredVersion=5 (an old agent must REFUSE, not silently ignore the section).
 type Route struct {
 	DstCIDR string `json:"dst_cidr"` // a remote site subnet to route via the tunnel interface

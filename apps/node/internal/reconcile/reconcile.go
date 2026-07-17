@@ -19,6 +19,10 @@ type Peer struct {
 	PublicKey  string   `json:"public_key"`
 	AllowedIPs []string `json:"allowed_ips"`
 	Endpoint   string   `json:"endpoint,omitempty"`
+	// SiteLink (S8.2) marks a gateway-DIALED site-link peer whose Endpoint is control-plane-managed
+	// (static). The dirty-check compares Endpoint for these (B4) so a hub endpoint change re-dials; device
+	// peers roam → SiteLink=false → endpoint-blind (TestReconcileIgnoresRoamedEndpoint stays armed).
+	SiteLink bool `json:"site_link,omitempty"`
 }
 
 // DesiredState is the control-plane response the agent reconciles toward.
@@ -107,6 +111,50 @@ type Reconciler struct {
 	// change reaches the forward chain on the push path (<5s), not the next
 	// egress tick.
 	onPolicy func(*nodepolicy.Compiled)
+	// siteLinkStale (S8.2 H5) is an optional sink: each reconcile, the agent checks its SITE-LINK peers'
+	// WG handshakes and stores whether any is stale/absent, so the report loop can surface site_link_down.
+	// nil when not wired (e.g. tests) → the check is skipped.
+	siteLinkStale *atomic.Bool
+}
+
+// SetSiteLinkStaleSink wires the H5 site-link-staleness sink (read by the report loop). Call before Run.
+func (r *Reconciler) SetSiteLinkStaleSink(b *atomic.Bool) { r.siteLinkStale = b }
+
+// siteLinkStaleWindow: a site-link peer with no handshake within this window (or never) is stale. Errs
+// toward over-reporting (a false site_link_down is an annoyance; a false-healthy dead bridge is the
+// blackhole class). Comfortably above WireGuard's ~2-min rehandshake/keepalive cadence.
+const siteLinkStaleWindow = 180 * time.Second
+
+// updateSiteLinkStale checks the desired SITE-LINK peers' handshakes and stores staleness in the sink.
+func (r *Reconciler) updateSiteLinkStale(ctx context.Context, desired []Peer) {
+	var sitePubs []string
+	for _, p := range desired {
+		if p.SiteLink {
+			sitePubs = append(sitePubs, p.PublicKey)
+		}
+	}
+	if len(sitePubs) == 0 {
+		r.siteLinkStale.Store(false) // no site links on this gateway → nothing to be stale
+		return
+	}
+	stats, err := r.backend.Stats(ctx)
+	if err != nil {
+		return // can't determine this tick → keep the last value (don't flap on a transient stats error)
+	}
+	hs := make(map[string]int64, len(stats))
+	for _, s := range stats {
+		hs[s.PublicKey] = s.LastHandshake
+	}
+	now := time.Now().Unix()
+	stale := false
+	for _, pub := range sitePubs {
+		h, ok := hs[pub]
+		if !ok || h == 0 || now-h > int64(siteLinkStaleWindow.Seconds()) {
+			stale = true
+			break
+		}
+	}
+	r.siteLinkStale.Store(stale)
 }
 
 // OnPolicy registers the policy sink. Call before Run (not synchronized).
@@ -183,6 +231,10 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	if err := r.backend.ApplyRoutes(ctx, routes); err != nil {
 		r.healthy.Store(false)
 		return false, err
+	}
+	// H5: refresh the site-link-staleness signal (best-effort; never fails the reconcile).
+	if r.siteLinkStale != nil {
+		r.updateSiteLinkStale(ctx, ds.Peers)
 	}
 	r.healthy.Store(true)
 	return changed, nil
@@ -276,5 +328,13 @@ func peersEqual(a, b []Peer) bool {
 func canon(p Peer) string {
 	ips := append([]string(nil), p.AllowedIPs...)
 	sort.Strings(ips)
-	return p.PublicKey + "|" + strings.Join(ips, ",")
+	key := p.PublicKey + "|" + strings.Join(ips, ",")
+	// B4: a SITE-LINK peer's Endpoint is control-plane-managed (the spoke dials the hub's static
+	// endpoint), so a hub endpoint change MUST be caught → include it in the dirty-check. A device peer's
+	// Endpoint is its roaming NAT source port → EXCLUDED (else ApplyPeers fires every reconcile). This is
+	// the per-peer static-endpoint distinction the EPIC-8 boundary comment above pre-flagged.
+	if p.SiteLink {
+		key += "|" + p.Endpoint
+	}
+	return key
 }

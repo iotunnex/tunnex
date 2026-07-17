@@ -297,18 +297,20 @@ func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) (
 }
 
 const listSiteNodesForOrg = `-- name: ListSiteNodesForOrg :many
-SELECT id, site_id FROM nodes
+SELECT id, site_id, endpoint FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL
 `
 
 type ListSiteNodesForOrgRow struct {
-	ID     uuid.UUID   `json:"id"`
-	SiteID pgtype.UUID `json:"site_id"`
+	ID       uuid.UUID   `json:"id"`
+	SiteID   pgtype.UUID `json:"site_id"`
+	Endpoint string      `json:"endpoint"`
 }
 
-// S8.2 compiler input: the (site_id, node_id) binding for every site-bound gateway in the org, so the
-// compiler can place a src_kind='site' grant on the involved sites' gateways + give a device-less site
-// gateway a compiled artifact. site_id is org-scoped via the node row (nodes.org_id).
+// S8.2 compiler input: the (site_id, node_id, endpoint) binding for every site-bound gateway in the org.
+// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
+// hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
+// org-scoped via the node row (nodes.org_id).
 func (q *Queries) ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listSiteNodesForOrg, orgID)
 	if err != nil {
@@ -318,7 +320,7 @@ func (q *Queries) ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]L
 	items := []ListSiteNodesForOrgRow{}
 	for rows.Next() {
 		var i ListSiteNodesForOrgRow
-		if err := rows.Scan(&i.ID, &i.SiteID); err != nil {
+		if err := rows.Scan(&i.ID, &i.SiteID, &i.Endpoint); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

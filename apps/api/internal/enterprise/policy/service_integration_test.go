@@ -294,6 +294,46 @@ func code(err error) string {
 	return ""
 }
 
+// TestSiteSourceRuleAuditsSiteID — S8.2 M6: a src_kind='site' rule audits its src_site_id, NEVER a
+// nil-UUID src_group_id (the misattribution the else-branch caused).
+func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org, site := uuid.New(), uuid.New()
+	ex := func(q string, a ...any) {
+		if _, e := pool.Exec(ctx, q, a...); e != nil {
+			t.Fatalf("seed %q: %v", q, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug) VALUES ($1,'M6',$2)`, org, "m6-"+org.String()[:8])
+	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}); err != nil {
+		t.Fatalf("create site-src rule: %v", err)
+	}
+	var srcSiteID, srcGroupID *string
+	if err := pool.QueryRow(ctx, `SELECT metadata->>'src_site_id', metadata->>'src_group_id' FROM audit_logs WHERE org_id=$1 AND action='policy.rule_created'`, org).Scan(&srcSiteID, &srcGroupID); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if srcSiteID == nil || *srcSiteID != site.String() {
+		t.Fatalf("M6: audit must record src_site_id=%s, got %v", site, srcSiteID)
+	}
+	if srcGroupID != nil {
+		t.Fatalf("M6: a site-source audit must NOT record a src_group_id, got %q", *srcGroupID)
+	}
+}
+
 func auditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, action string) int {
 	t.Helper()
 	var n int

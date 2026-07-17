@@ -158,6 +158,9 @@ type PolicyStatus struct {
 	// unsupported (> MaxSupportedVersion), or 0 when none. The control plane surfaces this
 	// as `unsupported_policy_version` (remedy: upgrade the agent) — distinct from staleness.
 	RefusedVersion int
+	// SiteLinkStale (S8.2 H5) — a site-link peer (hub/spoke) has a stale/absent WG handshake:
+	// site-to-site traffic on that link is dead. Surfaced as site_link_down.
+	SiteLinkStale bool
 }
 
 // ReportInfo reports the node's locally-generated WireGuard public key, its public
@@ -169,6 +172,7 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 		"public_key": publicKey, "endpoint": endpoint, "egress_nat": egressNAT,
 		"policy_version": ps.Version, "policy_hash": ps.Hash, "policy_error": ps.Error,
 		"policy_failing_since": ps.FailingSince, "policy_refused_version": ps.RefusedVersion,
+		"site_link_stale": ps.SiteLinkStale,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

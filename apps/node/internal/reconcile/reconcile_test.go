@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ type fakeBackend struct {
 	mu        sync.Mutex
 	peers     []Peer
 	routes    []string
+	stats     []PeerStat
 	applyN    int
 	configErr error
 }
@@ -38,7 +40,12 @@ func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string) error {
 	f.routes = append([]string(nil), cidrs...)
 	return nil
 }
-func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) { return nil, nil }
+func (f *fakeBackend) setStat(s PeerStat) { f.mu.Lock(); f.stats = []PeerStat{s}; f.mu.Unlock() }
+func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]PeerStat(nil), f.stats...), nil
+}
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -164,6 +171,51 @@ func TestRunOnceProgramsAndPrunesSiteRoutes(t *testing.T) {
 	}
 	if got := b.appliedRoutes(); len(got) != 0 {
 		t.Fatalf("nil policy must clear routes, got %v", got)
+	}
+}
+
+// TestSiteLinkEndpointChangeIsDirty — S8.2 B4: a SITE-LINK peer's endpoint change IS caught by the
+// dirty-check (the spoke must re-dial the hub's new static endpoint), while a device peer's roamed
+// endpoint is NOT (TestReconcileIgnoresRoamedEndpoint stays armed — the per-peer static-endpoint split).
+func TestSiteLinkEndpointChangeIsDirty(t *testing.T) {
+	a := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "old:51820", SiteLink: true}
+	b := a
+	b.Endpoint = "new:51820"
+	if peersEqual([]Peer{a}, []Peer{b}) {
+		t.Fatal("a site-link peer's endpoint change MUST be dirty (spoke re-dials the hub)")
+	}
+	d1 := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}, Endpoint: "1.2.3.4:5"} // roaming device
+	d2 := d1
+	d2.Endpoint = "6.7.8.9:10"
+	if !peersEqual([]Peer{d1}, []Peer{d2}) {
+		t.Fatal("a device peer's roamed endpoint must be IGNORED (no re-apply every reconcile)")
+	}
+}
+
+// TestSiteLinkStaleComputation — S8.2 H5: the agent flags site_link_down when a SITE-LINK peer's WG
+// handshake is stale/absent (and NOT for a healthy one, nor for device peers). Feeds the CP kind.
+func TestSiteLinkStaleComputation(t *testing.T) {
+	var sink atomic.Bool
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	r.SetSiteLinkStaleSink(&sink)
+	ctx := context.Background()
+
+	// A site-link peer with NO handshake (fake reports no stats) → stale.
+	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
+	if !sink.Load() {
+		t.Fatal("a site-link peer with no handshake must be stale")
+	}
+	// A fresh handshake → not stale.
+	b.setStat(PeerStat{PublicKey: "hub", LastHandshake: time.Now().Unix()})
+	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
+	if sink.Load() {
+		t.Fatal("a site-link peer with a fresh handshake must NOT be stale")
+	}
+	// A non-site (device) peer is never considered → not stale even with no handshake.
+	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "dev", SiteLink: false}})
+	if sink.Load() {
+		t.Fatal("device peers must not drive site-link staleness")
 	}
 }
 

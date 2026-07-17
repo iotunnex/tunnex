@@ -564,6 +564,45 @@ func TestSiteSourceResolution(t *testing.T) {
 	}
 }
 
+// TestSiteSourceTransitHubGrant — S8.2 B1: a site→site grant is placed on the transit HUB (a third
+// site's gateway, hub ∉ {src,dst}), not just src+dst, so the hub's default-deny forward chain accepts
+// the transited A-LAN→B-LAN pair. Without this a 3-site hub-and-spoke silently blackholes spoke↔spoke
+// at the hub (the paper's packet-walk step 4). Inverse: hub ∈ {src,dst} emits no duplicate.
+func TestSiteSourceTransitHubGrant(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-00000051ed01")
+	siteB := uuid.MustParse("00000000-0000-0000-0000-00000051ed02")
+	siteH := uuid.MustParse("00000000-0000-0000-0000-00000051ed03")
+	nodeH := uuid.MustParse("00000000-0000-0000-0000-0000000000c1")
+	snap := policy.Snapshot{
+		Mode:  policy.ModeEnforcing,
+		Rules: []policy.Rule{{ID: uuid.New(), SrcKind: "site", SrcSiteID: siteA, DstKind: "site", DstSiteID: siteB}},
+		SiteSubnets: []policy.SiteSubnet{
+			{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}, {SiteID: siteH, CIDR: "10.3.0.0/24"},
+		},
+		SiteNodes: []policy.SiteNode{
+			{SiteID: siteA, NodeID: nodeA},
+			{SiteID: siteB, NodeID: nodeB},
+			{SiteID: siteH, NodeID: nodeH, Endpoint: "hub.example:51820"}, // the HUB — a THIRD site, neither src nor dst
+		},
+	}
+	out := policy.Compile(snap)
+	if !hasAllow(allowsFor(out, nodeH), "10.1.0.0/24", "10.2.0.0/24") {
+		t.Fatalf("the transit HUB (hub ∉ {src,dst}) must carry the site→site grant, got %+v", allowsFor(out, nodeH))
+	}
+	if !hasAllow(allowsFor(out, nodeA), "10.1.0.0/24", "10.2.0.0/24") || !hasAllow(allowsFor(out, nodeB), "10.1.0.0/24", "10.2.0.0/24") {
+		t.Fatal("src + dst gateways must carry the grant too")
+	}
+	// Inverse: A is BOTH the hub (has the endpoint) AND the src → no duplicate emission on nodeA.
+	snap.SiteNodes = []policy.SiteNode{
+		{SiteID: siteA, NodeID: nodeA, Endpoint: "a.example:51820"},
+		{SiteID: siteB, NodeID: nodeB},
+	}
+	snap.SiteSubnets = []policy.SiteSubnet{{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}}
+	if a2 := allowsFor(policy.Compile(snap), nodeA); len(a2) != 1 {
+		t.Fatalf("hub==src must not duplicate the grant, got %d: %+v", len(a2), a2)
+	}
+}
+
 // TestSiteSourceDowngradeToMesh — S8.2 D11 downgrade-release: a src_kind='site' grant is GATED under
 // enforcing (the LAN-source AllowEntry is the sole reason the traffic is permitted) and RELEASES to the
 // legacy MESH under off-mode (enterprise→open downgrade → routed-but-ungated). Symmetric to the S8.1 dst
