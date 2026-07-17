@@ -76,13 +76,20 @@ func (s apiServer) AdminResetMfa(ctx context.Context, req api.AdminResetMfaReque
 // The allowlist admits EXACTLY what a gated user needs to become UN-gated. Enrollment requires a
 // verified email, so email verification is UPSTREAM of enrollment — same class as the enroll ops
 // themselves (finding #5: the happy-path allowlist dead-ended the unverified+enforced intersection).
+//
+// CASING (S7.5.5 walk defect): keys are the operationIds AS api.GetSwagger() carries them — oapi-codegen
+// normalizes them to EXPORTED (PascalCase) Go identifiers, NOT the source-yaml casing. The gate resolves
+// via that embedded spec, so the keys must match it. This was camelCase and silently bricked every gated
+// user (zero matches). If oapi-codegen's identifier normalization ever changes, the semantic (method,path)
+// pins in TestEnrollmentGateSelfArming fail LOUDLY and the fix is a key update here — a red build, never
+// a silent re-brick.
 var enrollmentGateAllow = map[string]bool{
-	"mfaEnrollStart":      true,
-	"mfaEnrollConfirm":    true,
-	"verifyEmail":         true,
-	"resendVerification":  true,
-	"logout":              true,
-	"currentUser":         true,
+	"MfaEnrollStart":     true,
+	"MfaEnrollConfirm":   true,
+	"VerifyEmail":        true,
+	"ResendVerification": true,
+	"Logout":             true,
+	"CurrentUser":        true,
 }
 
 // mfaEnrollmentGate is the DEFAULT-DENY authorization overlay for the D8 grandfather path (Option A):
