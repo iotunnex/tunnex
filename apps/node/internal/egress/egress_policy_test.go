@@ -512,6 +512,31 @@ func TestSiteSourceCIDRRendersAndRoutedButDropped(t *testing.T) {
 	}
 }
 
+// TestMSSClampOnIntraTunnelForward — S8.2 D9 (Slice 3): the forward chain clamps intra-tunnel (wg0→wg0)
+// TCP SYN MSS to the path MTU — the double-encapsulation "ping works, large transfer freezes" fix.
+// Node-local rendered rule, scoped to wg0→wg0 so device internet egress is untouched.
+func TestMSSClampOnIntraTunnelForward(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Mesh: false})
+	rs := m.ruleset("10.99.0.1/24")
+	if !strings.Contains(rs, `iifname "wg0" oifname "wg0" tcp flags syn tcp option maxseg size set rt mtu`) {
+		t.Fatalf("forward chain must clamp intra-tunnel TCP MSS to path MTU; got:\n%s", rs)
+	}
+}
+
+// TestSiteToSiteNotMasqueraded — S8.2 Item 8 PINNED INVARIANT: site-to-site traffic (wg0→wg0) is NEVER
+// NATed. The masquerade rule is scoped `oifname != "wg0"` (internet egress only), so a future scope
+// change can't silently start NATing site traffic (which would break return routing — both LANs need
+// their real addresses). Structural pin on the rendered rule.
+func TestSiteToSiteNotMasqueraded(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Mesh: false})
+	rs := m.ruleset("10.99.0.1/24")
+	if !strings.Contains(rs, `oifname != "wg0" masquerade`) {
+		t.Fatalf("masquerade must be scoped oifname != wg0 (wg0→wg0 site traffic never NATed); got:\n%s", rs)
+	}
+}
+
 // TestInterlockV4AgentRefusesV5 — S8.2 Slice-1 interlock: a GATED agent pinned at the pre-S8.2 max (4)
 // receiving the REAL v5 LAN-source artifact REFUSES it (deny-all + records the refusal) rather than
 // silently SKIPPING the CIDR source (which the old allowMatch would do → office-to-office blackholes

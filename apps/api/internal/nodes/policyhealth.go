@@ -25,6 +25,15 @@ const (
 	// agent (every other kind's remedy is CP-side). Highest priority: a refusing gateway isn't
 	// stale or apply-failing, it's version-incapable — distinguish it so the operator upgrades.
 	KindUnsupportedPolicyVersion PolicyDegradedKind = "unsupported_policy_version"
+	// KindSiteHubDown / KindSiteLinkDown (S8.2, Item 7/9): a SITE gateway's site-link is down (stale/no
+	// WG handshake), so site-to-site traffic blackholes though the policy may be perfectly synced — a
+	// REACHABILITY failure, distinct from a policy desync (whose remedy is CP-side). HUB-down is separate
+	// from a single spoke's link-down because the remedy differs entirely: hub-down kills EVERY spoke's
+	// site traffic (fix the hub), a spoke link-down kills only that spoke (fix that spoke's tunnel/NAT).
+	// Ranked directly below version-refused: for a site gateway, "my site link is dead" is the headline
+	// infrastructure signal (the gateway can't do the one thing it exists for); hub outranks spoke.
+	KindSiteHubDown  PolicyDegradedKind = "site_hub_down"
+	KindSiteLinkDown PolicyDegradedKind = "site_link_down"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -69,6 +78,8 @@ type KindInput struct {
 	ReportAge          time.Duration // now − last_seen_at (report freshness)
 	Now                time.Time
 	UnsupportedVersion bool          // agent-reported: it REFUSED a too-new artifact (S8.1 D1) → highest-priority kind
+	SiteHubDown        bool          // S8.2: a site gateway whose HUB site-link has no fresh WG handshake (all spokes' site traffic dead)
+	SiteLinkDown       bool          // S8.2: a site gateway with ≥1 spoke site-link with no fresh handshake (that spoke's traffic dead)
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -81,6 +92,8 @@ type TransitionRule struct {
 
 var transitionTable = []TransitionRule{
 	{KindUnsupportedPolicyVersion, "agent REFUSED a too-new artifact (UnsupportedVersion) — checked FIRST, remedy = upgrade the agent"},
+	{KindSiteHubDown, "site gateway, HUB site-link no fresh handshake (SiteHubDown) — remedy = fix the hub; outranks a single spoke link-down"},
+	{KindSiteLinkDown, "site gateway, a spoke site-link no fresh handshake (SiteLinkDown) — remedy = fix that spoke's tunnel/NAT"},
 	{KindHealthy, "not degraded: no error, pushed==applied, reports fresh"},
 	{KindApplyFailing, "policy_error set AND policy_failing_since set"},
 	{KindStuckEnforcing, "policy_error set AND policy_failing_since EMPTY (pushed=='' && applied!='')"},
@@ -98,6 +111,17 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	// so it must not be masked by the desync/apply-error paths below.
 	if in.UnsupportedVersion {
 		return KindUnsupportedPolicyVersion
+	}
+	// S8.2 (Item 7/9) — a site gateway's site-link is down: site traffic is dead regardless of policy
+	// state, and the remedy is infrastructure (fix the hub / that spoke), not CP-side. HUB-down first
+	// (kills every spoke), then a single spoke link-down. Ranked above the policy apply/desync kinds:
+	// for a site gateway this is the headline. (A gateway can be BOTH link-down and desync'd; the desync
+	// stamp is retained and re-surfaces once the link recovers — the kind is a single summary.)
+	if in.SiteHubDown {
+		return KindSiteHubDown
+	}
+	if in.SiteLinkDown {
+		return KindSiteLinkDown
 	}
 	// Agent-reported apply failure (from the last report — a reported fact, not a server compare).
 	// [fold 3] mirror the bool's TERM-2: policy_failing_since alone (error empty) is a failing

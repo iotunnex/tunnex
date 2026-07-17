@@ -564,6 +564,29 @@ func TestSiteSourceResolution(t *testing.T) {
 	}
 }
 
+// TestSiteSourceDowngradeToMesh — S8.2 D11 downgrade-release: a src_kind='site' grant is GATED under
+// enforcing (the LAN-source AllowEntry is the sole reason the traffic is permitted) and RELEASES to the
+// legacy MESH under off-mode (enterprise→open downgrade → routed-but-ungated). Symmetric to the S8.1 dst
+// downgrade red — the mode-as-compiler-input revert.
+func TestSiteSourceDowngradeToMesh(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-00000051e0c1")
+	siteB := uuid.MustParse("00000000-0000-0000-0000-00000051e0c2")
+	snap := func(mode string) policy.Snapshot {
+		return policy.Snapshot{
+			Mode:        mode,
+			Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "site", SrcSiteID: siteA, DstKind: "site", DstSiteID: siteB}},
+			SiteSubnets: []policy.SiteSubnet{{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}},
+			SiteNodes:   []policy.SiteNode{{SiteID: siteA, NodeID: nodeA}, {SiteID: siteB, NodeID: nodeB}},
+		}
+	}
+	if enf := policy.Compile(snap(policy.ModeEnforcing))[nodeA]; enf.Mesh || !hasAllow(enf.Allow, "10.1.0.0/24", "10.2.0.0/24") {
+		t.Fatalf("enforcing must gate the site-source grant, got mesh=%v allow=%+v", enf.Mesh, enf.Allow)
+	}
+	if off := policy.Compile(snap(policy.ModeOff))[nodeA]; !off.Mesh || len(off.Allow) != 0 {
+		t.Fatalf("off-mode must release to the legacy mesh (no site-source grant-gating), got mesh=%v allow=%+v", off.Mesh, off.Allow)
+	}
+}
+
 // TestContentDerivedVersion — S8.2 D1b: the emitted Version is the MINIMUM the artifact's content
 // requires. A device-only org (no CIDR source) stays v4 — byte-identical, old gated agents keep working,
 // no fleet re-converge. Only an artifact carrying a site-LAN (CIDR) source is v5.

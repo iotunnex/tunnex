@@ -32,3 +32,9 @@ func (m *Manager) SetFlowLogGroup(_ int) {}
 // AppliedStatus off Linux reports "nothing applied" (version 0, no hash, no error) —
 // a non-Linux agent never claims a policy is in force.
 func (m *Manager) AppliedStatus() (int, string, time.Time, error) { return 0, "", time.Time{}, nil }
+
+// RefusedVersion off Linux is always 0 (no policy is ever applied or refused). This keeps the
+// cross-platform agent main package building on darwin (the S8.1 refusal state was Linux-only, tripping
+// a native `go build ./...`; this stub is the ledgered fix — apps/node builds on all platforms, the real
+// gateway data plane stays Linux).
+func (m *Manager) RefusedVersion() int { return 0 }
