@@ -308,7 +308,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
     setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok, sitesLoaded: sr.ok }); // sitesLoaded → WF-8 name resolution
-    setErr(gr.ok && resr.ok && mr.ok ? null : "Some groups/resources/members failed to load — names may show as unresolved. Refresh.");
+    setErr(gr.ok && resr.ok && mr.ok && sr.ok ? null : "Some groups/resources/members/sites failed to load — names may show as unresolved. Refresh."); // sr.ok: WF-8 review — a sites-load failure must raise the banner too
     // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
     // longer present, keep the rest (B).
     setStaleRuleIds((prev) => pruneStaleRuleIds(prev, true, freshRules));
