@@ -58,6 +58,14 @@ Create a `site → site` grant from the Access Add-rule modal — through the AP
 
 ---
 
+## FOLD STATUS (founder-dispositioned 2026-07-18: 6 fold, 2 defer)
+- **WF-4 FOLDED** (`b6ca114`) — agent owns a Routes-scoped accept in DOCKER-USER; ForwardBlocked→siteSubnetUnreachable. Decision-first (`docs/S8.2c-decisions.md`). **Re-walk owed: delete the manual rule, behind-host ping survives on agent rules alone.**
+- **WF-8 FOLDED** (`5db… WF-8 commit`) — site rules resolve to NAMES.
+- **WF-6 CLOSED, no code** — out-of-hash exclusion holds (twin goldens); converging was the in-hash grant settling.
+- **WF-2 / WF-3 / WF-5 FOLDED** (`07e40c3`) — pinnable image + boot log · in-UI cloud fabric · subnet removal.
+- **WF-1 DEFERRED** → S8.5 L1-metrics rider (positive site-link health). **WF-7 DEFERRED** → first-request / epic-close UX harvest (site-rule editor).
+- Gates green across the fold; targeted re-review + Leg-2 re-walk pending.
+
 ## Findings (held WF-numbered for disposition — the founder brings dispositions back; fold only what's dispositioned)
 | WF# | leg | finding | severity | disposition |
 |-----|-----|---------|----------|-------------|
