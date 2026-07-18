@@ -73,3 +73,16 @@ func TestSiteManagePermGrants(t *testing.T) {
 		t.Fatal("site:manage is mutating (must be email-verified gated)")
 	}
 }
+
+// TestSiteReadVsManageSplit is the S8.3 D5 deliberate-red: a MEMBER reads the site topology (org:view —
+// the read-only Sites page) but CANNOT mutate it (site:manage). The handlers back this — ListSites /
+// ListSiteSubnets gate org:view; register/advertise/approve/bind/unbind/delete + getSiteReferences gate
+// site:manage — so a member sees the topology their traffic traverses yet every mutation still 403s.
+func TestSiteReadVsManageSplit(t *testing.T) {
+	if !Can(RoleMember, PermOrgView) {
+		t.Fatal("a member must read the topology (org:view backs ListSites/ListSiteSubnets)")
+	}
+	if Can(RoleMember, PermSiteManage) {
+		t.Fatal("a member must NOT mutate sites (site:manage gates every mutation + the deletion preview)")
+	}
+}

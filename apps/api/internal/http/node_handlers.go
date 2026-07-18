@@ -48,9 +48,11 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	}
 	// Zero Trust policy health: the authoritative bool + the advisory kind from ONE org
 	// compile (S7.4b fold [0] — a single snapshot so bool and kind can't disagree).
-	health := s.nodes.PolicyHealthForNodes(ctx, req.OrgId, ns)
+	// Load the site topology + elect the hub ONCE, shared by both passes (review #3: no double load).
+	batch := s.nodes.LoadSiteTopoBatch(ctx, req.OrgId, ns)
+	health := s.nodes.PolicyHealthForNodes(ctx, req.OrgId, ns, batch)
 	// S8.3: the hub designation (projection of the ONE election) + the reported max policy version (CW).
-	extras := s.nodes.NodeDisplayExtrasForNodes(ctx, req.OrgId, ns)
+	extras := s.nodes.NodeDisplayExtrasForNodes(ctx, req.OrgId, ns, batch)
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)

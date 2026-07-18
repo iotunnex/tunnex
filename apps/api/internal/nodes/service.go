@@ -796,13 +796,21 @@ type NodeDisplayExtras struct {
 	MaxPolicyVersion int // 0 = never reported (pre-CW agent) → the UI reads this as below-ceiling
 }
 
-// NodeDisplayExtrasForNodes returns the hub designation + reported max-version per node. The hub is
-// elected ONCE for the batch (electSiteHub — the same picker the site-link graph + health use), so the
-// `is_site_hub` the UI renders is a projection of the one election, not a second one. Max-version is read
-// from each node's caps JSONB (absence → 0). All nodes must belong to orgID.
-func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]NodeDisplayExtras {
-	out := make(map[uuid.UUID]NodeDisplayExtras, len(nodes))
-	var hubID uuid.UUID
+// SiteTopoBatch is the per-request site topology + elected hub, loaded ONCE for a node list and shared by
+// the health + display passes so ListNodes does not load the topology (and elect the hub) TWICE (R5 batch
+// discipline — review #3). Opaque: build it with LoadSiteTopoBatch and pass it to both methods.
+type SiteTopoBatch struct {
+	topo   siteTopology
+	ok     bool      // false = a node is a site gateway but the topology LOAD failed (hub-health can't determine)
+	hubID  uuid.UUID // the elected hub's node id (valid only when hasHub)
+	hasHub bool      // electSiteHub(topo) != nil — the ONE election, computed once for the batch
+}
+
+// LoadSiteTopoBatch loads the site topology once for a node list + elects the hub once (electSiteHub — the
+// same picker the site-link graph uses). A zero batch (ok=true, no hub) when no node is a site gateway.
+// Pass the result to PolicyHealthForNodes + NodeDisplayExtrasForNodes so neither reloads it.
+func (s *Service) LoadSiteTopoBatch(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) SiteTopoBatch {
+	b := SiteTopoBatch{ok: true}
 	anySite := false
 	for _, n := range nodes {
 		if n.SiteID.Valid {
@@ -811,18 +819,38 @@ func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID
 		}
 	}
 	if anySite {
-		if topo, err := s.loadSiteTopology(ctx, orgID); err == nil {
-			if hub := electSiteHub(topo); hub != nil {
-				hubID = hub.ID
+		if t, err := s.loadSiteTopology(ctx, orgID); err == nil {
+			b.topo = t
+			if hub := electSiteHub(t); hub != nil {
+				b.hubID, b.hasHub = hub.ID, true
 			}
+		} else {
+			b.ok = false // load failed → can't determine hub-health (never a wrong designation)
 		}
-		// A topology-load error leaves hubID zero → no node marked hub (honest: can't determine → not hub),
-		// never a wrong designation.
 	}
+	return b
+}
+
+// siteTopoBatchFor returns the caller-provided prefetched batch, or loads one — so a caller that passes no
+// batch (every existing test) behaves EXACTLY as before (one load), while ListNodes passes a shared batch.
+func (s *Service) siteTopoBatchFor(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node, pre []SiteTopoBatch) SiteTopoBatch {
+	if len(pre) > 0 {
+		return pre[0]
+	}
+	return s.LoadSiteTopoBatch(ctx, orgID, nodes)
+}
+
+// NodeDisplayExtrasForNodes returns the hub designation + reported max-version per node. The hub is a
+// PROJECTION of the ONE election (electSiteHub, from the shared batch — not a second one). Max-version is
+// read from each node's caps JSONB (absence → 0). All nodes must belong to orgID. Pass the shared batch to
+// avoid reloading the topology (review #3).
+func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node, pre ...SiteTopoBatch) map[uuid.UUID]NodeDisplayExtras {
+	out := make(map[uuid.UUID]NodeDisplayExtras, len(nodes))
+	b := s.siteTopoBatchFor(ctx, orgID, nodes, pre)
 	for _, n := range nodes {
 		var caps NodeCapabilities
 		_ = json.Unmarshal(n.Capabilities, &caps) // absent/garbage caps → zero-value (MaxPolicyVersion 0)
-		out[n.ID] = NodeDisplayExtras{IsSiteHub: n.SiteID.Valid && n.ID == hubID, MaxPolicyVersion: caps.MaxPolicyVersion}
+		out[n.ID] = NodeDisplayExtras{IsSiteHub: b.hasHub && n.SiteID.Valid && n.ID == b.hubID, MaxPolicyVersion: caps.MaxPolicyVersion}
 	}
 	return out
 }
@@ -834,29 +862,18 @@ func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID
 // slightly before this compile; a push in that gap makes pushed reflect the new policy while
 // applied reflects the old — which is a REAL just-pushed desync and correctly renders
 // `converging`, so it is harmless, not a suppressed alarm.)
-func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]PolicyHealth {
+func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node, pre ...SiteTopoBatch) map[uuid.UUID]PolicyHealth {
 	out := make(map[uuid.UUID]PolicyHealth, len(nodes))
 	enterprise := s.policy != nil
 	// Site topology — loaded ONCE for the batch, in BOTH editions (site-link routing + its health are
 	// CORE, D11). Only when some node is a site gateway. Drives site_hub_down (B2: no carrier) AND
 	// finalizes the pushed hash (enterprise) the SAME way the served artifact is (#1: no false desync).
-	var topo siteTopology
-	topoOK := true
-	anySite := false
-	for _, n := range nodes {
-		if n.SiteID.Valid {
-			anySite = true
-			break
-		}
-	}
-	if anySite {
-		if t, terr := s.loadSiteTopology(ctx, orgID); terr == nil {
-			topo = t
-		} else {
-			topoOK = false // topology unavailable → term (3) can't be evaluated; hub-health can't determine
-		}
-	}
-	hubExists := siteTopoHasHub(topo) // R5: computed ONCE for the batch (node-independent)
+	// The batch is loaded here when unset (existing callers) or shared from ListNodes (review #3) — same
+	// topo + hub, so the health output is byte-identical either way.
+	b := s.siteTopoBatchFor(ctx, orgID, nodes, pre)
+	topo := b.topo
+	topoOK := b.ok
+	hubExists := b.hasHub // R5: the ONE election (== siteTopoHasHub(topo)), computed once for the batch
 	var pushed map[uuid.UUID]string
 	pushKnown := false
 	if enterprise && topoOK {
