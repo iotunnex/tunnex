@@ -80,7 +80,7 @@ Create a `site → site` grant from the Access Add-rule modal — through the AP
 
 ## RE-WALK SCRIPT (WF-4 loop terminator + fold spot-checks; Pawan drives)
 The fold is in; this proves it on live nft (the loop terminator, not a 4th review round).
-- **① Mac build+push** the WF-4 agent (`docker buildx … node.Dockerfile --push`). **RECORD the pushed digest** (`docker buildx imagetools inspect ghcr.io/iotunnex/tunnex-node-agent:latest` or the push output) — "the version the walk proved" must be a PINNABLE fact, not a moving `:latest` (WF-2's discipline applied to ourselves; the mild irony noted). Digest: _____
+- **① Mac build+push** the WF-4 agent (`docker buildx … node.Dockerfile --push`). **RECORD the pushed digest** (`docker buildx imagetools inspect ghcr.io/iotunnex/tunnex-node-agent:latest` or the push output) — "the version the walk proved" must be a PINNABLE fact, not a moving `:latest` (WF-2's discipline applied to ourselves; the mild irony noted). **Digest (the WF-4 re-walk version): `ghcr.io/iotunnex/tunnex-node-agent@sha256:72eaab3849ae7a6d2f0cec353c4c1ea2dd0fab14d7470822e730b1bd7328bf50`** (multi-arch amd64+arm64; supersedes the pre-WF-4 `sha256:24efd269…`).
 - **② CP VM** rebuild api+web+nginx from the branch (`git pull` + `TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build`).
 - **③ Both gateways** — DELETE the manual rule (`sudo iptables -D DOCKER-USER -j ACCEPT`), `docker pull` the agent, `docker rm -f tunnex-node`, re-run the same `docker run` (volume reuse = identity kept).
 - **④ ZERO-TOUCH VERDICT — the ping + the IDEMPOTENCE handle-check (both required):**
