@@ -610,7 +610,10 @@ func nftRun(ctx context.Context, args ...string) (string, error) {
 
 const dockerUserComment = "tunnex-site-fwd" // marks the agent's own DOCKER-USER rules for idempotent find + full-sweep
 
-var dockerUserRuleRE = regexp.MustCompile(`ip daddr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
+// captures direction (s|d addr) + the address + the handle, for a comment-marked rule. BOTH directions
+// are Route-scoped (forward: daddr=route; return: saddr=route) — the return path is why a single-direction
+// accept passed the forward ping but dropped the reply on the re-walk.
+var dockerUserRuleRE = regexp.MustCompile(`ip ([sd])addr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
 
 // reconcileDockerForward makes site-to-site forwarding work on a DOCKER host with ZERO gateway
 // touch (WF-4). Docker sets `filter FORWARD` policy DROP + a DOCKER-USER hook; the agent's
@@ -634,17 +637,26 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (
 		m.forwardBlocked.Store(false)
 		return false
 	}
-	// Desired = one accept per v4 route, keyed by the CANONICAL daddr nft PRINTS (host route → bare, else
-	// masked). #1: nft drops the /32 from a host daddr, so a `Masked()` "x/32" key would never match the
-	// listed bare "x" and would thrash insert+delete every tick — canonDaddr keys both sides the same way.
+	// Desired = TWO Route-scoped accepts per v4 route — forward (daddr=route) AND return (saddr=route) —
+	// keyed "d:"/"s:" + the CANONICAL address nft PRINTS (host route bare, else masked). Both directions
+	// are needed: a forward-only accept passed the ping's echo-request but Docker's FORWARD DROP killed the
+	// reply (re-walk). #1: nft drops the /32 from a host addr, so keying on Masked() "x/32" would never
+	// match the listed bare "x" and thrash — canonDaddr keys both sides the same way. args are built from
+	// canonical prefixes (no operator/CP string reaches nft raw).
 	desired := map[string]bool{}
+	insertArgs := map[string][]string{}
+	comment := `"` + dockerUserComment + `"`
 	for _, c := range routes {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
-			desired[canonDaddr(p)] = true
+			a := canonDaddr(p)
+			fk, rk := "d:"+a, "s:"+a
+			desired[fk], desired[rk] = true, true
+			insertArgs[fk] = []string{"iifname", "!=", wg, "oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment}
+			insertArgs[rk] = []string{"iifname", wg, "oifname", "!=", wg, "ip", "saddr", a, "counter", "accept", "comment", comment}
 		}
 	}
-	// Current tunnex-marked rules: canonical daddr -> handle. A LIST ERROR (not just empty) means we can't
-	// know what's in force → SKIP add/sweep this tick and keep the prior signal (#2: blindly inserting on an
+	// Current tunnex-marked rules: "dir:addr" -> handle. A LIST ERROR (not just empty) means we can't know
+	// what's in force → SKIP add/sweep this tick and keep the prior signal (#2: blindly inserting on an
 	// unread list duplicates accepts the sweep can't reap, since they ARE in desired). Next tick retries.
 	listing, err := m.nftRun(ctx, "-a", "list", "chain", "ip", "filter", "DOCKER-USER")
 	if err != nil {
@@ -652,22 +664,24 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (
 	}
 	current := map[string]string{}
 	for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
-		if p, e := netip.ParsePrefix(mt[1]); e == nil {
-			current[canonDaddr(p)] = mt[2]
-		} else if a, e := netip.ParseAddr(mt[1]); e == nil {
-			current[a.String()] = mt[2] // nft prints a host route as a bare address
+		dir, addr, handle := mt[1], mt[2], mt[3]
+		key := ""
+		if p, e := netip.ParsePrefix(addr); e == nil {
+			key = dir + ":" + canonDaddr(p)
+		} else if a, e := netip.ParseAddr(addr); e == nil {
+			key = dir + ":" + a.String() // nft prints a host route as a bare address
+		}
+		if key != "" {
+			current[key] = handle
 		}
 	}
 	placeErr := false
-	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN. The daddr is the
-	// canonical key (bare host / masked CIDR) — nft accepts either form.
-	for key := range desired {
+	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN.
+	for key, args := range insertArgs {
 		if _, have := current[key]; have {
 			continue
 		}
-		if _, err := m.nftRun(ctx, "insert", "rule", "ip", "filter", "DOCKER-USER",
-			"iifname", "!=", wg, "oifname", wg, "ip", "daddr", key, "counter", "accept",
-			"comment", `"`+dockerUserComment+`"`); err != nil {
+		if _, err := m.nftRun(ctx, append([]string{"insert", "rule", "ip", "filter", "DOCKER-USER"}, args...)...); err != nil {
 			placeErr = true
 		}
 	}

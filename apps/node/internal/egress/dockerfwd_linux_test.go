@@ -44,8 +44,13 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		}
 		var b strings.Builder
 		b.WriteString("table ip filter {\n  chain DOCKER-USER {\n")
-		for daddr, h := range f.rules {
-			fmt.Fprintf(&b, "    iifname != \"wg0\" oifname \"wg0\" ip daddr %s counter accept comment \"%s\" # handle %s\n", daddr, dockerUserComment, h)
+		for key, h := range f.rules { // key = "d:addr" (forward) or "s:addr" (return)
+			addr := key[2:]
+			if key[0] == 'd' {
+				fmt.Fprintf(&b, "    iifname != \"wg0\" oifname \"wg0\" ip daddr %s counter accept comment \"%s\" # handle %s\n", addr, dockerUserComment, h)
+			} else {
+				fmt.Fprintf(&b, "    iifname \"wg0\" oifname != \"wg0\" ip saddr %s counter accept comment \"%s\" # handle %s\n", addr, dockerUserComment, h)
+			}
 		}
 		b.WriteString("  }\n}\n")
 		return b.String(), nil
@@ -53,16 +58,19 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		if f.insertErr {
 			return "", errors.New("insert denied")
 		}
-		daddr := ""
+		dir, addr := "", ""
 		for i := 0; i+1 < len(args); i++ {
 			if args[i] == "daddr" {
-				daddr = args[i+1]
+				dir, addr = "d", args[i+1]
+			} else if args[i] == "saddr" {
+				dir, addr = "s", args[i+1]
 			}
 		}
-		daddr = strings.TrimSuffix(daddr, "/32") // model nft: a host daddr is stored/printed BARE
+		addr = strings.TrimSuffix(addr, "/32") // model nft: a host addr is stored/printed BARE
+		key := dir + ":" + addr
 		f.nextHandle++
-		f.rules[daddr] = fmt.Sprint(f.nextHandle)
-		f.inserts = append(f.inserts, daddr)
+		f.rules[key] = fmt.Sprint(f.nextHandle)
+		f.inserts = append(f.inserts, key)
 		return "", nil
 	case len(args) >= 2 && args[0] == "delete" && args[1] == "rule":
 		handle := args[len(args)-1]
@@ -89,8 +97,15 @@ func TestDockerForwardScopedInsert(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"})
-	if len(f.rules) != 2 || f.rules["10.0.0.0/24"] == "" || f.rules["172.31.0.0/16"] == "" {
-		t.Fatalf("expected one scoped accept per route, got %v", f.rules)
+	// TWO Route-scoped accepts per route: forward (d:) + return (s:) — the return path is why the re-walk
+	// forward-ping passed but the reply dropped.
+	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
+		if f.rules[k] == "" {
+			t.Fatalf("missing scoped accept %s; got %v", k, f.rules)
+		}
+	}
+	if len(f.rules) != 4 {
+		t.Fatalf("expected 4 rules (fwd+ret per route), got %v", f.rules)
 	}
 }
 
@@ -115,14 +130,18 @@ func TestDockerForwardFullSweep(t *testing.T) {
 	m := mgrWithNft(f)
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"})
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // 172.31 withdrawn
-	if _, still := f.rules["172.31.0.0/16"]; still {
-		t.Fatalf("a withdrawn route's DOCKER-USER rule must be swept, still present: %v", f.rules)
+	for _, k := range []string{"d:172.31.0.0/16", "s:172.31.0.0/16"} {
+		if _, still := f.rules[k]; still {
+			t.Fatalf("a withdrawn route's rule %s must be swept, still present: %v", k, f.rules)
+		}
 	}
-	if _, kept := f.rules["10.0.0.0/24"]; !kept {
-		t.Fatalf("the surviving route's rule must stay, got %v", f.rules)
+	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24"} {
+		if _, kept := f.rules[k]; !kept {
+			t.Fatalf("the surviving route's rule %s must stay, got %v", k, f.rules)
+		}
 	}
-	if len(f.deletes) != 1 {
-		t.Fatalf("exactly the stale rule must be deleted by handle, deletes=%v", f.deletes)
+	if len(f.deletes) != 2 { // both directions of the withdrawn route
+		t.Fatalf("exactly the stale route's two rules must be deleted, deletes=%v", f.deletes)
 	}
 }
 
@@ -135,8 +154,8 @@ func TestDockerForwardHostRouteIdempotent(t *testing.T) {
 	routes := []string{"10.0.0.5/32"}
 	m.reconcileDockerForward(context.Background(), routes)
 	n := len(f.inserts)
-	if n != 1 {
-		t.Fatalf("first reconcile inserts the /32 accept once, got %d", n)
+	if n != 2 { // fwd + ret for the one /32
+		t.Fatalf("first reconcile inserts the /32 fwd+ret accepts, got %d", n)
 	}
 	m.reconcileDockerForward(context.Background(), routes)
 	if len(f.inserts) != n || len(f.deletes) != 0 {
