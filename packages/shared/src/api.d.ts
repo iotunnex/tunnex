@@ -1516,6 +1516,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/site-subnets/{subnetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                subnetId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Un-advertise / remove a site subnet (S8.2c WF-5; site:manage)
+         * @description Removes an advertised subnet from a site. A pending subnet just disappears; an APPROVED subnet's route is withdrawn from all gateways on the next reconcile (the full-sweep contract) — the UI states this consequence in the confirm. Correcting a mis-advertised subnet no longer requires deleting the whole site (the WF-5 trap the cross-cloud walk hit). Audited site.subnet_removed.
+         */
+        delete: operations["removeSiteSubnet"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2220,6 +2243,8 @@ export interface components {
             edition: "open" | "enterprise";
             /** @description S8.2c: the control plane's own CONFIGURED public base URL (APP_BASE_URL / install.sh's public address) — the AUTHORITATIVE answer to "where do gateways reach me", independent of how an admin happened to open the dashboard (a tunnel/alias/bare IP would bake the wrong URL into the emitted gateway install command). The gateway-enroll command derives TUNNEX_API_URL/TUNNEX_AGENT_URL from this, never from window.location. Empty when unset (the SPA then falls back to its own origin). */
             public_base_url?: string;
+            /** @description S8.2c WF-2: the gateway agent image the emitted enroll command uses (TUNNEX_NODE_AGENT_IMAGE). One-truth applied to the artifact version — pin it to a DIGEST and the stale-`:latest` drift that mis-convicted D2 becomes structurally impossible. The SPA falls back to its own default ref when unset. */
+            node_agent_image?: string;
             /** @description S8.3 (CW): the control plane's current compiled-artifact version CEILING (policyspec.ProtocolVersion). The cross-site upgrade warning names gateways whose reported max is below this — server-sourced so the UI never hardcodes the ceiling (it bumps with each protocol change; a hardcoded copy would silently fork on the next bump). */
             protocol_version: number;
             sso_providers: ("google" | "microsoft")[];
@@ -4721,6 +4746,28 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Approved. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeSiteSubnet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                subnetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
             204: {
                 headers: {
                     [name: string]: unknown;

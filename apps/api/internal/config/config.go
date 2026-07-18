@@ -26,6 +26,11 @@ type Config struct {
 	AutoMigrate bool
 	// AppBaseURL is the public base URL used to build email links (S2.1).
 	AppBaseURL string
+	// NodeAgentImage is the gateway agent image the dashboard bakes into the emitted enroll command
+	// (S8.2c WF-2). One-truth applied to the artifact version: pin it to a DIGEST
+	// (ghcr.io/…/tunnex-node-agent@sha256:…) and the stale-`:latest` drift that mis-convicted D2 becomes
+	// structurally impossible. Defaults to the `:latest` ref (matches the compose default).
+	NodeAgentImage string
 	// RedisURL is the session store DSN (S2.2).
 	RedisURL string
 	// CookieSecure sets the Secure flag on the session cookie. MUST be true in
@@ -84,6 +89,7 @@ func Load() Config {
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
+		NodeAgentImage:     getenv("TUNNEX_NODE_AGENT_IMAGE", "ghcr.io/iotunnex/tunnex-node-agent:latest"),
 		RedisURL:           getenv("REDIS_URL", "redis://redis:6379/0"),
 		CookieSecure:       getbool("TUNNEX_COOKIE_SECURE", false),
 		SessionIdleTTL:     getdur("TUNNEX_SESSION_IDLE_TTL", 24*time.Hour),

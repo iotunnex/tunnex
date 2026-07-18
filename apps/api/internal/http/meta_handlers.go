@@ -18,9 +18,10 @@ func (s apiServer) GetMeta(ctx context.Context, _ api.GetMetaRequestObject) (api
 	if s.sso != nil {
 		providers = []api.MetaSsoProviders{api.MetaSsoProvidersGoogle, api.MetaSsoProvidersMicrosoft}
 	}
-	base := s.appBaseURL // S8.2c: the CP's authoritative public URL for the gateway-enroll command
+	base := s.appBaseURL   // S8.2c: the CP's authoritative public URL for the gateway-enroll command
+	img := s.nodeAgentImage // WF-2: the (digest-pinnable) agent image the emitted command uses
 	return api.GetMeta200JSONResponse{
-		Body:    api.Meta{Edition: api.MetaEdition(enterprise.Name), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base},
+		Body:    api.Meta{Edition: api.MetaEdition(enterprise.Name), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, NodeAgentImage: &img},
 		Headers: api.GetMeta200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

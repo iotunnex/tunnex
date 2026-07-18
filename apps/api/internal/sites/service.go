@@ -280,3 +280,24 @@ func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid
 	}
 	return nil
 }
+
+// RemoveSubnet un-advertises a site subnet (WF-5). Correcting a mis-advertised subnet no longer needs a
+// whole-site delete. A pending subnet just vanishes; an APPROVED subnet's route is withdrawn from every
+// gateway on the next reconcile (finalizeArtifact drops it from the topology's approved set — the standard
+// full-sweep, the same path DeleteSite relies on). Audited in-tx (swallowed-audit law: the audit error
+// propagates, so a mystery commit-rollback can't hide a removal).
+func (s *Service) RemoveSubnet(ctx context.Context, actor, orgID, subnetID uuid.UUID) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		sub, e := q.GetSiteSubnetForOrg(ctx, sqlc.GetSiteSubnetForOrgParams{ID: subnetID, OrgID: orgID})
+		if e != nil {
+			if e == pgx.ErrNoRows {
+				return apierr.NotFound("subnet_not_found", "no such site subnet in this organization")
+			}
+			return e
+		}
+		if e := q.DeleteSiteSubnet(ctx, subnetID); e != nil {
+			return e
+		}
+		return s.audit(ctx, q, orgID, actor, subnetID, "site.subnet_removed", map[string]any{"cidr": sub.Cidr.String(), "was_status": sub.Status})
+	})
+}

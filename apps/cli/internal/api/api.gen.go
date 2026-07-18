@@ -863,6 +863,9 @@ type MemberStatus string
 type Meta struct {
 	Edition MetaEdition `json:"edition"`
 
+	// NodeAgentImage S8.2c WF-2: the gateway agent image the emitted enroll command uses (TUNNEX_NODE_AGENT_IMAGE). One-truth applied to the artifact version — pin it to a DIGEST and the stale-`:latest` drift that mis-convicted D2 becomes structurally impossible. The SPA falls back to its own default ref when unset.
+	NodeAgentImage *string `json:"node_agent_image,omitempty"`
+
 	// ProtocolVersion S8.3 (CW): the control plane's current compiled-artifact version CEILING (policyspec.ProtocolVersion). The cross-site upgrade warning names gateways whose reported max is below this — server-sourced so the UI never hardcodes the ceiling (it bumps with each protocol change; a hardcoded copy would silently fork on the next bump).
 	ProtocolVersion int `json:"protocol_version"`
 
@@ -1724,6 +1727,9 @@ type ClientInterface interface {
 
 	// ListPendingSiteSubnets request
 	ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RemoveSiteSubnet request
+	RemoveSiteSubnet(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ApproveSiteSubnet request
 	ApproveSiteSubnet(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3196,6 +3202,18 @@ func (c *Client) UpdateResource(ctx context.Context, orgId openapi_types.UUID, r
 
 func (c *Client) ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPendingSiteSubnetsRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RemoveSiteSubnet(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveSiteSubnetRequest(c.Server, orgId, subnetId)
 	if err != nil {
 		return nil, err
 	}
@@ -6967,6 +6985,47 @@ func NewListPendingSiteSubnetsRequest(server string, orgId openapi_types.UUID) (
 	return req, nil
 }
 
+// NewRemoveSiteSubnetRequest generates requests for RemoveSiteSubnet
+func NewRemoveSiteSubnetRequest(server string, orgId openapi_types.UUID, subnetId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "subnetId", runtime.ParamLocationPath, subnetId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/site-subnets/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewApproveSiteSubnetRequest generates requests for ApproveSiteSubnet
 func NewApproveSiteSubnetRequest(server string, orgId openapi_types.UUID, subnetId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -7926,6 +7985,9 @@ type ClientWithResponsesInterface interface {
 
 	// ListPendingSiteSubnetsWithResponse request
 	ListPendingSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingSiteSubnetsResponse, error)
+
+	// RemoveSiteSubnetWithResponse request
+	RemoveSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveSiteSubnetResponse, error)
 
 	// ApproveSiteSubnetWithResponse request
 	ApproveSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveSiteSubnetResponse, error)
@@ -9846,6 +9908,28 @@ func (r ListPendingSiteSubnetsResponse) StatusCode() int {
 	return 0
 }
 
+type RemoveSiteSubnetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveSiteSubnetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveSiteSubnetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ApproveSiteSubnetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11195,6 +11279,15 @@ func (c *ClientWithResponses) ListPendingSiteSubnetsWithResponse(ctx context.Con
 		return nil, err
 	}
 	return ParseListPendingSiteSubnetsResponse(rsp)
+}
+
+// RemoveSiteSubnetWithResponse request returning *RemoveSiteSubnetResponse
+func (c *ClientWithResponses) RemoveSiteSubnetWithResponse(ctx context.Context, orgId openapi_types.UUID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveSiteSubnetResponse, error) {
+	rsp, err := c.RemoveSiteSubnet(ctx, orgId, subnetId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveSiteSubnetResponse(rsp)
 }
 
 // ApproveSiteSubnetWithResponse request returning *ApproveSiteSubnetResponse
@@ -13917,6 +14010,32 @@ func ParseListPendingSiteSubnetsResponse(rsp *http.Response) (*ListPendingSiteSu
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveSiteSubnetResponse parses an HTTP response from a RemoveSiteSubnetWithResponse call
+func ParseRemoveSiteSubnetResponse(rsp *http.Response) (*RemoveSiteSubnetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveSiteSubnetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

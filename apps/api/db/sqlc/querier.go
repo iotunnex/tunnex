@@ -187,6 +187,8 @@ type Querier interface {
 	// it triggers (dst_kind='site'/src_kind='site' rules + subnets, ON DELETE CASCADE) is exercised by
 	// TestPolicyRuleSiteDstCascade; the bound gateway is unbound (nodes.site_id -> NULL via the FK).
 	DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, error)
+	// lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before deletion (WF-5 un-advertise).
+	DeleteSiteSubnet(ctx context.Context, id uuid.UUID) error
 	// lint:cross-org — user-scoped credential.
 	// Disenroll (self re-enroll clears via upsert; explicit delete for self-disenroll + admin-reset).
 	DeleteTOTP(ctx context.Context, userID uuid.UUID) (int64, error)

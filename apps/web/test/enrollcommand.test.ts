@@ -18,7 +18,7 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
   const base = okBase("https://cp.example.com", "https://ignored.example");
 
   it("is a SINGLE docker run — no compose, no newlines (the paste-mismatch is structurally impossible)", () => {
-    const cmd = remoteEnrollCommand({ token: "TKN", name: "gw-aws", endpoint: "203.0.113.7:51820", ...base });
+    const cmd = remoteEnrollCommand({ token: "TKN", name: "gw-aws", endpoint: "203.0.113.7:51820", ...base, image: GATEWAY_IMAGE });
     expect(cmd.startsWith("docker run ")).toBe(true);
     expect(cmd).not.toContain("docker compose");
     expect(cmd).not.toContain("\n");
@@ -26,7 +26,7 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
   });
 
   it("bakes in EVERY hand-fixed piece from the demo (host net, wgctrl, tun, token, CP urls, servername, image)", () => {
-    const cmd = remoteEnrollCommand({ token: "TKN", name: null, endpoint: null, ...base });
+    const cmd = remoteEnrollCommand({ token: "TKN", name: null, endpoint: null, ...base, image: GATEWAY_IMAGE });
     for (const piece of [
       "--network host",
       "--cap-add NET_ADMIN",
@@ -44,16 +44,16 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
   });
 
   it("endpoint present → TUNNEX_NODE_ENDPOINT set (hub); absent → omitted (NAT'd spoke)", () => {
-    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: "1.2.3.4:51820", ...base })).toContain('-e TUNNEX_NODE_ENDPOINT="1.2.3.4:51820"');
-    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: null, ...base })).not.toContain("TUNNEX_NODE_ENDPOINT");
+    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: "1.2.3.4:51820", ...base, image: GATEWAY_IMAGE })).toContain('-e TUNNEX_NODE_ENDPOINT="1.2.3.4:51820"');
+    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: null, ...base, image: GATEWAY_IMAGE })).not.toContain("TUNNEX_NODE_ENDPOINT");
   });
 
   it("a name is shell-quoted (a space can't truncate it into a node_name_mismatch loop)", () => {
-    expect(remoteEnrollCommand({ token: "T", name: "my gw", endpoint: null, ...base })).toContain('-e TUNNEX_NODE_NAME="my gw"');
+    expect(remoteEnrollCommand({ token: "T", name: "my gw", endpoint: null, ...base, image: GATEWAY_IMAGE })).toContain('-e TUNNEX_NODE_NAME="my gw"');
   });
 
   it("an endpoint is shell-quoted too (review #3 — a space/metachar can't corrupt the zero-touch command)", () => {
-    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: "1.2.3.4:51820 --privileged", ...base })).toContain(
+    expect(remoteEnrollCommand({ token: "T", name: null, endpoint: "1.2.3.4:51820 --privileged", ...base, image: GATEWAY_IMAGE })).toContain(
       '-e TUNNEX_NODE_ENDPOINT="1.2.3.4:51820 --privileged"',
     );
   });
@@ -75,6 +75,13 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
     expect(e.usedFallback).toBe(true); // signal the caller uses to caveat a fetch-failure fallback (#2)
     // An empty/whitespace configured URL is treated as unset (falls back).
     expect(okBase("   ", "http://40.65.63.141").apiURL).toBe("http://40.65.63.141");
+  });
+
+  it("WF-2: the command uses the CP-configured (digest-pinnable) image, not a hardcoded :latest", () => {
+    const digest = "ghcr.io/iotunnex/tunnex-node-agent@sha256:abc123";
+    const cmd = remoteEnrollCommand({ token: "T", name: null, endpoint: null, ...base, image: digest });
+    expect(cmd.endsWith(digest)).toBe(true);
+    expect(cmd).not.toContain(":latest");
   });
 
   it("cpEndpoints REFUSES an unparseable configured URL (re-review #1 — never a silently-broken command)", () => {

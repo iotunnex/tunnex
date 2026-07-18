@@ -1940,6 +1940,23 @@ paths:
         "204": { description: Approved. }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/site-subnets/{subnetId}:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: subnetId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: removeSiteSubnet
+      summary: Un-advertise / remove a site subnet (S8.2c WF-5; site:manage)
+      description: >-
+        Removes an advertised subnet from a site. A pending subnet just disappears; an APPROVED subnet's
+        route is withdrawn from all gateways on the next reconcile (the full-sweep contract) — the UI states
+        this consequence in the confirm. Correcting a mis-advertised subnet no longer requires deleting the
+        whole site (the WF-5 trap the cross-cloud walk hit). Audited site.subnet_removed.
+      tags: [sites]
+      responses:
+        "204": { description: Removed. }
+        default: { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2949,6 +2966,12 @@ components:
             happened to open the dashboard (a tunnel/alias/bare IP would bake the wrong URL into the emitted
             gateway install command). The gateway-enroll command derives TUNNEX_API_URL/TUNNEX_AGENT_URL from
             this, never from window.location. Empty when unset (the SPA then falls back to its own origin).
+        node_agent_image:
+          type: string
+          description: >-
+            S8.2c WF-2: the gateway agent image the emitted enroll command uses (TUNNEX_NODE_AGENT_IMAGE).
+            One-truth applied to the artifact version — pin it to a DIGEST and the stale-`:latest` drift that
+            mis-convicted D2 becomes structurally impossible. The SPA falls back to its own default ref when unset.
         protocol_version:
           type: integer
           description: >-
