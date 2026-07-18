@@ -15,6 +15,44 @@ export function enrollCommand(token: string, pinnedName: string | null): string 
   return `TUNNEX_JOIN_TOKEN=${token}${name} docker compose -f tunnex.yml up -d --force-recreate node-agent`;
 }
 
+// The published gateway image (S6.6 zero-build deploy). Pulled by the emitted docker run — nothing builds.
+export const GATEWAY_IMAGE = "ghcr.io/iotunnex/tunnex-node-agent:latest";
+
+export interface RemoteEnrollOpts {
+  token: string;
+  name: string | null;
+  endpoint: string | null; // public ip:port peers dial (D4a: admin-entered). null → NAT'd spoke, no endpoint.
+  apiURL: string; // public CP REST origin (nginx), e.g. https://cp.example.com
+  agentURL: string; // public CP agent TLS channel, e.g. https://cp.example.com:8443
+  serverName: string; // CP cert SAN the agent pins, e.g. tunnex-control
+}
+
+// remoteEnrollCommand builds the ONE true `docker run` for a REMOTE cloud gateway (S8.2c D4) — a SINGLE
+// LINE (D4b: a multi-line/compose line LOOKS copyable and got mis-pasted twice in the cross-cloud demo; a
+// one-line docker run with every env inline cannot be). It bakes in EVERYTHING the demo needed by hand:
+// `--network host` (so wg0 lives on the host + reaches real host LANs, not the bridge), `wgctrl` (real
+// WireGuard, not the mem fake), `/dev/net/tun` + NET_ADMIN, the public CP URLs + servername, the token,
+// the optional public endpoint. Pasted verbatim on a clean VM it reaches agent_ready with ZERO edits.
+export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
+  const q = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
+  const nameEnv = o.name ? ` -e TUNNEX_NODE_NAME=${q(o.name)}` : "";
+  const endpointEnv = o.endpoint ? ` -e TUNNEX_NODE_ENDPOINT=${o.endpoint}` : "";
+  return (
+    `docker run -d --name tunnex-node --restart unless-stopped --network host ` +
+    `--cap-add NET_ADMIN --device /dev/net/tun -v tunnex_node_state:/var/lib/tunnex-node ` +
+    `-e TUNNEX_JOIN_TOKEN=${o.token}${nameEnv}${endpointEnv} ` +
+    `-e TUNNEX_API_URL=${o.apiURL} -e TUNNEX_AGENT_URL=${o.agentURL} ` +
+    `-e TUNNEX_AGENT_SERVERNAME=${o.serverName} -e TUNNEX_WG_BACKEND=wgctrl ${GATEWAY_IMAGE}`
+  );
+}
+
+// cpEndpoints derives the public CP URLs the remote agent dials, from the dashboard's own origin (the
+// browser is served BY the control plane). REST rides nginx on the origin; the agent TLS channel is :8443
+// with the standard cert SAN. Pure over a location-like input so it unit-tests without a DOM.
+export function cpEndpoints(loc: { protocol: string; hostname: string; origin: string }): { apiURL: string; agentURL: string; serverName: string } {
+  return { apiURL: loc.origin, agentURL: `https://${loc.hostname}:8443`, serverName: "tunnex-control" };
+}
+
 /**
  * Gateways renders a org's enrolled tunnex-node agents and the enroll ceremony
  * (S4.7). Enrolling mints a ONE-TIME join token — a secret with the same handling
@@ -26,6 +64,8 @@ export function enrollCommand(token: string, pinnedName: string | null): string 
 export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   const [open, setOpen] = useState(false);
   const [nodeName, setNodeName] = useState("");
+  const [endpoint, setEndpoint] = useState(""); // D4a: admin-entered public ip:port (blank = NAT'd spoke)
+  const [pinnedEndpoint, setPinnedEndpoint] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   // The name the token was PINNED to at issue time — the server refuses this
   // token from an agent enrolling under any other name, so the ceremony must
@@ -51,8 +91,10 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
       }
       setToken(data.join_token); // shown once — never re-served
       setPinnedName(pinned);
+      setPinnedEndpoint(endpoint.trim() || null);
       setOpen(false);
       setNodeName("");
+      setEndpoint("");
     } catch {
       // A network-level failure rejects instead of returning {error}; without this
       // the button would stay stuck on "Generating…".
@@ -76,6 +118,11 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
           <div className="min-w-[12rem] flex-1">
             <Field label="Gateway name (optional)">
               <Input value={nodeName} onChange={(e) => setNodeName(e.target.value)} placeholder="office-gw" maxLength={100} />
+            </Field>
+          </div>
+          <div className="min-w-[12rem] flex-1">
+            <Field label="Public endpoint (optional — ip:port peers dial)">
+              <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="203.0.113.7:51820" maxLength={100} />
             </Field>
           </div>
           <Button onClick={issue} disabled={busy}>
@@ -119,26 +166,40 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
           title="Enroll your gateway — run this once"
           caption={
             <>
-              Run this command in your Tunnex install folder (where <span className="font-mono">tunnex.yml</span> lives)
-              to bring the gateway online — it re-creates the <span className="font-mono">node-agent</span> with this join
-              token. It is shown <span className="font-semibold">exactly once</span>, is single-use, and cannot be
-              retrieved again — copy it now.
+              Paste this <span className="font-semibold">single command</span> on the gateway VM (Docker installed) to
+              bring it online — it pulls the agent and comes up on real WireGuard with{" "}
+              <span className="font-semibold">no edits</span>. Shown <span className="font-semibold">exactly once</span>,
+              single-use — copy it now.
               {pinnedName && (
                 <>
                   {" "}
-                  The token is <span className="font-semibold">pinned to the name</span>{" "}
-                  <span className="font-mono">{pinnedName}</span> — the agent must enroll with exactly that{" "}
-                  <span className="font-mono">TUNNEX_NODE_NAME</span> or the server refuses it.
+                  Pinned to the name <span className="font-mono">{pinnedName}</span> — the agent enrolls under exactly
+                  that or the server refuses it.
                 </>
               )}
+              {!pinnedEndpoint && (
+                <>
+                  {" "}
+                  No public endpoint set → this gateway is treated as a <span className="font-semibold">NAT'd spoke</span>{" "}
+                  (it dials the hub; other peers can't dial it).
+                </>
+              )}{" "}
+              Co-located with the control plane instead? Run{" "}
+              <span className="font-mono">docker compose up -d node-agent</span> in your install folder.
             </>
           }
-          // The COMPLETE runnable command (env inline + the compose line) — see enrollCommand.
-          secret={enrollCommand(token, pinnedName)}
+          // D4: the ONE true remote-gateway docker run — single line, host networking + wgctrl baked in.
+          secret={remoteEnrollCommand({
+            token,
+            name: pinnedName,
+            endpoint: pinnedEndpoint,
+            ...cpEndpoints({ protocol: window.location.protocol, hostname: window.location.hostname, origin: window.location.origin }),
+          })}
           copyLabel="Copy command"
           onDismiss={() => {
             setToken(null);
             setPinnedName(null);
+            setPinnedEndpoint(null);
           }}
         />
       )}
