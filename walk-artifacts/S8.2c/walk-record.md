@@ -78,6 +78,18 @@ Create a `site → site` grant from the Access Add-rule modal — through the AP
 | WF-8 | Leg 5 | Site rules render as `site 019f762b… → site 019f762b…` (raw truncated site UUID, not the site NAME). azure-site & aws-site are UUIDv7 created seconds apart → they SHARE the `019f762b…` prefix, so the two distinct rules look IDENTICAL. Should show `azure-site → aws-site`. (S8.3 `ruleRow` resolves site labels — the Access Rules list isn't feeding it the sites, or the resolution isn't wired here.) | UX / correctness (display) | HELD — resolve site rule endpoints to names in the Rules list |
 | WF-3 | Leg 3 | Guided cloud-fabric setup (Azure UDR / AWS route-table + src/dst-check + IP-forwarding) is **docs-only** (`docs/deploy-cloud-gateway.md`), NOT surfaced on the site/subnet page. D3 RULED "the site/subnet UI surfaces per-cloud 'your fabric needs this route' instructions (detected/declared cloud, copy-paste snippets, doc links)." Slice 2 delivered the doc but not the in-UI surfacing — and the site page carries no link to it. Operator must find the doc, not read it in context. | scope gap vs D3 ruling | HELD for founder — was the in-UI guided-setup in scope for S8.2c or deferrable? At minimum, link the doc from the site page |
 
+## RE-WALK SCRIPT (WF-4 loop terminator + fold spot-checks; Pawan drives)
+The fold is in; this proves it on live nft (the loop terminator, not a 4th review round).
+- **① Mac build+push** the WF-4 agent (`docker buildx … node.Dockerfile --push`). **RECORD the pushed digest** (`docker buildx imagetools inspect ghcr.io/iotunnex/tunnex-node-agent:latest` or the push output) — "the version the walk proved" must be a PINNABLE fact, not a moving `:latest` (WF-2's discipline applied to ourselves; the mild irony noted). Digest: _____
+- **② CP VM** rebuild api+web+nginx from the branch (`git pull` + `TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build`).
+- **③ Both gateways** — DELETE the manual rule (`sudo iptables -D DOCKER-USER -j ACCEPT`), `docker pull` the agent, `docker rm -f tunnex-node`, re-run the same `docker run` (volume reuse = identity kept).
+- **④ ZERO-TOUCH VERDICT — the ping + the IDEMPOTENCE handle-check (both required):**
+  1. From the behind-host (CP VM `10.0.0.4`): `ping -c3 172.31.24.206` → want 0% loss with NO manual iptables present.
+  2. On azure-gw: `sudo docker exec tunnex-node nft -a list chain ip filter DOCKER-USER` → note the `tunnex-site-fwd` rule's `# handle N`.
+  3. **Wait ≥30s (≥1 reconcile tick), list again** → **SAME handle = idempotence proven on live nft** (the /32-churn class would pass a single ping but thrash the handle over ticks — this is the one gap between the red and reality). A CHANGED handle = the churn class survived → walk FAILS on it.
+- **⑤ Spot-checks:** WF-8 (Rules show `azure-site → aws-site`) · WF-3 (site card "Cloud fabric setup" expander) · WF-5 (✕ on the bogus `192.168.88.0/24` — mini-proof + cleanup in one click).
+- ④ passes → Zero-Touch Law SATISFIED → story flips to PASS → merge is Pawan's word.
+
 ## Verdict (2026-07-18, live founder-present walk, cross-cloud AWS Sydney ↔ Azure West US)
 
 **ZERO-TOUCH LAW: FAIL → the story STAYS OPEN.**
