@@ -1,4 +1,6 @@
-# Demo prep — laptop-as-device reaches the VM's private IP via site machinery (Option A, product path)
+# Demo prep — laptop-as-device → VM private IP (DEFERRED — device-path demo, founder-parked)
+
+**PARKED (founder-directed): superseded by the cross-cloud site-to-site demo (`walk-artifacts/cross-cloud-demo/demo-script.md`).** Kept because its container→host-LAN routing honesty section is S8.5 input regardless. Not the active demo.
 
 **Runs AFTER the S8.3 merge, on `main`.** Goal: your **laptop** (a Tunnex device) reaches the **VM's private IP `10.0.0.4`** through the tunnel, where the VM gateway advertises the VM host's `10.0.0.0/24` as a **site subnet** and a **Zero-Trust grant** permits device→site. This is client-to-site-resource using the S8 site machinery (NOT gateway↔gateway; S8.2 already wire-proved that).
 
