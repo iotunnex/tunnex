@@ -15,7 +15,15 @@
 
 ---
 
-## Pre-flight (both consoles — paste outputs; STOP on any surprise)
+## UI-FIRST constraint (founder-directed) + gap protocol
+Every step that CAN be done in the dashboard IS — Pawan clicks, screenshots as evidence (S8.3 walk convention). Terminal only where inherent: the agent `docker run` on the cloud VMs (with the exact line surfaced from the UI's join-token screen), the ping/tcpdump proof legs, and the two cloud consoles. **If a step has no UI surface → HALT the leg, log a UI-GAP FINDING (S8.4/S8.5 input), give the workaround (API/CLI), continue.**
+
+### UI-gaps found at scoping (logged)
+- **GAP-1 — no in-session org creation for an existing owner** (`/create-org` is `RequireNoOrg`-gated). Workaround: **fresh-account signup** (new email → mailpit verify → create-org). Scripted below.
+- **GAP-2 — no site policy-grant in the rule builder** (the Access Add-rule modal is `group/user → group/resource` only; `src_kind=site`/`dst_kind=site` CANNOT be created in the UI). **HALTS the ZT-grant leg → workaround = API.** The headline gap S8.5 / a site-policy UI must close.
+- **GAP-3 (minor) — node endpoint not shown in the UI.** The **HUB badge** (Sites card, post-bind) is the admin proxy for "has a public endpoint"; `· policy vN` shows version-readiness. Log, proceed by badge.
+
+## Pre-flight (UI-first where possible — screenshots as evidence; STOP on any surprise)
 **Cloud-fabric (each step LOGGED as S8.5/deploy input):**
 1. **AWS security group:** allow **UDP 51820** inbound to `15.134.231.13` (from the Azure public IP, or 0.0.0.0/0 for the demo). Allow ICMP for the ping proof.
 2. **AWS source/dest check OFF** on the AWS instance ENI (a gateway forwards traffic not addressed to itself — AWS drops it otherwise). Log it.
@@ -23,29 +31,31 @@
 4. **Azure NSG:** allow ICMP + the return path; the spoke dials out so no inbound UDP needed on Azure.
 5. Confirm reachability: from Azure `ping -c1 15.134.231.13` (hub public) succeeds.
 
-**Agent install (both VMs, against the CP public API):**
-```
-# per VM: run the tunnex-node container, TUNNEX_API_URL=https://40.65.63.141 (public CP),
-# TUNNEX_AGENT_SERVERNAME=<CP cert SAN>, enroll with a join token issued from the UI.
-```
-Pre-flight PASS = both agents enrolled + reporting; hub shows a public endpoint, spoke does not.
+**Leg 0a — fresh org (UI; GAP-1 workaround).** Sign up a fresh account (new email) → verify via mailpit → **create-org `cross-cloud`**. Screenshot the empty org. (An existing owner has no "new org" button — GAP-1.)
+
+**Leg 0b — join tokens (UI).** Devices page → **Generate join token** ×2 (pin names `gw-aws`, `gw-azure`). The screen shows the **exact enroll command** — copy each. Screenshot.
+
+**Leg 0c — enroll (terminal, inherent — cloud VMs).** On each VM run its copied command against the **public CP** (`40.65.63.141`). NOTE: the UI emits a `docker compose -f tunnex.yml … node-agent` line assuming a compose install; a bare cloud VM running just the `tunnex-node` container needs the token as `TUNNEX_JOIN_TOKEN` env on `docker run` instead — **if the compose line doesn't fit the cloud VM, that's a deploy-shape note (S8.5/deploy input); adapt to `docker run` and LOG it.** Paste each enroll result.
+
+**Leg 0d — verify (UI-first).** Devices page (new org) shows **exactly two** nodes (`gw-aws`, `gw-azure`, no `demo-gw` — the clean-org check, screenshot). Endpoint isn't shown pre-bind (GAP-3) → the hub verification is the **HUB badge on gw-aws on the Sites card AFTER Leg-1 bind** (screenshot). Only if the badge is wrong/ambiguous, fall back to `curl …/nodes | jq '.[]|{name,is_site_hub,endpoint}'` as the workaround (log it).
+Pre-flight PASS = both agents enrolled + reporting; **gw-aws takes the HUB badge**, gw-azure does not.
 
 ---
 
-## Setup (product path — Sites UI, owner)
-1. **Register two sites**, bind Gateway A → `site-aws`, Gateway B → `site-azure`.
-2. **Advertise + approve** each cloud's private subnet:
-   - `site-aws`: `172.31.0.0/16` (or a scoped `/24` around `172.31.24.206`).
-   - `site-azure`: `<AZURE_VNET_PREFIX>` (from Pawan's paste).
-   - **Disjointness handled in-script:** AWS `172.31.x` vs Azure VNet must be disjoint (they are, different clouds). If either overlaps the device pool (`10.99.x`) or each other, scope to a `/24`. Approve → `site.subnet_approved` each.
-3. **Hub confirm:** the Sites page shows Gateway A with the **HUB** badge (backend-elected), Gateway B a spoke.
-4. **Gateway container→host routing/NAT (the hand-fiddle — LOG EACH):** on each VM, ensure the gateway container forwards + masquerades to its host subnet (`net.ipv4.ip_forward=1`; masquerade out the host NIC for the peer subnet; a route to the host LAN). **Every command = S8.5 input.**
+## Setup
+**Leg 1 — register + bind (UI, Sites page).** Register `site-aws` + `site-azure`; **Bind gateway** gw-aws → site-aws, gw-azure → site-azure. Screenshot. **Hub verify:** gw-aws takes the **HUB** badge (Leg-0d verification lands here).
+**Leg 2 — advertise + approve subnets (UI, Sites page + queue).**
+- `site-aws`: `172.31.0.0/16` (or `/24` around `172.31.24.206`).
+- `site-azure`: `10.0.0.0/24` (**NOTE: contains the CP `10.0.0.4` + the Azure gw `10.0.0.5`** — deliberate).
+- **Disjointness (validator being right):** vs the org's device pool — if the pool overlaps `10.0.0.0/24` or `172.31.x`, **Approve fires the typed `subnet_not_disjoint` refusal** (screenshot it — that's a real leg). Renumber the pool (Settings, UI) or scope site-azure to `10.0.0.4/30`, then re-approve. Screenshot approved.
+**Leg 3 — gateway container→host routing/NAT (terminal, inherent — LOG EACH as S8.5 input).** On each VM, the gateway container must forward + masquerade to its host subnet (`net.ipv4.ip_forward=1`; masquerade out the host NIC for the peer subnet; route to the host LAN). **No UI surface — every command is S8.5 scope evidence** (S8.5 compiles routed-range → forward rules; today it's manual).
 
 ## Proof legs
-1. **Routed-but-dropped (ordering matters — do this BEFORE the grant):** enforcing, NO site→site grant → from an AWS host `ping <azure-host-in-VNet>` → the packet is WG-carried to the hub and **DROPPED** at the forward chain (routing ≠ permission). Capture the hub `default_drop` counter.
-2. **Grant → cross-cloud ping:** Access → rule `src_kind=site (site-aws) → dst_kind=site (site-azure)` (and/or the reverse) → the SAME ping now **replies**. **pcap BOTH sides** (tcpdump on AWS egress + Azure ingress) showing the ICMP crossing the WG tunnel — first cross-CLOUD packet.
-3. **`site_link_down` live:** stop the hub (or the spoke link) → after the staleness window the Sites card flips to **`site_link_down`** / `site_hub_down`; restart → clears. (Keepalive keeps a healthy idle link warm — the S8.3 Slice-0 rider, so the badge means a real dead link.)
-4. **Un-NAT'd invariant:** confirm the site-to-site traffic keeps its real LAN source (masquerade scoped `oifname != wg0`) — the transit accept matches the real VPC/VNet source, not a NAT'd address.
+1. **Routed-but-dropped (ordering — BEFORE the grant; terminal ping):** enforcing, NO grant → from an AWS host `ping <azure-host-in-10.0.0.0/24>` → WG-carried to the hub, **DROPPED** at the forward chain (routing ≠ permission). Capture the hub `default_drop` counter.
+2. **Grant → cross-cloud ping. ⚠ GAP-2 HALT: the site policy-grant has NO UI.** The Access Add-rule modal cannot create `src_kind=site → dst_kind=site`. **Log the finding, then workaround via API** (`POST …/policies {src_kind:site, src_site_id:<site-aws>, dst_kind:site, dst_site_id:<site-azure>}`) — the SAME ping now **replies**. **pcap BOTH sides** (tcpdump AWS egress + Azure ingress) — the first cross-CLOUD packet. *(This gap is the demo's loudest S8.5/site-policy-UI input.)*
+3. **`site_link_down` live (UI):** stop the hub/spoke link (terminal) → after the staleness window the Sites card flips to **`site_link_down`**/`site_hub_down` (screenshot); restart → clears. Keepalive keeps a healthy idle link warm (S8.3 Slice-0) so the badge means a REAL dead link.
+4. **Un-NAT'd invariant (terminal):** site-to-site traffic keeps its real LAN source (masquerade scoped `oifname != wg0`) — the transit accept matches the real VPC/VNet source, not a NAT'd address.
+5. **BONUS — AWS reaches the CP privately (`10.0.0.4`):** since `10.0.0.0/24` now routes AWS→tunnel→Azure gateway→its local VNet, `ping 10.0.0.4` from AWS reaches the CP/dev-VM over the site tunnel (the Azure gw forwards to its neighbor). **Route-loop watch:** the CP is reached for CONTROL over its PUBLIC IP (`40.65.63.141`, default route) — the tunnel carries only the DATA-plane `10.0.0.4`; if the hub shows any route-loop for the CP address, SURFACE it, don't improvise.
 
 ## Verdict + S8.5 input
 - Record: did AWS Sydney reach Azure West US through the tunnel (ping + pcap both sides)? drop-then-grant flipped on exactly the grant? `site_link_down` live?
