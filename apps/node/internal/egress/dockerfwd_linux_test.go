@@ -16,7 +16,8 @@ type fakeNft struct {
 	chainAbsent  bool              // list chain DOCKER-USER errors (bare-metal / non-Docker host)
 	forwardDrop  bool              // `list chain ip filter FORWARD` reports policy drop
 	insertErr    bool              // inserts fail (can't place the accept → forwardBlocked path)
-	rules        map[string]string // daddr -> handle (the agent's tunnex-marked DOCKER-USER rules)
+	listErr      bool              // the `-a list` enumeration errors (transient nft busy/lock)
+	rules        map[string]string // daddr (as nft PRINTS it) -> handle (the agent's tunnex-marked rules)
 	nextHandle   int
 	inserts      []string // daddr order of inserts (assert scoping)
 	deletes      []string // handles deleted
@@ -38,6 +39,9 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		}
 		return "chain FORWARD { type filter hook forward priority filter; policy accept; }", nil
 	case cmd == "-a list chain ip filter DOCKER-USER":
+		if f.listErr {
+			return "", errors.New("nft busy: resource temporarily unavailable")
+		}
 		var b strings.Builder
 		b.WriteString("table ip filter {\n  chain DOCKER-USER {\n")
 		for daddr, h := range f.rules {
@@ -49,13 +53,13 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		if f.insertErr {
 			return "", errors.New("insert denied")
 		}
-		// daddr is the token after "ip daddr"
 		daddr := ""
 		for i := 0; i+1 < len(args); i++ {
 			if args[i] == "daddr" {
 				daddr = args[i+1]
 			}
 		}
+		daddr = strings.TrimSuffix(daddr, "/32") // model nft: a host daddr is stored/printed BARE
 		f.nextHandle++
 		f.rules[daddr] = fmt.Sprint(f.nextHandle)
 		f.inserts = append(f.inserts, daddr)
@@ -119,6 +123,38 @@ func TestDockerForwardFullSweep(t *testing.T) {
 	}
 	if len(f.deletes) != 1 {
 		t.Fatalf("exactly the stale rule must be deleted by handle, deletes=%v", f.deletes)
+	}
+}
+
+// TestDockerForwardHostRouteIdempotent — re-review #1: a /32 route must NOT thrash. nft prints a host
+// daddr BARE (no /32), so keying on Masked() "x/32" would never match the listed "x" → perpetual
+// insert+delete. canonDaddr keys both sides bare, so a second reconcile inserts nothing.
+func TestDockerForwardHostRouteIdempotent(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	routes := []string{"10.0.0.5/32"}
+	m.reconcileDockerForward(context.Background(), routes)
+	n := len(f.inserts)
+	if n != 1 {
+		t.Fatalf("first reconcile inserts the /32 accept once, got %d", n)
+	}
+	m.reconcileDockerForward(context.Background(), routes)
+	if len(f.inserts) != n || len(f.deletes) != 0 {
+		t.Fatalf("a /32 route must be idempotent (no churn); inserts %d→%d, deletes %d", n, len(f.inserts), len(f.deletes))
+	}
+}
+
+// TestDockerForwardListErrorSkips — re-review #2: a transient `-a list` failure must NOT blind-insert
+// (which duplicates accepts the sweep can't reap). On a list error the reconcile skips add/sweep.
+func TestDockerForwardListErrorSkips(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // places one
+	before := len(f.inserts)
+	f.listErr = true
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // list fails → must NOT re-insert
+	if len(f.inserts) != before {
+		t.Fatalf("a transient list error must skip inserts (no duplicates); inserts %d→%d", before, len(f.inserts))
 	}
 }
 

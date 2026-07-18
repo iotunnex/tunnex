@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -633,43 +634,67 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (
 		m.forwardBlocked.Store(false)
 		return false
 	}
-	// Desired = one accept per v4 route (canonical masked prefix — no nft injection).
+	// Desired = one accept per v4 route, keyed by the CANONICAL daddr nft PRINTS (host route → bare, else
+	// masked). #1: nft drops the /32 from a host daddr, so a `Masked()` "x/32" key would never match the
+	// listed bare "x" and would thrash insert+delete every tick — canonDaddr keys both sides the same way.
 	desired := map[string]bool{}
 	for _, c := range routes {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
-			desired[p.Masked().String()] = true
+			desired[canonDaddr(p)] = true
 		}
 	}
-	// Current tunnex-marked rules: daddr -> handle.
+	// Current tunnex-marked rules: canonical daddr -> handle. A LIST ERROR (not just empty) means we can't
+	// know what's in force → SKIP add/sweep this tick and keep the prior signal (#2: blindly inserting on an
+	// unread list duplicates accepts the sweep can't reap, since they ARE in desired). Next tick retries.
+	listing, err := m.nftRun(ctx, "-a", "list", "chain", "ip", "filter", "DOCKER-USER")
+	if err != nil {
+		return m.forwardBlocked.Load()
+	}
 	current := map[string]string{}
-	if listing, err := m.nftRun(ctx, "-a", "list", "chain", "ip", "filter", "DOCKER-USER"); err == nil {
-		for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
-			current[mt[1]] = mt[2]
+	for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
+		if p, e := netip.ParsePrefix(mt[1]); e == nil {
+			current[canonDaddr(p)] = mt[2]
+		} else if a, e := netip.ParseAddr(mt[1]); e == nil {
+			current[a.String()] = mt[2] // nft prints a host route as a bare address
 		}
 	}
 	placeErr := false
-	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN.
-	for cidr := range desired {
-		if _, have := current[cidr]; have {
+	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN. The daddr is the
+	// canonical key (bare host / masked CIDR) — nft accepts either form.
+	for key := range desired {
+		if _, have := current[key]; have {
 			continue
 		}
 		if _, err := m.nftRun(ctx, "insert", "rule", "ip", "filter", "DOCKER-USER",
-			"iifname", "!=", wg, "oifname", wg, "ip", "daddr", cidr, "counter", "accept",
+			"iifname", "!=", wg, "oifname", wg, "ip", "daddr", key, "counter", "accept",
 			"comment", `"`+dockerUserComment+`"`); err != nil {
 			placeErr = true
 		}
 	}
-	// Full-sweep: delete comment-marked rules whose daddr left Routes.
-	for cidr, handle := range current {
-		if desired[cidr] {
+	// Full-sweep: delete comment-marked rules whose daddr left Routes. #5: surface a failed delete (a
+	// lingering foreign-chain accept is retried next tick, but a persistent failure must not be silent).
+	for key, handle := range current {
+		if desired[key] {
 			continue
 		}
-		_, _ = m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle)
+		if _, err := m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle); err != nil {
+			slog.Warn("docker_user_sweep_failed", "handle", handle, "daddr", key, "error", err.Error())
+		}
 	}
 	// D-WF4-d: routes to carry + FORWARD policy-drop + our accept couldn't be placed → blocked (loud).
 	blocked := len(desired) > 0 && placeErr && forwardPolicyIsDrop(ctx, m.nftRun)
 	m.forwardBlocked.Store(blocked)
 	return blocked
+}
+
+// canonDaddr returns the daddr string nft PRINTS for a prefix: a host route (/32 v4, /128 v6) as the BARE
+// address, any other prefix as the masked CIDR. Keying idempotence on this form makes the /32 case match
+// (nft drops the /32) instead of thrashing insert+delete every tick.
+func canonDaddr(p netip.Prefix) string {
+	if p.Bits() == p.Addr().BitLen() {
+		return p.Addr().String()
+	}
+	return p.Masked().String()
 }
 
 // forwardPolicyIsDrop reports whether the `ip filter FORWARD` base chain is policy drop (the
