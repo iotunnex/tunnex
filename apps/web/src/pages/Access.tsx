@@ -32,6 +32,7 @@ import {
   pruneStaleRuleIds,
   swapRule,
   grantExpiry,
+  rulesSummary,
   extendErrorCopy,
   activeMembers,
   canEditRuleInModal,
@@ -282,15 +283,23 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   // desync ([291]/[309]/[371]). Pruned ONLY on a successful load (amendment A), per-id (B).
   const [staleRuleIds, setStaleRuleIds] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  // S8.3 CP summary line: BOTH derived from real load results (never an empty default) so a failed load
+  // can't render the loud "0 rules — all denied". null until the first load resolves.
+  const [modeResult, setModeResult] = useState<Loaded<"off" | "enforcing"> | null>(null);
+  const [rulesResult, setRulesResult] = useState<Loaded<number> | null>(null);
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
-    const [rr, gr, resr, mr] = await Promise.all([
+    const [rr, gr, resr, mr, mo] = await Promise.all([
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", { params: { path: { orgId } } })),
     ]);
+    // Summary inputs — set from the SAME results (a rules-load failure → summary shows "failed", never 0).
+    setRulesResult(rr.ok ? { ok: true, data: (rr.data as PolicyRule[]).length } : rr);
+    setModeResult(mo.ok ? { ok: true, data: (mo.data as ZeroTrustMode).mode } : (mo as Loaded<"off" | "enforcing">));
     // The RULES fetch failing means the section cannot render truthfully — show retry, NOT
     // the reassuring "No rules — enforcing denies everything" ([2]). Amendment A: on this
     // FAILED path the stale-rule set is left untouched (the warning persists).
@@ -336,6 +345,24 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
         )}
       </div>
       <p className="mt-1 text-xs text-slate-500">Allow rules: a source group may reach a destination group or resource.</p>
+
+      {/* S8.3 CP: the posture summary line. enforcing+0 is LOUD (a live default-deny with no rules); a
+          failed load reads "unavailable", never the reassuring 0-rules message. */}
+      {(() => {
+        const s = rulesSummary({ modeResult, rulesResult });
+        if (s.state === "loading") return null;
+        return (
+          <p
+            className={
+              s.loud
+                ? "mt-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-1.5 text-sm font-semibold text-danger"
+                : `mt-2 text-xs ${s.state === "failed" ? "text-amber-300" : "text-slate-400"}`
+            }
+          >
+            {s.text}
+          </p>
+        );
+      })()}
 
       {/* [291] legibility signals COMPOSE: the partial-swap notice + a mutation error render at
           TOP LEVEL — a load failure replaces the LIST (content), never a warning. */}
@@ -592,66 +619,74 @@ function RuleFormModal({
       }
     >
       <div className="space-y-3">
-        <Field label="Source type">
-          <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user")}>
-            <option value="group">Group</option>
-            <option value="user">User (a single person)</option>
-          </Select>
-        </Field>
-        {srcKind === "group" ? (
-          <Field label="Source group">
-            <Select value={src} onChange={(e) => setSrc(e.target.value)}>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
+        {/* S8.3 CP layout: source + destination each read as a labeled panel (was a flat field list),
+            so the "who → what" of a rule is legible at a glance. Layout only — no behavior change. */}
+        <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Source</legend>
+          <Field label="Source type">
+            <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user")}>
+              <option value="group">Group</option>
+              <option value="user">User (a single person)</option>
             </Select>
           </Field>
-        ) : (
-          // D1 constraint mirrored client-side: only CURRENT active members are offered,
-          // so the picker never lets you build a rule the server would reject (user_not_member).
-          <Field label="Source user">
-            {members.length > 0 ? (
-              <Select value={srcUser} onChange={(e) => setSrcUser(e.target.value)}>
-                {members.map((m) => (
-                  <option key={m.user_id} value={m.user_id}>
-                    {m.name || m.email}
+          {srcKind === "group" ? (
+            <Field label="Source group">
+              <Select value={src} onChange={(e) => setSrc(e.target.value)}>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
                   </option>
                 ))}
               </Select>
-            ) : (
-              <Input value="" disabled placeholder="No active members to grant" />
-            )}
-          </Field>
-        )}
-        <Field label="Destination type">
-          <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource")}>
-            <option value="group">Group (device-to-device)</option>
-            <option value="resource">Resource (CIDR / port)</option>
-          </Select>
-        </Field>
-        {dstKind === "group" ? (
-          <Field label="Destination group">
-            <Select value={dstGroup} onChange={(e) => setDstGroup(e.target.value)}>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
+            </Field>
+          ) : (
+            // D1 constraint mirrored client-side: only CURRENT active members are offered,
+            // so the picker never lets you build a rule the server would reject (user_not_member).
+            <Field label="Source user">
+              {members.length > 0 ? (
+                <Select value={srcUser} onChange={(e) => setSrcUser(e.target.value)}>
+                  {members.map((m) => (
+                    <option key={m.user_id} value={m.user_id}>
+                      {m.name || m.email}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input value="" disabled placeholder="No active members to grant" />
+              )}
+            </Field>
+          )}
+        </fieldset>
+        <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
+          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Destination</legend>
+          <Field label="Destination type">
+            <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource")}>
+              <option value="group">Group (device-to-device)</option>
+              <option value="resource">Resource (CIDR / port)</option>
             </Select>
           </Field>
-        ) : (
-          <Field label="Destination resource">
-            <Select value={dstResource} onChange={(e) => setDstResource(e.target.value)}>
-              {resources.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
+          {dstKind === "group" ? (
+            <Field label="Destination group">
+              <Select value={dstGroup} onChange={(e) => setDstGroup(e.target.value)}>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <Field label="Destination resource">
+              <Select value={dstResource} onChange={(e) => setDstResource(e.target.value)}>
+                {resources.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+        </fieldset>
         {/* Temporary grant (CREATE only): set an expiry to auto-revoke; empty = permanent.
             Editing an existing rule changes its src/dst; change a temporary grant's window
             with Extend (a window bump), not Edit. */}
