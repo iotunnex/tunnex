@@ -101,11 +101,16 @@ type Service struct {
 	// written to the join-token audit rows, so issuance and redemption correlate
 	// without the raw token ever entering the audit stream.
 	sealer *crypto.Sealer
+	// siteTopoLoad loads the S8.2 site topology. Defaults to loadSiteTopology; a test overrides it to
+	// inject a fault, proving the DesiredState-ATOMIC contract (a topology error fails the whole fetch).
+	siteTopoLoad func(context.Context, uuid.UUID) (siteTopology, error)
 }
 
 // NewService builds the node service.
 func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Service {
-	return &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer}
+	s := &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer}
+	s.siteTopoLoad = s.loadSiteTopology
+	return s
 }
 
 // SetPolicyProvider wires the enterprise policy engine (S7.2). Call before serving.
@@ -324,23 +329,26 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	// pushed-hash path (trackDesync / PolicyHealthForNodes) calls, so the served artifact and the desync
 	// baseline can NEVER disagree about the artifact's contents (the #1 fix: two compile paths agreeing).
 	if node.SiteID.Valid {
-		topo, terr := s.loadSiteTopology(ctx, node.OrgID)
-		if terr != nil {
-			// DesiredState-ATOMIC LAW (AMENDED, R1): silently-empty is still forbidden, but a section's
-			// failure is handled per PRECEDENCE, not all-or-nothing. The device peers + policy are
-			// SECURITY-carrying (a revocation must reach the agent within its <5s SLA) — they MUST serve
-			// fresh. The site-link section is AUXILIARY — on its failure it is OMITTED-AND-SURFACED: the
-			// agent's site peers age out and site_link_down (H5) fires, so the degradation is VISIBLE, not
-			// silent. Failing the whole fetch here (the pre-R1 shape) would withhold the fresh device peers
-			// and delay revocation — security < availability inverted. (Legal only because H5 wired the
-			// surface; it would have been reassuring-green before.)
-			slog.Warn("site_topology_load_failed_omitting_section",
-				slog.String("node_id", node.ID.String()), slog.String("error", terr.Error()))
-		} else {
-			peers, _ := siteLinkGraphFrom(topo, node)
-			ds.Peers = append(ds.Peers, peers...)
-			ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
+		load := s.siteTopoLoad
+		if load == nil { // directly-constructed Service (tests) → the real loader
+			load = s.loadSiteTopology
 		}
+		topo, terr := load(ctx, node.OrgID)
+		if terr != nil {
+			// DesiredState-ATOMIC LAW (original, unamended): a multi-section artifact assembly error FAILS
+			// THE WHOLE FETCH — never a partial artifact that reads whole. The agent's standing FAIL-STATIC
+			// contract (since S3.1) then holds LAST-GOOD everything, so nothing (peers, routes, policy) is
+			// torn down across the blip. A topology-query error is the SAME class as any other DesiredState
+			// query error — a DB fault marginally widening the fetch's failure surface, NOT a new coupling
+			// of revocation to sites: revocation rides the push path, and a push landing during a DB
+			// outage always waited. (The R1 "omit the section" attempt was WRONG — full-sweep reconcile
+			// DELETES an omitted section, tearing down the live site path; F1. The security-precedence
+			// amendment is withdrawn: it manufactured partial sections that full-sweep cannot survive.)
+			return DesiredState{}, terr
+		}
+		peers, _ := siteLinkGraphFrom(topo, node)
+		ds.Peers = append(ds.Peers, peers...)
+		ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 	}
 	return ds, nil
 }

@@ -115,6 +115,7 @@ type Reconciler struct {
 	// WG handshakes and stores whether any is stale/absent, so the report loop can surface site_link_down.
 	// nil when not wired (e.g. tests) → the check is skipped.
 	siteLinkStale *atomic.Bool
+	lastStatsOK   time.Time // F2: last successful backend.Stats read — the one timestamp for three-state staleness
 }
 
 // SetSiteLinkStaleSink wires the H5 site-link-staleness sink (read by the report loop). Call before Run.
@@ -139,12 +140,17 @@ func (r *Reconciler) updateSiteLinkStale(ctx context.Context, desired []Peer) {
 	}
 	stats, err := r.backend.Stats(ctx)
 	if err != nil {
-		// R4: there ARE site-link peers but we can't confirm them UP → report STALE (over-report; a
-		// maybe-dead link reads dead until proven alive, incl. cold start before the first Stats). Silence
-		// here would be the dead-while-green class; the annoyance of a brief false site_link_down heals.
-		r.siteLinkStale.Store(true)
-		return
+		// THREE-STATE on a Stats error (F2/R4), one timestamp, no debounce machinery: (1) cold start —
+		// never a good reading — report STALE (over-report once; a maybe-dead link reads dead). (2) a
+		// TRANSIENT error within the staleness window of the last good read — KEEP the last value (kills
+		// the flap: a genuinely-up link doesn't oscillate on an intermittent wg-dump hiccup). (3) an error
+		// PERSISTING past the window — report STALE (can no longer vouch the link is up).
+		if r.lastStatsOK.IsZero() || time.Since(r.lastStatsOK) > siteLinkStaleWindow {
+			r.siteLinkStale.Store(true)
+		}
+		return // else: keep last value
 	}
+	r.lastStatsOK = time.Now()
 	hs := make(map[string]int64, len(stats))
 	for _, s := range stats {
 		hs[s.PublicKey] = s.LastHandshake
@@ -295,25 +301,26 @@ func sleep(ctx context.Context, d time.Duration) bool {
 }
 
 // peersEqual compares the ACTUAL peer set (from the kernel/wg dump) against the DESIRED set (from the
-// control plane). It keys by public key — NOT two independently-canon'd sorted lists — because the
-// Endpoint check is ASYMMETRIC: only the DESIRED side carries SiteLink (CP intent); the actual side (wg
-// dump) never can (R2). So a SITE-LINK peer's static Endpoint is compared using the DESIRED peer's flag,
-// while a device peer's roaming endpoint is ignored. Keying canon on SiteLink (the pre-R2 shape) made
-// every real site-link peer perpetually dirty (actual.SiteLink=false ≠ desired.SiteLink=true).
+// control plane). OUTER structure is the sorted-MULTISET compare (F4/R2 restore) — canon both, sort,
+// pairwise — so a duplicate-pubkey desired set can't hide an unpruned actual peer (a map-keyed compare
+// dropped that). The per-peer Endpoint conditionality lives INSIDE the comparator: after sorting on
+// canon (pubkey + sorted allowed-ips, endpoint-BLIND), aligned pairs share pubkey+ips, so the DESIRED
+// peer's SiteLink flag decides whether the static Endpoint must match (B4). Only the desired side ever
+// carries SiteLink (CP intent); the kernel read path never does — keying canon on SiteLink was the R2
+// perpetual-dirty bug.
 func peersEqual(actual, desired []Peer) bool {
 	if len(actual) != len(desired) {
 		return false
 	}
-	am := make(map[string]Peer, len(actual))
-	for _, p := range actual {
-		am[p.PublicKey] = p
-	}
-	for _, d := range desired {
-		a, ok := am[d.PublicKey]
-		if !ok || canon(a) != canon(d) { // canon = pubkey + sorted allowed-ips (endpoint-blind)
+	a := append([]Peer(nil), actual...)
+	d := append([]Peer(nil), desired...)
+	sort.Slice(a, func(i, j int) bool { return canon(a[i]) < canon(a[j]) })
+	sort.Slice(d, func(i, j int) bool { return canon(d[i]) < canon(d[j]) })
+	for i := range a {
+		if canon(a[i]) != canon(d[i]) { // pubkey + allowed-ips (multiset-exact)
 			return false
 		}
-		if d.SiteLink && a.Endpoint != d.Endpoint { // site-link static endpoint must match (B4)
+		if d[i].SiteLink && a[i].Endpoint != d[i].Endpoint { // site-link static endpoint must match (B4)
 			return false
 		}
 	}

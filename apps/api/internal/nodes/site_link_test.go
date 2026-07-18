@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -70,6 +71,47 @@ func TestSiteLinkNoHubNoRoutes(t *testing.T) {
 	topo.gws[1].Endpoint = "b.example:51820" // give one gateway an endpoint → a hub now exists
 	if siteHubMissing(siteTopoHasHub(topo), topo, node) {
 		t.Fatal("a hub exists → siteHubMissing must be false")
+	}
+}
+
+// TestDesiredStateFailsWholeFetchOnTopologyError — S8.2 F1/R1/B3 (terminal): a site-topology load error
+// FAILS the whole DesiredState fetch (atomic + fail-static), so the agent holds last-good everything and
+// tears nothing down. NOT the omit-and-teardown attempt (full-sweep reconcile deletes an omitted section).
+func TestDesiredStateFailsWholeFetchOnTopologyError(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org, node, site := uuid.New(), uuid.New(), uuid.New()
+	ex := func(q string, a ...any) {
+		if _, e := pool.Exec(ctx, q, a...); e != nil {
+			t.Fatalf("seed %q: %v", q, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug) VALUES ($1,'F1',$2)`, org, "f1-"+org.String()[:8])
+	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org)
+	ex(`INSERT INTO nodes (id,org_id,name,cert_serial,agent_version,site_id) VALUES ($1,$2,'gw',$4,'0.1.0',$3)`, node, org, site, "f1s-"+node.String())
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	svc := &Service{pool: pool, q: sqlc.New(pool)}
+	siteNode := sqlc.Node{ID: node, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true}}
+
+	svc.siteTopoLoad = func(context.Context, uuid.UUID) (siteTopology, error) {
+		return siteTopology{}, errors.New("topology DB blip")
+	}
+	if _, err := svc.DesiredState(ctx, siteNode); err == nil {
+		t.Fatal("F1: a topology-load error must FAIL the whole fetch (fail-static), not serve a partial artifact")
+	}
+	// With the real loader the fetch succeeds (site section present, no fault).
+	svc.siteTopoLoad = svc.loadSiteTopology
+	if _, err := svc.DesiredState(ctx, siteNode); err != nil {
+		t.Fatalf("with topology loading OK, the fetch must succeed: %v", err)
 	}
 }
 

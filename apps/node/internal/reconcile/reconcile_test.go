@@ -208,36 +208,55 @@ func TestSiteLinkEndpointChangeIsDirty(t *testing.T) {
 	}
 }
 
-// TestSiteLinkStaleComputation — S8.2 H5: the agent flags site_link_down when a SITE-LINK peer's WG
-// handshake is stale/absent (and NOT for a healthy one, nor for device peers). Feeds the CP kind.
+// TestSiteLinkStaleComputation — S8.2 H5 + F2 three-state: cold-start/no-reading → stale; a fresh
+// handshake → clears; a TRANSIENT Stats error after a good reading → keep-last (flap-free); an error
+// PERSISTING past the window → stale; device peers never drive it.
 func TestSiteLinkStaleComputation(t *testing.T) {
 	var sink atomic.Bool
 	b := &fakeBackend{}
 	r := New(b, "priv", "pub", discard())
 	r.SetSiteLinkStaleSink(&sink)
 	ctx := context.Background()
+	site := []Peer{{PublicKey: "hub", SiteLink: true}}
 
-	// A site-link peer with NO handshake (fake reports no stats) → stale.
-	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
+	// (1) Cold start: no good reading yet + a site link with no handshake → stale (over-report once).
+	r.updateSiteLinkStale(ctx, site)
 	if !sink.Load() {
-		t.Fatal("a site-link peer with no handshake must be stale")
+		t.Fatal("cold start with no handshake must be stale")
 	}
-	// A fresh handshake → not stale.
+	// (2) A fresh handshake → not stale (records lastStatsOK).
 	b.setStat(PeerStat{PublicKey: "hub", LastHandshake: time.Now().Unix()})
-	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
+	r.updateSiteLinkStale(ctx, site)
 	if sink.Load() {
-		t.Fatal("a site-link peer with a fresh handshake must NOT be stale")
+		t.Fatal("a fresh handshake must clear")
 	}
-	// A non-site (device) peer is never considered → not stale even with no handshake.
+	// (3) TRANSIENT Stats error right after a good reading → KEEP last value (F2 flap-free): stays clear.
+	b.setStatsErr(errors.New("wg dump blip"))
+	r.updateSiteLinkStale(ctx, site)
+	if sink.Load() {
+		t.Fatal("F2: a transient Stats error within the window must KEEP the last value (no flap)")
+	}
+	// (4) Error PERSISTING past the staleness window → stale.
+	r.lastStatsOK = time.Now().Add(-2 * siteLinkStaleWindow)
+	r.updateSiteLinkStale(ctx, site)
+	if !sink.Load() {
+		t.Fatal("F2: a Stats error persisting past the window must go stale")
+	}
+	// (5) Device peers only → never stale.
+	b.setStat(PeerStat{PublicKey: "x"}) // clears the error
 	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "dev", SiteLink: false}})
 	if sink.Load() {
 		t.Fatal("device peers must not drive site-link staleness")
 	}
-	// R4: a Stats ERROR with site-link peers present → over-report STALE (maybe-dead reads dead).
-	b.setStatsErr(errors.New("wg dump failed"))
-	r.updateSiteLinkStale(ctx, []Peer{{PublicKey: "hub", SiteLink: true}})
-	if !sink.Load() {
-		t.Fatal("R4: a Stats error with site-link peers must over-report stale (never false-green)")
+}
+
+// TestPeersEqualMultiset — F4/R2: a duplicate-pubkey desired set must NOT mask an unpruned actual peer
+// (the map-keyed compare dropped multiset semantics; the sorted-multiset compare catches it).
+func TestPeersEqualMultiset(t *testing.T) {
+	x := Peer{PublicKey: "X", AllowedIPs: []string{"10.0.0.1/32"}}
+	y := Peer{PublicKey: "Y", AllowedIPs: []string{"10.0.0.2/32"}}
+	if peersEqual([]Peer{x, y}, []Peer{x, x}) {
+		t.Fatal("F4: a duplicate-pubkey desired must not mask an unpruned actual peer Y (multiset)")
 	}
 }
 

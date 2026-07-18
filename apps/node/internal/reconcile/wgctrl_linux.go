@@ -332,6 +332,11 @@ func routesToPrune(enumerated []string, desired map[netip.Prefix]bool) []netip.P
 // a family if S8.4 admits v6 subnets).
 func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 	metric := strconv.Itoa(siteRouteMetric)
+	// surface: only a gateway ACTIVELY managing routes (some desired) treats a v4 enumeration failure as
+	// a reconcile fault. A gateway with NO desired routes (non-site, or unbound) tolerates every
+	// enumeration error → its pre-S8.2 no-op (P9): it never goes unhealthy over a route-subsystem blip
+	// unrelated to its function. (F3: the conjunction of P9's no-op AND R3's v4-surfaces — not a choice.)
+	surface := len(cidrs) > 0
 	desired := make(map[netip.Prefix]bool, len(cidrs))
 	for _, c := range cidrs {
 		p, ok := parseRouteDst(c)
@@ -346,12 +351,12 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 	for _, fam := range []string{"-4", "-6"} {
 		out, err := run(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
 		if err != nil {
-			// P7 (R3-scoped): tolerate ONLY the -6 family — it may be UNAVAILABLE (ipv6.disable=1), and
-			// site subnets are v4-only today, so a v6 enumeration failure is not a reconcile fault. The -4
-			// family is LOAD-BEARING: a persistent v4 enumeration failure would SILENTLY SKIP a needed
-			// prune (stale route → blackhole while green), so it MUST surface as a reconcile error.
-			if fam == "-6" {
-				slog.Debug("site_route_enumerate_v6_skipped", "iface", b.iface, "error", err.Error())
+			// Tolerate the -6 family always (may be ipv6.disable=1; site subnets are v4-only today), and
+			// tolerate EVERYTHING on a gateway with nothing to manage (!surface → P9 no-op). Otherwise a
+			// -4 failure on a route-carrying gateway is LOAD-BEARING — skipping the prune would leave a
+			// stale route blackholing while green — so it surfaces as a reconcile error.
+			if fam == "-6" || !surface {
+				slog.Debug("site_route_enumerate_skipped", "family", fam, "iface", b.iface, "error", err.Error())
 				continue
 			}
 			return err
