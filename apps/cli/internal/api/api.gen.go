@@ -860,8 +860,11 @@ type MemberStatus string
 
 // Meta defines model for Meta.
 type Meta struct {
-	Edition      MetaEdition        `json:"edition"`
-	SsoProviders []MetaSsoProviders `json:"sso_providers"`
+	Edition MetaEdition `json:"edition"`
+
+	// ProtocolVersion S8.3 (CW): the control plane's current compiled-artifact version CEILING (policyspec.ProtocolVersion). The cross-site upgrade warning names gateways whose reported max is below this — server-sourced so the UI never hardcodes the ceiling (it bumps with each protocol change; a hardcoded copy would silently fork on the next bump).
+	ProtocolVersion int                `json:"protocol_version"`
+	SsoProviders    []MetaSsoProviders `json:"sso_providers"`
 }
 
 // MetaEdition defines model for Meta.Edition.

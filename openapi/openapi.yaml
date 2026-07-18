@@ -2933,10 +2933,17 @@ components:
 
     Meta:
       type: object
-      required: [edition, sso_providers]
+      required: [edition, sso_providers, protocol_version]
       additionalProperties: false
       properties:
         edition: { type: string, enum: [open, enterprise] }
+        protocol_version:
+          type: integer
+          description: >-
+            S8.3 (CW): the control plane's current compiled-artifact version CEILING (policyspec.ProtocolVersion).
+            The cross-site upgrade warning names gateways whose reported max is below this — server-sourced so
+            the UI never hardcodes the ceiling (it bumps with each protocol change; a hardcoded copy would
+            silently fork on the next bump).
         # SSO providers this deployment can offer (empty in the open edition, so
         # the SPA hides SSO entirely rather than showing buttons that error).
         sso_providers:
