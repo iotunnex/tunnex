@@ -32,6 +32,8 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       return { label: "site hub unreachable", tone: "danger" }; // S8.2: no carrier for site-to-site traffic
     case "site_link_down":
       return { label: "site link down", tone: "danger" }; // S8.2: a site-to-site tunnel has no fresh handshake
+    case "site_subnet_unreachable":
+      return { label: "site subnet unreachable", tone: "danger" }; // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped)
     default:
       // Degraded per the authoritative bool but the kind is absent/healthy — still show a
       // badge (never less alarmed than the bool).

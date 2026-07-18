@@ -187,6 +187,7 @@ const (
 	SilentDesync             NodePolicyDegradedKind = "silent_desync"
 	SiteHubDown              NodePolicyDegradedKind = "site_hub_down"
 	SiteLinkDown             NodePolicyDegradedKind = "site_link_down"
+	SiteSubnetUnreachable    NodePolicyDegradedKind = "site_subnet_unreachable"
 	StuckEnforcing           NodePolicyDegradedKind = "stuck_enforcing"
 	UnsupportedPolicyVersion NodePolicyDegradedKind = "unsupported_policy_version"
 )

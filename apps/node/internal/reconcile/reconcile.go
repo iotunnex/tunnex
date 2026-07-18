@@ -6,6 +6,7 @@ package reconcile
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -123,6 +124,22 @@ type Reconciler struct {
 	// nil when not wired (e.g. tests) → the check is skipped.
 	siteLinkStale *atomic.Bool
 	lastStatsOK   time.Time // F2: last successful backend.Stats read — the one timestamp for three-state staleness
+	// siteSubnetUnreachable (S8.2c D3) is an optional sink: each reconcile, if the CP advertised local site
+	// subnets (LocalSubnets) but NO host address is inside any of them, the gateway is fronting a subnet it
+	// isn't on (bridge-trapped wg0, or a misconfigured advertisement). Surfaced as site_subnet_unreachable
+	// so the "reassuring-green" shape (wg0 alive + handshake fresh, LAN unreachable) is never silently OK.
+	siteSubnetUnreachable *atomic.Bool
+	// hostAddrsFn returns the host's IPv4 addresses for the D3 check (defaults to hostIPv4Addrs). Seam for tests.
+	hostAddrsFn func() []netip.Addr
+}
+
+// SetSiteSubnetUnreachableSink wires the D3 unreachable-advertised-subnet sink (read by the report loop).
+// Call before Run. Also arms hostAddrsFn to the real enumerator if unset.
+func (r *Reconciler) SetSiteSubnetUnreachableSink(b *atomic.Bool) {
+	r.siteSubnetUnreachable = b
+	if r.hostAddrsFn == nil {
+		r.hostAddrsFn = hostIPv4Addrs
+	}
 }
 
 // SetSiteLinkStaleSink wires the H5 site-link-staleness sink (read by the report loop). Call before Run.
@@ -245,6 +262,13 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 			routes = append(routes, rt.DstCIDR)
 		}
 		localSubnets = ds.Policy.LocalSubnets // D2: the gateway's own approved subnets → route src-hint
+	}
+	// D3: advertised a local subnet but no host address is inside any → the gateway fronts a subnet it
+	// isn't on (bridge-trapped wg0 / misconfig). Same derivation as the D2 src-hint (one truth). The sink
+	// feeds site_subnet_unreachable so the reassuring-green shape (link fresh, LAN unreachable) is loud.
+	if r.siteSubnetUnreachable != nil {
+		_, ok, had := siteRouteSrc(localSubnets, r.hostAddrsFn())
+		r.siteSubnetUnreachable.Store(had && !ok)
 	}
 	if err := r.backend.ApplyRoutes(ctx, routes, localSubnets); err != nil {
 		r.healthy.Store(false)

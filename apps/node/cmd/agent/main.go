@@ -138,8 +138,8 @@ func main() {
 	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
 	// H5: the reconciler writes site-link staleness here each tick; the report loop reads it. Shared
 	// because the report loop starts before the reconciler exists.
-	var siteLinkStale atomic.Bool
-	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, egressMgr, &siteLinkStale, &keyReported, reportEvery, logger)
+	var siteLinkStale, siteSubnetUnreachable atomic.Bool
+	go reportKeyLoop(ctx, client, wgPub, wgEndpoint, &egressNAT, egressMgr, &siteLinkStale, &siteSubnetUnreachable, &keyReported, reportEvery, logger)
 
 	backend, err := reconcile.SelectBackend(wgBackend, wgIface, logger)
 	if err != nil {
@@ -149,6 +149,7 @@ func main() {
 	logger.Info("agent_backend_selected", slog.String("backend", wgBackend), slog.String("interface", wgIface))
 	r := reconcile.New(backend, wgPriv, wgPub, logger)
 	r.SetSiteLinkStaleSink(&siteLinkStale)
+	r.SetSiteSubnetUnreachableSink(&siteSubnetUnreachable) // D3: unreachable-advertised-subnet health signal
 	// Every desired-state fetch hands the compiled Zero Trust policy (nil = legacy
 	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
 	r.OnPolicy(func(p *nodepolicy.Compiled) {
@@ -281,14 +282,14 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 // with backoff until it succeeds (then sets reported and returns). The report is
 // idempotent server-side, so retrying is safe. Until it succeeds the agent stays
 // not-ready, so no orchestrator routes to a node the control plane can't peer.
-func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, egressNAT *atomic.Bool, egressMgr *egress.Manager, siteLinkStale *atomic.Bool, reported *atomic.Bool, every time.Duration, logger *slog.Logger) {
+func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint string, egressNAT *atomic.Bool, egressMgr *egress.Manager, siteLinkStale, siteSubnetUnreachable *atomic.Bool, reported *atomic.Bool, every time.Duration, logger *slog.Logger) {
 	const maxBackoff = 30 * time.Second
 	report := func() bool {
 		// Applied-policy status rides the capability report (S7.2 staleness): version +
 		// canonical hash of what is IN FORCE, plus the last apply error. The control
 		// plane compares against what it pushed — a stale gateway must be visible.
 		v, h, failingSince, applyErr := egressMgr.AppliedStatus()
-		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion}
+		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
 			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)

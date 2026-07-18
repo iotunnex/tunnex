@@ -42,6 +42,7 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
     expect(hub?.tone).toBe("danger");
     expect(hub?.label).toMatch(/hub/i);
     expect(policyHealthBadge(node(true, "site_link_down"))?.label).toMatch(/link/i);
+    expect(policyHealthBadge(node(true, "site_subnet_unreachable"))?.tone).toBe("danger"); // S8.2c D3
   });
 
   it("forward-compat: an unknown future kind falls through to the 'degraded' default (never null while degraded)", () => {

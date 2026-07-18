@@ -103,6 +103,28 @@ func TestSiteRouteSrcHint(t *testing.T) {
 	}
 }
 
+// TestSiteSubnetUnreachableSignal — S8.2c D3: the health signal is (hadSubnets && !matched) — the gateway
+// advertised a local subnet but NO host address is inside it (bridge-trapped / misconfig). It is INDEPENDENT
+// of link state (derived from host addrs, not handshakes), so it catches the reassuring-green shape. Empty
+// advertisement OR a match → NOT unreachable.
+func TestSiteSubnetUnreachableSignal(t *testing.T) {
+	onSubnet := []netip.Addr{netip.MustParseAddr("172.31.24.206")}
+	offSubnet := []netip.Addr{netip.MustParseAddr("10.99.0.1")} // only the overlay — not on the site subnet
+	sig := func(local []string, addrs []netip.Addr) bool {
+		_, ok, had := siteRouteSrc(local, addrs)
+		return had && !ok
+	}
+	if !sig([]string{"172.31.0.0/16"}, offSubnet) {
+		t.Fatal("advertised subnet + no host addr inside → UNREACHABLE (the bridge-trapped trap)")
+	}
+	if sig([]string{"172.31.0.0/16"}, onSubnet) {
+		t.Fatal("advertised subnet + a host addr inside → NOT unreachable")
+	}
+	if sig(nil, offSubnet) {
+		t.Fatal("no advertised subnet → NOT unreachable (nothing to be unreachable)")
+	}
+}
+
 func hasArg(args []string, a string) bool {
 	for _, x := range args {
 		if x == a {
