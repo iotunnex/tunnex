@@ -48,10 +48,13 @@ Force a gateway advertising a subnet it isn't on (or bridge-trapped wg0) → `si
 - **EXPECTED:** induce it → the health badge shows `site subnet unreachable` (danger), INDEPENDENT of the fresh link; recover → the badge CLEARS without a restart.
 - **OBSERVED:** _(badge both states + agent log)_
 
-### Leg 5 — D5 site rules from the Access builder (GAP-2 closed)
+### Leg 5 — D5 site rules from the Access builder (GAP-2 closed) — PASS
 Create a `site → site` grant from the Access Add-rule modal — through the API (validation + audit), NOT a raw DB insert.
-- **EXPECTED:** the modal offers `site` as Source AND Destination; creating writes through the policy API → an audit row appears, disjointness rides the same path; the enforcing gateway picks up the grant and the forward drop→accept flips on the VISIBLE chain.
-- **OBSERVED:** _(modal + audit row + enforcing ping)_
+- **OBSERVED (2026-07-18) = PASS:**
+  - The Add-rule modal offers **Source type "Site (a LAN behind a gateway)"** AND **Destination type "Site …"** (D5). With no groups but sites present, it defaulted to `site` (the review #4 default-kind fix, live).
+  - Created `azure-site → aws-site` via the modal → **audit log shows `policy.rule_created` · actor `tunnex` · `{"dst_kind":"site","src_kind":"site","src_site_id":…}`** — the API+audit path, NOT the demo's raw DB insert (GAP-2's whole point). Full walk audited: `org.created`, `node.token_issued`×2, `node.enrolled`×2 (system actor), `site.subnet_approved`×2, `org.zero_trust_enabled{mode:enforcing}`, `policy.rule_created`.
+  - **Enforcing contrast (D1+D5) on the wire:** enforcing WITHOUT a grant → behind-host `10.0.0.4→172.31.24.206` = 100% loss (default-deny denies the ungranted forward); after the `azure-site→aws-site` grant → 0% loss, ttl-63. The grant re-permits the forward.
+  - **Directional enforcement:** aws→azure (`172.31.24.206 → 10.0.0.4`) stayed DENIED until a reverse `aws-site→azure-site` grant was added → then 6/6, 0% loss. Two directional grants = bidirectional; each direction is independently gated (a clean routed-but-dropped contrast).
 
 ---
 
