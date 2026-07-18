@@ -272,7 +272,13 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	// unreachable-subnet signal from the SAME view. srcOK → src-hint (D2). hadSubnets && !srcOK → the
 	// gateway fronts a subnet it isn't on (bridge-trapped wg0 / misconfig) → D3 site_subnet_unreachable
 	// (loud even when the link handshake is fresh — the reassuring-green trap) + a throttled onset log.
-	src, srcOK, hadSubnets := siteRouteSrc(localSubnets, r.hostAddrsFn())
+	// Enumerate host addrs ONLY when a subnet is advertised (re-review #5): the common non-site node has no
+	// LocalSubnets, and siteRouteSrc discards the addrs there anyway — skip the net.InterfaceAddrs syscall.
+	var hostAddrs []netip.Addr
+	if len(localSubnets) > 0 {
+		hostAddrs = r.hostAddrsFn()
+	}
+	src, srcOK, hadSubnets := siteRouteSrc(localSubnets, hostAddrs)
 	if r.siteSubnetUnreachable != nil {
 		r.siteSubnetUnreachable.Store(hadSubnets && !srcOK)
 	}

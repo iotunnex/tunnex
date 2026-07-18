@@ -33,35 +33,52 @@ export interface RemoteEnrollOpts {
 // `--network host` (so wg0 lives on the host + reaches real host LANs, not the bridge), `wgctrl` (real
 // WireGuard, not the mem fake), `/dev/net/tun` + NET_ADMIN, the public CP URLs + servername, the token,
 // the optional public endpoint. Pasted verbatim on a clean VM it reaches agent_ready with ZERO edits.
+// q shell-quotes an env VALUE (single charset, one rule for the whole command — review: an unquoted
+// space/metachar in ANY operator-supplied value corrupts the zero-touch command). Applied uniformly to the
+// name, endpoint AND the CP urls (the urls now come from operator config, not the browser origin).
+const q = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
+
 export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
-  const q = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
   const nameEnv = o.name ? ` -e TUNNEX_NODE_NAME=${q(o.name)}` : "";
-  // Endpoint is admin-entered free text — shell-QUOTE it like the name (review: an unquoted space/metachar
-  // corrupts the zero-touch command; a bad endpoint now fails cleanly instead of injecting a flag).
   const endpointEnv = o.endpoint ? ` -e TUNNEX_NODE_ENDPOINT=${q(o.endpoint)}` : "";
   return (
     `docker run -d --name tunnex-node --restart unless-stopped --network host ` +
     `--cap-add NET_ADMIN --device /dev/net/tun -v tunnex_node_state:/var/lib/tunnex-node ` +
     `-e TUNNEX_JOIN_TOKEN=${o.token}${nameEnv}${endpointEnv} ` +
-    `-e TUNNEX_API_URL=${o.apiURL} -e TUNNEX_AGENT_URL=${o.agentURL} ` +
-    `-e TUNNEX_AGENT_SERVERNAME=${o.serverName} -e TUNNEX_WG_BACKEND=wgctrl ${GATEWAY_IMAGE}`
+    `-e TUNNEX_API_URL=${q(o.apiURL)} -e TUNNEX_AGENT_URL=${q(o.agentURL)} ` +
+    `-e TUNNEX_AGENT_SERVERNAME=${q(o.serverName)} -e TUNNEX_WG_BACKEND=wgctrl ${GATEWAY_IMAGE}`
   );
 }
 
-// cpEndpoints derives the public CP URLs the remote agent dials from the CP's OWN configured public base URL
+// CpEndpoints is a DISCRIMINATED result (re-review budget-rule reduce: one state model for CP-url consumption
+// instead of scattered empty-string sentinels). The emitted command must NEVER silently carry a broken url.
+//   { ok: true }  — usable urls; usedFallback=true means we used the dashboard origin (the CP has no
+//                   configured public url), which the caller flags when the meta fetch FAILED (vs was unset).
+//   { ok: false } — the CP's CONFIGURED public url is unparseable (operator APP_BASE_URL typo); the caller
+//                   BLOCKS token mint on this (a one-time token minted against a broken url is worse than the
+//                   block) and surfaces `reason`.
+export type CpEndpoints =
+  | { ok: true; apiURL: string; agentURL: string; serverName: string; usedFallback: boolean }
+  | { ok: false; reason: string };
+
+// cpEndpoints derives the public CP urls the remote agent dials from the CP's OWN configured public base URL
 // (meta.public_base_url — AUTHORITATIVE), NOT window.location: the browser URL is whatever path the admin
 // happened to use (a tunnel / internal alias / bare IP), which would bake an unreachable endpoint into the
-// pasted zero-touch command. Falls back to the dashboard origin ONLY when the CP didn't configure a public
-// URL. REST rides the origin (nginx); the agent TLS channel is :8443 with the standard cert SAN. PURE.
-export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: string): { apiURL: string; agentURL: string; serverName: string } {
-  const base = publicBaseURL && publicBaseURL.trim() ? publicBaseURL.trim() : fallbackOrigin;
-  let host = "";
+// pasted command. Falls back to the dashboard origin ONLY when the CP didn't configure a public url. REST
+// rides the origin (nginx); the agent TLS channel is :8443 with the standard cert SAN. PURE.
+export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: string): CpEndpoints {
+  const configured = publicBaseURL && publicBaseURL.trim() ? publicBaseURL.trim() : "";
+  const usedFallback = configured === "";
+  const base = configured || fallbackOrigin;
+  let u: URL;
   try {
-    host = new URL(base).hostname;
+    u = new URL(base);
   } catch {
-    host = "";
+    // Only a CONFIGURED url reaches here (the browser origin always parses) → an operator APP_BASE_URL typo.
+    return { ok: false, reason: `The control plane's configured public URL (${base}) is not a valid URL.` };
   }
-  return { apiURL: base, agentURL: host ? `https://${host}:8443` : "", serverName: "tunnex-control" };
+  if (!u.hostname) return { ok: false, reason: `The control plane's configured public URL (${base}) has no host.` };
+  return { ok: true, apiURL: u.origin, agentURL: `https://${u.hostname}:8443`, serverName: "tunnex-control", usedFallback };
 }
 
 /**
@@ -86,13 +103,22 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The CP's authoritative public base URL for the emitted command (review #1 — not window.location).
+  // metaError distinguishes "fetch FAILED" from "fetch ok, field unset" (re-review #2): both leave
+  // publicBaseURL undefined, but only a genuine unset is a clean origin-fallback; a failure that silently
+  // falls back must be flagged, else a tunnel/alias origin gets baked in with no signal.
   const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(undefined);
+  const [metaError, setMetaError] = useState(false);
   useEffect(() => {
     api
       .GET("/api/v1/meta")
-      .then(({ data }) => setPublicBaseURL((data as Meta | undefined)?.public_base_url))
-      .catch(() => {});
+      .then(({ data }) => {
+        setPublicBaseURL((data as Meta | undefined)?.public_base_url);
+        setMetaError(false);
+      })
+      .catch(() => setMetaError(true));
   }, []);
+  // ONE derivation of the CP urls (re-review budget-rule reduce). Recomputed each render — cheap + pure.
+  const ep = cpEndpoints(publicBaseURL, window.location.origin);
 
   async function issue() {
     setBusy(true);
@@ -144,10 +170,20 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="203.0.113.7:51820" maxLength={100} />
             </Field>
           </div>
-          <Button onClick={issue} disabled={busy}>
+          <Button onClick={issue} disabled={busy || !ep.ok}>
             {busy ? "Generating…" : "Generate join token"}
           </Button>
         </div>
+      )}
+
+      {/* Block the mint (not just the emit) when the CP's configured public URL is unparseable — a one-time
+          token minted against a broken URL is worse than refusing. The remedy is operator-side (APP_BASE_URL). */}
+      {open && !ep.ok && <ErrorText>{ep.reason} Fix the control plane's public address (APP_BASE_URL) before enrolling a gateway.</ErrorText>}
+      {open && ep.ok && ep.usedFallback && metaError && (
+        <p className="mt-2 text-xs text-amber-400">
+          Couldn't confirm the control plane's public URL (metadata unavailable) — the command below uses this
+          dashboard's origin. Verify the gateway can reach <span className="font-mono">{ep.apiURL}</span>.
+        </p>
       )}
 
       <ErrorText>{error}</ErrorText>
@@ -180,7 +216,7 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
           first connect and is shown exactly once (shared OneTimeSecretModal). The
           node itself only appears in the list above once the agent redeems the
           token on first connect. */}
-      {token && (
+      {token && ep.ok && (
         <OneTimeSecretModal
           title="Enroll your gateway — run this once"
           caption={
@@ -214,7 +250,9 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
             token,
             name: pinnedName,
             endpoint: pinnedEndpoint,
-            ...cpEndpoints(publicBaseURL, window.location.origin),
+            apiURL: ep.apiURL,
+            agentURL: ep.agentURL,
+            serverName: ep.serverName,
           })}
           copyLabel="Copy command"
           onDismiss={() => {

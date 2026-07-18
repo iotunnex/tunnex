@@ -239,6 +239,21 @@ func TestRunOnceDerivesSrcHintAndUnreachableSignal(t *testing.T) {
 	if sink.Load() {
 		t.Fatal("D3: a recovered match must CLEAR the unreachable signal")
 	}
+
+	// re-review #5: the common non-site node (no LocalSubnets) must NOT pay the host-addr enumeration
+	// syscall — siteRouteSrc discards the addrs on an empty advertisement, so runOnce skips the call.
+	called := false
+	r.hostAddrsFn = func() []netip.Addr { called = true; return nil }
+	c.set(DesiredState{Policy: &nodepolicy.Compiled{Version: 5, Mode: nodepolicy.ModeEnforcing, Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}}}})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce 4: %v", err)
+	}
+	if called {
+		t.Fatal("#5: no LocalSubnets → host-addr enumeration must be SKIPPED (no needless syscall per tick)")
+	}
+	if sink.Load() {
+		t.Fatal("no advertised subnet → NOT unreachable")
+	}
 }
 
 // TestSiteLinkEndpointChangeIsDirty — S8.2 B4 + R2: the ACTUAL peer set comes from the kernel (wg dump)

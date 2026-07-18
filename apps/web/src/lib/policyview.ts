@@ -281,6 +281,34 @@ export function rulesSummary(i: {
 // The Access builder now creates group/user/SITE sources and group/resource/SITE destinations, all through
 // the SAME policies API (validation + audit intact — the demo's raw DB insert was the anti-pattern this
 // closes). Exactly ONE of each side's id fields is set; expiry is CREATE-only.
+// defaultDstKind / defaultSrcKind pick the modal's initial subject kind so a fresh org opens on a kind that
+// actually HAS options — otherwise the required select is empty and Create stays disabled with no obvious
+// reason (re-review #4: the src-side fix left the dst side able to dead-end). Priority: an existing rule's
+// kind (edit) → else groups if present → else the other available kind. PURE (unit-pins the dead-end fix).
+export function defaultDstKind(i: {
+  editingKind?: "group" | "resource" | "site";
+  hasGroups: boolean;
+  hasResources: boolean;
+  hasSites: boolean;
+}): "group" | "resource" | "site" {
+  if (i.editingKind) return i.editingKind;
+  if (i.hasGroups) return "group";
+  if (i.hasResources) return "resource";
+  if (i.hasSites) return "site";
+  return "group"; // empty org — the modal isn't reachable (Add-rule gated), so any value is inert
+}
+
+export function defaultSrcKind(i: {
+  editingKind?: "group" | "user" | "site";
+  hasGroups: boolean;
+  hasSites: boolean;
+}): "group" | "user" | "site" {
+  if (i.editingKind) return i.editingKind;
+  if (i.hasGroups) return "group";
+  if (i.hasSites) return "site"; // a no-groups site org creates site→ rules; users alone can't open the modal
+  return "group";
+}
+
 export interface RuleBodyInput {
   srcKind: "group" | "user" | "site";
   dstKind: "group" | "resource" | "site";

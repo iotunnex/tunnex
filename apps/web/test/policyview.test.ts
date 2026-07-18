@@ -416,3 +416,24 @@ describe("ruleRow — a site-dst rule renders as a site, NEVER a broken 'deleted
     expect(row.broken).toBe(false);
   });
 });
+
+import { defaultDstKind, defaultSrcKind } from "../src/lib/policyview";
+
+describe("defaultSrcKind / defaultDstKind — the modal opens on a kind that HAS options (re-review #4)", () => {
+  it("an editing rule's kind always wins", () => {
+    expect(defaultDstKind({ editingKind: "site", hasGroups: true, hasResources: true, hasSites: true })).toBe("site");
+    expect(defaultSrcKind({ editingKind: "user", hasGroups: true, hasSites: true })).toBe("user");
+  });
+  it("groups present → groups is the primary default (both sides)", () => {
+    expect(defaultDstKind({ hasGroups: true, hasResources: true, hasSites: true })).toBe("group");
+    expect(defaultSrcKind({ hasGroups: true, hasSites: true })).toBe("group");
+  });
+  it("THE FIX: no groups + resources → dst defaults to resource, NOT the empty group select (the dead-end)", () => {
+    expect(defaultDstKind({ hasGroups: false, hasResources: true, hasSites: true })).toBe("resource");
+    expect(defaultDstKind({ hasGroups: false, hasResources: true, hasSites: false })).toBe("resource");
+  });
+  it("no groups, no resources, sites only → dst defaults to site (both sides site-first)", () => {
+    expect(defaultDstKind({ hasGroups: false, hasResources: false, hasSites: true })).toBe("site");
+    expect(defaultSrcKind({ hasGroups: false, hasSites: true })).toBe("site");
+  });
+});
