@@ -6,8 +6,28 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 )
+
+// TestKeepaliveSyncConfRoundTrip — S8.3 CK: buildSyncConf EMITS PersistentKeepalive for a site-link peer,
+// and parseWGDump READS it back off the last dump field (so the actual side carries it → peersEqual
+// converges instead of churning). An "off"/absent keepalive parses to 0.
+func TestKeepaliveSyncConfRoundTrip(t *testing.T) {
+	p := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "h:51820", SiteLink: true, PersistentKeepalive: 25}
+	conf := buildSyncConf("priv", 51820, []Peer{p})
+	if !strings.Contains(conf, "PersistentKeepalive = 25") {
+		t.Fatalf("buildSyncConf must emit the keepalive, got:\n%s", conf)
+	}
+	got := parseWGDump("if\tpub\n" + "hub\t(none)\th:51820\t10.2.0.0/24\t0\t0\t0\t25\n")
+	if len(got) != 1 || got[0].PersistentKeepalive != 25 {
+		t.Fatalf("parseWGDump must read keepalive from the last field, got %+v", got)
+	}
+	off := parseWGDump("if\tpub\n" + "dev\t(none)\t1.2.3.4:5\t10.99.0.5/32\t0\t0\t0\toff\n")
+	if len(off) != 1 || off[0].PersistentKeepalive != 0 {
+		t.Fatalf("an 'off' keepalive must parse to 0, got %+v", off)
+	}
+}
 
 // TestApplyRoutesV4EnumErrorSurfaces — S8.2 F3 (terminal): a -4 route-enumeration error ALWAYS surfaces
 // (full-sweep), INCLUDING when there are no desired routes — the just-UNBOUND gateway, where the prune is

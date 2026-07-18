@@ -23,6 +23,11 @@ type Peer struct {
 	// (static). The dirty-check compares Endpoint for these (B4) so a hub endpoint change re-dials; device
 	// peers roam → SiteLink=false → endpoint-blind (TestReconcileIgnoresRoamedEndpoint stays armed).
 	SiteLink bool `json:"site_link,omitempty"`
+	// PersistentKeepalive (S8.3 CK, seconds) — CP-managed on site-link peers only; keeps a NAT'd link warm
+	// so it doesn't false-stale (H5). The kernel DOES report it (`wg show dump` last field), so it is
+	// compared for SiteLink peers in peersEqual (like Endpoint) — converges without churn, and catches a
+	// peer that gained keepalive (first application). Roaming device peers carry 0.
+	PersistentKeepalive int `json:"persistent_keepalive,omitempty"`
 }
 
 // DesiredState is the control-plane response the agent reconciles toward.
@@ -321,6 +326,9 @@ func peersEqual(actual, desired []Peer) bool {
 			return false
 		}
 		if d[i].SiteLink && a[i].Endpoint != d[i].Endpoint { // site-link static endpoint must match (B4)
+			return false
+		}
+		if d[i].SiteLink && a[i].PersistentKeepalive != d[i].PersistentKeepalive { // site-link keepalive (CK)
 			return false
 		}
 	}

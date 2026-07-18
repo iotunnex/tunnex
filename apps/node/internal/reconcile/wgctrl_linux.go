@@ -244,6 +244,14 @@ func parseWGDump(out string) []Peer {
 		if f[3] != "(none)" && f[3] != "" {
 			p.AllowedIPs = strings.Split(f[3], ",")
 		}
+		// Persistent-keepalive is the last dump field (f[7]): an interval in seconds, or "off". Parsing it
+		// (S8.3 CK) makes the actual side carry keepalive so peersEqual converges on it for site-link peers
+		// instead of churning (the R2 fixture-fidelity discipline: the kernel reports it, so we read it).
+		if len(f) >= 8 && f[7] != "off" && f[7] != "(none)" {
+			if ka, err := strconv.Atoi(f[7]); err == nil {
+				p.PersistentKeepalive = ka
+			}
+		}
 		peers = append(peers, p)
 	}
 	return peers
@@ -270,6 +278,9 @@ func buildSyncConf(privKey string, listenPort int, peers []Peer) string {
 		}
 		if p.Endpoint != "" {
 			sb.WriteString("Endpoint = " + p.Endpoint + "\n")
+		}
+		if p.PersistentKeepalive > 0 {
+			sb.WriteString("PersistentKeepalive = " + strconv.Itoa(p.PersistentKeepalive) + "\n")
 		}
 	}
 	return sb.String()

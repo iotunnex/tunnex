@@ -58,6 +58,11 @@ type Peer struct {
 	// and reports their handshake staleness for the site-link health surface (H5). Device peers roam →
 	// SiteLink=false → endpoint-blind.
 	SiteLink bool `json:"site_link,omitempty"`
+	// PersistentKeepalive (S8.3 CK, seconds) keeps a site-link tunnel warm through NAT: a NAT'd spoke
+	// must dial the hub, and an idle link would otherwise false-stale (H5 site_link_down from mere
+	// idleness). Set only on SITE-LINK peers (CP intent); 0 (omitted) on roaming device peers, which
+	// re-handshake on demand. The agent compares it for SiteLink peers so a change re-syncs (Slice 0).
+	PersistentKeepalive int `json:"persistent_keepalive,omitempty"`
 }
 
 // DesiredState is what an agent should converge its interface to. Version lets
@@ -380,6 +385,11 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 }
 
 // siteLinkGraphFrom builds a site-gateway node's site-link WG peers + kernel routes from a loaded
+// siteLinkKeepaliveSecs (S8.3 CK) is the persistent-keepalive interval on every site-link peer — the
+// wireguard-conventional 25s, comfortably under NAT UDP-mapping timeouts, so a NAT'd spoke stays dialable
+// and an idle link never false-stales for want of a handshake.
+const siteLinkKeepaliveSecs = 25
+
 // topology (S8.2 hub-and-spoke, Item 6/7) — PURE. Returns (nil, nil) when the node is not a site gateway
 // or there is no remote site to reach. HUB = the site gateway with a public endpoint (v1; deterministic
 // by lowest node id if several — multi-hub reserved). A spoke peers ONLY with the hub (AllowedIPs = ALL
@@ -437,11 +447,11 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 				continue // a spoke advertising no subnets yet contributes no crypto-routing
 			}
 			sort.Strings(ips)
-			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint, SiteLink: true})
+			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
 		}
 	default: // this node is a SPOKE → peer only with the hub
 		if len(routeCIDRs) > 0 {
-			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint, SiteLink: true})
+			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
 		}
 	}
 	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
