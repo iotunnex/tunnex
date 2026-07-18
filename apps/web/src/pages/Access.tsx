@@ -537,14 +537,18 @@ function RuleFormModal({
   // S8.2c D5: the modal now CREATES site-source + site-dest rules too (was API-only). src_kind ∈
   // {group,user,site}; dst_kind ∈ {group,resource,site} — all through the same policies API (validation +
   // audit intact; the demo's raw DB insert was the anti-pattern this closes).
+  // Review #4: when the org has sites but no groups, defaulting to "group" opens a modal that can't submit
+  // (empty group select) until BOTH dropdowns are flipped — a dead end. Default to the kind that's actually
+  // available so a fresh site-to-site org can Create immediately.
+  const noGroups = groups.length === 0;
   const [srcKind, setSrcKind] = useState<"group" | "user" | "site">(
-    editing?.src_kind === "user" ? "user" : editing?.src_kind === "site" ? "site" : "group",
+    editing?.src_kind === "user" ? "user" : editing?.src_kind === "site" ? "site" : noGroups && sites.length > 0 ? "site" : "group",
   );
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
   const [srcSite, setSrcSite] = useState(editing?.src_site_id ?? sites[0]?.id ?? "");
   const [dstKind, setDstKind] = useState<"group" | "resource" | "site">(
-    editing?.dst_kind === "resource" ? "resource" : editing?.dst_kind === "site" ? "site" : "group",
+    editing?.dst_kind === "resource" ? "resource" : editing?.dst_kind === "site" ? "site" : noGroups && resources.length === 0 && sites.length > 0 ? "site" : "group",
   );
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");

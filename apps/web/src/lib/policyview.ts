@@ -382,11 +382,12 @@ export function swapPartialMessage(oldIdShort: string): string {
   return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
 }
 
-// canEditRuleInModal: the rule-edit modal only creates group/resource grants with a group/user source
-// (create-then-delete). A rule whose DST is a site (S8.1) OR whose SRC is a site (S8.2) must NOT be
+// canEditRuleInModal: the rule-EDIT (swap) modal only rewrites group/resource grants with a group/user
+// source (create-then-delete). A rule whose DST is a site (S8.1) OR whose SRC is a site (S8.2) must NOT be
 // editable there — editing would silently rewrite it into a group/resource rule, a policy MUTATION
-// disguised as a display limitation. Site rules are managed via the API / the S8.3 site UI. (The
-// read-side kind coercion in the modal is display-only; this blocks the WRITE path.)
+// disguised as a display limitation. Site rules are CREATED via the Access rule builder (S8.2c D5) and
+// managed via the API; only in-place EDIT is withheld here. (The read-side kind coercion in the modal is
+// display-only; this blocks the WRITE path.)
 export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }): boolean {
   return rule.dst_kind !== "site" && rule.src_kind !== "site";
 }

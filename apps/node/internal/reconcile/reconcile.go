@@ -86,10 +86,11 @@ type WGBackend interface {
 	// ApplyRoutes reconciles the kernel routes to remote SITE subnets (S8.2): install each desired
 	// route via the tunnel iface (idempotent — heals a flushed route next tick) and PRUNE our routes
 	// no longer desired (the full-sweep contract: a site unbind/subnet removal drops the route). Only
-	// agent-owned routes are touched; the interface's own on-link route is never pruned. localSubnets
-	// (S8.2c D2) are THIS gateway's own approved site subnets — the source-hint is the host address inside
-	// one of them, so gateway-host-originated site traffic sources from the site LAN (not the overlay).
-	ApplyRoutes(ctx context.Context, cidrs []string, localSubnets []string) error
+	// agent-owned routes are touched; the interface's own on-link route is never pruned. srcHint (S8.2c D2,
+	// "" = none) is the gateway's site-LAN source address the RECONCILE loop derived (one host-addr snapshot
+	// shared with the D3 signal) — applied to each route so gateway-host-originated site traffic sources
+	// from the site LAN, not the overlay.
+	ApplyRoutes(ctx context.Context, cidrs []string, srcHint string) error
 	// Stats reports per-peer live telemetry (handshake/bytes/endpoint).
 	Stats(ctx context.Context) ([]PeerStat, error)
 }
@@ -129,8 +130,12 @@ type Reconciler struct {
 	// isn't on (bridge-trapped wg0, or a misconfigured advertisement). Surfaced as site_subnet_unreachable
 	// so the "reassuring-green" shape (wg0 alive + handshake fresh, LAN unreachable) is never silently OK.
 	siteSubnetUnreachable *atomic.Bool
-	// hostAddrsFn returns the host's IPv4 addresses for the D3 check (defaults to hostIPv4Addrs). Seam for tests.
+	// hostAddrsFn returns the host's IPv4 addresses (defaults to hostIPv4Addrs; seam for tests). Enumerated
+	// ONCE per reconcile and used for BOTH the D2 route src-hint and the D3 unreachable signal, so the two
+	// read the SAME snapshot (review: a src from one view + an alarm from another is a reassuring-green gen).
 	hostAddrsFn func() []netip.Addr
+	// noSrcLogged throttles the site_route_src_unresolved onset warning to once per onset (not per tick).
+	noSrcLogged bool
 }
 
 // SetSiteSubnetUnreachableSink wires the D3 unreachable-advertised-subnet sink (read by the report loop).
@@ -197,7 +202,7 @@ func (r *Reconciler) OnPolicy(fn func(*nodepolicy.Compiled)) { r.onPolicy = fn }
 // New builds a Reconciler with the node's WireGuard key pair (public key is used
 // only for the clamp-safe "is the interface key already set" check).
 func New(backend WGBackend, privateKey, publicKey string, logger *slog.Logger) *Reconciler {
-	return &Reconciler{backend: backend, privateKey: privateKey, publicKey: publicKey, logger: logger}
+	return &Reconciler{backend: backend, privateKey: privateKey, publicKey: publicKey, logger: logger, hostAddrsFn: hostIPv4Addrs}
 }
 
 // Healthy reports whether the last reconcile fully succeeded (control plane
@@ -263,14 +268,27 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 		}
 		localSubnets = ds.Policy.LocalSubnets // D2: the gateway's own approved subnets → route src-hint
 	}
-	// D3: advertised a local subnet but no host address is inside any → the gateway fronts a subnet it
-	// isn't on (bridge-trapped wg0 / misconfig). Same derivation as the D2 src-hint (one truth). The sink
-	// feeds site_subnet_unreachable so the reassuring-green shape (link fresh, LAN unreachable) is loud.
+	// D2 + D3, ONE host-addr snapshot per tick (review #6): derive the route src-hint AND the
+	// unreachable-subnet signal from the SAME view. srcOK → src-hint (D2). hadSubnets && !srcOK → the
+	// gateway fronts a subnet it isn't on (bridge-trapped wg0 / misconfig) → D3 site_subnet_unreachable
+	// (loud even when the link handshake is fresh — the reassuring-green trap) + a throttled onset log.
+	src, srcOK, hadSubnets := siteRouteSrc(localSubnets, r.hostAddrsFn())
 	if r.siteSubnetUnreachable != nil {
-		_, ok, had := siteRouteSrc(localSubnets, r.hostAddrsFn())
-		r.siteSubnetUnreachable.Store(had && !ok)
+		r.siteSubnetUnreachable.Store(hadSubnets && !srcOK)
 	}
-	if err := r.backend.ApplyRoutes(ctx, routes, localSubnets); err != nil {
+	if hadSubnets && !srcOK {
+		if !r.noSrcLogged {
+			r.logger.Warn("site_route_src_unresolved", "local_subnets", strings.Join(localSubnets, ","))
+			r.noSrcLogged = true // onset-only: reset when a src resolves or nothing is advertised
+		}
+	} else {
+		r.noSrcLogged = false
+	}
+	srcHint := ""
+	if srcOK {
+		srcHint = src.String()
+	}
+	if err := r.backend.ApplyRoutes(ctx, routes, srcHint); err != nil {
 		r.healthy.Store(false)
 		return false, err
 	}

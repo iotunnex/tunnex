@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,7 @@ type fakeBackend struct {
 	mu        sync.Mutex
 	peers     []Peer
 	routes    []string
+	srcHint   string
 	stats     []PeerStat
 	statsErr  error
 	applyN    int
@@ -35,12 +37,14 @@ func (f *fakeBackend) appliedRoutes() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.routes...)
 }
-func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string, _ []string) error {
+func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string, srcHint string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.routes = append([]string(nil), cidrs...)
+	f.srcHint = srcHint
 	return nil
 }
+func (f *fakeBackend) appliedSrcHint() string { f.mu.Lock(); defer f.mu.Unlock(); return f.srcHint }
 func (f *fakeBackend) setStat(s PeerStat)  { f.mu.Lock(); f.stats = []PeerStat{s}; f.statsErr = nil; f.mu.Unlock() }
 func (f *fakeBackend) setStatsErr(e error) { f.mu.Lock(); f.statsErr = e; f.mu.Unlock() }
 func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) {
@@ -183,6 +187,57 @@ func TestRunOnceProgramsAndPrunesSiteRoutes(t *testing.T) {
 	}
 	if got := b.appliedRoutes(); len(got) != 0 {
 		t.Fatalf("nil policy must clear routes, got %v", got)
+	}
+}
+
+// TestRunOnceDerivesSrcHintAndUnreachableSignal — S8.2c D2/D3: the src-derivation is enumerated ONCE per
+// tick in the reconcile loop (review #6 — not re-enumerated inside the backend). Proves runOnce (a) threads
+// the host addr inside an approved local subnet to the backend as the route srcHint (D2), and (b) flips the
+// siteSubnetUnreachable sink when a local subnet is advertised but no host addr is inside it (D3), and clears
+// it once a match exists — INDEPENDENT of link state. hostAddrsFn is the injected seam (no real interfaces).
+func TestRunOnceDerivesSrcHintAndUnreachableSignal(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	var sink atomic.Bool
+	r.SetSiteSubnetUnreachableSink(&sink)
+	ctx := context.Background()
+	c := &fakeClient{watch: make(chan struct{})}
+
+	// Host is ON the advertised subnet → src-hint threaded, NOT unreachable.
+	r.hostAddrsFn = func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("10.99.0.1"), netip.MustParseAddr("172.31.24.206")} }
+	c.set(DesiredState{Policy: &nodepolicy.Compiled{
+		Version: 5, Mode: nodepolicy.ModeEnforcing,
+		Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}}, LocalSubnets: []string{"172.31.0.0/16"},
+	}})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if got := b.appliedSrcHint(); got != "172.31.24.206" {
+		t.Fatalf("D2: reconcile must thread the local-subnet host addr as srcHint, got %q", got)
+	}
+	if sink.Load() {
+		t.Fatal("D3: host IS on the advertised subnet → must NOT be unreachable")
+	}
+
+	// Same advertisement, host NO LONGER on it (bridge-trapped) → no src-hint, sink flips ON.
+	r.hostAddrsFn = func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("10.99.0.1")} }
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce 2: %v", err)
+	}
+	if got := b.appliedSrcHint(); got != "" {
+		t.Fatalf("D2: no host addr in the advertised subnet → empty srcHint (never a guess), got %q", got)
+	}
+	if !sink.Load() {
+		t.Fatal("D3: advertised subnet + no host addr inside → UNREACHABLE (the reassuring-green trap)")
+	}
+
+	// A match returns → sink clears (recovers without a restart).
+	r.hostAddrsFn = func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("172.31.24.206")} }
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce 3: %v", err)
+	}
+	if sink.Load() {
+		t.Fatal("D3: a recovered match must CLEAR the unreachable signal")
 	}
 }
 
