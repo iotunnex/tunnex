@@ -14,6 +14,7 @@ import {
   attributionLabel,
   activeMembers,
   rulesSummary,
+  ruleBody,
   type LoadState,
 } from "../src/lib/policyview";
 import { loadOne, type Loaded } from "../src/lib/api";
@@ -170,6 +171,27 @@ describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (faile
     expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).text).toMatch(/3 rules/);
     expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(1) }).text).toMatch(/1 rule\b/);
     expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).loud).toBe(false);
+  });
+});
+
+describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rules (via the API, not a DB insert)", () => {
+  const base = { src: "g1", srcUser: "u1", srcSite: "s1", dstGroup: "g2", dstResource: "r1", dstSite: "s2", expiresAt: "", editing: false };
+  it("site → site sets ONLY the site ids (the demo's DB-insert path, now first-class in the UI)", () => {
+    const b = ruleBody({ ...base, srcKind: "site", dstKind: "site" });
+    expect(b).toMatchObject({ src_kind: "site", src_site_id: "s1", dst_kind: "site", dst_site_id: "s2" });
+    expect("src_group_id" in b).toBe(false);
+    expect("dst_resource_id" in b).toBe(false);
+  });
+  it("group → site (a device group reaching a site LAN)", () => {
+    expect(ruleBody({ ...base, srcKind: "group", dstKind: "site" })).toMatchObject({ src_kind: "group", src_group_id: "g1", dst_kind: "site", dst_site_id: "s2" });
+  });
+  it("existing kinds unchanged (group→group, user→resource)", () => {
+    expect(ruleBody({ ...base, srcKind: "group", dstKind: "group" })).toMatchObject({ src_kind: "group", dst_kind: "group", dst_group_id: "g2" });
+    expect(ruleBody({ ...base, srcKind: "user", dstKind: "resource" })).toMatchObject({ src_kind: "user", src_user_id: "u1", dst_kind: "resource", dst_resource_id: "r1" });
+  });
+  it("expiry is create-only", () => {
+    expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: false })).toBe(true);
+    expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: true })).toBe(false);
   });
 });
 
