@@ -55,7 +55,8 @@ Create a `site → site` grant from the Access Add-rule modal — through the AP
 ## Findings (held WF-numbered for disposition — the founder brings dispositions back; fold only what's dispositioned)
 | WF# | leg | finding | severity | disposition |
 |-----|-----|---------|----------|-------------|
-| _(none yet — fill live)_ | | | | |
+| WF-1 | Sites/2 | No POSITIVE site-link health on the Sites page — a healthy site-to-site link shows no "UP/linked/last-handshake" indicator, only degraded states badge (the "green=liveness-only" convention, inherited from device health). For site-to-site, liveness IS the product: a healthy link is visually indistinguishable from an idle/unconfigured one. Founder-noticed. | UX / design decide-item | HELD for founder — revisit green=liveness-only for the site surface (positive "linked · last handshake" vs convention) |
+| WF-2 | setup/1 | Stale `tunnex_node_state` volume on a re-used VM → agent boots cached identity, `agent_ready` under the OLD org, invisible in the new org. Zero-touch premise is a clean VM; re-use needs a volume wipe. | deploy/doc gap | HELD — doc line + consider a boot-time "host already holds a gateway identity" notice |
 
 ## Verdict
 _(fill after the walk: did every demo gateway touch collapse into the two pastes + the one guided console visit? Zero-Touch Law PASS / FAIL. A FAIL keeps the story open.)_
