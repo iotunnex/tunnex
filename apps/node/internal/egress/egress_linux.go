@@ -331,6 +331,20 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 	}
 	if pol == nil || pol.Mesh {
 		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" counter accept\n", wg)
+		// S8.2c D1: SYMMETRIC site forwarding in mesh. Mesh means "no doors" — a behind-gateway host must
+		// be able to INITIATE to a remote site (LAN→tunnel), not just receive. The wg0-ingress accepts
+		// above cover tunnel→LAN + spoke↔spoke but NOT LAN→tunnel (the S3.7 "egress LAN can never initiate
+		// into spokes" stance). We open LAN→tunnel SCOPED TO THE REMOTE SITE SUBNETS (pol.Routes) only —
+		// so the S3.7 spoke-isolation HOLDS (the device pool 10.99.x is never a Route, so the egress LAN
+		// still can't reach device spokes; only approved site-to-site subnets). Canonically re-emitted
+		// (netip) so nothing injects nft statements. Enforcing keeps its grant-gated forward (allowMatch).
+		if pol != nil {
+			for _, rt := range pol.Routes {
+				if p, err := netip.ParsePrefix(rt.DstCIDR); err == nil && p.Addr().Is4() {
+					v4 += fmt.Sprintf("    iifname != \"%[1]s\" oifname \"%[1]s\" ip daddr %[2]s counter accept\n", wg, p.Masked().String())
+				}
+			}
+		}
 		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n", wg)
 		return v4, v6
 	}
