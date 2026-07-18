@@ -67,6 +67,10 @@ type Compiled struct {
 	// CanonicalHash (hashView omits it, like policyspec), so route drift never disturbs the policy hash.
 	// The agent programs each as a kernel route via the tunnel iface. Mirror of policyspec.Compiled.
 	Routes []Route `json:"routes,omitempty"`
+	// LocalSubnets (S8.2c D2) — this gateway's own approved site subnets (the CP's authoritative answer).
+	// The agent picks its host address inside one of these as the SOURCE for its site routes. Out-of-hash
+	// plumbing; mirror of policyspec.Compiled.LocalSubnets.
+	LocalSubnets []string `json:"local_subnets,omitempty"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site

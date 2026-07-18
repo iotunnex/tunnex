@@ -482,12 +482,17 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	if len(routes) == 0 {
 		return pol
 	}
+	// D2: attach THIS gateway's own approved site subnets (the authoritative local-subnet answer) so the
+	// agent can source its site routes from the site LAN. Out-of-hash plumbing; rides with Routes (v5).
+	local := append([]string(nil), topo.subnets[uuid.UUID(node.SiteID.Bytes)]...)
+	sort.Strings(local)
 	if pol != nil {
 		pol.Routes = routes
+		pol.LocalSubnets = local
 		pol.Version = policyspec.RequiredVersion(*pol)
 		return pol
 	}
-	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local}
 	c.Version = policyspec.RequiredVersion(c)
 	return &c
 }

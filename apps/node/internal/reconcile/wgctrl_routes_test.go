@@ -43,15 +43,81 @@ func TestApplyRoutesV4EnumErrorSurfaces(t *testing.T) {
 		}
 	}
 	// Unbound gateway (cidrs empty) + a -4 show failure → MUST surface (the sweep is owed).
-	b4 := &wgctrlBackend{iface: "wg0", runFn: fail("-4")}
-	if err := b4.ApplyRoutes(ctx, nil); err == nil {
+	noAddrs := func() []netip.Addr { return nil }
+	b4 := &wgctrlBackend{iface: "wg0", runFn: fail("-4"), addrsFn: noAddrs}
+	if err := b4.ApplyRoutes(ctx, nil, nil); err == nil {
 		t.Fatal("F3: a -4 enum error must surface even with no desired routes (unbound gateway owes the prune)")
 	}
 	// A -6 show failure → tolerated.
-	b6 := &wgctrlBackend{iface: "wg0", runFn: fail("-6")}
-	if err := b6.ApplyRoutes(ctx, nil); err != nil {
+	b6 := &wgctrlBackend{iface: "wg0", runFn: fail("-6"), addrsFn: noAddrs}
+	if err := b6.ApplyRoutes(ctx, nil, nil); err != nil {
 		t.Fatalf("a -6 enum error must be tolerated: %v", err)
 	}
+}
+
+// TestSiteRouteSrcHint — S8.2c D2: ApplyRoutes sources its site routes from the host address inside an
+// approved LOCAL subnet (the CP's authoritative answer), so gateway-host-originated site traffic sources
+// from the site LAN (not the overlay). Reds: (1) the src is applied to the route + SURVIVES RECONCILE
+// (re-derived+re-applied every call — the manual-strip clobber can't win); (2) the no-site edge (empty
+// localSubnets) programs the route WITHOUT a src; (3) the no-matching-address edge (advertised a subnet
+// the host isn't on) programs without a src (D3 territory) — never a wrong/guessed src.
+func TestSiteRouteSrcHint(t *testing.T) {
+	ctx := context.Background()
+	var gotArgs [][]string
+	rec := func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "route" && args[1] == "replace" {
+			gotArgs = append(gotArgs, append([]string(nil), args...))
+		}
+		return "", nil // route show returns empty (no prune)
+	}
+	siteHost := netip.MustParseAddr("172.31.24.206")   // inside the local site subnet
+	overlay := netip.MustParseAddr("10.99.0.1")        // wg0 overlay — must NOT be chosen
+	addrs := func() []netip.Addr { return []netip.Addr{overlay, siteHost} }
+
+	// (1) match → src applied.
+	gotArgs = nil
+	b := &wgctrlBackend{iface: "wg0", runFn: rec, addrsFn: addrs}
+	if err := b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotArgs) != 1 || !hasPair(gotArgs[0], "src", "172.31.24.206") {
+		t.Fatalf("D2: the site route must carry src=172.31.24.206 (the local-subnet host addr); got %v", gotArgs)
+	}
+	// survives reconcile: a second call re-applies the same src (there is no persisted state to clobber).
+	gotArgs = nil
+	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+	if len(gotArgs) != 1 || !hasPair(gotArgs[0], "src", "172.31.24.206") {
+		t.Fatalf("D2: the src-hint must SURVIVE reconcile (re-applied every tick); got %v", gotArgs)
+	}
+	// (2) no-site edge: empty localSubnets → no src.
+	gotArgs = nil
+	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, nil)
+	if len(gotArgs) != 1 || hasArg(gotArgs[0], "src") {
+		t.Fatalf("no localSubnets → route programs WITHOUT a src; got %v", gotArgs)
+	}
+	// (3) no-matching-address edge: advertised a subnet the host isn't on → no src (never a guess).
+	gotArgs = nil
+	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"10.55.0.0/24"})
+	if len(gotArgs) != 1 || hasArg(gotArgs[0], "src") {
+		t.Fatalf("no host addr in the advertised subnet → no src (D3 territory), never a guess; got %v", gotArgs)
+	}
+}
+
+func hasArg(args []string, a string) bool {
+	for _, x := range args {
+		if x == a {
+			return true
+		}
+	}
+	return false
+}
+func hasPair(args []string, k, v string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == k && args[i+1] == v {
+			return true
+		}
+	}
+	return false
 }
 
 // TestParseRouteDstNormalizesHost — S8.2 review #3: `ip route show` prints a host route as a BARE address
