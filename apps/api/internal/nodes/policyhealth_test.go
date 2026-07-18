@@ -58,6 +58,14 @@ func TestDegradedKind(t *testing.T) {
 		{"S8.2 — hub-down OUTRANKS a spoke link-down", KindInput{SiteHubDown: true, SiteLinkDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteHubDown},
 		{"S8.2 — hub-down OUTRANKS apply-error + silent-desync", KindInput{SiteHubDown: true, PolicyError: "boom", PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindSiteHubDown},
 		{"S8.2 — version-refused still OUTRANKS hub-down", KindInput{UnsupportedVersion: true, SiteHubDown: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindUnsupportedPolicyVersion},
+		// S8.2c D3 — the reassuring-green trap: link handshake FRESH (SiteLinkDown=false) + hashes MATCH
+		// (would be healthy) but the gateway advertises a subnet it isn't on → site_subnet_unreachable,
+		// NEVER healthy. This is the exact bridge-mode shape the cross-cloud demo hit.
+		{"S8.2c — site_subnet_unreachable fires though link fresh + in-sync (reassuring-green)", KindInput{SiteSubnetUnreachable: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteSubnetUnreachable},
+		// A dead LINK is the louder failure → site_link_down OUTRANKS site_subnet_unreachable when both.
+		{"S8.2c — site_link_down OUTRANKS site_subnet_unreachable", KindInput{SiteLinkDown: true, SiteSubnetUnreachable: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteLinkDown},
+		// site_subnet_unreachable OUTRANKS the policy apply/desync kinds (a reachability fault is the headline).
+		{"S8.2c — site_subnet_unreachable OUTRANKS silent_desync", KindInput{SiteSubnetUnreachable: true, PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindSiteSubnetUnreachable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

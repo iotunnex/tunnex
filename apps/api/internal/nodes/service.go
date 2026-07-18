@@ -610,6 +610,9 @@ type AppliedPolicy struct {
 	// hub, or a spoke) has a stale/absent WG handshake — site-to-site traffic on that link is dead.
 	// Surfaced as site_link_down so a down bridge is never green-on-the-dashboard.
 	SiteLinkStale bool `json:"site_link_stale"`
+	// SiteSubnetUnreachable (S8.2c D3) is agent-computed: the gateway advertises a local site subnet no
+	// host address is inside (bridge-trapped wg0 / misconfig). Surfaced as site_subnet_unreachable.
+	SiteSubnetUnreachable bool `json:"site_subnet_unreachable"`
 	// MaxSupportedVersion (S8.3 CW) is the highest artifact Version the agent can apply. Observability
 	// (outside the hash); stored so the UI can warn which gateways would deny-all on a version bump.
 	MaxSupportedVersion int `json:"max_policy_version"`
@@ -655,7 +658,8 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_error":           applied.Error,
 		"policy_failing_since":   applied.FailingSince,
 		"policy_refused_version": applied.RefusedVersion,
-		"site_link_stale":        applied.SiteLinkStale,
+		"site_link_stale":         applied.SiteLinkStale,
+		"site_subnet_unreachable": applied.SiteSubnetUnreachable,
 		"max_policy_version":     applied.MaxSupportedVersion,
 	})
 	if err != nil {
@@ -741,6 +745,9 @@ type NodeCapabilities struct {
 	// SiteLinkStale (S8.2 H5) — agent-computed: a site-link peer has a stale/absent handshake.
 	// Drives the `site_link_down` health kind (a dead bridge is never green).
 	SiteLinkStale bool `json:"site_link_stale"`
+	// SiteSubnetUnreachable (S8.2c D3) — agent-computed: advertises a local subnet no host addr is inside.
+	// Drives the `site_subnet_unreachable` health kind (the reassuring-green bridge-mode trap).
+	SiteSubnetUnreachable bool `json:"site_subnet_unreachable"`
 	// MaxPolicyVersion (S8.3 CW) — the agent's reported max-supported policy version. 0 = never reported
 	// (a pre-CW/pre-upgrade agent): read as BELOW the ceiling, never unknown-treated-as-ready (S7.5.3
 	// absence-is-not-compliance). Surfaced on the Node API for the cross-site upgrade warning.
@@ -905,9 +912,13 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// blackholes that must never read green.
 		siteHubDown := topoOK && siteHubMissing(hubExists, topo, n)
 		siteLinkDown := caps.SiteLinkStale
+		// site_subnet_unreachable (S8.2c D3): the gateway advertises a local subnet it isn't on
+		// (bridge-trapped wg0 / misconfig). A REACHABILITY fault the agent detects even when the link is
+		// fresh — the reassuring-green trap. Edition-independent (routing is core, D11).
+		siteSubnetUnreachable := caps.SiteSubnetUnreachable
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
-		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable
 		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
@@ -927,6 +938,8 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindSiteHubDown // edition-independent (routing/peers are core, D11)
 		case !enterprise && siteLinkDown:
 			kind = KindSiteLinkDown
+		case !enterprise && siteSubnetUnreachable:
+			kind = KindSiteSubnetUnreachable // D3, edition-independent
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
@@ -942,8 +955,9 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				ReportAge:          reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
 				Now:                now,
 				UnsupportedVersion: caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
-				SiteHubDown:        siteHubDown,                   // S8.2 Item 7/9 (B2)
-				SiteLinkDown:       siteLinkDown,                  // S8.2 H5
+				SiteHubDown:           siteHubDown,           // S8.2 Item 7/9 (B2)
+				SiteLinkDown:          siteLinkDown,          // S8.2 H5
+				SiteSubnetUnreachable: siteSubnetUnreachable, // S8.2c D3
 			})
 		}
 		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}

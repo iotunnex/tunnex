@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -40,50 +39,6 @@ type wgctrlBackend struct {
 
 func newWGCtrlBackend(iface string, logger *slog.Logger) (WGBackend, error) {
 	return &wgctrlBackend{iface: iface, logger: logger, runFn: run, addrsFn: hostIPv4Addrs}, nil
-}
-
-// hostIPv4Addrs returns the host's global-unicast IPv4 addresses (all interfaces). The D2 src-hint picks
-// the one inside an approved local site subnet.
-func hostIPv4Addrs() []netip.Addr {
-	var out []netip.Addr
-	ifaddrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return out
-	}
-	for _, a := range ifaddrs {
-		if ipnet, ok := a.(*net.IPNet); ok {
-			if v4 := ipnet.IP.To4(); v4 != nil {
-				if addr, ok := netip.AddrFromSlice(v4); ok && addr.IsValid() && !addr.IsLoopback() {
-					out = append(out, addr)
-				}
-			}
-		}
-	}
-	return out
-}
-
-// siteRouteSrc picks the gateway's SOURCE for its site routes (D2): the host address inside one of the
-// gateway's OWN approved site subnets (localSubnets — the CP's authoritative answer). Returns (addr,true)
-// on a match. Returns (_, false) when localSubnets is empty (no site source to hint — the route still
-// programs identically to today) OR when localSubnets is non-empty but NO host address is inside any of
-// them — the D3 refuse-loudly case (a gateway advertising a subnet it isn't on, e.g. bridge-trapped wg0).
-// PURE. `matchable` distinguishes the two false cases (empty vs no-match) for the D3 signal.
-func siteRouteSrc(localSubnets []string, hostAddrs []netip.Addr) (src netip.Addr, ok bool, hadSubnets bool) {
-	if len(localSubnets) == 0 {
-		return netip.Addr{}, false, false
-	}
-	for _, s := range localSubnets {
-		p, err := netip.ParsePrefix(s)
-		if err != nil {
-			continue
-		}
-		for _, a := range hostAddrs {
-			if p.Contains(a) {
-				return a, true, true
-			}
-		}
-	}
-	return netip.Addr{}, false, true
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {

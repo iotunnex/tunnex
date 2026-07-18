@@ -34,6 +34,13 @@ const (
 	// infrastructure signal (the gateway can't do the one thing it exists for); hub outranks spoke.
 	KindSiteHubDown  PolicyDegradedKind = "site_hub_down"
 	KindSiteLinkDown PolicyDegradedKind = "site_link_down"
+	// KindSiteSubnetUnreachable (S8.2c D3): a SITE gateway advertises a local subnet NO host address is
+	// inside — it fronts a subnet it isn't actually on (bridge-trapped wg0, or a misconfigured
+	// advertisement). The REASSURING-GREEN trap: wg0 is up and the handshake is fresh (so site_link_down
+	// is FALSE), yet the LAN is unreachable and site traffic to it blackholes. Ranked directly below the
+	// site-link kinds: a reachability/deploy fault whose remedy is operator-side (fix the gateway's host
+	// networking — run host-mode / correct the advertised subnet), like the version-refused kind.
+	KindSiteSubnetUnreachable PolicyDegradedKind = "site_subnet_unreachable"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -80,6 +87,9 @@ type KindInput struct {
 	UnsupportedVersion bool          // agent-reported: it REFUSED a too-new artifact (S8.1 D1) → highest-priority kind
 	SiteHubDown        bool          // S8.2: a site gateway whose HUB site-link has no fresh WG handshake (all spokes' site traffic dead)
 	SiteLinkDown       bool          // S8.2: a site gateway with ≥1 spoke site-link with no fresh handshake (that spoke's traffic dead)
+	// SiteSubnetUnreachable (S8.2c D3): the gateway advertises a local subnet no host address is inside —
+	// the reassuring-green bridge-mode trap. INDEPENDENT of SiteLinkDown (fires when the link is FRESH).
+	SiteSubnetUnreachable bool
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -94,6 +104,7 @@ var transitionTable = []TransitionRule{
 	{KindUnsupportedPolicyVersion, "agent REFUSED a too-new artifact (UnsupportedVersion) — checked FIRST, remedy = upgrade the agent"},
 	{KindSiteHubDown, "site gateway, HUB site-link no fresh handshake (SiteHubDown) — remedy = fix the hub; outranks a single spoke link-down"},
 	{KindSiteLinkDown, "site gateway, a spoke site-link no fresh handshake (SiteLinkDown) — remedy = fix that spoke's tunnel/NAT"},
+	{KindSiteSubnetUnreachable, "site gateway advertises a local subnet no host addr is inside (SiteSubnetUnreachable) — reassuring-green trap; remedy = fix the gateway's host networking"},
 	{KindHealthy, "not degraded: no error, pushed==applied, reports fresh"},
 	{KindApplyFailing, "policy_error set AND policy_failing_since set"},
 	{KindStuckEnforcing, "policy_error set AND policy_failing_since EMPTY (pushed=='' && applied!='')"},
@@ -122,6 +133,13 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	}
 	if in.SiteLinkDown {
 		return KindSiteLinkDown
+	}
+	// S8.2c D3 — the gateway advertises a local subnet it isn't on: site traffic to that LAN blackholes
+	// even though the link handshake is fresh (the reassuring-green trap). Ranked below the link kinds
+	// (a dead link is the louder failure) but above the policy apply/desync kinds — it's a reachability
+	// fault, remedy operator-side (fix the gateway host networking), not a CP-side policy issue.
+	if in.SiteSubnetUnreachable {
+		return KindSiteSubnetUnreachable
 	}
 	// Agent-reported apply failure (from the last report — a reported fact, not a server compare).
 	// [fold 3] mirror the bool's TERM-2: policy_failing_since alone (error empty) is a failing
