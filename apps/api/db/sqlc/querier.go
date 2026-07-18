@@ -439,6 +439,9 @@ type Querier interface {
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	// lint:cross-org — org-scoped directly. S8.4: each site's dns_forwarding JSONB ([{domain,resolver_ip}]),
+	// unioned CP-side into the org forwarding table compiled onto every gateway.
+	ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID) ([][]byte, error)
 	// S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
 	// input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
 	// yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).

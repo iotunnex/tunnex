@@ -48,6 +48,40 @@ func TestPushedHashMatchesServedForRoutedGateway(t *testing.T) {
 	}
 }
 
+// TestFinalizeAttachesDNSForwardsOutOfHash — S8.4 D1/D5: finalizeArtifact attaches the org DNS forwarding
+// table onto a routed gateway, and it is OUT-of-hash — the pushed/applied hash is byte-identical with or
+// without DNS (a DNS-only change never false-alarms silent_desync; every gateway carries the whole table).
+func TestFinalizeAttachesDNSForwardsOutOfHash(t *testing.T) {
+	svc := &Service{policy: fakeProvider{}}
+	siteA, siteB, nodeA := uuid.New(), uuid.New(), uuid.New()
+	base := siteTopology{
+		gws: []sqlc.ListSiteGatewaysForOrgRow{
+			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KA", Endpoint: "a:51820"},
+			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KB"},
+		},
+		subnets: map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
+	}
+	node := sqlc.Node{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}}
+	mkRouteless := func() *policyspec.Compiled {
+		return &policyspec.Compiled{Version: policyspec.RequiredVersion(policyspec.Compiled{Mode: "enforcing"}), NodeID: nodeA.String(), Mode: "enforcing"}
+	}
+	withDNS := base
+	withDNS.dnsForwards = []policyspec.DNSForward{{Domain: "corp.local", ResolverIP: "10.2.0.53"}}
+
+	got := svc.finalizeArtifact(withDNS, node, mkRouteless())
+	if len(got.DNSForwards) != 1 || got.DNSForwards[0].Domain != "corp.local" {
+		t.Fatalf("finalize must attach the org DNS table onto the gateway, got %+v", got.DNSForwards)
+	}
+	// Out-of-hash: the finalized hash is identical with vs without DNS.
+	noDNS := svc.finalizeArtifact(base, node, mkRouteless())
+	if policyspec.CanonicalHash(*got) != policyspec.CanonicalHash(*noDNS) {
+		t.Fatal("DNSForwards must be out-of-hash — attaching DNS changed the artifact hash (false-desync risk)")
+	}
+	if got.Version != noDNS.Version {
+		t.Fatalf("DNSForwards must not bump the version; got v%d vs v%d", got.Version, noDNS.Version)
+	}
+}
+
 // TestElectSiteHubIsTheOneElection — S8.3 D2: the hub designation the Node API projects (is_site_hub) reads
 // electSiteHub, the SAME picker the site-link graph + health use — endpoint-bearing, lowest id, ties by id,
 // nil when all NAT'd. siteTopoHasHub is exactly (electSiteHub != nil), so existence and designation never

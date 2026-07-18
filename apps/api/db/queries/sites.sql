@@ -89,6 +89,11 @@ RETURNING *;
 -- lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before deletion (WF-5 un-advertise).
 DELETE FROM site_subnets WHERE id = $1;
 
+-- name: ListSiteDNSForwardsForOrg :many
+-- lint:cross-org — org-scoped directly. S8.4: each site's dns_forwarding JSONB ([{domain,resolver_ip}]),
+-- unioned CP-side into the org forwarding table compiled onto every gateway.
+SELECT dns_forwarding FROM sites WHERE org_id = $1;
+
 -- name: ListPendingSiteSubnetsForOrg :many
 -- lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
 SELECT ss.id, ss.site_id, ss.cidr, ss.status

@@ -285,6 +285,32 @@ func (q *Queries) ListPendingSiteSubnetsForOrg(ctx context.Context, orgID uuid.U
 	return items, nil
 }
 
+const listSiteDNSForwardsForOrg = `-- name: ListSiteDNSForwardsForOrg :many
+SELECT dns_forwarding FROM sites WHERE org_id = $1
+`
+
+// lint:cross-org — org-scoped directly. S8.4: each site's dns_forwarding JSONB ([{domain,resolver_ip}]),
+// unioned CP-side into the org forwarding table compiled onto every gateway.
+func (q *Queries) ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listSiteDNSForwardsForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var dns_forwarding []byte
+		if err := rows.Scan(&dns_forwarding); err != nil {
+			return nil, err
+		}
+		items = append(items, dns_forwarding)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSiteGatewaysForOrg = `-- name: ListSiteGatewaysForOrg :many
 SELECT id, site_id, wg_public_key, endpoint FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> ''
