@@ -30,15 +30,10 @@ type wgctrlBackend struct {
 	// runFn shells `ip`/`wg` (defaults to the package run). Overridable in tests to inject a route-
 	// enumeration fault, proving ApplyRoutes surfaces a -4 error (F3).
 	runFn func(context.Context, string, ...string) (string, error)
-	// addrsFn returns the host's unicast IPv4 addresses (defaults to hostIPv4Addrs). Overridable in tests
-	// to inject the gateway's site-subnet membership for the D2 route src-hint.
-	addrsFn func() []netip.Addr
-	// noSrcLogged throttles the D2 "no site source" log to once per condition-onset (not per reconcile).
-	noSrcLogged bool
 }
 
 func newWGCtrlBackend(iface string, logger *slog.Logger) (WGBackend, error) {
-	return &wgctrlBackend{iface: iface, logger: logger, runFn: run, addrsFn: hostIPv4Addrs}, nil
+	return &wgctrlBackend{iface: iface, logger: logger, runFn: run}, nil
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {
@@ -349,22 +344,8 @@ func routesToPrune(enumerated []string, desired map[netip.Prefix]bool) []netip.P
 // PRUNES only OUR routes (proto static + siteRouteMetric) no longer desired — the full-sweep contract.
 // Enumerates BOTH families (review #4: v6 inputs are refused today, but the prune must not silently miss
 // a family if S8.4 admits v6 subnets).
-func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string, localSubnets []string) error {
+func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string, srcHint string) error {
 	metric := strconv.Itoa(siteRouteMetric)
-	// D2: the source-hint for our site routes — the host's address inside an approved local site subnet,
-	// so gateway-host-originated site traffic sources from the site LAN (not the overlay). No match →
-	// program the route WITHOUT a src (identical to pre-D2), logged ONCE per onset (not per reconcile).
-	src, srcOK, hadSubnets := siteRouteSrc(localSubnets, b.addrsFn())
-	if srcOK {
-		b.noSrcLogged = false
-	} else if !b.noSrcLogged {
-		if hadSubnets {
-			// Advertised a local subnet the host isn't on (e.g. bridge-trapped wg0) — D3 territory; the
-			// route still programs, but the src-hint can't be honored. (D3 surfaces this as a health kind.)
-			slog.Warn("site_route_src_unresolved", "iface", b.iface, "local_subnets", strings.Join(localSubnets, ","))
-		}
-		b.noSrcLogged = true
-	}
 	desired := make(map[netip.Prefix]bool, len(cidrs))
 	for _, c := range cidrs {
 		p, ok := parseRouteDst(c)
@@ -373,8 +354,8 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string, localSu
 		}
 		desired[p] = true
 		args := []string{"route", "replace", p.String(), "dev", b.iface, "proto", "static", "metric", metric}
-		if srcOK {
-			args = append(args, "src", src.String()) // D2 src-hint — survives reconcile (re-applied every tick)
+		if srcHint != "" {
+			args = append(args, "src", srcHint) // D2 src-hint (reconcile-derived) — re-applied every tick, survives clobber
 		}
 		if _, err := b.runFn(ctx, "ip", args...); err != nil {
 			return err

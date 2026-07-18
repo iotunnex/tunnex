@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { api, apiErrorMessage, type Node, type Org } from "../lib/api";
+import { useEffect, useState } from "react";
+import { api, apiErrorMessage, type Node, type Org, type Meta } from "../lib/api";
 import { policyHealthBadge, badgeClass } from "../lib/healthview";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
@@ -36,7 +36,9 @@ export interface RemoteEnrollOpts {
 export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
   const q = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
   const nameEnv = o.name ? ` -e TUNNEX_NODE_NAME=${q(o.name)}` : "";
-  const endpointEnv = o.endpoint ? ` -e TUNNEX_NODE_ENDPOINT=${o.endpoint}` : "";
+  // Endpoint is admin-entered free text — shell-QUOTE it like the name (review: an unquoted space/metachar
+  // corrupts the zero-touch command; a bad endpoint now fails cleanly instead of injecting a flag).
+  const endpointEnv = o.endpoint ? ` -e TUNNEX_NODE_ENDPOINT=${q(o.endpoint)}` : "";
   return (
     `docker run -d --name tunnex-node --restart unless-stopped --network host ` +
     `--cap-add NET_ADMIN --device /dev/net/tun -v tunnex_node_state:/var/lib/tunnex-node ` +
@@ -46,11 +48,20 @@ export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
   );
 }
 
-// cpEndpoints derives the public CP URLs the remote agent dials, from the dashboard's own origin (the
-// browser is served BY the control plane). REST rides nginx on the origin; the agent TLS channel is :8443
-// with the standard cert SAN. Pure over a location-like input so it unit-tests without a DOM.
-export function cpEndpoints(loc: { protocol: string; hostname: string; origin: string }): { apiURL: string; agentURL: string; serverName: string } {
-  return { apiURL: loc.origin, agentURL: `https://${loc.hostname}:8443`, serverName: "tunnex-control" };
+// cpEndpoints derives the public CP URLs the remote agent dials from the CP's OWN configured public base URL
+// (meta.public_base_url — AUTHORITATIVE), NOT window.location: the browser URL is whatever path the admin
+// happened to use (a tunnel / internal alias / bare IP), which would bake an unreachable endpoint into the
+// pasted zero-touch command. Falls back to the dashboard origin ONLY when the CP didn't configure a public
+// URL. REST rides the origin (nginx); the agent TLS channel is :8443 with the standard cert SAN. PURE.
+export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: string): { apiURL: string; agentURL: string; serverName: string } {
+  const base = publicBaseURL && publicBaseURL.trim() ? publicBaseURL.trim() : fallbackOrigin;
+  let host = "";
+  try {
+    host = new URL(base).hostname;
+  } catch {
+    host = "";
+  }
+  return { apiURL: base, agentURL: host ? `https://${host}:8443` : "", serverName: "tunnex-control" };
 }
 
 /**
@@ -74,6 +85,14 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   const [pinnedName, setPinnedName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The CP's authoritative public base URL for the emitted command (review #1 — not window.location).
+  const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    api
+      .GET("/api/v1/meta")
+      .then(({ data }) => setPublicBaseURL((data as Meta | undefined)?.public_base_url))
+      .catch(() => {});
+  }, []);
 
   async function issue() {
     setBusy(true);
@@ -184,16 +203,18 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
                   (it dials the hub; other peers can't dial it).
                 </>
               )}{" "}
-              Co-located with the control plane instead? Run{" "}
-              <span className="font-mono">docker compose up -d node-agent</span> in your install folder.
+              (Installing on the SAME host as the control plane? See{" "}
+              <span className="font-mono">docs/deploy-cloud-gateway.md</span> for the co-located compose form —
+              it carries this same token.)
             </>
           }
           // D4: the ONE true remote-gateway docker run — single line, host networking + wgctrl baked in.
+          // CP urls from the CP's own configured public base URL (review #1), not window.location.
           secret={remoteEnrollCommand({
             token,
             name: pinnedName,
             endpoint: pinnedEndpoint,
-            ...cpEndpoints({ protocol: window.location.protocol, hostname: window.location.hostname, origin: window.location.origin }),
+            ...cpEndpoints(publicBaseURL, window.location.origin),
           })}
           copyLabel="Copy command"
           onDismiss={() => {

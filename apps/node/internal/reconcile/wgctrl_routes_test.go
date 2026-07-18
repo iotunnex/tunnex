@@ -43,25 +43,23 @@ func TestApplyRoutesV4EnumErrorSurfaces(t *testing.T) {
 		}
 	}
 	// Unbound gateway (cidrs empty) + a -4 show failure → MUST surface (the sweep is owed).
-	noAddrs := func() []netip.Addr { return nil }
-	b4 := &wgctrlBackend{iface: "wg0", runFn: fail("-4"), addrsFn: noAddrs}
-	if err := b4.ApplyRoutes(ctx, nil, nil); err == nil {
+	b4 := &wgctrlBackend{iface: "wg0", runFn: fail("-4")}
+	if err := b4.ApplyRoutes(ctx, nil, ""); err == nil {
 		t.Fatal("F3: a -4 enum error must surface even with no desired routes (unbound gateway owes the prune)")
 	}
 	// A -6 show failure → tolerated.
-	b6 := &wgctrlBackend{iface: "wg0", runFn: fail("-6"), addrsFn: noAddrs}
-	if err := b6.ApplyRoutes(ctx, nil, nil); err != nil {
+	b6 := &wgctrlBackend{iface: "wg0", runFn: fail("-6")}
+	if err := b6.ApplyRoutes(ctx, nil, ""); err != nil {
 		t.Fatalf("a -6 enum error must be tolerated: %v", err)
 	}
 }
 
-// TestSiteRouteSrcHint — S8.2c D2: ApplyRoutes sources its site routes from the host address inside an
-// approved LOCAL subnet (the CP's authoritative answer), so gateway-host-originated site traffic sources
-// from the site LAN (not the overlay). Reds: (1) the src is applied to the route + SURVIVES RECONCILE
-// (re-derived+re-applied every call — the manual-strip clobber can't win); (2) the no-site edge (empty
-// localSubnets) programs the route WITHOUT a src; (3) the no-matching-address edge (advertised a subnet
-// the host isn't on) programs without a src (D3 territory) — never a wrong/guessed src.
-func TestSiteRouteSrcHint(t *testing.T) {
+// TestApplyRoutesSrcHint — S8.2c D2 (backend seam): ApplyRoutes applies the reconcile-derived srcHint
+// VERBATIM to each route, and re-applies it every call (survives reconcile — there is no persisted state to
+// clobber). An empty srcHint programs the route WITHOUT a src (the no-site / D3 edges, which reconcile
+// resolves to ""). The DERIVATION (which host addr, the no-match refusal) lives in TestSiteRouteSrc — the
+// backend never guesses a src, it only threads the one it's handed.
+func TestApplyRoutesSrcHint(t *testing.T) {
 	ctx := context.Background()
 	var gotArgs [][]string
 	rec := func(_ context.Context, _ string, args ...string) (string, error) {
@@ -70,58 +68,51 @@ func TestSiteRouteSrcHint(t *testing.T) {
 		}
 		return "", nil // route show returns empty (no prune)
 	}
-	siteHost := netip.MustParseAddr("172.31.24.206")   // inside the local site subnet
-	overlay := netip.MustParseAddr("10.99.0.1")        // wg0 overlay — must NOT be chosen
-	addrs := func() []netip.Addr { return []netip.Addr{overlay, siteHost} }
+	b := &wgctrlBackend{iface: "wg0", runFn: rec}
 
-	// (1) match → src applied.
+	// srcHint set → applied to the route.
 	gotArgs = nil
-	b := &wgctrlBackend{iface: "wg0", runFn: rec, addrsFn: addrs}
-	if err := b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}); err != nil {
+	if err := b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, "172.31.24.206"); err != nil {
 		t.Fatal(err)
 	}
 	if len(gotArgs) != 1 || !hasPair(gotArgs[0], "src", "172.31.24.206") {
-		t.Fatalf("D2: the site route must carry src=172.31.24.206 (the local-subnet host addr); got %v", gotArgs)
+		t.Fatalf("D2: a non-empty srcHint must be applied as src; got %v", gotArgs)
 	}
-	// survives reconcile: a second call re-applies the same src (there is no persisted state to clobber).
+	// survives reconcile: a second call re-applies the same src.
 	gotArgs = nil
-	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, "172.31.24.206")
 	if len(gotArgs) != 1 || !hasPair(gotArgs[0], "src", "172.31.24.206") {
 		t.Fatalf("D2: the src-hint must SURVIVE reconcile (re-applied every tick); got %v", gotArgs)
 	}
-	// (2) no-site edge: empty localSubnets → no src.
+	// empty srcHint → no src (reconcile hands "" for the no-site + no-match edges).
 	gotArgs = nil
-	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, nil)
+	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, "")
 	if len(gotArgs) != 1 || hasArg(gotArgs[0], "src") {
-		t.Fatalf("no localSubnets → route programs WITHOUT a src; got %v", gotArgs)
-	}
-	// (3) no-matching-address edge: advertised a subnet the host isn't on → no src (never a guess).
-	gotArgs = nil
-	_ = b.ApplyRoutes(ctx, []string{"10.0.0.0/24"}, []string{"10.55.0.0/24"})
-	if len(gotArgs) != 1 || hasArg(gotArgs[0], "src") {
-		t.Fatalf("no host addr in the advertised subnet → no src (D3 territory), never a guess; got %v", gotArgs)
+		t.Fatalf("empty srcHint → route programs WITHOUT a src; got %v", gotArgs)
 	}
 }
 
-// TestSiteSubnetUnreachableSignal — S8.2c D3: the health signal is (hadSubnets && !matched) — the gateway
-// advertised a local subnet but NO host address is inside it (bridge-trapped / misconfig). It is INDEPENDENT
-// of link state (derived from host addrs, not handshakes), so it catches the reassuring-green shape. Empty
-// advertisement OR a match → NOT unreachable.
-func TestSiteSubnetUnreachableSignal(t *testing.T) {
-	onSubnet := []netip.Addr{netip.MustParseAddr("172.31.24.206")}
-	offSubnet := []netip.Addr{netip.MustParseAddr("10.99.0.1")} // only the overlay — not on the site subnet
-	sig := func(local []string, addrs []netip.Addr) bool {
-		_, ok, had := siteRouteSrc(local, addrs)
-		return had && !ok
+// TestSiteRouteSrc — S8.2c D2/D3, the PURE derivation shared by the backend (src-hint) and reconcile (the
+// unreachable signal). Picks the host address inside an approved local subnet (never the overlay). Returns
+// (_, false, false) for the no-site edge and (_, false, true) — the D3 signal — when a subnet is advertised
+// but NO host address is inside it (bridge-trapped / misconfig, INDEPENDENT of link state → catches the
+// reassuring-green shape).
+func TestSiteRouteSrc(t *testing.T) {
+	siteHost := netip.MustParseAddr("172.31.24.206")           // inside the local site subnet
+	overlay := netip.MustParseAddr("10.99.0.1")               // wg0 overlay — must NOT be chosen
+	both := []netip.Addr{overlay, siteHost}
+
+	// match → the local-subnet host addr, never the overlay.
+	if src, ok, had := siteRouteSrc([]string{"172.31.0.0/16"}, both); !ok || !had || src != siteHost {
+		t.Fatalf("D2: must pick the local-subnet host addr (not the overlay); got src=%v ok=%v had=%v", src, ok, had)
 	}
-	if !sig([]string{"172.31.0.0/16"}, offSubnet) {
-		t.Fatal("advertised subnet + no host addr inside → UNREACHABLE (the bridge-trapped trap)")
+	// advertised subnet + no host addr inside → D3 signal (had && !ok).
+	if src, ok, had := siteRouteSrc([]string{"172.31.0.0/16"}, []netip.Addr{overlay}); ok || !had || src.IsValid() {
+		t.Fatalf("D3: advertised subnet + no host addr inside → (invalid, false, true); got src=%v ok=%v had=%v", src, ok, had)
 	}
-	if sig([]string{"172.31.0.0/16"}, onSubnet) {
-		t.Fatal("advertised subnet + a host addr inside → NOT unreachable")
-	}
-	if sig(nil, offSubnet) {
-		t.Fatal("no advertised subnet → NOT unreachable (nothing to be unreachable)")
+	// no advertised subnet → not a signal (nothing to be unreachable).
+	if _, ok, had := siteRouteSrc(nil, both); ok || had {
+		t.Fatalf("no advertised subnet → (false, false); got ok=%v had=%v", ok, had)
 	}
 }
 

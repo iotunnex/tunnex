@@ -40,7 +40,7 @@ func (m *MemBackend) ApplyPeers(_ context.Context, peers []Peer) error {
 }
 
 // ApplyRoutes records the desired route set (the in-memory backend has no kernel FIB).
-func (m *MemBackend) ApplyRoutes(_ context.Context, cidrs []string, _ []string) error {
+func (m *MemBackend) ApplyRoutes(_ context.Context, cidrs []string, _ string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.routes = append([]string(nil), cidrs...)
