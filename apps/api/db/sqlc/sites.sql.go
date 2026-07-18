@@ -81,6 +81,25 @@ func (q *Queries) BindNodeToSite(ctx context.Context, arg BindNodeToSiteParams) 
 	return result.RowsAffected(), nil
 }
 
+const countPolicyRulesReferencingSite = `-- name: CountPolicyRulesReferencingSite :one
+SELECT COUNT(*) FROM policy_rules
+WHERE org_id = $1 AND (dst_site_id = $2 OR src_site_id = $2)
+`
+
+type CountPolicyRulesReferencingSiteParams struct {
+	OrgID     uuid.UUID   `json:"org_id"`
+	DstSiteID pgtype.UUID `json:"dst_site_id"`
+}
+
+// lint:cross-org — org-scoped by org_id; counts policy rules that name this site as src OR dst. S8.3 D1/D4:
+// the reverse-link "rules referencing this site" and the delete-cascade preview share this ONE count.
+func (q *Queries) CountPolicyRulesReferencingSite(ctx context.Context, arg CountPolicyRulesReferencingSiteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPolicyRulesReferencingSite, arg.OrgID, arg.DstSiteID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSite = `-- name: CreateSite :one
 INSERT INTO sites (org_id, name) VALUES ($1, $2)
 RETURNING id, org_id, name, link_transport, link_mtu, dns_forwarding, created_at, updated_at
@@ -116,9 +135,9 @@ type DeleteSiteParams struct {
 	OrgID uuid.UUID `json:"org_id"`
 }
 
-// DELIBERATELY UNWIRED until S8.3 (delete-site is a destructive op that needs the confirm-naming-target
-// UI grain). Kept because the cascade behavior it triggers (dst_kind='site' rules + subnets cascade,
-// ON DELETE CASCADE) is exercised by TestPolicyRuleSiteDstCascade — do NOT drop this in a cleanup pass.
+// S8.3 D4: WIRED — the deleteSite endpoint (name-typed confirm + cascade preview in the UI). The cascade
+// it triggers (dst_kind='site'/src_kind='site' rules + subnets, ON DELETE CASCADE) is exercised by
+// TestPolicyRuleSiteDstCascade; the bound gateway is unbound (nodes.site_id -> NULL via the FK).
 func (q *Queries) DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSite, arg.ID, arg.OrgID)
 	if err != nil {

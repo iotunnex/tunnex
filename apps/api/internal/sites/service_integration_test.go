@@ -116,6 +116,77 @@ func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 	}
 }
 
+// TestDeleteSiteCascadesAndAudits — S8.3 D4: deleteSite removes the site and CASCADES its subnets + any
+// policy rule naming it (src/dst), and UNBINDS the gateway. GetReferences reports the real counts the UI
+// previews; the audit records those counts (never "may affect"); a re-delete is a clean 404.
+func TestDeleteSiteCascadesAndAudits(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	q := sqlc.New(pool)
+	ctx := context.Background()
+
+	org, user, node, grp := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	ex := func(sql string, args ...any) {
+		if _, e := pool.Exec(ctx, sql, args...); e != nil {
+			t.Fatalf("seed %q: %v", sql, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id, name, slug) VALUES ($1,'S',$2)`, org, "del-"+org.String()[:8])
+	ex(`INSERT INTO users (id, email, name) VALUES ($1,$2,'U')`, user, "del-"+user.String()[:8]+"@t.io")
+	ex(`INSERT INTO nodes (id, org_id, name, cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8])
+	ex(`INSERT INTO user_groups (id, org_id, name) VALUES ($1,$2,'g')`, grp, org)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	site, err := svc.RegisterSite(ctx, org, "hq")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := svc.BindNode(ctx, org, site.ID, node); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if _, err := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.20.0.0/24")); err != nil {
+		t.Fatalf("subnet: %v", err)
+	}
+	// A policy rule naming the site as dst → referenced (must cascade on delete).
+	ex(`INSERT INTO policy_rules (id, org_id, src_kind, src_group_id, dst_kind, dst_site_id)
+	    VALUES ($1,$2,'group',$3,'site',$4)`, uuid.New(), org, grp, site.ID)
+
+	// GetReferences reports the real cascade counts the UI previews.
+	refs, err := svc.GetReferences(ctx, org, site.ID)
+	if err != nil || refs.RuleCount != 1 || refs.SubnetCount != 1 {
+		t.Fatalf("references must be {rules:1, subnets:1}, got %+v (%v)", refs, err)
+	}
+
+	if err := svc.DeleteSite(ctx, user, org, site.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	// Site gone; the referencing rule + subnet cascaded; the gateway unbound.
+	if _, err := svc.GetSite(ctx, org, site.ID); err == nil {
+		t.Fatal("site must be gone after delete")
+	}
+	var rules, subs int
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM policy_rules WHERE dst_site_id=$1`, site.ID).Scan(&rules)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM site_subnets WHERE site_id=$1`, site.ID).Scan(&subs)
+	if rules != 0 || subs != 0 {
+		t.Fatalf("cascade must remove referencing rules + subnets, got rules=%d subs=%d", rules, subs)
+	}
+	n, err := q.GetSiteNode(ctx, pgtype.UUID{Bytes: site.ID, Valid: true})
+	if err == nil {
+		t.Fatalf("the gateway must be unbound after site delete, still bound: %v", n.ID)
+	}
+	// The audit row records the REAL cascade counts (never "may affect").
+	var auditRules, auditSubs int
+	err = pool.QueryRow(ctx, `SELECT (metadata->>'rules_deleted')::int, (metadata->>'subnets_released')::int
+	    FROM audit_logs WHERE org_id=$1 AND action='site.deleted'`, org).Scan(&auditRules, &auditSubs)
+	if err != nil || auditRules != 1 || auditSubs != 1 {
+		t.Fatalf("site.deleted audit must record real counts {1,1}, got {%d,%d} (%v)", auditRules, auditSubs, err)
+	}
+	// A re-delete is a clean 404, not a crash.
+	if err := svc.DeleteSite(ctx, user, org, site.ID); err == nil {
+		t.Fatal("re-deleting an absent site must be a 404")
+	}
+}
+
 // TestApproveSubnetDisjointness — S8.1 Slice-4 D5/D7: approval runs the ONE disjointness validator.
 // A subnet overlapping an APPROVED site subnet or the pool is REFUSED (typed, stays pending, audited);
 // an ADJACENT (touching-but-disjoint) subnet is APPROVED; approvals + refusals are both audited.

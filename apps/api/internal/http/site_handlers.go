@@ -138,3 +138,30 @@ func (s apiServer) ApproveSiteSubnet(ctx context.Context, req api.ApproveSiteSub
 	}
 	return api.ApproveSiteSubnet204Response{}, nil
 }
+
+// GetSiteReferences GET /sites/{siteId} — the D1 reverse link + D4 cascade preview counts.
+func (s apiServer) GetSiteReferences(ctx context.Context, req api.GetSiteReferencesRequestObject) (api.GetSiteReferencesResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	refs, err := s.sites.GetReferences(ctx, req.OrgId, req.SiteId)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetSiteReferences200JSONResponse{
+		Body:    api.SiteReferences{RuleCount: int(refs.RuleCount), SubnetCount: int(refs.SubnetCount)},
+		Headers: api.GetSiteReferences200ResponseHeaders{XRequestId: reqID(ctx)},
+	}, nil
+}
+
+// DeleteSite DELETE /sites/{siteId} — cascades subnets + site-referencing rules; unbinds the gateway (D4).
+func (s apiServer) DeleteSite(ctx context.Context, req api.DeleteSiteRequestObject) (api.DeleteSiteResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.sites.DeleteSite(ctx, p.UserID, req.OrgId, req.SiteId); err != nil {
+		return nil, err
+	}
+	return api.DeleteSite204Response{}, nil
+}

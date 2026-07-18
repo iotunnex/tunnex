@@ -149,6 +149,73 @@ func (s *Service) UnbindSiteNode(ctx context.Context, orgID, siteID uuid.UUID) e
 	return s.UnbindNode(ctx, orgID, n.ID)
 }
 
+// SiteReferences is what points at a site: the counts the UI shows BEFORE a delete (D4 cascade preview)
+// and on the site page's reverse link (D1). A rule is referenced if it names the site as src OR dst.
+type SiteReferences struct {
+	RuleCount   int64
+	SubnetCount int64
+}
+
+// GetReferences returns the rule + subnet counts referencing a site (org-checked). ONE read serves both
+// the D1 reverse link and the D4 cascade preview.
+func (s *Service) GetReferences(ctx context.Context, orgID, siteID uuid.UUID) (SiteReferences, error) {
+	if _, err := s.GetSite(ctx, orgID, siteID); err != nil {
+		return SiteReferences{}, err
+	}
+	rules, err := s.q.CountPolicyRulesReferencingSite(ctx, sqlc.CountPolicyRulesReferencingSiteParams{
+		OrgID: orgID, DstSiteID: pgtype.UUID{Bytes: siteID, Valid: true},
+	})
+	if err != nil {
+		return SiteReferences{}, err
+	}
+	subs, err := s.q.ListSiteSubnets(ctx, siteID)
+	if err != nil {
+		return SiteReferences{}, err
+	}
+	return SiteReferences{RuleCount: rules, SubnetCount: int64(len(subs))}, nil
+}
+
+// DeleteSite deletes a site and cascades its subnets + site-referencing policy rules (ON DELETE CASCADE);
+// the bound gateway is unbound (nodes.site_id -> NULL via the FK). Org-checked (404 cross-org/absent). The
+// delete + its audit share ONE tx (a swallowed audit poisons the tx — the swallowed-audit law); the audit
+// records the real cascade counts computed before the delete, never "may affect".
+func (s *Service) DeleteSite(ctx context.Context, actor, orgID, siteID uuid.UUID) error {
+	if _, err := s.GetSite(ctx, orgID, siteID); err != nil {
+		return err
+	}
+	refs, err := s.GetReferences(ctx, orgID, siteID) // real counts for the audit (before the cascade)
+	if err != nil {
+		return err
+	}
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, err := q.DeleteSite(ctx, sqlc.DeleteSiteParams{ID: siteID, OrgID: orgID})
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return apierr.NotFound("site_not_found", "no such site in this organization")
+		}
+		return s.auditSite(ctx, q, orgID, actor, siteID, "site.deleted", map[string]any{
+			"rules_deleted": refs.RuleCount, "subnets_released": refs.SubnetCount,
+		})
+	})
+}
+
+// auditSite writes a site-targeted audit row (mirrors audit(), TargetType "site"). Returns its error —
+// swallowing it inside the delete tx would poison the commit (swallowed-audit law).
+func (s *Service) auditSite(ctx context.Context, q *sqlc.Queries, orgID, actor, siteID uuid.UUID, action string, meta map[string]any) error {
+	b, _ := json.Marshal(meta)
+	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
+		Action:      action,
+		TargetType:  strptr("site"),
+		TargetID:    strptr(siteID.String()),
+		Metadata:    b,
+	})
+	return err
+}
+
 // ListPendingSubnets returns the org's advertised-but-unapproved subnets (the admin review queue).
 func (s *Service) ListPendingSubnets(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListPendingSiteSubnetsForOrgRow, error) {
 	return s.q.ListPendingSiteSubnetsForOrg(ctx, orgID)

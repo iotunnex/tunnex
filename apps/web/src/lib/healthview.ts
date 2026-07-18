@@ -26,6 +26,12 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       return { label: "silent desync", tone: "danger" };
     case "desync_unknown":
       return { label: "health unknown", tone: "unknown" };
+    case "unsupported_policy_version":
+      return { label: "agent too old", tone: "danger" }; // refused the artifact → deny-all; remedy: upgrade
+    case "site_hub_down":
+      return { label: "site hub unreachable", tone: "danger" }; // S8.2: no carrier for site-to-site traffic
+    case "site_link_down":
+      return { label: "site link down", tone: "danger" }; // S8.2: a site-to-site tunnel has no fresh handshake
     default:
       // Degraded per the authoritative bool but the kind is absent/healthy — still show a
       // badge (never less alarmed than the bool).

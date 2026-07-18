@@ -9,10 +9,16 @@ SELECT * FROM sites WHERE id = $1 AND org_id = $2;
 SELECT * FROM sites WHERE org_id = $1 ORDER BY created_at;
 
 -- name: DeleteSite :execrows
--- DELIBERATELY UNWIRED until S8.3 (delete-site is a destructive op that needs the confirm-naming-target
--- UI grain). Kept because the cascade behavior it triggers (dst_kind='site' rules + subnets cascade,
--- ON DELETE CASCADE) is exercised by TestPolicyRuleSiteDstCascade — do NOT drop this in a cleanup pass.
+-- S8.3 D4: WIRED — the deleteSite endpoint (name-typed confirm + cascade preview in the UI). The cascade
+-- it triggers (dst_kind='site'/src_kind='site' rules + subnets, ON DELETE CASCADE) is exercised by
+-- TestPolicyRuleSiteDstCascade; the bound gateway is unbound (nodes.site_id -> NULL via the FK).
 DELETE FROM sites WHERE id = $1 AND org_id = $2;
+
+-- name: CountPolicyRulesReferencingSite :one
+-- lint:cross-org — org-scoped by org_id; counts policy rules that name this site as src OR dst. S8.3 D1/D4:
+-- the reverse-link "rules referencing this site" and the delete-cascade preview share this ONE count.
+SELECT COUNT(*) FROM policy_rules
+WHERE org_id = $1 AND (dst_site_id = $2 OR src_site_id = $2);
 
 -- name: AddSiteSubnet :one
 -- lint:cross-org — site_id is org-checked by the caller (GetSite) before this insert; site_subnets

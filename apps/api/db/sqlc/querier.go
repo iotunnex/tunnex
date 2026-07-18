@@ -113,6 +113,9 @@ type Querier interface {
 	// global deactivation; each row's org_id is used in the correlated subquery.
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountOwners(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// lint:cross-org — org-scoped by org_id; counts policy rules that name this site as src OR dst. S8.3 D1/D4:
+	// the reverse-link "rules referencing this site" and the delete-cascade preview share this ONE count.
+	CountPolicyRulesReferencingSite(ctx context.Context, arg CountPolicyRulesReferencingSiteParams) (int64, error)
 	// lint:cross-org — user-scoped credential.
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
@@ -180,9 +183,9 @@ type Querier interface {
 	// lint:cross-org — user-scoped credential.
 	DeleteRecoveryCodesForUser(ctx context.Context, userID uuid.UUID) error
 	DeleteResource(ctx context.Context, arg DeleteResourceParams) (int64, error)
-	// DELIBERATELY UNWIRED until S8.3 (delete-site is a destructive op that needs the confirm-naming-target
-	// UI grain). Kept because the cascade behavior it triggers (dst_kind='site' rules + subnets cascade,
-	// ON DELETE CASCADE) is exercised by TestPolicyRuleSiteDstCascade — do NOT drop this in a cleanup pass.
+	// S8.3 D4: WIRED — the deleteSite endpoint (name-typed confirm + cascade preview in the UI). The cascade
+	// it triggers (dst_kind='site'/src_kind='site' rules + subnets, ON DELETE CASCADE) is exercised by
+	// TestPolicyRuleSiteDstCascade; the bound gateway is unbound (nodes.site_id -> NULL via the FK).
 	DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, error)
 	// lint:cross-org — user-scoped credential.
 	// Disenroll (self re-enroll clears via upsert; explicit delete for self-disenroll + admin-reset).
