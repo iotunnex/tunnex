@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/control"
+	"github.com/tunnexio/tunnex/apps/node/internal/dnsforward"
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
 	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
@@ -123,6 +124,14 @@ func main() {
 	// shutdown (full-sweep). No-op / not-capable off Linux.
 	egressMgr := egress.New(wgIface)
 	defer egressMgr.Teardown(context.Background())
+	// S8.4: the in-agent cross-site DNS forwarder. Serve is best-effort — a bind/serve fault must NEVER
+	// affect the tunnel (DNS-down ≠ tunnel-down, D2/D5). The table is (re)programmed from every policy.
+	dnsFwd := dnsforward.New(logger, nil)
+	go func() {
+		if err := dnsFwd.Serve(ctx, wgIface); err != nil {
+			logger.Warn("dns_forward_serve_failed", slog.String("error", err.Error())) // convenience: log, never fail the agent
+		}
+	}()
 	// S7.5.1 flow logging is OPT-IN per gateway: TUNNEX_FLOWLOG_GROUP>0 arms the forward-chain
 	// nflog rules (set BEFORE the first Reconcile so the log clauses render from the start) and
 	// the reader+drain below. 0 = OFF (the forward chain is byte-identical to pre-S7.5.1).
@@ -163,6 +172,7 @@ func main() {
 	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
 	r.OnPolicy(func(p *nodepolicy.Compiled) {
 		egressMgr.SetPolicy(p)
+		dnsFwd.SetTable(dnsEntriesFrom(p)) // S8.4: reprogram the forwarding table (nil policy → empty → serves nothing)
 		select {
 		case policyKick <- struct{}{}:
 		default: // a kick is already pending — the apply reads the latest policy anyway
@@ -443,6 +453,19 @@ func loadOrCreateWGKey(path string) (privB64, pubB64 string, err error) {
 		return "", "", werr
 	}
 	return priv, base64.StdEncoding.EncodeToString(pk.PublicKey().Bytes()), nil
+}
+
+// dnsEntriesFrom maps a compiled artifact's DNS forwarding table to the forwarder's input (S8.4). A nil
+// policy (mesh/off/cold-start) yields no entries → the forwarder serves nothing (REFUSED), never stale.
+func dnsEntriesFrom(p *nodepolicy.Compiled) []dnsforward.Entry {
+	if p == nil {
+		return nil
+	}
+	out := make([]dnsforward.Entry, 0, len(p.DNSForwards))
+	for _, d := range p.DNSForwards {
+		out = append(out, dnsforward.Entry{Domain: d.Domain, ResolverIP: d.ResolverIP})
+	}
+	return out
 }
 
 func getdur(k string, def time.Duration) time.Duration {
