@@ -90,7 +90,19 @@ The fold is in; this proves it on live nft (the loop terminator, not a 4th revie
 - **⑤ Spot-checks:** WF-8 (Rules show `azure-site → aws-site`) · WF-3 (site card "Cloud fabric setup" expander) · WF-5 (✕ on the bogus `192.168.88.0/24` — mini-proof + cleanup in one click).
 - ④ passes → Zero-Touch Law SATISFIED → story flips to PASS → merge is Pawan's word.
 
-## Verdict (2026-07-18, live founder-present walk, cross-cloud AWS Sydney ↔ Azure West US)
+## RE-WALK VERDICT (2026-07-19) — ZERO-TOUCH LAW SATISFIED → S8.2c PASSES
+The WF-4 fold + its re-walk fix are PROVEN on live nft (cross-cloud AWS↔Azure), image `sha256:1b39c22e…`:
+- **④ Forwarding works on AGENT-MANAGED rules alone — NO manual iptables.** Behind-host (CP VM `10.0.0.4`) → `172.31.24.206`: **3/3, 0% loss, 139ms, ttl-63** (forwarded). The agent placed BOTH Route-scoped accepts in DOCKER-USER — forward `iifname != wg0 oifname wg0 ip daddr 172.31.0.0/16` (handle 20) + return `iifname wg0 oifname != wg0 ip saddr 172.31.0.0/16` (handle 21), each `counter packets 3`. The manual `DOCKER-USER -j ACCEPT` was DELETED before the test — the forward survives on the agent's own rules. That is the Zero-Touch Law met for the forwarding path.
+- **Idempotent on live nft** — same handles (20, 21) across a ≥30s reconcile tick: no thrash (the /32-churn class the re-review caught is dead).
+- **Re-walk found + fixed one gap:** a forward-only accept passed the echo-request but Docker's FORWARD DROP killed the reply; fixed with the per-route RETURN accept (still Route-scoped, `db4425f`).
+- **WF-2 boot log fired** (`agent_reusing_stored_identity`); image digest recorded (pinnable fact).
+- **Spot-checks PASS:** WF-8 (Rules show `site azure-site → site aws-site`, names not UUIDs) · WF-3 (site card "Cloud fabric setup" expander) · WF-5 (`✕` on subnet chips).
+
+**VERDICT: Zero-Touch Law SATISFIED. Story PASSES. Merge is the founder's word.**
+
+---
+
+## Original verdict (2026-07-18, first walk — superseded by the re-walk PASS above)
 
 **ZERO-TOUCH LAW: FAIL → the story STAYS OPEN.**
 
