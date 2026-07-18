@@ -6,9 +6,16 @@ import { remoteEnrollCommand, cpEndpoints, GATEWAY_IMAGE } from "../src/componen
 // paste-failure: it must be a SINGLE `docker run` (no compose, no line breaks) with EVERY piece the demo
 // added by hand baked in.
 
+// The CP's AUTHORITATIVE public base URL (meta.public_base_url), not the dashboard origin (review #1).
+// cpEndpoints returns a discriminated result; a valid URL narrows to the ok branch (spreadable into opts).
+function okBase(url: string | undefined, fallback: string) {
+  const e = cpEndpoints(url, fallback);
+  if (!e.ok) throw new Error(`expected ok endpoints, got: ${e.reason}`);
+  return e;
+}
+
 describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
-  // The CP's AUTHORITATIVE public base URL (meta.public_base_url), not the dashboard origin (review #1).
-  const base = cpEndpoints("https://cp.example.com", "https://ignored.example");
+  const base = okBase("https://cp.example.com", "https://ignored.example");
 
   it("is a SINGLE docker run — no compose, no newlines (the paste-mismatch is structurally impossible)", () => {
     const cmd = remoteEnrollCommand({ token: "TKN", name: "gw-aws", endpoint: "203.0.113.7:51820", ...base });
@@ -26,9 +33,10 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
       "--device /dev/net/tun",
       "-e TUNNEX_WG_BACKEND=wgctrl",
       "-e TUNNEX_JOIN_TOKEN=TKN",
-      "-e TUNNEX_API_URL=https://cp.example.com",
-      "-e TUNNEX_AGENT_URL=https://cp.example.com:8443",
-      "-e TUNNEX_AGENT_SERVERNAME=tunnex-control",
+      // The CP urls are shell-quoted too (re-review #3 — they now come from operator config, not the browser).
+      '-e TUNNEX_API_URL="https://cp.example.com"',
+      '-e TUNNEX_AGENT_URL="https://cp.example.com:8443"',
+      '-e TUNNEX_AGENT_SERVERNAME="tunnex-control"',
       GATEWAY_IMAGE,
     ]) {
       expect(cmd, `missing: ${piece}`).toContain(piece);
@@ -52,18 +60,28 @@ describe("remoteEnrollCommand — the one true zero-touch docker run", () => {
 
   it("cpEndpoints prefers the CP's configured public base URL over the fallback origin (review #1)", () => {
     // An admin opening the dashboard via a tunnel/alias must NOT bake that origin into the emitted command.
-    const e = cpEndpoints("https://cp.example.com", "https://tunnel.internal:9999");
+    const e = okBase("https://cp.example.com", "https://tunnel.internal:9999");
     expect(e.apiURL).toBe("https://cp.example.com");
     expect(e.agentURL).toBe("https://cp.example.com:8443");
     expect(e.serverName).toBe("tunnex-control");
+    expect(e.usedFallback).toBe(false);
   });
 
   it("cpEndpoints falls back to the dashboard origin ONLY when the CP has no configured public URL", () => {
-    const e = cpEndpoints(undefined, "http://40.65.63.141");
+    const e = okBase(undefined, "http://40.65.63.141");
     expect(e.apiURL).toBe("http://40.65.63.141");
     expect(e.agentURL).toBe("https://40.65.63.141:8443");
     expect(e.serverName).toBe("tunnex-control");
+    expect(e.usedFallback).toBe(true); // signal the caller uses to caveat a fetch-failure fallback (#2)
     // An empty/whitespace configured URL is treated as unset (falls back).
-    expect(cpEndpoints("   ", "http://40.65.63.141").apiURL).toBe("http://40.65.63.141");
+    expect(okBase("   ", "http://40.65.63.141").apiURL).toBe("http://40.65.63.141");
+  });
+
+  it("cpEndpoints REFUSES an unparseable configured URL (re-review #1 — never a silently-broken command)", () => {
+    // A non-blank configured value the browser can't parse is an operator APP_BASE_URL typo — the caller
+    // blocks the one-time-token mint on this, rather than emitting a command with an empty agent URL.
+    const bad = cpEndpoints("cp.example.com", "http://40.65.63.141"); // no scheme → new URL() throws
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.reason).toMatch(/not a valid URL/);
   });
 });
