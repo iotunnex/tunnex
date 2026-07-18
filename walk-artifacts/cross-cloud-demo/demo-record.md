@@ -29,9 +29,12 @@ ping -I 172.31.24.206 -c3 10.0.0.5
 
 ## (b) — Enforcing + site→site grant characterization (finding #5 severity)
 GAP-2 workaround: the grant was inserted **directly into `policy_rules`** (both directions, `site-azure↔site-aws`) — **DEMO-ONLY: this bypasses the API's disjointness validation + audit; never a documented path.**
-**Result:** _(FILL from the re-ping + gw-azure nft)_
-- **replies** → the compiled enforcing rule opens LAN→tunnel → #5 is a **mesh-mode-only gap**.
-- **still drops** → the compiled forward rule doesn't match forwarded LAN-source traffic → #5 is a **data-plane defect in the S8.2 compiler output** (S8.2c's first slice, regardless of all else).
+**Result: the S8.2 COMPILER IS EXONERATED — #5 is deploy-class, not a data-plane defect.**
+- Enforcing recompiled (agent picked up the DB-inserted grant); the compiled forward rule is **correct + symmetric + iifname-AGNOSTIC**: `ip saddr 10.0.0.0/24 ip daddr 172.31.0.0/16 accept` (+ the reverse). It *would* match the CP's forwarded packet.
+- But its **counter = 0** — the packet never reached the forward chain. tcpdump on gw-azure **eth0 shows ZERO** ICMP while the CP pings. So the packet dies in the **Azure fabric, before the gateway.**
+- CP→gw-azure direct = 1.25ms (reachable); CP OS route correct (`172.31.24.206 via 10.0.0.5 src 10.0.0.4`). → **Azure SDN drops the packet: a VM can't route a non-VNet dst (`172.31.x`) via a next-hop VM without a User-Defined Route (UDR).**
+- **Two deploy-class blockers (→ S8.2c #3 host/cloud-networking stance):** (1) **cloud-fabric routing** — Azure UDR / AWS route-table + source-dest-check for a behind-host to reach the gateway; (2) **mesh mode emits no LAN→tunnel forward rule** (enforcing+grant does — a mode gap, likely by-design).
+- **NOT confirmed by a full behind-host reply** (would need the Azure UDR added — a cloud-console step; deferred, the tunnel + the compiler are both proven). The `-I` gateway-host ping (138ms) remains the headline site-to-site proof.
 
 ## Verdict
 Cross-cloud site-to-site is **real and proven** (138ms, un-NAT'd, Sydney↔West US). Getting there required **6 manual gateway touches + 3 UI gaps** — none of which a customer should ever hit. **That friction is the entire justification for S8.2c** (see the Zero-Touch Gateway Law, `docs/laws.md`). The demo's value is the proof AND the gap inventory.
