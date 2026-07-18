@@ -27,10 +27,13 @@ type wgctrlBackend struct {
 	// silently breaking every tunnel on the next reconcile (POC-surfaced bug).
 	privKey    string
 	listenPort int
+	// runFn shells `ip`/`wg` (defaults to the package run). Overridable in tests to inject a route-
+	// enumeration fault, proving ApplyRoutes surfaces a -4 error (F3).
+	runFn func(context.Context, string, ...string) (string, error)
 }
 
 func newWGCtrlBackend(iface string, logger *slog.Logger) (WGBackend, error) {
-	return &wgctrlBackend{iface: iface, logger: logger}, nil
+	return &wgctrlBackend{iface: iface, logger: logger, runFn: run}, nil
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {
@@ -332,11 +335,6 @@ func routesToPrune(enumerated []string, desired map[netip.Prefix]bool) []netip.P
 // a family if S8.4 admits v6 subnets).
 func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 	metric := strconv.Itoa(siteRouteMetric)
-	// surface: only a gateway ACTIVELY managing routes (some desired) treats a v4 enumeration failure as
-	// a reconcile fault. A gateway with NO desired routes (non-site, or unbound) tolerates every
-	// enumeration error → its pre-S8.2 no-op (P9): it never goes unhealthy over a route-subsystem blip
-	// unrelated to its function. (F3: the conjunction of P9's no-op AND R3's v4-surfaces — not a choice.)
-	surface := len(cidrs) > 0
 	desired := make(map[netip.Prefix]bool, len(cidrs))
 	for _, c := range cidrs {
 		p, ok := parseRouteDst(c)
@@ -344,19 +342,22 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 			continue // malformed CP input — never install a bad route
 		}
 		desired[p] = true
-		if _, err := run(ctx, "ip", "route", "replace", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
+		if _, err := b.runFn(ctx, "ip", "route", "replace", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
 			return err
 		}
 	}
 	for _, fam := range []string{"-4", "-6"} {
-		out, err := run(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
+		out, err := b.runFn(ctx, "ip", fam, "route", "show", "dev", b.iface, "proto", "static", "metric", metric)
 		if err != nil {
-			// Tolerate the -6 family always (may be ipv6.disable=1; site subnets are v4-only today), and
-			// tolerate EVERYTHING on a gateway with nothing to manage (!surface → P9 no-op). Otherwise a
-			// -4 failure on a route-carrying gateway is LOAD-BEARING — skipping the prune would leave a
-			// stale route blackholing while green — so it surfaces as a reconcile error.
-			if fam == "-6" || !surface {
-				slog.Debug("site_route_enumerate_skipped", "family", fam, "iface", b.iface, "error", err.Error())
+			// -6 is tolerated always (may be ipv6.disable=1; site subnets are v4-only today). -4 ALWAYS
+			// SURFACES (F3 terminal): we cannot know whether a stale route needs pruning without
+			// enumerating, so swallowing a -4 error would skip the full-sweep prune on the exact
+			// UNBOUND-gateway transition where it is owed (stale route blackholing while green). Under
+			// fail-static, a gateway whose `ip -4 route show` errors IS unhealthy — surfacing it is
+			// correct, not a false alarm (the tolerate-when-no-desired-routes convenience was refused: it
+			// could not distinguish never-had-routes from just-unbound, and the latter owes the sweep).
+			if fam == "-6" {
+				slog.Debug("site_route_enumerate_v6_skipped", "iface", b.iface, "error", err.Error())
 				continue
 			}
 			return err
@@ -372,7 +373,7 @@ func (b *wgctrlBackend) ApplyRoutes(ctx context.Context, cidrs []string) error {
 			// that happens to share it is indistinguishable here, so the deletion must be LEGIBLE (the
 			// metric-collision residual limitation made visible, not silent).
 			slog.Info("site_route_pruned", "dst", p.String(), "iface", b.iface, "metric", siteRouteMetric)
-			if _, err := run(ctx, "ip", "route", "del", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
+			if _, err := b.runFn(ctx, "ip", "route", "del", p.String(), "dev", b.iface, "proto", "static", "metric", metric); err != nil {
 				return err
 			}
 		}
