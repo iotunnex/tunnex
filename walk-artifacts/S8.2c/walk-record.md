@@ -32,7 +32,10 @@ Enroll a gateway → copy the ONE emitted `docker run` → paste VERBATIM on a C
 From the separate Azure behind-host `10.0.0.4` (NOT the gateway) — plain `ping` (no `-I`), traversing the Azure gateway's forward chain.
 - **EXPECTED:** `ping -c3 172.31.24.206` (or a host in the AWS VPC) from `10.0.0.4` succeeds — the first FORWARDED cross-site packet, mesh mode; the Azure gateway's nft LAN→tunnel forward counter INCREMENTS (D1 symmetric forward); the return path sources correctly (D2 src-hint), no overlay mis-source, and SURVIVES a reconcile tick.
 - **PRECONDITION:** the `-I <gateway-host>` shortcut does NOT satisfy this leg (see the fixture-fidelity precondition above).
-- **OBSERVED:** _(ping + nft counter + `ip route get` src)_
+- **OBSERVED (D2 src-hint = PASS on the wire, 2026-07-18):**
+  - aws-gw `ip route get 10.0.0.5 → src 172.31.24.206` (its LAN addr in 172.31.0.0/16), azure-gw `ip route get 172.31.24.206 → src 10.0.0.5` (its LAN addr in 10.0.0.0/24). Both source from the SITE LAN, NOT the overlay 10.99.0.1 — the exact demo bug (`src 10.99.0.1`) is FIXED. Site link up both ways (handshakes fresh, keepalive 25s, allowed-ips correct, route `proto static metric 8021`).
+  - **D2 EXONERATED (was a false alarm):** first check showed `src 10.99.0.1` (no hint) — root-caused NOT to a D2 defect but to a STALE CACHED `node-agent:latest`. `docker run :latest` does not force-pull; the VMs ran yesterday's `main`-build agent (has S8.2 Routes → route landed, but NOT S8.2c D2 → no LocalSubnets/src). Verified the full D2 chain is correct in code (finalizeArtifact sets LocalSubnets alongside Routes · policyspec/nodepolicy json tags match · writeJSON encodes ds directly · reconcile reads ds.Policy.LocalSubnets · siteRouteSrc+ApplyRoutes apply src). `docker pull` the branch image + recreate → src-hint appears immediately. (3rd deploy sharp-edge, WF-2 family: `:latest`+`docker run` silently reuses a cached image; a re-used VM needs `docker pull`.)
+  - forwarded behind-host ping (D1): _(pending — needs the Azure UDR, Leg 3)_
 
 ### Leg 3 — the ONE guided cloud-console visit, SURFACED IN THE UI
 The un-codeable fabric (Azure UDR / AWS route-table + src/dst-check) is guided setup, ONE visit per side.
