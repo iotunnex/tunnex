@@ -106,8 +106,14 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   // metaError distinguishes "fetch FAILED" from "fetch ok, field unset" (re-review #2): both leave
   // publicBaseURL undefined, but only a genuine unset is a clean origin-fallback; a failure that silently
   // falls back must be flagged, else a tunnel/alias origin gets baked in with no signal.
+  // metaLoaded makes the IN-FLIGHT fetch a first-class state (re-review round-3, budget-rule reduce
+  // COMPLETION): before it settles, publicBaseURL is undefined so ep transiently narrows to the origin
+  // fallback — minting THEN would either strand the token (a late-arriving broken URL flips ep.ok false and
+  // hides the modal) or silently bake the browser origin. Gate the mint on metaLoaded so the emitted command
+  // is only ever built from a SETTLED CP address — the whole in-flight window becomes a disabled button.
   const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(undefined);
   const [metaError, setMetaError] = useState(false);
+  const [metaLoaded, setMetaLoaded] = useState(false);
   useEffect(() => {
     api
       .GET("/api/v1/meta")
@@ -115,7 +121,8 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
         setPublicBaseURL((data as Meta | undefined)?.public_base_url);
         setMetaError(false);
       })
-      .catch(() => setMetaError(true));
+      .catch(() => setMetaError(true))
+      .finally(() => setMetaLoaded(true));
   }, []);
   // ONE derivation of the CP urls (re-review budget-rule reduce). Recomputed each render — cheap + pure.
   const ep = cpEndpoints(publicBaseURL, window.location.origin);
@@ -170,15 +177,18 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="203.0.113.7:51820" maxLength={100} />
             </Field>
           </div>
-          <Button onClick={issue} disabled={busy || !ep.ok}>
-            {busy ? "Generating…" : "Generate join token"}
+          <Button onClick={issue} disabled={busy || !metaLoaded || !ep.ok}>
+            {busy ? "Generating…" : !metaLoaded ? "Checking control plane…" : "Generate join token"}
           </Button>
         </div>
       )}
 
       {/* Block the mint (not just the emit) when the CP's configured public URL is unparseable — a one-time
-          token minted against a broken URL is worse than refusing. The remedy is operator-side (APP_BASE_URL). */}
-      {open && !ep.ok && <ErrorText>{ep.reason} Fix the control plane's public address (APP_BASE_URL) before enrolling a gateway.</ErrorText>}
+          token minted against a broken URL is worse than refusing. The remedy is operator-side (APP_BASE_URL).
+          Only judged once meta has SETTLED (metaLoaded) — an in-flight fetch isn't an error. */}
+      {open && metaLoaded && !ep.ok && (
+        <ErrorText>{ep.reason} Fix the control plane's public address (APP_BASE_URL) before enrolling a gateway.</ErrorText>
+      )}
       {open && ep.ok && ep.usedFallback && metaError && (
         <p className="mt-2 text-xs text-amber-400">
           Couldn't confirm the control plane's public URL (metadata unavailable) — the command below uses this
