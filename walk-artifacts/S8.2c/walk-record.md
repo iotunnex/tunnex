@@ -64,7 +64,7 @@ Create a `site → site` grant from the Access Add-rule modal — through the AP
 - **WF-6 CLOSED, no code** — out-of-hash exclusion holds (twin goldens); converging was the in-hash grant settling.
 - **WF-2 / WF-3 / WF-5 FOLDED** (`07e40c3`) — pinnable image + boot log · in-UI cloud fabric · subnet removal.
 - **WF-1 DEFERRED** → S8.5 L1-metrics rider (positive site-link health). **WF-7 DEFERRED** → first-request / epic-close UX harvest (site-rule editor).
-- Gates green across the fold; targeted re-review + Leg-2 re-walk pending.
+- Gates green across the fold. Targeted re-review RAN (`wf_61dc1017`) → 5 CONFIRMED fold-induced defects → **re-review fold `79e6206`**: #1 DOCKER-USER /32 daddr churn (canonDaddr keys both sides as nft prints — host route bare), #2 transient `-a list` error → skip (no blind-insert duplicates), #3 Access banner includes `sr.ok`, #5 sweep-error logged; #4 GATEWAY_IMAGE :latest fallback kept as the honest floor. Reds added (/32 idempotent, list-error skip). **Leg-2 re-walk owed (Pawan) — the loop terminator, on live nft.**
 
 ## Findings (held WF-numbered for disposition — the founder brings dispositions back; fold only what's dispositioned)
 | WF# | leg | finding | severity | disposition |
