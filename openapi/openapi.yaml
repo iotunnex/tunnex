@@ -2468,6 +2468,14 @@ components:
             where the gateway is guaranteed on its last-good fail-closed policy (never open, never
             blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge
             UX is S7.4, reading the same agent-reported JSONB.
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            S8.3 (D2/CH): the site this gateway is bound to (null = not a site gateway). The topology view
+            joins nodes to sites by this field — a site's gateways are the nodes with this site_id, rendered
+            as a LIST (many nodes → one site scales to future HA; the UI never assumes one-gateway-per-site).
         max_policy_version:
           type: integer
           nullable: true

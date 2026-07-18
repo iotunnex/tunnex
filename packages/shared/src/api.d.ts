@@ -1903,6 +1903,11 @@ export interface components {
             last_seen_at?: string;
             /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
             policy_degraded?: boolean;
+            /**
+             * Format: uuid
+             * @description S8.3 (D2/CH): the site this gateway is bound to (null = not a site gateway). The topology view joins nodes to sites by this field — a site's gateways are the nodes with this site_id, rendered as a LIST (many nodes → one site scales to future HA; the UI never assumes one-gateway-per-site).
+             */
+            site_id?: string | null;
             /** @description S8.3 (CW): the agent's REPORTED max-supported policy version — observability (a reported fact, OUTSIDE the compile hash; no ProtocolVersion bump). NULL = never reported (a pre-upgrade agent): absence reads as BELOW the current ceiling, never unknown-treated-as-ready (S7.5.3 absence-is- not-compliance, applied to version readiness). The UI's cross-site upgrade warning names the gateways whose max is below the ceiling. */
             max_policy_version?: number | null;
             /** @description S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes. */

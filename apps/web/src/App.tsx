@@ -19,6 +19,7 @@ import CliAuth from "./pages/CliAuth";
 import CliDevice from "./pages/CliDevice";
 import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
+import Sites from "./pages/Sites";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
@@ -64,6 +65,7 @@ export default function App() {
           <Route element={<RequireOrg><AppShell /></RequireOrg>}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
+            <Route path="/sites" element={<Sites />} />
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />

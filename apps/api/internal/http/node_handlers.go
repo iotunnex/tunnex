@@ -118,5 +118,9 @@ func toAPINode(n sqlc.Node) api.Node {
 		t := n.LastSeenAt.Time
 		out.LastSeenAt = &t
 	}
+	if n.SiteID.Valid { // S8.3 D2/CH: the site binding the topology view joins on
+		sid := uuid.UUID(n.SiteID.Bytes)
+		out.SiteId = &sid
+	}
 	return out
 }
