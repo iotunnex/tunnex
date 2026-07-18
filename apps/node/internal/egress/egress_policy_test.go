@@ -76,6 +76,37 @@ func TestRulesetMeshIsBlanket(t *testing.T) {
 	}
 }
 
+// TestMeshSymmetricSiteForward — S8.2c D1: mesh mode must forward a behind-gateway host's LAN→tunnel
+// traffic to APPROVED REMOTE SITE SUBNETS (the Routes), symmetric with the wg0-ingress accepts — mesh
+// means "no doors". SCOPED to the routes so the S3.7 spoke-isolation HOLDS: the device pool (10.99.x)
+// is NEVER a Route, so the egress LAN still cannot initiate into device spokes.
+func TestMeshSymmetricSiteForward(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{
+		Mode: nodepolicy.ModeOff, Mesh: true,
+		Routes: []nodepolicy.Route{{DstCIDR: "172.31.0.0/16"}, {DstCIDR: "10.2.0.0/24"}},
+	})
+	rs := m.ruleset("10.99.0.1/24")
+	// LAN→tunnel now accepted, scoped to each remote site subnet.
+	if !strings.Contains(rs, `iifname != "wg0" oifname "wg0" ip daddr 172.31.0.0/16 counter accept`) {
+		t.Fatalf("mesh must forward LAN->tunnel to the approved site subnet 172.31.0.0/16; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, `iifname != "wg0" oifname "wg0" ip daddr 10.2.0.0/24 counter accept`) {
+		t.Fatalf("mesh must forward LAN->tunnel to 10.2.0.0/24; got:\n%s", rs)
+	}
+	// SPOKE-ISOLATION HOLDS: no BLANKET LAN->tunnel (the device pool 10.99.x must stay unreachable from
+	// the egress LAN — the S3.7 stance). Only route-scoped daddr rules, never a bare LAN->tunnel accept.
+	if strings.Contains(rs, `iifname != "wg0" oifname "wg0" counter accept`) {
+		t.Fatalf("mesh must NOT open a BLANKET LAN->tunnel (spoke-isolation) — only route-scoped; got:\n%s", rs)
+	}
+	// A gateway with NO routes (no remote sites) emits NO LAN->tunnel rule (nothing to reach).
+	m2 := New("wg0")
+	m2.SetPolicy(&nodepolicy.Compiled{Mode: nodepolicy.ModeOff, Mesh: true})
+	if strings.Contains(m2.ruleset("10.99.0.1/24"), `iifname != "wg0" oifname "wg0"`) {
+		t.Fatal("mesh with no routes must emit no LAN->tunnel rule")
+	}
+}
+
 // Enforcing renders DEFAULT-DENY: the compiled allows, in order, and CRUCIALLY no
 // wg0<->wg0 blanket accept anywhere (the S7.1 structural guard, now on the wire — 3c).
 func TestRulesetEnforcingDefaultDenyNoBlanket(t *testing.T) {
