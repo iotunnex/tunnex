@@ -136,7 +136,14 @@ type Reconciler struct {
 	hostAddrsFn func() []netip.Addr
 	// noSrcLogged throttles the site_route_src_unresolved onset warning to once per onset (not per tick).
 	noSrcLogged bool
+	// forwardBlockedFn (WF-4 / D-WF4-d) optionally reports the egress manager's Docker-FORWARD-blocked
+	// condition: a Docker host whose FORWARD DROP swallows forwarded site traffic the agent couldn't
+	// clear. OR'd into siteSubnetUnreachable so a can't-forward gateway surfaces LOUD, never green.
+	forwardBlockedFn func() bool
 }
+
+// SetForwardBlockedFn wires the egress Docker-FORWARD-blocked probe into the D3 signal (WF-4). Optional.
+func (r *Reconciler) SetForwardBlockedFn(f func() bool) { r.forwardBlockedFn = f }
 
 // SetSiteSubnetUnreachableSink wires the D3 unreachable-advertised-subnet sink (read by the report loop).
 // Call before Run. Also arms hostAddrsFn to the real enumerator if unset.
@@ -280,7 +287,10 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	}
 	src, srcOK, hadSubnets := siteRouteSrc(localSubnets, hostAddrs)
 	if r.siteSubnetUnreachable != nil {
-		r.siteSubnetUnreachable.Store(hadSubnets && !srcOK)
+		// D3 (host not on the advertised subnet) OR WF-4 (Docker FORWARD DROP swallows the forward) —
+		// both mean "this gateway can't actually deliver its advertised site subnet". Surface either LOUD.
+		fwdBlocked := r.forwardBlockedFn != nil && r.forwardBlockedFn()
+		r.siteSubnetUnreachable.Store((hadSubnets && !srcOK) || fwdBlocked)
 	}
 	if hadSubnets && !srcOK {
 		if !r.noSrcLogged {

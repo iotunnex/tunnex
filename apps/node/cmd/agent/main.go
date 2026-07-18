@@ -150,6 +150,7 @@ func main() {
 	r := reconcile.New(backend, wgPriv, wgPub, logger)
 	r.SetSiteLinkStaleSink(&siteLinkStale)
 	r.SetSiteSubnetUnreachableSink(&siteSubnetUnreachable) // D3: unreachable-advertised-subnet health signal
+	r.SetForwardBlockedFn(egressMgr.ForwardBlocked)       // WF-4: Docker FORWARD DROP swallowing the forward → same signal
 	// Every desired-state fetch hands the compiled Zero Trust policy (nil = legacy
 	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
 	r.OnPolicy(func(p *nodepolicy.Compiled) {
