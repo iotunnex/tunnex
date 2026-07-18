@@ -288,6 +288,7 @@ JSONL-durability class, flowlog volume/ownership); the review arc caught+fixed t
 on-disk JSONL source-of-truth + byte-verbatim SIEM export + tamper-evidence (D4) + beyond-hot-window retention
 — the writer took six review rounds without converging and was DEFERRED rather than shipped with defects
 (the D4 obligation moved to S7.5.1b; the `seq` column + box-walk JSONL/export evidence carry over as its spec).
+**Metrics L2 (added at S8.3 walk close, founder-directed — no new scope):** site-to-site FLOWS are a first-class consumer of the flow-log viewer — the per-rule counters already capture site grants; this story surfaces them.
 **NEXT: S7.5.2 (IdP sync + SCIM) commit-one — its own fresh sitting.** If this pointer disagrees with the git
 log, TRUST GIT (`git log --oneline -20`) and update it.
 
@@ -1315,6 +1316,9 @@ Per-gateway admin-declared LAN CIDRs → compiled into device `AllowedIPs` + gat
 - **Sequencing:** after S8.4, BEFORE the epic-close founder UI walk.
 - **S8.4 COUPLING (binds S8.4's commit-one):** S8.4 DNS design must treat routed-LAN ranges as a KNOWN SIBLING of site subnets — DNS decided blind to S8.5 would bake in a redo. **S8.4's paper MUST state this coupling.**
 - **Known bindings for S8.5's commit-one:** the disjointness validator gains a THIRD input class (routed-LAN ranges alongside site subnets + pool) · **NAT/return-path stated explicitly** (SNAT vs documented static-route) · fleet-wide **device-config blast radius = full protocol** (a routed range changes every device's `AllowedIPs`) · **D2 enforcement-vs-observability classification answered, not assumed.**
+- **S8.5 ALSO carries (from the S8.3 walk close, founder-directed):**
+  - **Metrics L1 — site-link byte counters (tx/rx) + handshake age on the S8.3 topology cards.** SIZE IT here (same report-plumbing neighborhood; the agent already parses `wg show dump`, S3.6). A report-path extension + a UI join. **Render-floor:** cumulative-since-handshake totals labeled as EXACTLY that — NO rate graphs, NO sampling implied (that is S11.1's job).
+  - **Walk-found UX fix — stale Add-rule button after group-add** (pre-existing cross-section staleness on the Access page; founder-found at the S8.3 walk). Rides **S8.5 or the epic-close fold, whichever lands first**. Lift `groups` to the parent / reload RulesSection on group-add.
 - **PREREQUISITE — run BEFORE S8.4's paper (read-only, cited answers; feeds BOTH S8.4 and S8.5 papers):** the two-part verify-item — **(a) enterprise:** do granted resource-CIDRs already flow into device `AllowedIPs` today? **(b) open:** what surface exists today for gateway-reachable LAN routes — configured / partial / missing? Answer with citations before S8.4 commit-one.
 
 **INHERITS the S7.5.1 versioned-artifact discipline** (sites-as-destination-kind bumps `policyspec.Compiled`):
@@ -1416,7 +1420,7 @@ epic-close walk covers the integrated surface end-to-end. Plan S8.3's walk with 
 *(S11.3 rate limits + security headers REJOINS here — it was pulled into the bundle under the old order; the
 new order runs EPIC 11 complete before the bundle, so the bundle sheds it.)*
 
-- **S11.1 Metrics** — Prometheus metrics, health/readiness (logging already in EPIC 0).
+- **S11.1 Metrics** — Prometheus metrics, health/readiness (logging already in EPIC 0). **Metrics L3 (added at S8.3 walk close, founder-directed):** site-link throughput TIME-SERIES joins the Prometheus metric set when S11.1 opens — NOT pulled forward (S8.3's card counters are cumulative-since-handshake only; rate/time-series is S11.1's job).
 - **S11.2 Backup/restore** — DB + master key **+ node-agent state (WG private keys on each gateway)**; documented restore.
 - **S11.3 Rate limiting & security headers** — API abuse protection, TLS via nginx, secrets hygiene.
 - **S11.4 Docs & install guide** — self-host quickstart, upgrade path.
