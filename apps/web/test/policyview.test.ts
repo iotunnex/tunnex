@@ -13,6 +13,7 @@ import {
   extendErrorCopy,
   attributionLabel,
   activeMembers,
+  rulesSummary,
   type LoadState,
 } from "../src/lib/policyview";
 import { loadOne, type Loaded } from "../src/lib/api";
@@ -133,6 +134,42 @@ describe("loadOne — the class armed-guard: a failure NEVER reads as absence", 
     const r = await loadOne(async () => ({ data: [1, 2, 3] }));
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data).toEqual([1, 2, 3]);
+  });
+});
+
+describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (failed never reads as 0-rules)", () => {
+  const ok = <T,>(data: T): Loaded<T> => ({ ok: true, data });
+  const fail: Loaded<never> = { ok: false, error: "boom" };
+
+  it("either input still loading → loading (no premature posture claim)", () => {
+    expect(rulesSummary({ modeResult: null, rulesResult: ok(0) }).state).toBe("loading");
+    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: null }).state).toBe("loading");
+  });
+  it("a FAILED rules load → 'failed', NEVER the 0-rules message (the reassuring-empty class on the loud line)", () => {
+    const s = rulesSummary({ modeResult: ok("enforcing"), rulesResult: fail });
+    expect(s.state).toBe("failed");
+    expect(s.loud).toBe(false);
+    expect(s.text).not.toMatch(/0 rules/);
+  });
+  it("a failed MODE load → failed (can't claim off or enforcing)", () => {
+    expect(rulesSummary({ modeResult: fail, rulesResult: ok(3) }).state).toBe("failed");
+  });
+  it("off → open-mesh copy, not loud", () => {
+    const s = rulesSummary({ modeResult: ok("off"), rulesResult: ok(0) });
+    expect(s.state).toBe("off");
+    expect(s.text).toMatch(/open mesh/i);
+    expect(s.loud).toBe(false);
+  });
+  it("enforcing + 0 rules → LOUD 'all traffic denied' (the legibility-law lockout state)", () => {
+    const s = rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(0) });
+    expect(s.state).toBe("enforcing_empty");
+    expect(s.loud).toBe(true);
+    expect(s.text).toMatch(/denied/i);
+  });
+  it("enforcing + N rules → 'N rules — default-deny active', not loud; singular at 1", () => {
+    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).text).toMatch(/3 rules/);
+    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(1) }).text).toMatch(/1 rule\b/);
+    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).loud).toBe(false);
   });
 });
 

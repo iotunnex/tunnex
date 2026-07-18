@@ -252,6 +252,31 @@ function compactSpan(ms: number): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
+// ── S8.3 CP: the rules summary line (states ENUMERATED, derived from a Loaded<T>) ──────
+// The one-line posture summary atop the rules list. It derives from the LOAD RESULTS, never from an empty
+// default: a FAILED rules load must never render "0 rules — all denied" (the reassuring-empty class on the
+// loudest line). enforcing+0 is the LOUD legibility-law state (a live default-deny with no rules).
+export type RulesSummaryState = "loading" | "failed" | "off" | "enforcing_empty" | "enforcing";
+
+export interface RulesSummaryView {
+  state: RulesSummaryState;
+  text: string;
+  loud: boolean; // the enforcing-empty lockout — rendered prominently, not a caption
+}
+
+export function rulesSummary(i: {
+  modeResult: Loaded<"off" | "enforcing"> | null; // null = still loading
+  rulesResult: Loaded<number> | null; // the rule COUNT from a real load; null = still loading
+}): RulesSummaryView {
+  if (!i.modeResult || !i.rulesResult) return { state: "loading", text: "…", loud: false };
+  // A failed load (mode OR rules) cannot render a truthful posture → say so, never a defaulted count.
+  if (!i.modeResult.ok || !i.rulesResult.ok) return { state: "failed", text: "Rule status unavailable — refresh.", loud: false };
+  if (i.modeResult.data === "off") return { state: "off", text: "Policy not enforced — open mesh.", loud: false };
+  const n = i.rulesResult.data;
+  if (n === 0) return { state: "enforcing_empty", text: "0 rules — ALL traffic denied.", loud: true };
+  return { state: "enforcing", text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`, loud: false };
+}
+
 // extendErrorCopy maps the server's typed 409 codes to legible copy (never a raw error).
 export function extendErrorCopy(code: string | undefined): string {
   switch (code) {
