@@ -1,57 +1,58 @@
 # S8.2c gateway zero-touch — WALK RECORD (demo-re-run, founder-present)
 
-**Acceptance = the Zero-Touch Gateway Law (`docs/laws.md`):** a gateway comes online by pasting the ONE dashboard-emitted install command — nothing else. Any manual gateway networking step is a DEFECT. **Boundary clause:** the gateway VM gets zero SSH after join; the cloud console gets ONE guided visit per side (Azure UDR / AWS route-table + src/dst-check — un-codeable fabric, surfaced as guided setup, NOT a gateway touch).
+## PASS/FAIL LINE (Zero-Touch Gateway Law, `docs/laws.md`) — the single gate
+**PASS** iff each gateway comes online by pasting the ONE dashboard-emitted install command, and the ONLY other manual actions are ONE guided cloud-console visit per side (Azure UDR / AWS route-table + src/dst-check). **FAIL** iff anything past the two pastes demands SSH to a gateway VM — any hand-added `--network host`, `TUNNEX_WG_BACKEND`, `src`-hint, forward rule, or `ip route` edit. **A FAIL leaves the story OPEN** (not merged). Guided cloud-console ≠ gateway-touch; the boundary is the gateway VM.
 
-**This walk re-runs the cross-cloud demo** (`walk-artifacts/cross-cloud-demo/demo-record.md`) — the same AWS↔Azure topology that took **6 manual gateway touches + 3 UI gaps** — and proves every touch is now either baked into the emitted command or is the one allowed guided cloud-console visit.
+**This walk IS S8.2c's box-walk** and IS the **new-customer onboarding path**: it uses a FRESH SIGNUP for a clean org (the GAP-1 multi-org-switcher deferral means an existing owner can't spin a 2nd org in-session; fresh-signup is HIGHER fidelity than a switcher shortcut — it's exactly what a real new customer does). Re-runs the cross-cloud demo (`walk-artifacts/cross-cloud-demo/demo-record.md`) that took **6 manual gateway touches + 3 UI gaps** — proving every touch now collapses into a paste or the one guided console visit.
 
-**Topology (re-use the demo's):** AWS Sydney `172.31.24.206` (VPC `172.31.0.0/16`) = hub · Azure West US `10.0.0.5` (VNet `10.0.0.0/24`) = spoke · CP public `40.65.63.141`.
+**Topology (re-use the demo's):** AWS Sydney `172.31.24.206` (VPC `172.31.0.0/16`) = hub · Azure West US `10.0.0.5` (VNet `10.0.0.0/24`) = spoke · a **separate Azure behind-host** `10.0.0.4` (the demo's `Tunnex-dev-vm`, same VNet) = the forwarded host · CP public `40.65.63.141`.
 
-**FIXTURE-FIDELITY REQUIREMENT (topology-sibling law):** the walk MUST include a **genuinely separate FORWARDED host behind a gateway** — a distinct VM/host on the site LAN, NOT the gateway host itself, NOT a dummy-in-netns. The demo's `-I` gateway-host ping hid the forward-chain asymmetry (D1); this walk must land a packet that TRAVERSES the gateway's forward chain (behind-host → remote site), so the D1 symmetric-forward + D2 src-hint are proven on real forwarded traffic. The Azure VNet's second host (`Tunnex-dev-vm` `10.0.0.4`) is the behind-host.
+**FIXTURE-FIDELITY PRECONDITION (topology-sibling law, `docs/laws.md`) — binds Leg 2:** the cross-site ping MUST originate from a **genuinely separate FORWARDED host behind a gateway** (`10.0.0.4`), traversing the gateway's forward chain. **The `ping -I <gateway-host>` form the demo used does NOT count this run** — it's locally-originated, never forwarded, and hides the D1 forward-chain asymmetry (per our own law). If a separate behind-host isn't available, Leg 2 is INCOMPLETE, not passed.
 
 ---
 
-## Legs (Pawan drives; fill evidence inline)
+## Legs (Pawan drives; fill expected-vs-observed inline)
 
-### Leg 1 — ZERO-TOUCH JOIN (the law itself)
-Enroll a gateway from the dashboard → copy the ONE emitted `docker run` → paste VERBATIM on a CLEAN cloud VM → it reaches `agent_ready` on real WireGuard with **zero edits**.
-- [ ] the emitted command is a SINGLE line (no compose, no line breaks) — structurally un-mis-pasteable (the demo's double paste-failure)
-- [ ] it bakes in: `--network host`, `wgctrl`, `/dev/net/tun` + NET_ADMIN, the public CP URLs, servername, token, the optional endpoint
-- [ ] the CP URLs come from the CP's configured public base URL (`meta.public_base_url`) — NOT the browser origin (review #1); verify by opening the dashboard via an alias/tunnel and confirming the command still emits the real public CP address
-- [ ] pasted on a clean VM → `agent_ready`, `wg show` fresh handshake, ZERO manual gateway edits
-- **Evidence:** _(paste the command + the agent log + wg show)_
+### Leg 1 — ZERO-TOUCH JOIN + the metaLoaded gate proof
+Enroll a gateway → copy the ONE emitted `docker run` → paste VERBATIM on a CLEAN cloud VM → `agent_ready` on real WireGuard, zero edits.
+- **EXPECTED:** single-line command (no compose, no line breaks); bakes in `--network host`, `wgctrl`, `/dev/net/tun`+NET_ADMIN, the public CP URLs, servername, token, optional endpoint. Pasted verbatim → `agent_ready`, `wg show` fresh handshake, ZERO manual gateway edits.
+- **EXPECTED (one-truth #5):** open the dashboard via an ALIAS/tunnel (not the raw public IP) and confirm the emitted command STILL carries the real configured CP public address (`meta.public_base_url`), NOT the alias origin.
+- **EXPECTED (metaLoaded gate — the ONLY proof of this fix; it is component wiring, NOT unit-pinned):** on the enroll form, before `/api/v1/meta` resolves, the **"Generate join token" button reads "Checking control plane…" and is DISABLED**. There must be **NO flash of a mintable command before meta arrives** — no early-enabled Generate button, no placeholder/origin-based command, no half-formed token line. **ANY flicker of a mintable command in the in-flight window = a FINDING (WF-#), not cosmetics.** Watch the first render deliberately (hard-reload the page, eyes on the button).
+- **OBSERVED:** _(command + agent log + wg show + the button-state observation)_
 
-### Leg 2 — FORWARDED behind-host reaches the remote site (D1 + D2, the fixture-sibling proof)
-From the Azure behind-host (`10.0.0.4`, NOT the gateway) ping into the AWS VPC — a plain `ping` (no `-I`), sourced naturally, TRAVERSING the Azure gateway's forward chain.
-- [ ] `ping -c3 172.31.<aws-host>` from `10.0.0.4` succeeds (the FIRST forwarded cross-site packet, mesh mode)
-- [ ] the Azure gateway's nft forward counter for the LAN→tunnel rule INCREMENTS (D1 symmetric forward, mesh)
-- [ ] the return path sources correctly (D2 src-hint) — no overlay-address mis-source, and it SURVIVES a reconcile tick (the manual-`src`-clobber the demo hit is gone)
-- **Evidence:** _(ping + nft counter + `ip route get` showing the src)_
+### Leg 2 — FORWARDED behind-host reaches the remote site (D1 + D2, fixture-sibling)
+From the separate Azure behind-host `10.0.0.4` (NOT the gateway) — plain `ping` (no `-I`), traversing the Azure gateway's forward chain.
+- **EXPECTED:** `ping -c3 172.31.24.206` (or a host in the AWS VPC) from `10.0.0.4` succeeds — the first FORWARDED cross-site packet, mesh mode; the Azure gateway's nft LAN→tunnel forward counter INCREMENTS (D1 symmetric forward); the return path sources correctly (D2 src-hint), no overlay mis-source, and SURVIVES a reconcile tick.
+- **PRECONDITION:** the `-I <gateway-host>` shortcut does NOT satisfy this leg (see the fixture-fidelity precondition above).
+- **OBSERVED:** _(ping + nft counter + `ip route get` src)_
 
-### Leg 3 — the ONE guided cloud-console visit per side (boundary clause)
-The cloud fabric (Azure UDR / AWS route-table + src/dst-check) is un-codeable → the site UI surfaces per-cloud guided setup. Prove it's ONE guided visit, not SSH-into-the-gateway.
-- [ ] the dashboard shows the per-cloud "your fabric needs this route" instruction (detected/declared cloud, copy-paste snippet, doc link)
-- [ ] adding the Azure UDR (one console visit) is what makes Leg 2 pass — and it's the ONLY non-gateway manual step
-- [ ] NO SSH to the gateway VM after the Leg-1 join (the boundary clause holds)
-- **Evidence:** _(the UI instruction screenshot + the console step)_
+### Leg 3 — the ONE guided cloud-console visit, SURFACED IN THE UI
+The un-codeable fabric (Azure UDR / AWS route-table + src/dst-check) is guided setup, ONE visit per side.
+- **EXPECTED (D3/Slice-2 guided-setup scope):** the site/subnet UI **DISPLAYS the per-cloud "your fabric needs this route" instruction** on the page during the walk — detected/declared cloud, copy-paste snippet, doc link. **If Pawan has to REMEMBER the UDR/route-table step from the demo instead of READING it on the site page, that is a FINDING (WF-#) against D3/Slice-2's guided-setup scope** — the guided setup didn't ship its job.
+- **EXPECTED:** adding the Azure UDR (one console visit) is what makes Leg 2 pass, and is the ONLY non-gateway manual step; NO SSH to the gateway VM after Leg-1 join.
+- **OBSERVED:** _(the UI instruction screenshot + the console step)_
 
 ### Leg 4 — D3 the bridge-trap reassuring-green catch (loud, not silent)
-Force the failure the demo hit silently: a gateway advertising a subnet it isn't on (or bridge-trapped wg0) → `site_subnet_unreachable` fires LOUD on the health surface even though the link handshake is fresh.
-- [ ] induce it (e.g. advertise a subnet the host has no address in) → the health badge shows `site subnet unreachable` (danger), INDEPENDENT of the fresh link
-- [ ] recover (host regains an address in the subnet) → the badge CLEARS without a restart
-- **Evidence:** _(the badge in both states + the agent log)_
+Force a gateway advertising a subnet it isn't on (or bridge-trapped wg0) → `site_subnet_unreachable` fires LOUD even with a fresh link.
+- **EXPECTED:** induce it → the health badge shows `site subnet unreachable` (danger), INDEPENDENT of the fresh link; recover → the badge CLEARS without a restart.
+- **OBSERVED:** _(badge both states + agent log)_
 
-### Leg 5 — D5 site rules created from the Access builder (GAP-2 closed)
-Create a `site → site` grant from the Access Add-rule modal — through the API (validation + audit), NOT the demo's raw DB insert.
-- [ ] the modal offers `site` as Source AND Destination
-- [ ] creating a site→site rule writes through the policy API — an audit row appears, disjointness validation rides the same path
-- [ ] the enforcing gateway picks up the grant and the forward drop→accept flips on the VISIBLE chain (the D1 enforcing contrast)
-- **Evidence:** _(the modal + the audit row + the enforcing ping)_
+### Leg 5 — D5 site rules from the Access builder (GAP-2 closed)
+Create a `site → site` grant from the Access Add-rule modal — through the API (validation + audit), NOT a raw DB insert.
+- **EXPECTED:** the modal offers `site` as Source AND Destination; creating writes through the policy API → an audit row appears, disjointness rides the same path; the enforcing gateway picks up the grant and the forward drop→accept flips on the VISIBLE chain.
+- **OBSERVED:** _(modal + audit row + enforcing ping)_
 
 ---
 
+## Findings (held WF-numbered for disposition — the founder brings dispositions back; fold only what's dispositioned)
+| WF# | leg | finding | severity | disposition |
+|-----|-----|---------|----------|-------------|
+| _(none yet — fill live)_ | | | | |
+
 ## Verdict
-_(fill after the walk: did every one of the demo's 6 gateway touches collapse into the pasted command or the one guided console visit? Zero-Touch Law SATISFIED / not.)_
+_(fill after the walk: did every demo gateway touch collapse into the two pastes + the one guided console visit? Zero-Touch Law PASS / FAIL. A FAIL keeps the story open.)_
 
 ## Deferred / substitutes
-- GAP-1 (in-session multi-org creation) DEFERRED — rides the org-switcher follow-on; the walk uses fresh-signup for a clean org (as the demo did), so it is NOT blocked.
+- GAP-1 (in-session multi-org creation) DEFERRED — rides the org-switcher follow-on; the walk uses fresh-signup (the new-customer onboarding path), so it is NOT blocked.
 - #7 (duplicate precedence ladders) DEFERRED from the fold — mechanical, no behavioral risk.
+- The `metaLoaded` gate (re-review round-3) is component wiring, not unit-pinned — **Leg 1's button-state observation is its ONLY proof.**
