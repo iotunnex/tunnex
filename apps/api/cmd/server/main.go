@@ -185,6 +185,7 @@ func main() {
 		MfaEnforceEnabled:     apphttp.NewMfaEnforceEdition(),
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
+		NodeAgentImage:        cfg.NodeAgentImage,
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
 		AuthFn:                apphttp.SessionAuth(sessions, sqlc.New(pool)),
 		BearerFn:              apphttp.BearerAuth(sqlc.New(pool)),

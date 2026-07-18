@@ -114,6 +114,7 @@ type apiServer struct {
 	mfaEnforceEnabled bool
 	cookieSecure        bool
 	appBaseURL          string
+	nodeAgentImage      string
 }
 
 // GetHealth implements GET /healthz.

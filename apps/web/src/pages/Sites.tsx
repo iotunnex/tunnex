@@ -207,6 +207,7 @@ function SiteCardView({
   onDone: () => void;
 }) {
   const [modal, setModal] = useState<"subnet" | "bind" | "unbind" | "delete" | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; cidr: string; status: string } | null>(null); // WF-5
   const hasGateway = card.gateways.length > 0;
   return (
     <Card>
@@ -237,9 +238,48 @@ function SiteCardView({
             >
               {s.cidr}
               {s.status === "pending" && " · pending"}
+              {canManage && (
+                <button
+                  type="button"
+                  className="ml-1.5 text-slate-500 hover:text-rose-400"
+                  aria-label={`Remove ${s.cidr}`}
+                  title="Remove this subnet (un-advertise)"
+                  onClick={() => setRemoving({ id: s.id, cidr: s.cidr, status: s.status })}
+                >
+                  ✕
+                </button>
+              )}
             </span>
           ))}
         </div>
+      )}
+
+      {/* WF-3: guided cloud-fabric setup, SURFACED IN-UI (not docs-only). STATIC per cloud — the SDN
+          steps that get a behind-host's packet to this gateway are un-codeable, so we show the copy-paste
+          the operator applies in ONE cloud-console visit (the Zero-Touch Law boundary clause). No
+          cloud-detection this pass (that rides S8.5); doc link for the full reference. */}
+      {hasGateway && card.subnets.some((s) => s.status === "approved") && (
+        <details className="mt-3 rounded-lg border border-white/5 bg-ink-900/60 px-3 py-2 text-xs text-slate-400">
+          <summary className="cursor-pointer text-slate-300">Cloud fabric setup — one console visit per side (why a behind-host may not reach yet)</summary>
+          <div className="mt-2 space-y-2">
+            <p>
+              A gateway VM forwards for hosts on its LAN, but the cloud SDN must (1) let the VM forward and (2)
+              route the REMOTE site's CIDR to this gateway. Apply once, in the cloud console — never on the gateway.
+            </p>
+            <p>
+              <span className="font-semibold text-slate-300">Both clouds:</span> enable <span className="font-mono">IP forwarding</span> on this gateway VM's NIC.
+            </p>
+            <p>
+              <span className="font-semibold text-slate-300">Azure:</span> route table on the behind-hosts' subnet → add
+              <span className="font-mono"> &lt;REMOTE_CIDR&gt;</span> → next hop <span className="font-mono">Virtual appliance</span> → this gateway's private IP.
+            </p>
+            <p>
+              <span className="font-semibold text-slate-300">AWS:</span> disable <span className="font-mono">source/dest check</span> on the gateway ENI; route table → add
+              <span className="font-mono"> &lt;REMOTE_CIDR&gt;</span> → target = the gateway instance/ENI.
+            </p>
+            <p className="text-slate-500">Full reference: <span className="font-mono">docs/deploy-cloud-gateway.md</span>.</p>
+          </div>
+        </details>
       )}
 
       {canManage && (
@@ -260,6 +300,17 @@ function SiteCardView({
       {modal === "bind" && <BindGatewayModal orgId={orgId} siteId={card.id} nodes={unboundNodes} onDone={onDone} onClose={() => setModal(null)} />}
       {modal === "unbind" && <UnbindConfirm orgId={orgId} siteId={card.id} onDone={onDone} onClose={() => setModal(null)} />}
       {modal === "delete" && <DeleteSiteModal orgId={orgId} site={card} onDone={onDone} onClose={() => setModal(null)} />}
+      {removing && (
+        <RemoveSubnetConfirm
+          orgId={orgId}
+          subnet={removing}
+          onDone={() => {
+            setRemoving(null);
+            onDone();
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </Card>
   );
 }
@@ -426,6 +477,58 @@ function UnbindConfirm({ orgId, siteId, onDone, onClose }: { orgId: string; site
     >
       <p className="text-sm text-slate-400">
         The gateway's site-link peers and routes are swept. The site and its subnets are kept — bind a replacement to restore routing.
+      </p>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+// WF-5: un-advertise / remove a single subnet — no longer needs a whole-site delete. The confirm STATES
+// the full-sweep consequence for an approved subnet (route withdrawn from every gateway).
+function RemoveSubnetConfirm({
+  orgId,
+  subnet,
+  onDone,
+  onClose,
+}: {
+  orgId: string;
+  subnet: { id: string; cidr: string; status: string };
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/site-subnets/{subnetId}", {
+      params: { path: { orgId, subnetId: subnet.id } },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not remove the subnet."));
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title={`Remove ${subnet.cidr}?`}
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" className="bg-danger hover:bg-danger" onClick={submit} disabled={busy}>Remove</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-400">
+        {subnet.status === "approved" ? (
+          <>
+            This subnet is approved and routed. Removing it <span className="font-semibold">withdraws its route from every gateway</span> on
+            the next reconcile — behind-hosts on other sites will no longer reach <span className="font-mono">{subnet.cidr}</span>.
+          </>
+        ) : (
+          <>This pending subnet is not yet routed — removing it just un-advertises it.</>
+        )}
       </p>
       <ErrorText>{err}</ErrorText>
     </Modal>

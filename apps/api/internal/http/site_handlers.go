@@ -142,6 +142,19 @@ func (s apiServer) ApproveSiteSubnet(ctx context.Context, req api.ApproveSiteSub
 	return api.ApproveSiteSubnet204Response{}, nil
 }
 
+// RemoveSiteSubnet DELETE /site-subnets/{subnetId} — un-advertise / remove a subnet (WF-5). All-editions
+// core like the rest of the site model (authorize FIRST, no edition gate); route withdrawn full-sweep.
+func (s apiServer) RemoveSiteSubnet(ctx context.Context, req api.RemoveSiteSubnetRequestObject) (api.RemoveSiteSubnetResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.sites.RemoveSubnet(ctx, p.UserID, req.OrgId, req.SubnetId); err != nil {
+		return nil, err
+	}
+	return api.RemoveSiteSubnet204Response{}, nil
+}
+
 // GetSiteReferences GET /sites/{siteId} — the D1 reverse link + D4 cascade preview counts.
 func (s apiServer) GetSiteReferences(ctx context.Context, req api.GetSiteReferencesRequestObject) (api.GetSiteReferencesResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {

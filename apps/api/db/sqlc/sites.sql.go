@@ -146,6 +146,16 @@ func (q *Queries) DeleteSite(ctx context.Context, arg DeleteSiteParams) (int64, 
 	return result.RowsAffected(), nil
 }
 
+const deleteSiteSubnet = `-- name: DeleteSiteSubnet :exec
+DELETE FROM site_subnets WHERE id = $1
+`
+
+// lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before deletion (WF-5 un-advertise).
+func (q *Queries) DeleteSiteSubnet(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSiteSubnet, id)
+	return err
+}
+
 const getSite = `-- name: GetSite :one
 SELECT id, org_id, name, link_transport, link_mtu, dns_forwarding, created_at, updated_at FROM sites WHERE id = $1 AND org_id = $2
 `

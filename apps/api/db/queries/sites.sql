@@ -85,6 +85,10 @@ WHERE ss.id = $1 AND s.org_id = $2;
 UPDATE site_subnets SET status = 'approved' WHERE id = $1
 RETURNING *;
 
+-- name: DeleteSiteSubnet :exec
+-- lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before deletion (WF-5 un-advertise).
+DELETE FROM site_subnets WHERE id = $1;
+
 -- name: ListPendingSiteSubnetsForOrg :many
 -- lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
 SELECT ss.id, ss.site_id, ss.cidr, ss.status

@@ -76,6 +76,14 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
+	} else {
+		// WF-2: an existing identity was found in the state volume — this host already ran a gateway.
+		// Name it LOUD at boot: a re-used VM silently keeps its OLD identity (and org), which mis-convicted
+		// D2 during the cross-cloud walk. To RE-ENROLL a re-used host, wipe the state volume first.
+		logger.Warn("agent_reusing_stored_identity",
+			slog.String("state_dir", certDir),
+			slog.String("node_name", nodeName),
+			slog.String("note", "this host already holds a gateway identity; wipe the state volume to re-enroll fresh"))
 	}
 
 	client, err := control.NewClient(agentURL, serverName, nodeName, certPEM, keyPEM, caPEM)

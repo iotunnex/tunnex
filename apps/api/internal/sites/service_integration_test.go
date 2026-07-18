@@ -336,3 +336,53 @@ func TestUnbindSiteNode(t *testing.T) {
 		t.Fatal("unbinding a site with no gateway must 404")
 	}
 }
+
+// TestRemoveSubnet — WF-5: a mis-advertised subnet is removable without deleting the whole site; the
+// removal is audited, and it is org-scoped (a foreign org can't remove it).
+func TestRemoveSubnet(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "rm-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	site, err := svc.RegisterSite(ctx, org, "hq")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	sub, err := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.20.0.0/24"))
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Cross-org safety: a DIFFERENT org can't remove this subnet.
+	if err := svc.RemoveSubnet(ctx, actor, uuid.New(), sub.ID); err == nil {
+		t.Fatal("removing a subnet from a foreign org must fail (subnet_not_found)")
+	}
+	var stillThere int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE id=$1`, sub.ID).Scan(&stillThere)
+	if stillThere != 1 {
+		t.Fatal("a cross-org remove must NOT delete the subnet")
+	}
+	// Owning org removes it → gone + audited.
+	if err := svc.RemoveSubnet(ctx, actor, org, sub.ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	var gone int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE id=$1`, sub.ID).Scan(&gone)
+	if gone != 0 {
+		t.Fatal("the subnet must be removed")
+	}
+	var audited int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.subnet_removed'`, org).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("the removal must be audited (site.subnet_removed); got %d", audited)
+	}
+}

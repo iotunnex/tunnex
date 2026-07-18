@@ -25,6 +25,7 @@ export interface RemoteEnrollOpts {
   apiURL: string; // public CP REST origin (nginx), e.g. https://cp.example.com
   agentURL: string; // public CP agent TLS channel, e.g. https://cp.example.com:8443
   serverName: string; // CP cert SAN the agent pins, e.g. tunnex-control
+  image: string; // WF-2: the agent image (CP-configured, digest-pinnable). One-truth over the artifact version.
 }
 
 // remoteEnrollCommand builds the ONE true `docker run` for a REMOTE cloud gateway (S8.2c D4) — a SINGLE
@@ -46,7 +47,7 @@ export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
     `--cap-add NET_ADMIN --device /dev/net/tun -v tunnex_node_state:/var/lib/tunnex-node ` +
     `-e TUNNEX_JOIN_TOKEN=${o.token}${nameEnv}${endpointEnv} ` +
     `-e TUNNEX_API_URL=${q(o.apiURL)} -e TUNNEX_AGENT_URL=${q(o.agentURL)} ` +
-    `-e TUNNEX_AGENT_SERVERNAME=${q(o.serverName)} -e TUNNEX_WG_BACKEND=wgctrl ${GATEWAY_IMAGE}`
+    `-e TUNNEX_AGENT_SERVERNAME=${q(o.serverName)} -e TUNNEX_WG_BACKEND=wgctrl ${o.image}`
   );
 }
 
@@ -112,6 +113,7 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
   // hides the modal) or silently bake the browser origin. Gate the mint on metaLoaded so the emitted command
   // is only ever built from a SETTLED CP address — the whole in-flight window becomes a disabled button.
   const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(undefined);
+  const [nodeAgentImage, setNodeAgentImage] = useState<string | undefined>(undefined); // WF-2: CP-configured (digest-pinnable) agent image
   const [metaError, setMetaError] = useState(false);
   const [metaLoaded, setMetaLoaded] = useState(false);
   useEffect(() => {
@@ -119,6 +121,7 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
       .GET("/api/v1/meta")
       .then(({ data }) => {
         setPublicBaseURL((data as Meta | undefined)?.public_base_url);
+        setNodeAgentImage((data as Meta | undefined)?.node_agent_image);
         setMetaError(false);
       })
       .catch(() => setMetaError(true))
@@ -263,6 +266,7 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
             apiURL: ep.apiURL,
             agentURL: ep.agentURL,
             serverName: ep.serverName,
+            image: nodeAgentImage && nodeAgentImage.trim() ? nodeAgentImage.trim() : GATEWAY_IMAGE, // WF-2: CP-pinned, else default
           })}
           copyLabel="Copy command"
           onDismiss={() => {
