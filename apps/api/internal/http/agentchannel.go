@@ -175,12 +175,14 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		PolicyRefusedVersion int `json:"policy_refused_version"`
 		// S8.2 H5: a site-link peer has a stale/absent handshake (site-to-site link down).
 		SiteLinkStale bool `json:"site_link_stale"`
+		// S8.3 CW: the agent's max-supported policy version (0 when a pre-CW agent omits it → below-ceiling).
+		MaxPolicyVersion int `json:"max_policy_version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale}
+	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale, MaxSupportedVersion: body.MaxPolicyVersion}
 	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {

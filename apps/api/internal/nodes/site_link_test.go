@@ -48,6 +48,38 @@ func TestPushedHashMatchesServedForRoutedGateway(t *testing.T) {
 	}
 }
 
+// TestElectSiteHubIsTheOneElection — S8.3 D2: the hub designation the Node API projects (is_site_hub) reads
+// electSiteHub, the SAME picker the site-link graph + health use — endpoint-bearing, lowest id, ties by id,
+// nil when all NAT'd. siteTopoHasHub is exactly (electSiteHub != nil), so existence and designation never
+// disagree (no second election in the UI, the overrule's point).
+func TestElectSiteHubIsTheOneElection(t *testing.T) {
+	lo, hi := uuid.New(), uuid.New()
+	if lo.String() > hi.String() {
+		lo, hi = hi, lo // ensure lo has the lower id
+	}
+	// Two endpoint-bearing gateways → the lower id wins (deterministic tie-break).
+	topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
+		{ID: hi, Endpoint: "b:51820"}, {ID: lo, Endpoint: "a:51820"},
+	}}
+	hub := electSiteHub(topo)
+	if hub == nil || hub.ID != lo {
+		t.Fatalf("the endpoint-bearing lowest-id gateway must be the hub, got %+v", hub)
+	}
+	if !siteTopoHasHub(topo) {
+		t.Fatal("siteTopoHasHub must agree with electSiteHub (one election)")
+	}
+	// A NAT'd gateway (no endpoint) is never the hub even with a lower id.
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo}, {ID: hi, Endpoint: "b:51820"}}
+	if h := electSiteHub(topo); h == nil || h.ID != hi {
+		t.Fatalf("a NAT'd gateway cannot be the hub; the endpoint-bearing one wins, got %+v", h)
+	}
+	// All NAT'd → no hub (B2 no-carrier), and siteTopoHasHub agrees.
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo}, {ID: hi}}
+	if electSiteHub(topo) != nil || siteTopoHasHub(topo) {
+		t.Fatal("all-NAT'd → no hub (both electSiteHub and siteTopoHasHub must say so)")
+	}
+}
+
 // TestSiteLinkNoHubNoRoutes — S8.2 B2: no gateway has a public endpoint (all NAT'd) → no carrier, so
 // siteLinkGraphFrom emits ZERO routes + ZERO peers (routes with no peer to carry them are the silent
 // blackhole), and siteHubMissing flags the condition so it surfaces as site_hub_down.

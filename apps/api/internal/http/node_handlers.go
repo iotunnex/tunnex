@@ -49,6 +49,8 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	// Zero Trust policy health: the authoritative bool + the advisory kind from ONE org
 	// compile (S7.4b fold [0] — a single snapshot so bool and kind can't disagree).
 	health := s.nodes.PolicyHealthForNodes(ctx, req.OrgId, ns)
+	// S8.3: the hub designation (projection of the ONE election) + the reported max policy version (CW).
+	extras := s.nodes.NodeDisplayExtrasForNodes(ctx, req.OrgId, ns)
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)
@@ -56,6 +58,12 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 		an.PolicyDegraded = &h.Degraded
 		k := api.NodePolicyDegradedKind(h.Kind)
 		an.PolicyDegradedKind = &k
+		e := extras[n.ID]
+		an.IsSiteHub = &e.IsSiteHub
+		if e.MaxPolicyVersion > 0 { // nullable: 0 = never reported → leave nil (the UI reads absence as below-ceiling)
+			mv := e.MaxPolicyVersion
+			an.MaxPolicyVersion = &mv
+		}
 		out = append(out, an)
 	}
 	return api.ListNodes200JSONResponse{

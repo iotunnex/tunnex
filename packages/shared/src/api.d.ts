@@ -1408,6 +1408,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/sites/{siteId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Count what references a site — cascade preview + reverse link (S8.3; site:manage)
+         * @description The rule/subnet counts the UI needs BEFORE a delete (D4 cascade preview: N rules deleted, M subnets released) and to render the site page's "rules referencing this site" reverse link (D1). ONE endpoint serves both. A rule is referenced if it names this site as src OR dst.
+         */
+        get: operations["getSiteReferences"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a site — cascades its subnets + site-referencing rules (S8.3; site:manage)
+         * @description Deletes the site; ON DELETE CASCADE removes its subnets and any policy rule naming it as src/dst, and the bound gateway is unbound. The UI gates this behind a name-typed confirm + the getSiteReferences cascade preview (D4). Discharges the S8.1 DELIBERATELY-UNWIRED DeleteSite query.
+         */
+        delete: operations["deleteSite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/sites/{siteId}/subnets": {
         parameters: {
             query?: never;
@@ -1713,6 +1740,13 @@ export interface components {
              */
             status: "pending" | "approved";
         };
+        /** @description S8.3 D1/D4: what references a site — the delete cascade preview + the reverse-link count. */
+        SiteReferences: {
+            /** @description Policy rules naming this site as src or dst (deleted on cascade). */
+            rule_count: number;
+            /** @description Subnets advertised on this site (released on cascade). */
+            subnet_count: number;
+        };
         RegisterSiteRequest: {
             name: string;
         };
@@ -1869,11 +1903,15 @@ export interface components {
             last_seen_at?: string;
             /** @description Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB. */
             policy_degraded?: boolean;
+            /** @description S8.3 (CW): the agent's REPORTED max-supported policy version — observability (a reported fact, OUTSIDE the compile hash; no ProtocolVersion bump). NULL = never reported (a pre-upgrade agent): absence reads as BELOW the current ceiling, never unknown-treated-as-ready (S7.5.3 absence-is- not-compliance, applied to version readiness). The UI's cross-site upgrade warning names the gateways whose max is below the ceiling. */
+            max_policy_version?: number | null;
+            /** @description S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes. */
+            is_site_hub?: boolean;
             /**
-             * @description Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine).
+             * @description Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2): a SITE gateway's site-to-site link has no fresh handshake — the hub is unreachable (`site_hub_down`, CP-derived: no public-endpoint carrier) or a spoke link is dead (`site_link_down`, agent-reported staleness). A down site bridge is never green. Hub outranks a single spoke link-down.
              * @enum {string}
              */
-            policy_degraded_kind?: "healthy" | "apply_failing" | "stuck_enforcing" | "converging" | "silent_desync" | "desync_unknown" | "unsupported_policy_version";
+            policy_degraded_kind?: "healthy" | "apply_failing" | "stuck_enforcing" | "converging" | "silent_desync" | "desync_unknown" | "unsupported_policy_version" | "site_hub_down" | "site_link_down";
         };
         JoinTokenRequest: {
             node_name?: string;
@@ -4484,6 +4522,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Site"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSiteReferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference counts. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteReferences"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

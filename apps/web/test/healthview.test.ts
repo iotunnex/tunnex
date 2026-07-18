@@ -35,4 +35,18 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
     expect(policyHealthBadge(node(true, "healthy"))).not.toBeNull();
     expect(policyHealthBadge(node(true))).not.toBeNull();
   });
+
+  it("S8.2 kinds render distinct danger badges (site hub/link down, agent too old)", () => {
+    expect(policyHealthBadge(node(true, "unsupported_policy_version"))?.tone).toBe("danger");
+    const hub = policyHealthBadge(node(true, "site_hub_down"));
+    expect(hub?.tone).toBe("danger");
+    expect(hub?.label).toMatch(/hub/i);
+    expect(policyHealthBadge(node(true, "site_link_down"))?.label).toMatch(/link/i);
+  });
+
+  it("forward-compat: an unknown future kind falls through to the 'degraded' default (never null while degraded)", () => {
+    // A kind the switch doesn't enumerate must still badge (the default guards the next kind we add).
+    const b = policyHealthBadge(node(true, "some_future_kind" as Node["policy_degraded_kind"]));
+    expect(b).toEqual({ label: "degraded", tone: "warn" });
+  });
 });

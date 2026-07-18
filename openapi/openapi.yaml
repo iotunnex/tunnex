@@ -1834,6 +1834,36 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/sites/{siteId}:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSiteReferences
+      summary: Count what references a site — cascade preview + reverse link (S8.3; site:manage)
+      description: >-
+        The rule/subnet counts the UI needs BEFORE a delete (D4 cascade preview: N rules deleted, M subnets
+        released) and to render the site page's "rules referencing this site" reverse link (D1). ONE endpoint
+        serves both. A rule is referenced if it names this site as src OR dst.
+      tags: [sites]
+      responses:
+        "200":
+          description: Reference counts.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteReferences" } } }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSite
+      summary: Delete a site — cascades its subnets + site-referencing rules (S8.3; site:manage)
+      description: >-
+        Deletes the site; ON DELETE CASCADE removes its subnets and any policy rule naming it as src/dst, and
+        the bound gateway is unbound. The UI gates this behind a name-typed confirm + the getSiteReferences
+        cascade preview (D4). Discharges the S8.1 DELIBERATELY-UNWIRED DeleteSite query.
+      tags: [sites]
+      responses:
+        "204": { description: Deleted. }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/sites/{siteId}/subnets:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2153,6 +2183,14 @@ components:
         site_id: { type: string, format: uuid }
         cidr: { type: string, description: "IPv4 CIDR of the routed LAN (e.g. 10.20.0.0/24)." }
         status: { type: string, enum: [pending, approved], description: "Advertised subnets are pending until approved (D5)." }
+    SiteReferences:
+      type: object
+      required: [rule_count, subnet_count]
+      additionalProperties: false
+      properties:
+        rule_count: { type: integer, description: "Policy rules naming this site as src or dst (deleted on cascade)." }
+        subnet_count: { type: integer, description: "Subnets advertised on this site (released on cascade)." }
+      description: "S8.3 D1/D4: what references a site — the delete cascade preview + the reverse-link count."
     RegisterSiteRequest:
       type: object
       required: [name]
@@ -2430,9 +2468,24 @@ components:
             where the gateway is guaranteed on its last-good fail-closed policy (never open, never
             blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge
             UX is S7.4, reading the same agent-reported JSONB.
+        max_policy_version:
+          type: integer
+          nullable: true
+          description: >-
+            S8.3 (CW): the agent's REPORTED max-supported policy version — observability (a reported fact,
+            OUTSIDE the compile hash; no ProtocolVersion bump). NULL = never reported (a pre-upgrade agent):
+            absence reads as BELOW the current ceiling, never unknown-treated-as-ready (S7.5.3 absence-is-
+            not-compliance, applied to version readiness). The UI's cross-site upgrade warning names the
+            gateways whose max is below the ceiling.
+        is_site_hub:
+          type: boolean
+          description: >-
+            S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election
+            (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived
+            so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes.
         policy_degraded_kind:
           type: string
-          enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version]
+          enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version, site_hub_down, site_link_down]
           description: >-
             Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail
             over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on
@@ -2444,6 +2497,10 @@ components:
             exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is
             edition-independent and operator-side: upgrade the agent. Set for any edition (the version
             gate lives on the agent, not the policy engine).
+            `site_hub_down` / `site_link_down` (S8.2 H5/B2): a SITE gateway's site-to-site link has no fresh
+            handshake — the hub is unreachable (`site_hub_down`, CP-derived: no public-endpoint carrier) or a
+            spoke link is dead (`site_link_down`, agent-reported staleness). A down site bridge is never
+            green. Hub outranks a single spoke link-down.
 
     JoinTokenRequest:
       type: object

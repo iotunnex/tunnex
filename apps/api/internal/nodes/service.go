@@ -396,10 +396,12 @@ const siteLinkKeepaliveSecs = 25
 // remote subnets, reaching other spokes VIA the hub); the hub peers with every spoke (each peer's
 // AllowedIPs = that spoke's OWN subnets); the hub forwards between them. Routes = every remote site's
 // approved subnets. Deterministic (sorted) so a steady-state reconcile is a no-op.
-func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.Route) {
-	if !node.SiteID.Valid {
-		return nil, nil
-	}
+// electSiteHub picks the org's transit HUB — the endpoint-bearing site gateway with the lowest id
+// (single hub v1; multi-hub reserved). Returns nil when no gateway has a public endpoint (all NAT'd) —
+// the B2 no-carrier condition. This is THE election: every hub fact (site-link peers, routes, AND the
+// `is_site_hub` API projection) reads it, so the designation has exactly ONE source and the UI never
+// re-elects (the D2 overrule). PURE.
+func electSiteHub(topo siteTopology) *sqlc.ListSiteGatewaysForOrgRow {
 	var hub *sqlc.ListSiteGatewaysForOrgRow
 	for i := range topo.gws {
 		g := &topo.gws[i]
@@ -407,6 +409,14 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 			hub = g
 		}
 	}
+	return hub
+}
+
+func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.Route) {
+	if !node.SiteID.Valid {
+		return nil, nil
+	}
+	hub := electSiteHub(topo)
 	// B2: no hub (every gateway is NAT'd, no public endpoint) → NO carrier for site traffic, so emit NO
 	// routes and NO peers. Installing routes with no peer to carry them is the silent blackhole; the
 	// no-hub condition is surfaced CP-side as site_hub_down (PolicyHealthForNodes), never a silent no-op.
@@ -497,12 +507,7 @@ func (s *Service) pushedHash(topo siteTopology, node sqlc.Node, routeless *polic
 // siteTopoHasHub reports whether ANY gateway carries a public endpoint (a hub exists). Org-wide +
 // node-independent, so the batch health path computes it ONCE (R5: was an O(N·G) per-node rescan).
 func siteTopoHasHub(topo siteTopology) bool {
-	for _, g := range topo.gws {
-		if g.Endpoint != "" {
-			return true
-		}
-	}
-	return false
+	return electSiteHub(topo) != nil // one election: hub existence reads the same picker as the designation
 }
 
 // siteHubMissing reports the B2 no-carrier condition for ONE node, given a precomputed hubExists: a site
@@ -600,6 +605,9 @@ type AppliedPolicy struct {
 	// hub, or a spoke) has a stale/absent WG handshake — site-to-site traffic on that link is dead.
 	// Surfaced as site_link_down so a down bridge is never green-on-the-dashboard.
 	SiteLinkStale bool `json:"site_link_stale"`
+	// MaxSupportedVersion (S8.3 CW) is the highest artifact Version the agent can apply. Observability
+	// (outside the hash); stored so the UI can warn which gateways would deny-all on a version bump.
+	MaxSupportedVersion int `json:"max_policy_version"`
 }
 
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
@@ -643,6 +651,7 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_failing_since":   applied.FailingSince,
 		"policy_refused_version": applied.RefusedVersion,
 		"site_link_stale":        applied.SiteLinkStale,
+		"max_policy_version":     applied.MaxSupportedVersion,
 	})
 	if err != nil {
 		return err
@@ -727,6 +736,10 @@ type NodeCapabilities struct {
 	// SiteLinkStale (S8.2 H5) — agent-computed: a site-link peer has a stale/absent handshake.
 	// Drives the `site_link_down` health kind (a dead bridge is never green).
 	SiteLinkStale bool `json:"site_link_stale"`
+	// MaxPolicyVersion (S8.3 CW) — the agent's reported max-supported policy version. 0 = never reported
+	// (a pre-CW/pre-upgrade agent): read as BELOW the ceiling, never unknown-treated-as-ready (S7.5.3
+	// absence-is-not-compliance). Surfaced on the Node API for the cross-site upgrade warning.
+	MaxPolicyVersion int `json:"max_policy_version"`
 }
 
 // zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
@@ -774,6 +787,44 @@ const zeroTrustOff = "off"
 type PolicyHealth struct {
 	Degraded bool
 	Kind     PolicyDegradedKind
+}
+
+// NodeDisplayExtras is per-node S8.3 display truth surfaced on the Node API: the hub designation (a
+// PROJECTION of electSiteHub, never re-elected UI-side — D2) and the agent's reported max policy version.
+type NodeDisplayExtras struct {
+	IsSiteHub        bool
+	MaxPolicyVersion int // 0 = never reported (pre-CW agent) → the UI reads this as below-ceiling
+}
+
+// NodeDisplayExtrasForNodes returns the hub designation + reported max-version per node. The hub is
+// elected ONCE for the batch (electSiteHub — the same picker the site-link graph + health use), so the
+// `is_site_hub` the UI renders is a projection of the one election, not a second one. Max-version is read
+// from each node's caps JSONB (absence → 0). All nodes must belong to orgID.
+func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID, nodes []sqlc.Node) map[uuid.UUID]NodeDisplayExtras {
+	out := make(map[uuid.UUID]NodeDisplayExtras, len(nodes))
+	var hubID uuid.UUID
+	anySite := false
+	for _, n := range nodes {
+		if n.SiteID.Valid {
+			anySite = true
+			break
+		}
+	}
+	if anySite {
+		if topo, err := s.loadSiteTopology(ctx, orgID); err == nil {
+			if hub := electSiteHub(topo); hub != nil {
+				hubID = hub.ID
+			}
+		}
+		// A topology-load error leaves hubID zero → no node marked hub (honest: can't determine → not hub),
+		// never a wrong designation.
+	}
+	for _, n := range nodes {
+		var caps NodeCapabilities
+		_ = json.Unmarshal(n.Capabilities, &caps) // absent/garbage caps → zero-value (MaxPolicyVersion 0)
+		out[n.ID] = NodeDisplayExtras{IsSiteHub: n.SiteID.Valid && n.ID == hubID, MaxPolicyVersion: caps.MaxPolicyVersion}
+	}
+	return out
 }
 
 // PolicyHealthForNodes computes both the bool and the advisory kind from a SINGLE org compile.

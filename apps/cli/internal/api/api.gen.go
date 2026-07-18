@@ -185,6 +185,8 @@ const (
 	DesyncUnknown            NodePolicyDegradedKind = "desync_unknown"
 	Healthy                  NodePolicyDegradedKind = "healthy"
 	SilentDesync             NodePolicyDegradedKind = "silent_desync"
+	SiteHubDown              NodePolicyDegradedKind = "site_hub_down"
+	SiteLinkDown             NodePolicyDegradedKind = "site_link_down"
 	StuckEnforcing           NodePolicyDegradedKind = "stuck_enforcing"
 	UnsupportedPolicyVersion NodePolicyDegradedKind = "unsupported_policy_version"
 )
@@ -904,18 +906,24 @@ type Node struct {
 	AgentVersion string             `json:"agent_version"`
 	EnrolledAt   time.Time          `json:"enrolled_at"`
 	Id           openapi_types.UUID `json:"id"`
-	LastSeenAt   *time.Time         `json:"last_seen_at,omitempty"`
-	Name         string             `json:"name"`
+
+	// IsSiteHub S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes.
+	IsSiteHub  *bool      `json:"is_site_hub,omitempty"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+
+	// MaxPolicyVersion S8.3 (CW): the agent's REPORTED max-supported policy version — observability (a reported fact, OUTSIDE the compile hash; no ProtocolVersion bump). NULL = never reported (a pre-upgrade agent): absence reads as BELOW the current ceiling, never unknown-treated-as-ready (S7.5.3 absence-is- not-compliance, applied to version readiness). The UI's cross-site upgrade warning names the gateways whose max is below the ceiling.
+	MaxPolicyVersion *int   `json:"max_policy_version"`
+	Name             string `json:"name"`
 
 	// PolicyDegraded Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB.
 	PolicyDegraded *bool `json:"policy_degraded,omitempty"`
 
-	// PolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine).
+	// PolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2): a SITE gateway's site-to-site link has no fresh handshake — the hub is unreachable (`site_hub_down`, CP-derived: no public-endpoint carrier) or a spoke link is dead (`site_link_down`, agent-reported staleness). A down site bridge is never green. Hub outranks a single spoke link-down.
 	PolicyDegradedKind *NodePolicyDegradedKind `json:"policy_degraded_kind,omitempty"`
 	Status             NodeStatus              `json:"status"`
 }
 
-// NodePolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine).
+// NodePolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2): a SITE gateway's site-to-site link has no fresh handshake — the hub is unreachable (`site_hub_down`, CP-derived: no public-endpoint carrier) or a spoke link is dead (`site_link_down`, agent-reported staleness). A down site bridge is never green. Hub outranks a single spoke link-down.
 type NodePolicyDegradedKind string
 
 // NodeStatus defines model for Node.Status.
@@ -1052,6 +1060,15 @@ type Site struct {
 
 // SiteLinkTransport Reserved enum (D4); wireguard-only in v1.
 type SiteLinkTransport string
+
+// SiteReferences S8.3 D1/D4: what references a site — the delete cascade preview + the reverse-link count.
+type SiteReferences struct {
+	// RuleCount Policy rules naming this site as src or dst (deleted on cascade).
+	RuleCount int `json:"rule_count"`
+
+	// SubnetCount Subnets advertised on this site (released on cascade).
+	SubnetCount int `json:"subnet_count"`
+}
 
 // SiteSubnet defines model for SiteSubnet.
 type SiteSubnet struct {
@@ -1708,6 +1725,12 @@ type ClientInterface interface {
 	RegisterSiteWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	RegisterSite(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteSite request
+	DeleteSite(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSiteReferences request
+	GetSiteReferences(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UnbindSiteNode request
 	UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3211,6 +3234,30 @@ func (c *Client) RegisterSiteWithBody(ctx context.Context, orgId openapi_types.U
 
 func (c *Client) RegisterSite(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRegisterSiteRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteSite(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSiteRequest(c.Server, orgId, siteId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSiteReferences(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSiteReferencesRequest(c.Server, orgId, siteId)
 	if err != nil {
 		return nil, err
 	}
@@ -7032,6 +7079,88 @@ func NewRegisterSiteRequestWithBody(server string, orgId openapi_types.UUID, con
 	return req, nil
 }
 
+// NewDeleteSiteRequest generates requests for DeleteSite
+func NewDeleteSiteRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetSiteReferencesRequest generates requests for GetSiteReferences
+func NewGetSiteReferencesRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewUnbindSiteNodeRequest generates requests for UnbindSiteNode
 func NewUnbindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -7798,6 +7927,12 @@ type ClientWithResponsesInterface interface {
 	RegisterSiteWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error)
 
 	RegisterSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, body RegisterSiteJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterSiteResponse, error)
+
+	// DeleteSiteWithResponse request
+	DeleteSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteSiteResponse, error)
+
+	// GetSiteReferencesWithResponse request
+	GetSiteReferencesWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetSiteReferencesResponse, error)
 
 	// UnbindSiteNodeWithResponse request
 	UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error)
@@ -9769,6 +9904,51 @@ func (r RegisterSiteResponse) StatusCode() int {
 	return 0
 }
 
+type DeleteSiteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteSiteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteSiteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetSiteReferencesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SiteReferences
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSiteReferencesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSiteReferencesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type UnbindSiteNodeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11040,6 +11220,24 @@ func (c *ClientWithResponses) RegisterSiteWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseRegisterSiteResponse(rsp)
+}
+
+// DeleteSiteWithResponse request returning *DeleteSiteResponse
+func (c *ClientWithResponses) DeleteSiteWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteSiteResponse, error) {
+	rsp, err := c.DeleteSite(ctx, orgId, siteId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteSiteResponse(rsp)
+}
+
+// GetSiteReferencesWithResponse request returning *GetSiteReferencesResponse
+func (c *ClientWithResponses) GetSiteReferencesWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetSiteReferencesResponse, error) {
+	rsp, err := c.GetSiteReferences(ctx, orgId, siteId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSiteReferencesResponse(rsp)
 }
 
 // UnbindSiteNodeWithResponse request returning *UnbindSiteNodeResponse
@@ -13800,6 +13998,65 @@ func ParseRegisterSiteResponse(rsp *http.Response) (*RegisterSiteResponse, error
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteSiteResponse parses an HTTP response from a DeleteSiteWithResponse call
+func ParseDeleteSiteResponse(rsp *http.Response) (*DeleteSiteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteSiteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSiteReferencesResponse parses an HTTP response from a GetSiteReferencesWithResponse call
+func ParseGetSiteReferencesResponse(rsp *http.Response) (*GetSiteReferencesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSiteReferencesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SiteReferences
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
