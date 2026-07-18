@@ -71,12 +71,22 @@ type Compiled struct {
 	// The agent picks its host address inside one of these as the SOURCE for its site routes. Out-of-hash
 	// plumbing; mirror of policyspec.Compiled.LocalSubnets.
 	LocalSubnets []string `json:"local_subnets,omitempty"`
+	// DNSForwards (S8.4) — the org cross-site DNS forwarding table {domain -> resolver_ip} the in-agent
+	// forwarder serves. Out-of-hash CONVENIENCE, no version trigger; mirror of policyspec.Compiled.DNSForwards.
+	DNSForwards []DNSForward `json:"dns_forwards,omitempty"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site
 // subnet is reachable. Mirror of policyspec.Route. PLUMBING, never in the hash.
 type Route struct {
 	DstCIDR string `json:"dst_cidr"`
+}
+
+// DNSForward is one forwarded zone (S8.4): queries for Domain go to ResolverIP over the tunnel. Mirror of
+// policyspec.DNSForward. Convenience plumbing, never in the hash.
+type DNSForward struct {
+	Domain     string `json:"domain"`
+	ResolverIP string `json:"resolver_ip"`
 }
 
 // hashAllow / hashView are the ENFORCEMENT-ONLY projection hashed by CanonicalHash —

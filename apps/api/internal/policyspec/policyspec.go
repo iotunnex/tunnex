@@ -194,4 +194,19 @@ type Compiled struct {
 	// plumbing, not projected). Only rides WITH Routes (a remote route exists), so it inherits v5's gate;
 	// an old agent that ignored it would lose ONLY the src-hint (degraded-not-broken) — no version bump.
 	LocalSubnets []string `json:"local_subnets,omitempty"`
+	// DNSForwards (S8.4 D1/D5) is the org's cross-site DNS forwarding table: {domain -> resolver_ip} for
+	// each approved site zone, so this gateway's in-agent forwarder can send a query for a remote site's
+	// domain to that site's internal resolver over the tunnel. OUT OF CanonicalHash + NO RequiredVersion
+	// trigger — degraded-not-broken CONVENIENCE (unlike Routes): a DNS-blind agent serves a WORKING bridge
+	// where names don't resolve (visibly degraded, user-diagnosable), never a dead bridge while green. So it
+	// is neither hashed nor version-gated; a no-DNS org's artifact is byte-identical.
+	DNSForwards []DNSForward `json:"dns_forwards,omitempty"`
+}
+
+// DNSForward is one forwarded zone: queries for Domain go to ResolverIP (an address inside the declaring
+// site's approved subnet — validated at write time, D7). The org-wide union is compiled onto every gateway
+// so any gateway can answer for any site's zone (local resolver direct; remote via the tunnel route).
+type DNSForward struct {
+	Domain     string `json:"domain"`
+	ResolverIP string `json:"resolver_ip"`
 }
