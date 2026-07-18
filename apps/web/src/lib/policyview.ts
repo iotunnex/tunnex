@@ -3,7 +3,7 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest } from "./api";
+import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest, Site } from "./api";
 
 // roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
 // members load must NOT read as "no role" — that silently downgrades an admin to the
@@ -168,6 +168,7 @@ export interface LoadState {
   groupsLoaded: boolean;
   resourcesLoaded: boolean;
   membersLoaded?: boolean; // S7.5.4: for resolving a per-user subject to a member name
+  sitesLoaded?: boolean; // S8.2c WF-8: for resolving a site subject to its NAME (not the raw UUID)
 }
 
 function short(id: string): string {
@@ -197,30 +198,41 @@ function resolveResource(id: string, resources: Resource[], loaded: boolean): Re
   return { id, label: `deleted resource ${short(id)}`, state: "deleted" };
 }
 
+// resolveSite (WF-8): render a site subject by its NAME. The raw truncated UUID was both unreadable
+// AND ambiguous — sites are UUIDv7 (time-ordered), so two sites created seconds apart share a prefix
+// (`019f762b…`) and rendered identically. Falls back to "site <id>" only when the sites set is
+// unavailable (can't tell deleted from present), matching the group/resource honesty.
+function resolveSite(id: string, sites: Site[], loaded: boolean): RefLabel {
+  const s = sites.find((x) => x.id === id);
+  if (s) return { id, label: `site ${s.name}`, state: "ok" };
+  if (!loaded) return { id, label: `site ${short(id)} — refresh`, state: "unresolved" };
+  return { id, label: `deleted site ${short(id)}`, state: "deleted" };
+}
+
 export function ruleRow(
   rule: PolicyRule,
   groups: UserGroup[],
   resources: Resource[],
   members: Member[],
+  sites: Site[],
   loaded: LoadState,
 ): RuleRow {
-  // S7.5.4: a rule's source is a group OR a single user — resolve each to a name,
-  // honestly (a removed-user or deleted-group ref shows distinctly, never mislabeled).
+  // S7.5.4: a rule's source is a group OR a single user (S8.2: OR a site) — resolve each to a NAME,
+  // honestly (a removed-user / deleted-group / deleted-site ref shows distinctly, never mislabeled).
   const src: RefLabel =
     rule.src_kind === "user"
       ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
-      : rule.src_kind === "site" // S8.2: a site LAN as the source — a stable "site <id>" label, not a broken group
-        ? { id: rule.src_site_id ?? "", label: `site ${short(rule.src_site_id ?? "")}`, state: "ok" }
+      : rule.src_kind === "site" // WF-8: resolve to the site NAME, not the ambiguous UUIDv7 prefix
+        ? resolveSite(rule.src_site_id ?? "", sites, loaded.sitesLoaded ?? false)
         : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
-  // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site label, NOT the
-  // resource branch (which would render a valid site rule as a broken 'deleted resource', the
-  // never-mislabeled invariant. No site name is loaded here yet — the S8.3 site UI supplies it — so
-  // show a stable "site <id>" at state ok; display + edit are now both site-aware).
+  // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site NAME (WF-8), NOT the
+  // resource branch (which would render a valid site rule as a broken 'deleted resource'), preserving
+  // the never-mislabeled invariant.
   const dst: RefLabel =
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
       : rule.dst_kind === "site"
-        ? { id: rule.dst_site_id ?? "", label: `site ${short(rule.dst_site_id ?? "")}`, state: "ok" }
+        ? resolveSite(rule.dst_site_id ?? "", sites, loaded.sitesLoaded ?? false)
         : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
   return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok" };
 }

@@ -307,7 +307,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     setSites((sr.ok ? (sr.data as Site[]) : []) as Site[]); // D5
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
-    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok });
+    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok, sitesLoaded: sr.ok }); // sitesLoaded → WF-8 name resolution
     setErr(gr.ok && resr.ok && mr.ok ? null : "Some groups/resources/members failed to load — names may show as unresolved. Refresh.");
     // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
     // longer present, keep the rest (B).
@@ -372,7 +372,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
           )}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
-              const row = ruleRow(r, groups, resources, members, loaded);
+              const row = ruleRow(r, groups, resources, members, sites, loaded);
               const exp = grantExpiry(r, Date.now());
               return (
                 <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm">

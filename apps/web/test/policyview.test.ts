@@ -80,18 +80,34 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("resolves group→group and group→resource to names", () => {
     const g2g: PolicyRule = { id: "1", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(g2g, groups, resources, [], LOADED);
+    const row = ruleRow(g2g, groups, resources, [], [], LOADED);
     expect(row.src.label).toBe("Engineering");
     expect(row.dst.label).toBe("Databases");
     expect(row.broken).toBe(false);
 
     const g2r: PolicyRule = { id: "2", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    expect(ruleRow(g2r, groups, resources, [], LOADED).dst.label).toBe("10.0.5.0/24");
+    expect(ruleRow(g2r, groups, resources, [], [], LOADED).dst.label).toBe("10.0.5.0/24");
+  });
+
+  it("WF-8: site rules resolve to NAMES, and two UUIDv7-prefix-sharing sites render distinguishably", () => {
+    // UUIDv7 (time-ordered) — created seconds apart, so they SHARE the first 8 chars (the demo bug).
+    const azure = { id: "019f762b-b62b-7aa8-9362-249ecf231395", name: "azure-site" } as any;
+    const aws = { id: "019f762b-c00c-7fff-8888-000000000000", name: "aws-site" } as any;
+    const rule: PolicyRule = { id: "s", src_kind: "site", src_site_id: azure.id, dst_kind: "site", dst_site_id: aws.id } as PolicyRule;
+    const row = ruleRow(rule, [], [], [], [azure, aws], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true });
+    expect(row.src.label).toBe("site azure-site");
+    expect(row.dst.label).toBe("site aws-site");
+    expect(row.src.label).not.toBe(row.dst.label); // the prefix-collision no longer makes them identical
+    expect(row.broken).toBe(false);
+    // sites set FAILED to load → honest "refresh", not a fake name.
+    const un = ruleRow(rule, [], [], [], [], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: false });
+    expect(un.src.state).toBe("unresolved");
+    expect(un.src.label).toMatch(/refresh/);
   });
 
   it("referent ABSENT from a LOADED set → 'deleted' (not omitted, broken=true)", () => {
     const rule: PolicyRule = { id: "3", src_group_id: "g-gone", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(rule, groups, resources, [], LOADED);
+    const row = ruleRow(rule, groups, resources, [], [], LOADED);
     expect(row.src.state).toBe("deleted");
     expect(row.src.label).toMatch(/deleted group/i);
     expect(row.broken).toBe(true);
@@ -100,7 +116,7 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("set FAILED TO LOAD → 'unresolved — refresh', NOT 'deleted' (no false alarm)", () => {
     const rule: PolicyRule = { id: "4", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(rule, [], resources, [], { groupsLoaded: false, resourcesLoaded: true });
+    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: false, resourcesLoaded: true });
     expect(row.src.state).toBe("unresolved");
     expect(row.src.label).toMatch(/unresolved group.*refresh/i);
     expect(row.src.label).not.toMatch(/deleted/i); // must NOT lie about why
@@ -108,7 +124,7 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 
   it("resource set failed to load → dst unresolved, not deleted", () => {
     const rule: PolicyRule = { id: "5", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    const row = ruleRow(rule, groups, [], [], { groupsLoaded: true, resourcesLoaded: false });
+    const row = ruleRow(rule, groups, [], [], [], { groupsLoaded: true, resourcesLoaded: false });
     expect(row.dst.state).toBe("unresolved");
     expect(row.dst.label).toMatch(/refresh/i);
   });
@@ -324,18 +340,18 @@ describe("S7.5.4 ruleRow user subject", () => {
   const rule = { id: "r1", src_kind: "user", src_user_id: "u1", dst_kind: "resource", dst_resource_id: "res1" } as PolicyRule;
   const resources = [R("res1", "db")];
   it("resolves a per-user subject to the member name", () => {
-    const row = ruleRow(rule, [], resources, [M("u1", "alice")], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    const row = ruleRow(rule, [], resources, [M("u1", "alice")], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
     expect(row.src.label).toBe("alice");
     expect(row.src.state).toBe("ok");
   });
   it("a removed user (not in a loaded roster) shows distinctly, never mislabeled", () => {
-    const row = ruleRow(rule, [], resources, [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
     expect(row.src.label).toMatch(/removed user/);
     expect(row.src.state).toBe("deleted");
     expect(row.broken).toBe(true);
   });
   it("a FAILED roster load reads unresolved (refresh), not removed", () => {
-    const row = ruleRow(rule, [], resources, [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: false });
+    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: false });
     expect(row.src.state).toBe("unresolved");
   });
 });
@@ -410,9 +426,10 @@ describe("ruleRow — a site-dst rule renders as a site, NEVER a broken 'deleted
       id: "r1", org_id: "o", src_kind: "group", src_group_id: "g1",
       dst_kind: "site", dst_site_id: "00000000-0000-0000-0000-0000000051e1", created_at: "x",
     } as any;
-    const row = ruleRow(rule, [{ id: "g1", name: "Admins" } as any], [], [], { groupsLoaded: true, resourcesLoaded: true } as any);
+    const site = { id: "00000000-0000-0000-0000-0000000051e1", name: "hq-site" } as any;
+    const row = ruleRow(rule, [{ id: "g1", name: "Admins" } as any], [], [], [site], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true } as any);
     expect(row.dst.state).toBe("ok");
-    expect(row.dst.label).toMatch(/^site /);
+    expect(row.dst.label).toBe("site hq-site"); // WF-8: resolved to the NAME, never a broken 'deleted resource'
     expect(row.broken).toBe(false);
   });
 });
