@@ -54,6 +54,23 @@ func TestRequiredVersionRoutesTriggerV5(t *testing.T) {
 	}
 }
 
+// TestDNSForwardsHashBlindAndNoVersionTrigger — S8.4 D5 LAW guard, the D2-checklist row exercised. UNLIKE
+// Routes, DNSForwards is CONVENIENCE (a DNS-blind agent serves a WORKING bridge where names just don't
+// resolve — visibly degraded, nothing silently unsafe), so it is BOTH hash-blind AND does NOT trigger a
+// RequiredVersion bump. This red-fails if a future change hashes DNS or version-gates it.
+func TestDNSForwardsHashBlindAndNoVersionTrigger(t *testing.T) {
+	base := policyspec.Compiled{NodeID: "n", Mode: "off", Mesh: true}
+	withDNS := base
+	withDNS.DNSForwards = []policyspec.DNSForward{{Domain: "corp.local", ResolverIP: "10.0.0.53"}}
+	if policyspec.CanonicalHash(withDNS) != policyspec.CanonicalHash(base) {
+		t.Fatal("DNSForwards must be hash-blind — adding a forward changed CanonicalHash")
+	}
+	if policyspec.RequiredVersion(withDNS) != policyspec.RequiredVersion(base) {
+		t.Fatalf("DNSForwards must NOT trigger a version bump (convenience, not reachability); got %d vs %d",
+			policyspec.RequiredVersion(withDNS), policyspec.RequiredVersion(base))
+	}
+}
+
 // TestCanonicalHashRuleIDIsObservabilityOnly is the A-1/A-3 red pair: rule_id
 // (observability) must be INVISIBLE to the hash in BOTH directions, and an
 // enforcement-field change MUST move the hash. This is the "observability, never

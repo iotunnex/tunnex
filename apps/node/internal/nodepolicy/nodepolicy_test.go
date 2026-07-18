@@ -79,6 +79,18 @@ func TestCanonicalHashRuleIDIsObservabilityOnly(t *testing.T) {
 	}
 }
 
+// TestCanonicalHashDNSForwardsBlind — S8.4 D5 (agent side): DNSForwards is convenience plumbing, out of
+// the hash, so the agent's applied hash matches the CP's pushed hash whether or not DNS is configured
+// (no false silent_desync from a DNS-only change). Mirror of policyspec's guard.
+func TestCanonicalHashDNSForwardsBlind(t *testing.T) {
+	base := &nodepolicy.Compiled{Version: 5, NodeID: "node-a", Mode: nodepolicy.ModeEnforcing}
+	withDNS := *base
+	withDNS.DNSForwards = []nodepolicy.DNSForward{{Domain: "corp.local", ResolverIP: "10.0.0.53"}}
+	if nodepolicy.CanonicalHash(base) != nodepolicy.CanonicalHash(&withDNS) {
+		t.Fatal("DNSForwards must be hash-blind on the agent side too (else a DNS change false-alarms silent_desync)")
+	}
+}
+
 // The agent must CAPTURE rule_id off the v2 wire (it stamps flow/deny events with it,
 // D6) — while the hash stays blind to it (equal to the rule_id-free equivalent).
 func TestWireRuleIDCapturedButHashBlind(t *testing.T) {
