@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { assembleTopology, siteGate, sitesView } from "../src/lib/sitesview";
+import {
+  assembleTopology,
+  crossesMultiSiteThreshold,
+  disjointRefusal,
+  nameMatchesExactly,
+  siteGate,
+  sitesView,
+  subCeilingGateways,
+} from "../src/lib/sitesview";
 import type { Node, Site, SiteSubnet } from "../src/lib/api";
 
 const site = (id: string, name: string): Site => ({ id, name, link_transport: "wireguard", created_at: "2026-01-01T00:00:00Z" });
@@ -89,5 +97,67 @@ describe("assembleTopology — the wire-truth join (CH list-of-one, backend hub,
   it("a site with no bound gateway renders an empty gateway list (stated, not hidden)", () => {
     const cards = assembleTopology([sA], {}, []);
     expect(cards[0].gateways).toEqual([]);
+  });
+});
+
+// ── Slice 3: mutation-surface decisions ──────────────────────────────────────────────
+
+describe("crossesMultiSiteThreshold — the CW confirm's action-ordering gate", () => {
+  it("a FIRST site's approval never crosses (no other site has approved subnets yet)", () => {
+    expect(crossesMultiSiteThreshold("sa", {})).toBe(false); // no approved anywhere
+    expect(crossesMultiSiteThreshold("sa", { sa: 0 })).toBe(false);
+  });
+  it("first-approval-on-the-SECOND-site crosses (1 other site approved → becomes 2)", () => {
+    expect(crossesMultiSiteThreshold("sb", { sa: 2, sb: 0 })).toBe(true);
+  });
+  it("adding a 2nd subnet to an already-approved site does NOT cross (site count unchanged)", () => {
+    expect(crossesMultiSiteThreshold("sa", { sa: 1, sb: 3 })).toBe(false);
+  });
+  it("a 3rd site's approval when already multi-site does NOT newly cross (v5 already active)", () => {
+    expect(crossesMultiSiteThreshold("sc", { sa: 1, sb: 1, sc: 0 })).toBe(false);
+  });
+});
+
+describe("subCeilingGateways — names the gateways below the server ceiling (absence = below)", () => {
+  const gws = [
+    { id: "g1", name: "hub", maxPolicyVersion: 5 },
+    { id: "g2", name: "old", maxPolicyVersion: 4 },
+    { id: "g3", name: "never-reported", maxPolicyVersion: null },
+  ];
+  it("all-fleet-at-ceiling → EMPTY (clean confirm, no gateway list)", () => {
+    expect(subCeilingGateways([{ id: "g1", name: "a", maxPolicyVersion: 5 }], 5)).toEqual([]);
+  });
+  it("mixed → names the sub-ceiling gateways; a never-reported agent counts as below", () => {
+    expect(subCeilingGateways(gws, 5)).toEqual([
+      { id: "g2", name: "old" },
+      { id: "g3", name: "never-reported" },
+    ]);
+  });
+});
+
+describe("nameMatchesExactly — the delete-site ceremony (exact match, button dead until then)", () => {
+  it("exact match only", () => {
+    expect(nameMatchesExactly("HQ", "HQ")).toBe(true);
+    expect(nameMatchesExactly("hq", "HQ")).toBe(false);
+    expect(nameMatchesExactly("HQ ", "HQ")).toBe(false); // trailing space is not a match
+    expect(nameMatchesExactly("", "HQ")).toBe(false);
+  });
+});
+
+describe("disjointRefusal — VERBATIM per overlap class, null otherwise (no JS re-check)", () => {
+  const refusal = (cls: string) => ({ error: { code: "subnet_not_disjoint", message: `this subnet overlaps the ${cls} range 10.0.0.0/24; approval refused` } });
+  // One case per overlap class → a future class addition can't render blank.
+  it("site-class refusal renders the API message verbatim", () => {
+    expect(disjointRefusal(refusal("site"))).toMatch(/overlaps the site range/);
+  });
+  it("pool-class refusal renders verbatim", () => {
+    expect(disjointRefusal(refusal("pool"))).toMatch(/overlaps the pool range/);
+  });
+  it("reserved-class refusal renders verbatim", () => {
+    expect(disjointRefusal(refusal("reserved"))).toMatch(/overlaps the reserved range/);
+  });
+  it("a non-disjointness error returns null (caller shows its generic message)", () => {
+    expect(disjointRefusal({ error: { code: "something_else", message: "x" } })).toBeNull();
+    expect(disjointRefusal(undefined)).toBeNull();
   });
 });

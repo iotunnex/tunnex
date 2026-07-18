@@ -67,6 +67,43 @@ export interface SiteCard {
   subnets: SubnetView[];
 }
 
+// ── mutation-surface decisions (Slice 3, all PURE) ───────────────────────────────────
+
+// crossesMultiSiteThreshold — the CW confirm's ACTION-ORDERING gate. The cross-site upgrade warning fires
+// at the ONE crossing: approving a subnet that takes the org from single-site-routable (≤1 site with an
+// approved subnet, so NO routes compile) to multi-site-routable (≥2, so hub-and-spoke routes compile and
+// the artifact bumps to v5). That happens iff THIS site has no approved subnet yet AND exactly ONE OTHER
+// site already does (1 → 2). A first site's first approval (0 others) does not cross; a 3rd-site approval
+// when already multi-site (≥2 others) does not newly cross (v5 already active). PURE.
+export function crossesMultiSiteThreshold(approvingSiteId: string, approvedCountBySite: Record<string, number>): boolean {
+  if ((approvedCountBySite[approvingSiteId] ?? 0) > 0) return false; // site already contributes routes
+  const otherSitesWithApproved = Object.entries(approvedCountBySite).filter(([id, c]) => id !== approvingSiteId && c > 0).length;
+  return otherSitesWithApproved === 1; // was single-site-routable, becomes multi-site — the crossing
+}
+
+// subCeilingGateways — the gateways the CW confirm NAMES: those whose reported max policy version is below
+// the server ceiling. Absence (null — a pre-CW/pre-upgrade agent that never reported) counts as BELOW (the
+// S7.5.3 absence-is-not-compliance rule; those are the very gateways the warning exists for). PURE.
+export function subCeilingGateways(gateways: { id: string; name: string; maxPolicyVersion: number | null }[], ceiling: number): { id: string; name: string }[] {
+  return gateways.filter((g) => (g.maxPolicyVersion ?? 0) < ceiling).map((g) => ({ id: g.id, name: g.name }));
+}
+
+// nameMatchesExactly — the delete-site name-typed ceremony (D4, the S4.5 one-time grain): the typed value
+// must EQUAL the site's name exactly. The Delete button stays dead until this is true.
+export function nameMatchesExactly(typed: string, siteName: string): boolean {
+  return typed === siteName;
+}
+
+// disjointRefusal — the D3 VERBATIM refusal: on a `subnet_not_disjoint` 409, return the API's own message
+// (it names the overlap_class + colliding range). Returns null for any other error so the caller shows its
+// generic message. NO client-side disjointness re-computation (the comparison-set law's UI corollary — one
+// validator, never a second copy in JS). PURE.
+export function disjointRefusal(err: unknown): string | null {
+  const e = err as { error?: { code?: string; message?: string } } | undefined;
+  if (e?.error?.code === "subnet_not_disjoint") return e.error.message ?? "This subnet overlaps an existing range; approval refused.";
+  return null;
+}
+
 // assembleTopology joins sites + their subnets + the nodes list into render-ready cards. PURE. A site's
 // gateways = the nodes whose site_id is this site (the D2/CH join). Everything a card shows is a wire
 // field; the only computation is the join + the health-badge projection (itself pure).

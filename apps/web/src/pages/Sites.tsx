@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
+  apiErrorMessage,
   loadOne,
   type Loaded,
   type Meta,
@@ -9,18 +10,29 @@ import {
   type Role,
   type Site,
   type SiteSubnet,
+  type SiteReferences,
   type Node,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { Card } from "../components/ui";
+import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
-import { assembleTopology, siteGate, sitesView, type GatewayView, type SiteCard } from "../lib/sitesview";
+import {
+  assembleTopology,
+  crossesMultiSiteThreshold,
+  disjointRefusal,
+  nameMatchesExactly,
+  siteGate,
+  sitesView,
+  subCeilingGateways,
+  type GatewayView,
+  type SiteCard,
+} from "../lib/sitesview";
 
-// Sites (S8.3 Slice 2): the read-only topology. Every value on screen traces to a wire field — the
-// render-floor law (no animation, nothing implied). Hub designation is backend-derived (node.is_site_hub),
-// health is the S7.4b/S8.2 badge, a site's gateways are a LIST (CH). Mutations + the pending queue are
-// Slice 3; this slice renders truth and gates by edition/role.
+// Sites (S8.3): the topology + its mutation surfaces. Reads render wire-truth only (render-floor law);
+// mutations all go through the AUDITED service endpoints (Slice-3 condition 4 — nothing routed around the
+// audit trail). The pending queue + every mutation affordance are canManage-gated (D5: a member sees the
+// read-only topology, never the queue).
 
 function LoadRetry({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
@@ -33,6 +45,12 @@ function LoadRetry({ error, onRetry }: { error: string; onRetry: () => void }) {
   );
 }
 
+interface Raw {
+  sites: Site[];
+  nodes: Node[];
+  subnetsBySite: Record<string, SiteSubnet[]>;
+}
+
 export default function Sites() {
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
@@ -40,12 +58,13 @@ export default function Sites() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
   const [myRole, setMyRole] = useState<Role | undefined>(undefined);
-  const [cards, setCards] = useState<SiteCard[] | null>(null);
+  const [raw, setRaw] = useState<Raw | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [registering, setRegistering] = useState(false);
 
   const reload = useCallback(async () => {
     setLoadError(null);
-    setCards(null);
+    setRaw(null);
     const mRes = await loadOne(() => api.GET("/api/v1/meta"));
     if (!mRes.ok) return setLoadError(mRes.error);
     setMeta(mRes.data as Meta);
@@ -54,15 +73,12 @@ export default function Sites() {
     const first = (oRes.data as Org[])[0];
     if (!first) return setLoadError("You are not a member of any organization yet.");
     setOrg(first);
-    // Role (for the manage gate) — only meaningful for enterprise; a member still sees the topology.
     const memRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId: first.id } } }),
     )) as Loaded<Member[]>;
     setMyRole(roleFromMembers(memRes, myId).role);
 
-    if ((mRes.data as Meta).edition !== "enterprise") return; // upsell view; no site fetches
-    // The topology join: sites + nodes + per-site subnets. A single failed fetch is a legible retry,
-    // never a reassuring empty topology (the S7.4a no-false-empty rule).
+    if ((mRes.data as Meta).edition !== "enterprise") return;
     const sRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/sites", { params: { path: { orgId: first.id } } }),
     )) as Loaded<Site[]>;
@@ -74,14 +90,12 @@ export default function Sites() {
     const subnetsBySite: Record<string, SiteSubnet[]> = {};
     for (const site of sRes.data) {
       const subRes = (await loadOne(() =>
-        api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/subnets", {
-          params: { path: { orgId: first.id, siteId: site.id } },
-        }),
+        api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/subnets", { params: { path: { orgId: first.id, siteId: site.id } } }),
       )) as Loaded<SiteSubnet[]>;
       if (!subRes.ok) return setLoadError(subRes.error);
       subnetsBySite[site.id] = subRes.data;
     }
-    setCards(assembleTopology(sRes.data, subnetsBySite, nRes.data));
+    setRaw({ sites: sRes.data, nodes: nRes.data, subnetsBySite });
   }, [myId]);
   useEffect(() => {
     reload();
@@ -90,10 +104,26 @@ export default function Sites() {
   const gate = siteGate({ role: myRole, emailVerified, edition: meta?.edition });
   const view = sitesView({ editionReady: meta != null && org != null, loadError: loadError != null, isEnterprise: gate.isEnterprise });
 
+  const cards: SiteCard[] = useMemo(() => (raw ? assembleTopology(raw.sites, raw.subnetsBySite, raw.nodes) : []), [raw]);
+  // Approved-subnet count per site — the CW threshold input. Unbound nodes — the bind picker. All gateways
+  // (nodes bound to any site) — the CW sub-ceiling naming input. All derived from wire data.
+  const approvedCountBySite = useMemo(() => {
+    const m: Record<string, number> = {};
+    if (raw) for (const [sid, subs] of Object.entries(raw.subnetsBySite)) m[sid] = subs.filter((s) => s.status === "approved").length;
+    return m;
+  }, [raw]);
+  const unboundNodes = useMemo(() => (raw ? raw.nodes.filter((n) => !n.site_id && n.status === "active") : []), [raw]);
+  const allGateways = useMemo(() => cards.flatMap((c) => c.gateways), [cards]);
+
   return (
     <div>
-      <h1 className="text-xl font-semibold text-white">Sites</h1>
-      <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-white">Sites</h1>
+          <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+        </div>
+        {view === "body" && gate.canManage && <Button onClick={() => setRegistering(true)}>Register site</Button>}
+      </div>
 
       {view === "load_retry" && <LoadRetry error={loadError ?? "Couldn't load."} onRetry={reload} />}
       {view === "loading" && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
@@ -107,13 +137,47 @@ export default function Sites() {
         </Card>
       )}
 
-      {view === "body" && cards != null && <Topology cards={cards} canManage={gate.canManage} />}
-      {view === "body" && cards == null && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
+      {view === "body" && raw != null && org != null && (
+        <>
+          {gate.canManage && (
+            <PendingQueue
+              orgId={org.id}
+              approvedCountBySite={approvedCountBySite}
+              allGateways={allGateways}
+              ceiling={meta?.protocol_version ?? 0}
+              onDone={reload}
+            />
+          )}
+          <Topology
+            cards={cards}
+            canManage={gate.canManage}
+            orgId={org.id}
+            unboundNodes={unboundNodes}
+            onDone={reload}
+          />
+        </>
+      )}
+      {view === "body" && raw == null && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
+
+      {registering && org && <RegisterSiteModal orgId={org.id} onDone={reload} onClose={() => setRegistering(false)} />}
     </div>
   );
 }
 
-function Topology({ cards, canManage }: { cards: SiteCard[]; canManage: boolean }) {
+// ── the read-only topology + per-site mutation affordances ───────────────────────────
+function Topology({
+  cards,
+  canManage,
+  orgId,
+  unboundNodes,
+  onDone,
+}: {
+  cards: SiteCard[];
+  canManage: boolean;
+  orgId: string;
+  unboundNodes: Node[];
+  onDone: () => void;
+}) {
   if (cards.length === 0) {
     return (
       <Card className="mt-6">
@@ -126,23 +190,34 @@ function Topology({ cards, canManage }: { cards: SiteCard[]; canManage: boolean 
   return (
     <div className="mt-6 space-y-4">
       {cards.map((c) => (
-        <SiteCardView key={c.id} card={c} />
+        <SiteCardView key={c.id} card={c} canManage={canManage} orgId={orgId} unboundNodes={unboundNodes} onDone={onDone} />
       ))}
     </div>
   );
 }
 
-function SiteCardView({ card }: { card: SiteCard }) {
+function SiteCardView({
+  card,
+  canManage,
+  orgId,
+  unboundNodes,
+  onDone,
+}: {
+  card: SiteCard;
+  canManage: boolean;
+  orgId: string;
+  unboundNodes: Node[];
+  onDone: () => void;
+}) {
+  const [modal, setModal] = useState<"subnet" | "bind" | "unbind" | "delete" | null>(null);
+  const hasGateway = card.gateways.length > 0;
   return (
     <Card>
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold text-white">{card.name}</h2>
-        <span className="text-xs text-slate-500">
-          {card.gateways.length === 1 ? "1 gateway" : `${card.gateways.length} gateways`}
-        </span>
+        <span className="text-xs text-slate-500">{card.gateways.length === 1 ? "1 gateway" : `${card.gateways.length} gateways`}</span>
       </div>
 
-      {/* Gateways — a LIST (CH), usually one in v1. A site with no bound gateway is stated, not hidden. */}
       {card.gateways.length === 0 ? (
         <p className="mt-2 text-xs text-slate-500">No gateway bound.</p>
       ) : (
@@ -153,7 +228,6 @@ function SiteCardView({ card }: { card: SiteCard }) {
         </ul>
       )}
 
-      {/* Subnets with their REAL approval state (never assumed approved). */}
       {card.subnets.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {card.subnets.map((s) => (
@@ -170,6 +244,25 @@ function SiteCardView({ card }: { card: SiteCard }) {
           ))}
         </div>
       )}
+
+      {canManage && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={() => setModal("subnet")}>Advertise subnet</Button>
+          {hasGateway ? (
+            <Button variant="ghost" onClick={() => setModal("unbind")}>Unbind gateway</Button>
+          ) : (
+            <Button variant="ghost" onClick={() => setModal("bind")} disabled={unboundNodes.length === 0}>
+              Bind gateway
+            </Button>
+          )}
+          <Button variant="danger" onClick={() => setModal("delete")}>Delete site</Button>
+        </div>
+      )}
+
+      {modal === "subnet" && <AddSubnetModal orgId={orgId} siteId={card.id} onDone={onDone} onClose={() => setModal(null)} />}
+      {modal === "bind" && <BindGatewayModal orgId={orgId} siteId={card.id} nodes={unboundNodes} onDone={onDone} onClose={() => setModal(null)} />}
+      {modal === "unbind" && <UnbindConfirm orgId={orgId} siteId={card.id} onDone={onDone} onClose={() => setModal(null)} />}
+      {modal === "delete" && <DeleteSiteModal orgId={orgId} site={card} onDone={onDone} onClose={() => setModal(null)} />}
     </Card>
   );
 }
@@ -186,5 +279,323 @@ function GatewayRow({ g }: { g: GatewayView }) {
         {g.maxPolicyVersion != null && ` · policy v${g.maxPolicyVersion}`}
       </span>
     </li>
+  );
+}
+
+// ── mutation modals (all hit the audited service endpoints) ──────────────────────────
+function RegisterSiteModal({ orgId, onDone, onClose }: { orgId: string; onDone: () => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/sites", { params: { path: { orgId } }, body: { name } });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not register the site."));
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title="Register a site"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || name.trim() === ""}>Register</Button>
+        </>
+      }
+    >
+      <Field label="Site name">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mumbai office" autoFocus />
+      </Field>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+function AddSubnetModal({ orgId, siteId, onDone, onClose }: { orgId: string; siteId: string; onDone: () => void; onClose: () => void }) {
+  const [cidr, setCidr] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/sites/{siteId}/subnets", {
+      params: { path: { orgId, siteId } },
+      body: { cidr },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not advertise the subnet."));
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title="Advertise a subnet"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || cidr.trim() === ""}>Advertise</Button>
+        </>
+      }
+    >
+      <p className="text-xs text-slate-500">The subnet is advertised as PENDING — an owner or admin must approve it before it routes.</p>
+      <div className="mt-2">
+        <Field label="LAN CIDR">
+          <Input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="10.20.0.0/24" autoFocus />
+        </Field>
+      </div>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+function BindGatewayModal({
+  orgId,
+  siteId,
+  nodes,
+  onDone,
+  onClose,
+}: {
+  orgId: string;
+  siteId: string;
+  nodes: Node[];
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [nodeId, setNodeId] = useState(nodes[0]?.id ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/sites/{siteId}/bind", {
+      params: { path: { orgId, siteId } },
+      body: { node_id: nodeId },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not bind the gateway."));
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title="Bind a gateway"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || nodeId === ""}>Bind</Button>
+        </>
+      }
+    >
+      <Field label="Gateway node">
+        <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+          {nodes.map((n) => (
+            <option key={n.id} value={n.id}>{n.name}</option>
+          ))}
+        </Select>
+      </Field>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+function UnbindConfirm({ orgId, siteId, onDone, onClose }: { orgId: string; siteId: string; onDone: () => void; onClose: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/sites/{siteId}/bind", { params: { path: { orgId, siteId } } });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not unbind the gateway."));
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title="Unbind the gateway?"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>Unbind</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-400">
+        The gateway's site-link peers and routes are swept. The site and its subnets are kept — bind a replacement to restore routing.
+      </p>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+function DeleteSiteModal({ orgId, site, onDone, onClose }: { orgId: string; site: SiteCard; onDone: () => void; onClose: () => void }) {
+  const [refs, setRefs] = useState<SiteReferences | null>(null);
+  const [refErr, setRefErr] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const r = (await loadOne(() =>
+        api.GET("/api/v1/organizations/{orgId}/sites/{siteId}", { params: { path: { orgId, siteId: site.id } } }),
+      )) as Loaded<SiteReferences>;
+      if (r.ok) setRefs(r.data);
+      else setRefErr(r.error);
+    })();
+  }, [orgId, site.id]);
+
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/sites/{siteId}", { params: { path: { orgId, siteId: site.id } } });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not delete the site."));
+    onClose();
+    onDone();
+  }
+
+  return (
+    <Modal
+      title={`Delete “${site.name}”?`}
+      danger
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" className="bg-danger hover:bg-danger" onClick={submit} disabled={busy || !nameMatchesExactly(typed, site.name)}>
+            Delete site
+          </Button>
+        </>
+      }
+    >
+      {/* PRESENT-TENSE cascade preview (the ratified copy — advisory, not a promise; the audit records the
+          actual counts). */}
+      {refErr && <p className="text-xs text-amber-300">Couldn’t read what this affects ({refErr}). Deleting still cascades.</p>}
+      {refs && (
+        <p className="text-sm text-slate-400">
+          This deletes the site and cascades what currently references it: <strong>{refs.rule_count}</strong>{" "}
+          {refs.rule_count === 1 ? "rule" : "rules"} and <strong>{refs.subnet_count}</strong>{" "}
+          {refs.subnet_count === 1 ? "subnet" : "subnets"}; the gateway is unbound.
+        </p>
+      )}
+      <p className="mt-3 text-xs text-slate-500">Type the site name to confirm.</p>
+      <div className="mt-1">
+        <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={site.name} autoFocus />
+      </div>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+// ── the pending-approval queue (admin-only, D5) + the CW upgrade confirm ──────────────
+function PendingQueue({
+  orgId,
+  approvedCountBySite,
+  allGateways,
+  ceiling,
+  onDone,
+}: {
+  orgId: string;
+  approvedCountBySite: Record<string, number>;
+  allGateways: GatewayView[];
+  ceiling: number;
+  onDone: () => void;
+}) {
+  const [pending, setPending] = useState<SiteSubnet[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ subnet: SiteSubnet; gateways: { id: string; name: string }[] } | null>(null);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+
+  const loadQueue = useCallback(async () => {
+    setLoadErr(null);
+    const r = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/site-subnets/pending", { params: { path: { orgId } } }),
+    )) as Loaded<SiteSubnet[]>;
+    if (r.ok) setPending(r.data);
+    else setLoadErr(r.error);
+  }, [orgId]);
+  useEffect(() => {
+    loadQueue();
+  }, [loadQueue]);
+
+  // approve does the actual POST + shared error handling (verbatim refusal). Called directly for a
+  // non-crossing approval, or from the CW confirm's onConfirm.
+  async function approve(subnet: SiteSubnet) {
+    setRowErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/site-subnets/{subnetId}/approve", {
+      params: { path: { orgId, subnetId: subnet.id } },
+    });
+    if (error) {
+      // D3: a disjointness refusal renders VERBATIM (the API names the class + colliding range). No
+      // client-side re-check.
+      const refusal = disjointRefusal(error);
+      return setRowErr(refusal ?? apiErrorMessage(error, "Could not approve the subnet."));
+    }
+    setConfirm(null);
+    await loadQueue();
+    onDone(); // refresh the topology (a newly-approved subnet now routes)
+  }
+
+  // onApproveClick decides whether this approval crosses the multi-site threshold with sub-ceiling
+  // gateways present — if so it opens the CW confirm naming them; otherwise it approves directly.
+  function onApproveClick(subnet: SiteSubnet) {
+    const gateways = subCeilingGateways(allGateways, ceiling);
+    if (crossesMultiSiteThreshold(subnet.site_id, approvedCountBySite) && gateways.length > 0) {
+      setConfirm({ subnet, gateways });
+    } else {
+      approve(subnet);
+    }
+  }
+
+  if (loadErr) return <Card className="mt-6"><LoadRetry error={loadErr} onRetry={loadQueue} /></Card>;
+  if (pending == null) return null; // queue still loading — the topology below renders regardless
+  if (pending.length === 0) return null; // nothing awaiting approval → no queue section
+
+  return (
+    <Card className="mt-6">
+      <h2 className="text-sm font-semibold text-slate-300">Pending subnet approvals</h2>
+      <p className="mt-1 text-xs text-slate-500">Advertised subnets route only once approved (disjointness is checked on approval).</p>
+      <ul className="mt-3 space-y-2">
+        {pending.map((s) => (
+          <li key={s.id} className="flex items-center gap-3 text-sm">
+            <span className="font-mono text-slate-200">{s.cidr}</span>
+            <Button variant="ghost" className="ml-auto" onClick={() => onApproveClick(s)}>Approve</Button>
+          </li>
+        ))}
+      </ul>
+      <ErrorText>{rowErr}</ErrorText>
+
+      {confirm && (
+        <Modal
+          title="Enable cross-site routing?"
+          danger
+          onDismiss={() => setConfirm(null)}
+          actions={
+            <>
+              <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
+              <Button onClick={() => approve(confirm.subnet)}>Approve anyway</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-400">
+            Approving this subnet enables site-to-site routing, which requires policy version {ceiling}. These gateways cannot apply it
+            and will <strong>deny all traffic</strong> until upgraded:
+          </p>
+          <ul className="mt-2 list-disc pl-5 text-sm text-rose-300">
+            {confirm.gateways.map((g) => (
+              <li key={g.id}>{g.name}</li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+    </Card>
   );
 }
