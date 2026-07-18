@@ -82,6 +82,17 @@ type Manager struct {
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
+	// nftRun runs an arbitrary `nft <args...>` (list/insert/delete) and returns stdout;
+	// injectable for the DOCKER-USER foreign-chain reconcile tests (WF-4). Distinct from
+	// `apply` (the atomic `-f -` full-table replace) — the Docker-owned chain can't be
+	// flushed, so its rules are managed one at a time by handle.
+	nftRun func(context.Context, ...string) (string, error)
+	// forwardBlocked (WF-4 / D-WF4-d): true when this is a Docker host (DOCKER-USER exists),
+	// FORWARD is policy-drop, there ARE remote routes to carry, yet the agent could NOT place
+	// its DOCKER-USER accept — so forwarded site traffic is silently dropped by Docker's chain.
+	// Surfaced as site_subnet_unreachable (the advertised subnet is not reachable via this
+	// gateway) so the health surface shows it LOUD rather than blackholing green.
+	forwardBlocked atomic.Bool
 
 	mu sync.Mutex
 	// applied* is the status of the LAST SUCCESSFUL apply — what is actually in force
@@ -114,8 +125,13 @@ type Manager struct {
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager {
-	return &Manager{wgIface: wgIface, apply: nftApply, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
+	return &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
 }
+
+// ForwardBlocked reports the WF-4 / D-WF4-d condition: a Docker host whose FORWARD DROP is
+// swallowing forwarded site traffic the agent couldn't clear. The reconcile loop feeds this
+// into the site_subnet_unreachable health signal so it never blackholes green.
+func (m *Manager) ForwardBlocked() bool { return m.forwardBlocked.Load() }
 
 // SetFlowLogGroup enables flow logging by pointing the forward-chain log clauses at an
 // nflog group (>0). 0 disables it. Non-terminal + best-effort: the log clause NEVER changes
@@ -219,6 +235,16 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	if err := m.applyAndTrack(ctx, m.rulesetWith(subnet, pol), pol); err != nil {
 		return false, err // no nftables / IPv4 NAT support, or a bad ruleset → not egress-capable
 	}
+	// WF-4: on a Docker host, clear Docker's `filter FORWARD` DROP for the approved site routes
+	// (a Routes-scoped DOCKER-USER accept) so site-to-site forwarding works with zero gateway touch.
+	// Best-effort + idempotent; a Docker-blocked forward it can't clear is surfaced via ForwardBlocked().
+	var routeCIDRs []string
+	if pol != nil {
+		for _, rt := range pol.Routes {
+			routeCIDRs = append(routeCIDRs, rt.DstCIDR)
+		}
+	}
+	m.reconcileDockerForward(ctx, routeCIDRs)
 	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
 	// (default route) — otherwise full-tunnel would blackhole, so report NOT capable.
 	if subnet == "" || !hasDefaultRoute(ctx) {
@@ -568,6 +594,93 @@ func nftApply(ctx context.Context, ruleset string) error {
 		return fmt.Errorf("nft apply: %w: %s", err, bytes.TrimSpace(out))
 	}
 	return nil
+}
+
+// nftRun runs `nft <args...>` and returns stdout. Used by the DOCKER-USER foreign-chain
+// reconcile (WF-4) for list/insert/delete, which — unlike the atomic tunnex-table replace —
+// must edit a Docker-owned chain one rule at a time (never flush it).
+func nftRun(ctx context.Context, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, "nft", args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("nft %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(out))
+	}
+	return string(out), nil
+}
+
+const dockerUserComment = "tunnex-site-fwd" // marks the agent's own DOCKER-USER rules for idempotent find + full-sweep
+
+var dockerUserRuleRE = regexp.MustCompile(`ip daddr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
+
+// reconcileDockerForward makes site-to-site forwarding work on a DOCKER host with ZERO gateway
+// touch (WF-4). Docker sets `filter FORWARD` policy DROP + a DOCKER-USER hook; the agent's
+// `ip tunnex` forward accept is a SEPARATE base chain, so Docker's drop terminally kills the
+// forwarded behind-host packet. This inserts a Routes-SCOPED accept into DOCKER-USER (jumped
+// FIRST from FORWARD; an accept there clears the hook's drop) — mirroring the D1 rule, NEVER a
+// blanket ACCEPT. The `ip tunnex` chain still enforces the grant (proven on the wire: enforcing
+// with no grant stayed 100% loss even with a blanket DOCKER-USER accept), so this only lifts
+// Docker's isolation for approved site subnets, not the policy.
+//
+// Idempotent (list → insert only what's missing) + full-sweep (delete comment-marked rules whose
+// daddr left Routes) → re-run every reconcile tick, so a dockerd reload that recreates DOCKER-USER
+// self-heals within one interval (D-WF4-a). Docker-CONDITIONAL: no DOCKER-USER chain (bare metal /
+// the D4 bare-metal path) → no-op, forwarding rides the host's own FORWARD (D-WF4-c). Returns
+// forwardBlocked when we have routes to carry, FORWARD is policy-drop, yet we could not place the
+// accept — the D-WF4-d loud signal.
+func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (forwardBlocked bool) {
+	wg := m.wgIface
+	// Probe DOCKER-USER. Absent → not a Docker-managed FORWARD host; nothing to satisfy.
+	if _, err := m.nftRun(ctx, "list", "chain", "ip", "filter", "DOCKER-USER"); err != nil {
+		m.forwardBlocked.Store(false)
+		return false
+	}
+	// Desired = one accept per v4 route (canonical masked prefix — no nft injection).
+	desired := map[string]bool{}
+	for _, c := range routes {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
+			desired[p.Masked().String()] = true
+		}
+	}
+	// Current tunnex-marked rules: daddr -> handle.
+	current := map[string]string{}
+	if listing, err := m.nftRun(ctx, "-a", "list", "chain", "ip", "filter", "DOCKER-USER"); err == nil {
+		for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
+			current[mt[1]] = mt[2]
+		}
+	}
+	placeErr := false
+	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN.
+	for cidr := range desired {
+		if _, have := current[cidr]; have {
+			continue
+		}
+		if _, err := m.nftRun(ctx, "insert", "rule", "ip", "filter", "DOCKER-USER",
+			"iifname", "!=", wg, "oifname", wg, "ip", "daddr", cidr, "counter", "accept",
+			"comment", `"`+dockerUserComment+`"`); err != nil {
+			placeErr = true
+		}
+	}
+	// Full-sweep: delete comment-marked rules whose daddr left Routes.
+	for cidr, handle := range current {
+		if desired[cidr] {
+			continue
+		}
+		_, _ = m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle)
+	}
+	// D-WF4-d: routes to carry + FORWARD policy-drop + our accept couldn't be placed → blocked (loud).
+	blocked := len(desired) > 0 && placeErr && forwardPolicyIsDrop(ctx, m.nftRun)
+	m.forwardBlocked.Store(blocked)
+	return blocked
+}
+
+// forwardPolicyIsDrop reports whether the `ip filter FORWARD` base chain is policy drop (the
+// Docker default that swallows forwarded traffic). Best-effort: an unreadable chain → false
+// (don't manufacture a blocked signal we can't substantiate).
+func forwardPolicyIsDrop(ctx context.Context, run func(context.Context, ...string) (string, error)) bool {
+	out, err := run(ctx, "list", "chain", "ip", "filter", "FORWARD")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(out, "policy drop")
 }
 
 // wgSubnet returns the WG interface's IPv4 address+prefix (e.g. "10.99.0.1/24"), used to
