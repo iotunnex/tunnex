@@ -3,9 +3,36 @@
 package reconcile
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"testing"
 )
+
+// TestApplyRoutesV4EnumErrorSurfaces — S8.2 F3 (terminal): a -4 route-enumeration error ALWAYS surfaces
+// (full-sweep), INCLUDING when there are no desired routes — the just-UNBOUND gateway, where the prune is
+// owed. A -6 error is tolerated (v6-disabled host).
+func TestApplyRoutesV4EnumErrorSurfaces(t *testing.T) {
+	ctx := context.Background()
+	fail := func(family string) func(context.Context, string, ...string) (string, error) {
+		return func(_ context.Context, _ string, args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == family && args[1] == "route" { // the `ip <fam> route show` call
+				return "", errors.New("route show failed")
+			}
+			return "", nil
+		}
+	}
+	// Unbound gateway (cidrs empty) + a -4 show failure → MUST surface (the sweep is owed).
+	b4 := &wgctrlBackend{iface: "wg0", runFn: fail("-4")}
+	if err := b4.ApplyRoutes(ctx, nil); err == nil {
+		t.Fatal("F3: a -4 enum error must surface even with no desired routes (unbound gateway owes the prune)")
+	}
+	// A -6 show failure → tolerated.
+	b6 := &wgctrlBackend{iface: "wg0", runFn: fail("-6")}
+	if err := b6.ApplyRoutes(ctx, nil); err != nil {
+		t.Fatalf("a -6 enum error must be tolerated: %v", err)
+	}
+}
 
 // TestParseRouteDstNormalizesHost — S8.2 review #3: `ip route show` prints a host route as a BARE address
 // (no /32), so a desired "10.1.0.5/32" and the enumerated "10.1.0.5" MUST canonicalize equal — otherwise
