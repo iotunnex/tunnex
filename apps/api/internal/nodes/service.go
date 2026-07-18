@@ -364,6 +364,9 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 type siteTopology struct {
 	gws     []sqlc.ListSiteGatewaysForOrgRow
 	subnets map[uuid.UUID][]string // site_id -> approved subnet CIDRs
+	// dnsForwards (S8.4) is the org's cross-site DNS forwarding table — the union of every site's
+	// dns_forwarding entries, compiled onto EVERY gateway so any gateway can answer for any site's zone.
+	dnsForwards []policyspec.DNSForward
 }
 
 // loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
@@ -381,7 +384,25 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 	for _, ss := range subs {
 		sub[ss.SiteID] = append(sub[ss.SiteID], ss.Cidr.String())
 	}
-	return siteTopology{gws: gws, subnets: sub}, nil
+	// S8.4: union the sites' dns_forwarding JSONB into the org table. A malformed row is SKIPPED (never
+	// fail the whole topology load over one bad DNS blob — the agent's forwarder also skip-degrades).
+	raws, err := s.q.ListSiteDNSForwardsForOrg(ctx, orgID)
+	if err != nil {
+		return siteTopology{}, err
+	}
+	var fwds []policyspec.DNSForward
+	for _, raw := range raws {
+		if len(raw) == 0 {
+			continue
+		}
+		var entries []policyspec.DNSForward
+		if e := json.Unmarshal(raw, &entries); e != nil {
+			slog.Warn("dns_forwarding_unmarshal_skipped", "org_id", orgID.String(), "error", e.Error())
+			continue
+		}
+		fwds = append(fwds, entries...)
+	}
+	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds}, nil
 }
 
 // siteLinkGraphFrom builds a site-gateway node's site-link WG peers + kernel routes from a loaded
@@ -486,13 +507,18 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	// agent can source its site routes from the site LAN. Out-of-hash plumbing; rides with Routes (v5).
 	local := append([]string(nil), topo.subnets[uuid.UUID(node.SiteID.Bytes)]...)
 	sort.Strings(local)
+	// S8.4: attach the org-wide DNS forwarding table (out-of-hash CONVENIENCE — NOT hashed, NO version bump,
+	// so a route-carrying artifact stays byte-identical for the desync baseline). Every gateway carries the
+	// whole table so any gateway answers for any site's zone. nil for a no-DNS org (empty until Slice 2).
+	dns := append([]policyspec.DNSForward(nil), topo.dnsForwards...)
 	if pol != nil {
 		pol.Routes = routes
 		pol.LocalSubnets = local
+		pol.DNSForwards = dns
 		pol.Version = policyspec.RequiredVersion(*pol)
 		return pol
 	}
-	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local, DNSForwards: dns}
 	c.Version = policyspec.RequiredVersion(c)
 	return &c
 }
