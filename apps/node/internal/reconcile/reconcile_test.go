@@ -35,7 +35,7 @@ func (f *fakeBackend) appliedRoutes() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.routes...)
 }
-func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string) error {
+func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string, _ []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.routes = append([]string(nil), cidrs...)

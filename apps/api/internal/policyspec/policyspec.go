@@ -187,4 +187,11 @@ type Compiled struct {
 	// present triggers RequiredVersion=5 (an old agent refuses rather than ignoring the routes). Carried
 	// in BOTH modes: an off-mode gateway still needs the kernel route to reach a remote site subnet.
 	Routes []Route `json:"routes,omitempty"`
+	// LocalSubnets (S8.2c D2) is THIS gateway's OWN approved site subnets — the CP's authoritative answer
+	// to "which subnet does this gateway front" (the admin advertised + approved it). The agent picks its
+	// host address inside one of these as the SOURCE for its site routes (so gateway-host-originated
+	// traffic sources from the site LAN, not the overlay addr). OUT OF CanonicalHash (observability
+	// plumbing, not projected). Only rides WITH Routes (a remote route exists), so it inherits v5's gate;
+	// an old agent that ignored it would lose ONLY the src-hint (degraded-not-broken) — no version bump.
+	LocalSubnets []string `json:"local_subnets,omitempty"`
 }

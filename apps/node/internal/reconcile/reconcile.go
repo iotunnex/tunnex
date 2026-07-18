@@ -85,8 +85,10 @@ type WGBackend interface {
 	// ApplyRoutes reconciles the kernel routes to remote SITE subnets (S8.2): install each desired
 	// route via the tunnel iface (idempotent — heals a flushed route next tick) and PRUNE our routes
 	// no longer desired (the full-sweep contract: a site unbind/subnet removal drops the route). Only
-	// agent-owned routes are touched; the interface's own on-link route is never pruned.
-	ApplyRoutes(ctx context.Context, cidrs []string) error
+	// agent-owned routes are touched; the interface's own on-link route is never pruned. localSubnets
+	// (S8.2c D2) are THIS gateway's own approved site subnets — the source-hint is the host address inside
+	// one of them, so gateway-host-originated site traffic sources from the site LAN (not the overlay).
+	ApplyRoutes(ctx context.Context, cidrs []string, localSubnets []string) error
 	// Stats reports per-peer live telemetry (handshake/bytes/endpoint).
 	Stats(ctx context.Context) ([]PeerStat, error)
 }
@@ -237,13 +239,14 @@ func (r *Reconciler) runOnce(ctx context.Context, client ControlClient) (bool, e
 	}
 	// S8.2: converge the site-to-site kernel routes (from Policy.Routes — explicit intent, never
 	// inferred from a peer's AllowedIPs). After peers so the interface + crypto-routing exist.
-	var routes []string
+	var routes, localSubnets []string
 	if ds.Policy != nil {
 		for _, rt := range ds.Policy.Routes {
 			routes = append(routes, rt.DstCIDR)
 		}
+		localSubnets = ds.Policy.LocalSubnets // D2: the gateway's own approved subnets → route src-hint
 	}
-	if err := r.backend.ApplyRoutes(ctx, routes); err != nil {
+	if err := r.backend.ApplyRoutes(ctx, routes, localSubnets); err != nil {
 		r.healthy.Store(false)
 		return false, err
 	}
