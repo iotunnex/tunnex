@@ -3,7 +3,7 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded } from "./api";
+import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest } from "./api";
 
 // roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
 // members load must NOT read as "no role" — that silently downgrades an admin to the
@@ -275,6 +275,40 @@ export function rulesSummary(i: {
   const n = i.rulesResult.data;
   if (n === 0) return { state: "enforcing_empty", text: "0 rules — ALL traffic denied.", loud: true };
   return { state: "enforcing", text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`, loud: false };
+}
+
+// ── S8.2c D5: the rule-create body (PURE, so the site-subject branches are unit-tested) ───────────────
+// The Access builder now creates group/user/SITE sources and group/resource/SITE destinations, all through
+// the SAME policies API (validation + audit intact — the demo's raw DB insert was the anti-pattern this
+// closes). Exactly ONE of each side's id fields is set; expiry is CREATE-only.
+export interface RuleBodyInput {
+  srcKind: "group" | "user" | "site";
+  dstKind: "group" | "resource" | "site";
+  src: string; // group id
+  srcUser: string;
+  srcSite: string;
+  dstGroup: string;
+  dstResource: string;
+  dstSite: string;
+  expiresAt: string; // datetime-local, "" = permanent
+  editing: boolean; // expiry is create-only
+}
+
+export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
+  const srcPart =
+    i.srcKind === "user"
+      ? { src_kind: "user" as const, src_user_id: i.srcUser }
+      : i.srcKind === "site"
+        ? { src_kind: "site" as const, src_site_id: i.srcSite }
+        : { src_kind: "group" as const, src_group_id: i.src };
+  const dstPart =
+    i.dstKind === "group"
+      ? { dst_kind: "group" as const, dst_group_id: i.dstGroup }
+      : i.dstKind === "site"
+        ? { dst_kind: "site" as const, dst_site_id: i.dstSite }
+        : { dst_kind: "resource" as const, dst_resource_id: i.dstResource };
+  const expiry = !i.editing && i.expiresAt ? { expires_at: new Date(i.expiresAt).toISOString() } : {};
+  return { ...srcPart, ...dstPart, ...expiry };
 }
 
 // extendErrorCopy maps the server's typed 409 codes to legible copy (never a raw error).

@@ -11,6 +11,7 @@ import {
   type Role,
   type UserGroup,
   type Resource,
+  type Site,
   type PolicyRule,
   type ZeroTrustMode,
   type AffectedDevice,
@@ -34,6 +35,7 @@ import {
   swapRule,
   grantExpiry,
   rulesSummary,
+  ruleBody,
   extendErrorCopy,
   activeMembers,
   canEditRuleInModal,
@@ -261,6 +263,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [sites, setSites] = useState<Site[]>([]); // S8.2c D5: site rule subjects
   const [loaded, setLoaded] = useState<LoadState>({ groupsLoaded: false, resourcesLoaded: false, membersLoaded: false });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -278,12 +281,13 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
-    const [rr, gr, resr, mr, mo] = await Promise.all([
+    const [rr, gr, resr, mr, mo, sr] = await Promise.all([
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", { params: { path: { orgId } } })),
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/sites", { params: { path: { orgId } } })), // S8.2c D5: site rule subjects
     ]);
     // Summary inputs — set from the SAME results (a rules-load failure → summary shows "failed", never 0).
     setRulesResult(rr.ok ? { ok: true, data: (rr.data as PolicyRule[]).length } : rr);
@@ -298,6 +302,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
     setGroups((gr.ok ? (gr.data as UserGroup[]) : []) as UserGroup[]);
     setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
     setMembers((mr.ok ? (mr.data as Member[]) : []) as Member[]);
+    setSites((sr.ok ? (sr.data as Site[]) : []) as Site[]); // D5
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
     setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok });
@@ -327,7 +332,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Rules</h2>
         {canManage && !view.showRetry && (
-          <Button onClick={() => setCreating(true)} disabled={groups.length === 0}>
+          <Button onClick={() => setCreating(true)} disabled={groups.length === 0 && sites.length === 0}>
             Add rule
           </Button>
         )}
@@ -360,8 +365,8 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
 
       {view.showContent && (
         <>
-          {groups.length === 0 && loaded.groupsLoaded && (
-            <p className="mt-2 text-xs text-slate-500">Create a group first — every rule&rsquo;s source is a group.</p>
+          {groups.length === 0 && sites.length === 0 && loaded.groupsLoaded && (
+            <p className="mt-2 text-xs text-slate-500">Create a group (device/user source) or register a site (site-to-site source) to add a rule.</p>
           )}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
@@ -411,6 +416,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
           groups={groups}
           resources={resources}
           members={activeMembers(members)}
+          sites={sites}
           editing={editing}
           onClose={() => {
             setCreating(false);
@@ -514,6 +520,7 @@ function RuleFormModal({
   groups,
   resources,
   members,
+  sites,
   editing,
   onClose,
   onDone,
@@ -522,20 +529,26 @@ function RuleFormModal({
   groups: UserGroup[];
   resources: Resource[];
   members: Member[];
+  sites: Site[];
   editing: PolicyRule | null;
   onClose: () => void;
   onDone: (staleRuleId?: string) => void;
 }) {
-  // S8.2: src_kind may be "site" over the wire, but this modal only creates group/user sources (a
-  // site-source rule is blocked from the modal by canEditRuleInModal) — coerce for the form.
-  const [srcKind, setSrcKind] = useState<"group" | "user">(editing?.src_kind === "user" ? "user" : "group");
+  // S8.2c D5: the modal now CREATES site-source + site-dest rules too (was API-only). src_kind ∈
+  // {group,user,site}; dst_kind ∈ {group,resource,site} — all through the same policies API (validation +
+  // audit intact; the demo's raw DB insert was the anti-pattern this closes).
+  const [srcKind, setSrcKind] = useState<"group" | "user" | "site">(
+    editing?.src_kind === "user" ? "user" : editing?.src_kind === "site" ? "site" : "group",
+  );
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
-  // S8.1: dst_kind may be "site" over the wire, but this rule-edit modal only creates group/resource
-  // grants (site-dst rule management is the API + the S8.3 site UI, not here) — coerce for the form.
-  const [dstKind, setDstKind] = useState<"group" | "resource">(editing?.dst_kind === "resource" ? "resource" : "group");
+  const [srcSite, setSrcSite] = useState(editing?.src_site_id ?? sites[0]?.id ?? "");
+  const [dstKind, setDstKind] = useState<"group" | "resource" | "site">(
+    editing?.dst_kind === "resource" ? "resource" : editing?.dst_kind === "site" ? "site" : "group",
+  );
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");
+  const [dstSite, setDstSite] = useState(editing?.dst_site_id ?? sites[0]?.id ?? "");
   // Temporary grant: an optional expiry (datetime-local). Empty = permanent.
   // Expiry is a CREATE-only field ([2]/[3] fix): editing a rule is create-then-delete, and a
   // same-(src,dst) edit carrying an expiry collides on the unique index (or resubmits a past
@@ -545,16 +558,7 @@ function RuleFormModal({
   const [err, setErr] = useState<string | null>(null);
 
   function bodyFor(): CreatePolicyRuleRequest {
-    const srcPart =
-      srcKind === "user"
-        ? { src_kind: "user" as const, src_user_id: srcUser }
-        : { src_kind: "group" as const, src_group_id: src };
-    const dstPart =
-      dstKind === "group"
-        ? { dst_kind: "group" as const, dst_group_id: dstGroup }
-        : { dst_kind: "resource" as const, dst_resource_id: dstResource };
-    const expiry = !editing && expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {};
-    return { ...srcPart, ...dstPart, ...expiry };
+    return ruleBody({ srcKind, dstKind, src, srcUser, srcSite, dstGroup, dstResource, dstSite, expiresAt, editing: !!editing });
   }
 
   async function submit() {
@@ -598,7 +602,11 @@ function RuleFormModal({
             Cancel
           </Button>
           <Button
-            disabled={busy || (srcKind === "group" ? !src : !srcUser) || (dstKind === "group" ? !dstGroup : !dstResource)}
+            disabled={
+              busy ||
+              (srcKind === "group" ? !src : srcKind === "user" ? !srcUser : !srcSite) ||
+              (dstKind === "group" ? !dstGroup : dstKind === "resource" ? !dstResource : !dstSite)
+            }
             onClick={submit}
           >
             {editing ? "Save" : "Create"}
@@ -612,9 +620,10 @@ function RuleFormModal({
         <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Source</legend>
           <Field label="Source type">
-            <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user")}>
+            <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user" | "site")}>
               <option value="group">Group</option>
               <option value="user">User (a single person)</option>
+              {sites.length > 0 && <option value="site">Site (a LAN behind a gateway)</option>}
             </Select>
           </Field>
           {srcKind === "group" ? (
@@ -627,7 +636,7 @@ function RuleFormModal({
                 ))}
               </Select>
             </Field>
-          ) : (
+          ) : srcKind === "user" ? (
             // D1 constraint mirrored client-side: only CURRENT active members are offered,
             // so the picker never lets you build a rule the server would reject (user_not_member).
             <Field label="Source user">
@@ -643,14 +652,25 @@ function RuleFormModal({
                 <Input value="" disabled placeholder="No active members to grant" />
               )}
             </Field>
+          ) : (
+            <Field label="Source site">
+              <Select value={srcSite} onChange={(e) => setSrcSite(e.target.value)}>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           )}
         </fieldset>
         <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Destination</legend>
           <Field label="Destination type">
-            <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource")}>
+            <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource" | "site")}>
               <option value="group">Group (device-to-device)</option>
               <option value="resource">Resource (CIDR / port)</option>
+              {sites.length > 0 && <option value="site">Site (a LAN behind a gateway)</option>}
             </Select>
           </Field>
           {dstKind === "group" ? (
@@ -663,12 +683,22 @@ function RuleFormModal({
                 ))}
               </Select>
             </Field>
-          ) : (
+          ) : dstKind === "resource" ? (
             <Field label="Destination resource">
               <Select value={dstResource} onChange={(e) => setDstResource(e.target.value)}>
                 {resources.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <Field label="Destination site">
+              <Select value={dstSite} onChange={(e) => setDstSite(e.target.value)}>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
                   </option>
                 ))}
               </Select>
