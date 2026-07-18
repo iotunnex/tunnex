@@ -11,6 +11,9 @@ import { HealthStatus } from "./HealthStatus";
 const NAV = [
   { to: "/dashboard", label: "Dashboard", enabled: true },
   { to: "/devices", label: "Devices", enabled: true },
+  // Sites (S8.3): enterprise site-to-site. Shown for everyone; the page owns the edition upsell (the
+  // Access precedent — D5), so a non-enterprise org sees the nav entry and a clear upsell, not a dead link.
+  { to: "/sites", label: "Sites", enabled: true },
   { to: "/access", label: "Access", enabled: true },
   { to: "/users", label: "Users", enabled: true },
   { to: "/settings", label: "Settings", enabled: true },

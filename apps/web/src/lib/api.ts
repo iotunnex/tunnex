@@ -32,6 +32,10 @@ export type DeviceApproval = components["schemas"]["DeviceApproval"];
 // consumed by the Electron client, not the SPA — the web app only reads/writes the
 // check config, so only HealthCheck is surfaced here.)
 export type HealthCheck = components["schemas"]["HealthCheck"];
+// S8.3 — site management UI.
+export type Site = components["schemas"]["Site"];
+export type SiteSubnet = components["schemas"]["SiteSubnet"];
+export type SiteReferences = components["schemas"]["SiteReferences"];
 
 // apiErrorMessage pulls the human message out of the standard error envelope.
 export function apiErrorMessage(error: unknown, fallback: string): string {
