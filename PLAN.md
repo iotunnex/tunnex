@@ -1310,9 +1310,20 @@ goes FIRST (everything packaged/signed depends on the final edition-gating shape
 
 ## EPIC 8 — Site-to-Site Networking — opens next AFTER S7.5.2–S7.5.5 (RESTRUCTURED 2026-07-15)
 
-**EPIC 8 is now FIVE stories** (founder-directed 2026-07-18): S8.1 model · S8.2 route propagation · S8.3 site UI · S8.4 DNS · **S8.5 open-edition routed subnets**. The epic-close founder UI walk lands after S8.4… **NO — after S8.5** (the walk covers the COMPLETE story including the open edition).
+**EPIC 8 is now SIX stories** (founder-directed 2026-07-18): S8.1 model · S8.2 route propagation · S8.3 site UI · **S8.2c gateway zero-touch (inserted NEXT, ahead of S8.4)** · S8.4 DNS · **S8.5 open-edition routed subnets**. The epic-close founder UI walk lands after S8.5 (covers the COMPLETE story including the open edition).
 
-**S8.5 — open-edition routed subnets (split-tunnel push routes) — REGISTERED (founder-directed 2026-07-18).**
+**S8.2c — "site-to-site end-to-end via UI" (gateway zero-touch) — REGISTERED NEXT (founder-directed 2026-07-18, ahead of S8.4).** Born from the cross-cloud demo (AWS Sydney↔Azure West US PROVEN at 138ms, but only after 6 manual gateway touches + 3 UI gaps — see `walk-artifacts/cross-cloud-demo/demo-record.md`). **The ZERO-TOUCH GATEWAY LAW (`docs/laws.md`) is the paper's first line + the acceptance bar:** the demo re-runs clean — fresh org, two cloud VMs, the ONLY terminal action a pasted join command; sites/subnets/enforcing/grant/behind-gateway-host-reaching-far-site all CLICKED. **That re-run IS the story's box-walk.**
+- **Decide-items (commit-one, proposed dispositions held for founder ruling):**
+  - **#5 symmetric forwarding** — gateway forwards LAN→tunnel for approved site subnets, BOTH modes, per policy. **If (b) shows a data-plane defect → this is Slice 1 regardless of all else.** Red: a genuinely-separate behind-gateway host initiates cross-site (the fixture class whose absence hid it — see the fixture-fidelity TOPOLOGY-SIBLING law).
+  - **#4b src-hint in `ApplyRoutes`** — the agent programs site routes with the correct source; red: **survives reconcile** (today it clobbers a manual fix).
+  - **#3 host-networking stance** — decide (host-mode required+emitted vs bridge+forwarding); the agent must **refuse-loudly when it can't reach what it advertises**.
+  - **#1/#2 emitted install command** — the join-token screen produces the ONE true `docker run` for a remote gateway (wgctrl, host networking, all envs, endpoint param); compose remains for co-located.
+  - **GAP-2 site rules in the Access builder** — src/dst site options in the modal (S8.3 built display, not create; this completes it), disjointness/validation riding the EXISTING API path (no new bypass).
+  - **GAP-1 org creation + GAP-3 add-rule-with-zero-groups** — small UI items, same slice as #5.
+- **Protocol UNCHANGED:** commit-one (dispositions held) → slices → gates → story-end review → the demo-re-run walk (Pawan drives). **NO scattered hotfixes** — the S8.2 four-round arc is the standing proof that "just fix it" on this component breeds defects.
+- **Sequencing:** S8.2c → S8.4 → S8.5. **S8.5's scope SHRINKS by whatever S8.2c absorbs** (the container→host routing/NAT honesty + emitted-command shape overlap) — noted in the S8.5 registration.
+
+**S8.5 — open-edition routed subnets (split-tunnel push routes) — REGISTERED (founder-directed 2026-07-18). SCOPE-SHRINKS by whatever S8.2c absorbs** (the container→host-LAN routing/NAT + emitted-install-command shape overlap the S8.2c gateway-zero-touch work; S8.2c lands first, so S8.5 inherits a gateway that already reaches its host LAN correctly).
 Per-gateway admin-declared LAN CIDRs → compiled into device `AllowedIPs` + gateway forward rules → those ranges route via the gateway, the rest direct. **Open edition, no policy engine**; enterprise INHERITS the ranges as policy destinations (ONE mechanism, edition-gated depth). Founder rationale: **Pritunl push-routes parity — the migration wedge's table-stakes config.**
 - **Sequencing:** after S8.4, BEFORE the epic-close founder UI walk.
 - **S8.4 COUPLING (binds S8.4's commit-one):** S8.4 DNS design must treat routed-LAN ranges as a KNOWN SIBLING of site subnets — DNS decided blind to S8.5 would bake in a redo. **S8.4's paper MUST state this coupling.**
