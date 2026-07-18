@@ -325,7 +325,13 @@ func peersEqual(actual, desired []Peer) bool {
 		if canon(a[i]) != canon(d[i]) { // pubkey + allowed-ips (multiset-exact)
 			return false
 		}
-		if d[i].SiteLink && a[i].Endpoint != d[i].Endpoint { // site-link static endpoint must match (B4)
+		// B4 static-endpoint compare — but ONLY when the desired peer HAS a static endpoint. A hub's view
+		// of a NAT'd spoke has desired Endpoint="" by construction (the spoke dials the hub, not vice
+		// versa), so the kernel-learned ROAMED src endpoint is the only truth — comparing it would churn
+		// forever (the endpoint-blind canon, exactly like a roaming device peer). The keepalive made that
+		// spoke always-connected, so an empty-desired compare would be perpetual-dirty. So: compare the
+		// endpoint only for the spoke→hub direction (desired endpoint present), stay blind for hub→spoke.
+		if d[i].SiteLink && d[i].Endpoint != "" && a[i].Endpoint != d[i].Endpoint {
 			return false
 		}
 		if d[i].SiteLink && a[i].PersistentKeepalive != d[i].PersistentKeepalive { // site-link keepalive (CK)

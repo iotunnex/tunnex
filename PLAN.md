@@ -1308,6 +1308,15 @@ goes FIRST (everything packaged/signed depends on the final edition-gating shape
 
 ## EPIC 8 — Site-to-Site Networking — opens next AFTER S7.5.2–S7.5.5 (RESTRUCTURED 2026-07-15)
 
+**EPIC 8 is now FIVE stories** (founder-directed 2026-07-18): S8.1 model · S8.2 route propagation · S8.3 site UI · S8.4 DNS · **S8.5 open-edition routed subnets**. The epic-close founder UI walk lands after S8.4… **NO — after S8.5** (the walk covers the COMPLETE story including the open edition).
+
+**S8.5 — open-edition routed subnets (split-tunnel push routes) — REGISTERED (founder-directed 2026-07-18).**
+Per-gateway admin-declared LAN CIDRs → compiled into device `AllowedIPs` + gateway forward rules → those ranges route via the gateway, the rest direct. **Open edition, no policy engine**; enterprise INHERITS the ranges as policy destinations (ONE mechanism, edition-gated depth). Founder rationale: **Pritunl push-routes parity — the migration wedge's table-stakes config.**
+- **Sequencing:** after S8.4, BEFORE the epic-close founder UI walk.
+- **S8.4 COUPLING (binds S8.4's commit-one):** S8.4 DNS design must treat routed-LAN ranges as a KNOWN SIBLING of site subnets — DNS decided blind to S8.5 would bake in a redo. **S8.4's paper MUST state this coupling.**
+- **Known bindings for S8.5's commit-one:** the disjointness validator gains a THIRD input class (routed-LAN ranges alongside site subnets + pool) · **NAT/return-path stated explicitly** (SNAT vs documented static-route) · fleet-wide **device-config blast radius = full protocol** (a routed range changes every device's `AllowedIPs`) · **D2 enforcement-vs-observability classification answered, not assumed.**
+- **PREREQUISITE — run BEFORE S8.4's paper (read-only, cited answers; feeds BOTH S8.4 and S8.5 papers):** the two-part verify-item — **(a) enterprise:** do granted resource-CIDRs already flow into device `AllowedIPs` today? **(b) open:** what surface exists today for gateway-reachable LAN routes — configured / partial / missing? Answer with citations before S8.4 commit-one.
+
 **INHERITS the S7.5.1 versioned-artifact discipline** (sites-as-destination-kind bumps `policyspec.Compiled`):
 (1) the **newer-Version FAIL-CLOSED decide-item** — an agent receiving a Version it doesn't speak must refuse →
 deny-all + `policy_degraded` (today it silently accepts; S7.5.1 ledger, decide-before-code AT this bump since

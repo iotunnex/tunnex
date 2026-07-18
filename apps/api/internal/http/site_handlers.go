@@ -25,7 +25,9 @@ func toAPISite(s sqlc.Site) api.Site {
 }
 
 func (s apiServer) ListSites(ctx context.Context, req api.ListSitesRequestObject) (api.ListSitesResponseObject, error) {
-	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+	// S8.3 D5: a MEMBER reads the topology their traffic traverses (org:view — the same member-read gate as
+	// ListNodes/ListDevices/Overview). Mutations + getSiteReferences + the pending queue stay site:manage.
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
 		return nil, err
 	}
 	list, err := s.sites.ListSites(ctx, req.OrgId)
@@ -99,7 +101,8 @@ func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeReq
 }
 
 func (s apiServer) ListSiteSubnets(ctx context.Context, req api.ListSiteSubnetsRequestObject) (api.ListSiteSubnetsResponseObject, error) {
-	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+	// S8.3 D5: member-readable (org:view) — part of the read-only topology; approval/advertise stay site:manage.
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
 		return nil, err
 	}
 	list, err := s.sites.ListSubnets(ctx, req.OrgId, req.SiteId)

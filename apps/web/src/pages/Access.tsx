@@ -21,6 +21,7 @@ import {
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
+import { LoadRetry } from "../components/LoadRetry";
 import {
   accessView,
   modeEnableConfirm,
@@ -50,20 +51,7 @@ import {
 // swapRule + swapPartialMessage power the create-then-delete rule edit (D-a5) in RuleFormModal.
 // Every GET here goes through loadOne — a raw api.GET whose emptiness is user-meaningful is
 // review-refused (S7.4a review): a fetch failure must render a legible retry, never a
-// reassuring empty state.
-
-// LoadRetry replaces a reassuring-empty render when a load FAILED — a transient API error
-// must be legible + retryable, not shown as "none / not an admin".
-function LoadRetry({ error, onRetry }: { error: string; onRetry: () => void }) {
-  return (
-    <div className="mt-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-amber-300">
-      {error}{" "}
-      <button className="underline underline-offset-2 hover:text-amber-200" onClick={onRetry}>
-        Retry
-      </button>
-    </div>
-  );
-}
+// reassuring empty state. (LoadRetry — the shared legible-retry affordance — lives in components/LoadRetry.)
 
 export default function Access() {
   const { state } = useAuth();

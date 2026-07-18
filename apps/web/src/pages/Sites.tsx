@@ -15,6 +15,7 @@ import {
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
+import { LoadRetry } from "../components/LoadRetry";
 import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
 import {
@@ -33,17 +34,6 @@ import {
 // mutations all go through the AUDITED service endpoints (Slice-3 condition 4 — nothing routed around the
 // audit trail). The pending queue + every mutation affordance are canManage-gated (D5: a member sees the
 // read-only topology, never the queue).
-
-function LoadRetry({ error, onRetry }: { error: string; onRetry: () => void }) {
-  return (
-    <div className="mt-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-amber-300">
-      {error}{" "}
-      <button className="underline underline-offset-2 hover:text-amber-200" onClick={onRetry}>
-        Retry
-      </button>
-    </div>
-  );
-}
 
 interface Raw {
   sites: Site[];
@@ -87,13 +77,20 @@ export default function Sites() {
       api.GET("/api/v1/organizations/{orgId}/nodes", { params: { path: { orgId: first.id } } }),
     )) as Loaded<Node[]>;
     if (!nRes.ok) return setLoadError(nRes.error);
+    // Per-site subnet fetches are independent → run them in PARALLEL (review #6: was a serial for-await
+    // that stalled N round-trips deep on an N-site org).
+    const subResults = (await Promise.all(
+      sRes.data.map((site) =>
+        loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/subnets", { params: { path: { orgId: first.id, siteId: site.id } } }),
+        ),
+      ),
+    )) as Loaded<SiteSubnet[]>[];
     const subnetsBySite: Record<string, SiteSubnet[]> = {};
-    for (const site of sRes.data) {
-      const subRes = (await loadOne(() =>
-        api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/subnets", { params: { path: { orgId: first.id, siteId: site.id } } }),
-      )) as Loaded<SiteSubnet[]>;
-      if (!subRes.ok) return setLoadError(subRes.error);
-      subnetsBySite[site.id] = subRes.data;
+    for (let i = 0; i < sRes.data.length; i++) {
+      const subRes = subResults[i];
+      if (!subRes.ok) return setLoadError(subRes.error); // any failed subnet load → legible retry, not a partial topology
+      subnetsBySite[sRes.data[i].id] = subRes.data;
     }
     setRaw({ sites: sRes.data, nodes: nRes.data, subnetsBySite });
   }, [myId]);

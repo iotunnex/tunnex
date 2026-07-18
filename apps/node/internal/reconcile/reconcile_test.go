@@ -208,6 +208,26 @@ func TestSiteLinkEndpointChangeIsDirty(t *testing.T) {
 	}
 }
 
+// TestSiteLinkNatSpokePeerConverges — review #1: a HUB's view of a NAT'd spoke has desired Endpoint=""
+// (the spoke dials the hub, never vice versa). Once the spoke handshakes — now GUARANTEED by the CK
+// keepalive — the kernel learns its roamed src endpoint. The B4 endpoint compare must be BLIND when the
+// desired endpoint is empty, or the hub churns `wg syncconf` forever (perpetual-dirty). The spoke→hub
+// direction (desired endpoint PRESENT) still compares, so a moved hub re-dials.
+func TestSiteLinkNatSpokePeerConverges(t *testing.T) {
+	// Hub's spoke peer: desired Endpoint="" (NAT'd spoke); actual = kernel-learned roamed src.
+	desiredSpoke := Peer{PublicKey: "spoke", AllowedIPs: []string{"10.2.0.0/24"}, SiteLink: true, PersistentKeepalive: 25}
+	actualSpoke := Peer{PublicKey: "spoke", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "203.0.113.7:41000", PersistentKeepalive: 25} // learned; SiteLink stripped on read
+	if !peersEqual([]Peer{actualSpoke}, []Peer{desiredSpoke}) {
+		t.Fatal("#1: a hub's NAT'd-spoke peer (desired endpoint empty) must CONVERGE despite a learned roamed endpoint — no perpetual churn")
+	}
+	// Spoke→hub direction unaffected: a MOVED hub (desired endpoint present + changed) is still dirty (B4).
+	desiredHub := Peer{PublicKey: "hub", AllowedIPs: []string{"10.1.0.0/24"}, Endpoint: "new:51820", SiteLink: true, PersistentKeepalive: 25}
+	actualHub := Peer{PublicKey: "hub", AllowedIPs: []string{"10.1.0.0/24"}, Endpoint: "old:51820", PersistentKeepalive: 25}
+	if peersEqual([]Peer{actualHub}, []Peer{desiredHub}) {
+		t.Fatal("B4: a moved hub (desired endpoint present) must stay DIRTY so the spoke re-dials")
+	}
+}
+
 // TestSiteLinkKeepaliveSignificance — S8.3 CK: keepalive is CP intent on site-link peers, and the kernel
 // DOES report it (wg dump), so it must be COMPARED for SiteLink peers (a peer that gained keepalive is
 // dirty → re-syncs) yet CONVERGE once applied (no churn — the R2 discipline). A device peer's keepalive is

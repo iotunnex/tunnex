@@ -40,19 +40,25 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 	return tx.Commit(ctx)
 }
 
-// audit writes one append-only audit row. It RETURNS its error (never swallows): swallowing an
-// InsertAuditLog failure inside a tx poisons the tx and surfaces later as a mystery commit-rollback.
-func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actor, subnetID uuid.UUID, action string, meta map[string]any) error {
+// auditTarget writes one append-only audit row for a given target type/id. It RETURNS its error (never
+// swallows): swallowing an InsertAuditLog failure inside a tx poisons the tx and surfaces later as a
+// mystery commit-rollback (the swallowed-audit law). audit() + auditSite() are thin target-typed wrappers.
+func (s *Service) auditTarget(ctx context.Context, q *sqlc.Queries, orgID, actor uuid.UUID, targetType, targetID, action string, meta map[string]any) error {
 	b, _ := json.Marshal(meta)
 	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
 		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
 		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
 		Action:      action,
-		TargetType:  strptr("site_subnet"),
-		TargetID:    strptr(subnetID.String()),
+		TargetType:  strptr(targetType),
+		TargetID:    strptr(targetID),
 		Metadata:    b,
 	})
 	return err
+}
+
+// audit writes a site_subnet-targeted audit row (subnet advertisement/approval events).
+func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actor, subnetID uuid.UUID, action string, meta map[string]any) error {
+	return s.auditTarget(ctx, q, orgID, actor, "site_subnet", subnetID.String(), action, meta)
 }
 
 func strptr(s string) *string { return &s }
@@ -180,10 +186,9 @@ func (s *Service) GetReferences(ctx context.Context, orgID, siteID uuid.UUID) (S
 // delete + its audit share ONE tx (a swallowed audit poisons the tx — the swallowed-audit law); the audit
 // records the real cascade counts computed before the delete, never "may affect".
 func (s *Service) DeleteSite(ctx context.Context, actor, orgID, siteID uuid.UUID) error {
-	if _, err := s.GetSite(ctx, orgID, siteID); err != nil {
-		return err
-	}
-	refs, err := s.GetReferences(ctx, orgID, siteID) // real counts for the audit (before the cascade)
+	// GetReferences org-checks the site (its own GetSite) and returns the real cascade counts for the audit
+	// — so no separate top-level GetSite (review #4: it was a redundant duplicate query).
+	refs, err := s.GetReferences(ctx, orgID, siteID)
 	if err != nil {
 		return err
 	}
@@ -201,19 +206,10 @@ func (s *Service) DeleteSite(ctx context.Context, actor, orgID, siteID uuid.UUID
 	})
 }
 
-// auditSite writes a site-targeted audit row (mirrors audit(), TargetType "site"). Returns its error —
-// swallowing it inside the delete tx would poison the commit (swallowed-audit law).
+// auditSite writes a site-targeted audit row. Returns its error — swallowing it inside the delete tx
+// would poison the commit (swallowed-audit law); auditTarget preserves that.
 func (s *Service) auditSite(ctx context.Context, q *sqlc.Queries, orgID, actor, siteID uuid.UUID, action string, meta map[string]any) error {
-	b, _ := json.Marshal(meta)
-	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
-		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
-		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
-		Action:      action,
-		TargetType:  strptr("site"),
-		TargetID:    strptr(siteID.String()),
-		Metadata:    b,
-	})
-	return err
+	return s.auditTarget(ctx, q, orgID, actor, "site", siteID.String(), action, meta)
 }
 
 // ListPendingSubnets returns the org's advertised-but-unapproved subnets (the admin review queue).
