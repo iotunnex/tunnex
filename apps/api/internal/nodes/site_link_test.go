@@ -179,6 +179,9 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 	if len(hp) != 1 || hp[0].PublicKey != "KSPOKE" || !sliceHas(hp[0].AllowedIPs, "10.2.0.0/24") {
 		t.Fatalf("hub must peer with the spoke (AllowedIPs = its subnet), got %+v", hp)
 	}
+	if hp[0].PersistentKeepalive != siteLinkKeepaliveSecs { // S8.3 CK: every site-link peer carries the keepalive
+		t.Fatalf("site-link peer must carry keepalive=%d, got %d", siteLinkKeepaliveSecs, hp[0].PersistentKeepalive)
+	}
 	if len(hr) != 1 || hr[0].DstCIDR != "10.2.0.0/24" {
 		t.Fatalf("hub routes must reach the spoke subnet, got %+v", hr)
 	}

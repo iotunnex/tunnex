@@ -208,6 +208,31 @@ func TestSiteLinkEndpointChangeIsDirty(t *testing.T) {
 	}
 }
 
+// TestSiteLinkKeepaliveSignificance — S8.3 CK: keepalive is CP intent on site-link peers, and the kernel
+// DOES report it (wg dump), so it must be COMPARED for SiteLink peers (a peer that gained keepalive is
+// dirty → re-syncs) yet CONVERGE once applied (no churn — the R2 discipline). A device peer's keepalive is
+// never compared. (The buildSyncConf/parseWGDump round-trip is asserted in the linux-tagged routes test.)
+func TestSiteLinkKeepaliveSignificance(t *testing.T) {
+	// First application: actual (kernel) has no keepalive yet; desired site-link peer wants 25 → DIRTY.
+	actualNoKA := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "h:51820"}
+	desiredKA := Peer{PublicKey: "hub", AllowedIPs: []string{"10.2.0.0/24"}, Endpoint: "h:51820", SiteLink: true, PersistentKeepalive: 25}
+	if peersEqual([]Peer{actualNoKA}, []Peer{desiredKA}) {
+		t.Fatal("CK: a site-link peer that lacks the desired keepalive must be DIRTY (re-sync applies it)")
+	}
+	// Converged: the kernel now reports keepalive=25 (round-tripped) → steady-state NO-OP.
+	actualKA := actualNoKA
+	actualKA.PersistentKeepalive = 25 // kernel read carries it; SiteLink stays false (fixture-fidelity)
+	if !peersEqual([]Peer{actualKA}, []Peer{desiredKA}) {
+		t.Fatal("CK: once keepalive is applied and the kernel reports it, the peer must CONVERGE (no churn)")
+	}
+	// A device peer's keepalive is never CP-managed → not compared (SiteLink=false).
+	devA := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}}
+	devD := Peer{PublicKey: "dev", AllowedIPs: []string{"10.99.0.5/32"}, PersistentKeepalive: 25}
+	if !peersEqual([]Peer{devA}, []Peer{devD}) {
+		t.Fatal("a device peer's keepalive must be ignored (SiteLink=false → not compared)")
+	}
+}
+
 // TestSiteLinkStaleComputation — S8.2 H5 + F2 three-state: cold-start/no-reading → stale; a fresh
 // handshake → clears; a TRANSIENT Stats error after a good reading → keep-last (flap-free); an error
 // PERSISTING past the window → stale; device peers never drive it.
