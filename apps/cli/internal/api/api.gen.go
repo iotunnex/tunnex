@@ -1062,6 +1062,12 @@ type ResourceRequest struct {
 // ResourceRequestProtocol defines model for ResourceRequest.Protocol.
 type ResourceRequestProtocol string
 
+// RoutedRanges defines model for RoutedRanges.
+type RoutedRanges struct {
+	// Ranges Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared.
+	Ranges []string `json:"ranges"`
+}
+
 // SignupRequest defines model for SignupRequest.
 type SignupRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -1736,6 +1742,9 @@ type ClientInterface interface {
 	UpdateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRoutedRanges request
+	ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPendingSiteSubnets request
 	ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3213,6 +3222,18 @@ func (c *Client) UpdateResourceWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateResourceRequest(c.Server, orgId, resourceId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRoutedRangesRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -7022,6 +7043,40 @@ func NewUpdateResourceRequestWithBody(server string, orgId openapi_types.UUID, r
 	return req, nil
 }
 
+// NewListRoutedRangesRequest generates requests for ListRoutedRanges
+func NewListRoutedRangesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/routed-ranges", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListPendingSiteSubnetsRequest generates requests for ListPendingSiteSubnets
 func NewListPendingSiteSubnetsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -8196,6 +8251,9 @@ type ClientWithResponsesInterface interface {
 	UpdateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
 
 	UpdateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
+
+	// ListRoutedRangesWithResponse request
+	ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error)
 
 	// ListPendingSiteSubnetsWithResponse request
 	ListPendingSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingSiteSubnetsResponse, error)
@@ -10110,6 +10168,29 @@ func (r UpdateResourceResponse) StatusCode() int {
 	return 0
 }
 
+type ListRoutedRangesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RoutedRanges
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRoutedRangesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRoutedRangesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListPendingSiteSubnetsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11562,6 +11643,15 @@ func (c *ClientWithResponses) UpdateResourceWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseUpdateResourceResponse(rsp)
+}
+
+// ListRoutedRangesWithResponse request returning *ListRoutedRangesResponse
+func (c *ClientWithResponses) ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error) {
+	rsp, err := c.ListRoutedRanges(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRoutedRangesResponse(rsp)
 }
 
 // ListPendingSiteSubnetsWithResponse request returning *ListPendingSiteSubnetsResponse
@@ -14299,6 +14389,39 @@ func ParseUpdateResourceResponse(rsp *http.Response) (*UpdateResourceResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest Resource
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRoutedRangesResponse parses an HTTP response from a ListRoutedRangesWithResponse call
+func ParseListRoutedRangesResponse(rsp *http.Response) (*ListRoutedRangesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRoutedRangesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RoutedRanges
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

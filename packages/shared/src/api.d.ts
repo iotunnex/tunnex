@@ -1408,6 +1408,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/routed-ranges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** The org's declared routed LAN ranges for split-tunnel device AllowedIPs (S8.5). Ranges-ONLY (no keys/endpoints/pool/policy) — the never-re-fetch identity invariant survives. Approved-only, sorted + canonical. Empty is a first-class answer. */
+        get: operations["listRoutedRanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/sites/{siteId}": {
         parameters: {
             query?: never;
@@ -1800,6 +1819,10 @@ export interface components {
             domain: string;
             /** @description The site's internal resolver — must be inside one of the site's approved subnets (S8.4). */
             resolver_ip: string;
+        };
+        RoutedRanges: {
+            /** @description Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared. */
+            ranges: string[];
         };
         SiteSubnet: {
             /** Format: uuid */
@@ -4606,6 +4629,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Site"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listRoutedRanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Routed ranges (approved site-subnet CIDRs; possibly empty). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutedRanges"];
                 };
             };
             default: components["responses"]["Error"];

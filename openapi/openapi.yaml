@@ -1834,6 +1834,20 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/routed-ranges:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listRoutedRanges
+      summary: The org's declared routed LAN ranges for split-tunnel device AllowedIPs (S8.5). Ranges-ONLY (no keys/endpoints/pool/policy) — the never-re-fetch identity invariant survives. Approved-only, sorted + canonical. Empty is a first-class answer.
+      tags: [sites]
+      responses:
+        "200":
+          description: Routed ranges (approved site-subnet CIDRs; possibly empty).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/RoutedRanges" } } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/sites/{siteId}:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2241,6 +2255,16 @@ components:
       properties:
         domain: { type: string, description: "The forwarded zone (e.g. corp.local)." }
         resolver_ip: { type: string, description: "The site's internal resolver — must be inside one of the site's approved subnets (S8.4)." }
+
+    RoutedRanges:
+      type: object
+      required: [ranges]
+      additionalProperties: false
+      properties:
+        ranges:
+          type: array
+          items: { type: string }
+          description: "Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared."
 
     SiteSubnet:
       type: object

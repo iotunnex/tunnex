@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -510,5 +511,78 @@ func TestRemoveSubnetSweepsDependentDNS(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT metadata::text FROM audit_logs WHERE org_id=$1 AND action='site.subnet_removed' ORDER BY created_at DESC LIMIT 1`, org).Scan(&meta)
 	if !strings.Contains(meta, "corp.local") {
 		t.Fatalf("the removal audit must name the swept forward; meta=%s", meta)
+	}
+}
+
+// TestListRoutedRanges (S8.5 Slice 2b) — the routed-ranges channel: APPROVED-only, org-scoped (the
+// comparison-set law's hidden collision: the SAME CIDR declared in two orgs, org A sees only its own),
+// canonical + sorted + deterministic, and EMPTY is a first-class answer.
+func TestListRoutedRanges(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	orgA, orgB, orgC, actor := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	for i, org := range []uuid.UUID{orgA, orgB, orgC} {
+		if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "rr-"+org.String()[:8]); e != nil {
+			t.Fatalf("seed org %d: %v", i, e)
+		}
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		for _, org := range []uuid.UUID{orgA, orgB, orgC} {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	approve := func(org uuid.UUID, site string, cidr string) {
+		s, err := svc.RegisterSite(ctx, org, site)
+		if err != nil {
+			t.Fatalf("register %s: %v", site, err)
+		}
+		sub, err := svc.AddSubnet(ctx, org, s.ID, netip.MustParsePrefix(cidr))
+		if err != nil {
+			t.Fatalf("add %s: %v", cidr, err)
+		}
+		if err := svc.ApproveSubnet(ctx, actor, org, sub.ID); err != nil {
+			t.Fatalf("approve %s: %v", cidr, err)
+		}
+	}
+	// org A: two APPROVED (added out of sorted order) + one PENDING (advertised, NOT approved).
+	approve(orgA, "hq", "10.20.0.0/24")
+	approve(orgA, "dc", "10.10.0.0/24")
+	siteP, _ := svc.RegisterSite(ctx, orgA, "pending-site")
+	if _, err := svc.AddSubnet(ctx, orgA, siteP.ID, netip.MustParsePrefix("10.30.0.0/24")); err != nil {
+		t.Fatalf("add pending: %v", err)
+	} // left pending
+	// org B: the SAME 10.20.0.0/24 (cross-org — allowed; disjointness is per-org) + one of its own.
+	approve(orgB, "b1", "10.20.0.0/24")
+	approve(orgB, "b2", "172.16.0.0/24")
+
+	// (1) approved-only + cross-org: org A returns ONLY its two APPROVED, sorted+canonical, pending EXCLUDED,
+	// org B's collision EXCLUDED.
+	got, err := svc.ListRoutedRanges(ctx, orgA)
+	if err != nil {
+		t.Fatalf("list A: %v", err)
+	}
+	if want := []string{"10.10.0.0/24", "10.20.0.0/24"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("org A ranges: got %v want %v (pending must be absent, org B's collision must not leak)", got, want)
+	}
+	// (2) deterministic: a second call is byte-identical (the client's churn-free merge depends on it).
+	if got2, _ := svc.ListRoutedRanges(ctx, orgA); !reflect.DeepEqual(got, got2) {
+		t.Fatalf("non-deterministic: %v vs %v", got, got2)
+	}
+	// (3) org B sees only its own (the collision belongs to whoever declared it, scoped).
+	if gotB, _ := svc.ListRoutedRanges(ctx, orgB); !reflect.DeepEqual(gotB, []string{"10.20.0.0/24", "172.16.0.0/24"}) {
+		t.Fatalf("org B ranges: %v", gotB)
+	}
+	// (4) empty is first-class: a no-ranges org returns [] (non-nil, len 0), zero client work downstream.
+	gotC, err := svc.ListRoutedRanges(ctx, orgC)
+	if err != nil {
+		t.Fatalf("list C: %v", err)
+	}
+	if gotC == nil || len(gotC) != 0 {
+		t.Fatalf("empty must be a non-nil [], got %#v", gotC)
 	}
 }

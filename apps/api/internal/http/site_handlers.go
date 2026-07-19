@@ -41,6 +41,25 @@ func (s apiServer) ListSites(ctx context.Context, req api.ListSitesRequestObject
 	return api.ListSites200JSONResponse{Body: out, Headers: api.ListSites200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
+// ListRoutedRanges GET /organizations/{orgId}/routed-ranges — the org's declared routed LAN ranges for
+// split-tunnel device AllowedIPs (S8.5). SAME auth class as the revocation poll: a member (org:view) of
+// THIS org. The org-scoped authorize IS the cross-org guard — a device (its user's bearer) in org A can
+// never fetch org B's ranges (authorize 403s a non-member). Ranges-ONLY; approved-only; sorted/canonical;
+// empty is a first-class answer.
+func (s apiServer) ListRoutedRanges(ctx context.Context, req api.ListRoutedRangesRequestObject) (api.ListRoutedRangesResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	ranges, err := s.sites.ListRoutedRanges(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	return api.ListRoutedRanges200JSONResponse{
+		Body:    api.RoutedRanges{Ranges: ranges},
+		Headers: api.ListRoutedRanges200ResponseHeaders{XRequestId: reqID(ctx)},
+	}, nil
+}
+
 func (s apiServer) RegisterSite(ctx context.Context, req api.RegisterSiteRequestObject) (api.RegisterSiteResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err
