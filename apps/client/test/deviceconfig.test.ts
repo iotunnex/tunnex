@@ -87,8 +87,8 @@ function fakeApi(): DeviceApi & { creates: number; revoked: string[]; exists: bo
     async reportHealth() {
       return { state: "compliant", blocked: false, failed_checks: [] } as const;
     },
-    async routedRanges() {
-      return [];
+    async routedConfig() {
+      return { ranges: [], forwards: [] };
     },
   };
 }
@@ -118,7 +118,7 @@ test("clearTunnelConfigForOrigin: removes + best-effort revokes that origin's de
 
   // Best-effort: a revoke that throws is swallowed, local removal still happens.
   await resolveTunnelConfig("https://u.example", false, api, store);
-  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true, deviceStatus: async () => "active", reportHealth: api.reportHealth.bind(api), routedRanges: async () => [] };
+  const throwingApi: DeviceApi = { createDevice: api.createDevice.bind(api), revokeDevice: async () => { throw new Error("network"); }, deviceExists: async () => true, deviceStatus: async () => "active", reportHealth: api.reportHealth.bind(api), routedConfig: async () => ({ ranges: [], forwards: [] }) };
   await clearTunnelConfigForOrigin("https://u.example", throwingApi, store); // must not throw
   assert.equal(store.get("https://u.example"), null);
 });
@@ -144,7 +144,7 @@ test("resolveTunnelConfig: self-heals a revoked device (clear + mint fresh)", as
     revokeDevice: api.revokeDevice.bind(api),
     deviceExists: async () => { throw new Error("network"); },
     deviceStatus: async () => { throw new Error("network"); },
-    reportHealth: api.reportHealth.bind(api), routedRanges: async () => [],
+    reportHealth: api.reportHealth.bind(api), routedConfig: async () => ({ ranges: [], forwards: [] }),
   };
   await resolveTunnelConfig(origin, false, flakyApi, store);
   assert.equal(api.creates, 2); // reused — no new create on a transient blip
@@ -242,7 +242,7 @@ test("resolveTunnelConfig: a no-orgId (legacy) config is dropped + re-minted, ne
     revokeDevice: api.revokeDevice.bind(api),
     deviceExists: async (...a) => { existsCalls++; return api.deviceExists(...a); },
     deviceStatus: async (...a) => { statusCalls++; return api.deviceStatus(...a); },
-    reportHealth: api.reportHealth.bind(api), routedRanges: async () => [],
+    reportHealth: api.reportHealth.bind(api), routedConfig: async () => ({ ranges: [], forwards: [] }),
   };
   const origin = "https://legacy.example";
   // A legacy stored config: NO orgId field (as an old build persisted it).

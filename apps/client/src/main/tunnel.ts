@@ -109,6 +109,29 @@ export class TunnelController {
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_allowed_ips failed"));
   }
 
+  // setResolvers is the POLL-DRIVEN resolver apply (S8.5 Slice 3): the RoutedRangesMonitor hands the FULL
+  // desired forward set (server-gated to reachable resolvers) each time it changes — forwards are VOLATILE,
+  // same lifecycle as routes, so they ride the poll, not the baked config. Full-sweep + reconcile are
+  // helper-side (S8.4 set_resolvers). Unlike up()'s one-shot applyResolvers this THROWS on a genuine
+  // failure so the monitor keeps its last-applied set (fail-static) and retries — EXCEPT
+  // resolvers_unsupported (Windows: the resolver verb is a stub until Slice 4's NRPT), which returns
+  // cleanly (nothing to retry; the slice is macOS-live, Windows-dark, and skips WITHOUT erroring).
+  // Latches resolversActive on any non-empty attempt so down()'s sweep can never STRAND monitor-installed
+  // resolver files — the monitor is a SECOND writer to the same helper resolver state (the F5 strand class).
+  async setResolvers(fwds: ResolverForward[]): Promise<void> {
+    if (fwds.length > 0) this.resolversActive = true;
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
+    if (r.ok) {
+      this.resolversActive = fwds.length > 0; // installed n, or swept to 0
+      return;
+    }
+    if (r.code === "resolvers_unsupported") {
+      this.resolversActive = false; // Windows stub: nothing installed — clean skip, no throw, no retry-thrash
+      return;
+    }
+    throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_resolvers failed"));
+  }
+
   async down(): Promise<void> {
     this.stopHeartbeat();
     this.address = undefined;

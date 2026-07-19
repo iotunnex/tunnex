@@ -35,6 +35,59 @@ func (s *Service) ListRoutedRanges(ctx context.Context, orgID uuid.UUID) ([]stri
 	return out, nil
 }
 
+// ListRoutedForwards returns the DNS forwards REACHABLE by a split-tunnel device given its routed ranges
+// (S8.5 Slice 3, D4). GATED: a forward is included ONLY if its resolver_ip falls inside one of the passed
+// `ranges` — a resolver the device cannot route to is a SERVFAIL generator wearing a feature's face, so it is
+// never handed over (the DNS walk's split-horizon honesty, extended to the client tier). In practice the
+// device routes ALL approved subnets (2c) and every forward's resolver lives in an approved subnet (S8.4
+// dns_resolver_not_in_site_subnet), so the set is normally "all org forwards" — but the gate is computed by
+// CONSTRUCTION, never assumed: a range the device does not route silently drops that range's forwards.
+// `ranges` are the canonical CIDRs already produced by ListRoutedRanges (no re-query, no drift between the
+// two halves of the one poll). Domain-deduped + sorted so the client's churn-free compare (2c) byte-matches.
+func (s *Service) ListRoutedForwards(ctx context.Context, orgID uuid.UUID, ranges []string) ([]DNSForward, error) {
+	prefixes := make([]netip.Prefix, 0, len(ranges))
+	for _, r := range ranges {
+		if p, err := netip.ParsePrefix(r); err == nil {
+			prefixes = append(prefixes, p)
+		}
+	}
+	rows, err := s.q.ListSitesByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DNSForward, 0)
+	seen := map[string]bool{}
+	for _, site := range rows {
+		for _, fwd := range decodeDNS(site.DnsForwarding) {
+			ip, err := netip.ParseAddr(fwd.ResolverIP)
+			if err != nil {
+				continue
+			}
+			reachable := false
+			for _, p := range prefixes {
+				if p.Contains(ip) {
+					reachable = true
+					break
+				}
+			}
+			if !reachable {
+				continue // GATE: a resolver the device cannot route to is never handed over
+			}
+			nd, ok := NormalizeDomain(fwd.Domain)
+			if !ok {
+				continue
+			}
+			if seen[nd] {
+				continue
+			}
+			seen[nd] = true
+			out = append(out, DNSForward{Domain: nd, ResolverIP: ip.String()})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	return out, nil
+}
+
 // RouteLAN is the S8.5 D1 ONE-SCREEN affordance's backend: it routes a LAN CIDR through a gateway in a
 // single call by COMPOSING the four existing service methods — RegisterSite → BindNode → AddSubnet →
 // ApproveSubnet. It is deliberately a COMPOSITE OF THE SAME CODE, not a new bespoke flow: so the DB state

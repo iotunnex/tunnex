@@ -306,11 +306,18 @@ export function registerIpc(
     if (cred && sc?.deviceId) {
       monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
-      // S8.5 routed-subnets push: poll the org's declared ranges and live-apply base ∪ ranges via the
-      // helper. SPLIT-TUNNEL ONLY — a full tunnel already routes everything (0.0.0.0/0), so the helper
-      // would no-op; the CLIENT skips here so no pointless privileged call is emitted (the ruled layer).
+      // S8.5 routed-subnets push: poll the org's declared ranges + reachable DNS forwards and live-apply
+      // each tier via the helper — ranges → set_allowed_ips (base ∪ ranges), forwards → set_resolvers.
+      // SPLIT-TUNNEL ONLY — a full tunnel already routes everything (0.0.0.0/0) and owns the resolver, so
+      // the helper would no-op; the CLIENT skips here so no pointless privileged call is emitted.
       if (!requestedFullTunnel) {
-        routedRangesMonitor = new RoutedRangesMonitor(sc.orgId, tunnel.baseAllowedIPs(), deviceApiFor(cred.server), (set) => tunnel.setAllowedIPs(set));
+        routedRangesMonitor = new RoutedRangesMonitor(
+          sc.orgId,
+          tunnel.baseAllowedIPs(),
+          deviceApiFor(cred.server),
+          (set) => tunnel.setAllowedIPs(set),
+          (fwds) => tunnel.setResolvers(fwds),
+        );
         routedRangesMonitor.start();
       }
       // S7.5.3: self-report posture while connected. First report early (~15s),

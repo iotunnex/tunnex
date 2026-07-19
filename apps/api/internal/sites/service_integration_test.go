@@ -587,6 +587,77 @@ func TestListRoutedRanges(t *testing.T) {
 	}
 }
 
+// TestListRoutedForwardsGating (S8.5 Slice 3, D4) — the DNS handoff's split-horizon gate: a forward is
+// handed to a device ONLY if its resolver is REACHABLE via the device's routed ranges. Two sites each
+// declare an approved subnet + a forwarded zone; with BOTH ranges routed, both forwards return — but drop
+// one range from the routed set and its site's forward vanishes (a resolver you can't reach is never a
+// SERVFAIL generator wearing a feature's face). Empty ranges → zero forwards, first-class.
+func TestListRoutedForwardsGating(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "rf-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	mkSite := func(name, cidr, domain, resolver string) {
+		s, err := svc.RegisterSite(ctx, org, name)
+		if err != nil {
+			t.Fatalf("register %s: %v", name, err)
+		}
+		sub, err := svc.AddSubnet(ctx, org, s.ID, netip.MustParsePrefix(cidr))
+		if err != nil {
+			t.Fatalf("add %s: %v", cidr, err)
+		}
+		if err := svc.ApproveSubnet(ctx, actor, org, sub.ID); err != nil {
+			t.Fatalf("approve %s: %v", cidr, err)
+		}
+		if err := svc.SetDNSForward(ctx, actor, org, s.ID, domain, resolver); err != nil {
+			t.Fatalf("forward %s: %v", domain, err)
+		}
+	}
+	mkSite("hq", "10.20.0.0/24", "corp.local", "10.20.0.53")
+	mkSite("branch", "10.30.0.0/24", "branch.internal", "10.30.0.53")
+
+	ranges, err := svc.ListRoutedRanges(ctx, org)
+	if err != nil {
+		t.Fatalf("ranges: %v", err)
+	}
+	// (1) BOTH ranges routed → BOTH forwards reachable, domain-sorted + deduped.
+	both, err := svc.ListRoutedForwards(ctx, org, ranges)
+	if err != nil {
+		t.Fatalf("forwards: %v", err)
+	}
+	want := []DNSForward{{Domain: "branch.internal", ResolverIP: "10.30.0.53"}, {Domain: "corp.local", ResolverIP: "10.20.0.53"}}
+	if !reflect.DeepEqual(both, want) {
+		t.Fatalf("both-reachable forwards: got %v want %v", both, want)
+	}
+	// (2) GATE: drop the branch range from the routed set → branch's resolver is unreachable → its forward
+	// is EXCLUDED (by construction, not assumed). Only corp.local survives.
+	gated, err := svc.ListRoutedForwards(ctx, org, []string{"10.20.0.0/24"})
+	if err != nil {
+		t.Fatalf("gated forwards: %v", err)
+	}
+	if !reflect.DeepEqual(gated, []DNSForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}) {
+		t.Fatalf("gated forwards: got %v — an unreachable resolver must NOT be handed over", gated)
+	}
+	// (3) empty ranges → zero forwards, non-nil [].
+	none, err := svc.ListRoutedForwards(ctx, org, nil)
+	if err != nil {
+		t.Fatalf("empty-range forwards: %v", err)
+	}
+	if none == nil || len(none) != 0 {
+		t.Fatalf("no reachable ranges must yield a non-nil [], got %#v", none)
+	}
+}
+
 // TestRouteLANByteIdentical (S8.5 Slice 2d, D1) — the one-screen RouteLAN produces DB state + an audit
 // trail BYTE-IDENTICAL to the four-step long ceremony. Same code composed, so the short path is exactly
 // as auditable as the long one (four constituent events, never a composite).

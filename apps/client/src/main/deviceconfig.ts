@@ -1,6 +1,15 @@
 import { parseWgConf } from "./wgconf";
 import type { TunnelConfigStore } from "./tunnelstore";
-import type { TunnelConfig } from "./helperclient";
+import type { ResolverForward, TunnelConfig } from "./helperclient";
+
+// RoutedConfig is the S8.5 volatile-routes channel body: the org's declared routed ranges AND the DNS
+// forwards REACHABLE via those ranges (Slice 3, D4 — server-gated). ONE poll carries both; NEVER identity
+// (the never-re-fetch invariant holds — routes and forwards were never identity). Empty on both is a
+// first-class answer.
+export interface RoutedConfig {
+  ranges: string[];
+  forwards: ResolverForward[];
+}
 
 // DeviceApi is the seam over the tenant API (called from MAIN with the bearer).
 // The concrete HTTP adapter mirrors the CLI's device flow (pick org + active node
@@ -29,10 +38,10 @@ export interface DeviceApi {
   // "gone" = 404/410 (device no longer exists). Any other failure THROWS (inconclusive
   // — retry with backoff, same discipline as deviceStatus).
   reportHealth(deviceId: string, orgId: string, facts: HealthFacts): Promise<HealthReportResult | "unsupported" | "gone">;
-  // routedRanges fetches the org's declared routed LAN ranges (S8.5) — the volatile-routes channel
-  // (ranges only, NEVER identity — the never-re-fetch invariant holds). Throws on any read error
-  // (inconclusive: the RoutedRangesMonitor keeps its last-applied set, fail-static).
-  routedRanges(orgId: string): Promise<string[]>;
+  // routedConfig fetches the org's declared routed LAN ranges + the reachable DNS forwards (S8.5) — the
+  // volatile-routes channel (ranges + forwards only, NEVER identity — the never-re-fetch invariant holds).
+  // Throws on any read error (inconclusive: the RoutedRangesMonitor keeps its last-applied set, fail-static).
+  routedConfig(orgId: string): Promise<RoutedConfig>;
 }
 
 // HealthFacts are the client-collected posture facts (S7.5.3). disk_encrypted is

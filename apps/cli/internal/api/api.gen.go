@@ -1076,6 +1076,9 @@ type RouteLANRequest struct {
 
 // RoutedRanges defines model for RoutedRanges.
 type RoutedRanges struct {
+	// Forwards DNS forwards whose resolver is REACHABLE via the returned ranges (S8.5 Slice 3). GATED: a forward is included only if its resolver_ip falls inside a routed range — a resolver you can't reach is never handed over (no SERVFAIL generator). Empty when none reachable.
+	Forwards []DNSForward `json:"forwards"`
+
 	// Ranges Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared.
 	Ranges []string `json:"ranges"`
 }

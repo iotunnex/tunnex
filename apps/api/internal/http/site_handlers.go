@@ -54,8 +54,18 @@ func (s apiServer) ListRoutedRanges(ctx context.Context, req api.ListRoutedRange
 	if err != nil {
 		return nil, err
 	}
+	// GATED forwards: only those whose resolver is reachable via `ranges` (S8.5 Slice 3, D4). Same poll,
+	// same body — ranges + forwards ride together; the client applies set_allowed_ips + set_resolvers.
+	fwds, err := s.sites.ListRoutedForwards(ctx, req.OrgId, ranges)
+	if err != nil {
+		return nil, err
+	}
+	apiFwds := make([]api.DNSForward, 0, len(fwds))
+	for _, f := range fwds {
+		apiFwds = append(apiFwds, api.DNSForward{Domain: f.Domain, ResolverIp: f.ResolverIP})
+	}
 	return api.ListRoutedRanges200JSONResponse{
-		Body:    api.RoutedRanges{Ranges: ranges},
+		Body:    api.RoutedRanges{Ranges: ranges, Forwards: apiFwds},
 		Headers: api.ListRoutedRanges200ResponseHeaders{XRequestId: reqID(ctx)},
 	}, nil
 }

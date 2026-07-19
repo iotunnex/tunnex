@@ -1,5 +1,6 @@
 import os from "node:os";
-import type { DeviceApi, HealthFacts, HealthReportResult } from "./deviceconfig";
+import type { DeviceApi, HealthFacts, HealthReportResult, RoutedConfig } from "./deviceconfig";
+import type { ResolverForward } from "./helperclient";
 
 // createErr surfaces the server's TYPED error code (body.error.code) when present, so
 // a caller can match on it — e.g. the S3.7 `gateway_no_egress` full-tunnel refusal the
@@ -93,13 +94,13 @@ export class HttpDeviceApi implements DeviceApi {
     return (await this.deviceStatus(deviceId, orgId)) === "active";
   }
 
-  // routedRanges GETs the org's declared routed ranges (S8.5). Throws on a non-OK read (inconclusive —
-  // the monitor keeps its last-applied set, never strip-to-baked). Ranges-only response.
-  async routedRanges(orgId: string): Promise<string[]> {
+  // routedConfig GETs the org's declared routed ranges + reachable DNS forwards (S8.5). Throws on a non-OK
+  // read (inconclusive — the monitor keeps its last-applied set, never strip-to-baked). Ranges + forwards.
+  async routedConfig(orgId: string): Promise<RoutedConfig> {
     const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/routed-ranges`, { headers: this.headers() });
     if (!r.ok) throw new Error(`routed_ranges_failed: ${r.status}`);
-    const body = (await r.json()) as { ranges?: string[] };
-    return body.ranges ?? [];
+    const body = (await r.json()) as { ranges?: string[]; forwards?: ResolverForward[] };
+    return { ranges: body.ranges ?? [], forwards: body.forwards ?? [] };
   }
 
   // deviceInOrg fetches ONE org's device list and maps the device's status, or null if it is
