@@ -47,6 +47,10 @@ type darwinBackend struct {
 	// the tunnel). endpointFam is "-inet"/"-inet6" so Down deletes it correctly.
 	endpointHost string
 	endpointFam  string
+	// appliedAllowedIPs is the peer's currently-routed AllowedIPs (set on Up, updated by SetAllowedIPs)
+	// — the diff baseline for the S8.5 live route full-sweep. Includes the baked base (pool / 0.0.0.0/0);
+	// the client always re-includes the base in the desired set, so the base is never dropped.
+	appliedAllowedIPs []string
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -170,6 +174,55 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.ifname = dev, tdev, name
+	b.appliedAllowedIPs = append([]string(nil), cfg.AllowedIPs...) // the S8.5 route full-sweep baseline
+	return nil
+}
+
+// SetAllowedIPs live-updates the peer's AllowedIPs (S8.5): a uapi update (no handshake reset) + an
+// OS-route full-sweep (add new, delete gone). Never touches the device identity, the peer's keys, the
+// endpoint, or the pf kill-switch. b.mu serializes against Up/Down.
+func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dev == nil {
+		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	uapi, err := allowedIPsUAPI(peerPubKey, allowedIPs)
+	if err != nil {
+		return err
+	}
+	if err := b.dev.IpcSet(uapi); err != nil {
+		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
+	}
+	// OS-route full-sweep against the prior applied set (route targets expand full-tunnel halves etc.).
+	cur := routeSet(b.appliedAllowedIPs)
+	want := routeSet(allowedIPs)
+	for t := range want {
+		if !cur[t] {
+			if err := b.routeOp("add", t); err != nil {
+				return err
+			}
+		}
+	}
+	for t := range cur {
+		if !want[t] {
+			_ = b.routeOp("delete", t) // best-effort: a removed range's route may already be gone
+		}
+	}
+	b.appliedAllowedIPs = append([]string(nil), allowedIPs...)
+	return nil
+}
+
+// routeOp runs a single `route add|delete -net <target> -interface <iface>` (v4/v6 by target form).
+func (b *darwinBackend) routeOp(op, target string) error {
+	args := []string{"-q", op}
+	if strings.Contains(target, ":") {
+		args = append(args, "-inet6")
+	}
+	args = append(args, "-net", target, "-interface", b.ifname)
+	if err := run("route", args...); err != nil {
+		return fmt.Errorf("route %s %s: %w", op, target, err)
+	}
 	return nil
 }
 
@@ -183,6 +236,7 @@ func (b *darwinBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
+	b.appliedAllowedIPs = nil // device closed drops its routes; a fresh Up rebuilds the baseline
 	if b.endpointHost != "" {
 		_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
 		b.endpointHost, b.endpointFam = "", ""
@@ -340,7 +394,6 @@ func (b *darwinBackend) CleanStale() error {
 	return nil
 }
 
-
 // networkServices returns the ENABLED macOS network services (Wi-Fi, Ethernet, …).
 // networksetup's first output line is a header; disabled services are '*'-prefixed.
 func networkServices() []string {
@@ -444,4 +497,3 @@ func runStdin(stdin, name string, args ...string) error {
 	}
 	return nil
 }
-

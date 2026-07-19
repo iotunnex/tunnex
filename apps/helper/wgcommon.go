@@ -79,6 +79,39 @@ func uapiConfig(cfg *TunnelConfig) (string, error) {
 	return sb.String(), nil
 }
 
+// allowedIPsUAPI renders a wireguard-go uapi string that LIVE-UPDATES one existing peer's AllowedIPs
+// to exactly `allowedIPs` — no tunnel bounce (S8.5). It carries NEITHER private_key NOR replace_peers NOR
+// endpoint, so the device's identity, the peer's keys, and the endpoint are all UNTOUCHED (the session +
+// handshake survive). `update_only=true` means an ABSENT peer is NOT created — a typo can never conjure a
+// phantom peer (the smuggle-class edge). `replace_allowed_ips=true` makes the given set the FULL sweep
+// (removed ranges vanish). An empty set clears the peer's crypto-routing entirely.
+func allowedIPsUAPI(peerPubKeyB64 string, allowedIPs []string) (string, error) {
+	pub, err := b64ToHex(peerPubKeyB64)
+	if err != nil {
+		return "", &ProtocolError{Code: "bad_peer_key", Msg: err.Error()}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "public_key=%s\n", pub)
+	fmt.Fprintf(&sb, "update_only=true\n")
+	fmt.Fprintf(&sb, "replace_allowed_ips=true\n")
+	for _, aip := range allowedIPs {
+		fmt.Fprintf(&sb, "allowed_ip=%s\n", aip)
+	}
+	return sb.String(), nil
+}
+
+// routeSet expands AllowedIPs to the concrete OS route targets (routeTargets splits full-tunnel halves).
+// Shared by both backends' S8.5 live route full-sweep diff.
+func routeSet(allowedIPs []string) map[string]bool {
+	m := map[string]bool{}
+	for _, aip := range allowedIPs {
+		for _, t := range routeTargets(aip) {
+			m[t] = true
+		}
+	}
+	return m
+}
+
 func b64ToHex(k string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(k)
 	if err != nil {

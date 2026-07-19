@@ -97,6 +97,10 @@ type Server struct {
 	// S8.4b), injectable so dispatch tests never write to the real /etc/resolver.
 	resolvers func([]ResolverForward) error
 
+	// setAllowedIPs live-updates the tunnel peer's AllowedIPs (S8.5) — Supervisor.UpdateAllowedIPs by
+	// default, injectable so dispatch tests never touch a real wg device.
+	setAllowedIPs func([]string) error
+
 	mu    sync.Mutex
 	owner net.Conn // the connection that brought the current tunnel up (nil if down)
 }
@@ -106,14 +110,15 @@ type Server struct {
 // separate knob to drift out of sync with the real check.
 func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Server {
 	return &Server{
-		sup:          sup,
-		verify:       verify,
-		resolve:      resolve,
-		readTimeout:  defaultReadTimeout,
-		writeTimeout: defaultWriteTimeout,
-		sem:          make(chan struct{}, defaultMaxConns),
-		posture:      collectPosture,
-		resolvers:    setResolvers,
+		sup:           sup,
+		verify:        verify,
+		resolve:       resolve,
+		readTimeout:   defaultReadTimeout,
+		writeTimeout:  defaultWriteTimeout,
+		sem:           make(chan struct{}, defaultMaxConns),
+		posture:       collectPosture,
+		resolvers:     setResolvers,
+		setAllowedIPs: sup.UpdateAllowedIPs,
 	}
 }
 
@@ -286,6 +291,15 @@ func (s *Server) dispatch(req *Request) *Response {
 		// typed code; the app fail-STATIC (keeps the tunnel up, names just don't
 		// resolve cross-site) — DNS forwarding is never load-bearing for the tunnel.
 		if err := s.resolvers(req.Resolvers); err != nil {
+			return errorResponse(codeOf(err), err.Error())
+		}
+		return okResponse(nil)
+	case VerbSetAllowedIPs:
+		// State-changing but NOT tunnel-owning (same class as set_resolvers): a live AllowedIPs
+		// update changes routing, never tunnel state / the owner connection / the kill-switch. A
+		// failure returns a typed code; the client fail-STATIC (keeps the tunnel + its last routes,
+		// the new route just doesn't push). Full-tunnel is a no-op (Supervisor.UpdateAllowedIPs).
+		if err := s.setAllowedIPs(req.AllowedIPs); err != nil {
 			return errorResponse(codeOf(err), err.Error())
 		}
 		return okResponse(nil)

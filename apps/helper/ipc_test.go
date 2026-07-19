@@ -122,6 +122,54 @@ func TestIPCResolversRejectedOnOtherVerbs(t *testing.T) {
 	}
 }
 
+// TestIPCSetAllowedIPsRoutesAndTunnelUntouched (S8.5 Slice 2a) — set_allowed_ips reaches the live-apply
+// with the desired set and NEVER changes tunnel state or ownership (the kill-switch-untouched probe).
+func TestIPCSetAllowedIPsRoutesAndTunnelUntouched(t *testing.T) {
+	srv, sup := newServer(t, &fakeBackend{}, trustedResolver)
+	var got []string
+	called := 0
+	srv.setAllowedIPs = func(a []string) error { called++; got = a; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+
+	if resp, err := Do(c1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: err=%v resp=%+v", err, resp)
+	}
+	want := []string{"10.0.0.0/16", "192.168.1.0/24"}
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetAllowedIPs, AllowedIPs: want})
+	if err != nil || !resp.OK {
+		t.Fatalf("set_allowed_ips: err=%v resp=%+v", err, resp)
+	}
+	if called != 1 || len(got) != 2 {
+		t.Fatalf("live-apply not routed with the desired set: called=%d got=%v", called, got)
+	}
+	if sup.State() != StateUp {
+		t.Fatalf("set_allowed_ips disturbed the tunnel: state=%s", sup.State())
+	}
+}
+
+// TestIPCAllowedIPsRejectedOnOtherVerbs (S8.5 Slice 2a) — an allowed_ips payload smuggled onto a non-
+// set_allowed_ips verb is rejected by the envelope validator (no routing change on tunnel_down).
+func TestIPCAllowedIPsRejectedOnOtherVerbs(t *testing.T) {
+	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
+	called := 0
+	srv.setAllowedIPs = func([]string) error { called++; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbTunnelDown, AllowedIPs: []string{"10.0.0.0/16"}})
+	if err != nil {
+		t.Fatalf("io: %v", err)
+	}
+	if resp.OK || resp.Code != "unexpected_allowed_ips" {
+		t.Fatalf("want unexpected_allowed_ips, got %+v", resp)
+	}
+	if called != 0 {
+		t.Fatalf("must not apply for a non-set_allowed_ips verb")
+	}
+}
+
 func TestIPCUntrustedCallerRejected(t *testing.T) {
 	srv, _ := newServer(t, &fakeBackend{}, untrustedResolver)
 	c1, c2 := net.Pipe()

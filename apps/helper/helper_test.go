@@ -244,6 +244,10 @@ type fakeBackend struct {
 	up, down, failClosed, cleanStale int
 	armed                            bool // models the kernel-resident kill-switch
 	fc                               chan struct{}
+	// S8.5: record the last live AllowedIPs apply (peer + set) so the dispatch/Supervisor path is provable.
+	lastAllowedIPs []string
+	lastPeer       string
+	setAllowedCnt  int
 }
 
 func (f *fakeBackend) Up(cfg *TunnelConfig) error {
@@ -267,6 +271,11 @@ func (f *fakeBackend) FailClosed() error {
 }
 func (f *fakeBackend) CleanStale() error            { f.cleanStale++; f.armed = false; return nil } // un-strand
 func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxBytes: 1}, nil }
+func (f *fakeBackend) SetAllowedIPs(peer string, aips []string) error {
+	f.setAllowedCnt++
+	f.lastPeer, f.lastAllowedIPs = peer, aips
+	return nil
+}
 
 // TestDeadManHoldsAfterUpFailure is the guard for the FAIL-OPEN regression (review
 // #2): a full-tunnel Up that arms the block then fails must keep the block for the
@@ -370,6 +379,59 @@ func TestCrashSweepRunsOutsideLock(t *testing.T) {
 	}
 	if !reentered {
 		t.Fatal("crash sweep must run outside the lock (State() would have deadlocked if under it)")
+	}
+}
+
+// TestUpdateAllowedIPsRoutesToBackend (S8.5 Slice 2a) — a split-tunnel UpdateAllowedIPs passes the peer +
+// the full desired set to the backend live-apply, without disturbing tunnel state.
+func TestUpdateAllowedIPsRoutesToBackend(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	cfg := goodConfig()
+	cfg.FullTunnel = false
+	cfg.AllowedIPs = []string{"10.99.0.0/24"}
+	if err := s.Up(cfg); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if err := s.UpdateAllowedIPs([]string{"10.99.0.0/24", "192.168.5.0/24"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if fb.setAllowedCnt != 1 || fb.lastPeer != cfg.PeerPublicKey || len(fb.lastAllowedIPs) != 2 {
+		t.Fatalf("live-apply not routed: cnt=%d peer=%q set=%v", fb.setAllowedCnt, fb.lastPeer, fb.lastAllowedIPs)
+	}
+	if s.State() != StateUp {
+		t.Fatalf("update disturbed the tunnel: %s", s.State())
+	}
+}
+
+// TestUpdateAllowedIPsFullTunnelNoOp (S8.5 Slice 2a) — full-tunnel is a clean no-op: 0.0.0.0/0 subsumes
+// every range and the kill-switch (full-tunnel only) must never be touched. The backend is NOT called.
+func TestUpdateAllowedIPsFullTunnelNoOp(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	cfg := goodConfig() // 0.0.0.0/0 + ::/0
+	cfg.FullTunnel = true
+	if err := s.Up(cfg); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if err := s.UpdateAllowedIPs([]string{"192.168.5.0/24"}); err != nil {
+		t.Fatalf("full-tunnel update must be a clean no-op: %v", err)
+	}
+	if fb.setAllowedCnt != 0 {
+		t.Fatalf("full-tunnel must NOT call the backend (subsumed by 0.0.0.0/0): got %d", fb.setAllowedCnt)
+	}
+}
+
+// TestUpdateAllowedIPsNotUp (S8.5 Slice 2a) — a down tunnel has no peer to route through → not_up, no
+// backend call.
+func TestUpdateAllowedIPsNotUp(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	if err := s.UpdateAllowedIPs([]string{"192.168.5.0/24"}); err == nil || codeOf(err) != "not_up" {
+		t.Fatalf("want not_up, got %v", err)
+	}
+	if fb.setAllowedCnt != 0 {
+		t.Error("no backend call when down")
 	}
 }
 

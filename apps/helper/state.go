@@ -74,6 +74,10 @@ type Backend interface {
 	// that would otherwise strand the host. Must be safe to call when nothing is
 	// stale (idempotent no-op).
 	CleanStale() error
+	// SetAllowedIPs (S8.5) LIVE-updates the tunnel peer's AllowedIPs to allowedIPs (the full desired
+	// set) — a wireguard-go uapi update (no handshake reset) + an OS-route full-sweep. It NEVER touches
+	// the kill-switch, the device identity, or the peer's keys/endpoint. Called only while a tunnel is up.
+	SetAllowedIPs(peerPubKey string, allowedIPs []string) error
 }
 
 // Supervisor owns the tunnel lifecycle and enforces the FAIL-CLOSED invariant: any
@@ -272,6 +276,27 @@ func (s *Supervisor) Down() error {
 		return &ProtocolError{Code: "tunnel_down_failed", Msg: err.Error()}
 	}
 	return nil
+}
+
+// UpdateAllowedIPs LIVE-applies the desired peer AllowedIPs (S8.5 routed-subnets push). It reads the
+// active peer under the lock then applies OUTSIDE it (bounded route syscalls must not hold s.mu — the
+// crash-sweep RR2 lesson). NOT tunnel-owning: it changes routing, never the kill-switch / state / owner.
+//   - tunnel not up → not_up (a down tunnel has no peer to route through).
+//   - FULL-TUNNEL → NO-OP: 0.0.0.0/0 already subsumes every range, and the kill-switch (full-tunnel only)
+//     must never be perturbed. So the verb is split-tunnel-only by structure.
+func (s *Supervisor) UpdateAllowedIPs(allowedIPs []string) error {
+	s.mu.Lock()
+	if s.state != StateUp || s.lastCfg == nil {
+		s.mu.Unlock()
+		return &ProtocolError{Code: "not_up", Msg: "no tunnel is up"}
+	}
+	full := s.lastCfg.FullTunnel
+	peer := s.lastCfg.PeerPublicKey
+	s.mu.Unlock()
+	if full {
+		return nil // full-tunnel: routes subsumed by 0.0.0.0/0; kill-switch never touched
+	}
+	return s.be.SetAllowedIPs(peer, allowedIPs)
 }
 
 // OnPeerLost is invoked when the IPC channel to the owning app drops — either the tunnel

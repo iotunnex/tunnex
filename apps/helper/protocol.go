@@ -111,10 +111,20 @@ const (
 	// cross-site names just don't resolve) — DNS forwarding is never load-bearing for
 	// the tunnel. macOS-only in v1 (/etc/resolver); Windows NRPT is S8.4b.
 	VerbSetResolvers Verb = "set_resolvers"
+	// VerbSetAllowedIPs (S8.5) LIVE-updates the tunnel peer's AllowedIPs to a COMPLETE desired set
+	// (baked-stable ∪ current-declared-ranges, computed client-side) — the open-edition routed-subnets
+	// push. Applied via a wireguard-go uapi update (update_only + replace_allowed_ips: the peer's keys +
+	// endpoint are UNTOUCHED, no handshake reset, no tunnel bounce) plus an OS-route full-sweep. STATE-
+	// CHANGING but NOT tunnel-owning (same class as set_resolvers): it never touches tunnel state, the
+	// owner connection, or the kill-switch. Split-tunnel ONLY by structure — the kill-switch exists only
+	// in full-tunnel, and a full-tunnel base (0.0.0.0/0) already subsumes every range, so the verb no-ops
+	// there. ADDITIVE at ProtocolVersion 1 like posture/set_resolvers: an old helper answers unknown_verb
+	// and the client fail-STATIC (routes just don't push).
+	VerbSetAllowedIPs Verb = "set_allowed_ips"
 )
 
 func validVerb(v Verb) bool {
-	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus || v == VerbSetResolvers
+	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus || v == VerbSetResolvers || v == VerbSetAllowedIPs
 }
 
 // Request is one app→helper message. Config is REQUIRED for tunnel_up and must be
@@ -126,6 +136,9 @@ type Request struct {
 	Config   *TunnelConfig `json:"config,omitempty"`
 	// Resolvers is the full-sweep desired set for VerbSetResolvers only (nil elsewhere).
 	Resolvers []ResolverForward `json:"resolvers,omitempty"`
+	// AllowedIPs is the COMPLETE desired peer AllowedIPs set for VerbSetAllowedIPs only (nil elsewhere) —
+	// the full baked-stable ∪ declared-ranges set, applied as a full-sweep (replace_allowed_ips).
+	AllowedIPs []string `json:"allowed_ips,omitempty"`
 }
 
 // ResolverForward is one domain-scoped resolver: names under Domain resolve via
@@ -198,6 +211,10 @@ func ValidateRequest(r *Request) error {
 	// verb. An empty list on set_resolvers is legal (it means sweep to zero).
 	if r.Verb != VerbSetResolvers && r.Resolvers != nil {
 		return &ProtocolError{Code: "unexpected_resolvers", Msg: "resolvers are only valid on set_resolvers"}
+	}
+	// AllowedIPs ride ONLY on set_allowed_ips — no smuggling a routing change onto another verb.
+	if r.Verb != VerbSetAllowedIPs && r.AllowedIPs != nil {
+		return &ProtocolError{Code: "unexpected_allowed_ips", Msg: "allowed_ips are only valid on set_allowed_ips"}
 	}
 	return nil
 }

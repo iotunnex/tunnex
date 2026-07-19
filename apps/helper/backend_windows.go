@@ -67,6 +67,8 @@ type windowsBackend struct {
 	epLUID   winipcfg.LUID
 	epNH     netip.Addr
 	epPinned bool
+	// appliedAllowedIPs — the S8.5 live route full-sweep baseline (set on Up, updated by SetAllowedIPs).
+	appliedAllowedIPs []string
 }
 
 // NewBackend returns the Windows tunnel backend.
@@ -233,6 +235,59 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.luid = dev, tdev, luid
+	b.appliedAllowedIPs = append([]string(nil), cfg.AllowedIPs...) // S8.5 route full-sweep baseline
+	return nil
+}
+
+// SetAllowedIPs live-updates the peer's AllowedIPs (S8.5): the SAME uapi update as macOS (dev.IpcSet,
+// no handshake reset) — the crypto-route path is platform-identical. The OS-route full-sweep DIFFERS by
+// platform: Windows reconciles via winipcfg AddRoute/DeleteRoute on the tunnel LUID (macOS uses the
+// `route` CLI). Never touches the device identity, the peer's keys/endpoint, or the WFP kill-switch.
+func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dev == nil {
+		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	uapi, err := allowedIPsUAPI(peerPubKey, allowedIPs)
+	if err != nil {
+		return err
+	}
+	if err := b.dev.IpcSet(uapi); err != nil {
+		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
+	}
+	wl := winipcfg.LUID(b.luid)
+	cur := routeSet(b.appliedAllowedIPs)
+	want := routeSet(allowedIPs)
+	for t := range want {
+		if cur[t] {
+			continue
+		}
+		dest, perr := netip.ParsePrefix(t)
+		if perr != nil {
+			return fmt.Errorf("parse route %q: %w", t, perr)
+		}
+		nh := netip.IPv4Unspecified()
+		if dest.Addr().Is6() {
+			nh = netip.IPv6Unspecified()
+		}
+		if err := wl.AddRoute(dest, nh, 0); err != nil {
+			return fmt.Errorf("route add %s: %w", t, err)
+		}
+	}
+	for t := range cur {
+		if want[t] {
+			continue
+		}
+		if dest, perr := netip.ParsePrefix(t); perr == nil {
+			nh := netip.IPv4Unspecified()
+			if dest.Addr().Is6() {
+				nh = netip.IPv6Unspecified()
+			}
+			_ = wl.DeleteRoute(dest, nh) // best-effort
+		}
+	}
+	b.appliedAllowedIPs = append([]string(nil), allowedIPs...)
 	return nil
 }
 
@@ -287,6 +342,7 @@ func (b *windowsBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.luid = nil, nil, 0
+	b.appliedAllowedIPs = nil
 	if b.epPinned {
 		_ = b.epLUID.DeleteRoute(b.epDest, b.epNH) // on the physical iface → not auto-removed
 		b.epPinned = false
@@ -314,6 +370,7 @@ func (b *windowsBackend) FailClosed() error {
 	if b.dev != nil {
 		b.dev.Close()
 		b.dev, b.tunDev, b.luid = nil, nil, 0
+		b.appliedAllowedIPs = nil
 	}
 	return nil
 }
