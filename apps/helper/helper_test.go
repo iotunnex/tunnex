@@ -301,6 +301,78 @@ func TestDeadManHoldsAfterUpFailure(t *testing.T) {
 	}
 }
 
+// TestCrashSweepFiresOnDeadManRelease (S8.5 Slice 1) — the crash/owner-loss resolver sweep fires when the
+// dead-man RELEASES the block (session definitively gone), and INHERITS the grace: a wedged owner keeps its
+// resolvers through the full window, swept only when the dead-man actually fires.
+func TestCrashSweepFiresOnDeadManRelease(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 90 * time.Second
+	swept := 0
+	s.SetOnCrashSweep(func() { swept++ })
+
+	_ = s.Up(goodConfig())
+	s.OnPeerLost(false) // wedged owner → full window (grace)
+	clock = base.Add(30 * time.Second)
+	if s.CheckDeadMan() {
+		t.Fatal("dead-man must not fire inside the window")
+	}
+	if swept != 0 {
+		t.Fatalf("resolvers must survive the grace window: swept=%d", swept)
+	}
+	clock = base.Add(120 * time.Second)
+	if !s.CheckDeadMan() {
+		t.Fatal("dead-man must fire past the window")
+	}
+	if swept != 1 {
+		t.Fatalf("crash sweep must fire exactly once on release: swept=%d", swept)
+	}
+}
+
+// TestGracefulDownDoesNotCrashSweep (S8.5 Slice 1) — a graceful Down does NOT crash-sweep; the client
+// already sweeps its resolvers via set_resolvers([]) before sending tunnel_down. Only the crash path sweeps.
+func TestGracefulDownDoesNotCrashSweep(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	swept := 0
+	s.SetOnCrashSweep(func() { swept++ })
+	_ = s.Up(goodConfig())
+	if err := s.Down(); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if swept != 0 {
+		t.Fatalf("graceful down must NOT crash-sweep (client sweeps): swept=%d", swept)
+	}
+}
+
+// TestCrashSweepRunsOutsideLock (S8.5 Slice 1 — the RR2 lesson) — the sweep runs OUTSIDE s.mu, so its
+// filesystem work can never stall the state machine. Proven by re-entering the Supervisor (State() takes
+// s.mu) from inside the sweep: if the sweep held s.mu, this would DEADLOCK the test.
+func TestCrashSweepRunsOutsideLock(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 1 * time.Second
+	reentered := false
+	s.SetOnCrashSweep(func() {
+		_ = s.State() // takes s.mu — deadlocks if the sweep is under the lock
+		reentered = true
+	})
+	_ = s.Up(goodConfig())
+	clock = base.Add(10 * time.Second)
+	if !s.CheckDeadMan() {
+		t.Fatal("dead-man must fire")
+	}
+	if !reentered {
+		t.Fatal("crash sweep must run outside the lock (State() would have deadlocked if under it)")
+	}
+}
+
 func TestSupervisorFailClosed(t *testing.T) {
 	// Backend errors on Up → FailClosed installed, state Failed (NOT Down → no leak).
 	fb := &fakeBackend{upErr: &ProtocolError{Code: "x", Msg: "boom"}}

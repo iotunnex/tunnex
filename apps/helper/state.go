@@ -105,7 +105,19 @@ type Supervisor struct {
 	// the app's first post-resume heartbeat (review #9). Do NOT swap this for a
 	// wall-clock source, which would count sleep time and fail the tunnel open.
 	now func() time.Time
+	// onCrashSweep (S8.5 Slice 1) fires when the dead-man RELEASES the kill-switch — the "session is
+	// definitively gone" conclusion after the grace window. It is the crash/owner-loss resolver sweep,
+	// carefully NOT the S8.4 release-rider that was reduced-out: it is called OUTSIDE s.mu (no FS-under-
+	// lock — the RR2 lesson), from the dead-man path ONLY (not graceful Down, which the client already
+	// sweeps via set_resolvers([])), and is set ONCE before the dead-man goroutine starts (no SetOnRelease
+	// race). nil = no sweep. The dormant-machinery law's scheduled compliance: it lands in S8.5 (where the
+	// resolver install path goes live) BEFORE any resolver file can exist, and is walk-proven.
+	onCrashSweep func()
 }
+
+// SetOnCrashSweep registers the dead-man-release resolver sweep. MUST be called once at startup BEFORE the
+// dead-man loop goroutine starts (the happens-before makes the field read race-free). Fired OUTSIDE s.mu.
+func (s *Supervisor) SetOnCrashSweep(fn func()) { s.onCrashSweep = fn }
 
 func NewSupervisor(be Backend) *Supervisor {
 	dm := DeadManDefault
@@ -164,8 +176,8 @@ func (s *Supervisor) beat() { s.lastBeat = s.now() }
 // fired. A background loop calls it periodically; tests call it directly.
 func (s *Supervisor) CheckDeadMan() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.state != StateUp && s.state != StateFailed {
+		s.mu.Unlock()
 		return false
 	}
 	// Definitive owner death (socket closed) releases on the SHORT window; a still-open
@@ -175,6 +187,7 @@ func (s *Supervisor) CheckDeadMan() bool {
 		window = s.deadManOrphan
 	}
 	if s.now().Sub(s.lastBeat) <= window {
+		s.mu.Unlock()
 		return false
 	}
 	// Bounded fail-closed: past the window with no owner → release so an unrecovered
@@ -183,6 +196,16 @@ func (s *Supervisor) CheckDeadMan() bool {
 	s.state = StateDown
 	s.lastCfg = nil
 	s.orphaned = false
+	sweep := s.onCrashSweep
+	// Release the lock BEFORE the resolver sweep's filesystem work — a wedged /etc/resolver must NOT
+	// stall the whole Supervisor state machine (the S8.4 RR2 lesson: FS never under s.mu). The grace is
+	// inherited (we only reach here past the window); the micro-window between unlock and sweep is
+	// self-healing (a reconnecting client re-installs on its next Up). Down does NOT sweep here — the
+	// client already sweeps on graceful teardown via set_resolvers([]).
+	s.mu.Unlock()
+	if sweep != nil {
+		sweep()
+	}
 	return true
 }
 

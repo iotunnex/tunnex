@@ -89,6 +89,17 @@ func serveHelper(stop <-chan struct{}) error {
 	// and off macOS.
 	startUninstallWatchdog(installDir, sup)
 
+	// S8.5 Slice 1 — the crash/owner-loss resolver sweep. Wired BEFORE the dead-man goroutine (the
+	// happens-before makes the field read race-free); fires OUTSIDE s.mu from the dead-man release path
+	// only. On a crash/force-quit (no graceful down), when the dead-man drops the block, this also sweeps
+	// the owned /etc/resolver files so a stale resolver can't outlive the dead tunnel. Graceful down is
+	// already swept client-side (set_resolvers([])). No-op until S8.5's resolver install path goes live.
+	sup.SetOnCrashSweep(func() {
+		if err := helper.CleanStaleResolvers(); err != nil {
+			log.Printf("tunnex-helper: crash resolver sweep: %v", err)
+		}
+	})
+
 	// Dead-man loop: bounds the fail-closed model. If the owning app stops
 	// heartbeating past DeadManDefault (crashed/wedged), auto-release the block so an
 	// unrecovered crash can't strand the host indefinitely.
