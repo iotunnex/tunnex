@@ -430,12 +430,33 @@ const hubStaleWindow = 90 * time.Second
 func electSiteHubSet(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysForOrgRow {
 	capable := make([]sqlc.ListSiteGatewaysForOrgRow, 0, len(topo.gws))
 	for _, g := range topo.gws {
-		if g.Endpoint != "" && g.WgPublicKey != "" { // the ONE capability gate (D1)
+		if g.Endpoint != "" && g.WgPublicKey != "" { // the capability gate (endpoint + key)
 			capable = append(capable, g)
 		}
 	}
 	sort.Slice(capable, func(i, j int) bool { return hubLess(&capable[i], &capable[j], now) })
-	return capable
+	// TWO-TIER MEMBERSHIP (S8.6 (3)) — HA is OPT-IN BY PIN, resolving the "capable ⇒ hub-posture" collision
+	// (an endpoint-bearing LEAF, e.g. an accidentally-public spoke, must NOT be drafted into hub duty). The
+	// pin was already the top of the ordering; it is now ALSO the membership DECLARATION (operators outrank
+	// magic, completing itself):
+	//   - ANY pins present → the set is the PINNED, capable gateways (pin declares "carry the org's transit";
+	//     capability still GATES — a pinned-but-NAT'd/keyless gateway is ineligible). Pinned are the sorted
+	//     prefix, so collecting them preserves pin>health>id order.
+	//   - NO pins → a SINGLE auto-elected hub (today's zero-config behavior, BYTE-IDENTICAL — no standbys
+	//     without declared intent, so a fresh org needs zero configuration).
+	var pinned []sqlc.ListSiteGatewaysForOrgRow
+	for _, g := range capable {
+		if g.HubPriority != nil {
+			pinned = append(pinned, g)
+		}
+	}
+	if len(pinned) > 0 {
+		return pinned
+	}
+	if len(capable) == 0 {
+		return nil
+	}
+	return capable[:1] // single-hub set of one (zero-config)
 }
 
 func hubHealthy(g *sqlc.ListSiteGatewaysForOrgRow, now time.Time) bool {
@@ -523,11 +544,10 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 	if !node.SiteID.Valid {
 		return nil, nil
 	}
-	hub := electSiteHub(topo, time.Now())
-	// B2: no hub (every gateway is NAT'd, no public endpoint) → NO carrier for site traffic, so emit NO
-	// routes and NO peers. Installing routes with no peer to carry them is the silent blackhole; the
-	// no-hub condition is surfaced CP-side as site_hub_down (PolicyHealthForNodes), never a silent no-op.
-	if hub == nil {
+	members := electSiteHubSet(topo, time.Now()) // ordered [primary, standby...] (S8.6 D1)
+	// B2: no capable gateway (all NAT'd) → NO carrier for site traffic, so emit NO routes and NO peers.
+	// A route with no peer to carry it is the silent blackhole; surfaced CP-side as site_hub_down.
+	if len(members) == 0 {
 		return nil, nil
 	}
 	mySite := uuid.UUID(node.SiteID.Bytes)
@@ -551,24 +571,46 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 		routes = append(routes, policyspec.Route{DstCIDR: c})
 	}
 
+	isMember := false
+	for i := range members {
+		if members[i].ID == node.ID {
+			isMember = true
+			break
+		}
+	}
+
 	var peers []Peer
-	switch {
-	case hub.ID == node.ID: // this node IS the hub (guaranteed non-nil by the B2 guard above)
+	if isMember {
+		// HUB posture — carried by the PRIMARY *and* every STANDBY (the D2 symmetry: a standby is a hub that
+		// isn't preferred yet, so promotion changes nothing hub-side). Peer with every non-self,
+		// subnet-advertising gateway NOT in this hub's OWN site. SAME-SITE exclusion (S8.6) is the real
+		// invariant — two gateways on one shared LAN need no tunnel between them (kills the spurious same-site
+		// hub↔hub link the single-node lift now makes possible). A CROSS-site member keeps its subnet-carrying
+		// link — in the data plane it IS a spoke, whatever the election calls it (so its subnets stay reachable).
 		for i := range topo.gws {
 			g := &topo.gws[i]
-			if g.ID == node.ID {
+			if g.ID == node.ID || uuid.UUID(g.SiteID.Bytes) == mySite {
 				continue
 			}
 			ips := append([]string(nil), topo.subnets[uuid.UUID(g.SiteID.Bytes)]...)
 			if len(ips) == 0 {
-				continue // a spoke advertising no subnets yet contributes no crypto-routing
+				continue // a gateway advertising no subnets yet contributes no crypto-routing
 			}
 			sort.Strings(ips)
 			peers = append(peers, Peer{PublicKey: g.WgPublicKey, AllowedIPs: ips, Endpoint: g.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
 		}
-	default: // this node is a SPOKE → peer only with the hub
-		if len(routeCIDRs) > 0 {
-			peers = append(peers, Peer{PublicKey: hub.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: hub.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
+	} else if len(routeCIDRs) > 0 {
+		// SPOKE: the remote subnets live in the PRIMARY (members[0]) peer's AllowedIPs ONLY — the single-valued
+		// invariant (WG's undefined-which across overlapping AllowedIPs is a nondeterminism generator). Every
+		// STANDBY member is a WARM keepalive-only peer: AllowedIPs EMPTY (so WG can never crypto-route traffic
+		// to it — the no-traffic property is STRUCTURAL, not a convention), endpoint + keepalive so the tunnel
+		// handshakes (warm + observable in node_peer_status). Promotion (Slice 4) re-compiles the subnets onto
+		// the standby's AllowedIPs — no build, no handshake wait: the tunnel is already up.
+		primary := &members[0]
+		peers = append(peers, Peer{PublicKey: primary.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: primary.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
+		for i := 1; i < len(members); i++ {
+			sb := &members[i]
+			peers = append(peers, Peer{PublicKey: sb.WgPublicKey, AllowedIPs: []string{}, Endpoint: sb.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
 		}
 	}
 	sort.Slice(peers, func(i, j int) bool { return peers[i].PublicKey < peers[j].PublicKey })
