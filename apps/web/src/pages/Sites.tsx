@@ -21,6 +21,7 @@ import { roleFromMembers } from "../lib/policyview";
 import {
   assembleTopology,
   gatewayLiveness,
+  gatewayOnline,
   crossesMultiSiteThreshold,
   disjointRefusal,
   forwardsInSubnet,
@@ -391,6 +392,9 @@ function GatewayRow({ g }: { g: GatewayView }) {
   // S8.4 rider (VERIFY-0): render the last-seen FACT + an OFFLINE badge when stale, so a stopped gateway no
   // longer reads healthy on the site surface. Extends the S8.3 badge system — no third health vocabulary.
   const live = gatewayLiveness(g.lastSeenAt, Date.now());
+  // S8.5 WF-1: the POSITIVE liveness signal — a fresh, healthy, active gateway reads "online" instead of
+  // silent absence. Same clock + health bool as the offline/degraded badges (no third vocabulary).
+  const online = gatewayOnline(g.status, live.offline, g.health);
   return (
     <li className="flex items-center gap-2 text-sm">
       <span className="text-slate-200">{g.name}</span>
@@ -398,6 +402,7 @@ function GatewayRow({ g }: { g: GatewayView }) {
       {g.status === "revoked" && <span className="text-xs text-rose-400">revoked</span>}
       {live.offline && <span className={`text-xs ${badgeClass("danger")}`}>offline</span>}
       {g.health && <span className={`text-xs ${badgeClass(g.health.tone)}`}>{g.health.label}</span>}
+      {online && <span className="text-xs text-emerald-400">online</span>}
       <span className="ml-auto text-[11px] text-slate-500">
         {live.lastSeen}
         {" · "}

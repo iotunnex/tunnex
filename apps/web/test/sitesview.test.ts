@@ -3,11 +3,13 @@ import {
   assembleTopology,
   crossesMultiSiteThreshold,
   disjointRefusal,
+  gatewayOnline,
   nameMatchesExactly,
   siteGate,
   sitesView,
   subCeilingGateways,
 } from "../src/lib/sitesview";
+import type { HealthBadge } from "../src/lib/healthview";
 import type { Node, Site, SiteSubnet } from "../src/lib/api";
 
 const site = (id: string, name: string): Site => ({ id, name, link_transport: "wireguard", created_at: "2026-01-01T00:00:00Z" });
@@ -202,5 +204,21 @@ describe("forwardsInSubnet — S8.4 F4 (name the DNS forwards a subnet removal w
   it("a malformed resolver or cidr is excluded (server stays the truth)", () => {
     expect(forwardsInSubnet([{ domain: "x", resolver_ip: "not-an-ip" }], "10.20.0.0/24")).toEqual([]);
     expect(forwardsInSubnet(fwds, "garbage")).toEqual([]);
+  });
+});
+
+describe("gatewayOnline (WF-1 positive health)", () => {
+  const linkDown: HealthBadge = { label: "site link down", tone: "danger" };
+  it("active + fresh + no health badge → ONLINE (the positive signal)", () => {
+    expect(gatewayOnline("active", false, null)).toBe(true);
+  });
+  it("offline (stale clock) → NOT online (the fresh side of the SAME clock)", () => {
+    expect(gatewayOnline("active", true, null)).toBe(false);
+  });
+  it("a degraded-health badge (site_link_down) → NOT online (existing kinds win)", () => {
+    expect(gatewayOnline("active", false, linkDown)).toBe(false);
+  });
+  it("revoked → NOT online regardless of freshness", () => {
+    expect(gatewayOnline("revoked", false, null)).toBe(false);
   });
 });

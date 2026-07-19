@@ -72,6 +72,13 @@ export default function Access() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
+  // S8.5 stale-button fix (one-truth at the React tier): RulesSection and GroupsResourcesSection each hold
+  // their OWN copy of the groups list (a cohesive batched load in RulesSection, so lifting just groups would
+  // fracture it). subjectsRev is the parent-owned invalidation signal — GroupsResourcesSection bumps it on a
+  // group/resource mutation, RulesSection re-loads on the bump — so its subject copies (and the "Add rule"
+  // enabled state derived from them) can never go stale behind a group add. Invalidate the copy, not the
+  // symptom (patching the disabled expression would leave the stale copy feeding the rule modal too).
+  const [subjectsRev, setSubjectsRev] = useState(0);
   const [roleResolved, setRoleResolved] = useState(false);
 
   const reload = useCallback(async () => {
@@ -138,8 +145,8 @@ export default function Access() {
       {view === "admin_body" && org && (
         <>
           <ModeSection orgId={org.id} canManage={gate.canManagePolicy} />
-          <RulesSection orgId={org.id} canManage={gate.canManagePolicy} />
-          <GroupsResourcesSection orgId={org.id} canManage={gate.canManagePolicy} />
+          <RulesSection orgId={org.id} canManage={gate.canManagePolicy} subjectsRev={subjectsRev} />
+          <GroupsResourcesSection orgId={org.id} canManage={gate.canManagePolicy} onSubjectsChanged={() => setSubjectsRev((v) => v + 1)} />
           <DeviceApprovalSection orgId={org.id} canManage={gate.canManageDevices} />
           <PostureChecksSection orgId={org.id} canManage={gate.canManageDeviceHealth} />
         </>
@@ -260,7 +267,7 @@ function ModeSection({ orgId, canManage }: { orgId: string; canManage: boolean }
 }
 
 // ── Rules ─────────────────────────────────────────────────────────────────────────────
-function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean }) {
+function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canManage: boolean; subjectsRev: number }) {
   const [rules, setRules] = useState<PolicyRule[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -315,7 +322,7 @@ function RulesSection({ orgId, canManage }: { orgId: string; canManage: boolean 
   }, [orgId]);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, subjectsRev]); // S8.5: re-load when a sibling section mutates groups/resources (stale-button fix)
 
   const notice = staleNoticeText(staleRuleIds); // DERIVED — no notice state
 
@@ -733,7 +740,7 @@ function RuleFormModal({
 }
 
 // ── Groups & Resources ──────────────────────────────────────────────────────────────
-function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage: boolean }) {
+function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId: string; canManage: boolean; onSubjectsChanged: () => void }) {
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [groupsError, setGroupsError] = useState<string | null>(null);
@@ -767,6 +774,7 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
     if (error) return setErr(apiErrorMessage(error, "Could not create the group."));
     setNewGroup("");
     load();
+    onSubjectsChanged(); // S8.5: re-sync RulesSection's subject copy (the stale "Add rule" button)
   }
   async function delGroup(id: string) {
     const { error } = await api.DELETE("/api/v1/organizations/{orgId}/groups/{groupId}", {
@@ -774,6 +782,7 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
     });
     if (error) return setErr(apiErrorMessage(error, "Could not delete the group."));
     load();
+    onSubjectsChanged();
   }
   async function addResource() {
     if (!newRes.name.trim() || !newRes.cidr.trim()) return;
@@ -784,6 +793,7 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
     if (error) return setErr(apiErrorMessage(error, "Could not create the resource."));
     setNewRes({ name: "", cidr: "", protocol: "any" });
     load();
+    onSubjectsChanged(); // resources are rule destinations — keep RulesSection's copy fresh too
   }
   async function delResource(id: string) {
     const { error } = await api.DELETE("/api/v1/organizations/{orgId}/resources/{resourceId}", {
@@ -791,6 +801,7 @@ function GroupsResourcesSection({ orgId, canManage }: { orgId: string; canManage
     });
     if (error) return setErr(apiErrorMessage(error, "Could not delete the resource."));
     load();
+    onSubjectsChanged();
   }
 
   return (

@@ -78,6 +78,17 @@ export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: nu
   return { lastSeen: relativeAge(lastSeenAt), offline: nowMs - t > GATEWAY_OFFLINE_MS };
 }
 
+// gatewayOnline (S8.5 WF-1 — positive health) is the affirmative liveness signal on the site surface: a
+// gateway reads ONLINE when it is active, reporting FRESH (not offline — the SAME gatewayLiveness clock),
+// AND carries no degraded-health badge (no site_link_down / site_hub_down / desync). It is the fresh side
+// of the SAME clock + health bool the offline/degraded badges already read — the deferred WF-1 item's
+// discharge with NO third vocabulary and NO new data. (The numeric handshake age + link bytes — L1 — are
+// re-deferred to S8.6's commit-one: "reported" ≢ "stored" for gateway peers, so a fresh/stale signal is
+// what the surface honestly has; numeric age is richer, not required for liveness.) PURE.
+export function gatewayOnline(status: GatewayView["status"], offline: boolean, health: HealthBadge | null): boolean {
+  return status === "active" && !offline && health == null;
+}
+
 export interface SiteCard {
   id: string;
   name: string;
