@@ -20,6 +20,7 @@ import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
 import {
   assembleTopology,
+  gatewayLiveness,
   crossesMultiSiteThreshold,
   disjointRefusal,
   nameMatchesExactly,
@@ -282,6 +283,11 @@ function SiteCardView({
         </details>
       )}
 
+      {/* S8.4 D7: cross-site DNS forwarding — rides the same card as the fabric steps (one site, one story). */}
+      {canManage && card.subnets.some((s) => s.status === "approved") && (
+        <DNSForwardSection orgId={orgId} siteId={card.id} />
+      )}
+
       {canManage && (
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="ghost" onClick={() => setModal("subnet")}>Advertise subnet</Button>
@@ -316,13 +322,19 @@ function SiteCardView({
 }
 
 function GatewayRow({ g }: { g: GatewayView }) {
+  // S8.4 rider (VERIFY-0): render the last-seen FACT + an OFFLINE badge when stale, so a stopped gateway no
+  // longer reads healthy on the site surface. Extends the S8.3 badge system — no third health vocabulary.
+  const live = gatewayLiveness(g.lastSeenAt, Date.now());
   return (
     <li className="flex items-center gap-2 text-sm">
       <span className="text-slate-200">{g.name}</span>
       {g.isHub && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-sky-300">hub</span>}
       {g.status === "revoked" && <span className="text-xs text-rose-400">revoked</span>}
+      {live.offline && <span className={`text-xs ${badgeClass("danger")}`}>offline</span>}
       {g.health && <span className={`text-xs ${badgeClass(g.health.tone)}`}>{g.health.label}</span>}
       <span className="ml-auto text-[11px] text-slate-500">
+        {live.lastSeen}
+        {" · "}
         {g.agentVersion}
         {g.maxPolicyVersion != null && ` · policy v${g.maxPolicyVersion}`}
       </span>
@@ -532,6 +544,73 @@ function RemoveSubnetConfirm({
       </p>
       <ErrorText>{err}</ErrorText>
     </Modal>
+  );
+}
+
+// S8.4 D7: per-site cross-site DNS forwarding config. The typed server refusals (dns_domain_conflict,
+// dns_resolver_not_in_site_subnet) are rendered VERBATIM — no JS re-check, ONE validator (the D3/S8.3
+// convention). Rides the fabric-card layout.
+function DNSForwardSection({ orgId, siteId }: { orgId: string; siteId: string }) {
+  const [forwards, setForwards] = useState<{ domain: string; resolver_ip: string }[]>([]);
+  const [domain, setDomain] = useState("");
+  const [resolverIp, setResolverIp] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const { data } = await api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards", { params: { path: { orgId, siteId } } });
+    if (data) setForwards(data as { domain: string; resolver_ip: string }[]);
+  }, [orgId, siteId]);
+  useEffect(() => {
+    load().catch(() => {});
+  }, [load]);
+  async function add() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards", {
+      params: { path: { orgId, siteId } },
+      body: { domain: domain.trim(), resolver_ip: resolverIp.trim() },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not add the forward.")); // verbatim typed refusal — no JS re-check
+    setDomain("");
+    setResolverIp("");
+    load();
+  }
+  async function remove(d: string) {
+    setErr(null);
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards/{domain}", {
+      params: { path: { orgId, siteId, domain: d } },
+    });
+    if (error) return setErr(apiErrorMessage(error, "Could not remove the forward."));
+    load();
+  }
+  return (
+    <details className="mt-3 rounded-lg border border-white/5 bg-ink-900/60 px-3 py-2 text-xs text-slate-400">
+      <summary className="cursor-pointer text-slate-300">Cross-site DNS forwarding — resolve this site's names from other sites</summary>
+      <div className="mt-2 space-y-2">
+        <p>Forward a domain to this site's internal resolver (an IP inside an approved subnet). Other sites resolve those names over the tunnel.</p>
+        <ul className="space-y-1">
+          {forwards.map((f) => (
+            <li key={f.domain} className="flex items-center gap-2">
+              <span className="font-mono text-slate-300">{f.domain}</span>
+              <span className="text-slate-500">→ {f.resolver_ip}</span>
+              <button type="button" className="ml-auto text-slate-500 hover:text-rose-400" aria-label={`Remove ${f.domain}`} onClick={() => remove(f.domain)}>
+                ✕
+              </button>
+            </li>
+          ))}
+          {forwards.length === 0 && <li className="text-slate-500">No forwarded zones.</li>}
+        </ul>
+        <div className="flex flex-wrap items-end gap-2">
+          <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="corp.local" className="w-40" maxLength={253} />
+          <Input value={resolverIp} onChange={(e) => setResolverIp(e.target.value)} placeholder="10.20.0.53" className="w-36" maxLength={45} />
+          <Button variant="ghost" onClick={add} disabled={busy || !domain.trim() || !resolverIp.trim()}>
+            Add
+          </Button>
+        </div>
+        <ErrorText>{err}</ErrorText>
+      </div>
+    </details>
   );
 }
 

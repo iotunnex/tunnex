@@ -161,3 +161,23 @@ describe("disjointRefusal — VERBATIM per overlap class, null otherwise (no JS 
     expect(disjointRefusal(undefined)).toBeNull();
   });
 });
+
+import { gatewayLiveness, GATEWAY_OFFLINE_MS } from "../src/lib/sitesview";
+
+describe("gatewayLiveness — S8.4 rider (VERIFY-0: a stopped gateway must NOT read healthy on the site card)", () => {
+  const now = 1_000_000_000_000;
+  it("a freshly-reporting gateway is NOT offline", () => {
+    const r = gatewayLiveness(new Date(now - 10_000).toISOString(), now);
+    expect(r.offline).toBe(false);
+    expect(r.lastSeen).toMatch(/ago|now|just/i);
+  });
+  it("a gateway stale past the threshold is OFFLINE (the dead-gateway-renders-healthy hole closed)", () => {
+    const r = gatewayLiveness(new Date(now - GATEWAY_OFFLINE_MS - 60_000).toISOString(), now);
+    expect(r.offline).toBe(true);
+  });
+  it("a never-connected gateway is offline, stated honestly", () => {
+    const r = gatewayLiveness(null, now);
+    expect(r.offline).toBe(true);
+    expect(r.lastSeen).toBe("never connected");
+  });
+});
