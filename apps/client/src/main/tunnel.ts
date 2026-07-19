@@ -50,9 +50,22 @@ export class TunnelController {
     this.conn = new HelperConnection(socketPath, () => this.onLost());
   }
 
+  // baseAllowed caches the session's BAKED-STABLE AllowedIPs (the pool for split, 0.0.0.0/0 + ::/0 for
+  // full) so the RoutedRangesMonitor can merge base ∪ ranges without re-fetching the config (identity is
+  // never re-fetched — D2). Refreshed each up(); a mode change re-mints, so a fresh session's monitor
+  // reads the fresh base.
+  private baseAllowed: string[] = [];
+
+  // baseAllowedIPs returns the session's baked-stable AllowedIPs — the routes the monitor must always
+  // re-include (the stable core the routed-ranges push never drops).
+  baseAllowedIPs(): string[] {
+    return [...this.baseAllowed];
+  }
+
   async up(): Promise<TunnelStatus> {
     const config = await this.resolveConfig();
     this.address = config.address;
+    this.baseAllowed = [...(config.allowed_ips ?? [])];
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up", config });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel up failed"));
     await this.applyResolvers(config.dns_forwards ?? []);
@@ -85,6 +98,15 @@ export class TunnelController {
     } catch {
       /* fail-static: leave the tunnel up; resolversActive stays as attempted so a down still tries once */
     }
+  }
+
+  // setAllowedIPs live-updates the tunnel peer's AllowedIPs to the full desired set (S8.5 routed-subnets
+  // push) via the helper. Unlike applyResolvers (one-shot, swallow), this is driven by a POLL, so it
+  // THROWS on failure — the RoutedRangesMonitor catches it, keeps its last-applied set (fail-static),
+  // and retries with backoff. A refusal (old helper unknown_verb) or a wire error both throw.
+  async setAllowedIPs(allowedIPs: string[]): Promise<void> {
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_allowed_ips", allowed_ips: allowedIPs });
+    if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_allowed_ips failed"));
   }
 
   async down(): Promise<void> {

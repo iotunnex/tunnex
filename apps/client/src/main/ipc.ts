@@ -7,6 +7,7 @@ import { TunnelConfigStore } from "./tunnelstore";
 import { HttpDeviceApi } from "./httpdeviceapi";
 import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
+import { RoutedRangesMonitor } from "./routedrangesmonitor";
 import { ApprovalMonitor } from "./approvalmonitor";
 import { HealthMonitor } from "./healthmonitor";
 import type { HealthFacts } from "./deviceconfig";
@@ -93,9 +94,12 @@ export function registerIpc(
 
   // --- revocation monitor (proactive, client-side; S6.4) -------------------------
   let monitor: RevocationMonitor | null = null;
+  let routedRangesMonitor: RoutedRangesMonitor | null = null; // S8.5: volatile-routes poll (split-tunnel only)
   const stopMonitor = (): void => {
     monitor?.stop();
     monitor = null;
+    routedRangesMonitor?.stop();
+    routedRangesMonitor = null;
   };
   // onRevoked is the definitive-gone teardown: tear the dead tunnel down, clear the
   // dead config (+ best-effort revoke), then surface the distinct revoked state LOUDLY
@@ -302,6 +306,13 @@ export function registerIpc(
     if (cred && sc?.deviceId) {
       monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
+      // S8.5 routed-subnets push: poll the org's declared ranges and live-apply base ∪ ranges via the
+      // helper. SPLIT-TUNNEL ONLY — a full tunnel already routes everything (0.0.0.0/0), so the helper
+      // would no-op; the CLIENT skips here so no pointless privileged call is emitted (the ruled layer).
+      if (!requestedFullTunnel) {
+        routedRangesMonitor = new RoutedRangesMonitor(sc.orgId, tunnel.baseAllowedIPs(), deviceApiFor(cred.server), (set) => tunnel.setAllowedIPs(set));
+        routedRangesMonitor.start();
+      }
       // S7.5.3: self-report posture while connected. First report early (~15s),
       // then every 10min (+ fixed jitter). Terminal 403 (open edition) stops it
       // until the next connect. onHealthResult surfaces a require-mode block as the

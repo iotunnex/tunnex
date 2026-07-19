@@ -7,7 +7,7 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export type AuthMode = "path_check" | "code_signing";
-export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status" | "set_resolvers";
+export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status" | "set_resolvers" | "set_allowed_ips";
 
 // ResolverForward mirrors apps/helper ResolverForward (S8.4): a domain whose names
 // resolve via a remote site's internal DNS (ResolverIP) over the tunnel.
@@ -41,6 +41,9 @@ export interface HelperRequest {
   config?: TunnelConfig;
   // resolvers rides ONLY on set_resolvers (the full desired set). Mirrors apps/helper.
   resolvers?: ResolverForward[];
+  // allowed_ips rides ONLY on set_allowed_ips — the full desired peer AllowedIPs set (baked-stable ∪
+  // declared-ranges), live-applied without a bounce. S8.5. Mirrors apps/helper.
+  allowed_ips?: string[];
 }
 
 export interface TunnelStatus {

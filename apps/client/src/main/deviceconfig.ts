@@ -29,6 +29,10 @@ export interface DeviceApi {
   // "gone" = 404/410 (device no longer exists). Any other failure THROWS (inconclusive
   // — retry with backoff, same discipline as deviceStatus).
   reportHealth(deviceId: string, orgId: string, facts: HealthFacts): Promise<HealthReportResult | "unsupported" | "gone">;
+  // routedRanges fetches the org's declared routed LAN ranges (S8.5) — the volatile-routes channel
+  // (ranges only, NEVER identity — the never-re-fetch invariant holds). Throws on any read error
+  // (inconclusive: the RoutedRangesMonitor keeps its last-applied set, fail-static).
+  routedRanges(orgId: string): Promise<string[]>;
 }
 
 // HealthFacts are the client-collected posture facts (S7.5.3). disk_encrypted is

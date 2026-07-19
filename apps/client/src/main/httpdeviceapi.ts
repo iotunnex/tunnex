@@ -93,6 +93,15 @@ export class HttpDeviceApi implements DeviceApi {
     return (await this.deviceStatus(deviceId, orgId)) === "active";
   }
 
+  // routedRanges GETs the org's declared routed ranges (S8.5). Throws on a non-OK read (inconclusive —
+  // the monitor keeps its last-applied set, never strip-to-baked). Ranges-only response.
+  async routedRanges(orgId: string): Promise<string[]> {
+    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/routed-ranges`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`routed_ranges_failed: ${r.status}`);
+    const body = (await r.json()) as { ranges?: string[] };
+    return body.ranges ?? [];
+  }
+
   // deviceInOrg fetches ONE org's device list and maps the device's status, or null if it is
   // not in that org. Throws on a non-OK read (inconclusive — a blip never reads as gone).
   private async deviceInOrg(orgId: string, deviceId: string): Promise<"active" | "pending" | "gone" | null> {
