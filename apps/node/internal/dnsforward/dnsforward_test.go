@@ -42,12 +42,12 @@ func TestServeBindReconcileLifecycle(t *testing.T) {
 	var mu sync.Mutex
 	var addrs []netip.Addr
 	setAddrs := func(a ...netip.Addr) { mu.Lock(); addrs = a; mu.Unlock() }
-	ifaceUp := false // false = wg0 absent (InterfaceByName errors); true = wg0 present (addrs may be empty)
+	ifaceUp := false // false = wg0 not found (InterfaceByName errors); true = wg0 present (addrs may be empty)
 	src := func(string) ([]netip.Addr, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if !ifaceUp {
-			return nil, errors.New("no such iface") // wg0 absent (boot) → the F1 topology
+			return nil, errWGIfaceNotFound // wg0 absent (boot / removed) → close (the F1 topology + RR1 guard)
 		}
 		return append([]netip.Addr(nil), addrs...), nil // present: a SUCCESSFUL read (possibly empty)
 	}
@@ -113,19 +113,22 @@ func TestServeBindReconcileLifecycle(t *testing.T) {
 	waitClosed(a2)
 }
 
-// TestReconcileBindsTransientErrorKeepsListeners (S8.4 fold R6) — a TRANSIENT bindSource error is NOT an
-// empty address set: the live listeners must PERSIST across a glitchy tick (error ≠ absence), so a momentary
-// interface read failure can't blip cross-site DNS. Only a SUCCESSFUL empty read closes them.
-func TestReconcileBindsTransientErrorKeepsListeners(t *testing.T) {
+// TestReconcileBindsTrichotomy (S8.4 RR1) — error is NOT one thing. A TRANSIENT error (interface exists,
+// addrs unreadable) KEEPS the listeners; interface-NOT-FOUND (wg0 gone) CLOSES them (the open-resolver
+// guard); a successful EMPTY read CLOSES them. Collapsing not-found into "keep" leaks a :53 listener on a
+// departed wg0 address (the RR1 regression); collapsing transient into "close" blips DNS on a glitch (R6).
+func TestReconcileBindsTrichotomy(t *testing.T) {
 	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { return nil, nil })
 	a1 := netip.MustParseAddr("10.99.0.2")
 	mode := "ok"
 	src := func(string) ([]netip.Addr, error) {
 		switch mode {
-		case "err":
-			return nil, errors.New("transient InterfaceByName glitch")
+		case "transient":
+			return nil, errors.New("transient Addrs read glitch") // iface exists, addrs unreadable → KEEP
+		case "notfound":
+			return nil, errWGIfaceNotFound // wg0 removed → CLOSE (security)
 		case "empty":
-			return nil, nil // successful read, no addresses
+			return nil, nil // successful read, no addresses → CLOSE
 		default:
 			return []netip.Addr{a1}, nil
 		}
@@ -133,19 +136,32 @@ func TestReconcileBindsTransientErrorKeepsListeners(t *testing.T) {
 	lst := func(netip.Addr) (udpListener, error) { return newFakeListener(), nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	live := map[netip.Addr]context.CancelFunc{}
 
-	f.reconcileBinds(ctx, src, lst, "wg0", live) // binds a1
+	// (2) transient error keeps the listener.
+	live := map[netip.Addr]context.CancelFunc{}
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
 	if _, ok := live[a1]; !ok {
 		t.Fatal("a1 must bind")
 	}
-	mode = "err"
-	f.reconcileBinds(ctx, src, lst, "wg0", live) // glitch → KEEP a1
+	mode = "transient"
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
 	if _, ok := live[a1]; !ok {
-		t.Fatal("a transient bindSource error must NOT tear down the listener (error ≠ absence)")
+		t.Fatal("a transient error must KEEP the listener (availability half)")
+	}
+	// (1) interface not-found CLOSES the listener (the open-resolver guard — RR1 leak scenario).
+	mode = "notfound"
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
+	if len(live) != 0 {
+		t.Fatal("wg0 gone (not-found) must CLOSE the listener, not leak it on the departed address")
+	}
+	// (3) successful empty read CLOSES.
+	mode = "ok"
+	f.reconcileBinds(ctx, src, lst, "wg0", live) // re-bind
+	if _, ok := live[a1]; !ok {
+		t.Fatal("a1 must re-bind")
 	}
 	mode = "empty"
-	f.reconcileBinds(ctx, src, lst, "wg0", live) // genuine empty read → close
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
 	if len(live) != 0 {
 		t.Fatal("a successful empty address read must close the listeners")
 	}

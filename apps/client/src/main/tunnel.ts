@@ -75,9 +75,11 @@ export class TunnelController {
       if (r.ok) {
         this.resolversActive = fwds.length > 0; // installed n or swept to 0
       } else {
-        // Helper REFUSED (an old helper's unknown_verb, or resolvers_unsupported on Windows): nothing was
-        // installed — with all-or-nothing on the helper a failed apply strands nothing — so clear the flag
-        // rather than latch it true and emit a redundant empty sweep on every future down (R3).
+        // Helper REFUSED (an old helper's unknown_verb, or resolvers_unsupported on Windows): no NEW files
+        // were installed (the helper rolls back this apply's newly-created files on failure), so clear the
+        // flag rather than latch it true and emit a redundant empty sweep on every future down (R3). Any
+        // overwrite of a PRE-EXISTING owned file is healed by the next apply / startup CleanStale (the R5
+        // accepted window) — not the client's concern here.
         this.resolversActive = false;
       }
     } catch {

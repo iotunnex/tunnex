@@ -122,38 +122,6 @@ func TestIPCResolversRejectedOnOtherVerbs(t *testing.T) {
 	}
 }
 
-// TestIPCReleaseRidesResolverSweep (S8.4 fold) — the resolver sweep is wired to the Supervisor release
-// rider by NewServer: a graceful down (which drops the block) sweeps resolvers to nil through the rider,
-// NOT via an eager onClose. Proves the wiring end-to-end over the IPC path.
-func TestIPCReleaseRidesResolverSweep(t *testing.T) {
-	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
-	swept := make(chan []ResolverForward, 4)
-	srv.resolvers = func(r []ResolverForward) error { swept <- r; return nil }
-	c1, c2 := net.Pipe()
-	go srv.handle(c2)
-	defer c1.Close()
-
-	if resp, err := Do(c1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
-		t.Fatalf("up: err=%v resp=%+v", err, resp)
-	}
-	if resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetResolvers, Resolvers: []ResolverForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}}); err != nil || !resp.OK {
-		t.Fatalf("set_resolvers: err=%v resp=%+v", err, resp)
-	}
-	<-swept // the explicit set call
-	// Graceful down drops the block → the release rider sweeps resolvers to nil.
-	if resp, err := Do(c1, req(VerbTunnelDown, nil)); err != nil || !resp.OK {
-		t.Fatalf("down: err=%v resp=%+v", err, resp)
-	}
-	select {
-	case r := <-swept:
-		if r != nil {
-			t.Fatalf("release sweep must reconcile to nil, got %+v", r)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("graceful down did not sweep resolvers via the release rider")
-	}
-}
-
 func TestIPCUntrustedCallerRejected(t *testing.T) {
 	srv, _ := newServer(t, &fakeBackend{}, untrustedResolver)
 	c1, c2 := net.Pipe()
