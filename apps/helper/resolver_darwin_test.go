@@ -136,6 +136,37 @@ func TestReconcileAcceptsSingleLabel(t *testing.T) {
 	}
 }
 
+// TestReconcileAcceptsUnderscoreAndUnicode (S8.4 fold R1) — the helper does PATH-SAFETY only; a domain the
+// CP accepts (an AD `_msdcs.corp` SRV zone, a unicode zone) must install, and — critically now that apply is
+// all-or-nothing — one such domain must NOT sink the WHOLE set.
+func TestReconcileAcceptsUnderscoreAndUnicode(t *testing.T) {
+	dir := t.TempDir()
+	err := reconcileResolvers(dir, []ResolverForward{
+		{Domain: "_msdcs.corp", ResolverIP: "10.20.0.53"},
+		{Domain: "münchen.local", ResolverIP: "10.20.0.54"},
+		{Domain: "corp.local", ResolverIP: "10.20.0.55"},
+	})
+	if err != nil {
+		t.Fatalf("underscore/unicode zones must install, not sink the set: %v", err)
+	}
+	for _, dom := range []string{"_msdcs.corp", "münchen.local", "corp.local"} {
+		if _, statErr := os.Stat(filepath.Join(dir, dom)); statErr != nil {
+			t.Errorf("%q not written: %v", dom, statErr)
+		}
+	}
+}
+
+// TestReconcileStillRefusesTraversal (S8.4 fold R1) — the path-safety FLOOR did not regress: separators,
+// traversal, and leading/trailing dots are still refused.
+func TestReconcileStillRefusesTraversal(t *testing.T) {
+	dir := t.TempDir()
+	for _, bad := range []string{"../etc/evil", "a/b.local", ".corp.local", "a..b.local"} {
+		if err := reconcileResolvers(dir, []ResolverForward{{Domain: bad, ResolverIP: "10.0.0.1"}}); err == nil || codeOf(err) != "invalid_resolver_domain" {
+			t.Errorf("path-unsafe domain %q must be refused, got %v", bad, err)
+		}
+	}
+}
+
 // TestReconcilePartialWriteRollsBack (F5/F6): a write failure mid-apply removes the files this apply newly
 // created (all-or-nothing) so nothing is stranded, and a foreign file is untouched throughout.
 func TestReconcilePartialWriteRollsBack(t *testing.T) {

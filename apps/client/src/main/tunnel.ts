@@ -72,9 +72,16 @@ export class TunnelController {
     if (fwds.length > 0) this.resolversActive = true;
     try {
       const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
-      if (r.ok && fwds.length === 0) this.resolversActive = false; // swept clean
+      if (r.ok) {
+        this.resolversActive = fwds.length > 0; // installed n or swept to 0
+      } else {
+        // Helper REFUSED (an old helper's unknown_verb, or resolvers_unsupported on Windows): nothing was
+        // installed — with all-or-nothing on the helper a failed apply strands nothing — so clear the flag
+        // rather than latch it true and emit a redundant empty sweep on every future down (R3).
+        this.resolversActive = false;
+      }
     } catch {
-      /* fail-static: leave the tunnel up, cross-site names may not resolve */
+      /* fail-static: leave the tunnel up; resolversActive stays as attempted so a down still tries once */
     }
   }
 

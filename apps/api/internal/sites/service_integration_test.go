@@ -202,7 +202,10 @@ func TestApproveSubnetDisjointness(t *testing.T) {
 	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
 		t.Fatalf("seed actor: %v", e)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org); _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor) })
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
 	site, err := svc.RegisterSite(ctx, org, "hq")
 	if err != nil {
 		t.Fatalf("register: %v", err)

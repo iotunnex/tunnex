@@ -226,13 +226,22 @@ func (f *Forwarder) reconcileBinds(
 	wgIface string,
 	live map[netip.Addr]context.CancelFunc,
 ) {
-	want := map[netip.Addr]struct{}{}
-	if binds, err := src(wgIface); err == nil {
-		for _, b := range binds {
-			want[b] = struct{}{}
+	binds, err := src(wgIface)
+	if err != nil {
+		// ERROR ≠ ABSENCE (the S8.2 F3 -4/-6 error-vs-absence ruling, applied at the bind layer): a
+		// TRANSIENT interface read glitch is NOT "wg0 has no addresses" — tearing down every :53 listener
+		// on a momentary error would blip cross-site DNS for a whole tick. Keep the current listeners and
+		// retry next tick; only a SUCCESSFUL read of an empty set closes them (below).
+		if f.log != nil {
+			f.log.Warn("dns_forward_bind_source_error", "iface", wgIface, "error", err.Error())
 		}
+		return
 	}
-	// Close listeners no longer wanted (address removed / wg0 gone).
+	want := map[netip.Addr]struct{}{}
+	for _, b := range binds {
+		want[b] = struct{}{}
+	}
+	// Close listeners no longer wanted (address removed / wg0 addressless).
 	for addr, stop := range live {
 		if _, ok := want[addr]; !ok {
 			stop()

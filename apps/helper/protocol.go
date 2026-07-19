@@ -60,6 +60,7 @@ func authRank(m AuthMode) int {
 //   - client < helper → the app is OLD relative to a newer helper: "client_outdated" —
 //     REFUSE (a stale app must not drive a newer helper; a downgrade-refused ratchet,
 //     mirroring the auth-mode ratchet in Negotiate). Update the app.
+//
 // v1 is the only version today; this is the framework the first bump uses.
 func NegotiateVersion(client, helper int) error {
 	switch {

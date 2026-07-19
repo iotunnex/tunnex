@@ -79,10 +79,13 @@ func reconcileResolvers(dir string, desired []ResolverForward) error {
 		}
 	}
 
-	// Write/update the desired set — ALL-OR-NOTHING per apply (F5/F6): if any write fails, roll back the
-	// files this apply newly CREATED so a partial apply never strands an owned file the client's
-	// resolversActive flag won't later sweep. (Overwrites of already-owned files are atomic temp-then-rename
-	// and are covered by the owner-loss + startup CleanStale sweeps, so they need no rollback.)
+	// Write/update the desired set. On a mid-apply write failure, roll back the files this apply newly
+	// CREATED (existed==false) so a partial apply strands no NEW owned file. An OVERWRITE of an
+	// already-owned file is NOT rolled back — the accepted, ledgered window (S8.4 fold R5): a failed
+	// mid-apply may leave an already-owned domain pointing at its NEW resolver until the next reconcile
+	// tick (client re-applies the full set) or a restart (startup CleanStale) heals it. Bounded + honest;
+	// not full all-or-nothing, and deliberately so — chasing atomic overwrite-rollback was the over-clever
+	// path the fold reduction backed out of.
 	type writeRec struct {
 		path    string
 		existed bool
@@ -170,23 +173,20 @@ func writeResolverFile(path string, ip netip.Addr) error {
 }
 
 // safeResolverDomain enforces the helper's OWN concern — that the domain is safe to use as a FILENAME
-// under resolverDir — ADDITIVELY, not by re-deriving DNS-name validity. Domain SHAPE (single-label vs
-// dotted, label rules) is the control plane's one-truth (sites.NormalizeDomain), which accepts single-label
-// zones like "internal"/"corp" that are legitimate in the homelab/SMB segment; the helper must not reject
-// what the CP accepted (F3 — a third normalizer was a third chance to disagree). So this checks path-safety
-// only: no separators, no traversal, no leading/trailing dot, an allowed charset. Lowercased.
+// under resolverDir — and NOTHING ELSE. Domain SHAPE (single-label vs dotted, label rules, allowed
+// characters) is the control plane's one-truth (sites.NormalizeDomain); the helper must not reject what
+// the CP accepted (F3). The earlier ASCII charset allowlist was a third normalizer wearing a security
+// costume: it rejected underscore zones (`_msdcs.corp`, `_ldap._tcp` — bog-standard Active Directory) and
+// unicode zones the CP stores and every gateway answers for — and, now that the apply is all-or-nothing,
+// ONE such domain sank the whole set. So this is PATH-SAFETY ONLY: no separators, no traversal, no NUL, no
+// leading/trailing dot. Underscores and unicode are perfectly safe filenames. Lowercased.
 func safeResolverDomain(raw string) (string, error) {
 	d := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(raw, ".")))
 	if d == "" || len(d) > 253 {
 		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain is empty or too long"}
 	}
-	if strings.ContainsAny(d, "/\\") || strings.Contains(d, "..") {
-		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a path separator"}
-	}
-	for _, r := range d {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-' {
-			return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has an illegal character"}
-		}
+	if strings.ContainsAny(d, "/\\") || strings.Contains(d, "..") || strings.ContainsRune(d, 0) {
+		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a path separator or traversal"}
 	}
 	if d[0] == '.' || d[len(d)-1] == '.' {
 		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has a leading or trailing dot"}
