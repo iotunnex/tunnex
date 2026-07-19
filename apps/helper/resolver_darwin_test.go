@@ -160,7 +160,7 @@ func TestReconcileAcceptsUnderscoreAndUnicode(t *testing.T) {
 // traversal, and leading/trailing dots are still refused.
 func TestReconcileStillRefusesTraversal(t *testing.T) {
 	dir := t.TempDir()
-	for _, bad := range []string{"../etc/evil", "a/b.local", ".corp.local", "a..b.local"} {
+	for _, bad := range []string{"../etc/evil", "a/b.local", ".corp.local", "a..b.local", "a\nb.local", "a\tb.local", "a\x00b.local"} {
 		if err := reconcileResolvers(dir, []ResolverForward{{Domain: bad, ResolverIP: "10.0.0.1"}}); err == nil || codeOf(err) != "invalid_resolver_domain" {
 			t.Errorf("path-unsafe domain %q must be refused, got %v", bad, err)
 		}

@@ -105,7 +105,7 @@ type Server struct {
 // the verifier itself (path_check now; code_signing at S6.5b) — there is no
 // separate knob to drift out of sync with the real check.
 func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Server {
-	srv := &Server{
+	return &Server{
 		sup:          sup,
 		verify:       verify,
 		resolve:      resolve,
@@ -115,14 +115,6 @@ func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Se
 		posture:      collectPosture,
 		resolvers:    setResolvers,
 	}
-	// S8.4: the resolver sweep rides the kill-switch release (dead-man fire / graceful Down), fired under
-	// the Supervisor's lock. The closure reads srv.resolvers at call-time so a test override is honored.
-	sup.SetOnRelease(func() {
-		if err := srv.resolvers(nil); err != nil && codeOf(err) != "resolvers_unsupported" {
-			log.Printf("resolver_sweep_on_release_failed: %v", err)
-		}
-	})
-	return srv
 }
 
 // Serve accepts connections until the listener closes. Each is handled in its own
@@ -245,11 +237,11 @@ func (s *Server) onClose(conn net.Conn, definitive bool) {
 	if isOwner {
 		// definitive=true (socket closed → process gone) selects the short orphan window;
 		// false (read-deadline timeout → wedged-but-connected) keeps the full window.
-		// The resolver sweep is NOT done here (that eager sweep diverged from the kill-switch's
-		// wedged-owner grace and raced a fast reconnect — the S8.4 fold reduction). Instead it RIDES the
-		// Supervisor's OWN release decision (SetOnRelease, wired in NewServer): it fires only when the
-		// dead-man actually drops the block, inheriting the grace + definitive-loss semantics under the
-		// Supervisor's lock. OnPeerLost only ARMS/HOLDS the block; it does not release, so nothing sweeps here.
+		// NO resolver sweep on owner-loss (S8.4 round-3 reduce-by-removal): the crash/owner-loss resolver
+		// sweep is DEFERRED to S8.4b/S8.5, where the client resolver path goes live and the sweep is
+		// exercisable + walk-provable. Until S8.5 the client installs NO resolver files (dns_forwards is
+		// empty), so there is no crash residue to sweep; startup CleanStaleResolvers covers the only
+		// residue path that could exist (a future downgrade/mixed-version edge). See docs/S8.4-decisions.md.
 		s.sup.OnPeerLost(definitive) // no-op unless a tunnel is up/failed
 	}
 }

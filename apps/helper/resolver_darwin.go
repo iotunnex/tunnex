@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // macOS resolves a name under a domain via /etc/resolver/<domain> if such a file
@@ -185,8 +186,16 @@ func safeResolverDomain(raw string) (string, error) {
 	if d == "" || len(d) > 253 {
 		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain is empty or too long"}
 	}
-	if strings.ContainsAny(d, "/\\") || strings.Contains(d, "..") || strings.ContainsRune(d, 0) {
+	if strings.ContainsAny(d, "/\\") || strings.Contains(d, "..") {
 		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a path separator or traversal"}
+	}
+	// The path-safety FLOOR (RR4): separators, traversal, NUL — and ANY control character (newline/tab/etc.)
+	// which is never legitimate in a domain and dangerous in a filename. Everything else (underscores,
+	// unicode) is the CP's shape one-truth, not the helper's to second-guess.
+	for _, r := range d {
+		if r == 0 || unicode.IsControl(r) {
+			return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a control character"}
+		}
 	}
 	if d[0] == '.' || d[len(d)-1] == '.' {
 		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has a leading or trailing dot"}

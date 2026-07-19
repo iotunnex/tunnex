@@ -3,12 +3,19 @@ package dnsforward
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
 	"time"
 )
+
+// errWGIfaceNotFound distinguishes "the wg interface is GONE" from a transient read glitch — the security
+// half of the bind reconcile's trichotomy (RR1). Interface-gone must CLOSE the listeners (a departed wg0
+// address must never keep a live :53 socket that could later answer on a reassigned public interface); a
+// transient error must KEEP them (availability). See reconcileBinds.
+var errWGIfaceNotFound = errors.New("dnsforward: wg interface not found")
 
 // ── per-source rate limiting (D2 hygiene) ────────────────────────────────────────────────────────────
 // A token bucket per source IP: capacity dnsRateBurst, refilled dnsRatePerSec tokens/sec. now() is
@@ -149,11 +156,14 @@ func tcpQuery(resolver netip.Addr, query []byte) ([]byte, error) {
 func wgBindAddrs(wgIface string) ([]netip.Addr, error) {
 	ifi, err := net.InterfaceByName(wgIface)
 	if err != nil {
-		return nil, err
+		// The interface is not present (not yet created at boot, or genuinely removed). This is the
+		// SECURITY-relevant case: caller CLOSES its listeners. A distinct sentinel so a merely transient
+		// Addrs() read below stays "keep".
+		return nil, errWGIfaceNotFound
 	}
 	addrs, err := ifi.Addrs()
 	if err != nil {
-		return nil, err
+		return nil, err // interface EXISTS but its addresses are momentarily unreadable → transient → keep
 	}
 	var out []netip.Addr
 	for _, a := range addrs {
@@ -226,22 +236,28 @@ func (f *Forwarder) reconcileBinds(
 	wgIface string,
 	live map[netip.Addr]context.CancelFunc,
 ) {
+	// TRICHOTOMY (RR1) — error is NOT one thing. Collapsing "transient glitch" and "interface gone" into a
+	// single branch is exactly the bug this replaced (the R6 over-correction leaked listeners on a real wg0
+	// removal). Three distinct outcomes:
+	//   1. interface NOT FOUND (errWGIfaceNotFound) → CLOSE all listeners (the SECURITY half: a departed wg0
+	//      address must not keep a live :53 socket that could later answer on a reassigned public interface).
+	//   2. other/TRANSIENT error (interface exists, addrs momentarily unreadable) → KEEP current listeners
+	//      (the AVAILABILITY half: a glitch must not blip cross-site DNS for a whole tick).
+	//   3. success, possibly EMPTY set → reconcile (an empty set closes all — wg0 up but addressless).
+	// Whoever "simplifies" this next should meet this reasoning first.
 	binds, err := src(wgIface)
-	if err != nil {
-		// ERROR ≠ ABSENCE (the S8.2 F3 -4/-6 error-vs-absence ruling, applied at the bind layer): a
-		// TRANSIENT interface read glitch is NOT "wg0 has no addresses" — tearing down every :53 listener
-		// on a momentary error would blip cross-site DNS for a whole tick. Keep the current listeners and
-		// retry next tick; only a SUCCESSFUL read of an empty set closes them (below).
+	if err != nil && !errors.Is(err, errWGIfaceNotFound) {
 		if f.log != nil {
-			f.log.Warn("dns_forward_bind_source_error", "iface", wgIface, "error", err.Error())
+			f.log.Warn("dns_forward_bind_transient_error", "iface", wgIface, "error", err.Error())
 		}
-		return
+		return // (2) transient → keep
 	}
+	// (1) not-found → err set, binds nil → want empty → close-all below; (3) success → reconcile to binds.
 	want := map[netip.Addr]struct{}{}
 	for _, b := range binds {
 		want[b] = struct{}{}
 	}
-	// Close listeners no longer wanted (address removed / wg0 addressless).
+	// Close listeners no longer wanted (address removed / wg0 addressless / wg0 gone).
 	for addr, stop := range live {
 		if _, ok := want[addr]; !ok {
 			stop()
