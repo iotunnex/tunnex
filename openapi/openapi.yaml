@@ -1892,6 +1892,49 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/SiteSubnet" } } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSiteDNSForwards
+      summary: List a site's cross-site DNS forwarding zones (S8.4; site:manage)
+      tags: [sites]
+      responses:
+        "200":
+          description: The site's forwarded zones.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DNSForward" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: setSiteDNSForward
+      summary: Add/update a forwarded zone (S8.4; site:manage)
+      description: >-
+        Forwards {domain} to {resolver_ip} — the resolver MUST be inside one of this site's approved subnets
+        (409 dns_resolver_not_in_site_subnet otherwise), and the domain must not already be forwarded by
+        ANOTHER site in the org (409 dns_domain_conflict — one zone → one resolver). Same domain on this site
+        updates its resolver. Audited site.dns_forwarding_set.
+      tags: [sites]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DNSForward" } } }
+      responses:
+        "204": { description: Set. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards/{domain}:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: domain, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: removeSiteDNSForward
+      summary: Remove a forwarded zone — full-sweep withdraws it from all gateways (S8.4; site:manage)
+      tags: [sites]
+      responses:
+        "204": { description: Removed. }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/sites/{siteId}/bind:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2191,6 +2234,14 @@ components:
         link_transport: { type: string, enum: [wireguard], description: "Reserved enum (D4); wireguard-only in v1." }
         link_mtu: { type: integer, nullable: true }
         created_at: { type: string, format: date-time }
+    DNSForward:
+      type: object
+      required: [domain, resolver_ip]
+      additionalProperties: false
+      properties:
+        domain: { type: string, description: "The forwarded zone (e.g. corp.local)." }
+        resolver_ip: { type: string, description: "The site's internal resolver — must be inside one of the site's approved subnets (S8.4)." }
+
     SiteSubnet:
       type: object
       required: [id, site_id, cidr, status]

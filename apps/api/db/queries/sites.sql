@@ -94,6 +94,10 @@ DELETE FROM site_subnets WHERE id = $1;
 -- unioned CP-side into the org forwarding table compiled onto every gateway.
 SELECT dns_forwarding FROM sites WHERE org_id = $1;
 
+-- name: SetSiteDNSForwarding :exec
+-- lint:cross-org — the site is org-checked via GetSite before this write (S8.4 D7 CRUD).
+UPDATE sites SET dns_forwarding = $2, updated_at = now() WHERE id = $1;
+
 -- name: ListPendingSiteSubnetsForOrg :many
 -- lint:cross-org — org-scoped via the join. The admin review queue (advertised, awaiting approval).
 SELECT ss.id, ss.site_id, ss.cidr, ss.status

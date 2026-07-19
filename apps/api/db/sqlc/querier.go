@@ -532,6 +532,8 @@ type Querier interface {
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
+	// lint:cross-org — the site is org-checked via GetSite before this write (S8.4 D7 CRUD).
+	SetSiteDNSForwarding(ctx context.Context, arg SetSiteDNSForwardingParams) error
 	// lint:cross-org — user-scoped credential.
 	// Replay guard: advance the last-accepted timestep after a successful verify.
 	SetTOTPLastTimestep(ctx context.Context, arg SetTOTPLastTimestepParams) error

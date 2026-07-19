@@ -487,6 +487,21 @@ func (q *Queries) ListSitesByOrg(ctx context.Context, orgID uuid.UUID) ([]Site, 
 	return items, nil
 }
 
+const setSiteDNSForwarding = `-- name: SetSiteDNSForwarding :exec
+UPDATE sites SET dns_forwarding = $2, updated_at = now() WHERE id = $1
+`
+
+type SetSiteDNSForwardingParams struct {
+	ID            uuid.UUID `json:"id"`
+	DnsForwarding []byte    `json:"dns_forwarding"`
+}
+
+// lint:cross-org — the site is org-checked via GetSite before this write (S8.4 D7 CRUD).
+func (q *Queries) SetSiteDNSForwarding(ctx context.Context, arg SetSiteDNSForwardingParams) error {
+	_, err := q.db.Exec(ctx, setSiteDNSForwarding, arg.ID, arg.DnsForwarding)
+	return err
+}
+
 const unbindNode = `-- name: UnbindNode :execrows
 UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2
 `

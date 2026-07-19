@@ -337,6 +337,76 @@ func TestUnbindSiteNode(t *testing.T) {
 	}
 }
 
+// TestDNSForwardCRUD — S8.4 D7: a forwarded zone is added (resolver validated inside an approved subnet),
+// a duplicate domain on ANOTHER site is refused (D1-addition), removal is audited + full-sweep.
+func TestDNSForwardCRUD(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "dns-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	siteA, err := svc.RegisterSite(ctx, org, "hq")
+	if err != nil {
+		t.Fatalf("register A: %v", err)
+	}
+	sub, err := svc.AddSubnet(ctx, org, siteA.ID, netip.MustParsePrefix("10.20.0.0/24"))
+	if err != nil {
+		t.Fatalf("add subnet: %v", err)
+	}
+	if err := svc.ApproveSubnet(ctx, actor, org, sub.ID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	// Resolver NOT in an approved subnet → refused.
+	if err := svc.SetDNSForward(ctx, actor, org, siteA.ID, "corp.local", "192.168.9.9"); err == nil {
+		t.Fatal("a resolver outside the site's approved subnets must be refused")
+	}
+	// Resolver inside the approved subnet → accepted + audited + compiled.
+	if err := svc.SetDNSForward(ctx, actor, org, siteA.ID, "Corp.Local.", "10.20.0.53"); err != nil {
+		t.Fatalf("set dns forward: %v", err)
+	}
+	fwds, _ := svc.q.ListSiteDNSForwardsForOrg(ctx, org)
+	if len(fwds) == 0 {
+		t.Fatal("the forward must be persisted")
+	}
+	var audited int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.dns_forwarding_set'`, org).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("set must be audited; got %d", audited)
+	}
+
+	// Another site claiming the same domain (normalized) → conflict.
+	siteB, _ := svc.RegisterSite(ctx, org, "branch")
+	subB, _ := svc.AddSubnet(ctx, org, siteB.ID, netip.MustParsePrefix("10.30.0.0/24"))
+	_ = svc.ApproveSubnet(ctx, actor, org, subB.ID)
+	if err := svc.SetDNSForward(ctx, actor, org, siteB.ID, "corp.local", "10.30.0.53"); err == nil {
+		t.Fatal("a domain already forwarded by another site must conflict (one zone → one resolver)")
+	}
+
+	// Remove → gone + audited.
+	if err := svc.RemoveDNSForward(ctx, actor, org, siteA.ID, "corp.local"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	var removed int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.dns_forwarding_removed'`, org).Scan(&removed)
+	if removed != 1 {
+		t.Fatalf("remove must be audited; got %d", removed)
+	}
+	// After removal siteB may now claim it (no longer a conflict).
+	if err := svc.SetDNSForward(ctx, actor, org, siteB.ID, "corp.local", "10.30.0.53"); err != nil {
+		t.Fatalf("after removal the domain is free for another site: %v", err)
+	}
+}
+
 // TestRemoveSubnet — WF-5: a mis-advertised subnet is removable without deleting the whole site; the
 // removal is audited, and it is org-scoped (a foreign org can't remove it).
 func TestRemoveSubnet(t *testing.T) {

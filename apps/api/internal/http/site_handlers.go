@@ -142,6 +142,49 @@ func (s apiServer) ApproveSiteSubnet(ctx context.Context, req api.ApproveSiteSub
 	return api.ApproveSiteSubnet204Response{}, nil
 }
 
+// ListSiteDNSForwards GET /sites/{siteId}/dns-forwards — the site's cross-site DNS zones (S8.4; site:manage, core).
+func (s apiServer) ListSiteDNSForwards(ctx context.Context, req api.ListSiteDNSForwardsRequestObject) (api.ListSiteDNSForwardsResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	fwds, err := s.sites.ListDNSForwards(ctx, req.OrgId, req.SiteId)
+	if err != nil {
+		return nil, err
+	}
+	body := make([]api.DNSForward, 0, len(fwds))
+	for _, f := range fwds {
+		body = append(body, api.DNSForward{Domain: f.Domain, ResolverIp: f.ResolverIP})
+	}
+	return api.ListSiteDNSForwards200JSONResponse{Body: body, Headers: api.ListSiteDNSForwards200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+// SetSiteDNSForward POST /sites/{siteId}/dns-forwards — add/update a forwarded zone (S8.4; site:manage, core).
+func (s apiServer) SetSiteDNSForward(ctx context.Context, req api.SetSiteDNSForwardRequestObject) (api.SetSiteDNSForwardResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_body", "domain + resolver_ip required")
+	}
+	if err := s.sites.SetDNSForward(ctx, p.UserID, req.OrgId, req.SiteId, req.Body.Domain, req.Body.ResolverIp); err != nil {
+		return nil, err
+	}
+	return api.SetSiteDNSForward204Response{}, nil
+}
+
+// RemoveSiteDNSForward DELETE /sites/{siteId}/dns-forwards/{domain} — full-sweep withdraw (S8.4; site:manage, core).
+func (s apiServer) RemoveSiteDNSForward(ctx context.Context, req api.RemoveSiteDNSForwardRequestObject) (api.RemoveSiteDNSForwardResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.sites.RemoveDNSForward(ctx, p.UserID, req.OrgId, req.SiteId, req.Domain); err != nil {
+		return nil, err
+	}
+	return api.RemoveSiteDNSForward204Response{}, nil
+}
+
 // RemoveSiteSubnet DELETE /site-subnets/{subnetId} — un-advertise / remove a subnet (WF-5). All-editions
 // core like the rest of the site model (authorize FIRST, no edition gate); route withdrawn full-sweep.
 func (s apiServer) RemoveSiteSubnet(ctx context.Context, req api.RemoveSiteSubnetRequestObject) (api.RemoveSiteSubnetResponseObject, error) {
