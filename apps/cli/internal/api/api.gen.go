@@ -521,6 +521,15 @@ type CreatePolicyRuleRequestDstKind string
 // CreatePolicyRuleRequestSrcKind defines model for CreatePolicyRuleRequest.SrcKind.
 type CreatePolicyRuleRequestSrcKind string
 
+// DNSForward defines model for DNSForward.
+type DNSForward struct {
+	// Domain The forwarded zone (e.g. corp.local).
+	Domain string `json:"domain"`
+
+	// ResolverIp The site's internal resolver — must be inside one of the site's approved subnets (S8.4).
+	ResolverIp string `json:"resolver_ip"`
+}
+
 // Device defines model for Device.
 type Device struct {
 	// ApprovedBy S7.3: who approved this device. null = grandfathered / auto-active (device_approval off). Set = explicitly approved.
@@ -1326,6 +1335,9 @@ type RegisterSiteJSONRequestBody = RegisterSiteRequest
 // BindSiteNodeJSONRequestBody defines body for BindSiteNode for application/json ContentType.
 type BindSiteNodeJSONRequestBody = BindSiteNodeRequest
 
+// SetSiteDNSForwardJSONRequestBody defines body for SetSiteDNSForward for application/json ContentType.
+type SetSiteDNSForwardJSONRequestBody = DNSForward
+
 // AddSiteSubnetJSONRequestBody defines body for AddSiteSubnet for application/json ContentType.
 type AddSiteSubnetJSONRequestBody = AddSiteSubnetRequest
 
@@ -1755,6 +1767,17 @@ type ClientInterface interface {
 	BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSiteDNSForwards request
+	ListSiteDNSForwards(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetSiteDNSForwardWithBody request with any body
+	SetSiteDNSForwardWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetSiteDNSForward(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body SetSiteDNSForwardJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RemoveSiteDNSForward request
+	RemoveSiteDNSForward(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, domain string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSiteSubnets request
 	ListSiteSubnets(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3322,6 +3345,54 @@ func (c *Client) BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.U
 
 func (c *Client) BindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewBindSiteNodeRequest(c.Server, orgId, siteId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSiteDNSForwards(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSiteDNSForwardsRequest(c.Server, orgId, siteId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetSiteDNSForwardWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSiteDNSForwardRequestWithBody(c.Server, orgId, siteId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetSiteDNSForward(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body SetSiteDNSForwardJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSiteDNSForwardRequest(c.Server, orgId, siteId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RemoveSiteDNSForward(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, domain string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveSiteDNSForwardRequest(c.Server, orgId, siteId, domain)
 	if err != nil {
 		return nil, err
 	}
@@ -7325,6 +7396,149 @@ func NewBindSiteNodeRequestWithBody(server string, orgId openapi_types.UUID, sit
 	return req, nil
 }
 
+// NewListSiteDNSForwardsRequest generates requests for ListSiteDNSForwards
+func NewListSiteDNSForwardsRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/dns-forwards", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetSiteDNSForwardRequest calls the generic SetSiteDNSForward builder with application/json body
+func NewSetSiteDNSForwardRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, body SetSiteDNSForwardJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetSiteDNSForwardRequestWithBody(server, orgId, siteId, "application/json", bodyReader)
+}
+
+// NewSetSiteDNSForwardRequestWithBody generates requests for SetSiteDNSForward with any type of body
+func NewSetSiteDNSForwardRequestWithBody(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/dns-forwards", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRemoveSiteDNSForwardRequest generates requests for RemoveSiteDNSForward
+func NewRemoveSiteDNSForwardRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, domain string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "siteId", runtime.ParamLocationPath, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "domain", runtime.ParamLocationPath, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/sites/%s/dns-forwards/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListSiteSubnetsRequest generates requests for ListSiteSubnets
 func NewListSiteSubnetsRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -8013,6 +8227,17 @@ type ClientWithResponsesInterface interface {
 	BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
 
 	BindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body BindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
+
+	// ListSiteDNSForwardsWithResponse request
+	ListSiteDNSForwardsWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSiteDNSForwardsResponse, error)
+
+	// SetSiteDNSForwardWithBodyWithResponse request with any body
+	SetSiteDNSForwardWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSiteDNSForwardResponse, error)
+
+	SetSiteDNSForwardWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body SetSiteDNSForwardJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSiteDNSForwardResponse, error)
+
+	// RemoveSiteDNSForwardWithResponse request
+	RemoveSiteDNSForwardWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, domain string, reqEditors ...RequestEditorFn) (*RemoveSiteDNSForwardResponse, error)
 
 	// ListSiteSubnetsWithResponse request
 	ListSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSiteSubnetsResponse, error)
@@ -10087,6 +10312,73 @@ func (r BindSiteNodeResponse) StatusCode() int {
 	return 0
 }
 
+type ListSiteDNSForwardsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]DNSForward
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSiteDNSForwardsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSiteDNSForwardsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SetSiteDNSForwardResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetSiteDNSForwardResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetSiteDNSForwardResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RemoveSiteDNSForwardResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveSiteDNSForwardResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveSiteDNSForwardResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListSiteSubnetsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11367,6 +11659,41 @@ func (c *ClientWithResponses) BindSiteNodeWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseBindSiteNodeResponse(rsp)
+}
+
+// ListSiteDNSForwardsWithResponse request returning *ListSiteDNSForwardsResponse
+func (c *ClientWithResponses) ListSiteDNSForwardsWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListSiteDNSForwardsResponse, error) {
+	rsp, err := c.ListSiteDNSForwards(ctx, orgId, siteId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSiteDNSForwardsResponse(rsp)
+}
+
+// SetSiteDNSForwardWithBodyWithResponse request with arbitrary body returning *SetSiteDNSForwardResponse
+func (c *ClientWithResponses) SetSiteDNSForwardWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSiteDNSForwardResponse, error) {
+	rsp, err := c.SetSiteDNSForwardWithBody(ctx, orgId, siteId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetSiteDNSForwardResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetSiteDNSForwardWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body SetSiteDNSForwardJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSiteDNSForwardResponse, error) {
+	rsp, err := c.SetSiteDNSForward(ctx, orgId, siteId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetSiteDNSForwardResponse(rsp)
+}
+
+// RemoveSiteDNSForwardWithResponse request returning *RemoveSiteDNSForwardResponse
+func (c *ClientWithResponses) RemoveSiteDNSForwardWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, domain string, reqEditors ...RequestEditorFn) (*RemoveSiteDNSForwardResponse, error) {
+	rsp, err := c.RemoveSiteDNSForward(ctx, orgId, siteId, domain, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveSiteDNSForwardResponse(rsp)
 }
 
 // ListSiteSubnetsWithResponse request returning *ListSiteSubnetsResponse
@@ -14234,6 +14561,91 @@ func ParseBindSiteNodeResponse(rsp *http.Response) (*BindSiteNodeResponse, error
 	}
 
 	response := &BindSiteNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSiteDNSForwardsResponse parses an HTTP response from a ListSiteDNSForwardsWithResponse call
+func ParseListSiteDNSForwardsResponse(rsp *http.Response) (*ListSiteDNSForwardsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSiteDNSForwardsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []DNSForward
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetSiteDNSForwardResponse parses an HTTP response from a SetSiteDNSForwardWithResponse call
+func ParseSetSiteDNSForwardResponse(rsp *http.Response) (*SetSiteDNSForwardResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetSiteDNSForwardResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveSiteDNSForwardResponse parses an HTTP response from a RemoveSiteDNSForwardWithResponse call
+func ParseRemoveSiteDNSForwardResponse(rsp *http.Response) (*RemoveSiteDNSForwardResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveSiteDNSForwardResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

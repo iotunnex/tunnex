@@ -1456,6 +1456,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        /** List a site's cross-site DNS forwarding zones (S8.4; site:manage) */
+        get: operations["listSiteDNSForwards"];
+        put?: never;
+        /**
+         * Add/update a forwarded zone (S8.4; site:manage)
+         * @description Forwards {domain} to {resolver_ip} — the resolver MUST be inside one of this site's approved subnets (409 dns_resolver_not_in_site_subnet otherwise), and the domain must not already be forwarded by ANOTHER site in the org (409 dns_domain_conflict — one zone → one resolver). Same domain on this site updates its resolver. Audited site.dns_forwarding_set.
+         */
+        post: operations["setSiteDNSForward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards/{domain}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+                domain: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a forwarded zone — full-sweep withdraws it from all gateways (S8.4; site:manage) */
+        delete: operations["removeSiteDNSForward"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/sites/{siteId}/bind": {
         parameters: {
             query?: never;
@@ -1749,6 +1794,12 @@ export interface components {
             link_mtu?: number | null;
             /** Format: date-time */
             created_at: string;
+        };
+        DNSForward: {
+            /** @description The forwarded zone (e.g. corp.local). */
+            domain: string;
+            /** @description The site's internal resolver — must be inside one of the site's approved subnets (S8.4). */
+            resolver_ip: string;
         };
         SiteSubnet: {
             /** Format: uuid */
@@ -4657,6 +4708,80 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SiteSubnet"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSiteDNSForwards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The site's forwarded zones. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DNSForward"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setSiteDNSForward: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DNSForward"];
+            };
+        };
+        responses: {
+            /** @description Set. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeSiteDNSForward: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                siteId: string;
+                domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };
