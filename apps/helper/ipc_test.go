@@ -47,6 +47,81 @@ func TestIPCRoundTrip(t *testing.T) {
 	}
 }
 
+// TestIPCSetResolversRoutesAndLeavesTunnelUntouched: set_resolvers reaches the
+// resolver reconciler with the desired set and NEVER changes tunnel state or
+// ownership (the S8.4 kill-switch/revocation-untouched probe).
+func TestIPCSetResolversRoutesAndLeavesTunnelUntouched(t *testing.T) {
+	srv, sup := newServer(t, &fakeBackend{}, trustedResolver)
+	var got []ResolverForward
+	called := 0
+	srv.resolvers = func(r []ResolverForward) error { called++; got = r; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+
+	// Bring the tunnel up so we can prove set_resolvers doesn't disturb it.
+	if resp, err := Do(c1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: err=%v resp=%+v", err, resp)
+	}
+	want := []ResolverForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetResolvers, Resolvers: want})
+	if err != nil || !resp.OK {
+		t.Fatalf("set_resolvers: err=%v resp=%+v", err, resp)
+	}
+	if called != 1 || len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("reconciler not called with the desired set: called=%d got=%+v", called, got)
+	}
+	if sup.State() != StateUp {
+		t.Fatalf("set_resolvers disturbed the tunnel: state=%s", sup.State())
+	}
+}
+
+// TestIPCSetResolversErrorIsTypedTunnelUntouched: a reconcile failure returns the
+// typed code and leaves the tunnel UP — fail-static, DNS forwarding is never
+// load-bearing for the tunnel.
+func TestIPCSetResolversErrorIsTypedTunnelUntouched(t *testing.T) {
+	srv, sup := newServer(t, &fakeBackend{}, trustedResolver)
+	srv.resolvers = func([]ResolverForward) error { return &ProtocolError{Code: "resolver_write_failed", Msg: "boom"} }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+	if resp, err := Do(c1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: err=%v resp=%+v", err, resp)
+	}
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetResolvers, Resolvers: []ResolverForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}})
+	if err != nil {
+		t.Fatalf("io: %v", err)
+	}
+	if resp.OK || resp.Code != "resolver_write_failed" {
+		t.Fatalf("want typed failure, got %+v", resp)
+	}
+	if sup.State() != StateUp {
+		t.Fatalf("failed set_resolvers disturbed the tunnel: state=%s", sup.State())
+	}
+}
+
+// TestIPCResolversRejectedOnOtherVerbs: a resolvers payload smuggled onto a non-
+// set_resolvers verb is rejected by the envelope validator (no resolver write on
+// tunnel_down).
+func TestIPCResolversRejectedOnOtherVerbs(t *testing.T) {
+	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
+	called := 0
+	srv.resolvers = func([]ResolverForward) error { called++; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbTunnelDown, Resolvers: []ResolverForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}})
+	if err != nil {
+		t.Fatalf("io: %v", err)
+	}
+	if resp.OK || resp.Code != "unexpected_resolvers" {
+		t.Fatalf("want unexpected_resolvers, got %+v", resp)
+	}
+	if called != 0 {
+		t.Fatalf("reconciler ran for a non-set_resolvers verb")
+	}
+}
+
 func TestIPCUntrustedCallerRejected(t *testing.T) {
 	srv, _ := newServer(t, &fakeBackend{}, untrustedResolver)
 	c1, c2 := net.Pipe()

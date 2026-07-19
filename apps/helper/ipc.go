@@ -92,6 +92,11 @@ type Server struct {
 	// by default, injectable so dispatch tests never exec fdesetup/powershell.
 	posture func() PostureStatus
 
+	// resolvers reconciles domain-scoped resolver files (S8.4) — the platform
+	// implementation by default (macOS /etc/resolver; unsupported elsewhere until
+	// S8.4b), injectable so dispatch tests never write to the real /etc/resolver.
+	resolvers func([]ResolverForward) error
+
 	mu    sync.Mutex
 	owner net.Conn // the connection that brought the current tunnel up (nil if down)
 }
@@ -108,6 +113,7 @@ func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Se
 		writeTimeout: defaultWriteTimeout,
 		sem:          make(chan struct{}, defaultMaxConns),
 		posture:      collectPosture,
+		resolvers:    setResolvers,
 	}
 }
 
@@ -269,6 +275,15 @@ func (s *Server) dispatch(req *Request) *Response {
 		// nothing to retry and absence is a first-class honest answer.
 		p := s.posture()
 		return &Response{Version: ProtocolVersion, OK: true, Posture: &p}
+	case VerbSetResolvers:
+		// State-changing but NOT tunnel-owning: reconciling resolver files never
+		// affects who owns the live tunnel (unlike tunnel_up). A failure returns a
+		// typed code; the app fail-STATIC (keeps the tunnel up, names just don't
+		// resolve cross-site) — DNS forwarding is never load-bearing for the tunnel.
+		if err := s.resolvers(req.Resolvers); err != nil {
+			return errorResponse(codeOf(err), err.Error())
+		}
+		return okResponse(nil)
 	default:
 		return errorResponse("unknown_verb", "unknown verb")
 	}

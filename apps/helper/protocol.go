@@ -100,10 +100,20 @@ const (
 	// app degrades to reporting the fact ABSENT (never guessed) — a version bump
 	// would instead refuse ALL verbs from a paired old helper, including tunnel_up.
 	VerbPostureStatus Verb = "posture_status"
+	// VerbSetResolvers (S8.4) installs domain-scoped resolvers so cross-site names
+	// resolve to a remote site's internal DNS over the tunnel. The Resolvers list is
+	// the COMPLETE desired set (full-sweep): the helper reconciles its OWNED resolver
+	// files to match exactly — writes/updates the desired, removes owned-but-absent,
+	// and NEVER touches foreign resolver files. An empty/nil list clears all owned
+	// resolvers (the inert steady state). ADDITIVE at ProtocolVersion 1 like posture:
+	// an old helper answers unknown_verb and the app fail-STATIC (tunnel stays up,
+	// cross-site names just don't resolve) — DNS forwarding is never load-bearing for
+	// the tunnel. macOS-only in v1 (/etc/resolver); Windows NRPT is S8.4b.
+	VerbSetResolvers Verb = "set_resolvers"
 )
 
 func validVerb(v Verb) bool {
-	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus
+	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus || v == VerbSetResolvers
 }
 
 // Request is one app→helper message. Config is REQUIRED for tunnel_up and must be
@@ -113,6 +123,15 @@ type Request struct {
 	AuthMode AuthMode      `json:"auth_mode"`
 	Verb     Verb          `json:"verb"`
 	Config   *TunnelConfig `json:"config,omitempty"`
+	// Resolvers is the full-sweep desired set for VerbSetResolvers only (nil elsewhere).
+	Resolvers []ResolverForward `json:"resolvers,omitempty"`
+}
+
+// ResolverForward is one domain-scoped resolver: names under Domain resolve via
+// ResolverIP (a remote site's internal DNS, reachable over the tunnel). S8.4.
+type ResolverForward struct {
+	Domain     string `json:"domain"`
+	ResolverIP string `json:"resolver_ip"`
 }
 
 // Response is one helper→app reply. Status is set only for a successful status/up;
@@ -173,6 +192,11 @@ func ValidateRequest(r *Request) error {
 	}
 	if r.Verb != VerbTunnelUp && r.Config != nil {
 		return &ProtocolError{Code: "unexpected_config", Msg: "config is only valid on tunnel_up"}
+	}
+	// Resolvers ride ONLY on set_resolvers — no smuggling a resolver write onto another
+	// verb. An empty list on set_resolvers is legal (it means sweep to zero).
+	if r.Verb != VerbSetResolvers && r.Resolvers != nil {
+		return &ProtocolError{Code: "unexpected_resolvers", Msg: "resolvers are only valid on set_resolvers"}
 	}
 	return nil
 }

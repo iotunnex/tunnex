@@ -1,4 +1,4 @@
-import { HelperConnection, PROTOCOL_VERSION, type PostureStatus, type TunnelConfig, type TunnelStatus } from "./helperclient";
+import { HelperConnection, PROTOCOL_VERSION, type PostureStatus, type ResolverForward, type TunnelConfig, type TunnelStatus } from "./helperclient";
 
 // helperSocketPath is the local endpoint the privileged helper listens on. It is
 // platform-specific (a unix socket on macOS, a named pipe on Windows). The helper
@@ -32,6 +32,9 @@ export class TunnelController {
   // reports runtime stats (rx/tx/handshake) but not the address (it's config), so
   // main attaches it to every status it forwards. Cleared on down / fail-closed.
   private address?: string;
+  // resolversActive tracks whether we have installed any domain-scoped resolvers so
+  // the inert path (no forwards, none ever set) makes ZERO wire calls. S8.4.
+  private resolversActive = false;
 
   // withAddress decorates a helper status with the cached tunnel address so the UI
   // can show "Your IP" without the address ever needing to round-trip the helper.
@@ -52,13 +55,30 @@ export class TunnelController {
     this.address = config.address;
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_up", config });
     if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "tunnel up failed"));
+    await this.applyResolvers(config.dns_forwards ?? []);
     this.startHeartbeat();
     return this.withAddress(r.status ?? { state: "up" });
+  }
+
+  // applyResolvers reconciles the helper's domain-scoped resolvers to the full desired
+  // set. BEST-EFFORT / fail-STATIC: an old helper (unknown_verb) or a set failure must
+  // NEVER fail the tunnel — cross-site names just don't resolve. Inert when there is
+  // nothing to set and nothing was set before (zero wire calls — the S8.4 inert red).
+  private async applyResolvers(fwds: ResolverForward[]): Promise<void> {
+    if (fwds.length === 0 && !this.resolversActive) return;
+    try {
+      const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
+      if (r.ok) this.resolversActive = fwds.length > 0;
+    } catch {
+      /* fail-static: leave the tunnel up, cross-site names may not resolve */
+    }
   }
 
   async down(): Promise<void> {
     this.stopHeartbeat();
     this.address = undefined;
+    // Sweep any installed resolvers BEFORE dropping the connection (while it's alive).
+    await this.applyResolvers([]);
     const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "tunnel_down" });
     // Graceful: the down told the helper to restore routing, so closing the owner
     // connection now is expected (won't trip fail-closed).
