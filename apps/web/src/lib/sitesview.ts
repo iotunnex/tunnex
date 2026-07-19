@@ -2,6 +2,7 @@ import type { Node, Site, SiteSubnet } from "./api";
 import { can } from "./rbac";
 import type { Role } from "./api";
 import { policyHealthBadge, type HealthBadge } from "./healthview";
+import { relativeAge } from "./format";
 
 // sitesview — PURE, electron-free view-models for the Sites page (S8.3 Slice 2). The page is a thin
 // render over these; the render-floor law binds here — every field a card shows traces to a WIRE value
@@ -56,6 +57,25 @@ export interface GatewayView {
   health: HealthBadge | null; // null = healthy (no badge); otherwise the S7.4b/S8.2 kind badge
   maxPolicyVersion: number | null; // reported max; null = never reported (below-ceiling — CW, Slice 3 uses it)
   agentVersion: string;
+  lastSeenAt: string | null; // S8.4 rider (VERIFY-0): the freshness fact the Devices page already renders
+}
+
+// GATEWAY_OFFLINE_MS: past this staleness a gateway reads OFFLINE. ~3 missed status reports (30s cadence).
+export const GATEWAY_OFFLINE_MS = 90_000;
+
+// gatewayLiveness (S8.4 rider) renders the FACT (last-seen age) and INFERS offline from a threshold — closing
+// VERIFY-0's dead-gateway-renders-healthy hole on the site surface. It reads the SAME node.last_seen_at the
+// Devices page already shows; no new signal, no third health vocabulary — the offline flag styles via the
+// existing badge system. PURE.
+export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: number): { lastSeen: string; offline: boolean } {
+  if (!lastSeenAt) {
+    return { lastSeen: "never connected", offline: true };
+  }
+  const t = Date.parse(lastSeenAt);
+  if (Number.isNaN(t)) {
+    return { lastSeen: "unknown", offline: true };
+  }
+  return { lastSeen: relativeAge(lastSeenAt), offline: nowMs - t > GATEWAY_OFFLINE_MS };
 }
 
 export interface SiteCard {
@@ -121,6 +141,7 @@ export function assembleTopology(sites: Site[], subnetsBySite: Record<string, Si
         health: policyHealthBadge(n),
         maxPolicyVersion: n.max_policy_version ?? null,
         agentVersion: n.agent_version,
+        lastSeenAt: n.last_seen_at ?? null,
       })),
     subnets: (subnetsBySite[s.id] ?? []).map((ss) => ({ id: ss.id, cidr: ss.cidr, status: ss.status })),
   }));
