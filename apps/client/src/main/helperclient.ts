@@ -7,7 +7,14 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export type AuthMode = "path_check" | "code_signing";
-export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status";
+export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status" | "set_resolvers";
+
+// ResolverForward mirrors apps/helper ResolverForward (S8.4): a domain whose names
+// resolve via a remote site's internal DNS (ResolverIP) over the tunnel.
+export interface ResolverForward {
+  domain: string;
+  resolver_ip: string;
+}
 
 export interface TunnelConfig {
   private_key: string;
@@ -21,6 +28,10 @@ export interface TunnelConfig {
   dns?: string[];
   mtu?: number;
   persistent_keepalive?: number;
+  // dns_forwards (S8.4): domain-scoped resolvers to install for this device's
+  // cross-site name resolution. Absent/empty until S8.5's device-routes slice
+  // populates them — the client is inert-safe when there are none.
+  dns_forwards?: ResolverForward[];
 }
 
 export interface HelperRequest {
@@ -28,6 +39,8 @@ export interface HelperRequest {
   auth_mode: AuthMode;
   verb: Verb;
   config?: TunnelConfig;
+  // resolvers rides ONLY on set_resolvers (the full desired set). Mirrors apps/helper.
+  resolvers?: ResolverForward[];
 }
 
 export interface TunnelStatus {

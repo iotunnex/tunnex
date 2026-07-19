@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-import { encodeFrame, FrameDecoder, HelperConnection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, type TunnelConfig } from "../src/main/helperclient";
+import { encodeFrame, FrameDecoder, HelperConnection, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, type ResolverForward, type TunnelConfig } from "../src/main/helperclient";
 import { helperSocketPath, TunnelController } from "../src/main/tunnel";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +81,68 @@ test("TunnelController attaches the config's tunnel address to forwarded status"
     await ctrl.down();
   } finally {
     server.close();
+    try { fs.unlinkSync(sockPath); } catch { /* gone */ }
+  }
+});
+
+// A helper stub that RECORDS every verb it receives, so the resolver plumbing can be
+// asserted at the wire. Replies ok to everything (down → state "down").
+function recordingHelper(): { server: net.Server; verbs: string[]; requests: Array<{ verb: string; resolvers?: ResolverForward[] }> } {
+  const verbs: string[] = [];
+  const requests: Array<{ verb: string; resolvers?: ResolverForward[] }> = [];
+  const server = net.createServer((sock) => {
+    const dec = new FrameDecoder();
+    sock.on("data", (chunk: Buffer) => {
+      for (const msg of dec.push(chunk)) {
+        const req = msg as { verb: string; resolvers?: ResolverForward[] };
+        verbs.push(req.verb);
+        requests.push({ verb: req.verb, resolvers: req.resolvers });
+        const state = req.verb === "tunnel_down" ? "down" : "up";
+        sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: true, status: { state } }));
+      }
+    });
+  });
+  return { server, verbs, requests };
+}
+
+// INERT RED (S8.4): a device with NO dns_forwards makes ZERO set_resolvers calls on
+// up AND on down — zero files, zero behavior delta against every existing install.
+test("TunnelController with no dns_forwards never calls set_resolvers", async () => {
+  const sockPath = testEndpoint("dnsinert");
+  try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
+  const { server, verbs } = recordingHelper();
+  await new Promise<void>((r) => server.listen(sockPath, r));
+  try {
+    const cfg = { address: "10.99.0.2/32" } as unknown as TunnelConfig; // no dns_forwards
+    const ctrl = new TunnelController(sockPath, async () => cfg);
+    await ctrl.up();
+    await ctrl.down();
+    assert.equal(verbs.includes("set_resolvers"), false, "no forwards ⇒ no set_resolvers call");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    try { fs.unlinkSync(sockPath); } catch { /* gone */ }
+  }
+});
+
+// ACTIVE RED (S8.4): dns_forwards present ⇒ set_resolvers carries them on up, and down
+// sweeps with an EMPTY desired set (full-sweep withdraw).
+test("TunnelController installs then sweeps dns_forwards via set_resolvers", async () => {
+  const sockPath = testEndpoint("dnsactive");
+  try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
+  const { server, requests } = recordingHelper();
+  await new Promise<void>((r) => server.listen(sockPath, r));
+  try {
+    const fwds: ResolverForward[] = [{ domain: "corp.local", resolver_ip: "10.20.0.53" }];
+    const cfg = { address: "10.99.0.2/32", dns_forwards: fwds } as unknown as TunnelConfig;
+    const ctrl = new TunnelController(sockPath, async () => cfg);
+    await ctrl.up();
+    await ctrl.down();
+    const sets = requests.filter((r) => r.verb === "set_resolvers");
+    assert.equal(sets.length, 2, "one install on up, one sweep on down");
+    assert.deepEqual(sets[0].resolvers, fwds, "up installs the desired set");
+    assert.deepEqual(sets[1].resolvers, [], "down sweeps to empty (full withdraw)");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
     try { fs.unlinkSync(sockPath); } catch { /* gone */ }
   }
 });
