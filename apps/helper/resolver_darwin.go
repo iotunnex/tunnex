@@ -7,9 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"unicode"
 )
 
 // macOS resolves a name under a domain via /etc/resolver/<domain> if such a file
@@ -173,41 +171,5 @@ func writeResolverFile(path string, ip netip.Addr) error {
 	return nil
 }
 
-// safeResolverDomain enforces the helper's OWN concern — that the domain is safe to use as a FILENAME
-// under resolverDir — and NOTHING ELSE. Domain SHAPE (single-label vs dotted, label rules, allowed
-// characters) is the control plane's one-truth (sites.NormalizeDomain); the helper must not reject what
-// the CP accepted (F3). The earlier ASCII charset allowlist was a third normalizer wearing a security
-// costume: it rejected underscore zones (`_msdcs.corp`, `_ldap._tcp` — bog-standard Active Directory) and
-// unicode zones the CP stores and every gateway answers for — and, now that the apply is all-or-nothing,
-// ONE such domain sank the whole set. So this is PATH-SAFETY ONLY: no separators, no traversal, no NUL, no
-// leading/trailing dot. Underscores and unicode are perfectly safe filenames. Lowercased.
-func safeResolverDomain(raw string) (string, error) {
-	d := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(raw, ".")))
-	if d == "" || len(d) > 253 {
-		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain is empty or too long"}
-	}
-	if strings.ContainsAny(d, "/\\") || strings.Contains(d, "..") {
-		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a path separator or traversal"}
-	}
-	// The path-safety FLOOR (RR4): separators, traversal, NUL — and ANY control character (newline/tab/etc.)
-	// which is never legitimate in a domain and dangerous in a filename. Everything else (underscores,
-	// unicode) is the CP's shape one-truth, not the helper's to second-guess.
-	for _, r := range d {
-		if unicode.IsControl(r) { // NUL (U+0000) is category Cc, so this covers it too
-			return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a control character"}
-		}
-	}
-	if d[0] == '.' || d[len(d)-1] == '.' {
-		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has a leading or trailing dot"}
-	}
-	return d, nil
-}
-
-func sortedKeys(m map[string]netip.Addr) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
-}
+// safeResolverDomain + sortedKeys moved to resolver.go (untagged) so the Windows NRPT path shares the same
+// path-safety floor and key-sort — one floor, both platforms.
