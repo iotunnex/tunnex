@@ -41,7 +41,7 @@ func (f *fakeRoutes) cmd(add bool, target string) error {
 	return nil
 }
 
-func kernelSet(f *fakeRoutes) []string { return sortedSet(f.kernel) }
+func kernelSet(f *fakeRoutes) []string { return sortedKeys(f.kernel) }
 
 // RED #1 — partial-add then retry CONVERGES: r2's add fails, but r1 stays applied so the retry re-attempts
 // ONLY r2 and never re-issues `route add r1` (which would fail "File exists"). Routes converge.

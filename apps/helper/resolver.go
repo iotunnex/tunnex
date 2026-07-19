@@ -2,7 +2,6 @@ package helper
 
 import (
 	"errors"
-	"net/netip"
 	"sort"
 	"strings"
 	"unicode"
@@ -54,7 +53,9 @@ func safeResolverDomain(raw string) (string, error) {
 	return d, nil
 }
 
-func sortedKeys(m map[string]netip.Addr) []string {
+// sortedKeys returns a map's keys in sorted order — the one keys-then-sort helper for the whole helper
+// package (the resolver reconcile, the NRPT reconcile, and the route reconcile all share it, S8.5 #4).
+func sortedKeys[V any](m map[string]V) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
 		ks = append(ks, k)

@@ -43,6 +43,10 @@ type Querier interface {
 	// Bind a gateway node to a site IN THE SAME ORG. The EXISTS guard refuses a cross-org bind (a
 	// node must not bind to another org's site). The single-node-per-site partial unique index makes a
 	// second bind to an already-occupied site a unique violation, which the service maps to a typed 409.
+	// S8.5 #2: `site_id IS NULL` makes the bind an ATOMIC CLAIM — under two concurrent binds of an unbound
+	// gateway, only ONE UPDATE matches (the other sees the just-committed non-null site_id → 0 rows), so the
+	// write itself enforces the re-home refusal the read alone could only race on. The caller re-reads on 0
+	// rows to emit the right typed error (same-site no-op / already-bound-elsewhere / node-or-site-not-found).
 	BindNodeToSite(ctx context.Context, arg BindNodeToSiteParams) (int64, error)
 	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
 	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can

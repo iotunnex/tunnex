@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -840,15 +841,160 @@ func TestRouteLANResumeRetrySafe(t *testing.T) {
 	if boundSite != site1.ID {
 		t.Fatalf("gateway must stay homed to the resumed site")
 	}
-	// Exactly ONE subnet on the site (the abandoned pending dropped), approved, and it's the corrected CIDR.
-	var subCount int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE site_id=$1`, site1.ID).Scan(&subCount)
-	if subCount != 1 {
-		t.Fatalf("resume must converge to ONE subnet (abandoned pending dropped), got %d", subCount)
-	}
+	// The corrected CIDR is approved.
 	var status, cidrStr string
 	_ = pool.QueryRow(ctx, `SELECT status, cidr::text FROM site_subnets WHERE id=$1`, sub.ID).Scan(&status, &cidrStr)
 	if status != "approved" || cidrStr != "10.9.0.0/24" {
 		t.Fatalf("the resumed subnet must be the corrected CIDR, approved: status=%s cidr=%s", status, cidrStr)
+	}
+	// The abandoned CIDR (the first attempt's pending) SURVIVES — RouteLAN mutates nothing that exists
+	// (re-review #1: resume must NOT hard-delete a pending advertisement; two await review, both truthful).
+	var badPending int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE site_id=$1 AND status='pending' AND cidr='10.99.0.0/24'`, site1.ID).Scan(&badPending)
+	if badPending != 1 {
+		t.Fatalf("the abandoned pending advertisement must survive (no destructive cleanup), got %d", badPending)
+	}
+}
+
+// TestRouteLANResumeLeavesForeignPending (re-review #1) — RouteLAN resume must NEVER hard-delete a bound
+// site's PENDING advertisement (a long-path admin's awaited work). Resume advertises its own CIDR and
+// mutates nothing that exists.
+func TestRouteLANResumeLeavesForeignPending(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor, node := uuid.New(), uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "fp-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8]); e != nil {
+		t.Fatalf("seed node: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+
+	// Long-path: a site on the gateway with a subnet advertised (PENDING, awaiting review — not approved).
+	site, _ := svc.RegisterSite(ctx, org, "long-path")
+	if err := svc.BindNode(ctx, org, site.ID, node); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	pend, err := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.0.0.0/24"))
+	if err != nil {
+		t.Fatalf("advertise: %v", err)
+	}
+
+	// RouteLAN the SAME gateway with a different CIDR → resumes the site + advertises 192.168.1.0/24.
+	if _, _, err := svc.RouteLAN(ctx, actor, org, node, "", netip.MustParsePrefix("192.168.1.0/24")); err != nil {
+		t.Fatalf("routeLAN resume: %v", err)
+	}
+	// The admin's pending advertisement SURVIVES (still pending, not deleted).
+	var st string
+	if e := pool.QueryRow(ctx, `SELECT status FROM site_subnets WHERE id=$1`, pend.ID).Scan(&st); e != nil {
+		t.Fatalf("the admin's pending subnet was DELETED (data loss): %v", e)
+	}
+	if st != "pending" {
+		t.Fatalf("the admin's advertisement must stay pending, got %s", st)
+	}
+}
+
+// TestRouteLANResumeSameCIDRNoDup (re-review #1 additive guard) — a resume whose CIDR already exists on the
+// site reuses that subnet (idempotent), never a duplicate row.
+func TestRouteLANResumeSameCIDRNoDup(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor, node := uuid.New(), uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "sc-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8]); e != nil {
+		t.Fatalf("seed node: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+
+	cidr := netip.MustParsePrefix("10.20.0.0/24")
+	site, _, err := svc.RouteLAN(ctx, actor, org, node, "hq", cidr)
+	if err != nil {
+		t.Fatalf("first routeLAN: %v", err)
+	}
+	// Same-CIDR resubmit (e.g. a double-click): reuse the approved subnet, no duplicate.
+	if _, _, err := svc.RouteLAN(ctx, actor, org, node, "hq", cidr); err != nil {
+		t.Fatalf("same-CIDR resume: %v", err)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE site_id=$1`, site.ID).Scan(&n)
+	if n != 1 {
+		t.Fatalf("same-CIDR resume must NOT duplicate the subnet row, got %d", n)
+	}
+}
+
+// TestBindNodeConcurrentClaimNoOrphan (re-review #2) — the re-home refusal must be a WRITE-enforced atomic
+// claim, not a read-then-write race: two concurrent binds of an unbound gateway to DIFFERENT sites →
+// exactly one succeeds, the other gets node_already_bound_to_site, and NEITHER site is orphaned (the loser's
+// site has no gateway; the gateway points to the winner).
+func TestBindNodeConcurrentClaimNoOrphan(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, node := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'cc-'||$3)`, org, org, org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8]); e != nil {
+		t.Fatalf("seed node: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	siteX, _ := svc.RegisterSite(ctx, org, "X")
+	siteY, _ := svc.RegisterSite(ctx, org, "Y")
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i, sid := range []uuid.UUID{siteX.ID, siteY.ID} {
+		wg.Add(1)
+		go func(i int, sid uuid.UUID) {
+			defer wg.Done()
+			<-start // release both together to contend
+			errs[i] = svc.BindNode(ctx, org, sid, node)
+		}(i, sid)
+	}
+	close(start)
+	wg.Wait()
+
+	// Exactly one nil, one node_already_bound_to_site — never two successes (the orphan class).
+	nils, refused := 0, 0
+	for _, e := range errs {
+		if e == nil {
+			nils++
+		} else if ae, ok := e.(*apierr.Error); ok && ae.Code == "node_already_bound_to_site" {
+			refused++
+		} else {
+			t.Fatalf("unexpected bind error: %v", e)
+		}
+	}
+	if nils != 1 || refused != 1 {
+		t.Fatalf("concurrent claim must yield exactly one success + one refusal, got nils=%d refused=%d", nils, refused)
+	}
+	// The gateway points to exactly one site; the other is NOT orphaned (has no gateway).
+	var boundSite uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, node).Scan(&boundSite)
+	if boundSite != siteX.ID && boundSite != siteY.ID {
+		t.Fatalf("gateway must be bound to one of the two sites, got %s", boundSite)
+	}
+	var gwCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE site_id IN ($1,$2)`, siteX.ID, siteY.ID).Scan(&gwCount)
+	if gwCount != 1 {
+		t.Fatalf("exactly ONE site may own the gateway (no double-owned / orphan), got %d", gwCount)
 	}
 }

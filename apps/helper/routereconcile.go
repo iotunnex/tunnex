@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"sort"
 	"strings"
 )
 
@@ -41,7 +40,7 @@ type routeCmd func(add bool, target string) error
 //     allowed_ips_apply_failed — it gains specificity, not spam).
 func reconcileRoutes(applied map[string]bool, want map[string]bool, cmd routeCmd) error {
 	// Delete stale FIRST (best-effort — the route may already be gone; belief cleared regardless).
-	for _, t := range sortedSet(applied) {
+	for _, t := range sortedKeys(applied) {
 		if want[t] {
 			continue
 		}
@@ -50,7 +49,7 @@ func reconcileRoutes(applied map[string]bool, want map[string]bool, cmd routeCmd
 	}
 	// Add missing with delete-before-add per route; per-route advance; sweep continues past a failed add.
 	var failed []string
-	for _, t := range sortedSet(want) {
+	for _, t := range sortedKeys(want) {
 		if applied[t] {
 			continue
 		}
@@ -66,15 +65,4 @@ func reconcileRoutes(applied map[string]bool, want map[string]bool, cmd routeCmd
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: "route add failed for: " + strings.Join(failed, ", ")}
 	}
 	return nil
-}
-
-// sortedSet returns a map's keys sorted — deterministic reconcile order (a stable command sequence for the
-// reds; order-independent for correctness).
-func sortedSet(m map[string]bool) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
 }

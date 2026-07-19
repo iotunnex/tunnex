@@ -358,9 +358,12 @@ func (b *windowsBackend) FailClosed() error {
 	// dead-man releases them.
 	if b.dev != nil {
 		b.dev.Close()
-		b.dev, b.tunDev, b.luid = nil, nil, 0
-		b.applied = nil // crash-path Down: routes vanish with the adapter; belief cleared (drift-heal c)
+		b.dev, b.tunDev = nil, nil
 	}
+	// UNCONDITIONAL (S8.5 #3): clear luid + the belief map on EVERY terminal transition, even when Up failed
+	// LATE (pinEndpointRoute/SetDNS after the route reconcile seeded `applied`, before b.dev was assigned) —
+	// FailClosed's `if b.dev != nil` guard would otherwise leave a populated map for a destroyed adapter.
+	b.luid, b.applied = 0, nil
 	return nil
 }
 

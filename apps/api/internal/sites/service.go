@@ -128,6 +128,9 @@ func (s *Service) BindNode(ctx context.Context, orgID, siteID, nodeID uuid.UUID)
 		}
 		return apierr.Conflict("node_already_bound_to_site", "this gateway is already bound to another site; unbind it first")
 	}
+	// Unbound at read time → ATOMIC claim. The `site_id IS NULL` predicate in BindNodeToSite is the real
+	// guard: under a concurrent bind, only one UPDATE matches, so the read above can never be raced into a
+	// silent re-home. On 0 rows we lost the race (or the site is missing) → re-read to classify.
 	n, err := s.q.BindNodeToSite(ctx, sqlc.BindNodeToSiteParams{
 		ID: nodeID, OrgID: orgID, SiteID: pgtype.UUID{Bytes: siteID, Valid: true},
 	})
@@ -137,10 +140,26 @@ func (s *Service) BindNode(ctx context.Context, orgID, siteID, nodeID uuid.UUID)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return apierr.NotFound("node_or_site_not_found", "no such node in this organization, or the site is not in this organization")
+	if n == 1 {
+		return nil
 	}
-	return nil
+	// 0 rows: a concurrent bind claimed the gateway first, or the site does not exist. Re-read to emit the
+	// right typed error — NEVER an orphaning silent success.
+	cur2, err := s.q.GetNodeSiteBinding(ctx, sqlc.GetNodeSiteBindingParams{ID: nodeID, OrgID: orgID})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return apierr.NotFound("node_or_site_not_found", "no such node in this organization, or the site is not in this organization")
+		}
+		return err
+	}
+	if cur2.Valid {
+		if cur2.Bytes == siteID {
+			return nil // the racer bound us to THIS same site → idempotent no-op
+		}
+		return apierr.Conflict("node_already_bound_to_site", "this gateway is already bound to another site; unbind it first")
+	}
+	// Still unbound → the claim's EXISTS(site) clause failed: the site is not in this org.
+	return apierr.NotFound("node_or_site_not_found", "no such node in this organization, or the site is not in this organization")
 }
 
 // UnbindNode detaches a node from its site — the SITE entity survives (the point of D6:

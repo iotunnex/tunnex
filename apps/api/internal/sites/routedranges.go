@@ -115,33 +115,15 @@ func (s *Service) RouteLAN(ctx context.Context, actor, orgID, nodeID uuid.UUID, 
 
 	var site sqlc.Site
 	if cur.Valid {
-		// RESUME the gateway's existing site.
+		// RESUME the gateway's existing site — advertise THIS CIDR and mutate NOTHING else. A prior pending
+		// subnet (a long-path advertisement awaiting review, or the abandoned CIDR of a failed attempt) is
+		// SOMEONE'S awaited work, not residue to sweep — RouteLAN never hard-deletes existing site state
+		// (the pre-fold invariant; deleting it silently is a data-loss class). If the resume leaves two
+		// pendings, that is the true state: two advertisements await review, both visible + approvable via
+		// the normal surfaces. The only guard is additive (below): a same-CIDR resume reuses, never dups.
 		site, err = s.GetSite(ctx, orgID, cur.Bytes)
 		if err != nil {
 			return sqlc.Site{}, sqlc.SiteSubnet{}, err
-		}
-		// If the site is HALF-BUILT (no APPROVED subnet — the RouteLAN shape), drop any leftover PENDING
-		// advertisement that does NOT match the corrected CIDR, so the resume converges to exactly this LAN
-		// (one subnet, no accumulation). An ESTABLISHED site (≥1 approved) is NEVER cleaned — we just add.
-		subs, e := s.q.ListSiteSubnets(ctx, site.ID)
-		if e != nil {
-			return site, sqlc.SiteSubnet{}, e
-		}
-		approved := false
-		for _, ss := range subs {
-			if ss.Status == "approved" {
-				approved = true
-				break
-			}
-		}
-		if !approved {
-			for _, ss := range subs {
-				if ss.Status == "pending" && ss.Cidr.Masked() != cidr.Masked() {
-					if e := s.RemoveSubnet(ctx, actor, orgID, ss.ID); e != nil {
-						return site, sqlc.SiteSubnet{}, e
-					}
-				}
-			}
 		}
 	} else {
 		// FRESH: register + bind. name is optional; blank derives a sensible default from the CIDR.

@@ -262,8 +262,11 @@ func (b *darwinBackend) FailClosed() error {
 	if b.dev != nil {
 		b.dev.Close()
 		b.dev, b.tunDev, b.ifname = nil, nil, ""
-		b.applied = nil // crash-path Down: utun routes vanish with the device; belief cleared (drift-heal c)
 	}
+	// UNCONDITIONAL (S8.5 #3): the belief map is cleared on EVERY terminal transition, even when Up failed
+	// LATE (after the route reconcile seeded `applied` but before b.dev was assigned) — a conditional clear
+	// is how a belief cache rots. Cheap + dumb beats a platform-specific patch path.
+	b.applied = nil
 	return nil
 }
 
