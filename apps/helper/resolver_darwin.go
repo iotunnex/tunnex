@@ -193,7 +193,7 @@ func safeResolverDomain(raw string) (string, error) {
 	// which is never legitimate in a domain and dangerous in a filename. Everything else (underscores,
 	// unicode) is the CP's shape one-truth, not the helper's to second-guess.
 	for _, r := range d {
-		if r == 0 || unicode.IsControl(r) {
+		if unicode.IsControl(r) { // NUL (U+0000) is category Cc, so this covers it too
 			return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain contains a control character"}
 		}
 	}

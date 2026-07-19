@@ -151,14 +151,31 @@ func tcpQuery(resolver netip.Addr, query []byte) ([]byte, error) {
 
 // wgBindAddrs returns the DNS listen addresses — the wg INTERFACE's own addresses ONLY (D2 bind scope). The
 // forwarder must NEVER bind a public interface (an open resolver on a cloud VM is an abuse vector), so the
-// bind set is derived from the wg iface alone; a non-wg address can never enter it. A missing interface
-// (wg0 not created yet at boot) returns an error → the bind-reconcile loop simply retries next tick.
+// bind set is derived from the wg iface alone; a non-wg address can never enter it.
+//
+// ABSENCE IS DETERMINED FROM A SUCCESSFUL ENUMERATION, NEVER INFERRED FROM A CALL FAILURE — "gone" means
+// "enumerated and not there." This is the terminal, un-regressable form of the error≠absence distinction
+// (the S8.2 -4/-6 ruling → R6 → RR1 → FF1): net.InterfaceByName conflates "no such interface" with a
+// TRANSIENT netlink failure (e.g. RTM_GETLINK ENOBUFS under memory pressure), so classifying its error as
+// not-found would re-introduce the R6 availability blip on a glitch. Instead: a failed enumeration is
+// TRANSIENT → keep (plain error); a SUCCESSFUL enumeration missing wgIface is genuinely GONE → close
+// (errWGIfaceNotFound). The next simplifier meets this sentence.
 func wgBindAddrs(wgIface string) ([]netip.Addr, error) {
-	ifi, err := net.InterfaceByName(wgIface)
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		// The interface is not present (not yet created at boot, or genuinely removed). This is the
-		// SECURITY-relevant case: caller CLOSES its listeners. A distinct sentinel so a merely transient
-		// Addrs() read below stays "keep".
+		return nil, err // enumeration itself failed → TRANSIENT → keep current listeners
+	}
+	var ifi *net.Interface
+	for i := range ifaces {
+		if ifaces[i].Name == wgIface {
+			ifi = &ifaces[i]
+			break
+		}
+	}
+	if ifi == nil {
+		// Enumerated successfully and wg0 is not among them → genuinely GONE. SECURITY-relevant: the caller
+		// CLOSES its listeners so a departed wg0 address can't keep a live :53 socket that could later
+		// answer on a reassigned public interface.
 		return nil, errWGIfaceNotFound
 	}
 	addrs, err := ifi.Addrs()

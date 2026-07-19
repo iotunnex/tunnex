@@ -347,3 +347,14 @@ func TestWgBindScopeNeverWildcard(t *testing.T) {
 		}
 	}
 }
+
+// TestWgBindAddrsAbsenceIsEnumerated (FF1) — a genuinely-absent interface is determined from a SUCCESSFUL
+// enumeration (not inferred from a call failure) and returns errWGIfaceNotFound, so reconcileBinds closes;
+// a transient enumeration failure would surface as a plain error (keep). No real host has an interface named
+// this, so net.Interfaces() succeeds and simply doesn't contain it → the terminal not-found signal.
+func TestWgBindAddrsAbsenceIsEnumerated(t *testing.T) {
+	_, err := wgBindAddrs("tnx-nope-xyz0")
+	if !errors.Is(err, errWGIfaceNotFound) {
+		t.Fatalf("an enumerated-but-absent interface must return errWGIfaceNotFound, got %v", err)
+	}
+}
