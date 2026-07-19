@@ -205,7 +205,7 @@ func (q *Queries) GetSite(ctx context.Context, arg GetSiteParams) (Site, error) 
 }
 
 const getSiteNode = `-- name: GetSiteNode :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes WHERE site_id = $1
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority FROM nodes WHERE site_id = $1
 `
 
 // lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
@@ -231,6 +231,7 @@ func (q *Queries) GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, er
 		&i.PolicyDesyncSince,
 		&i.PolicyReportedAt,
 		&i.SiteID,
+		&i.HubPriority,
 	)
 	return i, err
 }
@@ -335,20 +336,24 @@ func (q *Queries) ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID
 }
 
 const listSiteGatewaysForOrg = `-- name: ListSiteGatewaysForOrg :many
-SELECT id, site_id, wg_public_key, endpoint FROM nodes
+SELECT id, site_id, wg_public_key, endpoint, last_seen_at, hub_priority FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> ''
 `
 
 type ListSiteGatewaysForOrgRow struct {
-	ID          uuid.UUID   `json:"id"`
-	SiteID      pgtype.UUID `json:"site_id"`
-	WgPublicKey string      `json:"wg_public_key"`
-	Endpoint    string      `json:"endpoint"`
+	ID          uuid.UUID          `json:"id"`
+	SiteID      pgtype.UUID        `json:"site_id"`
+	WgPublicKey string             `json:"wg_public_key"`
+	Endpoint    string             `json:"endpoint"`
+	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+	HubPriority *int32             `json:"hub_priority"`
 }
 
 // S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
 // input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
 // yet can't be a peer, so it is excluded. endpoint is ” for a NAT'd spoke (it dials out).
+// S8.6: last_seen_at + hub_priority are the election ORDERING inputs (health + the admin pin) — additive,
+// the S8.2 site-link-graph consumers read only id/site_id/wg_public_key/endpoint.
 func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listSiteGatewaysForOrg, orgID)
 	if err != nil {
@@ -363,6 +368,8 @@ func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) (
 			&i.SiteID,
 			&i.WgPublicKey,
 			&i.Endpoint,
+			&i.LastSeenAt,
+			&i.HubPriority,
 		); err != nil {
 			return nil, err
 		}

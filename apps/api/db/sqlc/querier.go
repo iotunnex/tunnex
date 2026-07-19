@@ -269,6 +269,9 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
+	// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
+	// generation. No rows until the first ReconcileHubSet.
+	GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (OrgHubSet, error)
 	// ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
@@ -457,6 +460,8 @@ type Querier interface {
 	// S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
 	// input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
 	// yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).
+	// S8.6: last_seen_at + hub_priority are the election ORDERING inputs (health + the admin pin) — additive,
+	// the S8.2 site-link-graph consumers read only id/site_id/wg_public_key/endpoint.
 	ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error)
 	// S8.2 compiler input: the (site_id, node_id, endpoint) binding for every site-bound gateway in the org.
 	// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
@@ -532,6 +537,9 @@ type Querier interface {
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
 	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
+	// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
+	// so a cross-org node id no-ops (0 rows -> typed 404 at the service).
+	SetNodeHubPriority(ctx context.Context, arg SetNodeHubPriorityParams) (int64, error)
 	// lint:cross-org — keyed by id after cert authorization; the node reports its
 	// locally-generated WireGuard public key and its public endpoint (host:port that
 	// peer configs dial). Returns rows affected so the caller can distinguish a real
@@ -611,6 +619,11 @@ type Querier interface {
 	// Opt-in a check (or change its mode/param). A row's existence IS the opt-in
 	// (no row = off — the unlock-then-opt-in convention, default-off by construction).
 	UpsertOrgHealthCheck(ctx context.Context, arg UpsertOrgHealthCheckParams) (OrgHealthCheck, error)
+	// lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
+	// when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
+	// tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
+	// no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
+	UpsertOrgHubSet(ctx context.Context, arg UpsertOrgHubSetParams) (OrgHubSet, error)
 	UpsertOrgMfaEnforce(ctx context.Context, arg UpsertOrgMfaEnforceParams) error
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.

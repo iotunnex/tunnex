@@ -91,12 +91,14 @@ func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 		t.Fatalf("add subnet: %v", err)
 	}
 
-	// Single-node v1: binding B while A is still bound is REFUSED.
-	if err := svc.BindNode(ctx, org, site.ID, nodeB); err == nil {
-		t.Fatal("binding a second node to an occupied site must be refused (single-node v1)")
+	// S8.6 LIFT: binding a SECOND gateway to a site is now ALLOWED (the HA hub set — the single-node v1
+	// partial unique index was dropped in 0037 precisely so a site can hold primary + standby gateways).
+	if err := svc.BindNode(ctx, org, site.ID, nodeB); err != nil {
+		t.Fatalf("S8.6: a site may now hold multiple gateways (HA hub set); bind B must succeed, got %v", err)
 	}
 
-	// REPLACE the node: unbind A, bind B.
+	// REPLACE the node: unbind A, bind B (a same-site no-op now — B is already bound; the point is the site
+	// entity survives the node churn).
 	if err := svc.UnbindNode(ctx, org, nodeA); err != nil {
 		t.Fatalf("unbind A: %v", err)
 	}

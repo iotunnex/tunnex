@@ -125,3 +125,28 @@ SELECT nps.node_id, nps.public_key, nps.last_handshake_at, nps.rx_bytes, nps.tx_
 FROM node_peer_status nps
 JOIN nodes n ON n.id = nps.node_id
 WHERE n.org_id = @org_id;
+
+-- name: GetOrgHubSet :one
+-- lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
+-- generation. No rows until the first ReconcileHubSet.
+SELECT org_id, members, generation, updated_at FROM org_hub_set WHERE org_id = $1;
+
+-- name: UpsertOrgHubSet :one
+-- lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
+-- when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
+-- tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
+-- no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
+INSERT INTO org_hub_set (org_id, members, generation)
+VALUES (@org_id, @members, 1)
+ON CONFLICT (org_id) DO UPDATE
+SET members = EXCLUDED.members,
+    generation = CASE WHEN org_hub_set.members IS DISTINCT FROM EXCLUDED.members
+                      THEN org_hub_set.generation + 1
+                      ELSE org_hub_set.generation END,
+    updated_at = now()
+RETURNING org_id, members, generation, updated_at;
+
+-- name: SetNodeHubPriority :execrows
+-- lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
+-- so a cross-org node id no-ops (0 rows -> typed 404 at the service).
+UPDATE nodes SET hub_priority = @hub_priority WHERE id = @node_id AND org_id = @org_id;

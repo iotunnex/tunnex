@@ -417,27 +417,113 @@ const siteLinkKeepaliveSecs = 25
 // remote subnets, reaching other spokes VIA the hub); the hub peers with every spoke (each peer's
 // AllowedIPs = that spoke's OWN subnets); the hub forwards between them. Routes = every remote site's
 // approved subnets. Deterministic (sorted) so a steady-state reconcile is a no-op.
-// electSiteHub picks the org's transit HUB — the endpoint-bearing site gateway with the lowest id
-// (single hub v1; multi-hub reserved). Returns nil when no gateway has a public endpoint (all NAT'd) —
-// the B2 no-carrier condition. This is THE election: every hub fact (site-link peers, routes, AND the
-// `is_site_hub` API projection) reads it, so the designation has exactly ONE source and the UI never
-// re-elects (the D2 overrule). PURE.
-func electSiteHub(topo siteTopology) *sqlc.ListSiteGatewaysForOrgRow {
-	var hub *sqlc.ListSiteGatewaysForOrgRow
-	for i := range topo.gws {
-		g := &topo.gws[i]
-		if g.Endpoint != "" && (hub == nil || g.ID.String() < hub.ID.String()) {
-			hub = g
+// hubStaleWindow — a gateway not seen within this window is UNHEALTHY for hub ORDERING (sorts after fresh
+// peers). ~3 missed reports; the server-side twin of the site surface's freshness idea.
+const hubStaleWindow = 90 * time.Second
+
+// electSiteHubSet is THE org transit-hub election (S8.6 D1) — ORG-LEVEL (one transit hub for the org's whole
+// site mesh; NOT per-site — see docs/S8.6-decisions.md keying correction). Returns the CAPABLE gateways
+// (public endpoint + a reported WG key — the ONLY membership criterion, so a capable gateway from ANY site
+// enters; the standby need not share the primary's site) ORDERED: hub_priority (admin pin, ascending) >
+// health (fresh-before-stale) > id (deterministic). members[0] is the active transit hub; the rest are
+// failover candidates in order. PURE given `now` (used only for the health cut).
+func electSiteHubSet(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysForOrgRow {
+	capable := make([]sqlc.ListSiteGatewaysForOrgRow, 0, len(topo.gws))
+	for _, g := range topo.gws {
+		if g.Endpoint != "" && g.WgPublicKey != "" { // the ONE capability gate (D1)
+			capable = append(capable, g)
 		}
 	}
-	return hub
+	sort.Slice(capable, func(i, j int) bool { return hubLess(&capable[i], &capable[j], now) })
+	return capable
+}
+
+func hubHealthy(g *sqlc.ListSiteGatewaysForOrgRow, now time.Time) bool {
+	return g.LastSeenAt.Valid && now.Sub(g.LastSeenAt.Time) < hubStaleWindow
+}
+
+// hubLess orders two capable gateways: PINNED (hub_priority non-null, ascending) before unpinned; then
+// HEALTHY before stale; then id ascending. The admin pin OUTRANKS health — operators outrank the election.
+func hubLess(a, b *sqlc.ListSiteGatewaysForOrgRow, now time.Time) bool {
+	ap, bp := a.HubPriority, b.HubPriority
+	if (ap != nil) != (bp != nil) {
+		return ap != nil // pinned before unpinned
+	}
+	if ap != nil && *ap != *bp {
+		return *ap < *bp // lower priority number = more preferred
+	}
+	if ah, bh := hubHealthy(a, now), hubHealthy(b, now); ah != bh {
+		return ah // healthy before stale
+	}
+	return a.ID.String() < b.ID.String()
+}
+
+// electSiteHub returns the org's transit HUB — the HEAD of the election set (members[0]) — or nil when no
+// gateway is capable (the B2 no-carrier condition, all NAT'd). THE election every hub fact projects
+// (site-link peers, routes, the is_site_hub API projection); the compiler uses ONLY this primary (single-hub
+// v1 — standbys don't grow tunnels until S8.6 Slice 3). PURE given now.
+func electSiteHub(topo siteTopology, now time.Time) *sqlc.ListSiteGatewaysForOrgRow {
+	set := electSiteHubSet(topo, now)
+	if len(set) == 0 {
+		return nil
+	}
+	return &set[0]
+}
+
+// ReconcileHubSet recomputes the org's transit-hub election (electSiteHubSet) and PERSISTS it, bumping the
+// D5 generation ONLY when the ordered membership changes (the atomic UpsertOrgHubSet CASE) — so a no-change
+// reconcile never bumps (no idle tick eroding the fence). Called at every membership/order-change point
+// (bind/unbind/pin). Idempotent + concurrency-safe (the bump is a single SQL statement). Returns the
+// persisted set. NOTE (S8.6 Slice 2 boundary): the set is persisted + served here, but the COMPILER still
+// uses only members[0] (single-hub v1) — standbys don't grow tunnels until Slice 3.
+func (s *Service) ReconcileHubSet(ctx context.Context, orgID uuid.UUID) (sqlc.OrgHubSet, error) {
+	topo, err := s.siteTopoLoad(ctx, orgID)
+	if err != nil {
+		return sqlc.OrgHubSet{}, err
+	}
+	set := electSiteHubSet(topo, time.Now())
+	members := make([]uuid.UUID, 0, len(set))
+	for i := range set {
+		members = append(members, set[i].ID)
+	}
+	return s.q.UpsertOrgHubSet(ctx, sqlc.UpsertOrgHubSetParams{OrgID: orgID, Members: members})
+}
+
+// GetHubSet reads the persisted transit-hub set (S8.6) — the ordered members + the D5 generation. No rows
+// (never reconciled) returns a zero set with an empty member list, not an error.
+func (s *Service) GetHubSet(ctx context.Context, orgID uuid.UUID) (sqlc.OrgHubSet, error) {
+	hs, err := s.q.GetOrgHubSet(ctx, orgID)
+	if err == pgx.ErrNoRows {
+		return sqlc.OrgHubSet{OrgID: orgID, Members: []uuid.UUID{}, Generation: 0}, nil
+	}
+	return hs, err
+}
+
+// SetHubPriority sets (or clears, nil) a gateway's admin hub PIN (D1) and re-elects. Org-checked (a
+// cross-org node id -> 404). Audited in-tx; the re-election persists after so the pin takes effect.
+func (s *Service) SetHubPriority(ctx context.Context, actor, orgID, nodeID uuid.UUID, priority *int32) error {
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, e := q.SetNodeHubPriority(ctx, sqlc.SetNodeHubPriorityParams{NodeID: nodeID, OrgID: orgID, HubPriority: priority})
+		if e != nil {
+			return e
+		}
+		if n == 0 {
+			return apierr.NotFound("node_not_found", "no such node in this organization")
+		}
+		return audit(ctx, q, orgID, &actor, "node.hub_priority_set", "node", nodeID.String(), map[string]any{"hub_priority": priority})
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.ReconcileHubSet(ctx, orgID)
+	return err
 }
 
 func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.Route) {
 	if !node.SiteID.Valid {
 		return nil, nil
 	}
-	hub := electSiteHub(topo)
+	hub := electSiteHub(topo, time.Now())
 	// B2: no hub (every gateway is NAT'd, no public endpoint) → NO carrier for site traffic, so emit NO
 	// routes and NO peers. Installing routes with no peer to carry them is the silent blackhole; the
 	// no-hub condition is surfaced CP-side as site_hub_down (PolicyHealthForNodes), never a silent no-op.
@@ -538,7 +624,7 @@ func (s *Service) pushedHash(topo siteTopology, node sqlc.Node, routeless *polic
 // siteTopoHasHub reports whether ANY gateway carries a public endpoint (a hub exists). Org-wide +
 // node-independent, so the batch health path computes it ONCE (R5: was an O(N·G) per-node rescan).
 func siteTopoHasHub(topo siteTopology) bool {
-	return electSiteHub(topo) != nil // one election: hub existence reads the same picker as the designation
+	return electSiteHub(topo, time.Now()) != nil // one election: hub existence reads the same picker as the designation
 }
 
 // siteHubMissing reports the B2 no-carrier condition for ONE node, given a precomputed hubExists: a site
@@ -870,7 +956,7 @@ func (s *Service) LoadSiteTopoBatch(ctx context.Context, orgID uuid.UUID, nodes 
 	if anySite {
 		if t, err := s.loadSiteTopology(ctx, orgID); err == nil {
 			b.topo = t
-			if hub := electSiteHub(t); hub != nil {
+			if hub := electSiteHub(t, time.Now()); hub != nil {
 				b.hubID, b.hasHub = hub.ID, true
 			}
 		} else {

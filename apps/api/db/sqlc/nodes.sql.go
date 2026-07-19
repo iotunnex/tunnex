@@ -92,7 +92,7 @@ func (q *Queries) CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (org_id, name, cert_serial, agent_version)
 VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority
 `
 
 type CreateNodeParams struct {
@@ -128,12 +128,13 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.PolicyDesyncSince,
 		&i.PolicyReportedAt,
 		&i.SiteID,
+		&i.HubPriority,
 	)
 	return i, err
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority FROM nodes
 WHERE cert_serial = $1
 `
 
@@ -160,12 +161,13 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 		&i.PolicyDesyncSince,
 		&i.PolicyReportedAt,
 		&i.SiteID,
+		&i.HubPriority,
 	)
 	return i, err
 }
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority FROM nodes
 WHERE org_id = $1 AND name = $2
 `
 
@@ -195,6 +197,25 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 		&i.PolicyDesyncSince,
 		&i.PolicyReportedAt,
 		&i.SiteID,
+		&i.HubPriority,
+	)
+	return i, err
+}
+
+const getOrgHubSet = `-- name: GetOrgHubSet :one
+SELECT org_id, members, generation, updated_at FROM org_hub_set WHERE org_id = $1
+`
+
+// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
+// generation. No rows until the first ReconcileHubSet.
+func (q *Queries) GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (OrgHubSet, error) {
+	row := q.db.QueryRow(ctx, getOrgHubSet, orgID)
+	var i OrgHubSet
+	err := row.Scan(
+		&i.OrgID,
+		&i.Members,
+		&i.Generation,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -302,7 +323,7 @@ func (q *Queries) ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID)
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority FROM nodes
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -334,6 +355,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 			&i.PolicyDesyncSince,
 			&i.PolicyReportedAt,
 			&i.SiteID,
+			&i.HubPriority,
 		); err != nil {
 			return nil, err
 		}
@@ -378,6 +400,26 @@ type RevokeNodeParams struct {
 func (q *Queries) RevokeNode(ctx context.Context, arg RevokeNodeParams) error {
 	_, err := q.db.Exec(ctx, revokeNode, arg.OrgID, arg.ID)
 	return err
+}
+
+const setNodeHubPriority = `-- name: SetNodeHubPriority :execrows
+UPDATE nodes SET hub_priority = $1 WHERE id = $2 AND org_id = $3
+`
+
+type SetNodeHubPriorityParams struct {
+	HubPriority *int32    `json:"hub_priority"`
+	NodeID      uuid.UUID `json:"node_id"`
+	OrgID       uuid.UUID `json:"org_id"`
+}
+
+// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
+// so a cross-org node id no-ops (0 rows -> typed 404 at the service).
+func (q *Queries) SetNodeHubPriority(ctx context.Context, arg SetNodeHubPriorityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setNodeHubPriority, arg.HubPriority, arg.NodeID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setNodeWGInfo = `-- name: SetNodeWGInfo :execrows
@@ -447,4 +489,37 @@ WHERE id = $1
 func (q *Queries) TouchNodeSeen(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchNodeSeen, id)
 	return err
+}
+
+const upsertOrgHubSet = `-- name: UpsertOrgHubSet :one
+INSERT INTO org_hub_set (org_id, members, generation)
+VALUES ($1, $2, 1)
+ON CONFLICT (org_id) DO UPDATE
+SET members = EXCLUDED.members,
+    generation = CASE WHEN org_hub_set.members IS DISTINCT FROM EXCLUDED.members
+                      THEN org_hub_set.generation + 1
+                      ELSE org_hub_set.generation END,
+    updated_at = now()
+RETURNING org_id, members, generation, updated_at
+`
+
+type UpsertOrgHubSetParams struct {
+	OrgID   uuid.UUID   `json:"org_id"`
+	Members []uuid.UUID `json:"members"`
+}
+
+// lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
+// when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
+// tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
+// no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
+func (q *Queries) UpsertOrgHubSet(ctx context.Context, arg UpsertOrgHubSetParams) (OrgHubSet, error) {
+	row := q.db.QueryRow(ctx, upsertOrgHubSet, arg.OrgID, arg.Members)
+	var i OrgHubSet
+	err := row.Scan(
+		&i.OrgID,
+		&i.Members,
+		&i.Generation,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

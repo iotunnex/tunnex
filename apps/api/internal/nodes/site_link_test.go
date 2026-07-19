@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -91,11 +92,12 @@ func TestElectSiteHubIsTheOneElection(t *testing.T) {
 	if lo.String() > hi.String() {
 		lo, hi = hi, lo // ensure lo has the lower id
 	}
-	// Two endpoint-bearing gateways → the lower id wins (deterministic tie-break).
+	now := time.Now()
+	// Two endpoint-bearing gateways (with keys) → the lower id wins (no pins, equal health → id tie-break).
 	topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
-		{ID: hi, Endpoint: "b:51820"}, {ID: lo, Endpoint: "a:51820"},
+		{ID: hi, Endpoint: "b:51820", WgPublicKey: "Khi"}, {ID: lo, Endpoint: "a:51820", WgPublicKey: "Klo"},
 	}}
-	hub := electSiteHub(topo)
+	hub := electSiteHub(topo, now)
 	if hub == nil || hub.ID != lo {
 		t.Fatalf("the endpoint-bearing lowest-id gateway must be the hub, got %+v", hub)
 	}
@@ -103,13 +105,13 @@ func TestElectSiteHubIsTheOneElection(t *testing.T) {
 		t.Fatal("siteTopoHasHub must agree with electSiteHub (one election)")
 	}
 	// A NAT'd gateway (no endpoint) is never the hub even with a lower id.
-	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo}, {ID: hi, Endpoint: "b:51820"}}
-	if h := electSiteHub(topo); h == nil || h.ID != hi {
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "Klo"}, {ID: hi, Endpoint: "b:51820", WgPublicKey: "Khi"}}
+	if h := electSiteHub(topo, now); h == nil || h.ID != hi {
 		t.Fatalf("a NAT'd gateway cannot be the hub; the endpoint-bearing one wins, got %+v", h)
 	}
 	// All NAT'd → no hub (B2 no-carrier), and siteTopoHasHub agrees.
-	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo}, {ID: hi}}
-	if electSiteHub(topo) != nil || siteTopoHasHub(topo) {
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "Klo"}, {ID: hi, WgPublicKey: "Khi"}}
+	if electSiteHub(topo, now) != nil || siteTopoHasHub(topo) {
 		t.Fatal("all-NAT'd → no hub (both electSiteHub and siteTopoHasHub must say so)")
 	}
 }

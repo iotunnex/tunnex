@@ -60,7 +60,9 @@ SELECT * FROM nodes WHERE site_id = $1;
 -- S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the
 -- input to the hub-and-spoke site-link peer graph + per-node route set. A gateway with no wg_public_key
 -- yet can't be a peer, so it is excluded. endpoint is '' for a NAT'd spoke (it dials out).
-SELECT id, site_id, wg_public_key, endpoint FROM nodes
+-- S8.6: last_seen_at + hub_priority are the election ORDERING inputs (health + the admin pin) — additive,
+-- the S8.2 site-link-graph consumers read only id/site_id/wg_public_key/endpoint.
+SELECT id, site_id, wg_public_key, endpoint, last_seen_at, hub_priority FROM nodes
 WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '';
 
 -- name: ListSiteNodesForOrg :many

@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"log/slog"
 	"net/netip"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -142,6 +143,11 @@ func (s apiServer) BindSiteNode(ctx context.Context, req api.BindSiteNodeRequest
 	if err := s.sites.BindNode(ctx, req.OrgId, req.SiteId, req.Body.NodeId); err != nil {
 		return nil, err
 	}
+	// S8.6: binding a gateway changes hub-set membership → re-elect + persist (the D5 generation bumps).
+	// Best-effort: a reconcile hiccup must not fail the bind (the set self-heals on the next reconcile).
+	if _, err := s.nodes.ReconcileHubSet(ctx, req.OrgId); err != nil {
+		slog.WarnContext(ctx, "hub_set_reconcile_failed", "op", "bind", "org_id", req.OrgId.String(), "error", err.Error())
+	}
 	return api.BindSiteNode204Response{}, nil
 }
 
@@ -152,6 +158,10 @@ func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeReq
 	}
 	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId); err != nil {
 		return nil, err
+	}
+	// S8.6: unbinding removes a gateway from the hub-set candidate pool → re-elect + persist (best-effort).
+	if _, err := s.nodes.ReconcileHubSet(ctx, req.OrgId); err != nil {
+		slog.WarnContext(ctx, "hub_set_reconcile_failed", "op", "unbind", "org_id", req.OrgId.String(), "error", err.Error())
 	}
 	return api.UnbindSiteNode204Response{}, nil
 }

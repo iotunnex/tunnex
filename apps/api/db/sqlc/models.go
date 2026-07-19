@@ -213,6 +213,7 @@ type Node struct {
 	PolicyDesyncSince pgtype.Timestamptz `json:"policy_desync_since"`
 	PolicyReportedAt  pgtype.Timestamptz `json:"policy_reported_at"`
 	SiteID            pgtype.UUID        `json:"site_id"`
+	HubPriority       *int32             `json:"hub_priority"`
 }
 
 type NodeJoinToken struct {
@@ -242,6 +243,13 @@ type OrgHealthCheck struct {
 	Param     []byte    `json:"param"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type OrgHubSet struct {
+	OrgID      uuid.UUID   `json:"org_id"`
+	Members    []uuid.UUID `json:"members"`
+	Generation int64       `json:"generation"`
+	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
 type OrgMfa struct {
