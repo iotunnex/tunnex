@@ -1062,6 +1062,18 @@ type ResourceRequest struct {
 // ResourceRequestProtocol defines model for ResourceRequest.Protocol.
 type ResourceRequestProtocol string
 
+// RouteLANRequest defines model for RouteLANRequest.
+type RouteLANRequest struct {
+	// Cidr The LAN CIDR to route (IPv4). Validated disjoint from the org's other subnets + pool.
+	Cidr string `json:"cidr"`
+
+	// Name Optional site name; blank derives a default from the CIDR (S8.5 D1 solo-admin path).
+	Name *string `json:"name,omitempty"`
+
+	// NodeId The gateway node that fronts this LAN.
+	NodeId openapi_types.UUID `json:"node_id"`
+}
+
 // RoutedRanges defines model for RoutedRanges.
 type RoutedRanges struct {
 	// Ranges Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared.
@@ -1334,6 +1346,9 @@ type CreateResourceJSONRequestBody = ResourceRequest
 
 // UpdateResourceJSONRequestBody defines body for UpdateResource for application/json ContentType.
 type UpdateResourceJSONRequestBody = ResourceRequest
+
+// RouteLANJSONRequestBody defines body for RouteLAN for application/json ContentType.
+type RouteLANJSONRequestBody = RouteLANRequest
 
 // RegisterSiteJSONRequestBody defines body for RegisterSite for application/json ContentType.
 type RegisterSiteJSONRequestBody = RegisterSiteRequest
@@ -1742,6 +1757,11 @@ type ClientInterface interface {
 	UpdateResourceWithBody(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RouteLANWithBody request with any body
+	RouteLANWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RouteLAN(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRoutedRanges request
 	ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3222,6 +3242,30 @@ func (c *Client) UpdateResourceWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) UpdateResource(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateResourceRequest(c.Server, orgId, resourceId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RouteLANWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRouteLANRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RouteLAN(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRouteLANRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7043,6 +7087,53 @@ func NewUpdateResourceRequestWithBody(server string, orgId openapi_types.UUID, r
 	return req, nil
 }
 
+// NewRouteLANRequest calls the generic RouteLAN builder with application/json body
+func NewRouteLANRequest(server string, orgId openapi_types.UUID, body RouteLANJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRouteLANRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewRouteLANRequestWithBody generates requests for RouteLAN with any type of body
+func NewRouteLANRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/routed-lans", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListRoutedRangesRequest generates requests for ListRoutedRanges
 func NewListRoutedRangesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -8251,6 +8342,11 @@ type ClientWithResponsesInterface interface {
 	UpdateResourceWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
 
 	UpdateResourceWithResponse(ctx context.Context, orgId openapi_types.UUID, resourceId openapi_types.UUID, body UpdateResourceJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateResourceResponse, error)
+
+	// RouteLANWithBodyWithResponse request with any body
+	RouteLANWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RouteLANResponse, error)
+
+	RouteLANWithResponse(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*RouteLANResponse, error)
 
 	// ListRoutedRangesWithResponse request
 	ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error)
@@ -10168,6 +10264,29 @@ func (r UpdateResourceResponse) StatusCode() int {
 	return 0
 }
 
+type RouteLANResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *Site
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RouteLANResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RouteLANResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListRoutedRangesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11643,6 +11762,23 @@ func (c *ClientWithResponses) UpdateResourceWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseUpdateResourceResponse(rsp)
+}
+
+// RouteLANWithBodyWithResponse request with arbitrary body returning *RouteLANResponse
+func (c *ClientWithResponses) RouteLANWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RouteLANResponse, error) {
+	rsp, err := c.RouteLANWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRouteLANResponse(rsp)
+}
+
+func (c *ClientWithResponses) RouteLANWithResponse(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*RouteLANResponse, error) {
+	rsp, err := c.RouteLAN(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRouteLANResponse(rsp)
 }
 
 // ListRoutedRangesWithResponse request returning *ListRoutedRangesResponse
@@ -14393,6 +14529,39 @@ func ParseUpdateResourceResponse(rsp *http.Response) (*UpdateResourceResponse, e
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRouteLANResponse parses an HTTP response from a RouteLANWithResponse call
+func ParseRouteLANResponse(rsp *http.Response) (*RouteLANResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RouteLANResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Site
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

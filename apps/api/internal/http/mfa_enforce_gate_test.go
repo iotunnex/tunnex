@@ -32,10 +32,10 @@ var gateMustPass = []struct{ method, path string }{
 }
 
 var gateMustDeny = []struct{ method, path string }{
-	{"POST", "/api/v1/auth/login"},                        // a plain auth op
-	{"DELETE", "/api/v1/auth/mfa"},                        // mfaDisenroll — excluded by design (nothing to disenroll; self-cycling)
-	{"POST", "/api/v1/auth/cli/authorize"},                // cliAuthorize — excluded (must not birth a credential that outlives the gate)
-	{"GET", "/api/v1/organizations/{orgId}/devices"},      // a plain resource op — the everything-else default
+	{"POST", "/api/v1/auth/login"},                   // a plain auth op
+	{"DELETE", "/api/v1/auth/mfa"},                   // mfaDisenroll — excluded by design (nothing to disenroll; self-cycling)
+	{"POST", "/api/v1/auth/cli/authorize"},           // cliAuthorize — excluded (must not birth a credential that outlives the gate)
+	{"GET", "/api/v1/organizations/{orgId}/devices"}, // a plain resource op — the everything-else default
 }
 
 // TestEnrollmentGateSelfArming drives the gate's resolve+allowlist decision. It proves TWO properties

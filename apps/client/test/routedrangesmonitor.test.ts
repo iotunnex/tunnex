@@ -74,6 +74,32 @@ test("apply failure keeps lastApplied → retries on the next poll", async () =>
   assert.deepEqual(applied[0], ["10.99.0.0/24", "192.168.5.0/24"]);
 });
 
+test("immediate first poll: start() applies within the first tick, then schedules the 30s cadence (ruling A)", async () => {
+  const applied: string[][] = [];
+  const delays: number[] = [];
+  const api = { routedRanges: async () => ["192.168.5.0/24"] };
+  const m = new RoutedRangesMonitor(
+    "org",
+    ["10.99.0.0/24"],
+    api,
+    async (s) => {
+      applied.push(s);
+    },
+    30_000,
+    300_000,
+    (_cb, ms) => {
+      delays.push(ms);
+      return 0 as unknown as ReturnType<typeof setTimeout>; // capture the delay; never actually fire
+    },
+    () => {},
+  );
+  m.start();
+  await new Promise((r) => setImmediate(r)); // drain the immediate loop's checkOnce
+  assert.equal(applied.length, 1, "the first poll must fire IMMEDIATELY, not after a full interval");
+  assert.equal(delays[0], 30_000, "the NEXT poll is scheduled at the steady cadence");
+  m.stop();
+});
+
 test("stop abandons an in-flight poll's result (no apply after disconnect)", async () => {
   const { m, applied } = mk(["10.99.0.0/24"], [["192.168.5.0/24"]]);
   const p = m.checkOnce();

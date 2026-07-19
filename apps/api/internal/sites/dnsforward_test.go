@@ -19,9 +19,9 @@ func TestDNSDomainConflict(t *testing.T) {
 
 func TestNormalizeDomain(t *testing.T) {
 	for _, c := range []struct {
-		in       string
-		want     string
-		wantOK   bool
+		in     string
+		want   string
+		wantOK bool
 	}{
 		{"Corp.Local.", "corp.local", true},
 		{"  nas.mumbai.acme.com ", "nas.mumbai.acme.com", true},

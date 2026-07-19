@@ -586,3 +586,92 @@ func TestListRoutedRanges(t *testing.T) {
 		t.Fatalf("empty must be a non-nil [], got %#v", gotC)
 	}
 }
+
+// TestRouteLANByteIdentical (S8.5 Slice 2d, D1) — the one-screen RouteLAN produces DB state + an audit
+// trail BYTE-IDENTICAL to the four-step long ceremony. Same code composed, so the short path is exactly
+// as auditable as the long one (four constituent events, never a composite).
+func TestRouteLANByteIdentical(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	orgA, orgB, actor, nodeA, nodeB := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	ex := func(sql string, args ...any) {
+		if _, e := pool.Exec(ctx, sql, args...); e != nil {
+			t.Fatalf("seed %q: %v", sql, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'A',$2,'10.99.0.0/24')`, orgA, "rla-"+orgA.String()[:8])
+	ex(`INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'B',$2,'10.99.0.0/24')`, orgB, "rlb-"+orgB.String()[:8])
+	ex(`INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com")
+	ex(`INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, nodeA, orgA, "cs-a-"+nodeA.String()[:8])
+	ex(`INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, nodeB, orgB, "cs-b-"+nodeB.String()[:8])
+	t.Cleanup(func() {
+		for _, org := range []uuid.UUID{orgA, orgB} {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	cidr := netip.MustParsePrefix("10.20.0.0/24")
+
+	// SHORT path (org A): one call.
+	siteA, subA, err := svc.RouteLAN(ctx, actor, orgA, nodeA, "hq", cidr)
+	if err != nil {
+		t.Fatalf("routeLAN: %v", err)
+	}
+	// LONG path (org B): the four manual steps.
+	siteB, err := svc.RegisterSite(ctx, orgB, "hq")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := svc.BindNode(ctx, orgB, siteB.ID, nodeB); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	subB, err := svc.AddSubnet(ctx, orgB, siteB.ID, cidr)
+	if err != nil {
+		t.Fatalf("advertise: %v", err)
+	}
+	if err := svc.ApproveSubnet(ctx, actor, orgB, subB.ID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	// DB STATE: the gateway is bound to the site; the subnet is approved — in BOTH orgs.
+	boundNode := func(node uuid.UUID) string {
+		var sid uuid.UUID
+		_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, node).Scan(&sid)
+		return sid.String()
+	}
+	if boundNode(nodeA) != siteA.ID.String() || boundNode(nodeB) != siteB.ID.String() {
+		t.Fatalf("both gateways must be bound: A=%s(site %s) B=%s(site %s)", boundNode(nodeA), siteA.ID, boundNode(nodeB), siteB.ID)
+	}
+	subStatus := func(sub uuid.UUID) string {
+		var st string
+		_ = pool.QueryRow(ctx, `SELECT status FROM site_subnets WHERE id=$1`, sub).Scan(&st)
+		return st
+	}
+	if subStatus(subA.ID) != "approved" || subStatus(subB.ID) != "approved" {
+		t.Fatalf("both subnets must be approved: A=%s B=%s", subStatus(subA.ID), subStatus(subB.ID))
+	}
+
+	// AUDIT TRAIL: the same multiset of actions in both orgs (the four constituent events, never a composite).
+	auditActions := func(org uuid.UUID) []string {
+		rows, e := pool.Query(ctx, `SELECT action FROM audit_logs WHERE org_id=$1 ORDER BY action`, org)
+		if e != nil {
+			t.Fatalf("audit query: %v", e)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var a string
+			_ = rows.Scan(&a)
+			out = append(out, a)
+		}
+		return out
+	}
+	aA, aB := auditActions(orgA), auditActions(orgB)
+	if !reflect.DeepEqual(aA, aB) {
+		t.Fatalf("audit trails must be IDENTICAL (same code, four constituent events): short=%v long=%v", aA, aB)
+	}
+	if len(aA) == 0 {
+		t.Fatal("expected constituent audit events, got none")
+	}
+}

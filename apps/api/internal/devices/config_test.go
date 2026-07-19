@@ -1,9 +1,26 @@
 package devices
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// TestAllowedIPsForNeverBakesRoutedRanges (S8.5 D5 twin-golden, ruling A) — the mint-time device config is
+// the STABLE CORE ONLY: split = [pool], full = [0.0.0.0/0, ::/0]. Routed ranges are NEVER baked at mint —
+// they ride the RoutedRangesMonitor poll. So allowedIPsFor is byte-identical for ALL orgs, CATEGORICALLY:
+// its signature has no ranges input, so it structurally cannot include them. The feature is config-tier-
+// free (the two-tier model — identity baked, routes polled — holds at the mint seam). Gateway-artifact
+// hash-blindness (the golden's other side) is covered by TestRequiredVersionRoutesTriggerV5 (a routed
+// range IS an approved site subnet → a Route → hash-blind).
+func TestAllowedIPsForNeverBakesRoutedRanges(t *testing.T) {
+	if got := allowedIPsFor(false, "10.99.0.0/24"); !reflect.DeepEqual(got, []string{"10.99.0.0/24"}) {
+		t.Fatalf("split-tunnel mint must be the pool ONLY (no baked ranges): got %v", got)
+	}
+	if got := allowedIPsFor(true, "10.99.0.0/24"); !reflect.DeepEqual(got, []string{"0.0.0.0/0", "::/0"}) {
+		t.Fatalf("full-tunnel mint must be the default routes only: got %v", got)
+	}
+}
 
 func TestBuildConfigSplitTunnel(t *testing.T) {
 	conf := buildConfig(configParams{

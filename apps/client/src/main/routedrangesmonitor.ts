@@ -56,7 +56,10 @@ export class RoutedRangesMonitor {
     this.running = true;
     this.stopped = false;
     this.backoff = 0;
-    this.schedule(this.baseMs);
+    // IMMEDIATE first poll (the mint-ruling-A condition): a NEW device gets its ranges within SECONDS of
+    // connecting, not after a full 30s interval — shrinking the new-device gap so ruling A's "poll covers
+    // new devices" trade is nearly free. loop() runs checkOnce NOW, then reschedules at the steady cadence.
+    void this.loop();
   }
 
   stop(): void {

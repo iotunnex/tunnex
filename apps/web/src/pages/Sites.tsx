@@ -53,6 +53,7 @@ export default function Sites() {
   const [raw, setRaw] = useState<Raw | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [routingLan, setRoutingLan] = useState(false); // S8.5 D1 one-screen "route a LAN" affordance
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -121,7 +122,14 @@ export default function Sites() {
           <h1 className="text-xl font-semibold text-white">Sites</h1>
           <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
         </div>
-        {view === "body" && gate.canManage && <Button onClick={() => setRegistering(true)}>Register site</Button>}
+        {view === "body" && gate.canManage && (
+          <div className="flex gap-2">
+            {unboundNodes.length > 0 && (
+              <Button onClick={() => setRoutingLan(true)}>Route a LAN</Button>
+            )}
+            <Button variant="ghost" onClick={() => setRegistering(true)}>Register site</Button>
+          </div>
+        )}
       </div>
 
       {view === "load_retry" && <LoadRetry error={loadError ?? "Couldn't load."} onRetry={reload} />}
@@ -159,7 +167,63 @@ export default function Sites() {
       {view === "body" && raw == null && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
 
       {registering && org && <RegisterSiteModal orgId={org.id} onDone={reload} onClose={() => setRegistering(false)} />}
+      {routingLan && org && <RouteLANModal orgId={org.id} nodes={unboundNodes} onDone={reload} onClose={() => setRoutingLan(false)} />}
     </div>
+  );
+}
+
+// RouteLANModal (S8.5 D1) — the one-screen affordance for the solo-admin / Pritunl migrator: pick a
+// gateway, type a LAN CIDR, go. One POST does register-site + bind + advertise + approve (byte-identical
+// to the long ceremony). Name is optional (the server derives one). A range collision renders the typed
+// refusal VERBATIM (the one validator + its teaching text — no JS re-check).
+function RouteLANModal({ orgId, nodes, onDone, onClose }: { orgId: string; nodes: Node[]; onDone: () => void; onClose: () => void }) {
+  const [nodeId, setNodeId] = useState(nodes[0]?.id ?? "");
+  const [cidr, setCidr] = useState("");
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST("/api/v1/organizations/{orgId}/routed-lans", {
+      params: { path: { orgId } },
+      body: { node_id: nodeId, cidr: cidr.trim(), ...(name.trim() ? { name: name.trim() } : {}) },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not route the LAN.")); // verbatim typed refusal — no JS re-check
+    onClose();
+    onDone();
+  }
+  return (
+    <Modal
+      title="Route a LAN through this gateway"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !nodeId || !cidr.trim()}>Route it</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-400">
+        Route a behind-gateway LAN to your devices. This registers a site on the gateway, advertises the
+        range, and approves it — the range then pushes to split-tunnel devices.
+      </p>
+      <Field label="Gateway">
+        <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+          {nodes.map((n) => (
+            <option key={n.id} value={n.id}>{n.name}</option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="LAN CIDR">
+        <Input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="192.168.10.0/24" autoFocus />
+      </Field>
+      <Field label="Site name (optional)">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="derived from the CIDR" />
+      </Field>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
   );
 }
 

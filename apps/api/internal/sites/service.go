@@ -275,8 +275,11 @@ func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid
 		// AUDIT the refusal in its own committed op (it must survive the refusal), then return typed.
 		_ = s.audit(ctx, s.q, orgID, actor, subnetID, "site.subnet_approval_refused",
 			map[string]any{"overlap_class": string(refusal.Class), "overlaps": refusal.With.String()})
+		// S8.5 rider — teaching text on the ONE validator's refusal (rendered verbatim per convention): the
+		// solo-admin who hits a range collision on the one-screen affordance gets a next step, not a dead end.
 		return apierr.Conflict("subnet_not_disjoint",
-			"this subnet overlaps the "+string(refusal.Class)+" range "+refusal.With.String()+"; approval refused")
+			"this subnet overlaps the "+string(refusal.Class)+" range "+refusal.With.String()+"; approval refused. "+
+				"Both sides use overlapping addresses — options: renumber one LAN to a non-overlapping range, or subnet-mapping (roadmap).")
 	}
 	return nil
 }

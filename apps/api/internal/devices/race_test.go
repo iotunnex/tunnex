@@ -36,6 +36,7 @@ import (
 //   - WITHOUT the lock (comment out ResizePool's LockDeviceKey — the RED run): the
 //     create reads the old /24, allocates .2, and commits inside the window →
 //     resize commits the shrink → .2 is stranded outside the committed pool.
+//
 // So the assertions below are GREEN with the lock and RED without it; the RED run
 // is done manually (comment the lock, run, observe the failure, restore).
 func TestResizeAllocationRace(t *testing.T) {

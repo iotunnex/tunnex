@@ -20,13 +20,13 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
-	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
+	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
-	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
@@ -60,8 +60,8 @@ type Deps struct {
 	// return edition_required, and the enrollment gate never engages). NewMfaEnforceEdition().
 	MfaEnforceEnabled bool
 	CookieSecure      bool
-	AppBaseURL          string
-	NodeAgentImage      string
+	AppBaseURL        string
+	NodeAgentImage    string
 	// CORSAllowedOrigins are exact origins allowed cross-origin bearer access
 	// (S6.2 desktop; app://tunnex). Empty = no CORS (pure same-origin).
 	CORSAllowedOrigins []string

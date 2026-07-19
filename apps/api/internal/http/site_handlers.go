@@ -60,6 +60,33 @@ func (s apiServer) ListRoutedRanges(ctx context.Context, req api.ListRoutedRange
 	}, nil
 }
 
+// RouteLAN POST /organizations/{orgId}/routed-lans — the S8.5 D1 one-screen affordance: route a LAN
+// through a gateway in one call (register-site + bind + advertise + approve, byte-identical to the long
+// path). site:manage (all-editions core, D11). A range collision returns the typed refusal (site+bind+
+// pending persist). name is optional.
+func (s apiServer) RouteLAN(ctx context.Context, req api.RouteLANRequestObject) (api.RouteLANResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "node_id + cidr are required")
+	}
+	cidr, err := netip.ParsePrefix(req.Body.Cidr)
+	if err != nil || !cidr.Addr().Is4() {
+		return nil, apierr.BadRequest("invalid_cidr", "cidr must be a valid IPv4 CIDR")
+	}
+	name := ""
+	if req.Body.Name != nil {
+		name = *req.Body.Name
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	site, _, err := s.sites.RouteLAN(ctx, p.UserID, req.OrgId, req.Body.NodeId, name, cidr)
+	if err != nil {
+		return nil, err
+	}
+	return api.RouteLAN201JSONResponse{Body: toAPISite(site), Headers: api.RouteLAN201ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 func (s apiServer) RegisterSite(ctx context.Context, req api.RegisterSiteRequestObject) (api.RegisterSiteResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err

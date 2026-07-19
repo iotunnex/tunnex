@@ -112,10 +112,10 @@ func TestVersionLess(t *testing.T) {
 		{"14.0", "14.0", false},
 		{"13.9.9", "14.0", true},
 		{"10.0.22631", "10.0.19045", false},
-		{"14", "14.0.0", false},   // missing segments are zero
-		{"14.0.1", "14", false},   // longer version above shorter min
+		{"14", "14.0.0", false},       // missing segments are zero
+		{"14.0.1", "14", false},       // longer version above shorter min
 		{"22631H2.1", "22631", false}, // leading digits of a segment are used
-		{"", "14.0", true},        // empty = unparseable = less
+		{"", "14.0", true},            // empty = unparseable = less
 	}
 	for _, c := range cases {
 		if got := versionLess(c.v, c.min); got != c.want {

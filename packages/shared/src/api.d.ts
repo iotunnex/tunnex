@@ -1427,6 +1427,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/routed-lans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One-screen "route a LAN through this gateway" (S8.5 D1; site:manage). Composes register-site + bind-gateway + advertise-subnet + approve into one call — byte-identical DB state + the four constituent audit events. On a range collision the site+bind+pending-subnet persist and the typed refusal is returned. */
+        post: operations["routeLAN"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/sites/{siteId}": {
         parameters: {
             query?: never;
@@ -1823,6 +1842,17 @@ export interface components {
         RoutedRanges: {
             /** @description Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared. */
             ranges: string[];
+        };
+        RouteLANRequest: {
+            /**
+             * Format: uuid
+             * @description The gateway node that fronts this LAN.
+             */
+            node_id: string;
+            /** @description The LAN CIDR to route (IPv4). Validated disjoint from the org's other subnets + pool. */
+            cidr: string;
+            /** @description Optional site name; blank derives a default from the CIDR (S8.5 D1 solo-admin path). */
+            name?: string;
         };
         SiteSubnet: {
             /** Format: uuid */
@@ -4653,6 +4683,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutedRanges"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    routeLAN: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteLANRequest"];
+            };
+        };
+        responses: {
+            /** @description The site whose gateway now routes the LAN. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Site"];
                 };
             };
             default: components["responses"]["Error"];
