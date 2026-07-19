@@ -57,19 +57,24 @@ func (s *Service) SetDNSForward(ctx context.Context, actor, orgID, siteID uuid.U
 				"the resolver "+ip.String()+" must be inside one of this site's approved subnets")
 		}
 		// Overlap: another site already forwards this domain → refuse (D1-addition, one zone → one resolver).
+		// The ONE validator is DNSDomainConflict (F8 — the inline re-implementation that used to live here
+		// was tested-but-never-shipped; now the CRUD calls the same function the test exercises). Gather the
+		// OTHER sites' forwarded domains as its input; self is excluded (same-domain on this site = update).
 		all, e := q.ListSitesByOrg(ctx, orgID)
 		if e != nil {
 			return e
 		}
-		for _, os := range all {
-			if os.ID == siteID {
+		var others []string
+		for _, other := range all {
+			if other.ID == siteID {
 				continue
 			}
-			for _, en := range decodeDNS(os.DnsForwarding) {
-				if n, ok := NormalizeDomain(en.Domain); ok && n == nd {
-					return apierr.Conflict("dns_domain_conflict", nd+" is already forwarded by another site; a domain forwards to one resolver")
-				}
+			for _, en := range decodeDNS(other.DnsForwarding) {
+				others = append(others, en.Domain)
 			}
+		}
+		if DNSDomainConflict(others, domain) {
+			return apierr.Conflict("dns_domain_conflict", nd+" is already forwarded by another site; a domain forwards to one resolver")
 		}
 		// Add or update on THIS site.
 		mine := decodeDNS(site.DnsForwarding)

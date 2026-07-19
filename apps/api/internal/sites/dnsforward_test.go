@@ -25,6 +25,8 @@ func TestNormalizeDomain(t *testing.T) {
 	}{
 		{"Corp.Local.", "corp.local", true},
 		{"  nas.mumbai.acme.com ", "nas.mumbai.acme.com", true},
+		{"internal", "internal", true}, // F3: a single-label zone is LEGITIMATE (homelab/SMB) — the helper must accept what the CP does
+		{"corp", "corp", true},
 		{"", "", false},
 		{"a..b", "", false},
 		{"has space", "", false},

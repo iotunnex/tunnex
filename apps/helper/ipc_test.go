@@ -122,6 +122,37 @@ func TestIPCResolversRejectedOnOtherVerbs(t *testing.T) {
 	}
 }
 
+// TestIPCOwnerLossSweepsResolvers (F6) — when the OWNER connection dies without a graceful down (crash/
+// force-quit), the helper sweeps its domain-scoped resolvers at the same exit the kill-switch releases, so
+// stale /etc/resolver files can't outlive the tunnel. A resolvers([]) with nil desired = full sweep.
+func TestIPCOwnerLossSweepsResolvers(t *testing.T) {
+	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
+	swept := make(chan []ResolverForward, 1)
+	srv.resolvers = func(r []ResolverForward) error { swept <- r; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+
+	// Bring the tunnel up (this connection becomes the owner) + install a resolver set.
+	if resp, err := Do(c1, req(VerbTunnelUp, goodConfig())); err != nil || !resp.OK {
+		t.Fatalf("up: err=%v resp=%+v", err, resp)
+	}
+	if resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetResolvers, Resolvers: []ResolverForward{{Domain: "corp.local", ResolverIP: "10.20.0.53"}}}); err != nil || !resp.OK {
+		t.Fatalf("set_resolvers: err=%v resp=%+v", err, resp)
+	}
+	<-swept // drain the set call so the owner-loss nil sweep isn't blocked by the buffer
+
+	// Owner dies (socket closes, no graceful down) → onClose must sweep resolvers to nil.
+	c1.Close()
+	select {
+	case r := <-swept:
+		if r != nil {
+			t.Fatalf("owner-loss sweep must reconcile to nil (full sweep), got %+v", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("owner loss did not sweep resolvers")
+	}
+}
+
 func TestIPCUntrustedCallerRejected(t *testing.T) {
 	srv, _ := newServer(t, &fakeBackend{}, untrustedResolver)
 	c1, c2 := net.Pipe()

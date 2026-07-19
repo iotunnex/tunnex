@@ -147,6 +147,43 @@ test("TunnelController installs then sweeps dns_forwards via set_resolvers", asy
   }
 });
 
+// F5 RED (S8.4): a set_resolvers that fails (helper may have written some owned files) must STILL trigger
+// the full-sweep on down — resolversActive is set on ATTEMPT, not only on success, so nothing is stranded.
+test("TunnelController sweeps on down even after a failed set_resolvers", async () => {
+  const sockPath = testEndpoint("dnsfail");
+  try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
+  const requests: Array<{ verb: string; resolvers?: ResolverForward[] }> = [];
+  const server = net.createServer((sock) => {
+    const dec = new FrameDecoder();
+    sock.on("data", (chunk: Buffer) => {
+      for (const msg of dec.push(chunk)) {
+        const req = msg as { verb: string; resolvers?: ResolverForward[] };
+        requests.push({ verb: req.verb, resolvers: req.resolvers });
+        if (req.verb === "set_resolvers" && (req.resolvers?.length ?? 0) > 0) {
+          sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: false, code: "resolver_write_failed", error: "boom" }));
+        } else {
+          const state = req.verb === "tunnel_down" ? "down" : "up";
+          sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: true, status: { state } }));
+        }
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(sockPath, r));
+  try {
+    const fwds: ResolverForward[] = [{ domain: "corp.local", resolver_ip: "10.20.0.53" }];
+    const cfg = { address: "10.99.0.2/32", dns_forwards: fwds } as unknown as TunnelConfig;
+    const ctrl = new TunnelController(sockPath, async () => cfg);
+    await ctrl.up(); // install FAILS (ok:false) — but was attempted
+    await ctrl.down();
+    const sets = requests.filter((r) => r.verb === "set_resolvers");
+    assert.equal(sets.length, 2, "the failed install must not skip the down sweep");
+    assert.deepEqual(sets[1].resolvers, [], "down still sweeps to empty after a failed install");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    try { fs.unlinkSync(sockPath); } catch { /* gone */ }
+  }
+});
+
 test("HelperConnection: persistent round-trip, intentional close is quiet, unexpected close fires onLost", async () => {
   const sockPath = testEndpoint("helper");
   try { fs.unlinkSync(sockPath); } catch { /* fresh */ }

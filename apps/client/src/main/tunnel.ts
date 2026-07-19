@@ -66,9 +66,13 @@ export class TunnelController {
   // nothing to set and nothing was set before (zero wire calls — the S8.4 inert red).
   private async applyResolvers(fwds: ResolverForward[]): Promise<void> {
     if (fwds.length === 0 && !this.resolversActive) return;
+    // Mark active the moment we ATTEMPT a non-empty install — NOT only on success. A partial helper
+    // failure could leave owned resolver files behind; if resolversActive stayed false, the down() sweep
+    // would early-return and strand them (F5). Setting it on attempt guarantees down() always sweeps.
+    if (fwds.length > 0) this.resolversActive = true;
     try {
       const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
-      if (r.ok) this.resolversActive = fwds.length > 0;
+      if (r.ok && fwds.length === 0) this.resolversActive = false; // swept clean
     } catch {
       /* fail-static: leave the tunnel up, cross-site names may not resolve */
     }

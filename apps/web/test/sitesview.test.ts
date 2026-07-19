@@ -181,3 +181,26 @@ describe("gatewayLiveness — S8.4 rider (VERIFY-0: a stopped gateway must NOT r
     expect(r.lastSeen).toBe("never connected");
   });
 });
+
+import { forwardsInSubnet } from "../src/lib/sitesview";
+
+describe("forwardsInSubnet — S8.4 F4 (name the DNS forwards a subnet removal will also sweep; advisory only)", () => {
+  const fwds = [
+    { domain: "corp.local", resolver_ip: "10.20.0.53" },
+    { domain: "branch.local", resolver_ip: "10.30.0.53" },
+    { domain: "edge.local", resolver_ip: "10.20.0.99" },
+  ];
+  it("names only the forwards whose resolver is inside the CIDR", () => {
+    expect(forwardsInSubnet(fwds, "10.20.0.0/24").sort()).toEqual(["corp.local", "edge.local"]);
+  });
+  it("excludes forwards resolved elsewhere", () => {
+    expect(forwardsInSubnet(fwds, "10.30.0.0/24")).toEqual(["branch.local"]);
+  });
+  it("a /32 matches only its exact host", () => {
+    expect(forwardsInSubnet(fwds, "10.20.0.53/32")).toEqual(["corp.local"]);
+  });
+  it("a malformed resolver or cidr is excluded (server stays the truth)", () => {
+    expect(forwardsInSubnet([{ domain: "x", resolver_ip: "not-an-ip" }], "10.20.0.0/24")).toEqual([]);
+    expect(forwardsInSubnet(fwds, "garbage")).toEqual([]);
+  });
+});
