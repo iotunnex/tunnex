@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 )
 
@@ -744,5 +746,109 @@ func TestRouteLANByteIdentical(t *testing.T) {
 	}
 	if len(aA) == 0 {
 		t.Fatal("expected constituent audit events, got none")
+	}
+}
+
+// TestBindNodeRefusesRehome (S8.5 #2 standalone) — BindNode must NEVER silently re-home a bound gateway:
+// a second bind to a DIFFERENT site refuses `node_already_bound_to_site`, the gateway stays on site1, and
+// a re-bind to the SAME site is an idempotent no-op (RouteLAN's resume relies on it).
+func TestBindNodeRefusesRehome(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, node := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "rh-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8]); e != nil {
+		t.Fatalf("seed node: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	site1, _ := svc.RegisterSite(ctx, org, "s1")
+	site2, _ := svc.RegisterSite(ctx, org, "s2")
+	if err := svc.BindNode(ctx, org, site1.ID, node); err != nil {
+		t.Fatalf("first bind: %v", err)
+	}
+	// Same-site re-bind: idempotent no-op.
+	if err := svc.BindNode(ctx, org, site1.ID, node); err != nil {
+		t.Fatalf("same-site re-bind must be a no-op, got %v", err)
+	}
+	// Different-site bind: REFUSED, gateway stays on site1 (no silent re-home).
+	err := svc.BindNode(ctx, org, site2.ID, node)
+	if err == nil {
+		t.Fatal("re-home must be refused")
+	}
+	if ae, ok := err.(*apierr.Error); !ok || ae.Code != "node_already_bound_to_site" {
+		t.Fatalf("want node_already_bound_to_site, got %v", err)
+	}
+	var boundSite uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, node).Scan(&boundSite)
+	if boundSite != site1.ID {
+		t.Fatalf("gateway must stay on site1 (%s), got %s", site1.ID, boundSite)
+	}
+}
+
+// TestRouteLANResumeRetrySafe (S8.5 #2) — RouteLAN is retry-safe by RESUME: a disjointness refusal leaves
+// site+bind+pending; a resubmit with a CORRECTED CIDR advances the SAME site (no second site, gateway not
+// re-homed) and converges to ONE approved subnet (the abandoned pending is dropped).
+func TestRouteLANResumeRetrySafe(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor, node := uuid.New(), uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "rr2-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-"+node.String()[:8]); e != nil {
+		t.Fatalf("seed node: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+
+	// First attempt: a CIDR colliding with the pool (10.99.0.0/24) → approval refused; site+bind+pending persist.
+	bad := netip.MustParsePrefix("10.99.0.0/24")
+	site1, _, err := svc.RouteLAN(ctx, actor, org, node, "hq", bad)
+	if err == nil {
+		t.Fatal("a pool-colliding CIDR must be refused at approve")
+	}
+	if site1.ID == uuid.Nil {
+		t.Fatal("the refused attempt must still persist its site (resume target)")
+	}
+	// Corrected CIDR resubmit → RESUME site1 (not a second site), gateway still homed, one approved subnet.
+	good := netip.MustParsePrefix("10.9.0.0/24")
+	site2, sub, err := svc.RouteLAN(ctx, actor, org, node, "hq", good)
+	if err != nil {
+		t.Fatalf("corrected resubmit: %v", err)
+	}
+	if site2.ID != site1.ID {
+		t.Fatalf("resume must reuse the SAME site (no second site): first=%s second=%s", site1.ID, site2.ID)
+	}
+	// Exactly ONE site for this org's gateway, gateway still bound to it.
+	var siteCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM sites WHERE org_id=$1`, org).Scan(&siteCount)
+	if siteCount != 1 {
+		t.Fatalf("retry must leave exactly ONE site, got %d", siteCount)
+	}
+	var boundSite uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, node).Scan(&boundSite)
+	if boundSite != site1.ID {
+		t.Fatalf("gateway must stay homed to the resumed site")
+	}
+	// Exactly ONE subnet on the site (the abandoned pending dropped), approved, and it's the corrected CIDR.
+	var subCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM site_subnets WHERE site_id=$1`, site1.ID).Scan(&subCount)
+	if subCount != 1 {
+		t.Fatalf("resume must converge to ONE subnet (abandoned pending dropped), got %d", subCount)
+	}
+	var status, cidrStr string
+	_ = pool.QueryRow(ctx, `SELECT status, cidr::text FROM site_subnets WHERE id=$1`, sub.ID).Scan(&status, &cidrStr)
+	if status != "approved" || cidrStr != "10.9.0.0/24" {
+		t.Fatalf("the resumed subnet must be the corrected CIDR, approved: status=%s cidr=%s", status, cidrStr)
 	}
 }

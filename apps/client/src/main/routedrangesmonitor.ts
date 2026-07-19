@@ -1,5 +1,6 @@
 import type { DeviceApi } from "./deviceconfig";
 import type { ResolverForward } from "./helperclient";
+import { PollMonitor } from "./pollmonitor";
 import { REVOKE_POLL_MS, REVOKE_BACKOFF_MAX_MS } from "./revocation";
 
 // canonRanges dedups + sorts a CIDR list into a stable canonical form for change-compare. The server
@@ -37,12 +38,7 @@ export type RangesOutcome = "skipped" | "applied" | "unchanged" | "inconclusive"
 //     set (helper reconciles owned files) — a removed range/forward vanishes on the next differing poll.
 // The two tiers are INDEPENDENT: a set_resolvers failure never blocks a routes apply, and vice-versa —
 // DNS and routing degrade separately (a resolver-write refusal must not strand the office-LAN route).
-export class RoutedRangesMonitor {
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private stopped = false;
-  private running = false;
-  private inFlight = false;
-  private backoff = 0;
+export class RoutedRangesMonitor extends PollMonitor {
   // lastRanges = the canonical join of the AllowedIPs the helper currently holds. Seeded to the BAKED
   // BASE: tunnel_up already applied it, so an empty-ranges org yields "unchanged" on the ranges tier —
   // zero client work (the D5 empty-channel golden's client half).
@@ -57,36 +53,25 @@ export class RoutedRangesMonitor {
     private readonly api: Pick<DeviceApi, "routedConfig">,
     private readonly applyRanges: (allowedIPs: string[]) => Promise<void>, // TunnelController.setAllowedIPs
     private readonly applyForwards: (fwds: ResolverForward[]) => Promise<void>, // TunnelController.setResolvers
-    private readonly baseMs: number = REVOKE_POLL_MS, // reuse the revocation cadence (config changes rarely)
-    private readonly maxMs: number = REVOKE_BACKOFF_MAX_MS,
-    private readonly setTimer: (cb: () => void, ms: number) => ReturnType<typeof setTimeout> = (cb, ms) => {
-      const t = setTimeout(cb, ms);
-      t.unref?.();
-      return t;
-    },
-    private readonly clearTimer: (t: ReturnType<typeof setTimeout>) => void = (t) => clearTimeout(t),
+    baseMs: number = REVOKE_POLL_MS, // reuse the revocation cadence (config changes rarely)
+    maxMs: number = REVOKE_BACKOFF_MAX_MS,
+    setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>,
+    clearTimer?: (t: ReturnType<typeof setTimeout>) => void,
+    // S8.5 #5: whether to apply the ROUTES tier. FALSE for a full-tunnel session — 0.0.0.0/0 already
+    // subsumes every routed range, so pushing them is a no-op; the RESOLVER tier ALWAYS runs (full-tunnel's
+    // baked DNS can't answer internal cross-site zones, so it needs the forwards). The mode ruling that once
+    // skipped the whole monitor for full-tunnel lapsed when Slice 3 grew the payload past routes.
+    private readonly routesEnabled: boolean = true,
   ) {
+    super(baseMs, maxMs, setTimer, clearTimer);
     this.lastRanges = canonRanges(base).join(",");
   }
 
-  start(): void {
-    if (this.running) return;
-    this.running = true;
-    this.stopped = false;
-    this.backoff = 0;
-    // IMMEDIATE first poll (the mint-ruling-A condition): a NEW device gets its ranges + forwards within
-    // SECONDS of connecting, not after a full 30s interval — shrinking the new-device gap so ruling A's
-    // "poll covers new devices" trade is nearly free. loop() runs checkOnce NOW, then reschedules.
+  // IMMEDIATE first poll (the mint-ruling-A condition): a NEW device gets its ranges + forwards within
+  // SECONDS of connecting, not after a full 30s interval — shrinking the new-device gap so ruling A's
+  // "poll covers new devices" trade is nearly free. loop() runs checkOnce NOW, then reschedules at cadence.
+  protected override firstTick(): void {
     void this.loop();
-  }
-
-  stop(): void {
-    this.stopped = true;
-    this.running = false;
-    if (this.timer) {
-      this.clearTimer(this.timer);
-      this.timer = null;
-    }
   }
 
   // checkOnce runs a single poll then applies BOTH tiers, each on change only, each fail-static. Exposed
@@ -104,7 +89,8 @@ export class RoutedRangesMonitor {
       let changed = false;
       let failed = false;
       // RANGES tier — apply base ∪ ranges via set_allowed_ips on change; fail-static (keep lastRanges).
-      if (rangesKey !== this.lastRanges) {
+      // Skipped entirely for a full-tunnel session (#5): 0.0.0.0/0 subsumes every range (no route calls).
+      if (this.routesEnabled && rangesKey !== this.lastRanges) {
         try {
           await this.applyRanges(merged);
           this.lastRanges = rangesKey;
@@ -127,34 +113,17 @@ export class RoutedRangesMonitor {
       if (failed) {
         // At least one tier's apply threw: KEEP its last-applied set, lengthen the next probe. The other
         // tier (if it succeeded) already advanced its key, so it won't re-apply — no thrash.
-        this.backoff = this.backoff === 0 ? this.baseMs : Math.min(this.backoff * 2, this.maxMs);
+        this.bumpBackoff();
         return "inconclusive";
       }
-      this.backoff = 0;
+      this.resetBackoff();
       return changed ? "applied" : "unchanged";
     } catch {
       // Poll read error: KEEP both last-applied sets, lengthen the next probe (fail-static, both tiers).
-      this.backoff = this.backoff === 0 ? this.baseMs : Math.min(this.backoff * 2, this.maxMs);
+      this.bumpBackoff();
       return "inconclusive";
     } finally {
       this.inFlight = false;
     }
-  }
-
-  private nextDelay(): number {
-    return this.backoff === 0 ? this.baseMs : this.backoff;
-  }
-
-  private schedule(ms: number): void {
-    if (this.stopped) return;
-    this.timer = this.setTimer(() => {
-      this.timer = null;
-      void this.loop();
-    }, ms);
-  }
-
-  private async loop(): Promise<void> {
-    await this.checkOnce();
-    if (!this.stopped) this.schedule(this.nextDelay());
   }
 }

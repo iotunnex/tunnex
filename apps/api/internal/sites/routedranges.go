@@ -2,12 +2,15 @@ package sites
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"sort"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 )
 
 // ListRoutedRanges returns the org's DECLARED routed LAN ranges for split-tunnel device AllowedIPs
@@ -98,19 +101,85 @@ func (s *Service) ListRoutedForwards(ctx context.Context, orgID uuid.UUID, range
 // byte-identical to the long path's advertise-then-refused state — and the typed refusal (with its S8.5
 // teaching text) is returned. name is optional: blank derives a sensible default from the CIDR.
 func (s *Service) RouteLAN(ctx context.Context, actor, orgID, nodeID uuid.UUID, name string, cidr netip.Prefix) (sqlc.Site, sqlc.SiteSubnet, error) {
-	if name == "" {
-		name = "LAN " + cidr.Masked().String() // sensible default for the solo-admin path
+	// RETRY-SAFE by RESUME, not re-create (S8.5 #2). If this gateway already carries a half-built site from
+	// a prior attempt (a refusal left it site+bound+pending), advance THAT site — never register a second
+	// (which, with the old unconditional BindNode, silently re-homed the gateway and orphaned the first
+	// site). GetNodeSiteBinding tells us the gateway's current binding.
+	cur, err := s.q.GetNodeSiteBinding(ctx, sqlc.GetNodeSiteBindingParams{ID: nodeID, OrgID: orgID})
+	if err == pgx.ErrNoRows {
+		return sqlc.Site{}, sqlc.SiteSubnet{}, apierr.NotFound("node_or_site_not_found", "no such node in this organization")
 	}
-	site, err := s.RegisterSite(ctx, orgID, name)
 	if err != nil {
 		return sqlc.Site{}, sqlc.SiteSubnet{}, err
 	}
-	if err := s.BindNode(ctx, orgID, site.ID, nodeID); err != nil {
-		return site, sqlc.SiteSubnet{}, err
+
+	var site sqlc.Site
+	if cur.Valid {
+		// RESUME the gateway's existing site.
+		site, err = s.GetSite(ctx, orgID, cur.Bytes)
+		if err != nil {
+			return sqlc.Site{}, sqlc.SiteSubnet{}, err
+		}
+		// If the site is HALF-BUILT (no APPROVED subnet — the RouteLAN shape), drop any leftover PENDING
+		// advertisement that does NOT match the corrected CIDR, so the resume converges to exactly this LAN
+		// (one subnet, no accumulation). An ESTABLISHED site (≥1 approved) is NEVER cleaned — we just add.
+		subs, e := s.q.ListSiteSubnets(ctx, site.ID)
+		if e != nil {
+			return site, sqlc.SiteSubnet{}, e
+		}
+		approved := false
+		for _, ss := range subs {
+			if ss.Status == "approved" {
+				approved = true
+				break
+			}
+		}
+		if !approved {
+			for _, ss := range subs {
+				if ss.Status == "pending" && ss.Cidr.Masked() != cidr.Masked() {
+					if e := s.RemoveSubnet(ctx, actor, orgID, ss.ID); e != nil {
+						return site, sqlc.SiteSubnet{}, e
+					}
+				}
+			}
+		}
+	} else {
+		// FRESH: register + bind. name is optional; blank derives a sensible default from the CIDR.
+		if name == "" {
+			name = "LAN " + cidr.Masked().String()
+		}
+		site, err = s.RegisterSite(ctx, orgID, name)
+		if err != nil {
+			return sqlc.Site{}, sqlc.SiteSubnet{}, err
+		}
+		if err := s.BindNode(ctx, orgID, site.ID, nodeID); err != nil {
+			return site, sqlc.SiteSubnet{}, err
+		}
 	}
+
+	// Advertise + approve the target CIDR. A same-CIDR resume finds the surviving pending subnet (subnet_exists)
+	// and approves THAT rather than erroring — idempotent.
 	sub, err := s.AddSubnet(ctx, orgID, site.ID, cidr)
 	if err != nil {
-		return site, sqlc.SiteSubnet{}, err
+		var ae *apierr.Error
+		if errors.As(err, &ae) && ae.Code == "subnet_exists" {
+			existing, e := s.q.ListSiteSubnets(ctx, site.ID)
+			if e != nil {
+				return site, sqlc.SiteSubnet{}, e
+			}
+			found := false
+			for _, ss := range existing {
+				if ss.Cidr.Masked() == cidr.Masked() {
+					sub, found = ss, true
+					break
+				}
+			}
+			if !found {
+				return site, sqlc.SiteSubnet{}, err
+			}
+		} else {
+			return site, sqlc.SiteSubnet{}, err
+		}
 	}
 	if err := s.ApproveSubnet(ctx, actor, orgID, sub.ID); err != nil {
 		return site, sub, err // refusal: site+bind+pending persist (byte-identical to advertise-then-refused)

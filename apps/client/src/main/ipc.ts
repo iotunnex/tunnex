@@ -306,20 +306,24 @@ export function registerIpc(
     if (cred && sc?.deviceId) {
       monitor = new RevocationMonitor(sc.deviceId, sc.orgId, deviceApiFor(cred.server), () => onRevoked(cred.server));
       monitor.start();
-      // S8.5 routed-subnets push: poll the org's declared ranges + reachable DNS forwards and live-apply
-      // each tier via the helper — ranges → set_allowed_ips (base ∪ ranges), forwards → set_resolvers.
-      // SPLIT-TUNNEL ONLY — a full tunnel already routes everything (0.0.0.0/0) and owns the resolver, so
-      // the helper would no-op; the CLIENT skips here so no pointless privileged call is emitted.
-      if (!requestedFullTunnel) {
-        routedRangesMonitor = new RoutedRangesMonitor(
-          sc.orgId,
-          tunnel.baseAllowedIPs(),
-          deviceApiFor(cred.server),
-          (set) => tunnel.setAllowedIPs(set),
-          (fwds) => tunnel.setResolvers(fwds),
-        );
-        routedRangesMonitor.start();
-      }
+      // S8.5 routed-subnets push (#5: runs in BOTH modes): poll the org's declared ranges + reachable DNS
+      // forwards and live-apply each tier via the helper — ranges → set_allowed_ips, forwards →
+      // set_resolvers. The ROUTES tier is enabled only for SPLIT-tunnel (a full tunnel's 0.0.0.0/0 subsumes
+      // every range — no route calls). The RESOLVER tier runs in BOTH: full-tunnel's baked DNS (1.1.1.1)
+      // cannot answer internal cross-site zones, so it needs the forwards just as split-tunnel does.
+      routedRangesMonitor = new RoutedRangesMonitor(
+        sc.orgId,
+        tunnel.baseAllowedIPs(),
+        deviceApiFor(cred.server),
+        (set) => tunnel.setAllowedIPs(set),
+        (fwds) => tunnel.setResolvers(fwds),
+        undefined, // baseMs (default cadence)
+        undefined, // maxMs (default ceiling)
+        undefined, // setTimer (default)
+        undefined, // clearTimer (default)
+        !requestedFullTunnel, // routesEnabled: routes tier split-only; resolver tier always
+      );
+      routedRangesMonitor.start();
       // S7.5.3: self-report posture while connected. First report early (~15s),
       // then every 10min (+ fixed jitter). Terminal 403 (open edition) stops it
       // until the next connect. onHealthResult surfaces a require-mode block as the

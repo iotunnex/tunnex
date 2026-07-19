@@ -47,10 +47,10 @@ type darwinBackend struct {
 	// the tunnel). endpointFam is "-inet"/"-inet6" so Down deletes it correctly.
 	endpointHost string
 	endpointFam  string
-	// appliedAllowedIPs is the peer's currently-routed AllowedIPs (set on Up, updated by SetAllowedIPs)
-	// — the diff baseline for the S8.5 live route full-sweep. Includes the baked base (pool / 0.0.0.0/0);
-	// the client always re-includes the base in the desired set, so the base is never dropped.
-	appliedAllowedIPs []string
+	// applied is the per-session BELIEF CACHE (S8.5 reduce) of the OS route-targets we believe are in the
+	// kernel — set on Up (baked base), reconciled by SetAllowedIPs, cleared on Down. NEVER persisted. Keys
+	// are canonical route-targets (routeSet form). See reconcileRoutes for the belief-drift stance.
+	applied map[string]bool
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -148,18 +148,15 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 			}
 		}
 	}
-	for _, aip := range cfg.AllowedIPs {
-		for _, target := range routeTargets(aip) {
-			args := []string{"-q", "add"}
-			if strings.Contains(target, ":") {
-				args = append(args, "-inet6")
-			}
-			args = append(args, "-net", target, "-interface", name)
-			if err := run("route", args...); err != nil {
-				dev.Close()
-				return fmt.Errorf("route %s: %w", target, err)
-			}
-		}
+	// Baked routes go through the ONE reconciler (S8.5 reduce, #9) — same delete-before-add + per-route
+	// discipline as the pushed ranges. ifname must be set first (routeCmd reads it).
+	b.ifname = name
+	b.applied = map[string]bool{}
+	if err := reconcileRoutes(b.applied, routeSet(cfg.AllowedIPs), b.routeCmd); err != nil {
+		b.ifname = ""
+		b.applied = nil
+		dev.Close()
+		return err
 	}
 
 	// 4) FULL TUNNEL: move the system resolver onto the tunnel. Full-tunnel captures
@@ -174,7 +171,6 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.ifname = dev, tdev, name
-	b.appliedAllowedIPs = append([]string(nil), cfg.AllowedIPs...) // the S8.5 route full-sweep baseline
 	return nil
 }
 
@@ -194,27 +190,19 @@ func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) er
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
-	// OS-route full-sweep against the prior applied set (route targets expand full-tunnel halves etc.).
-	cur := routeSet(b.appliedAllowedIPs)
-	want := routeSet(allowedIPs)
-	for t := range want {
-		if !cur[t] {
-			if err := b.routeOp("add", t); err != nil {
-				return err
-			}
-		}
-	}
-	for t := range cur {
-		if !want[t] {
-			_ = b.routeOp("delete", t) // best-effort: a removed range's route may already be gone
-		}
-	}
-	b.appliedAllowedIPs = append([]string(nil), allowedIPs...)
-	return nil
+	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
+	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
+	return reconcileRoutes(b.applied, routeSet(allowedIPs), b.routeCmd)
 }
 
-// routeOp runs a single `route add|delete -net <target> -interface <iface>` (v4/v6 by target form).
-func (b *darwinBackend) routeOp(op, target string) error {
+// routeCmd is the darwin per-target route seam for reconcileRoutes: add|delete a `-net <target>` route on
+// the tunnel interface (v4/v6 by target form). #9/#10 reduce — Up's baked routes AND SetAllowedIPs' pushed
+// ranges go through this ONE path, so a route-flag change can never drift baked vs pushed.
+func (b *darwinBackend) routeCmd(add bool, target string) error {
+	op := "delete"
+	if add {
+		op = "add"
+	}
 	args := []string{"-q", op}
 	if strings.Contains(target, ":") {
 		args = append(args, "-inet6")
@@ -236,7 +224,9 @@ func (b *darwinBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
-	b.appliedAllowedIPs = nil // device closed drops its routes; a fresh Up rebuilds the baseline
+	b.applied = nil // device closed drops its utun routes; belief cleared (drift-heal c). A home-LAN range
+	// whose connected route we deleted-before-add re-derives on the next network event (verify: walk's
+	// home-LAN-collision leg — not unit-reachable).
 	if b.endpointHost != "" {
 		_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
 		b.endpointHost, b.endpointFam = "", ""
@@ -272,6 +262,7 @@ func (b *darwinBackend) FailClosed() error {
 	if b.dev != nil {
 		b.dev.Close()
 		b.dev, b.tunDev, b.ifname = nil, nil, ""
+		b.applied = nil // crash-path Down: utun routes vanish with the device; belief cleared (drift-heal c)
 	}
 	return nil
 }

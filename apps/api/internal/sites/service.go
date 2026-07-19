@@ -110,7 +110,24 @@ func (s *Service) ListSubnets(ctx context.Context, orgID, siteID uuid.UUID) ([]s
 // BindNode binds a gateway node to a site (single-node v1). Cross-org bind or unknown node -> 404;
 // binding to an already-occupied site -> 409 (the single-node partial unique index). The node's
 // bytes are copied into a pgtype.UUID because nodes.site_id is nullable.
+//
+// S8.5 #2: REFUSE to silently re-home a gateway already bound to ANOTHER site (`node_already_bound_to_site`)
+// — an unconditional UPDATE would strand the prior site with no gateway (the RouteLAN retry orphan). A bind
+// to the SAME site is an idempotent no-op (RouteLAN's resume path relies on it).
 func (s *Service) BindNode(ctx context.Context, orgID, siteID, nodeID uuid.UUID) error {
+	cur, err := s.q.GetNodeSiteBinding(ctx, sqlc.GetNodeSiteBindingParams{ID: nodeID, OrgID: orgID})
+	if err == pgx.ErrNoRows {
+		return apierr.NotFound("node_or_site_not_found", "no such node in this organization, or the site is not in this organization")
+	}
+	if err != nil {
+		return err
+	}
+	if cur.Valid {
+		if cur.Bytes == siteID {
+			return nil // already bound to THIS site — idempotent no-op (resume-safe)
+		}
+		return apierr.Conflict("node_already_bound_to_site", "this gateway is already bound to another site; unbind it first")
+	}
 	n, err := s.q.BindNodeToSite(ctx, sqlc.BindNodeToSiteParams{
 		ID: nodeID, OrgID: orgID, SiteID: pgtype.UUID{Bytes: siteID, Valid: true},
 	})

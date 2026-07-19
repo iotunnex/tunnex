@@ -261,6 +261,10 @@ type Querier interface {
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
+	// lint:cross-org — org-scoped (org_id in the predicate). Returns the node's current site_id (nullable) so
+	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
+	// when the node is not in this org.
+	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
 	// ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.

@@ -156,6 +156,25 @@ func (q *Queries) DeleteSiteSubnet(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getNodeSiteBinding = `-- name: GetNodeSiteBinding :one
+SELECT site_id FROM nodes WHERE id = $1 AND org_id = $2
+`
+
+type GetNodeSiteBindingParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// lint:cross-org — org-scoped (org_id in the predicate). Returns the node's current site_id (nullable) so
+// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
+// when the node is not in this org.
+func (q *Queries) GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getNodeSiteBinding, arg.ID, arg.OrgID)
+	var site_id pgtype.UUID
+	err := row.Scan(&site_id)
+	return site_id, err
+}
+
 const getSite = `-- name: GetSite :one
 SELECT id, org_id, name, link_transport, link_mtu, dns_forwarding, created_at, updated_at FROM sites WHERE id = $1 AND org_id = $2
 `

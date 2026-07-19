@@ -177,6 +177,31 @@ test("forwards tier fail-static is INDEPENDENT: a resolver-write throw keeps las
   assert.deepEqual(fwdApplied[0], [FWD("corp.local", "10.20.0.53")]);
 });
 
+test("#5 full-tunnel: resolver tier applies, routes tier is SKIPPED (no set_allowed_ips call)", async () => {
+  const applied: string[][] = [];
+  const fwdApplied: ResolverForward[][] = [];
+  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [FWD("corp.local", "10.20.0.53")] }) };
+  const m = new RoutedRangesMonitor(
+    "org",
+    ["0.0.0.0/0", "::/0"], // full-tunnel base
+    api,
+    async (s) => {
+      applied.push(s);
+    },
+    async (f) => {
+      fwdApplied.push(f);
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false, // routesEnabled = false (full-tunnel)
+  );
+  assert.equal(await m.checkOnce(), "applied");
+  assert.equal(applied.length, 0, "full-tunnel must issue NO route (set_allowed_ips) calls");
+  assert.deepEqual(fwdApplied[0], [FWD("corp.local", "10.20.0.53")], "full-tunnel STILL applies DNS forwards (1.1.1.1 can't answer internal zones)");
+});
+
 test("stop abandons an in-flight poll's result (no apply after disconnect)", async () => {
   const { m, applied } = mk(["10.99.0.0/24"], [["192.168.5.0/24"]]);
   const p = m.checkOnce();

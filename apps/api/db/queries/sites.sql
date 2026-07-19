@@ -41,6 +41,12 @@ WHERE nodes.id = $1 AND nodes.org_id = $2
 -- name: UnbindNode :execrows
 UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 
+-- name: GetNodeSiteBinding :one
+-- lint:cross-org — org-scoped (org_id in the predicate). Returns the node's current site_id (nullable) so
+-- BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
+-- when the node is not in this org.
+SELECT site_id FROM nodes WHERE id = $1 AND org_id = $2;
+
 -- name: GetSiteNode :one
 -- lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
 -- the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.

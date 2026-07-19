@@ -73,28 +73,30 @@ export class TunnelController {
     return this.withAddress(r.status ?? { state: "up" });
   }
 
-  // applyResolvers reconciles the helper's domain-scoped resolvers to the full desired
-  // set. BEST-EFFORT / fail-STATIC: an old helper (unknown_verb) or a set failure must
-  // NEVER fail the tunnel — cross-site names just don't resolve. Inert when there is
-  // nothing to set and nothing was set before (zero wire calls — the S8.4 inert red).
+  // resolverApply is the ONE set_resolvers path + the ONE resolversActive latch (S8.5 #6 — the F5 strand
+  // invariant lives here, not in two copies). Marks active the moment we ATTEMPT a non-empty install —
+  // NOT only on success — so a partial helper failure that left owned files can't strand them past a
+  // down() sweep (F5). `resolvers_unsupported` (Windows stub) means nothing was installed → clear. A
+  // genuine failure LEAVES the latch true so down() still sweeps once. Returns the raw response; the two
+  // callers apply their error posture (up/down swallow, the monitor throws).
+  private async resolverApply(fwds: ResolverForward[]): Promise<{ ok: boolean; code?: string; error?: string }> {
+    if (fwds.length > 0) this.resolversActive = true;
+    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
+    if (r.ok) {
+      this.resolversActive = fwds.length > 0; // installed n, or swept to 0
+    } else if (r.code === "resolvers_unsupported") {
+      this.resolversActive = false; // platform stub: nothing installed
+    }
+    return r;
+  }
+
+  // applyResolvers is the up()/down() best-effort / fail-STATIC wrapper: a set failure must NEVER fail the
+  // tunnel — cross-site names just don't resolve. Inert when there is nothing to set and nothing was set
+  // before (zero wire calls — the S8.4 inert red).
   private async applyResolvers(fwds: ResolverForward[]): Promise<void> {
     if (fwds.length === 0 && !this.resolversActive) return;
-    // Mark active the moment we ATTEMPT a non-empty install — NOT only on success. A partial helper
-    // failure could leave owned resolver files behind; if resolversActive stayed false, the down() sweep
-    // would early-return and strand them (F5). Setting it on attempt guarantees down() always sweeps.
-    if (fwds.length > 0) this.resolversActive = true;
     try {
-      const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
-      if (r.ok) {
-        this.resolversActive = fwds.length > 0; // installed n or swept to 0
-      } else {
-        // Helper REFUSED (an old helper's unknown_verb, or resolvers_unsupported on Windows): no NEW files
-        // were installed (the helper rolls back this apply's newly-created files on failure), so clear the
-        // flag rather than latch it true and emit a redundant empty sweep on every future down (R3). Any
-        // overwrite of a PRE-EXISTING owned file is healed by the next apply / startup CleanStale (the R5
-        // accepted window) — not the client's concern here.
-        this.resolversActive = false;
-      }
+      await this.resolverApply(fwds);
     } catch {
       /* fail-static: leave the tunnel up; resolversActive stays as attempted so a down still tries once */
     }
@@ -119,16 +121,8 @@ export class TunnelController {
   // Latches resolversActive on any non-empty attempt so down()'s sweep can never STRAND monitor-installed
   // resolver files — the monitor is a SECOND writer to the same helper resolver state (the F5 strand class).
   async setResolvers(fwds: ResolverForward[]): Promise<void> {
-    if (fwds.length > 0) this.resolversActive = true;
-    const r = await this.conn.request({ version: PROTOCOL_VERSION, auth_mode: "path_check", verb: "set_resolvers", resolvers: fwds });
-    if (r.ok) {
-      this.resolversActive = fwds.length > 0; // installed n, or swept to 0
-      return;
-    }
-    if (r.code === "resolvers_unsupported") {
-      this.resolversActive = false; // Windows stub: nothing installed — clean skip, no throw, no retry-thrash
-      return;
-    }
+    const r = await this.resolverApply(fwds); // the ONE set_resolvers path + latch (#6)
+    if (r.ok || r.code === "resolvers_unsupported") return; // unsupported = Windows stub: clean skip, no thrash
     throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_resolvers failed"));
   }
 

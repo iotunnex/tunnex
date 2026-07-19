@@ -67,8 +67,9 @@ type windowsBackend struct {
 	epLUID   winipcfg.LUID
 	epNH     netip.Addr
 	epPinned bool
-	// appliedAllowedIPs — the S8.5 live route full-sweep baseline (set on Up, updated by SetAllowedIPs).
-	appliedAllowedIPs []string
+	// applied is the per-session BELIEF CACHE (S8.5 reduce) of the OS route-targets we believe are in the
+	// kernel — set on Up, reconciled by SetAllowedIPs, cleared on Down. NEVER persisted. See reconcileRoutes.
+	applied map[string]bool
 }
 
 // NewBackend returns the Windows tunnel backend.
@@ -180,22 +181,15 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 		dev.Close()
 		return fmt.Errorf("set address: %w", err)
 	}
-	for _, aip := range cfg.AllowedIPs {
-		for _, target := range routeTargets(aip) {
-			dest, perr := netip.ParsePrefix(target)
-			if perr != nil {
-				dev.Close()
-				return fmt.Errorf("parse route %q: %w", target, perr)
-			}
-			nh := netip.IPv4Unspecified()
-			if dest.Addr().Is6() {
-				nh = netip.IPv6Unspecified()
-			}
-			if err := wl.AddRoute(dest, nh, 0); err != nil {
-				dev.Close()
-				return fmt.Errorf("route %s: %w", target, err)
-			}
-		}
+	// Baked routes go through the ONE reconciler (S8.5 reduce, #9/#10) — same delete-before-add + per-route
+	// discipline + single next-hop derivation as the pushed ranges. luid must be set first (routeCmd reads it).
+	b.luid = luid
+	b.applied = map[string]bool{}
+	if err := reconcileRoutes(b.applied, routeSet(cfg.AllowedIPs), b.routeCmd); err != nil {
+		b.luid = 0
+		b.applied = nil
+		dev.Close()
+		return err
 	}
 
 	// Pin the endpoint route on the PHYSICAL interface (review #1): with 0.0.0.0/1 on
@@ -235,7 +229,6 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.luid = dev, tdev, luid
-	b.appliedAllowedIPs = append([]string(nil), cfg.AllowedIPs...) // S8.5 route full-sweep baseline
 	return nil
 }
 
@@ -256,38 +249,34 @@ func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) e
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
+	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
+	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
+	return reconcileRoutes(b.applied, routeSet(allowedIPs), b.routeCmd)
+}
+
+// routeCmd is the windows per-target route seam for reconcileRoutes: add|delete a route on the tunnel LUID
+// (winipcfg). The next-hop family (unspecified on-link, v4/v6 by target) is derived HERE ONCE — #10 reduce
+// (it was copy-pasted across Up's loop + SetAllowedIPs' add + delete). #9/#10: Up's baked routes AND the
+// pushed ranges go through this ONE path, so they can never install with different attributes.
+func (b *windowsBackend) routeCmd(add bool, target string) error {
+	dest, err := netip.ParsePrefix(target)
+	if err != nil {
+		return fmt.Errorf("parse route %q: %w", target, err)
+	}
+	nh := netip.IPv4Unspecified()
+	if dest.Addr().Is6() {
+		nh = netip.IPv6Unspecified()
+	}
 	wl := winipcfg.LUID(b.luid)
-	cur := routeSet(b.appliedAllowedIPs)
-	want := routeSet(allowedIPs)
-	for t := range want {
-		if cur[t] {
-			continue
-		}
-		dest, perr := netip.ParsePrefix(t)
-		if perr != nil {
-			return fmt.Errorf("parse route %q: %w", t, perr)
-		}
-		nh := netip.IPv4Unspecified()
-		if dest.Addr().Is6() {
-			nh = netip.IPv6Unspecified()
-		}
+	if add {
 		if err := wl.AddRoute(dest, nh, 0); err != nil {
-			return fmt.Errorf("route add %s: %w", t, err)
+			return fmt.Errorf("route add %s: %w", target, err)
 		}
+		return nil
 	}
-	for t := range cur {
-		if want[t] {
-			continue
-		}
-		if dest, perr := netip.ParsePrefix(t); perr == nil {
-			nh := netip.IPv4Unspecified()
-			if dest.Addr().Is6() {
-				nh = netip.IPv6Unspecified()
-			}
-			_ = wl.DeleteRoute(dest, nh) // best-effort
-		}
+	if err := wl.DeleteRoute(dest, nh); err != nil {
+		return fmt.Errorf("route delete %s: %w", target, err)
 	}
-	b.appliedAllowedIPs = append([]string(nil), allowedIPs...)
 	return nil
 }
 
@@ -342,7 +331,7 @@ func (b *windowsBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.luid = nil, nil, 0
-	b.appliedAllowedIPs = nil
+	b.applied = nil // device closed drops its routes; belief cleared (drift-heal c)
 	if b.epPinned {
 		_ = b.epLUID.DeleteRoute(b.epDest, b.epNH) // on the physical iface → not auto-removed
 		b.epPinned = false
@@ -370,7 +359,7 @@ func (b *windowsBackend) FailClosed() error {
 	if b.dev != nil {
 		b.dev.Close()
 		b.dev, b.tunDev, b.luid = nil, nil, 0
-		b.appliedAllowedIPs = nil
+		b.applied = nil // crash-path Down: routes vanish with the adapter; belief cleared (drift-heal c)
 	}
 	return nil
 }
