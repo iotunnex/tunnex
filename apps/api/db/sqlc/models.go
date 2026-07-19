@@ -226,6 +226,15 @@ type NodeJoinToken struct {
 	CreatedAt      time.Time          `json:"created_at"`
 }
 
+type NodePeerStatus struct {
+	NodeID          uuid.UUID          `json:"node_id"`
+	PublicKey       string             `json:"public_key"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes         int64              `json:"rx_bytes"`
+	TxBytes         int64              `json:"tx_bytes"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
 type OrgHealthCheck struct {
 	OrgID     uuid.UUID `json:"org_id"`
 	CheckKind string    `json:"check_kind"`

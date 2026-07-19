@@ -427,6 +427,10 @@ type Querier interface {
 	// user's peers change (create/revoke/deactivate). Not org-scoped: a user's
 	// devices may span orgs and all affected nodes must be nudged to reconcile.
 	ListNodeIDsForUserActiveDevices(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	// lint:cross-org — org-scoped via the reporting node's org. Every gateway's node-peer telemetry for the
+	// org: the input to D3's per-hub freshness clock + the S8.5 L1 site-link card metrics (read path defined
+	// with the storage, consumed by S8.6 Slice 4 + Slice 6).
+	ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID) ([]NodePeerStatus, error)
 	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
 	ListOrgHealthChecks(ctx context.Context, orgID uuid.UUID) ([]OrgHealthCheck, error)
 	// The org roster for the Users page: membership joined to the user record so the
@@ -598,6 +602,12 @@ type Querier interface {
 	UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConfigParams) (IdpSyncConfig, error)
 	// Idempotent on (org_id, user_id).
 	UpsertMembership(ctx context.Context, arg UpsertMembershipParams) (Membership, error)
+	// lint:cross-org — keyed by node_id (the agent is cert-authorized for its own node) + the PEER's pubkey.
+	// The SIBLING of UpsertDeviceStatus (S8.6): it stores a reporting GATEWAY's GATEWAY-peer telemetry
+	// (site-link peers). The EXISTS guard admits ONLY a pubkey that is ANOTHER node (a real gateway) in the
+	// SAME org — a DEVICE pubkey matches no node, so it no-ops here (device peers land in device_status,
+	// gateway peers land here; neither crosses). Batched (one round-trip per report). rx/tx are raw gauges.
+	UpsertNodePeerStatus(ctx context.Context, arg []UpsertNodePeerStatusParams) *UpsertNodePeerStatusBatchResults
 	// Opt-in a check (or change its mode/param). A row's existence IS the opt-in
 	// (no row = off — the unlock-then-opt-in convention, default-off by construction).
 	UpsertOrgHealthCheck(ctx context.Context, arg UpsertOrgHealthCheckParams) (OrgHealthCheck, error)

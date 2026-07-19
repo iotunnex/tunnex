@@ -264,6 +264,43 @@ func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) 
 	return items, nil
 }
 
+const listNodePeerStatusForOrg = `-- name: ListNodePeerStatusForOrg :many
+SELECT nps.node_id, nps.public_key, nps.last_handshake_at, nps.rx_bytes, nps.tx_bytes, nps.updated_at
+FROM node_peer_status nps
+JOIN nodes n ON n.id = nps.node_id
+WHERE n.org_id = $1
+`
+
+// lint:cross-org — org-scoped via the reporting node's org. Every gateway's node-peer telemetry for the
+// org: the input to D3's per-hub freshness clock + the S8.5 L1 site-link card metrics (read path defined
+// with the storage, consumed by S8.6 Slice 4 + Slice 6).
+func (q *Queries) ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID) ([]NodePeerStatus, error) {
+	rows, err := q.db.Query(ctx, listNodePeerStatusForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NodePeerStatus{}
+	for rows.Next() {
+		var i NodePeerStatus
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.LastHandshakeAt,
+			&i.RxBytes,
+			&i.TxBytes,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodes = `-- name: ListNodes :many
 SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id FROM nodes
 WHERE org_id = $1

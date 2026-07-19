@@ -123,3 +123,91 @@ func TestReportStatus(t *testing.T) {
 		t.Fatal("a handshake within the skew tolerance must be stored")
 	}
 }
+
+// TestReportStatusNodePeerSibling (S8.6 Slice 1) — the SAME agent report feeds node_peer_status for
+// GATEWAY peers (a peer pubkey that is another node) while device peers still land in device_status, and
+// NEITHER crosses. This is the S8.5 UpsertDeviceStatus gateway-peer no-op's sibling — REPORTED != STORED,
+// fixed: the CP finally stores the gateway-peer telemetry the agent already sends.
+func TestReportStatusNodePeerSibling(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	q := sqlc.New(tx)
+	svc := &Service{q: q}
+
+	org, user := uuid.New(), uuid.New()
+	hub, spoke := uuid.New(), uuid.New()
+	var devID uuid.UUID
+	mustExec := func(sql string, args ...any) {
+		if _, e := tx.Exec(ctx, sql, args...); e != nil {
+			t.Fatalf("exec %q: %v", sql, e)
+		}
+	}
+	mustExec("INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "s-"+org.String())
+	mustExec("INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", user, user.String()+"@t")
+	// hub = the reporting gateway; spoke = a peer GATEWAY (carries a wg_public_key — a site-link peer).
+	mustExec("INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key) VALUES ($1,$2,'hub',$3,'HUBKEY')", hub, org, "c-hub-"+hub.String())
+	mustExec("INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key) VALUES ($1,$2,'spoke',$3,'SPOKEKEY')", spoke, org, "c-spoke-"+spoke.String())
+	// A DEVICE on the hub (pubkey DEVKEY) — a device peer in the same report.
+	if err := tx.QueryRow(ctx, "INSERT INTO devices (org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,'d','DEVKEY','10.99.0.2') RETURNING id", org, user, hub).Scan(&devID); err != nil {
+		t.Fatalf("device: %v", err)
+	}
+	hubRow, err := q.GetNodeByCertSerial(ctx, "c-hub-"+hub.String())
+	if err != nil {
+		t.Fatalf("get hub: %v", err)
+	}
+
+	// The hub reports BOTH peers in ONE report: a device (DEVKEY) and a gateway (SPOKEKEY = the spoke node).
+	hs := time.Now().Unix()
+	if err := svc.ReportStatus(ctx, hubRow, []PeerStatus{
+		{PublicKey: "DEVKEY", LastHandshake: hs, RxBytes: 10, TxBytes: 20},
+		{PublicKey: "SPOKEKEY", LastHandshake: hs, RxBytes: 30, TxBytes: 40},
+	}); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+
+	// node_peer_status: EXACTLY the gateway peer landed — (hub, SPOKEKEY), rx 30. The device peer did NOT
+	// cross in.
+	var npCount int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status").Scan(&npCount); err != nil {
+		t.Fatal(err)
+	}
+	if npCount != 1 {
+		t.Fatalf("node_peer_status must hold ONLY the gateway peer (SPOKEKEY), got %d rows", npCount)
+	}
+	var npRx int64
+	if err := tx.QueryRow(ctx, "SELECT rx_bytes FROM node_peer_status WHERE node_id=$1 AND public_key='SPOKEKEY'", hub).Scan(&npRx); err != nil {
+		t.Fatalf("the gateway-peer row (hub, SPOKEKEY) must exist: %v", err)
+	}
+	if npRx != 30 {
+		t.Fatalf("gateway-peer rx must be stored, got %d", npRx)
+	}
+	// NEITHER crosses: the DEVICE peer is NOT in node_peer_status; the GATEWAY peer is NOT in device_status.
+	var devInNodePeer, gwInDevice int
+	_ = tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status WHERE public_key='DEVKEY'").Scan(&devInNodePeer)
+	if devInNodePeer != 0 {
+		t.Fatal("a DEVICE peer must NOT land in node_peer_status (neither crosses)")
+	}
+	// device_status holds the device peer (unchanged behavior); the gateway peer no-ops there.
+	var devStatus int
+	_ = tx.QueryRow(ctx, "SELECT count(*) FROM device_status WHERE device_id=$1", devID).Scan(&devStatus)
+	if devStatus != 1 {
+		t.Fatalf("the device peer must still land in device_status (behavior unchanged), got %d", devStatus)
+	}
+	_ = tx.QueryRow(ctx, "SELECT count(*) FROM device_status ds JOIN devices d ON d.id=ds.device_id WHERE d.public_key='SPOKEKEY'").Scan(&gwInDevice)
+	if gwInDevice != 0 {
+		t.Fatal("a GATEWAY peer must NOT land in device_status (neither crosses)")
+	}
+}

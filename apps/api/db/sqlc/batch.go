@@ -180,3 +180,75 @@ func (b *UpsertDeviceStatusBatchResults) Close() error {
 	b.closed = true
 	return b.br.Close()
 }
+
+const upsertNodePeerStatus = `-- name: UpsertNodePeerStatus :batchexec
+INSERT INTO node_peer_status (node_id, public_key, last_handshake_at, rx_bytes, tx_bytes, updated_at)
+SELECT $1, $2, $3, $4, $5, now()
+WHERE EXISTS (
+    SELECT 1 FROM nodes peer
+    WHERE peer.wg_public_key = $2
+      AND peer.org_id = (SELECT org_id FROM nodes WHERE id = $1)
+      AND peer.id <> $1
+)
+ON CONFLICT (node_id, public_key) DO UPDATE
+SET last_handshake_at = EXCLUDED.last_handshake_at,
+    rx_bytes = EXCLUDED.rx_bytes,
+    tx_bytes = EXCLUDED.tx_bytes,
+    updated_at = now()
+`
+
+type UpsertNodePeerStatusBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertNodePeerStatusParams struct {
+	NodeID          uuid.UUID          `json:"node_id"`
+	PublicKey       string             `json:"public_key"`
+	LastHandshakeAt pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes         int64              `json:"rx_bytes"`
+	TxBytes         int64              `json:"tx_bytes"`
+}
+
+// lint:cross-org — keyed by node_id (the agent is cert-authorized for its own node) + the PEER's pubkey.
+// The SIBLING of UpsertDeviceStatus (S8.6): it stores a reporting GATEWAY's GATEWAY-peer telemetry
+// (site-link peers). The EXISTS guard admits ONLY a pubkey that is ANOTHER node (a real gateway) in the
+// SAME org — a DEVICE pubkey matches no node, so it no-ops here (device peers land in device_status,
+// gateway peers land here; neither crosses). Batched (one round-trip per report). rx/tx are raw gauges.
+func (q *Queries) UpsertNodePeerStatus(ctx context.Context, arg []UpsertNodePeerStatusParams) *UpsertNodePeerStatusBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.NodeID,
+			a.PublicKey,
+			a.LastHandshakeAt,
+			a.RxBytes,
+			a.TxBytes,
+		}
+		batch.Queue(upsertNodePeerStatus, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertNodePeerStatusBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertNodePeerStatusBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertNodePeerStatusBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}

@@ -595,6 +595,7 @@ func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []Peer
 	// tolerable degradation; fake-online would be a lie).
 	maxHS := time.Now().Add(2 * time.Minute).Unix()
 	params := make([]sqlc.UpsertDeviceStatusParams, 0, len(stats))
+	peerParams := make([]sqlc.UpsertNodePeerStatusParams, 0, len(stats)) // S8.6: the gateway-peer sibling
 	for _, st := range stats {
 		var hs pgtype.Timestamptz
 		if st.LastHandshake > 0 && st.LastHandshake <= maxHS {
@@ -604,14 +605,24 @@ func (s *Service) ReportStatus(ctx context.Context, node sqlc.Node, stats []Peer
 			NodeID: node.ID, PublicKey: st.PublicKey, LastHandshakeAt: hs,
 			RxBytes: st.RxBytes, TxBytes: st.TxBytes,
 		})
+		// S8.6 SIBLING upsert: the SAME report also feeds node_peer_status for peers that are GATEWAYS. Each
+		// upsert's own EXISTS guard routes the peer — a device pubkey no-ops here, a gateway pubkey no-ops in
+		// device_status — so neither table crosses. No new agent field: the CP finally stores the gateway-peer
+		// telemetry the agent already sends (REPORTED != STORED, fixed).
+		peerParams = append(peerParams, sqlc.UpsertNodePeerStatusParams{
+			NodeID: node.ID, PublicKey: st.PublicKey, LastHandshakeAt: hs,
+			RxBytes: st.RxBytes, TxBytes: st.TxBytes,
+		})
 	}
 	// br.Exec closes the batch results itself, so we do not Close separately.
 	var firstErr error
-	s.q.UpsertDeviceStatus(ctx, params).Exec(func(_ int, err error) {
+	record := func(_ int, err error) {
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
-	})
+	}
+	s.q.UpsertDeviceStatus(ctx, params).Exec(record)
+	s.q.UpsertNodePeerStatus(ctx, peerParams).Exec(record)
 	return firstErr
 }
 
@@ -678,15 +689,15 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	// it server-side from the typed report so a compromised agent can't inject
 	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
 	caps, err := json.Marshal(map[string]any{
-		"egress_nat":             egressNAT,
-		"policy_version":         applied.Version,
-		"policy_hash":            applied.Hash,
-		"policy_error":           applied.Error,
-		"policy_failing_since":   applied.FailingSince,
-		"policy_refused_version": applied.RefusedVersion,
+		"egress_nat":              egressNAT,
+		"policy_version":          applied.Version,
+		"policy_hash":             applied.Hash,
+		"policy_error":            applied.Error,
+		"policy_failing_since":    applied.FailingSince,
+		"policy_refused_version":  applied.RefusedVersion,
 		"site_link_stale":         applied.SiteLinkStale,
 		"site_subnet_unreachable": applied.SiteSubnetUnreachable,
-		"max_policy_version":     applied.MaxSupportedVersion,
+		"max_policy_version":      applied.MaxSupportedVersion,
 	})
 	if err != nil {
 		return err
@@ -972,18 +983,18 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindStuckEnforcing
 		case enterprise:
 			kind = degradedKind(KindInput{
-				PolicyError:        caps.PolicyError,
-				PolicyFailingSince: caps.PolicyFailingSince,
-				PushKnown:          pushKnown,
-				PushedHash:         pushed[n.ID],
-				AppliedHash:        caps.PolicyHash,
-				DesyncSince:        tsTime(n.PolicyDesyncSince),
-				ReportAge:          reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
-				Now:                now,
-				UnsupportedVersion: caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
-				SiteHubDown:           siteHubDown,           // S8.2 Item 7/9 (B2)
-				SiteLinkDown:          siteLinkDown,          // S8.2 H5
-				SiteSubnetUnreachable: siteSubnetUnreachable, // S8.2c D3
+				PolicyError:           caps.PolicyError,
+				PolicyFailingSince:    caps.PolicyFailingSince,
+				PushKnown:             pushKnown,
+				PushedHash:            pushed[n.ID],
+				AppliedHash:           caps.PolicyHash,
+				DesyncSince:           tsTime(n.PolicyDesyncSince),
+				ReportAge:             reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
+				Now:                   now,
+				UnsupportedVersion:    caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
+				SiteHubDown:           siteHubDown,                   // S8.2 Item 7/9 (B2)
+				SiteLinkDown:          siteLinkDown,                  // S8.2 H5
+				SiteSubnetUnreachable: siteSubnetUnreachable,         // S8.2c D3
 			})
 		}
 		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}

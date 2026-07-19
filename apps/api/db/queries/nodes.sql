@@ -96,3 +96,32 @@ UPDATE nodes SET policy_desync_since = $3 WHERE id = $1 AND org_id = $2 AND poli
 -- or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
 -- pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
 UPDATE nodes SET policy_desync_since = NULL WHERE id = $1 AND org_id = $2 AND policy_desync_since IS NOT NULL;
+
+-- name: UpsertNodePeerStatus :batchexec
+-- lint:cross-org — keyed by node_id (the agent is cert-authorized for its own node) + the PEER's pubkey.
+-- The SIBLING of UpsertDeviceStatus (S8.6): it stores a reporting GATEWAY's GATEWAY-peer telemetry
+-- (site-link peers). The EXISTS guard admits ONLY a pubkey that is ANOTHER node (a real gateway) in the
+-- SAME org — a DEVICE pubkey matches no node, so it no-ops here (device peers land in device_status,
+-- gateway peers land here; neither crosses). Batched (one round-trip per report). rx/tx are raw gauges.
+INSERT INTO node_peer_status (node_id, public_key, last_handshake_at, rx_bytes, tx_bytes, updated_at)
+SELECT @node_id, @public_key, @last_handshake_at, @rx_bytes, @tx_bytes, now()
+WHERE EXISTS (
+    SELECT 1 FROM nodes peer
+    WHERE peer.wg_public_key = @public_key
+      AND peer.org_id = (SELECT org_id FROM nodes WHERE id = @node_id)
+      AND peer.id <> @node_id
+)
+ON CONFLICT (node_id, public_key) DO UPDATE
+SET last_handshake_at = EXCLUDED.last_handshake_at,
+    rx_bytes = EXCLUDED.rx_bytes,
+    tx_bytes = EXCLUDED.tx_bytes,
+    updated_at = now();
+
+-- name: ListNodePeerStatusForOrg :many
+-- lint:cross-org — org-scoped via the reporting node's org. Every gateway's node-peer telemetry for the
+-- org: the input to D3's per-hub freshness clock + the S8.5 L1 site-link card metrics (read path defined
+-- with the storage, consumed by S8.6 Slice 4 + Slice 6).
+SELECT nps.node_id, nps.public_key, nps.last_handshake_at, nps.rx_bytes, nps.tx_bytes, nps.updated_at
+FROM node_peer_status nps
+JOIN nodes n ON n.id = nps.node_id
+WHERE n.org_id = @org_id;
