@@ -1,13 +1,139 @@
 package dnsforward
 
 import (
+	"context"
 	"errors"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
+
+// fakeListener is an injectable udpListener for the F1 bind-reconcile red — no real sockets. ReadFrom
+// blocks until Close (so serveConn's reader exits cleanly when its listener is cancelled).
+type fakeListener struct {
+	closed atomic.Bool
+	done   chan struct{}
+}
+
+func newFakeListener() *fakeListener { return &fakeListener{done: make(chan struct{})} }
+func (l *fakeListener) ReadFromUDPAddrPort([]byte) (int, netip.AddrPort, error) {
+	<-l.done
+	return 0, netip.AddrPort{}, errors.New("closed")
+}
+func (l *fakeListener) WriteToUDPAddrPort(b []byte, _ netip.AddrPort) (int, error) { return len(b), nil }
+func (l *fakeListener) Close() error {
+	if l.closed.CompareAndSwap(false, true) {
+		close(l.done)
+	}
+	return nil
+}
+
+// TestServeBindReconcileLifecycle (F1) — the forwarder binds when wg0 APPEARS after start (not at boot,
+// where wg0 doesn't exist yet), re-binds after an address flap, and closes listeners when the interface
+// goes. Drives reconcileBinds directly across interface states with injected seams.
+func TestServeBindReconcileLifecycle(t *testing.T) {
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { return nil, nil })
+	var mu sync.Mutex
+	var addrs []netip.Addr
+	setAddrs := func(a ...netip.Addr) { mu.Lock(); addrs = a; mu.Unlock() }
+	src := func(string) ([]netip.Addr, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(addrs) == 0 {
+			return nil, errors.New("no such iface") // wg0 absent (boot) → the F1 topology
+		}
+		return append([]netip.Addr(nil), addrs...), nil
+	}
+	opened := map[netip.Addr]*fakeListener{}
+	var olMu sync.Mutex
+	lst := func(a netip.Addr) (udpListener, error) {
+		l := newFakeListener()
+		olMu.Lock()
+		opened[a] = l
+		olMu.Unlock()
+		return l, nil
+	}
+	waitClosed := func(a netip.Addr) {
+		for i := 0; i < 200; i++ {
+			olMu.Lock()
+			l := opened[a]
+			olMu.Unlock()
+			if l != nil && l.closed.Load() {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("listener for %v never closed", a)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	live := map[netip.Addr]context.CancelFunc{}
+	a1 := netip.MustParseAddr("10.99.0.2")
+	a2 := netip.MustParseAddr("10.99.0.7")
+
+	// 1) wg0 absent at boot → NO bind (the F1 bug was a bind-once here that died forever).
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
+	if len(live) != 0 {
+		t.Fatal("must not bind before wg0 exists")
+	}
+	// 2) wg0 appears → bind a1.
+	setAddrs(a1)
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
+	if _, ok := live[a1]; !ok {
+		t.Fatal("must bind once wg0 appears (the F1 fix)")
+	}
+	// 3) flap a1 → a2: a1 closes, a2 binds.
+	setAddrs(a2)
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
+	if _, ok := live[a1]; ok {
+		t.Fatal("stale a1 listener must close on flap")
+	}
+	if _, ok := live[a2]; !ok {
+		t.Fatal("must re-bind to a2 after flap")
+	}
+	waitClosed(a1)
+	// 4) wg0 goes → all listeners close.
+	setAddrs()
+	f.reconcileBinds(ctx, src, lst, "wg0", live)
+	if len(live) != 0 {
+		t.Fatal("wg0 gone → every listener closed")
+	}
+	waitClosed(a2)
+}
+
+// TestBucketEvictionBounded (F7) — idle rate-limit buckets are swept so a source-address flood can't grow
+// the map without bound (OOM → tunnel-down). 1000 idle sources collapse to ~1 after a sweep pass.
+func TestBucketEvictionBounded(t *testing.T) {
+	base := time.Unix(0, 0)
+	cur := base
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { return []byte{0}, nil })
+	f.now = func() time.Time { return cur }
+	f.SetTable([]Entry{{Domain: "corp.local", ResolverIP: "10.0.0.53"}})
+	q := mkQuery("nas.corp.local.")
+	for i := 0; i < 1000; i++ {
+		f.handle(q, netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 5}))
+	}
+	f.mu.Lock()
+	before := len(f.buckets)
+	f.mu.Unlock()
+	if before < 900 {
+		t.Fatalf("expected ~1000 buckets before eviction, got %d", before)
+	}
+	// Advance past the idle TTL + a sweep interval; the next query triggers the sweep.
+	cur = base.Add(bucketIdleTTL + bucketSweepEvery + time.Second)
+	f.handle(q, netip.MustParseAddr("10.200.200.200"))
+	f.mu.Lock()
+	after := len(f.buckets)
+	f.mu.Unlock()
+	if after > 1 {
+		t.Fatalf("idle buckets must be evicted; map still holds %d", after)
+	}
+}
 
 func mkQuery(name string) []byte {
 	n, err := dnsmessage.NewName(name)
@@ -52,6 +178,18 @@ func TestMatchLongestSuffix(t *testing.T) {
 	// A near-miss must not false-match by bare suffix ("evilcorp.local" is not within "corp.local").
 	if _, ok := tbl.match("evilcorp.local"); ok {
 		t.Fatal("a label-boundary near-miss must NOT match")
+	}
+}
+
+// TestSingleLabelZoneCompiles (F3) — a single-label zone ("internal") is legitimate and must compile +
+// match, matching what the control plane accepts (no normalizer drift between layers).
+func TestSingleLabelZoneCompiles(t *testing.T) {
+	tbl := buildTable([]Entry{{Domain: "internal", ResolverIP: "10.0.0.53"}}, nil)
+	if len(tbl.rules) != 1 {
+		t.Fatalf("single-label zone must compile, got %d", len(tbl.rules))
+	}
+	if _, ok := tbl.match("host.internal"); !ok {
+		t.Fatal("host.internal must resolve via the single-label zone")
 	}
 }
 

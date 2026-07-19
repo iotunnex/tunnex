@@ -23,6 +23,7 @@ import {
   gatewayLiveness,
   crossesMultiSiteThreshold,
   disjointRefusal,
+  forwardsInSubnet,
   nameMatchesExactly,
   siteGate,
   sitesView,
@@ -309,6 +310,7 @@ function SiteCardView({
       {removing && (
         <RemoveSubnetConfirm
           orgId={orgId}
+          siteId={card.id}
           subnet={removing}
           onDone={() => {
             setRemoving(null);
@@ -499,17 +501,30 @@ function UnbindConfirm({ orgId, siteId, onDone, onClose }: { orgId: string; site
 // the full-sweep consequence for an approved subnet (route withdrawn from every gateway).
 function RemoveSubnetConfirm({
   orgId,
+  siteId,
   subnet,
   onDone,
   onClose,
 }: {
   orgId: string;
+  siteId: string;
   subnet: { id: string; cidr: string; status: string };
   onDone: () => void;
   onClose: () => void;
 }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // F4 preview: name the DNS forwards this removal will ALSO sweep (server does the authoritative sweep in
+  // the same tx; this is the present-tense advisory, matching the WF-5 confirm pattern). No enforcement here.
+  const [dependents, setDependents] = useState<string[]>([]);
+  useEffect(() => {
+    api
+      .GET("/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards", { params: { path: { orgId, siteId } } })
+      .then(({ data }) => {
+        if (data) setDependents(forwardsInSubnet(data as { domain: string; resolver_ip: string }[], subnet.cidr));
+      })
+      .catch(() => {});
+  }, [orgId, siteId, subnet.cidr]);
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -542,6 +557,12 @@ function RemoveSubnetConfirm({
           <>This pending subnet is not yet routed — removing it just un-advertises it.</>
         )}
       </p>
+      {dependents.length > 0 && (
+        <p className="mt-2 text-sm text-amber-400">
+          {dependents.length === 1 ? "1 DNS forward resolves" : `${dependents.length} DNS forwards resolve`} via this subnet and will also be removed:{" "}
+          <span className="font-mono">{dependents.join(", ")}</span>
+        </p>
+      )}
       <ErrorText>{err}</ErrorText>
     </Modal>
   );
@@ -574,7 +595,7 @@ function DNSForwardSection({ orgId, siteId }: { orgId: string; siteId: string })
     if (error) return setErr(apiErrorMessage(error, "Could not add the forward.")); // verbatim typed refusal — no JS re-check
     setDomain("");
     setResolverIp("");
-    load();
+    load().catch(() => {}); // F10: await/.catch parity with the mount load — a transient reload can't strand an unhandled rejection
   }
   async function remove(d: string) {
     setErr(null);
@@ -582,7 +603,7 @@ function DNSForwardSection({ orgId, siteId }: { orgId: string; siteId: string })
       params: { path: { orgId, siteId, domain: d } },
     });
     if (error) return setErr(apiErrorMessage(error, "Could not remove the forward."));
-    load();
+    load().catch(() => {}); // F10: same parity
   }
   return (
     <details className="mt-3 rounded-lg border border-white/5 bg-ink-900/60 px-3 py-2 text-xs text-slate-400">

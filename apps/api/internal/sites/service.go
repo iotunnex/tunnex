@@ -298,6 +298,34 @@ func (s *Service) RemoveSubnet(ctx context.Context, actor, orgID, subnetID uuid.
 		if e := q.DeleteSiteSubnet(ctx, subnetID); e != nil {
 			return e
 		}
-		return s.audit(ctx, q, orgID, actor, subnetID, "site.subnet_removed", map[string]any{"cidr": sub.Cidr.String(), "was_status": sub.Status})
+		// F4 — the full-sweep law's DNS instance: a forward whose resolver lived IN this subnet is now
+		// unreachable (SetDNSForward only ever admitted a resolver inside an approved subnet). Sweep those
+		// forwards in the same tx so a stale row can't keep directing a zone's queries at an unrouted
+		// resolver. Forwards with resolvers elsewhere are kept. The removed set is named in the audit.
+		site, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: sub.SiteID, OrgID: orgID})
+		if e != nil {
+			return e
+		}
+		kept := make([]DNSForward, 0)
+		swept := make([]string, 0)
+		for _, en := range decodeDNS(site.DnsForwarding) {
+			if ip, err := netip.ParseAddr(en.ResolverIP); err == nil && sub.Cidr.Contains(ip) {
+				swept = append(swept, en.Domain)
+				continue
+			}
+			kept = append(kept, en)
+		}
+		if len(swept) > 0 {
+			raw, e := json.Marshal(kept)
+			if e != nil {
+				return e
+			}
+			if e := q.SetSiteDNSForwarding(ctx, sqlc.SetSiteDNSForwardingParams{ID: sub.SiteID, DnsForwarding: raw}); e != nil {
+				return e
+			}
+		}
+		return s.audit(ctx, q, orgID, actor, subnetID, "site.subnet_removed", map[string]any{
+			"cidr": sub.Cidr.String(), "was_status": sub.Status, "dns_forwards_swept": swept,
+		})
 	})
 }

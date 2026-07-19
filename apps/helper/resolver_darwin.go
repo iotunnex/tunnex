@@ -79,11 +79,27 @@ func reconcileResolvers(dir string, desired []ResolverForward) error {
 		}
 	}
 
-	// Write/update the desired set.
+	// Write/update the desired set — ALL-OR-NOTHING per apply (F5/F6): if any write fails, roll back the
+	// files this apply newly CREATED so a partial apply never strands an owned file the client's
+	// resolversActive flag won't later sweep. (Overwrites of already-owned files are atomic temp-then-rename
+	// and are covered by the owner-loss + startup CleanStale sweeps, so they need no rollback.)
+	type writeRec struct {
+		path    string
+		existed bool
+	}
+	var written []writeRec
 	for _, dom := range sortedKeys(want) {
-		if err := writeResolverFile(filepath.Join(dir, dom), want[dom]); err != nil {
+		path := filepath.Join(dir, dom)
+		_, statErr := os.Stat(path)
+		if err := writeResolverFileFn(path, want[dom]); err != nil {
+			for _, w := range written {
+				if !w.existed {
+					os.Remove(w.path)
+				}
+			}
 			return err
 		}
+		written = append(written, writeRec{path: path, existed: statErr == nil})
 	}
 	// Sweep owned files whose domain is no longer desired.
 	for dom := range owned {
@@ -124,6 +140,10 @@ func ownedResolverFiles(dir string) (map[string]struct{}, error) {
 	return owned, nil
 }
 
+// writeResolverFileFn is the write seam (defaults to writeResolverFile) so the partial-write rollback red
+// can force a mid-apply failure without a real filesystem fault.
+var writeResolverFileFn = writeResolverFile
+
 // writeResolverFile atomically writes an owned resolver file (marker + nameserver)
 // via temp-then-rename so a name lookup never sees a half-written file.
 func writeResolverFile(path string, ip netip.Addr) error {
@@ -149,9 +169,12 @@ func writeResolverFile(path string, ip netip.Addr) error {
 	return nil
 }
 
-// safeResolverDomain validates a domain is safe to use as a FILENAME under
-// resolverDir — the helper never trusts the caller, so a path-traversal or an odd
-// character is refused, not sanitized. Lowercased; must be a plain dotted label set.
+// safeResolverDomain enforces the helper's OWN concern — that the domain is safe to use as a FILENAME
+// under resolverDir — ADDITIVELY, not by re-deriving DNS-name validity. Domain SHAPE (single-label vs
+// dotted, label rules) is the control plane's one-truth (sites.NormalizeDomain), which accepts single-label
+// zones like "internal"/"corp" that are legitimate in the homelab/SMB segment; the helper must not reject
+// what the CP accepted (F3 — a third normalizer was a third chance to disagree). So this checks path-safety
+// only: no separators, no traversal, no leading/trailing dot, an allowed charset. Lowercased.
 func safeResolverDomain(raw string) (string, error) {
 	d := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(raw, ".")))
 	if d == "" || len(d) > 253 {
@@ -165,8 +188,8 @@ func safeResolverDomain(raw string) (string, error) {
 			return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has an illegal character"}
 		}
 	}
-	if d[0] == '.' || d[len(d)-1] == '.' || !strings.Contains(d, ".") {
-		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain must be a dotted name"}
+	if d[0] == '.' || d[len(d)-1] == '.' {
+		return "", &ProtocolError{Code: "invalid_resolver_domain", Msg: "domain has a leading or trailing dot"}
 	}
 	return d, nil
 }

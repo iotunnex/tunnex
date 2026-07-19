@@ -112,9 +112,18 @@ type Forwarder struct {
 	exchange exchangeFn
 	log      *slog.Logger
 
-	mu      sync.Mutex
-	buckets map[netip.Addr]*bucket // per-source token buckets
-	now     func() time.Time       // injectable clock for the rate-limit red (nil → time.Now)
+	// F1 lifecycle seams (nil → real). Serve runs a BIND-RECONCILE loop that re-reads the wg interface's
+	// addresses every tick and reconciles its live listeners to match — so it binds when wg0 appears
+	// (it does NOT exist at agent boot; the reconcile loop creates it later), re-binds after a flap, and
+	// closes listeners when an address goes. bindSource/listen/bindInterval are injectable for the red.
+	bindSource   func(string) ([]netip.Addr, error) // nil → wgBindAddrs
+	listen       func(netip.Addr) (udpListener, error)
+	bindInterval time.Duration // 0 → 5s
+
+	mu       sync.Mutex
+	buckets  map[netip.Addr]*bucket // per-source token buckets
+	now      func() time.Time       // injectable clock for the rate-limit red (nil → time.Now)
+	lastSweep time.Time             // F7: last idle-bucket eviction pass (zero → sweep on first allow)
 }
 
 // New builds a Forwarder with the real UDP exchange unless one is injected (tests pass a fake).

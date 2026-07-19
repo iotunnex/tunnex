@@ -3,6 +3,7 @@
 package helper
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,56 @@ func TestReconcileNeverTouchesForeign(t *testing.T) {
 	}
 }
 
+// TestReconcileAcceptsSingleLabel (F3): a single-label zone ("internal") — legitimate in homelab/SMB and
+// ACCEPTED by the control plane — must install, not be rejected by the helper (the third-normalizer drift).
+func TestReconcileAcceptsSingleLabel(t *testing.T) {
+	dir := t.TempDir()
+	if err := reconcileResolvers(dir, []ResolverForward{{Domain: "internal", ResolverIP: "10.20.0.53"}}); err != nil {
+		t.Fatalf("single-label zone must install: %v", err)
+	}
+	got := readFile(t, filepath.Join(dir, "internal"))
+	if !strings.Contains(got, "nameserver 10.20.0.53") {
+		t.Errorf("single-label resolver not written: %q", got)
+	}
+}
+
+// TestReconcilePartialWriteRollsBack (F5/F6): a write failure mid-apply removes the files this apply newly
+// created (all-or-nothing) so nothing is stranded, and a foreign file is untouched throughout.
+func TestReconcilePartialWriteRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	foreign := filepath.Join(dir, "hand.local")
+	if err := os.WriteFile(foreign, []byte("nameserver 9.9.9.9\n"), 0o644); err != nil {
+		t.Fatalf("seed foreign: %v", err)
+	}
+	// Force the SECOND write (sorted: a.local then b.local) to fail.
+	orig := writeResolverFileFn
+	calls := 0
+	writeResolverFileFn = func(path string, ip netip.Addr) error {
+		calls++
+		if calls == 2 {
+			return &ProtocolError{Code: "resolver_write_failed", Msg: "boom"}
+		}
+		return orig(path, ip)
+	}
+	defer func() { writeResolverFileFn = orig }()
+
+	err := reconcileResolvers(dir, []ResolverForward{
+		{Domain: "a.local", ResolverIP: "10.20.0.1"},
+		{Domain: "b.local", ResolverIP: "10.20.0.2"},
+	})
+	if err == nil {
+		t.Fatal("a mid-apply write failure must surface an error")
+	}
+	// The first (newly created) file must have been rolled back — nothing stranded.
+	if _, statErr := os.Stat(filepath.Join(dir, "a.local")); !os.IsNotExist(statErr) {
+		t.Errorf("partial apply stranded a.local: err=%v", statErr)
+	}
+	// Foreign survives.
+	if got := readFile(t, foreign); got != "nameserver 9.9.9.9\n" {
+		t.Errorf("foreign file disturbed: %q", got)
+	}
+}
+
 // TestReconcileRejectsBadInput: a path-traversal domain or a non-IP resolver is
 // refused with a typed code and NOTHING is written (validate-before-apply).
 func TestReconcileRejectsBadInput(t *testing.T) {
@@ -133,7 +184,7 @@ func TestReconcileRejectsBadInput(t *testing.T) {
 	}{
 		{"traversal", ResolverForward{Domain: "../etc/evil", ResolverIP: "10.0.0.1"}, "invalid_resolver_domain"},
 		{"slash", ResolverForward{Domain: "a/b.local", ResolverIP: "10.0.0.1"}, "invalid_resolver_domain"},
-		{"nodot", ResolverForward{Domain: "localhost", ResolverIP: "10.0.0.1"}, "invalid_resolver_domain"},
+		{"leadingdot", ResolverForward{Domain: ".corp.local", ResolverIP: "10.0.0.1"}, "invalid_resolver_domain"},
 		{"badip", ResolverForward{Domain: "corp.local", ResolverIP: "not-an-ip"}, "invalid_resolver_ip"},
 	}
 	for _, c := range cases {

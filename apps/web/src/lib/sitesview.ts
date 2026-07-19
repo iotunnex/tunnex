@@ -124,6 +124,38 @@ export function disjointRefusal(err: unknown): string | null {
   return null;
 }
 
+// ── subnet-removal DNS preview (S8.4 F4, all PURE) ───────────────────────────────────────────────────
+// ipv4ToInt parses a dotted-quad to a uint32, or null if it is not a valid IPv4 literal.
+export function ipv4ToInt(ip: string): number | null {
+  const parts = ip.trim().split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const b = Number(p);
+    if (b > 255) return null;
+    n = n * 256 + b;
+  }
+  return n >>> 0;
+}
+
+// forwardsInSubnet NAMES the DNS forwards whose resolver lives inside cidr — the ADVISORY preview for the
+// subnet-removal confirm ("removing this also removes N forwards"). NOT an enforcement check: the server
+// sweeps authoritatively in the same tx (RemoveSubnet); this only tells the admin what that sweep will do.
+// Anything it can't parse as IPv4 is excluded (the server stays the truth). Site subnets are IPv4-only.
+export function forwardsInSubnet(forwards: { domain: string; resolver_ip: string }[], cidr: string): string[] {
+  const [base, bitsStr] = cidr.split("/");
+  const bits = Number(bitsStr);
+  const baseInt = ipv4ToInt(base ?? "");
+  if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return [];
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  const net = (baseInt & mask) >>> 0;
+  return forwards.filter((f) => {
+    const ipInt = ipv4ToInt(f.resolver_ip);
+    return ipInt !== null && ((ipInt & mask) >>> 0) === net;
+  }).map((f) => f.domain);
+}
+
 // assembleTopology joins sites + their subnets + the nodes list into render-ready cards. PURE. A site's
 // gateways = the nodes whose site_id is this site (the D2/CH join). Everything a card shows is a wire
 // field; the only computation is the join + the health-badge projection (itself pure).

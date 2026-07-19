@@ -78,6 +78,11 @@ func serveHelper(stop <-chan struct{}) error {
 	if err := sup.SelfHeal(); err != nil {
 		log.Printf("tunnex-helper: startup self-heal: %v", err)
 	}
+	// F6: sweep any domain-scoped resolver files stranded by a prior process that exited without a
+	// graceful sweep (reboot / uninstall-without-relaunch). Owned-marker files only; foreign untouched.
+	if err := helper.CleanStaleResolvers(); err != nil {
+		log.Printf("tunnex-helper: startup resolver clean-stale: %v", err)
+	}
 	// Self-uninstall watchdog (macOS packaged install): if the owning /Applications
 	// app is trashed, the helper releases its kill-switch + removes itself, so
 	// drag-to-Trash is fully clean without a script. No-op on the dev/multi-dir install

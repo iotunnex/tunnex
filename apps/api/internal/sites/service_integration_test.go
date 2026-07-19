@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -454,5 +455,57 @@ func TestRemoveSubnet(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='site.subnet_removed'`, org).Scan(&audited)
 	if audited != 1 {
 		t.Fatalf("the removal must be audited (site.subnet_removed); got %d", audited)
+	}
+}
+
+// TestRemoveSubnetSweepsDependentDNS (F4) — the full-sweep law's DNS instance: removing a subnet also
+// removes any DNS forward whose resolver lived inside it (that resolver is now unrouted), in the same tx;
+// a forward with a resolver elsewhere survives. The swept set is named in the audit.
+func TestRemoveSubnetSweepsDependentDNS(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "sw-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	site, err := svc.RegisterSite(ctx, org, "hq")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// Two approved subnets; a forward resolver in each.
+	subA, _ := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.20.0.0/24"))
+	subB, _ := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.30.0.0/24"))
+	if err := svc.ApproveSubnet(ctx, actor, org, subA.ID); err != nil {
+		t.Fatalf("approve A: %v", err)
+	}
+	if err := svc.ApproveSubnet(ctx, actor, org, subB.ID); err != nil {
+		t.Fatalf("approve B: %v", err)
+	}
+	if err := svc.SetDNSForward(ctx, actor, org, site.ID, "corp.local", "10.20.0.53"); err != nil {
+		t.Fatalf("forward A: %v", err)
+	}
+	if err := svc.SetDNSForward(ctx, actor, org, site.ID, "branch.local", "10.30.0.53"); err != nil {
+		t.Fatalf("forward B: %v", err)
+	}
+	// Remove subnet A → corp.local (resolver 10.20.0.53) swept; branch.local survives.
+	if err := svc.RemoveSubnet(ctx, actor, org, subA.ID); err != nil {
+		t.Fatalf("remove subnet A: %v", err)
+	}
+	left, _ := svc.ListDNSForwards(ctx, org, site.ID)
+	if len(left) != 1 || left[0].Domain != "branch.local" {
+		t.Fatalf("only the in-subnet forward must be swept; left=%+v", left)
+	}
+	var meta string
+	_ = pool.QueryRow(ctx, `SELECT metadata::text FROM audit_logs WHERE org_id=$1 AND action='site.subnet_removed' ORDER BY created_at DESC LIMIT 1`, org).Scan(&meta)
+	if !strings.Contains(meta, "corp.local") {
+		t.Fatalf("the removal audit must name the swept forward; meta=%s", meta)
 	}
 }

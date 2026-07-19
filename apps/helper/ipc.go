@@ -238,6 +238,13 @@ func (s *Server) onClose(conn net.Conn, definitive bool) {
 		// definitive=true (socket closed → process gone) selects the short orphan window;
 		// false (read-deadline timeout → wedged-but-connected) keeps the full window.
 		s.sup.OnPeerLost(definitive) // no-op unless a tunnel is up/failed
+		// F6: the owner died without a graceful down (crash / force-quit), so it never swept its
+		// domain-scoped resolvers — do it here, at the same exit the kill-switch releases. Otherwise
+		// stale /etc/resolver files keep pointing names at a resolver over the now-dead tunnel. Foreign
+		// files are untouched (reconcile sweeps only owned-marker files). Best-effort: log, never block.
+		if err := s.resolvers(nil); err != nil && codeOf(err) != "resolvers_unsupported" {
+			log.Printf("resolver_sweep_on_owner_loss_failed: %v", err)
+		}
 	}
 }
 

@@ -2,7 +2,9 @@ package dnsforward
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"time"
@@ -15,7 +17,24 @@ import (
 const (
 	dnsRateBurst  = 50 // tokens a single source may spend at once
 	dnsRatePerSec = 20 // steady-state queries/sec per source
+
+	// F7: bound the bucket map. An idle bucket refills to FULL, so an evicted source that returns gets a
+	// fresh full bucket — eviction is LOSSLESS, which is why a periodic idle-sweep beats an LRU here (no
+	// ordering structure, nothing of value dropped). The map size is bounded to sources seen within
+	// bucketIdleTTL. Without this a peer varying its source address over the tunnel grows the map to OOM,
+	// converting DNS-down into tunnel-down — the exact D2 outcome fail-static exists to prevent.
+	bucketIdleTTL    = 10 * time.Minute
+	bucketSweepEvery = 1 * time.Minute
+
+	// dnsUDPMax is the read buffer for a single UDP datagram: max so we never SELF-truncate an upstream
+	// answer (a short read silently discards the datagram's tail). Oversize-for-the-client answers are
+	// handled by the upstream setting TC → our TCP fallback, not by our buffer size.
+	dnsUDPMax = 65535
 )
+
+// dnsPort is the upstream resolver port (53). A var so the net-level red can point the exchange at a
+// fake resolver on an unprivileged port; production never changes it.
+var dnsPort uint16 = 53
 
 type bucket struct {
 	tokens float64
@@ -30,8 +49,18 @@ func (f *Forwarder) allow(src netip.Addr) bool {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	b := f.buckets[src]
 	t := now()
+	// F7: periodically evict idle buckets BEFORE (re)fetching this source's — a source returning after
+	// bucketIdleTTL is swept then recreated fresh (same full-bucket state it would have had anyway).
+	if t.Sub(f.lastSweep) >= bucketSweepEvery {
+		for k, bk := range f.buckets {
+			if t.Sub(bk.last) >= bucketIdleTTL {
+				delete(f.buckets, k)
+			}
+		}
+		f.lastSweep = t
+	}
+	b := f.buckets[src]
 	if b == nil {
 		b = &bucket{tokens: dnsRateBurst, last: t}
 		f.buckets[src] = b
@@ -48,10 +77,27 @@ func (f *Forwarder) allow(src netip.Addr) bool {
 	return true
 }
 
-// udpExchange relays a raw query to resolver:53 over UDP with a short deadline, returning the raw response.
-// A timeout/unreachable resolver -> error -> the caller answers SERVFAIL (fail-static).
+// udpExchange relays a raw query to resolver:53 over UDP; on an upstream TRUNCATED (TC) reply it re-asks
+// over TCP for the full record set (F2 — never relay a silently-truncated answer). A timeout/unreachable
+// resolver, or a TCP fallback that also fails, returns an error → the caller answers SERVFAIL (fail-static,
+// degraded honestly, never wrong).
 func udpExchange(resolver netip.Addr, query []byte) ([]byte, error) {
-	c, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(netip.AddrPortFrom(resolver, 53)))
+	resp, err := udpQuery(resolver, query)
+	if err != nil {
+		return nil, err
+	}
+	if dnsTruncated(resp) {
+		tcp, terr := tcpQuery(resolver, query)
+		if terr != nil {
+			return nil, fmt.Errorf("dnsforward: upstream truncated, tcp fallback failed: %w", terr)
+		}
+		return tcp, nil
+	}
+	return resp, nil
+}
+
+func udpQuery(resolver netip.Addr, query []byte) ([]byte, error) {
+	c, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(netip.AddrPortFrom(resolver, dnsPort)))
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +106,7 @@ func udpExchange(resolver netip.Addr, query []byte) ([]byte, error) {
 	if _, err := c.Write(query); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 1500)
+	buf := make([]byte, dnsUDPMax) // never self-truncate: one Read returns one whole datagram
 	n, err := c.Read(buf)
 	if err != nil {
 		return nil, err
@@ -68,9 +114,38 @@ func udpExchange(resolver netip.Addr, query []byte) ([]byte, error) {
 	return buf[:n], nil
 }
 
+// dnsTruncated reads the TC bit (byte 2, 0x02) of a DNS message header without a full parse.
+func dnsTruncated(resp []byte) bool { return len(resp) >= 3 && resp[2]&0x02 != 0 }
+
+// tcpQuery does a DNS-over-TCP exchange (RFC 1035 §4.2.2: a 2-byte big-endian length prefix frames both
+// the query and the response).
+func tcpQuery(resolver netip.Addr, query []byte) ([]byte, error) {
+	c, err := net.DialTimeout("tcp", netip.AddrPortFrom(resolver, dnsPort).String(), 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	var pfx [2]byte
+	binary.BigEndian.PutUint16(pfx[:], uint16(len(query)))
+	if _, err := c.Write(append(pfx[:], query...)); err != nil {
+		return nil, err
+	}
+	var rl [2]byte
+	if _, err := io.ReadFull(c, rl[:]); err != nil {
+		return nil, err
+	}
+	resp := make([]byte, binary.BigEndian.Uint16(rl[:]))
+	if _, err := io.ReadFull(c, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 // wgBindAddrs returns the DNS listen addresses — the wg INTERFACE's own addresses ONLY (D2 bind scope). The
 // forwarder must NEVER bind a public interface (an open resolver on a cloud VM is an abuse vector), so the
-// bind set is derived from the wg iface alone; a non-wg address can never enter it.
+// bind set is derived from the wg iface alone; a non-wg address can never enter it. A missing interface
+// (wg0 not created yet at boot) returns an error → the bind-reconcile loop simply retries next tick.
 func wgBindAddrs(wgIface string) ([]netip.Addr, error) {
 	ifi, err := net.InterfaceByName(wgIface)
 	if err != nil {
@@ -91,38 +166,104 @@ func wgBindAddrs(wgIface string) ([]netip.Addr, error) {
 	return out, nil
 }
 
-// Serve binds the forwarder to the wg interface's addresses on :53 and answers queries until ctx is done.
-// Best-effort per the CONVENIENCE rule (D5): a bind failure is returned but must never fail the agent's
-// reconcile — the caller logs and continues (DNS-down is not tunnel-down).
-func (f *Forwarder) Serve(ctx context.Context, wgIface string) error {
-	binds, err := wgBindAddrs(wgIface)
-	if err != nil {
-		return err
-	}
-	if len(binds) == 0 {
-		return fmt.Errorf("dnsforward: wg iface %q has no bindable address", wgIface)
-	}
-	for _, b := range binds {
-		pc, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(netip.AddrPortFrom(b, 53)))
-		if err != nil {
-			if f.log != nil {
-				f.log.Warn("dns_forward_bind_failed", "addr", b.String(), "error", err.Error())
-			}
-			continue // best-effort per bind addr
-		}
-		go f.serveConn(ctx, pc)
-	}
-	<-ctx.Done()
-	return nil
+// udpListener is the slice of *net.UDPConn the forwarder needs; an interface so the F1 bind-reconcile red
+// can inject a fake listener (no real sockets/interfaces).
+type udpListener interface {
+	ReadFromUDPAddrPort(b []byte) (int, netip.AddrPort, error)
+	WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error)
+	Close() error
 }
 
-func (f *Forwarder) serveConn(ctx context.Context, pc *net.UDPConn) {
+func realListen(addr netip.Addr) (udpListener, error) {
+	return net.ListenUDP("udp", net.UDPAddrFromAddrPort(netip.AddrPortFrom(addr, dnsPort)))
+}
+
+// Serve runs the forwarder's BIND-RECONCILE loop until ctx is done (F1). wg0 does NOT exist at agent boot —
+// the reconcile loop creates it later — so a bind-once-at-boot is dead on every fresh gateway. Instead this
+// re-reads the wg interface's addresses every tick (one-truth applied to lifecycle) and reconciles its live
+// listeners to match: it binds :53 when wg0 appears, re-binds after an interface/address flap, and closes a
+// listener when its address goes. Best-effort per D5: a bind failure is logged and retried next tick, never
+// fatal — DNS-down is never tunnel-down.
+func (f *Forwarder) Serve(ctx context.Context, wgIface string) error {
+	src := f.bindSource
+	if src == nil {
+		src = wgBindAddrs
+	}
+	lst := f.listen
+	if lst == nil {
+		lst = realListen
+	}
+	interval := f.bindInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	live := map[netip.Addr]context.CancelFunc{} // addr → stop its serveConn
+	defer func() {
+		for _, stop := range live {
+			stop()
+		}
+	}()
+	f.reconcileBinds(ctx, src, lst, wgIface, live) // bind immediately if wg0 is already up
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			f.reconcileBinds(ctx, src, lst, wgIface, live)
+		}
+	}
+}
+
+// reconcileBinds makes the live listener set match the wg interface's CURRENT addresses. A missing/empty
+// interface yields an empty want-set → every live listener is closed (wg0 went). Exported behavior is
+// idempotent: an unchanged address set is a no-op.
+func (f *Forwarder) reconcileBinds(
+	ctx context.Context,
+	src func(string) ([]netip.Addr, error),
+	lst func(netip.Addr) (udpListener, error),
+	wgIface string,
+	live map[netip.Addr]context.CancelFunc,
+) {
+	want := map[netip.Addr]struct{}{}
+	if binds, err := src(wgIface); err == nil {
+		for _, b := range binds {
+			want[b] = struct{}{}
+		}
+	}
+	// Close listeners no longer wanted (address removed / wg0 gone).
+	for addr, stop := range live {
+		if _, ok := want[addr]; !ok {
+			stop()
+			delete(live, addr)
+		}
+	}
+	// Open listeners newly wanted (wg0 appeared / new address).
+	for addr := range want {
+		if _, ok := live[addr]; ok {
+			continue
+		}
+		pc, err := lst(addr)
+		if err != nil {
+			if f.log != nil {
+				f.log.Warn("dns_forward_bind_failed", "addr", addr.String(), "error", err.Error())
+			}
+			continue // retry next tick
+		}
+		cctx, cancel := context.WithCancel(ctx)
+		live[addr] = cancel
+		go f.serveConn(cctx, pc)
+	}
+}
+
+func (f *Forwarder) serveConn(ctx context.Context, pc udpListener) {
 	go func() { <-ctx.Done(); _ = pc.Close() }()
-	buf := make([]byte, 1500)
+	buf := make([]byte, dnsUDPMax)
 	for {
 		n, src, err := pc.ReadFromUDPAddrPort(buf)
 		if err != nil {
-			return // conn closed (ctx done)
+			return // conn closed (ctx done / address removed)
 		}
 		q := append([]byte(nil), buf[:n]...)
 		srcAddr := src.Addr().Unmap()
