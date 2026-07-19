@@ -24,7 +24,9 @@ func (l *fakeListener) ReadFromUDPAddrPort([]byte) (int, netip.AddrPort, error) 
 	<-l.done
 	return 0, netip.AddrPort{}, errors.New("closed")
 }
-func (l *fakeListener) WriteToUDPAddrPort(b []byte, _ netip.AddrPort) (int, error) { return len(b), nil }
+func (l *fakeListener) WriteToUDPAddrPort(b []byte, _ netip.AddrPort) (int, error) {
+	return len(b), nil
+}
 func (l *fakeListener) Close() error {
 	if l.closed.CompareAndSwap(false, true) {
 		close(l.done)
@@ -40,13 +42,14 @@ func TestServeBindReconcileLifecycle(t *testing.T) {
 	var mu sync.Mutex
 	var addrs []netip.Addr
 	setAddrs := func(a ...netip.Addr) { mu.Lock(); addrs = a; mu.Unlock() }
+	ifaceUp := false // false = wg0 absent (InterfaceByName errors); true = wg0 present (addrs may be empty)
 	src := func(string) ([]netip.Addr, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if len(addrs) == 0 {
+		if !ifaceUp {
 			return nil, errors.New("no such iface") // wg0 absent (boot) → the F1 topology
 		}
-		return append([]netip.Addr(nil), addrs...), nil
+		return append([]netip.Addr(nil), addrs...), nil // present: a SUCCESSFUL read (possibly empty)
 	}
 	opened := map[netip.Addr]*fakeListener{}
 	var olMu sync.Mutex
@@ -82,6 +85,9 @@ func TestServeBindReconcileLifecycle(t *testing.T) {
 		t.Fatal("must not bind before wg0 exists")
 	}
 	// 2) wg0 appears → bind a1.
+	mu.Lock()
+	ifaceUp = true
+	mu.Unlock()
 	setAddrs(a1)
 	f.reconcileBinds(ctx, src, lst, "wg0", live)
 	if _, ok := live[a1]; !ok {
@@ -97,13 +103,52 @@ func TestServeBindReconcileLifecycle(t *testing.T) {
 		t.Fatal("must re-bind to a2 after flap")
 	}
 	waitClosed(a1)
-	// 4) wg0 goes → all listeners close.
+	// 4) addresses removed (wg0 up but addressless — a SUCCESSFUL empty read) → all listeners close.
+	// (A transient InterfaceByName ERROR is the separate R6 case and must NOT close — see that red.)
 	setAddrs()
 	f.reconcileBinds(ctx, src, lst, "wg0", live)
 	if len(live) != 0 {
-		t.Fatal("wg0 gone → every listener closed")
+		t.Fatal("a successful empty address read closes every listener")
 	}
 	waitClosed(a2)
+}
+
+// TestReconcileBindsTransientErrorKeepsListeners (S8.4 fold R6) — a TRANSIENT bindSource error is NOT an
+// empty address set: the live listeners must PERSIST across a glitchy tick (error ≠ absence), so a momentary
+// interface read failure can't blip cross-site DNS. Only a SUCCESSFUL empty read closes them.
+func TestReconcileBindsTransientErrorKeepsListeners(t *testing.T) {
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { return nil, nil })
+	a1 := netip.MustParseAddr("10.99.0.2")
+	mode := "ok"
+	src := func(string) ([]netip.Addr, error) {
+		switch mode {
+		case "err":
+			return nil, errors.New("transient InterfaceByName glitch")
+		case "empty":
+			return nil, nil // successful read, no addresses
+		default:
+			return []netip.Addr{a1}, nil
+		}
+	}
+	lst := func(netip.Addr) (udpListener, error) { return newFakeListener(), nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	live := map[netip.Addr]context.CancelFunc{}
+
+	f.reconcileBinds(ctx, src, lst, "wg0", live) // binds a1
+	if _, ok := live[a1]; !ok {
+		t.Fatal("a1 must bind")
+	}
+	mode = "err"
+	f.reconcileBinds(ctx, src, lst, "wg0", live) // glitch → KEEP a1
+	if _, ok := live[a1]; !ok {
+		t.Fatal("a transient bindSource error must NOT tear down the listener (error ≠ absence)")
+	}
+	mode = "empty"
+	f.reconcileBinds(ctx, src, lst, "wg0", live) // genuine empty read → close
+	if len(live) != 0 {
+		t.Fatal("a successful empty address read must close the listeners")
+	}
 }
 
 // TestBucketEvictionBounded (F7) — idle rate-limit buckets are swept so a source-address flood can't grow
@@ -224,7 +269,10 @@ func TestHandleServfailFailStatic(t *testing.T) {
 // TestHandleRefusedOutOfScope — an unmatched domain is REFUSED (scoped forwarder; the client's own resolver
 // handles everything else — split-horizon).
 func TestHandleRefusedOutOfScope(t *testing.T) {
-	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { t.Fatal("must NOT forward an out-of-scope query"); return nil, nil })
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) {
+		t.Fatal("must NOT forward an out-of-scope query")
+		return nil, nil
+	})
 	f.SetTable([]Entry{{Domain: "corp.local", ResolverIP: "10.0.0.53"}})
 	resp := f.handle(mkQuery("www.example.com."), netip.MustParseAddr("10.99.0.5"))
 	if resp == nil || rcodeOf(t, resp) != dnsmessage.RCodeRefused {

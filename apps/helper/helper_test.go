@@ -265,7 +265,7 @@ func (f *fakeBackend) FailClosed() error {
 	}
 	return nil
 }
-func (f *fakeBackend) CleanStale() error { f.cleanStale++; f.armed = false; return nil } // un-strand
+func (f *fakeBackend) CleanStale() error            { f.cleanStale++; f.armed = false; return nil } // un-strand
 func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxBytes: 1}, nil }
 
 // TestDeadManHoldsAfterUpFailure is the guard for the FAIL-OPEN regression (review
@@ -298,6 +298,88 @@ func TestDeadManHoldsAfterUpFailure(t *testing.T) {
 	clock = base.Add(120 * time.Second)
 	if !s.CheckDeadMan() || fb.down != 1 {
 		t.Fatalf("dead-man must release after the window: fired=%v down=%d", s.State() == StateDown, fb.down)
+	}
+}
+
+// TestResolverSweepInheritsDeadManGrace (S8.4 fold R2 inverted) — the resolver sweep rides the kill-switch
+// release, so a WEDGED owner (definitive=false) keeps BOTH the block AND the resolver files through the full
+// grace window; the sweep fires ONLY when the dead-man actually drops the block. It cannot diverge from the
+// grace because it is the same branch.
+func TestResolverSweepInheritsDeadManGrace(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 90 * time.Second
+	swept := 0
+	s.SetOnRelease(func() { swept++ })
+
+	if err := s.Up(goodConfig()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	s.OnPeerLost(false) // wedged owner (read-deadline timeout), NOT a definitive close → full window
+	// Inside the window: block held, resolvers NOT swept (DNS keeps working during grace).
+	clock = base.Add(30 * time.Second)
+	if s.CheckDeadMan() {
+		t.Fatal("dead-man must not fire inside the window")
+	}
+	if swept != 0 {
+		t.Fatalf("resolvers must survive the grace window (R2): swept=%d", swept)
+	}
+	// Past the window: the dead-man drops the block AND sweeps resolvers on the SAME branch.
+	clock = base.Add(120 * time.Second)
+	if !s.CheckDeadMan() {
+		t.Fatal("dead-man must fire past the window")
+	}
+	if swept != 1 {
+		t.Fatalf("resolver sweep must ride the release exactly once: swept=%d", swept)
+	}
+}
+
+// TestResolverSweepFastReconnectUntouched (S8.4 fold R4) — a definitive owner loss followed by a fast
+// reconnect must NOT sweep the reconnected session's resolvers. Because the sweep rides the dead-man (which
+// a fresh Up resets), no stale sweep can clobber the successor.
+func TestResolverSweepFastReconnectUntouched(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	base := time.Unix(1_700_000_000, 0)
+	clock := base
+	s.now = func() time.Time { return clock }
+	s.deadMan = 90 * time.Second
+	s.deadManOrphan = 5 * time.Second
+	swept := 0
+	s.SetOnRelease(func() { swept++ })
+
+	_ = s.Up(goodConfig()) // session A
+	s.OnPeerLost(true)     // A's socket closed (definitive → short orphan window)
+	clock = base.Add(1 * time.Second)
+	_ = s.Down() // A's graceful teardown races in... (drops block, sweeps once)
+	sweptAfterA := swept
+	// B reconnects immediately and installs its own resolvers.
+	_ = s.Up(goodConfig())             // session B — fresh beat, orphan cleared
+	clock = base.Add(10 * time.Second) // past A's short orphan window, but B is fresh
+	if s.CheckDeadMan() {
+		t.Fatal("B's fresh Up must reset the dead-man — no stale fire from A")
+	}
+	if swept != sweptAfterA {
+		t.Fatalf("no sweep may run against the reconnected session B (R4): swept=%d after A=%d", swept, sweptAfterA)
+	}
+}
+
+// TestResolverSweepOnGracefulDown — graceful Down drops the block and sweeps (idempotent belt-and-suspenders;
+// the client already swept via set_resolvers([]) before sending tunnel_down).
+func TestResolverSweepOnGracefulDown(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	swept := 0
+	s.SetOnRelease(func() { swept++ })
+	_ = s.Up(goodConfig())
+	if err := s.Down(); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if swept != 1 {
+		t.Fatalf("graceful down must sweep resolvers once: swept=%d", swept)
 	}
 }
 

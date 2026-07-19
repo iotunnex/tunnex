@@ -105,7 +105,7 @@ type Server struct {
 // the verifier itself (path_check now; code_signing at S6.5b) — there is no
 // separate knob to drift out of sync with the real check.
 func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Server {
-	return &Server{
+	srv := &Server{
 		sup:          sup,
 		verify:       verify,
 		resolve:      resolve,
@@ -115,6 +115,14 @@ func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Se
 		posture:      collectPosture,
 		resolvers:    setResolvers,
 	}
+	// S8.4: the resolver sweep rides the kill-switch release (dead-man fire / graceful Down), fired under
+	// the Supervisor's lock. The closure reads srv.resolvers at call-time so a test override is honored.
+	sup.SetOnRelease(func() {
+		if err := srv.resolvers(nil); err != nil && codeOf(err) != "resolvers_unsupported" {
+			log.Printf("resolver_sweep_on_release_failed: %v", err)
+		}
+	})
+	return srv
 }
 
 // Serve accepts connections until the listener closes. Each is handled in its own
@@ -237,14 +245,12 @@ func (s *Server) onClose(conn net.Conn, definitive bool) {
 	if isOwner {
 		// definitive=true (socket closed → process gone) selects the short orphan window;
 		// false (read-deadline timeout → wedged-but-connected) keeps the full window.
+		// The resolver sweep is NOT done here (that eager sweep diverged from the kill-switch's
+		// wedged-owner grace and raced a fast reconnect — the S8.4 fold reduction). Instead it RIDES the
+		// Supervisor's OWN release decision (SetOnRelease, wired in NewServer): it fires only when the
+		// dead-man actually drops the block, inheriting the grace + definitive-loss semantics under the
+		// Supervisor's lock. OnPeerLost only ARMS/HOLDS the block; it does not release, so nothing sweeps here.
 		s.sup.OnPeerLost(definitive) // no-op unless a tunnel is up/failed
-		// F6: the owner died without a graceful down (crash / force-quit), so it never swept its
-		// domain-scoped resolvers — do it here, at the same exit the kill-switch releases. Otherwise
-		// stale /etc/resolver files keep pointing names at a resolver over the now-dead tunnel. Foreign
-		// files are untouched (reconcile sweeps only owned-marker files). Best-effort: log, never block.
-		if err := s.resolvers(nil); err != nil && codeOf(err) != "resolvers_unsupported" {
-			log.Printf("resolver_sweep_on_owner_loss_failed: %v", err)
-		}
 	}
 }
 

@@ -147,20 +147,21 @@ test("TunnelController installs then sweeps dns_forwards via set_resolvers", asy
   }
 });
 
-// F5 RED (S8.4): a set_resolvers that fails (helper may have written some owned files) must STILL trigger
-// the full-sweep on down — resolversActive is set on ATTEMPT, not only on success, so nothing is stranded.
-test("TunnelController sweeps on down even after a failed set_resolvers", async () => {
-  const sockPath = testEndpoint("dnsfail");
+// R3 RED (S8.4 fold): an old/Windows helper that REFUSES set_resolvers (ok:false — resolvers_unsupported /
+// unknown_verb) must NOT latch resolversActive true; otherwise every future down() emits a redundant empty
+// sweep forever. After a refused install, down() sends NO set_resolvers.
+test("TunnelController does not redundant-sweep after a refused set_resolvers", async () => {
+  const sockPath = testEndpoint("dnsunsup");
   try { fs.unlinkSync(sockPath); } catch { /* fresh */ }
-  const requests: Array<{ verb: string; resolvers?: ResolverForward[] }> = [];
+  const requests: Array<{ verb: string }> = [];
   const server = net.createServer((sock) => {
     const dec = new FrameDecoder();
     sock.on("data", (chunk: Buffer) => {
       for (const msg of dec.push(chunk)) {
         const req = msg as { verb: string; resolvers?: ResolverForward[] };
-        requests.push({ verb: req.verb, resolvers: req.resolvers });
-        if (req.verb === "set_resolvers" && (req.resolvers?.length ?? 0) > 0) {
-          sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: false, code: "resolver_write_failed", error: "boom" }));
+        requests.push({ verb: req.verb });
+        if (req.verb === "set_resolvers") {
+          sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: false, code: "resolvers_unsupported", error: "not supported" }));
         } else {
           const state = req.verb === "tunnel_down" ? "down" : "up";
           sock.write(encodeFrame({ version: PROTOCOL_VERSION, ok: true, status: { state } }));
@@ -170,14 +171,12 @@ test("TunnelController sweeps on down even after a failed set_resolvers", async 
   });
   await new Promise<void>((r) => server.listen(sockPath, r));
   try {
-    const fwds: ResolverForward[] = [{ domain: "corp.local", resolver_ip: "10.20.0.53" }];
-    const cfg = { address: "10.99.0.2/32", dns_forwards: fwds } as unknown as TunnelConfig;
+    const cfg = { address: "10.99.0.2/32", dns_forwards: [{ domain: "corp.local", resolver_ip: "10.20.0.53" }] } as unknown as TunnelConfig;
     const ctrl = new TunnelController(sockPath, async () => cfg);
-    await ctrl.up(); // install FAILS (ok:false) — but was attempted
+    await ctrl.up();   // set_resolvers REFUSED (unsupported) → must clear the latch
     await ctrl.down();
     const sets = requests.filter((r) => r.verb === "set_resolvers");
-    assert.equal(sets.length, 2, "the failed install must not skip the down sweep");
-    assert.deepEqual(sets[1].resolvers, [], "down still sweeps to empty after a failed install");
+    assert.equal(sets.length, 1, "a refused install must not latch a redundant down sweep");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
     try { fs.unlinkSync(sockPath); } catch { /* gone */ }

@@ -105,6 +105,23 @@ type Supervisor struct {
 	// the app's first post-resume heartbeat (review #9). Do NOT swap this for a
 	// wall-clock source, which would count sleep time and fail the tunnel open.
 	now func() time.Time
+	// onRelease (S8.4) rides the kill-switch's OWN release decision: it fires under s.mu at every point
+	// the machinery concludes the session is definitively gone and drops the block — the dead-man fire and
+	// the graceful Down. The domain-scoped resolver sweep is wired here so it INHERITS the S6-proven
+	// wedged-owner grace / definitive-loss / dead-man semantics instead of re-deriving them (the S8.4 fold
+	// reduction). It is NEVER a decision-maker — no independent timing, no second lock. nil = no rider.
+	onRelease func()
+}
+
+// SetOnRelease registers the kill-switch-release rider (the resolver sweep). Fired under s.mu at each
+// release point; must be fast + must not re-enter the Supervisor.
+func (s *Supervisor) SetOnRelease(fn func()) { s.onRelease = fn }
+
+// releaseLocked runs the release rider. Caller holds s.mu.
+func (s *Supervisor) releaseLocked() {
+	if s.onRelease != nil {
+		s.onRelease()
+	}
 }
 
 func NewSupervisor(be Backend) *Supervisor {
@@ -183,6 +200,7 @@ func (s *Supervisor) CheckDeadMan() bool {
 	s.state = StateDown
 	s.lastCfg = nil
 	s.orphaned = false
+	s.releaseLocked() // the session is definitively gone → sweep resolvers on the SAME branch that dropped the block
 	return true
 }
 
@@ -245,6 +263,7 @@ func (s *Supervisor) Down() error {
 	s.state = StateDown
 	s.lastCfg = nil
 	s.orphaned = false
+	s.releaseLocked() // graceful teardown also drops the block → sweep resolvers (idempotent; the client already swept)
 	if err != nil {
 		return &ProtocolError{Code: "tunnel_down_failed", Msg: err.Error()}
 	}

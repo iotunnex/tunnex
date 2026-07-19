@@ -120,10 +120,10 @@ type Forwarder struct {
 	listen       func(netip.Addr) (udpListener, error)
 	bindInterval time.Duration // 0 → 5s
 
-	mu       sync.Mutex
-	buckets  map[netip.Addr]*bucket // per-source token buckets
-	now      func() time.Time       // injectable clock for the rate-limit red (nil → time.Now)
-	lastSweep time.Time             // F7: last idle-bucket eviction pass (zero → sweep on first allow)
+	mu        sync.Mutex
+	buckets   map[netip.Addr]*bucket // per-source token buckets
+	now       func() time.Time       // injectable clock for the rate-limit red (nil → time.Now)
+	lastSweep time.Time              // F7: last idle-bucket eviction pass (zero → sweep on first allow)
 }
 
 // New builds a Forwarder with the real UDP exchange unless one is injected (tests pass a fake).
@@ -171,8 +171,10 @@ func (f *Forwarder) handle(query []byte, src netip.Addr) []byte {
 
 // refuse / servfail build a minimal response echoing the query's question with the given RCode, so a client
 // gets a definite answer (not a timeout). Best-effort: on a pack error, no reply.
-func refuse(id uint16, query []byte) []byte  { return respondRCode(id, query, dnsmessage.RCodeRefused) }
-func servfail(id uint16, query []byte) []byte { return respondRCode(id, query, dnsmessage.RCodeServerFailure) }
+func refuse(id uint16, query []byte) []byte { return respondRCode(id, query, dnsmessage.RCodeRefused) }
+func servfail(id uint16, query []byte) []byte {
+	return respondRCode(id, query, dnsmessage.RCodeServerFailure)
+}
 
 func respondRCode(id uint16, query []byte, rcode dnsmessage.RCode) []byte {
 	var p dnsmessage.Parser
