@@ -1394,12 +1394,14 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindSiteLinkDown
 		case !enterprise && siteSubnetUnreachable:
 			kind = KindSiteSubnetUnreachable // D3, edition-independent
-		case !enterprise && conntrackFlushUnavailable:
-			kind = KindConntrackFlushUnavailable // S8.7 (structural agreement; open never sets it — no grants)
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
 			kind = KindStuckEnforcing
+		case !enterprise && conntrackFlushUnavailable:
+			// [3] LOWEST priority — ranked AFTER the apply faults so a louder failure is never masked by the
+			// hygiene label (structural agreement; open never sets it — no grants).
+			kind = KindConntrackFlushUnavailable
 		case enterprise:
 			kind = degradedKind(KindInput{
 				PolicyError:               caps.PolicyError,

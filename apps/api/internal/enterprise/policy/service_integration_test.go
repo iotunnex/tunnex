@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/enterprise/policy"
@@ -651,20 +652,33 @@ func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
 	if e != nil {
 		t.Fatalf("cidr rule: %v", e)
 	}
-	// No site subnet contains 172.31.17.64 yet → WARN.
-	w, e := svc.PolicyRuleCidrWarnings(ctx, org)
-	if e != nil {
-		t.Fatalf("warnings: %v", e)
+	rules := []sqlc.PolicyRule{rule}
+	warn := func() bool {
+		w, e := svc.PolicyRuleCidrWarnings(ctx, org, rules)
+		if e != nil {
+			t.Fatalf("warnings: %v", e)
+		}
+		return w[rule.ID]
 	}
-	if !w[rule.ID] {
+	// (a) No containing subnet → WARN (out-of-world; places nowhere).
+	if !warn() {
 		t.Fatal("an out-of-world cidr rule must WARN (cidr_outside_org_ranges)")
 	}
-	// The containing subnet lands (approved) → the warning SHEDS, read-time, no rule edit.
+	// (b) [9] The containing subnet lands, but the site has NO bound gateway → STILL WARNS: the grant places
+	// nowhere without a gateway (warn ⟺ won't-place, the [9] fix — a clean rule must never silently no-op).
 	if _, e := pool.Exec(ctx, `INSERT INTO site_subnets (site_id,cidr,status) VALUES ($1,'172.31.0.0/16','approved')`, site); e != nil {
 		t.Fatalf("subnet: %v", e)
 	}
-	w2, _ := svc.PolicyRuleCidrWarnings(ctx, org)
-	if w2[rule.ID] {
-		t.Fatal("the warning must SHED once the containing range lands (read-time derived, no edit)")
+	if !warn() {
+		t.Fatal("[9]: a cidr in a subnet of a NODE-LESS site must still WARN (it compiles to nothing)")
+	}
+	// (c) A gateway is bound → NOW it places (containing subnet + bound node) → the warning SHEDS, read-time,
+	// no rule edit. Both directions of the warn⟺place biconditional exercised.
+	gw := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint) VALUES ($1,$2,'gw',$3,$4,'KGW',':51820')`, gw, org, "cs-"+gw.String()[:8], site); e != nil {
+		t.Fatalf("bind gateway: %v", e)
+	}
+	if warn() {
+		t.Fatal("the warning must SHED once the range lands AND a gateway is bound (read-time, no edit)")
 	}
 }

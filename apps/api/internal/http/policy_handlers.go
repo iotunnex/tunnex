@@ -33,8 +33,9 @@ type policyPort interface {
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
 	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
 	// PolicyRuleCidrWarnings returns per-rule-id the S8.7 cidr_outside_org_ranges warning (a src_kind='cidr'
-	// rule whose CIDR is in no current site subnet → compiles to nothing). Read-time derived.
-	PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error)
+	// rule that places nowhere — no containing site with a bound gateway). Read-time derived; takes the
+	// already-fetched rules ([15] — no re-query of the rule set).
+	PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, rules []sqlc.PolicyRule) (map[uuid.UUID]bool, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
 	ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error)
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
@@ -250,7 +251,7 @@ func (s apiServer) ListPolicyRules(ctx context.Context, req api.ListPolicyRulesR
 	if err != nil {
 		return nil, err
 	}
-	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId) // S8.7 read-time warn (D1)
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId, rs) // S8.7 read-time warn (D1); reuse the fetched rules ([15])
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +292,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if err != nil {
 		return nil, err
 	}
-	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId) // S8.7 read-time warn for the created rule
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId, []sqlc.PolicyRule{r}) // S8.7 warn for the created rule
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +327,7 @@ func (s apiServer) ExtendGrant(ctx context.Context, req api.ExtendGrantRequestOb
 	if err != nil {
 		return nil, err
 	}
-	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId)
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId, []sqlc.PolicyRule{r})
 	if err != nil {
 		return nil, err
 	}

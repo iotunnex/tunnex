@@ -168,3 +168,39 @@ func TestFlushFailureSurfacedNotSilent(t *testing.T) {
 		t.Fatal("a successful flush must CLEAR the failing state (recovery → kind clears)")
 	}
 }
+
+// TestFamiliesOf — [11]/[17]: the flush dumps ONLY the families the removed tuples span. An all-v4 removal
+// never touches IPv6 (so a v6-less kernel can't false-fail).
+func TestFamiliesOf(t *testing.T) {
+	v4, _ := tupleFromAllow(nodepolicy.AllowEntry{SrcIP: "10.0.0.1/32", DstCIDR: "10.0.0.2/32"})
+	v6, _ := tupleFromAllow(nodepolicy.AllowEntry{SrcIP: "2001:db8::1/128", DstCIDR: "2001:db8::2/128"})
+	if f := familiesOf([]flowTuple{v4}); len(f) != 1 || f[0] != conntrack.IPv4 {
+		t.Fatalf("v4-only tuples → [IPv4] only, got %v", f)
+	}
+	if f := familiesOf([]flowTuple{v6}); len(f) != 1 || f[0] != conntrack.IPv6 {
+		t.Fatalf("v6-only tuples → [IPv6] only, got %v", f)
+	}
+	if f := familiesOf([]flowTuple{v4, v6}); len(f) != 2 {
+		t.Fatalf("mixed tuples → both families, got %v", f)
+	}
+}
+
+// TestFlushLatchClearsOnProbe — [1]: a latched flush-failing state clears on a no-removal drain once the
+// capability recovers (a reactive probe), without waiting for an unrelated grant removal.
+func TestFlushLatchClearsOnProbe(t *testing.T) {
+	var probeErr error = errors.New("still no CAP_NET_ADMIN")
+	m := &Manager{now: time.Now, ctProbe: func(context.Context) error { return probeErr }}
+	m.mu.Lock()
+	m.flushErr = errors.New("a prior flush failed")
+	m.mu.Unlock()
+
+	m.drainFlush(context.Background()) // no pending tuples; probe still failing → stays failing
+	if !m.ConntrackFlushFailing() {
+		t.Fatal("a still-failing probe must KEEP the flush-failing state")
+	}
+	probeErr = nil // capability recovered
+	m.drainFlush(context.Background())
+	if m.ConntrackFlushFailing() {
+		t.Fatal("[1]: a recovered capability must CLEAR the latched flush-failing state (no removal needed)")
+	}
+}

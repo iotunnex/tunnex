@@ -45,6 +45,20 @@ func containingSite(cidr string, siteCIDRs map[uuid.UUID][]string) uuid.UUID {
 	return uuid.Nil
 }
 
+// cidrPlacementSite is THE placement predicate for a src_kind='cidr' rule (S8.7 [0]+[9] reduce): the site the
+// grant PLACES on — its containing approved site subnet that ALSO has a bound gateway — with ok=false when it
+// places NOWHERE (out-of-world, OR a containing site with no gateway node). ONE FUNCTION, used by BOTH the
+// compiler (bails where ok=false) AND the read-time warning (fires where ok=false) — so warn ⟺ won't-place by
+// construction, in BOTH directions: [0] (a warned rule must never still emit ACCEPT on the dst/hub) and [9]
+// (a clean rule must never silently compile to nothing). Pure.
+func cidrPlacementSite(cidr string, siteCIDRs map[uuid.UUID][]string, siteNode map[uuid.UUID]uuid.UUID) (uuid.UUID, bool) {
+	s := containingSite(cidr, siteCIDRs)
+	if s == uuid.Nil || siteNode[s] == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return s, true
+}
+
 // Modes (mirror the organizations.zero_trust_mode CHECK).
 const (
 	ModeOff       = "off"
@@ -439,7 +453,14 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 			if r.SrcCIDR == "" {
 				continue
 			}
-			srcSite = containingSite(r.SrcCIDR, siteCIDRs)
+			// S8.7 [0]+[9] — the ONE placement predicate (same fn the warning uses): a cidr places iff its
+			// containing approved site subnet ALSO has a bound gateway. !ok → the rule places NOTHING (never
+			// the [0] dst-site ACCEPT bypass a warned rule must not emit, never the [9] node-less silent no-op).
+			s, ok := cidrPlacementSite(r.SrcCIDR, siteCIDRs, siteNode)
+			if !ok {
+				continue
+			}
+			srcSite = s
 			srcCIDRs = []string{r.SrcCIDR}
 		default:
 			continue
@@ -447,10 +468,14 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		if len(srcCIDRs) == 0 {
 			continue // subnetless source site
 		}
-		enforceNodes := map[uuid.UUID]bool{}
-		if n := siteNode[srcSite]; n != uuid.Nil {
-			enforceNodes[n] = true
+		// The SOURCE must resolve to a bound gateway to ORIGINATE — else the rule places NOTHING (the [0] fix
+		// generalized: a source that can't originate must not add the dst/hub ACCEPT). cidr already ensured
+		// this via cidrPlacementSite; site-src is guarded here (symmetric tightening).
+		srcGw := siteNode[srcSite]
+		if srcGw == uuid.Nil {
+			continue
 		}
+		enforceNodes := map[uuid.UUID]bool{srcGw: true}
 		if r.DstKind == "site" {
 			if n := siteNode[r.DstSiteID]; n != uuid.Nil {
 				enforceNodes[n] = true

@@ -819,3 +819,55 @@ func TestCIDRSourceGrantIsPrecise(t *testing.T) {
 		t.Fatalf("an out-of-world CIDR (in no site subnet) must compile to nothing, got %+v", a)
 	}
 }
+
+// TestCIDRSourcePlacementBiconditional — S8.7 [0]+[9]: the compiler side of warn⟺won't-place. A cidr PLACES
+// iff its containing approved site subnet has a bound gateway; otherwise it places NOTHING — never the [0]
+// dst-site ACCEPT bypass, never the [9] node-less silent no-op.
+func TestCIDRSourcePlacementBiconditional(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-00000051cb01")
+	siteB := uuid.MustParse("00000000-0000-0000-0000-00000051cb02")
+	siteC := uuid.MustParse("00000000-0000-0000-0000-00000051cb03")
+	gwA := uuid.MustParse("00000000-0000-0000-0000-0000000000e1")
+	gwB := uuid.MustParse("00000000-0000-0000-0000-0000000000e2")
+	res := uuid.MustParse("00000000-0000-0000-0000-0000000000e9")
+	resource := []policy.Resource{{ID: res, CIDR: "10.0.0.4/32", Protocol: "any"}}
+
+	// PLACES: a cidr inside siteA's subnet AND siteA has a bound gateway.
+	placed := policy.Snapshot{
+		Mode: policy.ModeEnforcing, Resources: resource,
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "cidr", SrcCIDR: "172.31.17.64/32", DstKind: "resource", DstResourceID: res}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteA, CIDR: "172.31.0.0/16"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteA, NodeID: gwA, Endpoint: "a:51820"}},
+	}
+	if !hasAllow(allowsFor(policy.Compile(placed), gwA), "172.31.17.64/32", "10.0.0.4/32") {
+		t.Fatal("in-world cidr with a bound gateway must PLACE")
+	}
+
+	// [0] DST-SITE BYPASS: an OUT-OF-WORLD cidr (in no site subnet) → dst=site. The warned-inert rule must
+	// emit NOTHING on the dst gateway or the hub — NOT an ACCEPT the operator was told matches nothing.
+	bypass := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "cidr", SrcCIDR: "203.0.113.9/32", DstKind: "site", DstSiteID: siteB}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteA, CIDR: "172.31.0.0/16"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteA, NodeID: gwA, Endpoint: "a:51820"}, {SiteID: siteB, NodeID: gwB, Endpoint: "b:51820"}},
+		ActiveHub:   gwA,
+	}
+	out := policy.Compile(bypass)
+	for _, n := range []uuid.UUID{gwA, gwB} {
+		if hasAllow(allowsFor(out, n), "203.0.113.9/32", "10.2.0.0/24") {
+			t.Fatalf("[0] an out-of-world cidr → dst-site must emit NO ACCEPT (default-deny bypass) on %v, got %+v", n, allowsFor(out, n))
+		}
+	}
+
+	// [9] NODE-LESS SITE: a cidr inside siteC's subnet but siteC has NO bound gateway → places NOTHING.
+	nodeless := policy.Snapshot{
+		Mode: policy.ModeEnforcing, Resources: resource,
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "cidr", SrcCIDR: "192.168.5.5/32", DstKind: "resource", DstResourceID: res}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteC, CIDR: "192.168.0.0/16"}}, // siteC has NO SiteNode
+	}
+	for _, c := range policy.Compile(nodeless) {
+		if hasAllow(c.Allow, "192.168.5.5/32", "10.0.0.4/32") {
+			t.Fatal("[9] a cidr in a NODE-LESS site must place NOTHING (compiles to nothing)")
+		}
+	}
+}

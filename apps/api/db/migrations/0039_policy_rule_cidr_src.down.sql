@@ -1,3 +1,9 @@
+-- HONEST down (S8.7 [5]): a src_kind='cidr' rule cannot survive the reverted CHECK (which has no 'cidr'
+-- arm), so recreating the checks below would ABORT the rollback on a constraint violation. Roll the FEATURE
+-- back → drop the FEATURE's rows first, LOUDLY in the migration log (not a silently wedged down). Re-create
+-- the cidr rules if you roll 0039 forward again.
+DELETE FROM policy_rules WHERE src_kind = 'cidr';
+
 DROP INDEX policy_rules_cidr_site_uniq;
 DROP INDEX policy_rules_cidr_group_uniq;
 DROP INDEX policy_rules_cidr_resource_uniq;

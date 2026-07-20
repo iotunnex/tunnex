@@ -86,6 +86,9 @@ type Manager struct {
 	// ctFlush deletes the conntrack entries matching a removed-grant tuple set (S8.7 Slice 2), scoped exactly
 	// to those tuples; injectable so the innocent-neighbor red asserts the scope without a live conntrack.
 	ctFlush func(context.Context, []flowTuple) (int, error)
+	// ctProbe reactively checks conntrack-netlink capability (opens+closes a CT socket) — used to CLEAR a
+	// latched flush-failing state on recovery when there are no removals to flush ([1]). Injectable.
+	ctProbe func(context.Context) error
 	// nftRun runs an arbitrary `nft <args...>` (list/insert/delete) and returns stdout;
 	// injectable for the DOCKER-USER foreign-chain reconcile tests (WF-4). Distinct from
 	// `apply` (the atomic `-f -` full-table replace) — the Docker-owned chain can't be
@@ -144,6 +147,7 @@ func New(wgIface string) *Manager {
 	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = func(ctx context.Context, tuples []flowTuple) (int, error) { return flushTuples(ctx, tuples, nil) }
+	m.ctProbe = probeConntrack
 	return m
 }
 
@@ -666,8 +670,22 @@ func (m *Manager) drainFlush(ctx context.Context) {
 	m.mu.Lock()
 	tuples := m.pendingFlush
 	m.pendingFlush = nil
+	failing := m.flushErr != nil
 	m.mu.Unlock()
-	if len(tuples) == 0 || m.ctFlush == nil { // no flusher wired (a directly-constructed Manager) → skip
+	if len(tuples) == 0 {
+		// [1] latch fix: nothing to flush this pass, but if a prior flush is FAILING, reactively probe the
+		// conntrack capability so a recovered CAP_NET_ADMIN CLEARS conntrack_flush_unavailable — without
+		// waiting for an unrelated grant removal to happen by. The kind tracks current truth.
+		if failing && m.ctProbe != nil {
+			if err := m.ctProbe(ctx); err == nil {
+				m.mu.Lock()
+				m.flushErr = nil
+				m.mu.Unlock()
+			}
+		}
+		return
+	}
+	if m.ctFlush == nil { // no flusher wired (a directly-constructed Manager) → skip
 		return
 	}
 	killed, err := m.ctFlush(ctx, tuples)

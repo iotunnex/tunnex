@@ -282,11 +282,7 @@ func (s *Service) ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.
 // after the range lands SHEDS its warning with no edit. (Routed-range/device-pool ranges are a noted S8.7
 // boundary: they neither place the grant nor clear the warning in this slice — a CIDR in only those ranges
 // still won't enforce, so warning it is honest.)
-func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
-	rules, err := s.q.ListPolicyRulesByOrg(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
+func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, rules []sqlc.PolicyRule) (map[uuid.UUID]bool, error) {
 	siteSubnets, err := s.q.ListSiteSubnetsForOrg(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -295,10 +291,23 @@ func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID) (
 	for _, ss := range siteSubnets {
 		siteCIDRs[ss.SiteID] = append(siteCIDRs[ss.SiteID], ss.Cidr.String())
 	}
+	// The SAME site→gateway map the compiler builds (ListSiteNodesForOrg), so the warning and the placement
+	// share ONE "has a bound gateway" truth — the [9] fix + the [0]+[9] biconditional (warn ⟺ won't-place).
+	siteNodes, err := s.q.ListSiteNodesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	siteNode := map[uuid.UUID]uuid.UUID{}
+	for _, sn := range siteNodes {
+		if id := fromPgUUID(sn.SiteID); id != uuid.Nil && sn.ID != uuid.Nil {
+			siteNode[id] = sn.ID
+		}
+	}
 	out := map[uuid.UUID]bool{}
 	for _, r := range rules {
 		if r.SrcKind == "cidr" && r.SrcCidr != nil {
-			out[r.ID] = containingSite(*r.SrcCidr, siteCIDRs) == uuid.Nil
+			_, places := cidrPlacementSite(*r.SrcCidr, siteCIDRs, siteNode)
+			out[r.ID] = !places // warn IFF the rule places nowhere — one truth with the compiler
 		}
 	}
 	return out, nil
