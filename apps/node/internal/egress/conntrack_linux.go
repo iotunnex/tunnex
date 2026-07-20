@@ -183,8 +183,8 @@ func familiesOf(tuples []flowTuple) []conntrack.Family {
 	return familiesOfPrefixes(ps)
 }
 
-// familiesOfPrefixes returns the conntrack families a set of prefixes spans — the ONE family-scoping
-// function both the removed-tuple flush and the restart sweep use ([11]/[17]/RE4).
+// familiesOfPrefixes returns the conntrack families a set of prefixes spans — the family-scoping helper
+// familiesOf uses so the removed-tuple flush dumps ONLY the families its tuples span ([11]/[17]).
 func familiesOfPrefixes(ps []netip.Prefix) []conntrack.Family {
 	var v4, v6 bool
 	for _, p := range ps {

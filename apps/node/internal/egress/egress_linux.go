@@ -591,7 +591,12 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 			m.appliedEnforcing = false
 			m.applyErr = nil
 			m.failingSince = time.Time{}
-			m.appliedAllow = nil // S8.7: mesh/off has no grants — nothing to diff/flush against next
+			// S8.7: mesh/off has no grants — nothing to diff/flush against next. NOTE (S8.7b gap): this drops the
+			// enforcing baseline, so if the org toggles ZT OFF→ON and the new enforcing policy no longer grants a
+			// destination, an established flow opened during the mesh window is NOT flushed on re-enable
+			// (removedTuples diffs from nil → empty). This is the SAME no-continuous-baseline class as the deferred
+			// boot reconcile — carried by S8.7b, stated in its named limitation. NEW connections are denied at once.
+			m.appliedAllow = nil
 			return nil
 		}
 		// The apply FAILED, so the kernel keeps the PREVIOUS ruleset in force.
