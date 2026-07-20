@@ -20,10 +20,10 @@ type stubHashProvider struct {
 	err error
 }
 
-func (s stubHashProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID) (*policyspec.Compiled, error) {
+func (s stubHashProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (*policyspec.Compiled, error) {
 	return s.pol, s.err
 }
-func (s stubHashProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
+func (s stubHashProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID, _ uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	if s.err != nil {
 		return nil, s.err
 	}

@@ -127,24 +127,43 @@ JOIN nodes n ON n.id = nps.node_id
 WHERE n.org_id = @org_id;
 
 -- name: GetOrgHubSet :one
--- lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
--- generation. No rows until the first ReconcileHubSet.
-SELECT org_id, members, generation, updated_at FROM org_hub_set WHERE org_id = $1;
+-- lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6 REDUCE): the two
+-- writer-partitioned fields (configured + demoted) + the D5 generation. The ACTIVE order is DERIVED from
+-- these by deriveActive (never stored). No rows until the first ReconcileHubSet.
+SELECT org_id, configured, demoted, generation, updated_at FROM org_hub_set WHERE org_id = $1;
 
--- name: UpsertOrgHubSet :one
--- lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
--- when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
--- tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
--- no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
-INSERT INTO org_hub_set (org_id, members, generation)
-VALUES (@org_id, @members, 1)
+-- name: UpsertOrgHubSetConfigured :one
+-- lint:cross-org — org-scoped by PK. ReconcileHubSet's writer (S8.6 REDUCE): writes `configured` ONLY —
+-- the CONFIGURED membership (pins/capability/order). ATOMIC bump: the generation increments in the SAME
+-- statement ONLY when `configured` actually changes (IS DISTINCT FROM) — an idempotent re-election never
+-- bumps (no idle tick eroding the fence), concurrent reconciles converge. On INSERT `demoted` defaults to
+-- '{}' (a fresh set has nothing demoted). This writer NEVER touches `demoted` (the field partition — the
+-- controller owns it), so a bind landing during a live failover updates membership without clobbering the
+-- demotion state.
+INSERT INTO org_hub_set (org_id, configured, generation)
+VALUES (@org_id, @configured, 1)
 ON CONFLICT (org_id) DO UPDATE
-SET members = EXCLUDED.members,
-    generation = CASE WHEN org_hub_set.members IS DISTINCT FROM EXCLUDED.members
+SET configured = EXCLUDED.configured,
+    generation = CASE WHEN org_hub_set.configured IS DISTINCT FROM EXCLUDED.configured
                       THEN org_hub_set.generation + 1
                       ELSE org_hub_set.generation END,
     updated_at = now()
-RETURNING org_id, members, generation, updated_at;
+RETURNING org_id, configured, demoted, generation, updated_at;
+
+-- name: UpsertOrgHubSetDemoted :one
+-- lint:cross-org — org-scoped by PK. The failover controller's writer (S8.6 REDUCE): writes `demoted` ONLY
+-- — the members currently promoted-past for staleness. UPDATE (not upsert): a demotion only makes sense for
+-- an org that already has a configured hub set, so no row → 0 rows → the controller skips (nothing to fail
+-- over). ATOMIC bump: generation increments ONLY when `demoted` actually changes. NEVER touches
+-- `configured` (the field partition — ReconcileHubSet owns it).
+UPDATE org_hub_set
+SET demoted = @demoted,
+    generation = CASE WHEN org_hub_set.demoted IS DISTINCT FROM @demoted::uuid[]
+                      THEN org_hub_set.generation + 1
+                      ELSE org_hub_set.generation END,
+    updated_at = now()
+WHERE org_id = @org_id
+RETURNING org_id, configured, demoted, generation, updated_at;
 
 -- name: SetNodeHubPriority :execrows
 -- lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
@@ -154,8 +173,8 @@ UPDATE nodes SET hub_priority = @hub_priority WHERE id = @node_id AND org_id = @
 -- name: ListFailoverOrgs :many
 -- lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
 -- MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
--- fail over (S8.6 Slice 4).
-SELECT org_id FROM org_hub_set WHERE array_length(members, 1) > 1;
+-- fail over (S8.6 Slice 4). Reads the CONFIGURED membership (the intent) — the reduce's field rename.
+SELECT org_id FROM org_hub_set WHERE array_length(configured, 1) > 1;
 
 -- name: GetNodeHubPriority :one
 -- lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the

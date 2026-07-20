@@ -584,6 +584,7 @@ func TestSiteSourceTransitHubGrant(t *testing.T) {
 			{SiteID: siteB, NodeID: nodeB},
 			{SiteID: siteH, NodeID: nodeH, Endpoint: "hub.example:51820"}, // the HUB — a THIRD site, neither src nor dst
 		},
+		ActiveHub: nodeH, // S8.6 REDUCE #1: the derived active hub is THREADED IN (the compiler never elects)
 	}
 	out := policy.Compile(snap)
 	if !hasAllow(allowsFor(out, nodeH), "10.1.0.0/24", "10.2.0.0/24") {
@@ -592,11 +593,12 @@ func TestSiteSourceTransitHubGrant(t *testing.T) {
 	if !hasAllow(allowsFor(out, nodeA), "10.1.0.0/24", "10.2.0.0/24") || !hasAllow(allowsFor(out, nodeB), "10.1.0.0/24", "10.2.0.0/24") {
 		t.Fatal("src + dst gateways must carry the grant too")
 	}
-	// Inverse: A is BOTH the hub (has the endpoint) AND the src → no duplicate emission on nodeA.
+	// Inverse: A is BOTH the hub (the threaded active hub) AND the src → no duplicate emission on nodeA.
 	snap.SiteNodes = []policy.SiteNode{
 		{SiteID: siteA, NodeID: nodeA, Endpoint: "a.example:51820"},
 		{SiteID: siteB, NodeID: nodeB},
 	}
+	snap.ActiveHub = nodeA
 	snap.SiteSubnets = []policy.SiteSubnet{{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"}}
 	if a2 := allowsFor(policy.Compile(snap), nodeA); len(a2) != 1 {
 		t.Fatalf("hub==src must not duplicate the grant, got %d: %+v", len(a2), a2)

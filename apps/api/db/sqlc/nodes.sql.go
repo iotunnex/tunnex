@@ -221,17 +221,27 @@ func (q *Queries) GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriority
 }
 
 const getOrgHubSet = `-- name: GetOrgHubSet :one
-SELECT org_id, members, generation, updated_at FROM org_hub_set WHERE org_id = $1
+SELECT org_id, configured, demoted, generation, updated_at FROM org_hub_set WHERE org_id = $1
 `
 
-// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
-// generation. No rows until the first ReconcileHubSet.
-func (q *Queries) GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (OrgHubSet, error) {
+type GetOrgHubSetRow struct {
+	OrgID      uuid.UUID   `json:"org_id"`
+	Configured []uuid.UUID `json:"configured"`
+	Demoted    []uuid.UUID `json:"demoted"`
+	Generation int64       `json:"generation"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
+// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6 REDUCE): the two
+// writer-partitioned fields (configured + demoted) + the D5 generation. The ACTIVE order is DERIVED from
+// these by deriveActive (never stored). No rows until the first ReconcileHubSet.
+func (q *Queries) GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (GetOrgHubSetRow, error) {
 	row := q.db.QueryRow(ctx, getOrgHubSet, orgID)
-	var i OrgHubSet
+	var i GetOrgHubSetRow
 	err := row.Scan(
 		&i.OrgID,
-		&i.Members,
+		&i.Configured,
+		&i.Demoted,
 		&i.Generation,
 		&i.UpdatedAt,
 	)
@@ -304,12 +314,12 @@ func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) 
 }
 
 const listFailoverOrgs = `-- name: ListFailoverOrgs :many
-SELECT org_id FROM org_hub_set WHERE array_length(members, 1) > 1
+SELECT org_id FROM org_hub_set WHERE array_length(configured, 1) > 1
 `
 
 // lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
 // MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
-// fail over (S8.6 Slice 4).
+// fail over (S8.6 Slice 4). Reads the CONFIGURED membership (the intent) — the reduce's field rename.
 func (q *Queries) ListFailoverOrgs(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listFailoverOrgs)
 	if err != nil {
@@ -536,33 +546,87 @@ func (q *Queries) TouchNodeSeen(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const upsertOrgHubSet = `-- name: UpsertOrgHubSet :one
-INSERT INTO org_hub_set (org_id, members, generation)
+const upsertOrgHubSetConfigured = `-- name: UpsertOrgHubSetConfigured :one
+INSERT INTO org_hub_set (org_id, configured, generation)
 VALUES ($1, $2, 1)
 ON CONFLICT (org_id) DO UPDATE
-SET members = EXCLUDED.members,
-    generation = CASE WHEN org_hub_set.members IS DISTINCT FROM EXCLUDED.members
+SET configured = EXCLUDED.configured,
+    generation = CASE WHEN org_hub_set.configured IS DISTINCT FROM EXCLUDED.configured
                       THEN org_hub_set.generation + 1
                       ELSE org_hub_set.generation END,
     updated_at = now()
-RETURNING org_id, members, generation, updated_at
+RETURNING org_id, configured, demoted, generation, updated_at
 `
 
-type UpsertOrgHubSetParams struct {
-	OrgID   uuid.UUID   `json:"org_id"`
-	Members []uuid.UUID `json:"members"`
+type UpsertOrgHubSetConfiguredParams struct {
+	OrgID      uuid.UUID   `json:"org_id"`
+	Configured []uuid.UUID `json:"configured"`
 }
 
-// lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
-// when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
-// tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
-// no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
-func (q *Queries) UpsertOrgHubSet(ctx context.Context, arg UpsertOrgHubSetParams) (OrgHubSet, error) {
-	row := q.db.QueryRow(ctx, upsertOrgHubSet, arg.OrgID, arg.Members)
-	var i OrgHubSet
+type UpsertOrgHubSetConfiguredRow struct {
+	OrgID      uuid.UUID   `json:"org_id"`
+	Configured []uuid.UUID `json:"configured"`
+	Demoted    []uuid.UUID `json:"demoted"`
+	Generation int64       `json:"generation"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
+// lint:cross-org — org-scoped by PK. ReconcileHubSet's writer (S8.6 REDUCE): writes `configured` ONLY —
+// the CONFIGURED membership (pins/capability/order). ATOMIC bump: the generation increments in the SAME
+// statement ONLY when `configured` actually changes (IS DISTINCT FROM) — an idempotent re-election never
+// bumps (no idle tick eroding the fence), concurrent reconciles converge. On INSERT `demoted` defaults to
+// '{}' (a fresh set has nothing demoted). This writer NEVER touches `demoted` (the field partition — the
+// controller owns it), so a bind landing during a live failover updates membership without clobbering the
+// demotion state.
+func (q *Queries) UpsertOrgHubSetConfigured(ctx context.Context, arg UpsertOrgHubSetConfiguredParams) (UpsertOrgHubSetConfiguredRow, error) {
+	row := q.db.QueryRow(ctx, upsertOrgHubSetConfigured, arg.OrgID, arg.Configured)
+	var i UpsertOrgHubSetConfiguredRow
 	err := row.Scan(
 		&i.OrgID,
-		&i.Members,
+		&i.Configured,
+		&i.Demoted,
+		&i.Generation,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertOrgHubSetDemoted = `-- name: UpsertOrgHubSetDemoted :one
+UPDATE org_hub_set
+SET demoted = $1,
+    generation = CASE WHEN org_hub_set.demoted IS DISTINCT FROM $1::uuid[]
+                      THEN org_hub_set.generation + 1
+                      ELSE org_hub_set.generation END,
+    updated_at = now()
+WHERE org_id = $2
+RETURNING org_id, configured, demoted, generation, updated_at
+`
+
+type UpsertOrgHubSetDemotedParams struct {
+	Demoted []uuid.UUID `json:"demoted"`
+	OrgID   uuid.UUID   `json:"org_id"`
+}
+
+type UpsertOrgHubSetDemotedRow struct {
+	OrgID      uuid.UUID   `json:"org_id"`
+	Configured []uuid.UUID `json:"configured"`
+	Demoted    []uuid.UUID `json:"demoted"`
+	Generation int64       `json:"generation"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
+// lint:cross-org — org-scoped by PK. The failover controller's writer (S8.6 REDUCE): writes `demoted` ONLY
+// — the members currently promoted-past for staleness. UPDATE (not upsert): a demotion only makes sense for
+// an org that already has a configured hub set, so no row → 0 rows → the controller skips (nothing to fail
+// over). ATOMIC bump: generation increments ONLY when `demoted` actually changes. NEVER touches
+// `configured` (the field partition — ReconcileHubSet owns it).
+func (q *Queries) UpsertOrgHubSetDemoted(ctx context.Context, arg UpsertOrgHubSetDemotedParams) (UpsertOrgHubSetDemotedRow, error) {
+	row := q.db.QueryRow(ctx, upsertOrgHubSetDemoted, arg.Demoted, arg.OrgID)
+	var i UpsertOrgHubSetDemotedRow
+	err := row.Scan(
+		&i.OrgID,
+		&i.Configured,
+		&i.Demoted,
 		&i.Generation,
 		&i.UpdatedAt,
 	)

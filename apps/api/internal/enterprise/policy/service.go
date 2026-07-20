@@ -688,11 +688,12 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 // device-LESS node gets an explicit deny-all under enforcing (so the blanket mesh is
 // removed proactively, not left until the first device) or nil under off (legacy
 // mesh). This is the nodes.PolicyProvider the desired-state path calls.
-func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error) {
+func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID, activeHub uuid.UUID) (*policyspec.Compiled, error) {
 	snap, err := s.BuildSnapshot(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	snap.ActiveHub = activeHub // S8.6 REDUCE #1: the derived active hub, threaded — the compiler never elects
 	compiled := Compile(snap)
 	if c, ok := compiled[nodeID]; ok {
 		return &c, nil
@@ -715,11 +716,12 @@ func (s *Service) CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) 
 // is — the #1 single-source fix (two compile paths can no longer disagree). Per node it reproduces
 // CompiledForNode's pick-or-fallback: the compiled entry, else the enforcing deny-all (content-derived
 // version), else nil for off / no-policy (the core pushedHash renders nil + non-enforcing as "").
-func (s *Service) CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
+func (s *Service) CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID, activeHub uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	snap, err := s.BuildSnapshot(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	snap.ActiveHub = activeHub // S8.6 REDUCE #1: the derived active hub, threaded — the compiler never elects
 	out := make(map[uuid.UUID]*policyspec.Compiled, len(nodeIDs))
 	compiled := Compile(snap)
 	enforcing := snap.Mode == ModeEnforcing

@@ -501,7 +501,7 @@ function SiteCardView({
 
       {modal === "subnet" && <AddSubnetModal orgId={orgId} siteId={card.id} onDone={onDone} onClose={() => setModal(null)} />}
       {modal === "bind" && <BindGatewayModal orgId={orgId} siteId={card.id} nodes={unboundNodes} onDone={onDone} onClose={() => setModal(null)} />}
-      {modal === "unbind" && <UnbindConfirm orgId={orgId} siteId={card.id} onDone={onDone} onClose={() => setModal(null)} />}
+      {modal === "unbind" && <UnbindConfirm orgId={orgId} siteId={card.id} gateways={card.gateways} onDone={onDone} onClose={() => setModal(null)} />}
       {modal === "delete" && <DeleteSiteModal orgId={orgId} site={card} onDone={onDone} onClose={() => setModal(null)} />}
       {removing && (
         <RemoveSubnetConfirm
@@ -666,13 +666,19 @@ function BindGatewayModal({
   );
 }
 
-function UnbindConfirm({ orgId, siteId, onDone, onClose }: { orgId: string; siteId: string; onDone: () => void; onClose: () => void }) {
+function UnbindConfirm({ orgId, siteId, gateways, onDone, onClose }: { orgId: string; siteId: string; gateways: GatewayView[]; onDone: () => void; onClose: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // S8.6 #3: a site may hold several gateways — name WHICH to unbind (no arbitrary server-side pick). Default
+  // to the first; a picker appears when there is more than one.
+  const [nodeId, setNodeId] = useState(gateways[0]?.id ?? "");
   async function submit() {
     setBusy(true);
     setErr(null);
-    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/sites/{siteId}/bind", { params: { path: { orgId, siteId } } });
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}/sites/{siteId}/bind", {
+      params: { path: { orgId, siteId } },
+      body: { node_id: nodeId },
+    });
     setBusy(false);
     if (error) return setErr(apiErrorMessage(error, "Could not unbind the gateway."));
     onClose();
@@ -685,13 +691,22 @@ function UnbindConfirm({ orgId, siteId, onDone, onClose }: { orgId: string; site
       actions={
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={busy}>Unbind</Button>
+          <Button onClick={submit} disabled={busy || !nodeId}>Unbind</Button>
         </>
       }
     >
       <p className="text-sm text-slate-400">
         The gateway's site-link peers and routes are swept. The site and its subnets are kept — bind a replacement to restore routing.
       </p>
+      {gateways.length > 1 && (
+        <Field label="Gateway to unbind">
+          <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+            {gateways.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </Select>
+        </Field>
+      )}
       <ErrorText>{err}</ErrorText>
     </Modal>
   );

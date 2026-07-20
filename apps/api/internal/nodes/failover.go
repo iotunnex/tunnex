@@ -29,6 +29,17 @@ const (
 	failoverStaleWindow = 90 * time.Second
 )
 
+// The hub-set audit actions (S8.6 REDUCE #2, landing a — NAMED constants via the standard audit() path, the
+// closest to "typed" available since the product has no audit-action registry; a real typed registry + lint
+// is deferred to its own story). The promotion/failback kinds are the record of ACTIVE-ORDER transitions
+// specifically (condition 1b); the membership kind is a CONFIGURED change (bind/unbind/pin), DISTINCT from a
+// failover so an operator reading the log never confuses "I rebound a gateway" with "my primary went stale".
+const (
+	auditHubPromotion  = "hub_set.promotion"  // the controller DEMOTED a member (active-order transition, a loss)
+	auditHubFailback   = "hub_set.failback"   // the controller RESTORED a member (active-order transition, recovery)
+	auditHubMembership = "hub_set.membership" // ReconcileHubSet changed the CONFIGURED membership (not a failover)
+)
+
 // FailoverController holds ONE org's in-memory hysteresis state: per-member consecutive stale/fresh tick
 // counts + the demoted set. NOT persisted — rebuilt from stored freshness on a CP restart, so a mid-window
 // restart restarts the counts (delays a failover by ≤N ticks, NEVER causes a spurious one — the
@@ -48,11 +59,13 @@ func NewFailoverController() *FailoverController {
 	}
 }
 
-// Step advances ONE tick and returns the ACTIVE order. It updates the counts from `freshness`, then derives
-// active = the CONFIGURED order with demoted members moved to the BACK (skipped for primary, kept as warm
-// standbys). Convergence (banked invariant): active differs from configured ONLY while some member is
-// demoted; when NOTHING is demoted (all restored) the orders CONVERGE — fail-back IS that convergence. Two
-// boring passes: count, then split.
+// Step advances ONE tick and returns the DEMOTED set (in configured order) — the members currently
+// promoted-past for staleness. It updates the hysteresis counts from `freshness` (N consecutive stale →
+// demote; M consecutive fresh → restore), then collects the demoted members. The ACTIVE order is NOT
+// computed here: deriveActive(configured, demoted) is the ONE shared derivation every consumer applies (the
+// REDUCE). Returning the demoted SET — not the active order — is what makes the controller a single-field
+// writer: it persists ONLY `demoted`. Convergence: when NOTHING is demoted, deriveActive returns the
+// configured order unchanged — fail-back IS that convergence.
 func (fc *FailoverController) Step(configured []uuid.UUID, freshness map[uuid.UUID]bool) []uuid.UUID {
 	for _, id := range configured {
 		if freshness[id] {
@@ -69,16 +82,13 @@ func (fc *FailoverController) Step(configured []uuid.UUID, freshness map[uuid.UU
 			}
 		}
 	}
-	live := make([]uuid.UUID, 0, len(configured))
-	dead := make([]uuid.UUID, 0)
+	demoted := make([]uuid.UUID, 0)
 	for _, id := range configured {
 		if fc.demoted[id] {
-			dead = append(dead, id)
-		} else {
-			live = append(live, id)
+			demoted = append(demoted, id)
 		}
 	}
-	return append(live, dead...)
+	return demoted
 }
 
 func (s *Service) failoverFor(orgID uuid.UUID) *FailoverController {
@@ -122,74 +132,74 @@ func (s *Service) RunFailoverTick(ctx context.Context) error {
 	return nil
 }
 
-// failoverOrg advances one org's tick: read the CONFIGURED order (electSiteHubSet — the intent) + each
-// member's freshness (node_peer_status, Slice 1) → Step → the ACTIVE order. If it differs from the persisted
-// set, PERSIST it (atomic generation bump), AUDIT the transition (old→new primary + condition), and let the
-// ordinary compile+push carry it. No standby (configured < 2) → nothing to fail over.
+// failoverOrg advances one org's tick: read the PERSISTED configured order (ReconcileHubSet's output — the
+// intent) + each member's freshness (node_peer_status, Slice 1) → Step → the DEMOTED set. If it differs from
+// the persisted demoted field, PERSIST it via the demoted-field writer (atomic generation bump) and AUDIT
+// the active-order transition IN THE SAME TX (#5 — an audit failure rolls back the demotion; the next tick
+// retries). The ordinary compile+push carries it (no failover-special path). Configured < 2 → nothing to
+// fail over. The controller writes ONLY `demoted` (the writer partition — ReconcileHubSet owns `configured`).
 func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Time) error {
-	topo, err := s.siteTopoLoad(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	configuredRows := electSiteHubSet(topo, now)
-	if len(configuredRows) < 2 {
-		return nil // single hub (or none) → no failover
-	}
-	configured := make([]uuid.UUID, len(configuredRows))
-	pubkey := make(map[uuid.UUID]string, len(configuredRows))
-	for i := range configuredRows {
-		configured[i] = configuredRows[i].ID
-		pubkey[configuredRows[i].ID] = configuredRows[i].WgPublicKey
-	}
-	// FRESHNESS — reads, never measures: a member is FRESH if a recent handshake exists with its pubkey
-	// (someone reached it) in node_peer_status.
-	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	freshestByKey := map[string]time.Time{}
-	for _, r := range rows {
-		if r.LastHandshakeAt.Valid && r.LastHandshakeAt.Time.After(freshestByKey[r.PublicKey]) {
-			freshestByKey[r.PublicKey] = r.LastHandshakeAt.Time
-		}
-	}
-	freshness := make(map[uuid.UUID]bool, len(configured))
-	for id, key := range pubkey {
-		t := freshestByKey[key]
-		freshness[id] = !t.IsZero() && now.Sub(t) < failoverStaleWindow
-	}
-
-	active := s.failoverFor(orgID).Step(configured, freshness)
-
 	current, err := s.GetHubSet(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	if sameOrder(active, current.Members) {
-		return nil // no change → no promotion event
+	configured := current.Configured
+	if len(configured) < 2 {
+		return nil // single hub (or none) → no failover
 	}
-	// PROMOTION EVENT — persist the active order (atomic generation bump), then audit the transition.
-	newHS, err := s.q.UpsertOrgHubSet(ctx, sqlc.UpsertOrgHubSetParams{OrgID: orgID, Members: active})
+	// pubkeys for the configured members (from the live gateways). A configured member no longer a gateway
+	// has no pubkey → no fresh handshake → it demotes; the next ReconcileHubSet drops it from configured.
+	topo, err := s.siteTopoLoad(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	oldPrimary, newPrimary := "", ""
-	if len(current.Members) > 0 {
-		oldPrimary = current.Members[0].String()
+	pubkey := make(map[uuid.UUID]string, len(topo.gws))
+	for i := range topo.gws {
+		pubkey[topo.gws[i].ID] = topo.gws[i].WgPublicKey
 	}
-	if len(active) > 0 {
-		newPrimary = active[0].String()
+	// FRESHNESS — reads, never measures: a member is FRESH if a recent handshake exists with its pubkey
+	// (someone reached it) in node_peer_status. Same latest-per-key fold the view uses (#8 shared helper).
+	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
+	if err != nil {
+		return err
 	}
-	condition := "primary_stale"
-	if sameOrder(active, configured) {
-		condition = "recovered" // active converged to the configured intent → fail-back / restoration
+	latest := latestByPubKey(rows)
+	freshness := make(map[uuid.UUID]bool, len(configured))
+	for _, id := range configured {
+		t := latest[pubkey[id]].LastHandshakeAt
+		freshness[id] = !t.IsZero() && now.Sub(t) < failoverStaleWindow
 	}
-	// System actor (no user) — a CP-driven transition (actor_system convention). Audited so an operator can
-	// answer "why did my hub change at 3am".
+
+	demoted := s.failoverFor(orgID).Step(configured, freshness)
+	if sameOrder(demoted, current.Demoted) {
+		return nil // the demotion state is unchanged → no active-order transition
+	}
+	// The transition KIND (condition 1b): the demoted set SHRANK → a failback (recovery); else a promotion (a
+	// member lost). old/new primary are DERIVED from the shared derivation over the old vs new demoted set.
+	oldActive := deriveActive(configured, current.Demoted)
+	newActive := deriveActive(configured, demoted)
+	action, condition := auditHubPromotion, "primary_stale"
+	if len(demoted) < len(current.Demoted) {
+		action, condition = auditHubFailback, "recovered"
+	}
+	// System actor (no user) — a CP-driven transition (actor_system convention). Persist + audit in ONE tx.
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
-		return audit(ctx, q, orgID, nil, "hub_set.promotion", "org", orgID.String(), map[string]any{
-			"old_primary": oldPrimary, "new_primary": newPrimary,
-			"generation": newHS.Generation, "condition": condition,
+		row, err := q.UpsertOrgHubSetDemoted(ctx, sqlc.UpsertOrgHubSetDemotedParams{OrgID: orgID, Demoted: demoted})
+		if err != nil {
+			return err
+		}
+		return audit(ctx, q, orgID, nil, action, "org", orgID.String(), map[string]any{
+			"old_primary": primaryOf(oldActive), "new_primary": primaryOf(newActive),
+			"generation": row.Generation, "condition": condition,
 		})
 	})
+}
+
+// primaryOf is the head node-id of an ordered hub set as a string ("" when empty) — the audit's old/new
+// primary field.
+func primaryOf(order []uuid.UUID) string {
+	if len(order) == 0 {
+		return ""
+	}
+	return order[0].String()
 }

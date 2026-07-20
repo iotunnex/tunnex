@@ -204,38 +204,6 @@ func (q *Queries) GetSite(ctx context.Context, arg GetSiteParams) (Site, error) 
 	return i, err
 }
 
-const getSiteNode = `-- name: GetSiteNode :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority FROM nodes WHERE site_id = $1
-`
-
-// lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
-// the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
-func (q *Queries) GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, error) {
-	row := q.db.QueryRow(ctx, getSiteNode, siteID)
-	var i Node
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Name,
-		&i.Status,
-		&i.CertSerial,
-		&i.AgentVersion,
-		&i.EnrolledAt,
-		&i.LastSeenAt,
-		&i.RevokedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.WgPublicKey,
-		&i.Endpoint,
-		&i.Capabilities,
-		&i.PolicyDesyncSince,
-		&i.PolicyReportedAt,
-		&i.SiteID,
-		&i.HubPriority,
-	)
-	return i, err
-}
-
 const getSiteSubnetForOrg = `-- name: GetSiteSubnetForOrg :one
 SELECT ss.id, ss.site_id, ss.cidr, ss.status
 FROM site_subnets ss
@@ -543,6 +511,27 @@ type UnbindNodeParams struct {
 
 func (q *Queries) UnbindNode(ctx context.Context, arg UnbindNodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, unbindNode, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unbindNodeFromSite = `-- name: UnbindNodeFromSite :execrows
+UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2 AND site_id = $3
+`
+
+type UnbindNodeFromSiteParams struct {
+	NodeID uuid.UUID   `json:"node_id"`
+	OrgID  uuid.UUID   `json:"org_id"`
+	SiteID pgtype.UUID `json:"site_id"`
+}
+
+// lint:cross-org — org-scoped. S8.6 #3: unbind a SPECIFIC gateway from a SPECIFIC site (post the single-node
+// lift a site may hold several gateways — the caller names which; no arbitrary GetSiteNode :one pick). 0 rows
+// = the node is not bound to that site in this org (a deterministic 404, never a wrong-gateway unbind).
+func (q *Queries) UnbindNodeFromSite(ctx context.Context, arg UnbindNodeFromSiteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unbindNodeFromSite, arg.NodeID, arg.OrgID, arg.SiteID)
 	if err != nil {
 		return 0, err
 	}

@@ -88,13 +88,17 @@ type DesiredState struct {
 // nil in the open build (no policy field is ever sent -> agents keep the legacy
 // mesh); the enterprise build wires the policy engine via SetPolicyProvider.
 type PolicyProvider interface {
-	CompiledForNode(ctx context.Context, orgID, nodeID uuid.UUID) (*policyspec.Compiled, error)
+	// activeHub (S8.6 REDUCE #1) is the DERIVED active transit hub for this compile pass, computed ONCE by
+	// the caller (electSiteHub over the same loaded topology that feeds the data-plane graph) and threaded
+	// in so the policy transit grant lands on the SAME hub the routing cites. uuid.Nil = no hub.
+	CompiledForNode(ctx context.Context, orgID, nodeID, activeHub uuid.UUID) (*policyspec.Compiled, error)
 	// CompiledArtifactsForNodes returns each node's ROUTE-LESS compiled artifact with a SINGLE org
 	// snapshot build — the batch counterpart to CompiledForNode. Route-less by design: the CORE
 	// finalizeArtifact/pushedHash attach the site routes + derive the version, so the pushed-hash
 	// baseline is computed the SAME way the served artifact is (the #1 single-source fix). nil for a node
 	// with no enforcement artifact (off / device-less-off). Avoids an N+1 recompile per node (finding #5).
-	CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error)
+	// activeHub threaded as above (org-wide — one hub for the batch).
+	CompiledArtifactsForNodes(ctx context.Context, orgID uuid.UUID, nodeIDs []uuid.UUID, activeHub uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error)
 }
 
 // Service provides node control-plane operations.
@@ -294,8 +298,40 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		ListenPort:       51820,
 		Peers:            peers,
 	}
+	// S8.6 REDUCE #1: load the site topology ONCE up front (site nodes only) and derive the active hub from
+	// it BEFORE the policy compile, so the policy transit grant and the data-plane site-link graph cite the
+	// SAME hub (one derivation per compile pass, fed to both). A non-site node loads no topology and passes
+	// activeHub=Nil — no site→site transit grant lands on a non-gateway node either way. The load moved up
+	// from the S8.2 block below; its DesiredState-ATOMIC failure semantics are preserved byte-for-byte.
+	var topo siteTopology
+	var haveTopo bool
+	var activeHub uuid.UUID
+	if node.SiteID.Valid {
+		load := s.siteTopoLoad
+		if load == nil { // directly-constructed Service (tests) → the real loader
+			load = s.loadSiteTopology
+		}
+		t, terr := load(ctx, node.OrgID)
+		if terr != nil {
+			// DesiredState-ATOMIC LAW (original, unamended): a multi-section artifact assembly error FAILS
+			// THE WHOLE FETCH — never a partial artifact that reads whole. The agent's standing FAIL-STATIC
+			// contract (since S3.1) then holds LAST-GOOD everything, so nothing (peers, routes, policy) is
+			// torn down across the blip. A topology-query error is the SAME class as any other DesiredState
+			// query error — a DB fault marginally widening the fetch's failure surface, NOT a new coupling
+			// of revocation to sites: revocation rides the push path, and a push landing during a DB
+			// outage always waited. (The R1 "omit the section" attempt was WRONG — full-sweep reconcile
+			// DELETES an omitted section, tearing down the live site path; F1. The security-precedence
+			// amendment is withdrawn: it manufactured partial sections that full-sweep cannot survive.)
+			return DesiredState{}, terr
+		}
+		topo, haveTopo = t, true
+		if h := electSiteHub(topo, time.Now()); h != nil { // the ONE derivation head, fed to policy + graph
+			activeHub = h.ID
+		}
+	}
+
 	if s.policy != nil {
-		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID)
+		pol, err := s.policy.CompiledForNode(ctx, node.OrgID, node.ID, activeHub)
 		switch {
 		case err == nil:
 			ds.Policy = pol
@@ -334,29 +370,12 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		}
 	}
 
-	// S8.2 site-to-site plumbing (CORE, all editions): if this node is a site gateway, add its site-link
-	// WG peers (hub-and-spoke) + kernel routes, from the org's site topology loaded ONCE. finalizeArtifact
-	// is the SINGLE SOURCE that attaches routes + derives the content version — the SAME step the
-	// pushed-hash path (trackDesync / PolicyHealthForNodes) calls, so the served artifact and the desync
-	// baseline can NEVER disagree about the artifact's contents (the #1 fix: two compile paths agreeing).
-	if node.SiteID.Valid {
-		load := s.siteTopoLoad
-		if load == nil { // directly-constructed Service (tests) → the real loader
-			load = s.loadSiteTopology
-		}
-		topo, terr := load(ctx, node.OrgID)
-		if terr != nil {
-			// DesiredState-ATOMIC LAW (original, unamended): a multi-section artifact assembly error FAILS
-			// THE WHOLE FETCH — never a partial artifact that reads whole. The agent's standing FAIL-STATIC
-			// contract (since S3.1) then holds LAST-GOOD everything, so nothing (peers, routes, policy) is
-			// torn down across the blip. A topology-query error is the SAME class as any other DesiredState
-			// query error — a DB fault marginally widening the fetch's failure surface, NOT a new coupling
-			// of revocation to sites: revocation rides the push path, and a push landing during a DB
-			// outage always waited. (The R1 "omit the section" attempt was WRONG — full-sweep reconcile
-			// DELETES an omitted section, tearing down the live site path; F1. The security-precedence
-			// amendment is withdrawn: it manufactured partial sections that full-sweep cannot survive.)
-			return DesiredState{}, terr
-		}
+	// S8.2 site-to-site plumbing (CORE, all editions): if this node is a site gateway, add its site-link WG
+	// peers (hub-and-spoke) + kernel routes, from the org's site topology loaded ONCE above. finalizeArtifact
+	// is the SINGLE SOURCE that attaches routes + derives the content version — the SAME step the pushed-hash
+	// path (trackDesync / PolicyHealthForNodes) calls, so the served artifact and the desync baseline can
+	// NEVER disagree about the artifact's contents (the #1 fix: two compile paths agreeing).
+	if haveTopo {
 		peers, _ := siteLinkGraphFrom(topo, node)
 		ds.Peers = append(ds.Peers, peers...)
 		ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
@@ -413,16 +432,21 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 		}
 		fwds = append(fwds, entries...)
 	}
-	// S8.6 Slice 4: the PERSISTED active hub order (org_hub_set), resolved to gateway rows in order — what
-	// the compiler consumes so a failover promotion (a change to the persisted members) flows through the
-	// ordinary compile. A member no longer a gateway (unbound/deleted) is skipped; no row → nil → fallback.
+	// S8.6 REDUCE: the PERSISTED active hub order, resolved to gateway rows in order — what the compiler
+	// consumes so a failover promotion flows through the ordinary compile. DERIVE-THEN-FILTER (#1 sharpening):
+	// the active order is deriveActive(configured, demoted) — the ONE shared derivation — computed FIRST, then
+	// the gateway-existence filter is applied to the DERIVED order (never to `configured` upstream of the
+	// derivation — that would be a second, shadow derivation input, the exact class the reduce killed). A
+	// member no longer a live gateway (unbound/deleted) is dropped from the active order at CONSUMPTION, a
+	// transient the membership-event reconcile (ReconcileHubSet on the unbind/delete path) then makes durable.
+	// No row → nil → fallback (a not-yet-reconciled org still compiles).
 	var hubMembers []sqlc.ListSiteGatewaysForOrgRow
 	if hs, herr := s.q.GetOrgHubSet(ctx, orgID); herr == nil {
 		byID := make(map[uuid.UUID]sqlc.ListSiteGatewaysForOrgRow, len(gws))
 		for _, g := range gws {
 			byID[g.ID] = g
 		}
-		for _, mid := range hs.Members {
+		for _, mid := range deriveActive(hs.Configured, hs.Demoted) {
 			if g, ok := byID[mid]; ok {
 				hubMembers = append(hubMembers, g)
 			}
@@ -431,6 +455,29 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 		return siteTopology{}, herr
 	}
 	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers}, nil
+}
+
+// deriveActive is THE shared hub-order derivation (S8.6 REDUCE) — the ONE function every consumer reads
+// (loadSiteTopology→the data-plane + policy compilers, the failover controller, GetHubSetView). The ACTIVE
+// order = the CONFIGURED order with DEMOTED members moved to the BACK (kept as warm standbys in configured
+// order, NEVER dropped — a demoted member is a failover candidate, not a deletion). Pure. When nothing is
+// demoted the active order IS the configured order (fail-back is that convergence). Members named in
+// `demoted` but absent from `configured` are ignored (a stale demotion the next configured-write clears).
+func deriveActive(configured, demoted []uuid.UUID) []uuid.UUID {
+	dead := make(map[uuid.UUID]bool, len(demoted))
+	for _, id := range demoted {
+		dead[id] = true
+	}
+	live := make([]uuid.UUID, 0, len(configured))
+	back := make([]uuid.UUID, 0, len(demoted))
+	for _, id := range configured {
+		if dead[id] {
+			back = append(back, id)
+		} else {
+			live = append(live, id)
+		}
+	}
+	return append(live, back...)
 }
 
 // activeHubMembers is the compiler's ordered hub set — the PERSISTED active order (org_hub_set, maintained
@@ -531,33 +578,93 @@ func electSiteHub(topo siteTopology, now time.Time) *sqlc.ListSiteGatewaysForOrg
 	return &set[0]
 }
 
-// ReconcileHubSet recomputes the org's transit-hub election (electSiteHubSet) and PERSISTS it, bumping the
-// D5 generation ONLY when the ordered membership changes (the atomic UpsertOrgHubSet CASE) — so a no-change
-// reconcile never bumps (no idle tick eroding the fence). Called at every membership/order-change point
-// (bind/unbind/pin). Idempotent + concurrency-safe (the bump is a single SQL statement). Returns the
-// persisted set. NOTE (S8.6 Slice 2 boundary): the set is persisted + served here, but the COMPILER still
-// uses only members[0] (single-hub v1) — standbys don't grow tunnels until Slice 3.
-func (s *Service) ReconcileHubSet(ctx context.Context, orgID uuid.UUID) (sqlc.OrgHubSet, error) {
-	topo, err := s.siteTopoLoad(ctx, orgID)
-	if err != nil {
-		return sqlc.OrgHubSet{}, err
-	}
-	set := electSiteHubSet(topo, time.Now())
-	members := make([]uuid.UUID, 0, len(set))
-	for i := range set {
-		members = append(members, set[i].ID)
-	}
-	return s.q.UpsertOrgHubSet(ctx, sqlc.UpsertOrgHubSetParams{OrgID: orgID, Members: members})
+// HubSet is the org's persisted transit-hub authority (S8.6 REDUCE) — the two writer-partitioned fields.
+// Configured is ReconcileHubSet's output (the CONFIGURED membership); Demoted is the failover controller's
+// output. The ACTIVE order is Active() = deriveActive(Configured, Demoted) — never stored, one derivation.
+type HubSet struct {
+	OrgID      uuid.UUID
+	Configured []uuid.UUID
+	Demoted    []uuid.UUID
+	Generation int64
 }
 
-// GetHubSet reads the persisted transit-hub set (S8.6) — the ordered members + the D5 generation. No rows
-// (never reconciled) returns a zero set with an empty member list, not an error.
-func (s *Service) GetHubSet(ctx context.Context, orgID uuid.UUID) (sqlc.OrgHubSet, error) {
+// Active is the derived active hub order (the ONE shared derivation) — Configured with Demoted at the back.
+func (h HubSet) Active() []uuid.UUID { return deriveActive(h.Configured, h.Demoted) }
+
+// ReconcileHubSet recomputes the org's CONFIGURED transit-hub membership (electSiteHubSet) and PERSISTS it
+// via the configured-field writer, bumping the D5 generation ONLY when the configured order changes (the
+// atomic CASE). Called at every membership/order-change point (bind/unbind/pin). It writes `configured` ONLY
+// — NEVER `demoted` (the writer partition: the failover controller owns demotion state, so a reconcile
+// landing during a live failover updates membership without clobbering the demotion). A configured change is
+// AUDITED as its own kind (auditHubMembership, condition 1b) — DISTINCT from a promotion/failback — in the
+// SAME tx as the write (swallowed-audit law). System actor: a derived consequence of the bind/unbind/pin
+// that carries its own user-actor audit.
+func (s *Service) ReconcileHubSet(ctx context.Context, orgID uuid.UUID) (HubSet, error) {
+	topo, err := s.siteTopoLoad(ctx, orgID)
+	if err != nil {
+		return HubSet{}, err
+	}
+	set := electSiteHubSet(topo, time.Now())
+	configured := make([]uuid.UUID, 0, len(set))
+	for i := range set {
+		configured = append(configured, set[i].ID)
+	}
+	prev, err := s.GetHubSet(ctx, orgID)
+	if err != nil {
+		return HubSet{}, err
+	}
+	var out HubSet
+	if txErr := s.withTx(ctx, func(q *sqlc.Queries) error {
+		row, err := q.UpsertOrgHubSetConfigured(ctx, sqlc.UpsertOrgHubSetConfiguredParams{OrgID: orgID, Configured: configured})
+		if err != nil {
+			return err
+		}
+		out = HubSet{OrgID: row.OrgID, Configured: row.Configured, Demoted: row.Demoted, Generation: row.Generation}
+		if !sameOrder(prev.Configured, out.Configured) {
+			return audit(ctx, q, orgID, nil, auditHubMembership, "org", orgID.String(), map[string]any{
+				"configured": idsToStrings(out.Configured), "generation": out.Generation,
+			})
+		}
+		return nil
+	}); txErr != nil {
+		return HubSet{}, txErr
+	}
+	return out, nil
+}
+
+// GetHubSet reads the persisted transit-hub set (S8.6 REDUCE) — the two fields + the D5 generation. No rows
+// (never reconciled) returns a zero set with empty fields, not an error.
+func (s *Service) GetHubSet(ctx context.Context, orgID uuid.UUID) (HubSet, error) {
 	hs, err := s.q.GetOrgHubSet(ctx, orgID)
 	if err == pgx.ErrNoRows {
-		return sqlc.OrgHubSet{OrgID: orgID, Members: []uuid.UUID{}, Generation: 0}, nil
+		return HubSet{OrgID: orgID, Configured: []uuid.UUID{}, Demoted: []uuid.UUID{}, Generation: 0}, nil
 	}
-	return hs, err
+	if err != nil {
+		return HubSet{}, err
+	}
+	return HubSet{OrgID: hs.OrgID, Configured: hs.Configured, Demoted: hs.Demoted, Generation: hs.Generation}, nil
+}
+
+// latestByPubKey folds node_peer_status rows to the freshest observation per peer pubkey (S8.6 REDUCE #8 —
+// ONE shared helper for the two readers: GetHubSetView's metrics + the failover tick's freshness). A GAUGE,
+// not a sum: the LATEST handshake wins, never accumulated.
+func latestByPubKey(rows []sqlc.NodePeerStatus) map[string]MemberMetrics {
+	latest := map[string]MemberMetrics{}
+	for _, r := range rows {
+		if r.LastHandshakeAt.Valid && r.LastHandshakeAt.Time.After(latest[r.PublicKey].LastHandshakeAt) {
+			latest[r.PublicKey] = MemberMetrics{LastHandshakeAt: r.LastHandshakeAt.Time, RxBytes: r.RxBytes, TxBytes: r.TxBytes}
+		}
+	}
+	return latest
+}
+
+// idsToStrings renders a node-id slice for audit metadata (stable, ordered).
+func idsToStrings(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }
 
 // MemberMetrics is a hub member's LATEST node_peer_status observation (S8.6 L1). PRESENT only when a row
@@ -608,14 +715,10 @@ func (s *Service) GetHubSetView(ctx context.Context, orgID uuid.UUID) (HubSetVie
 	if err != nil {
 		return HubSetView{}, err
 	}
-	latest := map[string]MemberMetrics{}
-	for _, r := range rows {
-		if r.LastHandshakeAt.Valid && r.LastHandshakeAt.Time.After(latest[r.PublicKey].LastHandshakeAt) {
-			latest[r.PublicKey] = MemberMetrics{LastHandshakeAt: r.LastHandshakeAt.Time, RxBytes: r.RxBytes, TxBytes: r.TxBytes}
-		}
-	}
-	view := HubSetView{Generation: hs.Generation, Members: make([]HubMemberView, 0, len(hs.Members))}
-	for i, mid := range hs.Members {
+	latest := latestByPubKey(rows)
+	active := hs.Active() // the ONE shared derivation — the served order (primary first)
+	view := HubSetView{Generation: hs.Generation, Members: make([]HubMemberView, 0, len(active))}
+	for i, mid := range active {
 		mv := HubMemberView{NodeID: mid, Role: "standby", HubPriority: prioByNode[mid]}
 		if i == 0 {
 			mv.Role = "primary"
@@ -968,21 +1071,26 @@ func (s *Service) trackDesync(ctx context.Context, node sqlc.Node, appliedHash s
 	if s.policy == nil {
 		return // open build — desync tracking is enterprise-only; silent, no write
 	}
-	arts, err := s.policy.CompiledArtifactsForNodes(ctx, node.OrgID, []uuid.UUID{node.ID})
-	if err != nil {
-		return // pushed artifact unavailable (compile fault) → can't-determine; never stamp/clear
-	}
 	// The pushed hash is finalized the SAME way the served artifact is (route-attach + version), so a
 	// route-carrying enforcing gateway compares clean instead of a false silent_desync (the #1 fix). Only
 	// a SITE gateway needs the topology (finalizeArtifact no-ops for non-site nodes) — skip the queries
-	// otherwise.
+	// otherwise. The topology loads BEFORE the compile so the derived active hub threads in (S8.6 REDUCE
+	// #1 — the pushed baseline cites the same hub the served artifact does).
 	var topo siteTopology
+	var activeHub uuid.UUID
 	if node.SiteID.Valid {
 		t, terr := s.loadSiteTopology(ctx, node.OrgID)
 		if terr != nil {
 			return // topology unavailable → can't-determine; never stamp/clear on a partial baseline
 		}
 		topo = t
+		if h := electSiteHub(topo, time.Now()); h != nil {
+			activeHub = h.ID
+		}
+	}
+	arts, err := s.policy.CompiledArtifactsForNodes(ctx, node.OrgID, []uuid.UUID{node.ID}, activeHub)
+	if err != nil {
+		return // pushed artifact unavailable (compile fault) → can't-determine; never stamp/clear
 	}
 	pushed := s.pushedHash(topo, node, arts[node.ID])
 	if pushed == "" || pushed == appliedHash {
@@ -1177,7 +1285,10 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		}
 		// err (transient compile/DB) -> pushKnown stays false: term (3) can't be evaluated, but the
 		// agent-reported terms still apply. A transient control-plane hiccup is not a gateway fault.
-		if arts, err := s.policy.CompiledArtifactsForNodes(ctx, orgID, ids); err == nil {
+		// S8.6 REDUCE #1: the batch's ONE elected hub (b.hubID, computed once via electSiteHub in the
+		// SiteTopoBatch) is threaded in — the pushed-hash baseline cites the same hub the served artifact
+		// does. uuid.Nil when the batch has no hub.
+		if arts, err := s.policy.CompiledArtifactsForNodes(ctx, orgID, ids, b.hubID); err == nil {
 			pushed = make(map[uuid.UUID]string, len(nodes))
 			for _, n := range nodes {
 				pushed[n.ID] = s.pushedHash(topo, n, arts[n.ID])

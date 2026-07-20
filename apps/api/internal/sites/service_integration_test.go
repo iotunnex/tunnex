@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
@@ -65,7 +64,6 @@ func testPool(t *testing.T) *pgxpool.Pool {
 func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
-	q := sqlc.New(pool)
 	ctx := context.Background()
 
 	org, nodeA, nodeB := uuid.New(), uuid.New(), uuid.New()
@@ -117,9 +115,9 @@ func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 		t.Fatalf("site subnet must survive node replacement, got %d subnets (%v)", len(subs), err)
 	}
 	// B is now the site's gateway; A is unbound.
-	n, err := q.GetSiteNode(ctx, pgtype.UUID{Bytes: site.ID, Valid: true})
-	if err != nil || n.ID != nodeB {
-		t.Fatalf("the replacement node B must be the site's gateway, got %v (%v)", n.ID, err)
+	var bSite uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, nodeB).Scan(&bSite); err != nil || bSite != site.ID {
+		t.Fatalf("the replacement node B must be the site's gateway, got %v (%v)", bSite, err)
 	}
 }
 
@@ -129,7 +127,6 @@ func TestReplaceNodePreservesSiteEntity(t *testing.T) {
 func TestDeleteSiteCascadesAndAudits(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
-	q := sqlc.New(pool)
 	ctx := context.Background()
 
 	org, user, node, grp := uuid.New(), uuid.New(), uuid.New(), uuid.New()
@@ -177,9 +174,10 @@ func TestDeleteSiteCascadesAndAudits(t *testing.T) {
 	if rules != 0 || subs != 0 {
 		t.Fatalf("cascade must remove referencing rules + subnets, got rules=%d subs=%d", rules, subs)
 	}
-	n, err := q.GetSiteNode(ctx, pgtype.UUID{Bytes: site.ID, Valid: true})
-	if err == nil {
-		t.Fatalf("the gateway must be unbound after site delete, still bound: %v", n.ID)
+	var bound int
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM nodes WHERE site_id=$1`, site.ID).Scan(&bound)
+	if bound != 0 {
+		t.Fatalf("the gateway must be unbound after site delete, still bound: %d", bound)
 	}
 	// The audit row records the REAL cascade counts (never "may affect").
 	var auditRules, auditSubs int
@@ -315,35 +313,47 @@ func TestApproveSubnetCrossSiteDuplicate(t *testing.T) {
 	}
 }
 
-// TestUnbindSiteNode is the #3 fold red (D6 replace-node via API): UnbindSiteNode detaches the site's
-// gateway; a second unbind (no gateway) is a typed 404.
+// TestUnbindSiteNode is the S8.6 #3 red (explicit-node-id unbind): a site holds TWO gateways (post the
+// single-node lift); UnbindSiteNode detaches EXACTLY the named one — the other stays bound (no arbitrary
+// :one pick). A second unbind of the same node is a typed 404 (not bound to this site).
 func TestUnbindSiteNode(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
-	q := sqlc.New(pool)
 	ctx := context.Background()
-	org, node := uuid.New(), uuid.New()
+	org, nodeA, nodeB := uuid.New(), uuid.New(), uuid.New()
 	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug) VALUES ($1,'S',$2)`, org, "ub-"+org.String()[:8]); e != nil {
 		t.Fatalf("org: %v", e)
 	}
-	if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw',$3)`, node, org, "cs-ub-"+node.String()[:8]); e != nil {
-		t.Fatalf("node: %v", e)
+	for i, node := range []uuid.UUID{nodeA, nodeB} {
+		if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,$3,$4)`,
+			node, org, "gw"+string(rune('A'+i)), "cs-ub-"+node.String()[:8]); e != nil {
+			t.Fatalf("node: %v", e)
+		}
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
 	site, _ := svc.RegisterSite(ctx, org, "hq")
-	if err := svc.BindNode(ctx, org, site.ID, node); err != nil {
-		t.Fatalf("bind: %v", err)
+	if err := svc.BindNode(ctx, org, site.ID, nodeA); err != nil {
+		t.Fatalf("bind A: %v", err)
 	}
-	// Unbind detaches the gateway.
-	if err := svc.UnbindSiteNode(ctx, org, site.ID); err != nil {
-		t.Fatalf("unbind: %v", err)
+	if err := svc.BindNode(ctx, org, site.ID, nodeB); err != nil {
+		t.Fatalf("bind B (a site may hold multiple gateways): %v", err)
 	}
-	if _, err := q.GetSiteNode(ctx, pgtype.UUID{Bytes: site.ID, Valid: true}); err == nil {
-		t.Fatal("the site must have no bound gateway after unbind")
+	// Unbind EXACTLY nodeA — nodeB must stay bound (the #3 proof: the named node, never an arbitrary pick).
+	if err := svc.UnbindSiteNode(ctx, org, site.ID, nodeA); err != nil {
+		t.Fatalf("unbind A: %v", err)
 	}
-	// A second unbind (no gateway) is a typed 404.
-	if err := svc.UnbindSiteNode(ctx, org, site.ID); err == nil {
-		t.Fatal("unbinding a site with no gateway must 404")
+	var aSite, bBound *uuid.UUID
+	_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, nodeA).Scan(&aSite)
+	if aSite != nil {
+		t.Fatalf("nodeA must be unbound, still bound to %v", *aSite)
+	}
+	_ = pool.QueryRow(ctx, `SELECT site_id FROM nodes WHERE id=$1`, nodeB).Scan(&bBound)
+	if bBound == nil || *bBound != site.ID {
+		t.Fatalf("nodeB must REMAIN bound to the site (only the named node unbinds), got %v", bBound)
+	}
+	// A second unbind of nodeA (no longer bound to this site) is a typed 404.
+	if err := svc.UnbindSiteNode(ctx, org, site.ID, nodeA); err == nil {
+		t.Fatal("unbinding a node not bound to this site must 404")
 	}
 }
 

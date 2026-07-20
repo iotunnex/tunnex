@@ -272,9 +272,10 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
-	// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6): ordered members + the D5
-	// generation. No rows until the first ReconcileHubSet.
-	GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (OrgHubSet, error)
+	// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6 REDUCE): the two
+	// writer-partitioned fields (configured + demoted) + the D5 generation. The ACTIVE order is DERIVED from
+	// these by deriveActive (never stored). No rows until the first ReconcileHubSet.
+	GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (GetOrgHubSetRow, error)
 	// ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
@@ -300,9 +301,6 @@ type Querier interface {
 	GetResource(ctx context.Context, arg GetResourceParams) (Resource, error)
 	GetSSOConfig(ctx context.Context, arg GetSSOConfigParams) (SsoConfig, error)
 	GetSite(ctx context.Context, arg GetSiteParams) (Site, error)
-	// lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
-	// the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
-	GetSiteNode(ctx context.Context, siteID pgtype.UUID) (Node, error)
 	// lint:cross-org — org-scoped via the join to sites.org_id.
 	GetSiteSubnetForOrg(ctx context.Context, arg GetSiteSubnetForOrgParams) (GetSiteSubnetForOrgRow, error)
 	// lint:cross-org — user-scoped credential.
@@ -414,7 +412,7 @@ type Querier interface {
 	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
 	// lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
 	// MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
-	// fail over (S8.6 Slice 4).
+	// fail over (S8.6 Slice 4). Reads the CONFIGURED membership (the intent) — the reduce's field rename.
 	ListFailoverOrgs(ctx context.Context) ([]uuid.UUID, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
@@ -593,6 +591,10 @@ type Querier interface {
 	// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
 	UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) (UserGroup, error)
 	UnbindNode(ctx context.Context, arg UnbindNodeParams) (int64, error)
+	// lint:cross-org — org-scoped. S8.6 #3: unbind a SPECIFIC gateway from a SPECIFIC site (post the single-node
+	// lift a site may hold several gateways — the caller names which; no arbitrary GetSiteNode :one pick). 0 rows
+	// = the node is not bound to that site in this org (a deterministic 404, never a wrong-gateway unbind).
+	UnbindNodeFromSite(ctx context.Context, arg UnbindNodeFromSiteParams) (int64, error)
 	// Resize the org tunnel pool. The service refuses a shrink that would orphan
 	// live allocations (checked in Go before calling this); this just persists it.
 	UpdateOrgPoolCidr(ctx context.Context, arg UpdateOrgPoolCidrParams) (Organization, error)
@@ -626,11 +628,20 @@ type Querier interface {
 	// Opt-in a check (or change its mode/param). A row's existence IS the opt-in
 	// (no row = off — the unlock-then-opt-in convention, default-off by construction).
 	UpsertOrgHealthCheck(ctx context.Context, arg UpsertOrgHealthCheckParams) (OrgHealthCheck, error)
-	// lint:cross-org — org-scoped by PK. ATOMIC bump: the generation increments in the SAME statement ONLY
-	// when `members` actually changes (IS DISTINCT FROM) — so an idempotent re-election never bumps (no idle
-	// tick eroding the fence), and concurrent reconciles converge (whoever writes the same members second is a
-	// no-op bump). The D5 fencing token is monotonic + CP-persisted by construction here.
-	UpsertOrgHubSet(ctx context.Context, arg UpsertOrgHubSetParams) (OrgHubSet, error)
+	// lint:cross-org — org-scoped by PK. ReconcileHubSet's writer (S8.6 REDUCE): writes `configured` ONLY —
+	// the CONFIGURED membership (pins/capability/order). ATOMIC bump: the generation increments in the SAME
+	// statement ONLY when `configured` actually changes (IS DISTINCT FROM) — an idempotent re-election never
+	// bumps (no idle tick eroding the fence), concurrent reconciles converge. On INSERT `demoted` defaults to
+	// '{}' (a fresh set has nothing demoted). This writer NEVER touches `demoted` (the field partition — the
+	// controller owns it), so a bind landing during a live failover updates membership without clobbering the
+	// demotion state.
+	UpsertOrgHubSetConfigured(ctx context.Context, arg UpsertOrgHubSetConfiguredParams) (UpsertOrgHubSetConfiguredRow, error)
+	// lint:cross-org — org-scoped by PK. The failover controller's writer (S8.6 REDUCE): writes `demoted` ONLY
+	// — the members currently promoted-past for staleness. UPDATE (not upsert): a demotion only makes sense for
+	// an org that already has a configured hub set, so no row → 0 rows → the controller skips (nothing to fail
+	// over). ATOMIC bump: generation increments ONLY when `demoted` actually changes. NEVER touches
+	// `configured` (the field partition — ReconcileHubSet owns it).
+	UpsertOrgHubSetDemoted(ctx context.Context, arg UpsertOrgHubSetDemotedParams) (UpsertOrgHubSetDemotedRow, error)
 	UpsertOrgMfaEnforce(ctx context.Context, arg UpsertOrgMfaEnforceParams) error
 	// Used by the seed with a fixed id; idempotent. Also clears deleted_at so
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.

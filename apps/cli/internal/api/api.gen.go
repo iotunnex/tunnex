@@ -1403,6 +1403,9 @@ type RouteLANJSONRequestBody = RouteLANRequest
 // RegisterSiteJSONRequestBody defines body for RegisterSite for application/json ContentType.
 type RegisterSiteJSONRequestBody = RegisterSiteRequest
 
+// UnbindSiteNodeJSONRequestBody defines body for UnbindSiteNode for application/json ContentType.
+type UnbindSiteNodeJSONRequestBody = BindSiteNodeRequest
+
 // BindSiteNodeJSONRequestBody defines body for BindSiteNode for application/json ContentType.
 type BindSiteNodeJSONRequestBody = BindSiteNodeRequest
 
@@ -1847,8 +1850,10 @@ type ClientInterface interface {
 	// GetSiteReferences request
 	GetSiteReferences(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UnbindSiteNode request
-	UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// UnbindSiteNodeWithBody request with any body
+	UnbindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body UnbindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// BindSiteNodeWithBody request with any body
 	BindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3478,8 +3483,20 @@ func (c *Client) GetSiteReferences(ctx context.Context, orgId openapi_types.UUID
 	return c.Client.Do(req)
 }
 
-func (c *Client) UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUnbindSiteNodeRequest(c.Server, orgId, siteId)
+func (c *Client) UnbindSiteNodeWithBody(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnbindSiteNodeRequestWithBody(c.Server, orgId, siteId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UnbindSiteNode(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body UnbindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnbindSiteNodeRequest(c.Server, orgId, siteId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7629,8 +7646,19 @@ func NewGetSiteReferencesRequest(server string, orgId openapi_types.UUID, siteId
 	return req, nil
 }
 
-// NewUnbindSiteNodeRequest generates requests for UnbindSiteNode
-func NewUnbindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID) (*http.Request, error) {
+// NewUnbindSiteNodeRequest calls the generic UnbindSiteNode builder with application/json body
+func NewUnbindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, body UnbindSiteNodeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUnbindSiteNodeRequestWithBody(server, orgId, siteId, "application/json", bodyReader)
+}
+
+// NewUnbindSiteNodeRequestWithBody generates requests for UnbindSiteNode with any type of body
+func NewUnbindSiteNodeRequestWithBody(server string, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -7662,10 +7690,12 @@ func NewUnbindSiteNodeRequest(server string, orgId openapi_types.UUID, siteId op
 		return nil, err
 	}
 
-	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	req, err := http.NewRequest("DELETE", queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -8564,8 +8594,10 @@ type ClientWithResponsesInterface interface {
 	// GetSiteReferencesWithResponse request
 	GetSiteReferencesWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetSiteReferencesResponse, error)
 
-	// UnbindSiteNodeWithResponse request
-	UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error)
+	// UnbindSiteNodeWithBodyWithResponse request with any body
+	UnbindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error)
+
+	UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body UnbindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error)
 
 	// BindSiteNodeWithBodyWithResponse request with any body
 	BindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BindSiteNodeResponse, error)
@@ -12122,9 +12154,17 @@ func (c *ClientWithResponses) GetSiteReferencesWithResponse(ctx context.Context,
 	return ParseGetSiteReferencesResponse(rsp)
 }
 
-// UnbindSiteNodeWithResponse request returning *UnbindSiteNodeResponse
-func (c *ClientWithResponses) UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error) {
-	rsp, err := c.UnbindSiteNode(ctx, orgId, siteId, reqEditors...)
+// UnbindSiteNodeWithBodyWithResponse request with arbitrary body returning *UnbindSiteNodeResponse
+func (c *ClientWithResponses) UnbindSiteNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error) {
+	rsp, err := c.UnbindSiteNodeWithBody(ctx, orgId, siteId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnbindSiteNodeResponse(rsp)
+}
+
+func (c *ClientWithResponses) UnbindSiteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, siteId openapi_types.UUID, body UnbindSiteNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*UnbindSiteNodeResponse, error) {
+	rsp, err := c.UnbindSiteNode(ctx, orgId, siteId, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

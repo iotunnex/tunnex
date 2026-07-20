@@ -156,7 +156,10 @@ func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeReq
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err
 	}
-	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId); err != nil {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId, req.Body.NodeId); err != nil {
 		return nil, err
 	}
 	// S8.6: unbinding removes a gateway from the hub-set candidate pool → re-elect + persist (best-effort).

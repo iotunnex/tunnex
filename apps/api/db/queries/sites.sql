@@ -45,16 +45,17 @@ WHERE nodes.id = $1 AND nodes.org_id = $2 AND nodes.site_id IS NULL
 -- name: UnbindNode :execrows
 UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 
+-- name: UnbindNodeFromSite :execrows
+-- lint:cross-org — org-scoped. S8.6 #3: unbind a SPECIFIC gateway from a SPECIFIC site (post the single-node
+-- lift a site may hold several gateways — the caller names which; no arbitrary GetSiteNode :one pick). 0 rows
+-- = the node is not bound to that site in this org (a deterministic 404, never a wrong-gateway unbind).
+UPDATE nodes SET site_id = NULL WHERE id = @node_id AND org_id = @org_id AND site_id = @site_id;
+
 -- name: GetNodeSiteBinding :one
 -- lint:cross-org — org-scoped (org_id in the predicate). Returns the node's current site_id (nullable) so
 -- BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 -- when the node is not in this org.
 SELECT site_id FROM nodes WHERE id = $1 AND org_id = $2;
-
--- name: GetSiteNode :one
--- lint:cross-org — scoped by site_id (the site is org-checked via GetSite by the caller); returns
--- the single node bound to the site (single-node v1), or no rows when the site has no gateway yet.
-SELECT * FROM nodes WHERE site_id = $1;
 
 -- name: ListSiteGatewaysForOrg :many
 -- S8.2: every site-bound gateway that has reported a WG key, with its site + public endpoint — the

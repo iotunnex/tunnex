@@ -23,23 +23,24 @@ func TestFailoverConvergence(t *testing.T) {
 	fresh := map[uuid.UUID]bool{p: true, s: true}
 	stale := map[uuid.UUID]bool{p: false, s: true}
 
+	// Step now returns the DEMOTED SET (the reduce); the ACTIVE order is deriveActive(cfg, demoted).
 	for i := 0; i < 10; i++ {
-		if got := fc.Step(cfg, fresh); !sameOrder(got, cfg) {
-			t.Fatalf("all-fresh must keep active == configured (convergence), got %v", got)
+		if got := fc.Step(cfg, fresh); len(got) != 0 {
+			t.Fatalf("all-fresh must demote NOTHING (active == configured), got demoted %v", got)
 		}
 	}
-	var active []uuid.UUID
+	var demoted []uuid.UUID
 	for i := 0; i < failoverDemoteTicks; i++ {
-		active = fc.Step(cfg, stale)
+		demoted = fc.Step(cfg, stale)
 	}
-	if !sameOrder(active, []uuid.UUID{s, p}) {
-		t.Fatalf("N stale ticks → primary demoted (active=[standby,primary]), got %v", active)
+	if !sameOrder(deriveActive(cfg, demoted), []uuid.UUID{s, p}) {
+		t.Fatalf("N stale ticks → primary demoted (active=[standby,primary]), got demoted=%v", demoted)
 	}
 	for i := 0; i < failoverRestoreTicks; i++ {
-		active = fc.Step(cfg, fresh)
+		demoted = fc.Step(cfg, fresh)
 	}
-	if !sameOrder(active, cfg) {
-		t.Fatalf("M fresh ticks → restored, active CONVERGES to configured (fail-back), got %v", active)
+	if len(demoted) != 0 || !sameOrder(deriveActive(cfg, demoted), cfg) {
+		t.Fatalf("M fresh ticks → restored, active CONVERGES to configured (fail-back), got demoted=%v", demoted)
 	}
 }
 
@@ -53,16 +54,16 @@ func TestFailoverFlapExactlyOne(t *testing.T) {
 	stale := map[uuid.UUID]bool{p: false, s: true}
 
 	changes := 0
-	prev := append([]uuid.UUID(nil), cfg...)
+	var prev []uuid.UUID // the demoted set (starts empty — nothing demoted)
 	tick := func(f map[uuid.UUID]bool) {
-		a := fc.Step(cfg, f)
-		if !sameOrder(a, prev) {
+		d := fc.Step(cfg, f)
+		if !sameOrder(d, prev) {
 			changes++
-			prev = append([]uuid.UUID(nil), a...)
+			prev = append([]uuid.UUID(nil), d...)
 		}
 	}
 	for i := 0; i < failoverDemoteTicks; i++ {
-		tick(stale) // demote → change #1
+		tick(stale) // demote → demoted set becomes [p]: change #1
 	}
 	for i := 0; i < 20; i++ { // FLAP: fresh,stale,fresh,stale... — never M-consecutive-fresh, so no fail-back churn
 		if i%2 == 0 {
@@ -88,8 +89,8 @@ func TestFailoverRestartConservative(t *testing.T) {
 		fc.Step(cfg, stale) // 2 stale ticks — one short of demotion
 	}
 	fc2 := NewFailoverController() // RESTART
-	if a := fc2.Step(cfg, stale); !sameOrder(a, cfg) {
-		t.Fatalf("a restart must NOT demote on the first post-restart tick (conservative), got %v", a)
+	if d := fc2.Step(cfg, stale); len(d) != 0 {
+		t.Fatalf("a restart must NOT demote on the first post-restart tick (conservative), got demoted %v", d)
 	}
 }
 
@@ -142,8 +143,8 @@ func TestOrgHubSetGenerationFence(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org) })
 
 	a, b := uuid.New(), uuid.New()
-	up := func(members []uuid.UUID) (int64, error) {
-		hs, e := q.UpsertOrgHubSet(ctx, sqlc.UpsertOrgHubSetParams{OrgID: org, Members: members})
+	up := func(configured []uuid.UUID) (int64, error) {
+		hs, e := q.UpsertOrgHubSetConfigured(ctx, sqlc.UpsertOrgHubSetConfiguredParams{OrgID: org, Configured: configured})
 		return hs.Generation, e
 	}
 	g1, _ := up([]uuid.UUID{a, b})
@@ -151,7 +152,7 @@ func TestOrgHubSetGenerationFence(t *testing.T) {
 	if g2 != g1 {
 		t.Fatalf("an unchanged set must NOT bump the generation: %d -> %d", g1, g2)
 	}
-	g3, _ := up([]uuid.UUID{b, a}) // REORDER (a promotion) → bump
+	g3, _ := up([]uuid.UUID{b, a}) // REORDER (a membership change) → bump
 	if g3 <= g2 {
 		t.Fatalf("a reorder must bump the generation (the fence): %d -> %d", g2, g3)
 	}
@@ -174,8 +175,8 @@ func TestOrgHubSetGenerationFence(t *testing.T) {
 	if final.Generation < g3 {
 		t.Fatalf("concurrent writes must leave a MONOTONIC generation (never regress), got %d < %d", final.Generation, g3)
 	}
-	if len(final.Members) != 2 {
-		t.Fatalf("the row must be intact (no torn write), got %v", final.Members)
+	if len(final.Configured) != 2 {
+		t.Fatalf("the row must be intact (no torn write), got %v", final.Configured)
 	}
 }
 
@@ -236,16 +237,17 @@ func TestFailoverPromotionAudits(t *testing.T) {
 		}
 	}
 	hs, _ := svc.GetHubSet(ctx, org)
-	if hs.Members[0] != primary {
-		t.Fatalf("before N ticks the primary must still be members[0] (hysteresis), got %v", hs.Members)
+	if hs.Active()[0] != primary {
+		t.Fatalf("before N ticks the primary must still be members[0] (hysteresis), got %v", hs.Active())
 	}
 	// The Nth stale tick → DEMOTE.
 	if e := svc.failoverOrg(ctx, org, time.Now()); e != nil {
 		t.Fatalf("Nth tick: %v", e)
 	}
 	hs, _ = svc.GetHubSet(ctx, org)
-	if len(hs.Members) != 2 || hs.Members[0] != standby || hs.Members[1] != primary {
-		t.Fatalf("after N stale ticks the standby must be promoted (active=[standby,primary]), got %v", hs.Members)
+	act := hs.Active()
+	if len(act) != 2 || act[0] != standby || act[1] != primary {
+		t.Fatalf("after N stale ticks the standby must be promoted (active=[standby,primary]), got %v", act)
 	}
 	// The transition is AUDITED (old→new primary + condition).
 	var action, oldP, newP, cond string

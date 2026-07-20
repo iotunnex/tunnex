@@ -172,8 +172,8 @@ func TestReconcileHubSetGeneration(t *testing.T) {
 	if hs.Generation <= gen0 {
 		t.Fatalf("electing the single hub must BUMP: %d -> %d", gen0, hs.Generation)
 	}
-	if len(hs.Members) != 1 || hs.Members[0] != gA {
-		t.Fatalf("no pins → members = [lowest-id hub gA], got %v", hs.Members)
+	if len(hs.Configured) != 1 || hs.Configured[0] != gA {
+		t.Fatalf("no pins → members = [lowest-id hub gA], got %v", hs.Configured)
 	}
 	genAfterAdd := hs.Generation
 
@@ -198,8 +198,8 @@ func TestReconcileHubSetGeneration(t *testing.T) {
 	// gB is already present (higher id, UNPINNED) — the single-hub set is still [gA], so a reconcile does NOT
 	// bump: an endpoint-bearing LEAF joining does not change the hub set (two-tier: no intent, no membership).
 	hs, _ = svc.ReconcileHubSet(ctx, org)
-	if hs.Generation != genAfterAdd || len(hs.Members) != 1 || hs.Members[0] != gA {
-		t.Fatalf("an unpinned leaf must NOT change the single-hub set (no bump), got members=%v gen %d->%d", hs.Members, genAfterAdd, hs.Generation)
+	if hs.Generation != genAfterAdd || len(hs.Configured) != 1 || hs.Configured[0] != gA {
+		t.Fatalf("an unpinned leaf must NOT change the single-hub set (no bump), got members=%v gen %d->%d", hs.Configured, genAfterAdd, hs.Generation)
 	}
 
 	// PIN gB → the set becomes the PINNED set [gB] (opt-in HA) → membership changes [gA]->[gB] → BUMP, and
@@ -209,8 +209,8 @@ func TestReconcileHubSetGeneration(t *testing.T) {
 		t.Fatalf("set pin: %v", err)
 	}
 	pinned, _ := svc.GetHubSet(ctx, org)
-	if len(pinned.Members) != 1 || pinned.Members[0] != gB {
-		t.Fatalf("pinning gB → the set is the pinned [gB], got %v", pinned.Members)
+	if len(pinned.Configured) != 1 || pinned.Configured[0] != gB {
+		t.Fatalf("pinning gB → the set is the pinned [gB], got %v", pinned.Configured)
 	}
 	if pinned.Generation <= beforePin {
 		t.Fatalf("a pin that changes membership must bump: %d -> %d", beforePin, pinned.Generation)

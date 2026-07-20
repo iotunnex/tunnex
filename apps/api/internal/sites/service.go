@@ -175,20 +175,24 @@ func (s *Service) UnbindNode(ctx context.Context, orgID, nodeID uuid.UUID) error
 	return nil
 }
 
-// UnbindSiteNode detaches the site's gateway node (D6 replace-node = unbind-old then bind-new). 404
-// when the site has no bound gateway. Finds the bound node via GetSiteNode, then unbinds it.
-func (s *Service) UnbindSiteNode(ctx context.Context, orgID, siteID uuid.UUID) error {
-	if _, err := s.GetSite(ctx, orgID, siteID); err != nil { // org-check
+// UnbindSiteNode detaches a SPECIFIC gateway node from the site (D6 replace-node = unbind-old then
+// bind-new). S8.6 #3: the caller names WHICH node — post the single-node lift a site may hold several
+// gateways, so an arbitrary GetSiteNode :one pick could unbind the wrong one. The exact scoped UPDATE
+// (id + org + site) unbinds only that node; 0 rows → a deterministic 404 (not bound to this site here).
+func (s *Service) UnbindSiteNode(ctx context.Context, orgID, siteID, nodeID uuid.UUID) error {
+	if _, err := s.GetSite(ctx, orgID, siteID); err != nil { // org-check the site
 		return err
 	}
-	n, err := s.q.GetSiteNode(ctx, pgtype.UUID{Bytes: siteID, Valid: true})
+	n, err := s.q.UnbindNodeFromSite(ctx, sqlc.UnbindNodeFromSiteParams{
+		NodeID: nodeID, OrgID: orgID, SiteID: pgtype.UUID{Bytes: siteID, Valid: true},
+	})
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return apierr.NotFound("site_no_gateway", "this site has no bound gateway to unbind")
-		}
 		return err
 	}
-	return s.UnbindNode(ctx, orgID, n.ID)
+	if n == 0 {
+		return apierr.NotFound("node_not_bound_to_site", "no such gateway bound to this site in this organization")
+	}
+	return nil
 }
 
 // SiteReferences is what points at a site: the counts the UI shows BEFORE a delete (D4 cascade preview)

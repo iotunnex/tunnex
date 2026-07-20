@@ -1592,7 +1592,11 @@ export interface paths {
         put?: never;
         /** Bind a gateway node to a site — single-node v1 (S8.1; site:manage) */
         post: operations["bindSiteNode"];
-        /** Unbind the site's gateway node — D6 replace-node (S8.1; site:manage) */
+        /**
+         * Unbind a specific gateway node from the site — D6 replace-node (S8.1/S8.6
+         * @description Unbinds the named gateway. Post the single-node lift a site may hold several gateways, so the caller names WHICH to unbind — no arbitrary pick (S8.6 #3). 404 when the node is not bound to this site.
+         *
+         */
         delete: operations["unbindSiteNode"];
         options?: never;
         head?: never;
@@ -5053,7 +5057,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindSiteNodeRequest"];
+            };
+        };
         responses: {
             /** @description Unbound. */
             204: {

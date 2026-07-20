@@ -20,11 +20,11 @@ type fakeProvider struct {
 	err error
 }
 
-func (f fakeProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID) (*policyspec.Compiled, error) {
+func (f fakeProvider) CompiledForNode(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (*policyspec.Compiled, error) {
 	return f.pol, f.err
 }
 
-func (f fakeProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
+func (f fakeProvider) CompiledArtifactsForNodes(_ context.Context, _ uuid.UUID, ids []uuid.UUID, _ uuid.UUID) (map[uuid.UUID]*policyspec.Compiled, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

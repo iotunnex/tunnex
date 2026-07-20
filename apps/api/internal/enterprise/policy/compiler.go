@@ -99,6 +99,11 @@ type Snapshot struct {
 	Devices     []Device
 	SiteSubnets []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
 	SiteNodes   []SiteNode   // S8.2: (site_id, node_id) bindings for src_kind='site' node placement
+	// ActiveHub is the DERIVED active transit hub (S8.6 REDUCE #1), THREADED IN by the caller from the ONE
+	// shared derivation (nodes.deriveActive) — the SAME per-compile value that feeds the data-plane graph.
+	// The compiler does NOT elect: the site→site transit grant lands on THIS node. uuid.Nil = no hub (no
+	// site→site transit to place — a non-site compile, or no capable gateway).
+	ActiveHub uuid.UUID
 }
 
 // Compile produces the compiled artifact for every node that has at least one
@@ -126,21 +131,20 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		nodeSet[d.NodeID] = true
 	}
 	siteNode := map[uuid.UUID]uuid.UUID{} // site_id -> its bound gateway node (S8.2 src placement)
-	var hubNode uuid.UUID                 // B1: the transit HUB — the site gateway with a public endpoint
 	for _, sn := range s.SiteNodes {
 		if sn.NodeID == uuid.Nil {
 			continue
 		}
 		siteNode[sn.SiteID] = sn.NodeID
 		nodeSet[sn.NodeID] = true
-		// Hub designation MUST match siteLinkGraphFrom (core): the endpoint-bearing gateway, lowest node
-		// id if several. A site→site grant is placed on the hub too (it forwards spoke↔spoke traffic), so
-		// its default-deny forward chain accepts the transited pair — without this the hub silently drops
-		// site-to-site between two spoke sites (B1; the paper's packet-walk step 4).
-		if sn.Endpoint != "" && (hubNode == uuid.Nil || sn.NodeID.String() < hubNode.String()) {
-			hubNode = sn.NodeID
-		}
 	}
+	// The transit HUB is the DERIVED active hub, THREADED IN by the caller (S8.6 REDUCE #1) — the compiler is
+	// structurally incapable of electing (the election + its "MUST match siteLinkGraphFrom" apology are gone;
+	// the ONE derivation lives in nodes.deriveActive, fed to this compile AND the data-plane graph from the
+	// SAME per-compile value, so the grant and the routing can never cite different hubs under HA). A
+	// site→site grant lands on the hub too (it forwards spoke↔spoke traffic), so its default-deny forward
+	// chain accepts the transited pair — without this the hub silently drops site-to-site between two spokes.
+	hubNode := s.ActiveHub
 
 	out := make(map[uuid.UUID]policyspec.Compiled, len(nodeSet))
 

@@ -247,9 +247,10 @@ type OrgHealthCheck struct {
 
 type OrgHubSet struct {
 	OrgID      uuid.UUID   `json:"org_id"`
-	Members    []uuid.UUID `json:"members"`
+	Configured []uuid.UUID `json:"configured"`
 	Generation int64       `json:"generation"`
 	UpdatedAt  time.Time   `json:"updated_at"`
+	Demoted    []uuid.UUID `json:"demoted"`
 }
 
 type OrgMfa struct {
