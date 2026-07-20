@@ -605,6 +605,43 @@ func TestSiteSourceTransitHubGrant(t *testing.T) {
 	}
 }
 
+// TestSiteTransitGrantHonorsThreadedActiveHub — S8.6 REDUCE #1 (the enterprise-enforcing cross-site
+// BLACKHOLE): the transit grant lands on the THREADED ActiveHub, NEVER on the lowest-id gateway. Under HA a
+// pinned/promoted non-lowest-id gateway IS the active hub; the pre-reduce lowest-id election put the grant on
+// the WRONG gateway, so the enforcing forward chain of the ACTUAL hub dropped every cross-site packet. With
+// the election deleted and the hub threaded in, the grant follows the derived active hub — the two compile
+// paths (data-plane routing + policy transit) can no longer cite different hubs.
+func TestSiteTransitGrantHonorsThreadedActiveHub(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-00000051ed01")
+	siteB := uuid.MustParse("00000000-0000-0000-0000-00000051ed02")
+	siteH := uuid.MustParse("00000000-0000-0000-0000-00000051ed03")
+	// Two endpoint-bearing gateways on the hub site: nodeLow sorts BEFORE nodeHigh by id, so the pre-reduce
+	// lowest-id election would have picked nodeLow. The DERIVED active hub is nodeHigh (a pin/failover).
+	nodeLow := uuid.MustParse("00000000-0000-0000-0000-0000000000c1")
+	nodeHigh := uuid.MustParse("00000000-0000-0000-0000-0000000000f9")
+	snap := policy.Snapshot{
+		Mode:  policy.ModeEnforcing,
+		Rules: []policy.Rule{{ID: uuid.New(), SrcKind: "site", SrcSiteID: siteA, DstKind: "site", DstSiteID: siteB}},
+		SiteSubnets: []policy.SiteSubnet{
+			{SiteID: siteA, CIDR: "10.1.0.0/24"}, {SiteID: siteB, CIDR: "10.2.0.0/24"},
+		},
+		SiteNodes: []policy.SiteNode{
+			{SiteID: siteA, NodeID: nodeA},
+			{SiteID: siteB, NodeID: nodeB},
+			{SiteID: siteH, NodeID: nodeLow, Endpoint: "low.example:51820"},   // the lowest-id temptation
+			{SiteID: siteH, NodeID: nodeHigh, Endpoint: "high.example:51820"}, // the DERIVED active hub
+		},
+		ActiveHub: nodeHigh,
+	}
+	out := policy.Compile(snap)
+	if !hasAllow(allowsFor(out, nodeHigh), "10.1.0.0/24", "10.2.0.0/24") {
+		t.Fatalf("the transit grant must land on the DERIVED active hub (nodeHigh), got %+v", allowsFor(out, nodeHigh))
+	}
+	if a := allowsFor(out, nodeLow); hasAllow(a, "10.1.0.0/24", "10.2.0.0/24") {
+		t.Fatalf("the transit grant must NOT land on the lowest-id gateway (the pre-reduce blackhole bug), got %+v", a)
+	}
+}
+
 // TestSiteSourceDowngradeToMesh — S8.2 D11 downgrade-release: a src_kind='site' grant is GATED under
 // enforcing (the LAN-source AllowEntry is the sole reason the traffic is permitted) and RELEASES to the
 // legacy MESH under off-mode (enterprise→open downgrade → routed-but-ungated). Symmetric to the S8.1 dst

@@ -385,3 +385,87 @@ func TestGetHubSetView(t *testing.T) {
 		t.Fatalf("the generation (version tag) must be served, got %d", view.Generation)
 	}
 }
+
+// TestReconcileHubSetMembershipAudit — S8.6 REDUCE #4 (membership as its own event, condition 1b): a
+// CONFIGURED change (a gateway leaving the pinned set — the unbind/delete membership event) bumps the
+// generation AND audits hub_set.membership, DISTINCT from a promotion/failback. An unchanged reconcile
+// neither bumps nor re-audits (no idle tick eroding the fence).
+func TestReconcileHubSetMembershipAudit(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "ma-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	g1, g2 := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, "e:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(g1, "g1", "KG1", 1)
+	mk(g2, "g2", "KG2", 2)
+
+	svc := NewService(pool, nil, nil)
+	hs1, e := svc.ReconcileHubSet(ctx, org) // configured=[g1,g2] — the first membership event
+	if e != nil {
+		t.Fatalf("reconcile 1: %v", e)
+	}
+	if len(hs1.Configured) != 2 || hs1.Configured[0] != g1 {
+		t.Fatalf("configured must be [g1,g2], got %v", hs1.Configured)
+	}
+	membershipAudits := func() int {
+		var n int
+		_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs WHERE org_id=$1 AND action='hub_set.membership'", org).Scan(&n)
+		return n
+	}
+	if membershipAudits() != 1 {
+		t.Fatalf("the first configured write must audit hub_set.membership once, got %d", membershipAudits())
+	}
+
+	// UNCHANGED reconcile → NO bump, NO new audit (the fence + audit both quiet).
+	hs1b, _ := svc.ReconcileHubSet(ctx, org)
+	if hs1b.Generation != hs1.Generation || membershipAudits() != 1 {
+		t.Fatalf("an unchanged reconcile must not bump/re-audit, gen %d->%d audits=%d", hs1.Generation, hs1b.Generation, membershipAudits())
+	}
+
+	// MEMBERSHIP EVENT: g1 leaves the site (the unbind/delete effect on configured). Reconcile drops it.
+	if _, e := pool.Exec(ctx, "UPDATE nodes SET site_id=NULL WHERE id=$1", g1); e != nil {
+		t.Fatalf("unbind g1: %v", e)
+	}
+	hs2, e := svc.ReconcileHubSet(ctx, org)
+	if e != nil {
+		t.Fatalf("reconcile 2: %v", e)
+	}
+	if len(hs2.Configured) != 1 || hs2.Configured[0] != g2 {
+		t.Fatalf("after g1 leaves, configured must be [g2], got %v", hs2.Configured)
+	}
+	if hs2.Generation <= hs1.Generation {
+		t.Fatalf("a membership change must bump the generation: %d -> %d", hs1.Generation, hs2.Generation)
+	}
+	if membershipAudits() != 2 {
+		t.Fatalf("the membership change must audit hub_set.membership again (2 total), got %d", membershipAudits())
+	}
+	// The compiler + view AGREE with the new configured set — the derived active order is [g2].
+	view, _ := svc.GetHubSetView(ctx, org)
+	if len(view.Members) != 1 || view.Members[0].NodeID != g2 || view.Members[0].Role != "primary" {
+		t.Fatalf("view must agree with the reconciled set: [g2 primary], got %+v", view.Members)
+	}
+}
