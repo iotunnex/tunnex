@@ -585,6 +585,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Pin (or clear) a gateway's HA hub priority (S8.6) */
+        put: operations["setHubPriority"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/hub-set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** The org's persisted HA hub set + per-member metrics (S8.6) */
+        get: operations["getHubSet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/overview": {
         parameters: {
             query?: never;
@@ -1855,6 +1894,38 @@ export interface components {
             cidr: string;
             /** @description Optional site name; blank derives a default from the CIDR (S8.5 D1 solo-admin path). */
             name?: string;
+        };
+        HubPriorityRequest: {
+            /** @description The admin hub pin (S8.6 D1) — lower = more preferred; null CLEARS the pin. Pinning declares a gateway a hub candidate; the PINNED set IS the HA hub set (opt-in). */
+            priority?: number | null;
+        };
+        HubSet: {
+            /**
+             * Format: int64
+             * @description The set's version tag (S8.6 D5) — bumps on every membership/order change (a promotion event).
+             */
+            generation: number;
+            /** @description The ORDERED active hub set: members[0] = the acting primary, the rest = standbys. */
+            members: components["schemas"]["HubMember"][];
+        };
+        HubMember: {
+            /** Format: uuid */
+            node_id: string;
+            /** @enum {string} */
+            role: "primary" | "standby";
+            /** @description Latest node_peer_status observation, or ABSENT when this member is not reporting (distinct from an idle link with zero bytes). */
+            metrics?: components["schemas"]["HubMemberMetrics"] | null;
+        };
+        HubMemberMetrics: {
+            /** Format: date-time */
+            last_handshake_at: string;
+            /**
+             * Format: int64
+             * @description Raw gauge since the last handshake (display only, never summed as monotonic).
+             */
+            rx_bytes: number;
+            /** Format: int64 */
+            tx_bytes: number;
         };
         SiteSubnet: {
             /** Format: uuid */
@@ -3202,6 +3273,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setHubPriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HubPriorityRequest"];
+            };
+        };
+        responses: {
+            /** @description Set. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getHubSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hub set. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HubSet"];
+                };
             };
             default: components["responses"]["Error"];
         };

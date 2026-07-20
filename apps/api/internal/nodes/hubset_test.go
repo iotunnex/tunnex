@@ -317,3 +317,71 @@ func TestSiteLinkGraphHA(t *testing.T) {
 		t.Fatalf("standby peers must add NO routes (hash-invariant): pinned %v vs no-pins %v", azurePinnedRoutes, azureNoPinRoutes)
 	}
 }
+
+// TestGetHubSetView (S8.6 Slice 6) — the served hub set: ordered members with role (primary=members[0]),
+// generation, and per-member L1 metrics from node_peer_status. The render-floor distinction: a member
+// with a node_peer_status row has METRICS (even idle rx/tx=0); a NOT-reporting member has NIL metrics
+// (absent ≠ zeroes-as-data).
+func TestGetHubSetView(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')", org, "hv-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	pr, sb := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, "e:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(pr, "primary", "KPR", 1)
+	mk(sb, "standby", "KSB", 2)
+
+	svc := NewService(pool, nil, nil)
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
+		t.Fatalf("reconcile: %v", e)
+	}
+	// The PRIMARY is IDLE-but-reporting: a node_peer_status row with rx/tx = 0 (a real link, no traffic yet).
+	// The STANDBY is NOT reporting: NO row.
+	now := time.Now()
+	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at,rx_bytes,tx_bytes) VALUES ($1,'KPR',$2,0,0)", sb, now); e != nil {
+		t.Fatalf("seed primary metrics: %v", e)
+	}
+
+	view, err := svc.GetHubSetView(ctx, org)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if len(view.Members) != 2 || view.Members[0].NodeID != pr || view.Members[0].Role != "primary" || view.Members[1].Role != "standby" {
+		t.Fatalf("ordered members with role (primary=members[0]), got %+v", view.Members)
+	}
+	// IDLE-but-reporting primary → metrics PRESENT with zeroes (an honest idle link).
+	if view.Members[0].Metrics == nil || view.Members[0].Metrics.RxBytes != 0 {
+		t.Fatalf("an idle-but-reporting member must have metrics (rx/tx=0 is honest), got %+v", view.Members[0].Metrics)
+	}
+	// NOT-reporting standby → metrics NIL (absent ≠ zeroes — a not-reporting link is a different truth).
+	if view.Members[1].Metrics != nil {
+		t.Fatalf("a NOT-reporting member must have ABSENT metrics (nil), never zeroes-as-data, got %+v", view.Members[1].Metrics)
+	}
+	if view.Generation <= 0 {
+		t.Fatalf("the generation (version tag) must be served, got %d", view.Generation)
+	}
+}

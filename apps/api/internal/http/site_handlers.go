@@ -290,3 +290,50 @@ func (s apiServer) DeleteSite(ctx context.Context, req api.DeleteSiteRequestObje
 	}
 	return api.DeleteSite204Response{}, nil
 }
+
+// SetHubPriority PUT /organizations/{orgId}/nodes/{nodeId}/hub-priority — pin (or clear) a gateway's HA hub
+// priority (S8.6 D1). site:manage (topology-consequential — pinning creates the HA hub set). Audited
+// old→new in the service. Cross-org node id → 404.
+func (s apiServer) SetHubPriority(ctx context.Context, req api.SetHubPriorityRequestObject) (api.SetHubPriorityResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	var pri *int32
+	if req.Body.Priority != nil {
+		v := int32(*req.Body.Priority)
+		pri = &v
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.nodes.SetHubPriority(ctx, p.UserID, req.OrgId, req.NodeId, pri); err != nil {
+		return nil, err
+	}
+	return api.SetHubPriority204Response{Headers: api.SetHubPriority204ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+// GetHubSet GET /organizations/{orgId}/hub-set — the org's persisted active hub set + per-member L1 metrics
+// (S8.6 Slice 6). org:view — MEMBER-readable (the D5/S8.3 read-only-topology precedent); the pin control is
+// site:manage. ONE truth — the same persisted org_hub_set the compiler + health read.
+func (s apiServer) GetHubSet(ctx context.Context, req api.GetHubSetRequestObject) (api.GetHubSetResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	view, err := s.nodes.GetHubSetView(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]api.HubMember, 0, len(view.Members))
+	for _, m := range view.Members {
+		hm := api.HubMember{NodeId: m.NodeID, Role: api.HubMemberRole(m.Role)}
+		if m.Metrics != nil { // absent metrics stay absent (not-reporting ≠ idle-with-zeroes)
+			hm.Metrics = &api.HubMemberMetrics{LastHandshakeAt: m.Metrics.LastHandshakeAt, RxBytes: m.Metrics.RxBytes, TxBytes: m.Metrics.TxBytes}
+		}
+		members = append(members, hm)
+	}
+	return api.GetHubSet200JSONResponse{
+		Body:    api.HubSet{Generation: view.Generation, Members: members},
+		Headers: api.GetHubSet200ResponseHeaders{XRequestId: reqID(ctx)},
+	}, nil
+}

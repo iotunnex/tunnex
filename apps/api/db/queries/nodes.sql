@@ -156,3 +156,8 @@ UPDATE nodes SET hub_priority = @hub_priority WHERE id = @node_id AND org_id = @
 -- MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
 -- fail over (S8.6 Slice 4).
 SELECT org_id FROM org_hub_set WHERE array_length(members, 1) > 1;
+
+-- name: GetNodeHubPriority :one
+-- lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
+-- old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
+SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2;

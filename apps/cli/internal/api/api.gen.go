@@ -134,6 +134,12 @@ const (
 	Ok HealthResponseStatus = "ok"
 )
 
+// Defines values for HubMemberRole.
+const (
+	Primary HubMemberRole = "primary"
+	Standby HubMemberRole = "standby"
+)
+
 // Defines values for IdpSyncConfigProvider.
 const (
 	IdpSyncConfigProviderGoogle    IdpSyncConfigProvider = "google"
@@ -752,6 +758,41 @@ type HealthResponse struct {
 // HealthResponseStatus Liveness status.
 type HealthResponseStatus string
 
+// HubMember defines model for HubMember.
+type HubMember struct {
+	// Metrics Latest node_peer_status observation, or ABSENT when this member is not reporting (distinct from an idle link with zero bytes).
+	Metrics *HubMemberMetrics  `json:"metrics"`
+	NodeId  openapi_types.UUID `json:"node_id"`
+	Role    HubMemberRole      `json:"role"`
+}
+
+// HubMemberRole defines model for HubMember.Role.
+type HubMemberRole string
+
+// HubMemberMetrics defines model for HubMemberMetrics.
+type HubMemberMetrics struct {
+	LastHandshakeAt time.Time `json:"last_handshake_at"`
+
+	// RxBytes Raw gauge since the last handshake (display only, never summed as monotonic).
+	RxBytes int64 `json:"rx_bytes"`
+	TxBytes int64 `json:"tx_bytes"`
+}
+
+// HubPriorityRequest defines model for HubPriorityRequest.
+type HubPriorityRequest struct {
+	// Priority The admin hub pin (S8.6 D1) — lower = more preferred; null CLEARS the pin. Pinning declares a gateway a hub candidate; the PINNED set IS the HA hub set (opt-in).
+	Priority *int `json:"priority"`
+}
+
+// HubSet defines model for HubSet.
+type HubSet struct {
+	// Generation The set's version tag (S8.6 D5) — bumps on every membership/order change (a promotion event).
+	Generation int64 `json:"generation"`
+
+	// Members The ORDERED active hub set: members[0] = the acting primary, the rest = standbys.
+	Members []HubMember `json:"members"`
+}
+
 // IdpGroupMapRequest defines model for IdpGroupMapRequest.
 type IdpGroupMapRequest struct {
 	GroupId *openapi_types.UUID `json:"group_id,omitempty"`
@@ -1335,6 +1376,9 @@ type SetMfaEnforceJSONRequestBody = MfaEnforce
 // IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
 type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
+// SetHubPriorityJSONRequestBody defines body for SetHubPriority for application/json ContentType.
+type SetHubPriorityJSONRequestBody = HubPriorityRequest
+
 // CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
 type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
 
@@ -1651,6 +1695,9 @@ type ClientInterface interface {
 
 	PutHealthCheck(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetHubSet request
+	GetHubSet(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PutIdpSyncConfigWithBody request with any body
 	PutIdpSyncConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1717,6 +1764,11 @@ type ClientInterface interface {
 	IssueJoinTokenWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	IssueJoinToken(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetHubPriorityWithBody request with any body
+	SetHubPriorityWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetHubPriority(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RevokeNode request
 	RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2763,6 +2815,18 @@ func (c *Client) PutHealthCheck(ctx context.Context, orgId openapi_types.UUID, c
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetHubSet(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHubSetRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) PutIdpSyncConfigWithBody(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPutIdpSyncConfigRequestWithBody(c.Server, orgId, provider, contentType, body)
 	if err != nil {
@@ -3053,6 +3117,30 @@ func (c *Client) IssueJoinTokenWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) IssueJoinToken(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIssueJoinTokenRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetHubPriorityWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetHubPriorityRequestWithBody(c.Server, orgId, nodeId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetHubPriority(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetHubPriorityRequest(c.Server, orgId, nodeId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5864,6 +5952,40 @@ func NewPutHealthCheckRequestWithBody(server string, orgId openapi_types.UUID, c
 	return req, nil
 }
 
+// NewGetHubSetRequest generates requests for GetHubSet
+func NewGetHubSetRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/hub-set", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewPutIdpSyncConfigRequest calls the generic PutIdpSyncConfig builder with application/json body
 func NewPutIdpSyncConfigRequest(server string, orgId openapi_types.UUID, provider string, body PutIdpSyncConfigJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -6607,6 +6729,60 @@ func NewIssueJoinTokenRequestWithBody(server string, orgId openapi_types.UUID, c
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewSetHubPriorityRequest calls the generic SetHubPriority builder with application/json body
+func NewSetHubPriorityRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetHubPriorityRequestWithBody(server, orgId, nodeId, "application/json", bodyReader)
+}
+
+// NewSetHubPriorityRequestWithBody generates requests for SetHubPriority with any type of body
+func NewSetHubPriorityRequestWithBody(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s/hub-priority", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -8236,6 +8412,9 @@ type ClientWithResponsesInterface interface {
 
 	PutHealthCheckWithResponse(ctx context.Context, orgId openapi_types.UUID, checkKind string, body PutHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PutHealthCheckResponse, error)
 
+	// GetHubSetWithResponse request
+	GetHubSetWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetHubSetResponse, error)
+
 	// PutIdpSyncConfigWithBodyWithResponse request with any body
 	PutIdpSyncConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error)
 
@@ -8302,6 +8481,11 @@ type ClientWithResponsesInterface interface {
 	IssueJoinTokenWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*IssueJoinTokenResponse, error)
 
 	IssueJoinTokenWithResponse(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*IssueJoinTokenResponse, error)
+
+	// SetHubPriorityWithBodyWithResponse request with any body
+	SetHubPriorityWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
+
+	SetHubPriorityWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
 
 	// RevokeNodeWithResponse request
 	RevokeNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeNodeResponse, error)
@@ -9631,6 +9815,29 @@ func (r PutHealthCheckResponse) StatusCode() int {
 	return 0
 }
 
+type GetHubSetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *HubSet
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHubSetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHubSetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type PutIdpSyncConfigResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10010,6 +10217,28 @@ func (r IssueJoinTokenResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r IssueJoinTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SetHubPriorityResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetHubPriorityResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetHubPriorityResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -11411,6 +11640,15 @@ func (c *ClientWithResponses) PutHealthCheckWithResponse(ctx context.Context, or
 	return ParsePutHealthCheckResponse(rsp)
 }
 
+// GetHubSetWithResponse request returning *GetHubSetResponse
+func (c *ClientWithResponses) GetHubSetWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetHubSetResponse, error) {
+	rsp, err := c.GetHubSet(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHubSetResponse(rsp)
+}
+
 // PutIdpSyncConfigWithBodyWithResponse request with arbitrary body returning *PutIdpSyncConfigResponse
 func (c *ClientWithResponses) PutIdpSyncConfigWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutIdpSyncConfigResponse, error) {
 	rsp, err := c.PutIdpSyncConfigWithBody(ctx, orgId, provider, contentType, body, reqEditors...)
@@ -11626,6 +11864,23 @@ func (c *ClientWithResponses) IssueJoinTokenWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseIssueJoinTokenResponse(rsp)
+}
+
+// SetHubPriorityWithBodyWithResponse request with arbitrary body returning *SetHubPriorityResponse
+func (c *ClientWithResponses) SetHubPriorityWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error) {
+	rsp, err := c.SetHubPriorityWithBody(ctx, orgId, nodeId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetHubPriorityResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetHubPriorityWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error) {
+	rsp, err := c.SetHubPriority(ctx, orgId, nodeId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetHubPriorityResponse(rsp)
 }
 
 // RevokeNodeWithResponse request returning *RevokeNodeResponse
@@ -13677,6 +13932,39 @@ func ParsePutHealthCheckResponse(rsp *http.Response) (*PutHealthCheckResponse, e
 	return response, nil
 }
 
+// ParseGetHubSetResponse parses an HTTP response from a GetHubSetWithResponse call
+func ParseGetHubSetResponse(rsp *http.Response) (*GetHubSetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHubSetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HubSet
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParsePutIdpSyncConfigResponse parses an HTTP response from a PutIdpSyncConfigWithResponse call
 func ParsePutIdpSyncConfigResponse(rsp *http.Response) (*PutIdpSyncConfigResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -14184,6 +14472,32 @@ func ParseIssueJoinTokenResponse(rsp *http.Response) (*IssueJoinTokenResponse, e
 		}
 		response.JSON201 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetHubPriorityResponse parses an HTTP response from a SetHubPriorityWithResponse call
+func ParseSetHubPriorityResponse(rsp *http.Response) (*SetHubPriorityResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetHubPriorityResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

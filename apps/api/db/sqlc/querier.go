@@ -265,6 +265,9 @@ type Querier interface {
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
+	// lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
+	// old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
+	GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriorityParams) (*int32, error)
 	// lint:cross-org — org-scoped (org_id in the predicate). Returns the node's current site_id (nullable) so
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.

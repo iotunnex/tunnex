@@ -654,6 +654,50 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: nodeId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: setHubPriority
+      summary: Pin (or clear) a gateway's HA hub priority (S8.6)
+      tags: [sites]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HubPriorityRequest" }
+      responses:
+        "204":
+          description: Set.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/hub-set:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getHubSet
+      summary: The org's persisted HA hub set + per-member metrics (S8.6)
+      tags: [sites]
+      responses:
+        "200":
+          description: The hub set.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubSet" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/overview:
     parameters:
       - name: orgId
@@ -2295,6 +2339,47 @@ components:
         node_id: { type: string, format: uuid, description: "The gateway node that fronts this LAN." }
         cidr: { type: string, description: "The LAN CIDR to route (IPv4). Validated disjoint from the org's other subnets + pool." }
         name: { type: string, description: "Optional site name; blank derives a default from the CIDR (S8.5 D1 solo-admin path)." }
+
+    HubPriorityRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        priority:
+          type: integer
+          nullable: true
+          description: "The admin hub pin (S8.6 D1) — lower = more preferred; null CLEARS the pin. Pinning declares a gateway a hub candidate; the PINNED set IS the HA hub set (opt-in)."
+    HubSet:
+      type: object
+      required: [generation, members]
+      additionalProperties: false
+      properties:
+        generation:
+          type: integer
+          format: int64
+          description: "The set's version tag (S8.6 D5) — bumps on every membership/order change (a promotion event)."
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/HubMember" }
+          description: "The ORDERED active hub set: members[0] = the acting primary, the rest = standbys."
+    HubMember:
+      type: object
+      required: [node_id, role]
+      additionalProperties: false
+      properties:
+        node_id: { type: string, format: uuid }
+        role: { type: string, enum: [primary, standby] }
+        metrics:
+          allOf: [ { $ref: "#/components/schemas/HubMemberMetrics" } ]
+          nullable: true
+          description: "Latest node_peer_status observation, or ABSENT when this member is not reporting (distinct from an idle link with zero bytes)."
+    HubMemberMetrics:
+      type: object
+      required: [last_handshake_at, rx_bytes, tx_bytes]
+      additionalProperties: false
+      properties:
+        last_handshake_at: { type: string, format: date-time }
+        rx_bytes: { type: integer, format: int64, description: "Raw gauge since the last handshake (display only, never summed as monotonic)." }
+        tx_bytes: { type: integer, format: int64 }
 
     SiteSubnet:
       type: object

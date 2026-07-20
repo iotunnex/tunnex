@@ -560,10 +560,82 @@ func (s *Service) GetHubSet(ctx context.Context, orgID uuid.UUID) (sqlc.OrgHubSe
 	return hs, err
 }
 
+// MemberMetrics is a hub member's LATEST node_peer_status observation (S8.6 L1). PRESENT only when a row
+// exists (someone handshook with this member) — a not-reporting link has NO metrics (nil), DISTINCT from an
+// idle link (a row with rx/tx = 0). rx/tx are RAW gauges since the last handshake (display only, never
+// summed monotonic — S11.1). The render cites THIS storage shape, not the report schema.
+type MemberMetrics struct {
+	LastHandshakeAt  time.Time
+	RxBytes, TxBytes int64
+}
+
+// HubMemberView is one hub-set member as SERVED: its node id, its ROLE (primary = members[0], else
+// standby), and its latest metrics (nil when not reporting).
+type HubMemberView struct {
+	NodeID  uuid.UUID
+	Role    string
+	Metrics *MemberMetrics
+}
+
+// HubSetView is the org's persisted hub set as SERVED (S8.6 Slice 6): the D5 generation (the set's version
+// tag) + the ordered members with role + L1 metrics. ONE truth — the same persisted org_hub_set every
+// consumer (compiler, health, this view) reads; no inference.
+type HubSetView struct {
+	Generation int64
+	Members    []HubMemberView
+}
+
+// GetHubSetView serves the persisted active hub set + per-member L1 metrics (node_peer_status). Empty when
+// no set is persisted (a not-yet-pinned org). Org-scoped by the caller (member-readable, D5/S8.3 precedent).
+func (s *Service) GetHubSetView(ctx context.Context, orgID uuid.UUID) (HubSetView, error) {
+	hs, err := s.GetHubSet(ctx, orgID)
+	if err != nil {
+		return HubSetView{}, err
+	}
+	gws, err := s.q.ListSiteGatewaysForOrg(ctx, orgID)
+	if err != nil {
+		return HubSetView{}, err
+	}
+	keyByNode := make(map[uuid.UUID]string, len(gws))
+	for _, g := range gws {
+		keyByNode[g.ID] = g.WgPublicKey
+	}
+	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
+	if err != nil {
+		return HubSetView{}, err
+	}
+	latest := map[string]MemberMetrics{}
+	for _, r := range rows {
+		if r.LastHandshakeAt.Valid && r.LastHandshakeAt.Time.After(latest[r.PublicKey].LastHandshakeAt) {
+			latest[r.PublicKey] = MemberMetrics{LastHandshakeAt: r.LastHandshakeAt.Time, RxBytes: r.RxBytes, TxBytes: r.TxBytes}
+		}
+	}
+	view := HubSetView{Generation: hs.Generation, Members: make([]HubMemberView, 0, len(hs.Members))}
+	for i, mid := range hs.Members {
+		mv := HubMemberView{NodeID: mid, Role: "standby"}
+		if i == 0 {
+			mv.Role = "primary"
+		}
+		if m, ok := latest[keyByNode[mid]]; ok {
+			mm := m
+			mv.Metrics = &mm // present only when a node_peer_status row exists (idle=0 vs not-reporting=nil)
+		}
+		view.Members = append(view.Members, mv)
+	}
+	return view, nil
+}
+
 // SetHubPriority sets (or clears, nil) a gateway's admin hub PIN (D1) and re-elects. Org-checked (a
 // cross-org node id -> 404). Audited in-tx; the re-election persists after so the pin takes effect.
 func (s *Service) SetHubPriority(ctx context.Context, actor, orgID, nodeID uuid.UUID, priority *int32) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		old, e := q.GetNodeHubPriority(ctx, sqlc.GetNodeHubPriorityParams{ID: nodeID, OrgID: orgID})
+		if e == pgx.ErrNoRows {
+			return apierr.NotFound("node_not_found", "no such node in this organization")
+		}
+		if e != nil {
+			return e
+		}
 		n, e := q.SetNodeHubPriority(ctx, sqlc.SetNodeHubPriorityParams{NodeID: nodeID, OrgID: orgID, HubPriority: priority})
 		if e != nil {
 			return e
@@ -571,7 +643,8 @@ func (s *Service) SetHubPriority(ctx context.Context, actor, orgID, nodeID uuid.
 		if n == 0 {
 			return apierr.NotFound("node_not_found", "no such node in this organization")
 		}
-		return audit(ctx, q, orgID, &actor, "node.hub_priority_set", "node", nodeID.String(), map[string]any{"hub_priority": priority})
+		// Audit the OLD→NEW pin (a topology-consequential act — pinning creates/edits the HA hub set).
+		return audit(ctx, q, orgID, &actor, "node.hub_priority_set", "node", nodeID.String(), map[string]any{"old_priority": old, "new_priority": priority})
 	})
 	if err != nil {
 		return err

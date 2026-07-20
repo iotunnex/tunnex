@@ -49,6 +49,7 @@ var walkBodies = map[string]string{
 	// S8.1 site-to-site gated ops (site:manage; each still 401s sessionless. approveSiteSubnet + listPending have no body).
 	"registersite":      `{"name":"Walk"}`,
 	"routelan":          `{"node_id":"00000000-0000-0000-0000-000000000000","cidr":"10.20.0.0/24"}`,
+	"sethubpriority":    `{"priority":1}`,
 	"addsitesubnet":     `{"cidr":"10.20.0.0/24"}`,
 	"setsitednsforward": `{"domain":"corp.local","resolver_ip":"10.20.0.53"}`,
 	"bindsitenode":      `{"node_id":"00000000-0000-0000-0000-000000000000"}`,

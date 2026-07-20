@@ -202,6 +202,24 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 	return i, err
 }
 
+const getNodeHubPriority = `-- name: GetNodeHubPriority :one
+SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2
+`
+
+type GetNodeHubPriorityParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
+// old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
+func (q *Queries) GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriorityParams) (*int32, error) {
+	row := q.db.QueryRow(ctx, getNodeHubPriority, arg.ID, arg.OrgID)
+	var hub_priority *int32
+	err := row.Scan(&hub_priority)
+	return hub_priority, err
+}
+
 const getOrgHubSet = `-- name: GetOrgHubSet :one
 SELECT org_id, members, generation, updated_at FROM org_hub_set WHERE org_id = $1
 `
