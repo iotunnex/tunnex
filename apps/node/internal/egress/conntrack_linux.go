@@ -22,6 +22,103 @@ import (
 // too wide tears down innocent neighbors — a self-inflicted outage on the busiest gateway. "Scoped" is
 // proven by the neighbor's SURVIVAL, not the filter's appearance (the innocent-neighbor red).
 
+// governedSpace is the source address space THIS gateway's policy governs (S8.7 [6]): the WG pool (every
+// device source is a /32 inside it) + this gateway's local site subnets (a site-src grant originates from the
+// local LAN). A conntrack flow whose ORIGIN src is inside this space is "ours to reconcile" at restart; a
+// flow outside it (the gateway's own SSH, an unrelated host) is NEVER swept — the innocent-neighbor
+// constraint, which binds HARDEST at restart.
+func governedSpace(poolCIDR string, localSubnets []string) []netip.Prefix {
+	var out []netip.Prefix
+	if p, ok := loosePrefix(poolCIDR); ok {
+		out = append(out, p)
+	}
+	for _, s := range localSubnets {
+		if p, ok := loosePrefix(s); ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// shouldReconcileFlush is the RESTART-sweep predicate (S8.7 [6], THE innocent-neighbor guard at restart): a
+// flow is swept IFF its origin src is inside our governed space AND the CURRENT policy permits it via NO
+// Allow entry. So a grant-covered flow SURVIVES (restart-with-live-legitimate-flows), a flow of a grant
+// revoked-while-down DIES (governed but no longer permitted), and an unrelated flow (src outside the governed
+// space) is NEVER touched. Pure — the whole safety of the restart sweep lives here.
+func shouldReconcileFlush(c conntrack.Con, governed []netip.Prefix, permit []flowTuple) bool {
+	src, ok := originSrc(c)
+	if !ok || !inGoverned(src, governed) {
+		return false // outside our governed source space → an innocent flow, never swept
+	}
+	for _, t := range permit {
+		if matchesTuple(c, t) {
+			return false // the current policy still permits it → survives
+		}
+	}
+	return true // governed source, not currently permitted → a leftover from a revoked-while-down grant
+}
+
+func originSrc(c conntrack.Con) (netip.Addr, bool) {
+	if c.Origin == nil || c.Origin.Src == nil {
+		return netip.Addr{}, false
+	}
+	a, ok := netip.AddrFromSlice(*c.Origin.Src)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	return a.Unmap(), true
+}
+
+func inGoverned(src netip.Addr, governed []netip.Prefix) bool {
+	for _, p := range governed {
+		if p.Contains(src) {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileFlush is the restart dump-and-reconcile (S8.7 [6]): with no in-memory baseline after a restart,
+// dump conntrack and flush every flow shouldReconcileFlush selects — scoped to our governed space, sparing
+// grant-covered + unrelated flows. Returns the count killed; per-flow/dump errors surface (never silent).
+func reconcileFlush(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry, emit func(ruleID string)) (int, error) {
+	permit := make([]flowTuple, 0, len(allow))
+	for _, e := range allow {
+		if t, ok := tupleFromAllow(e); ok {
+			permit = append(permit, t)
+		}
+	}
+	nfct, err := conntrack.Open(&conntrack.Config{})
+	if err != nil {
+		return 0, fmt.Errorf("conntrack open (CAP_NET_ADMIN?): %w", err)
+	}
+	defer nfct.Close()
+	killed := 0
+	var errs []error
+	for _, fam := range []conntrack.Family{conntrack.IPv4, conntrack.IPv6} { // a restart doesn't know the family span → both
+		flows, derr := nfct.Dump(conntrack.Conntrack, fam)
+		if derr != nil {
+			errs = append(errs, fmt.Errorf("conntrack dump %v: %w", fam, derr))
+			continue
+		}
+		for i := range flows {
+			c := flows[i]
+			if !shouldReconcileFlush(c, governed, permit) {
+				continue
+			}
+			if delErr := nfct.Delete(conntrack.Conntrack, fam, c); delErr != nil {
+				errs = append(errs, fmt.Errorf("conntrack delete: %w", delErr))
+			} else {
+				killed++
+				if emit != nil {
+					emit("restart_sweep")
+				}
+			}
+		}
+	}
+	return killed, errors.Join(errs...)
+}
+
 // probeConntrack reactively checks CT-netlink capability by opening + closing a conntrack socket. An error
 // (e.g. EPERM = CAP_NET_ADMIN absent) IS the capability signal (the reactive form, gap-2/[1] — no proactive
 // CapEff read). Used to clear a latched conntrack_flush_unavailable on recovery.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -202,5 +203,61 @@ func TestFlushLatchClearsOnProbe(t *testing.T) {
 	m.drainFlush(context.Background())
 	if m.ConntrackFlushFailing() {
 		t.Fatal("[1]: a recovered capability must CLEAR the latched flush-failing state (no removal needed)")
+	}
+}
+
+// TestRestartSweepPredicate — S8.7 [6] THE restart innocent-neighbor guard: the dump-and-reconcile sweep
+// flushes ONLY a flow whose src is in our governed space AND the current policy no longer permits. A
+// grant-covered flow survives (restart-with-live-legitimate-flows), a revoked-while-down flow dies, an
+// unrelated flow (src outside the governed space) is never touched.
+func TestRestartSweepPredicate(t *testing.T) {
+	governed := []netip.Prefix{netip.MustParsePrefix("10.99.0.0/24"), netip.MustParsePrefix("172.31.0.0/16")} // wg pool + a local site subnet
+	permit := []flowTuple{}
+	if t0, ok := tupleFromAllow(nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any"}); ok {
+		permit = append(permit, t0)
+	}
+	// (1) live legit flow — governed src, still permitted → SURVIVES.
+	if shouldReconcileFlush(con("10.99.0.10", "10.0.5.7", 6, 443), governed, permit) {
+		t.Fatal("a grant-covered flow must SURVIVE the restart sweep (restart-with-live-legitimate-flows)")
+	}
+	// (2) revoked-while-down — governed src, NO current permit → FLUSHED.
+	if !shouldReconcileFlush(con("10.99.0.11", "10.0.5.7", 6, 443), governed, permit) {
+		t.Fatal("a governed flow the current policy denies must be FLUSHED (revoked-while-down)")
+	}
+	// (3) unrelated — src OUTSIDE the governed space (the gateway's own egress) → NEVER swept.
+	if shouldReconcileFlush(con("203.0.113.5", "8.8.8.8", 6, 53), governed, permit) {
+		t.Fatal("a flow outside the governed source space must NEVER be swept (the innocent-neighbor constraint)")
+	}
+}
+
+// TestRestartSweepWiring — [6]: the FIRST enforcing apply after (re)start runs the restart RECONCILE sweep
+// (no in-memory baseline), NOT the removed-tuple diff; every subsequent removal uses the normal flush.
+func TestRestartSweepWiring(t *testing.T) {
+	var reconciled, flushed int
+	m := &Manager{
+		apply: func(context.Context, string) error { return nil }, now: time.Now, wgIface: "wg0",
+		ctReconcile: func(context.Context, []netip.Prefix, []nodepolicy.AllowEntry) (int, error) { reconciled++; return 0, nil },
+		ctFlush:     func(context.Context, []flowTuple) (int, error) { flushed++; return 0, nil },
+	}
+	a := nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"}
+	enf := func(allow ...nodepolicy.AllowEntry) *nodepolicy.Compiled {
+		return &nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Allow: allow}
+	}
+	ctx := context.Background()
+	// First enforcing apply → RESTART SWEEP (reconcile), not the diff flush.
+	if err := m.applyAndTrack(ctx, "rs", enf(a)); err != nil {
+		t.Fatalf("apply 1: %v", err)
+	}
+	m.drainFlush(ctx)
+	if reconciled != 1 || flushed != 0 {
+		t.Fatalf("[6] the first enforcing apply must run the restart reconcile (not the diff), got reconciled=%d flushed=%d", reconciled, flushed)
+	}
+	// Subsequent removal → normal flush, reconcile NOT re-run.
+	if err := m.applyAndTrack(ctx, "rs", enf()); err != nil {
+		t.Fatalf("apply 2: %v", err)
+	}
+	m.drainFlush(ctx)
+	if reconciled != 1 || flushed != 1 {
+		t.Fatalf("after the restart sweep, a removal must use the normal flush, got reconciled=%d flushed=%d", reconciled, flushed)
 	}
 }

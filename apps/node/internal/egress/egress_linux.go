@@ -89,6 +89,10 @@ type Manager struct {
 	// ctProbe reactively checks conntrack-netlink capability (opens+closes a CT socket) — used to CLEAR a
 	// latched flush-failing state on recovery when there are no removals to flush ([1]). Injectable.
 	ctProbe func(context.Context) error
+	// ctReconcile is the RESTART dump-and-reconcile sweep (S8.7 [6]): scoped to `governed`, it flushes
+	// conntrack flows the current `allow` no longer permits (a grant revoked while the agent was down).
+	// Injectable so the restart red family asserts the scope without a live conntrack.
+	ctReconcile func(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error)
 	// nftRun runs an arbitrary `nft <args...>` (list/insert/delete) and returns stdout;
 	// injectable for the DOCKER-USER foreign-chain reconcile tests (WF-4). Distinct from
 	// `apply` (the atomic `-f -` full-table replace) — the Docker-owned chain can't be
@@ -136,6 +140,11 @@ type Manager struct {
 	// pendingFlush is the removed-grant tuple set captured under mu at apply-success, drained + flushed by
 	// Reconcile OUTSIDE the lock (a netlink dump must not block status reads).
 	pendingFlush []flowTuple
+	// startupSwept + restartSweepPol drive the [6] restart sweep: the FIRST enforcing apply after (re)start
+	// has no in-memory baseline, so instead of an empty diff it reconciles conntrack against the current
+	// policy (restartSweepPol), scoped to the governed space. Thereafter the normal removed-tuple diff.
+	startupSwept    bool
+	restartSweepPol *nodepolicy.Compiled
 	// flushErr is the last conntrack-flush error (CAP_NET_ADMIN absent / netlink fault), surfaced never
 	// silent — the rule removal already succeeded, the lingering flows are degraded-not-broken.
 	flushErr error
@@ -148,6 +157,9 @@ func New(wgIface string) *Manager {
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = func(ctx context.Context, tuples []flowTuple) (int, error) { return flushTuples(ctx, tuples, nil) }
 	m.ctProbe = probeConntrack
+	m.ctReconcile = func(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error) {
+		return reconcileFlush(ctx, governed, allow, nil)
+	}
 	return m
 }
 
@@ -629,7 +641,15 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	// S8.7 Slice 2: capture the grants that LEFT the allow set (expired/deleted) under the lock; Reconcile
 	// flushes their established flows OUTSIDE the lock. The apply already removed the ACCEPT rule above, so
 	// the flush cannot race a re-accept.
-	m.pendingFlush = removedTuples(m.appliedAllow, pol.Allow)
+	if !m.startupSwept {
+		// [6] the FIRST enforcing apply after (re)start has no in-memory baseline — instead of the empty
+		// diff (which would leak a grant revoked-while-down), stash the policy for the restart dump-and-
+		// reconcile sweep (drainFlush runs it outside the lock). Thereafter the normal removed-tuple diff.
+		m.startupSwept = true
+		m.restartSweepPol = pol
+	} else {
+		m.pendingFlush = removedTuples(m.appliedAllow, pol.Allow)
+	}
 	m.appliedAllow = pol.Allow
 	return nil
 }
@@ -668,10 +688,29 @@ func allowKey(e nodepolicy.AllowEntry) string {
 // behavior, not a new failure.
 func (m *Manager) drainFlush(ctx context.Context) {
 	m.mu.Lock()
+	sweepPol := m.restartSweepPol
+	m.restartSweepPol = nil
 	tuples := m.pendingFlush
 	m.pendingFlush = nil
 	failing := m.flushErr != nil
 	m.mu.Unlock()
+
+	if sweepPol != nil && m.ctReconcile != nil {
+		// [6] restart sweep: reconcile conntrack against the current policy, scoped to our governed source
+		// space (the WG pool + this gateway's local site subnets). wgSubnet shells `ip`, so it runs OUTSIDE
+		// the status lock. A revoked-while-down grant's flow dies; a grant-covered or unrelated flow survives.
+		governed := governedSpace(wgSubnet(ctx, m.wgIface), sweepPol.LocalSubnets)
+		killed, err := m.ctReconcile(ctx, governed, sweepPol.Allow)
+		m.mu.Lock()
+		m.flushErr = err
+		m.mu.Unlock()
+		if err != nil {
+			slog.Error("conntrack_restart_sweep_failed", "error", err.Error())
+		} else if killed > 0 {
+			slog.Info("conntrack_restart_swept", "flows", killed)
+		}
+		return
+	}
 	if len(tuples) == 0 {
 		// [1] latch fix: nothing to flush this pass, but if a prior flush is FAILING, reactively probe the
 		// conntrack capability so a recovered CAP_NET_ADMIN CLEARS conntrack_flush_unavailable — without
