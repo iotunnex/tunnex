@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/netip"
 
+	"github.com/google/uuid"
+
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
@@ -156,10 +158,13 @@ func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeReq
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err
 	}
-	if req.Body == nil {
-		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	// S8.6 #6 compat: the body is OPTIONAL. With a node_id, unbind that gateway (the #3 explicit-id path);
+	// without a body (the legacy caller shape), UnbindSiteNode resolves the site's sole gateway.
+	var nodeID uuid.UUID
+	if req.Body != nil {
+		nodeID = req.Body.NodeId
 	}
-	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId, req.Body.NodeId); err != nil {
+	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId, nodeID); err != nil {
 		return nil, err
 	}
 	// S8.6: unbinding removes a gateway from the hub-set candidate pool → re-elect + persist (best-effort).

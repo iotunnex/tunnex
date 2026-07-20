@@ -1010,3 +1010,46 @@ func TestBindNodeConcurrentClaimNoOrphan(t *testing.T) {
 		t.Fatalf("exactly ONE site may own the gateway (no double-owned / orphan), got %d", gwCount)
 	}
 }
+
+// TestUnbindSiteNodeBodyless — S8.6 #6 compat: a bodyless unbind (nodeID=Nil, the legacy caller shape)
+// resolves the site's SOLE gateway; a multi-gateway site requires an explicit id (409 multiple_gateways).
+func TestUnbindSiteNodeBodyless(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, nodeA, nodeB := uuid.New(), uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug) VALUES ($1,'S',$2)`, org, "bl-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	for i, n := range []uuid.UUID{nodeA, nodeB} {
+		if _, e := pool.Exec(ctx, `INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,$3,$4)`,
+			n, org, "gw"+string(rune('A'+i)), "cs-bl-"+n.String()[:8]); e != nil {
+			t.Fatalf("node: %v", e)
+		}
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+	site, _ := svc.RegisterSite(ctx, org, "hq")
+	if err := svc.BindNode(ctx, org, site.ID, nodeA); err != nil {
+		t.Fatalf("bind A: %v", err)
+	}
+	// SOLE gateway → a bodyless unbind (nil node id) resolves + unbinds it.
+	if err := svc.UnbindSiteNode(ctx, org, site.ID, uuid.Nil); err != nil {
+		t.Fatalf("bodyless unbind of the sole gateway must succeed, got %v", err)
+	}
+	var bound int
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM nodes WHERE site_id=$1`, site.ID).Scan(&bound)
+	if bound != 0 {
+		t.Fatalf("the sole gateway must be unbound, still bound=%d", bound)
+	}
+	// Now TWO gateways → a bodyless unbind is ambiguous → 409 multiple_gateways.
+	if err := svc.BindNode(ctx, org, site.ID, nodeA); err != nil {
+		t.Fatalf("rebind A: %v", err)
+	}
+	if err := svc.BindNode(ctx, org, site.ID, nodeB); err != nil {
+		t.Fatalf("bind B: %v", err)
+	}
+	err := svc.UnbindSiteNode(ctx, org, site.ID, uuid.Nil)
+	if err == nil {
+		t.Fatal("a bodyless unbind of a multi-gateway site must be refused (409 multiple_gateways)")
+	}
+}

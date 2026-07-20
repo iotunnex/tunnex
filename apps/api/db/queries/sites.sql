@@ -45,6 +45,12 @@ WHERE nodes.id = $1 AND nodes.org_id = $2 AND nodes.site_id IS NULL
 -- name: UnbindNode :execrows
 UPDATE nodes SET site_id = NULL WHERE id = $1 AND org_id = $2;
 
+-- name: ListNodeIDsForSite :many
+-- lint:cross-org — org-scoped. The node ids currently bound to a site — the bodyless-unbind sole-gateway
+-- resolution (S8.6 #6 compat): a legacy DELETE with no body unbinds the site's ONE gateway; more than one
+-- requires an explicit node_id.
+SELECT id FROM nodes WHERE site_id = @site_id AND org_id = @org_id;
+
 -- name: UnbindNodeFromSite :execrows
 -- lint:cross-org — org-scoped. S8.6 #3: unbind a SPECIFIC gateway from a SPECIFIC site (post the single-node
 -- lift a site may hold several gateways — the caller names which; no arbitrary GetSiteNode :one pick). 0 rows

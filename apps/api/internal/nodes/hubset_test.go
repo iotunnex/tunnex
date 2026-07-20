@@ -550,3 +550,135 @@ func TestRevokedGatewayLeavesHubSet(t *testing.T) {
 		t.Fatalf("the view must show only the live standby as primary, got %+v", view.Members)
 	}
 }
+
+// hubTestOrg seeds an org + site + N pinned active gateways and returns the pool, svc, org, and node ids.
+func hubTestOrg(t *testing.T, prefix string, keys ...string) (*pgxpool.Pool, *Service, uuid.UUID, []uuid.UUID) {
+	t.Helper()
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, prefix+"-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	ids := make([]uuid.UUID, len(keys))
+	for i, key := range keys {
+		id := uuid.New()
+		ids[i] = id
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, "gw"+key, "cs-"+id.String()[:8], site, key, "e:51820", i+1); e != nil {
+			t.Fatalf("seed %s: %v", key, e)
+		}
+	}
+	return pool, NewService(pool, nil, nil), org, ids
+}
+
+func hubMembershipAuditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID) int {
+	t.Helper()
+	var n int
+	_ = pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM audit_logs WHERE org_id=$1 AND action='hub_set.membership'", org).Scan(&n)
+	return n
+}
+
+// TestFailoverCorrectorHealsConfigured — S8.6 #4/#5 REDUCE red: a gateway leaving the site (the DeleteSite/
+// unbind membership event) is healed by the failover tick's CONFIGURED CORRECTOR within ONE tick, even with
+// NO reconcile trigger fired — configured shrinks, the generation bumps, a hub_set.membership audit lands.
+func TestFailoverCorrectorHealsConfigured(t *testing.T) {
+	ctx := context.Background()
+	pool, svc, org, ids := hubTestOrg(t, "corr", "KA", "KB")
+	a, b := ids[0], ids[1]
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[a,b]
+		t.Fatalf("reconcile: %v", e)
+	}
+	before := hubMembershipAuditCount(t, pool, org)
+
+	// A leaves the site (DeleteSite cascade / unbind effect) — NO reconcile trigger fired here.
+	if _, e := pool.Exec(ctx, "UPDATE nodes SET site_id=NULL WHERE id=$1", a); e != nil {
+		t.Fatalf("unbind a: %v", e)
+	}
+	hs0, _ := svc.GetHubSet(ctx, org)
+	// ONE failover tick — the corrector re-derives configured from the live election.
+	if e := svc.failoverOrg(ctx, org, time.Now()); e != nil {
+		t.Fatalf("tick: %v", e)
+	}
+	hs1, _ := svc.GetHubSet(ctx, org)
+	if len(hs1.Configured) != 1 || hs1.Configured[0] != b {
+		t.Fatalf("the corrector must heal configured to [b] within one tick, got %v", hs1.Configured)
+	}
+	if hs1.Generation <= hs0.Generation {
+		t.Fatalf("the heal must bump the generation: %d -> %d", hs0.Generation, hs1.Generation)
+	}
+	if hubMembershipAuditCount(t, pool, org) != before+1 {
+		t.Fatalf("the corrector must audit hub_set.membership once, got %d (was %d)", hubMembershipAuditCount(t, pool, org), before)
+	}
+}
+
+// TestGetHubSetViewFiltersPhantom — S8.6 #3 red: GetHubSetView derive-then-filters against LIVE gateways, so
+// a configured member no longer a live gateway (revoked, before any corrector tick) is NOT shown — never as
+// the primary the data plane has failed away from. The store still names it; the VIEW filters it.
+func TestGetHubSetViewFiltersPhantom(t *testing.T) {
+	ctx := context.Background()
+	pool, svc, org, ids := hubTestOrg(t, "phan", "KA", "KB")
+	a, b := ids[0], ids[1]
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[a,b], a is primary
+		t.Fatalf("reconcile: %v", e)
+	}
+	// Revoke A (drops from ListSiteGatewaysForOrg) WITHOUT reconciling — the swallowed-trigger window.
+	if _, e := pool.Exec(ctx, "UPDATE nodes SET status='revoked' WHERE id=$1", a); e != nil {
+		t.Fatalf("revoke a: %v", e)
+	}
+	hs, _ := svc.GetHubSet(ctx, org)
+	if len(hs.Configured) != 2 { // the STORE still names the phantom (not reconciled)
+		t.Fatalf("precondition: configured must still be [a,b] in the store, got %v", hs.Configured)
+	}
+	view, err := svc.GetHubSetView(ctx, org)
+	if err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if len(view.Members) != 1 || view.Members[0].NodeID != b || view.Members[0].Role != "primary" {
+		t.Fatalf("the view must FILTER the revoked phantom a and show only live b as primary, got %+v", view.Members)
+	}
+	_ = a
+}
+
+// TestFailoverCorrectorIdempotent — S8.6 condition (d): a stable world (configured correct, nothing to
+// demote) changes neither field, so repeated ticks write NOTHING — no generation churn under the new writer.
+func TestFailoverCorrectorIdempotent(t *testing.T) {
+	ctx := context.Background()
+	pool, svc, org, ids := hubTestOrg(t, "idem", "KA", "KB")
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
+		t.Fatalf("reconcile: %v", e)
+	}
+	// Both gateways fresh (recent handshake) → nothing to demote, configured already correct.
+	now := time.Now()
+	for _, key := range []string{"KA", "KB"} {
+		if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,$2,$3)", ids[0], key, now); e != nil {
+			t.Fatalf("seed freshness: %v", e)
+		}
+	}
+	g0, _ := svc.GetHubSet(ctx, org)
+	for i := 0; i < 3; i++ {
+		if e := svc.failoverOrg(ctx, org, time.Now()); e != nil {
+			t.Fatalf("tick %d: %v", i, e)
+		}
+	}
+	g1, _ := svc.GetHubSet(ctx, org)
+	if g1.Generation != g0.Generation {
+		t.Fatalf("a stable world must not churn the generation across ticks: %d -> %d", g0.Generation, g1.Generation)
+	}
+}

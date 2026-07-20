@@ -2026,13 +2026,15 @@ paths:
         default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: unbindSiteNode
-      summary: Unbind a specific gateway node from the site — D6 replace-node (S8.1/S8.6 #3; site:manage)
+      summary: Unbind a gateway node from the site — D6 replace-node (S8.1/S8.6 #3; site:manage)
       description: >
-        Unbinds the named gateway. Post the single-node lift a site may hold several gateways, so the caller
-        names WHICH to unbind — no arbitrary pick (S8.6 #3). 404 when the node is not bound to this site.
+        Unbinds a gateway. With a node_id body, unbinds THAT gateway — post the single-node lift a site may
+        hold several, so the caller names which (S8.6 #3). WITHOUT a body (the legacy caller shape, S8.6 #6
+        compat), unbinds the site's SOLE gateway; a multi-gateway site then requires node_id (409). 404 when
+        the node is not bound to this site / the site has no gateway.
       tags: [sites]
       requestBody:
-        required: true
+        required: false
         content: { application/json: { schema: { $ref: "#/components/schemas/BindSiteNodeRequest" } } }
       responses:
         "204": { description: Unbound. }

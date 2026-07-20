@@ -261,3 +261,26 @@ func TestFailoverPromotionAudits(t *testing.T) {
 		t.Fatalf("audit must name old→new + condition, got old=%s new=%s cond=%s", oldP, newP, cond)
 	}
 }
+
+// TestFailoverRehydratesDemotionOnRestart — S8.6 #1: a fresh controller (a CP restart) rehydrates the
+// persisted demotion set BEFORE its first Step, so a still-stale demoted primary is NOT spuriously restored
+// on the first tick — no blackhole window. seedDemoted is idempotent (runs once).
+func TestFailoverRehydratesDemotionOnRestart(t *testing.T) {
+	p, s := idAt(1), idAt(2)
+	cfg := []uuid.UUID{p, s}
+	stale := map[uuid.UUID]bool{p: false, s: true} // the primary is STILL stale after the restart
+
+	fc := NewFailoverController() // fresh = a restart (counters zeroed)
+	fc.seedDemoted([]uuid.UUID{p}) // the persisted demoted=[p] is rehydrated
+	demoted := fc.Step(cfg, stale)
+	if !sameOrder(demoted, []uuid.UUID{p}) {
+		t.Fatalf("a rehydrated demotion must PERSIST on the first post-restart tick (no spurious restore), got %v", demoted)
+	}
+	if !sameOrder(deriveActive(cfg, demoted), []uuid.UUID{s, p}) {
+		t.Fatalf("the active order must keep the standby as primary post-restart, got %v", deriveActive(cfg, demoted))
+	}
+	fc.seedDemoted([]uuid.UUID{p, s}) // a later seed is a no-op (idempotent)
+	if fc.demoted[s] {
+		t.Fatal("seedDemoted must run ONCE — a later seed must not add members")
+	}
+}

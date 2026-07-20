@@ -1593,8 +1593,8 @@ export interface paths {
         /** Bind a gateway node to a site — single-node v1 (S8.1; site:manage) */
         post: operations["bindSiteNode"];
         /**
-         * Unbind a specific gateway node from the site — D6 replace-node (S8.1/S8.6
-         * @description Unbinds the named gateway. Post the single-node lift a site may hold several gateways, so the caller names WHICH to unbind — no arbitrary pick (S8.6 #3). 404 when the node is not bound to this site.
+         * Unbind a gateway node from the site — D6 replace-node (S8.1/S8.6
+         * @description Unbinds a gateway. With a node_id body, unbinds THAT gateway — post the single-node lift a site may hold several, so the caller names which (S8.6 #3). WITHOUT a body (the legacy caller shape, S8.6 #6 compat), unbinds the site's SOLE gateway; a multi-gateway site then requires node_id (409). 404 when the node is not bound to this site / the site has no gateway.
          *
          */
         delete: operations["unbindSiteNode"];
@@ -5057,7 +5057,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["BindSiteNodeRequest"];
             };

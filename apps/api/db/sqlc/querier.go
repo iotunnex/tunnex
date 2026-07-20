@@ -431,6 +431,10 @@ type Querier interface {
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	// lint:cross-org — org-scoped. The node ids currently bound to a site — the bodyless-unbind sole-gateway
+	// resolution (S8.6 #6 compat): a legacy DELETE with no body unbinds the site's ONE gateway; more than one
+	// requires an explicit node_id.
+	ListNodeIDsForSite(ctx context.Context, arg ListNodeIDsForSiteParams) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by user_id; used to find which nodes to push after a
 	// user's peers change (create/revoke/deactivate). Not org-scoped: a user's
 	// devices may span orgs and all affected nodes must be nudged to reconcile.

@@ -175,13 +175,31 @@ func (s *Service) UnbindNode(ctx context.Context, orgID, nodeID uuid.UUID) error
 	return nil
 }
 
-// UnbindSiteNode detaches a SPECIFIC gateway node from the site (D6 replace-node = unbind-old then
-// bind-new). S8.6 #3: the caller names WHICH node — post the single-node lift a site may hold several
-// gateways, so an arbitrary GetSiteNode :one pick could unbind the wrong one. The exact scoped UPDATE
-// (id + org + site) unbinds only that node; 0 rows → a deterministic 404 (not bound to this site here).
+// UnbindSiteNode detaches a gateway node from the site (D6 replace-node = unbind-old then bind-new). S8.6 #3:
+// with an explicit nodeID the caller names WHICH node — post the single-node lift a site may hold several
+// gateways, so an arbitrary pick could unbind the wrong one. S8.6 #6 compat: a nil nodeID (the legacy
+// bodyless DELETE shape) resolves to the site's SOLE gateway; a multi-gateway site then requires an explicit
+// id (409). The exact scoped UPDATE (id + org + site) unbinds only the named node; 0 rows → a deterministic
+// 404.
 func (s *Service) UnbindSiteNode(ctx context.Context, orgID, siteID, nodeID uuid.UUID) error {
 	if _, err := s.GetSite(ctx, orgID, siteID); err != nil { // org-check the site
 		return err
+	}
+	if nodeID == uuid.Nil { // bodyless legacy caller (#6): unbind the site's sole gateway, deterministically
+		ids, err := s.q.ListNodeIDsForSite(ctx, sqlc.ListNodeIDsForSiteParams{
+			SiteID: pgtype.UUID{Bytes: siteID, Valid: true}, OrgID: orgID,
+		})
+		if err != nil {
+			return err
+		}
+		switch len(ids) {
+		case 0:
+			return apierr.NotFound("site_no_gateway", "this site has no bound gateway to unbind")
+		case 1:
+			nodeID = ids[0]
+		default:
+			return apierr.Conflict("multiple_gateways", "this site has multiple gateways; specify node_id")
+		}
 	}
 	n, err := s.q.UnbindNodeFromSite(ctx, sqlc.UnbindNodeFromSiteParams{
 		NodeID: nodeID, OrgID: orgID, SiteID: pgtype.UUID{Bytes: siteID, Valid: true},

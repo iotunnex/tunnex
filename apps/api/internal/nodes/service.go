@@ -716,7 +716,17 @@ func (s *Service) GetHubSetView(ctx context.Context, orgID uuid.UUID) (HubSetVie
 		return HubSetView{}, err
 	}
 	latest := latestByPubKey(rows)
-	active := hs.Active() // the ONE shared derivation — the served order (primary first)
+	// S8.6 #3: DERIVE-THEN-FILTER — the SAME discipline loadSiteTopology applies to the data plane. The
+	// active order is derived (HubSet.Active()), then filtered against the LIVE gateways (keyByNode is built
+	// from ListSiteGatewaysForOrg, the identical status='active' source the data plane reads). A `configured`
+	// member no longer a live gateway (revoked/deleted/departed, before the corrector tick has rewritten
+	// configured) is DROPPED here — so the view can never show a member the data plane has failed away from.
+	active := make([]uuid.UUID, 0, len(hs.Active()))
+	for _, mid := range hs.Active() {
+		if _, live := keyByNode[mid]; live {
+			active = append(active, mid)
+		}
+	}
 	view := HubSetView{Generation: hs.Generation, Members: make([]HubMemberView, 0, len(active))}
 	for i, mid := range active {
 		mv := HubMemberView{NodeID: mid, Role: "standby", HubPriority: prioByNode[mid]}
@@ -1388,7 +1398,12 @@ func Capabilities(raw []byte) NodeCapabilities {
 
 // Revoke marks a node revoked (renewal will then be refused).
 func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
+	// Is this node a SITE GATEWAY? (Read before the revoke — RevokeNode leaves site_id set, so it reads the
+	// same either way, but this is the pre-revoke truth.) S8.6 #9: only a gateway revoke reconciles the hub
+	// set; a non-gateway device revoke must NOT churn a full reconcile.
+	binding, bErr := s.q.GetNodeSiteBinding(ctx, sqlc.GetNodeSiteBindingParams{ID: nodeID, OrgID: orgID})
+	wasGateway := bErr == nil && binding.Valid
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.RevokeNode(ctx, sqlc.RevokeNodeParams{OrgID: orgID, ID: nodeID}); e != nil {
 			return e
 		}
@@ -1398,7 +1413,18 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) er
 			return e
 		}
 		return audit(ctx, q, orgID, &actor, "node.revoked", "node", nodeID.String(), map[string]any{})
-	})
+	}); err != nil {
+		return err
+	}
+	// S8.6 #4/#9: a revoked GATEWAY left the hub-set candidate pool (status='active' filter) → re-elect +
+	// persist so the drop is durable + audited immediately. Best-effort belt: a hiccup self-heals on the next
+	// failover tick (the configured corrector). Gated on gateway-ness — a laptop revoke is a no-op here.
+	if wasGateway {
+		if _, err := s.ReconcileHubSet(ctx, orgID); err != nil {
+			slog.WarnContext(ctx, "hub_set_reconcile_failed", "op", "revoke", "org_id", orgID.String(), "error", err.Error())
+		}
+	}
+	return nil
 }
 
 // ListNodes returns an org's nodes.

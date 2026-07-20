@@ -236,6 +236,38 @@ func (q *Queries) GetSiteSubnetForOrg(ctx context.Context, arg GetSiteSubnetForO
 	return i, err
 }
 
+const listNodeIDsForSite = `-- name: ListNodeIDsForSite :many
+SELECT id FROM nodes WHERE site_id = $1 AND org_id = $2
+`
+
+type ListNodeIDsForSiteParams struct {
+	SiteID pgtype.UUID `json:"site_id"`
+	OrgID  uuid.UUID   `json:"org_id"`
+}
+
+// lint:cross-org — org-scoped. The node ids currently bound to a site — the bodyless-unbind sole-gateway
+// resolution (S8.6 #6 compat): a legacy DELETE with no body unbinds the site's ONE gateway; more than one
+// requires an explicit node_id.
+func (q *Queries) ListNodeIDsForSite(ctx context.Context, arg ListNodeIDsForSiteParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listNodeIDsForSite, arg.SiteID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingSiteSubnetsForOrg = `-- name: ListPendingSiteSubnetsForOrg :many
 SELECT ss.id, ss.site_id, ss.cidr, ss.status
 FROM site_subnets ss

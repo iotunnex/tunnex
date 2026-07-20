@@ -41,14 +41,17 @@ const (
 )
 
 // FailoverController holds ONE org's in-memory hysteresis state: per-member consecutive stale/fresh tick
-// counts + the demoted set. NOT persisted — rebuilt from stored freshness on a CP restart, so a mid-window
-// restart restarts the counts (delays a failover by ≤N ticks, NEVER causes a spurious one — the
-// conservative stance; dormant-machinery's cousin: no persistence for state the substrate re-derives).
+// counts + the demoted set. RESTART CONTRACT (S8.6 #1 — both halves): the COUNTERS are not persisted — a
+// mid-window restart restarts them (delays a failover by ≤N ticks, NEVER causes a spurious one — the
+// conservative stance). But the DEMOTION SET is REHYDRATED from the persisted `demoted` field on the
+// controller's first post-restart use (seedDemoted), so an in-flight demotion SURVIVES restart — a
+// still-stale primary is never spuriously restored. Counters conservative, demotion state durable.
 type FailoverController struct {
 	n, m    int
 	stale   map[uuid.UUID]int
 	fresh   map[uuid.UUID]int
 	demoted map[uuid.UUID]bool
+	seeded  bool // rehydrated from the persisted demoted set yet? (first-tick-post-restart guard)
 }
 
 // NewFailoverController builds a controller with the ruled thresholds (N=3 demote, M=5 restore).
@@ -56,6 +59,20 @@ func NewFailoverController() *FailoverController {
 	return &FailoverController{
 		n: failoverDemoteTicks, m: failoverRestoreTicks,
 		stale: map[uuid.UUID]int{}, fresh: map[uuid.UUID]int{}, demoted: map[uuid.UUID]bool{},
+	}
+}
+
+// seedDemoted rehydrates the demotion SET from the persisted `demoted` field on the controller's FIRST use
+// after a CP restart (S8.6 #1) — the demotion survives restart, so a still-stale primary is NOT spuriously
+// restored on the first tick. The hysteresis COUNTERS stay zero (conservative — a fresh member still needs M
+// ticks to restore, a stale one N to (re-)demote); only the demotion STATE is rehydrated.
+func (fc *FailoverController) seedDemoted(persisted []uuid.UUID) {
+	if fc.seeded {
+		return
+	}
+	fc.seeded = true
+	for _, id := range persisted {
+		fc.demoted[id] = true
 	}
 }
 
@@ -132,67 +149,136 @@ func (s *Service) RunFailoverTick(ctx context.Context) error {
 	return nil
 }
 
-// failoverOrg advances one org's tick: read the PERSISTED configured order (ReconcileHubSet's output — the
-// intent) + each member's freshness (node_peer_status, Slice 1) → Step → the DEMOTED set. If it differs from
-// the persisted demoted field, PERSIST it via the demoted-field writer (atomic generation bump) and AUDIT
-// the active-order transition IN THE SAME TX (#5 — an audit failure rolls back the demotion; the next tick
-// retries). The ordinary compile+push carries it (no failover-special path). Configured < 2 → nothing to
-// fail over. The controller writes ONLY `demoted` (the writer partition — ReconcileHubSet owns `configured`).
+// failoverOrg advances one org's tick — the ONE loop that owns the whole hub-set reconciliation (S8.6 #4/#5
+// REDUCE — the tick re-derives configured, carries demoted, derives active):
+//   - CONFIGURED CORRECTOR: re-derive the configured membership from the LIVE election (electSiteHubSet)
+//     every pass. This closes the four shadows of the deleted self-heal: every removal path (unbind, revoke,
+//     DeleteSite) is covered here BY CONSTRUCTION — a departed gateway drops from the live election, so the
+//     tick rewrites configured + audits the membership change within one tick; the event-triggers become
+//     belt-and-suspenders latency optimizations. The tick is configured's SECOND writer alongside
+//     ReconcileHubSet; legal under the writer-ownership law because BOTH write electSiteHubSet's output — one
+//     pure function, convergent by construction (a racing stale write self-heals the next tick).
+//   - DEMOTED (hysteresis): rehydrate the demotion set on the first post-restart tick (#1), advance the
+//     counts, collect the demoted set.
+// Both fields persist via their own per-field atomic upsert (writer partition preserved) IN ONE TX with their
+// audits (#5 — an audit failure rolls the whole tick back; the next tick retries). Idempotent: a stable world
+// changes neither field → zero writes, no generation churn.
 func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Time) error {
 	current, err := s.GetHubSet(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	configured := current.Configured
-	if len(configured) < 2 {
-		return nil // single hub (or none) → no failover
-	}
-	// pubkeys for the configured members (from the live gateways). A configured member no longer a gateway
-	// has no pubkey → no fresh handshake → it demotes; the next ReconcileHubSet drops it from configured.
-	topo, err := s.siteTopoLoad(ctx, orgID)
+	// ONE gateway read (no double GetOrgHubSet, no wasted subnet/dns load — #8). The live election needs only
+	// the gateways; a minimal topology carries them into electSiteHubSet.
+	gws, err := s.q.ListSiteGatewaysForOrg(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	pubkey := make(map[uuid.UUID]string, len(topo.gws))
-	for i := range topo.gws {
-		pubkey[topo.gws[i].ID] = topo.gws[i].WgPublicKey
-	}
-	// FRESHNESS — reads, never measures: a member is FRESH if a recent handshake exists with its pubkey
-	// (someone reached it) in node_peer_status. Same latest-per-key fold the view uses (#8 shared helper).
-	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
-	if err != nil {
-		return err
-	}
-	latest := latestByPubKey(rows)
-	freshness := make(map[uuid.UUID]bool, len(configured))
-	for _, id := range configured {
-		t := latest[pubkey[id]].LastHandshakeAt
-		freshness[id] = !t.IsZero() && now.Sub(t) < failoverStaleWindow
+	liveRows := electSiteHubSet(siteTopology{gws: gws}, now)
+	configured := make([]uuid.UUID, len(liveRows))
+	pubkey := make(map[uuid.UUID]string, len(liveRows))
+	for i := range liveRows {
+		configured[i] = liveRows[i].ID
+		pubkey[liveRows[i].ID] = liveRows[i].WgPublicKey
 	}
 
-	demoted := s.failoverFor(orgID).Step(configured, freshness)
-	if sameOrder(demoted, current.Demoted) {
-		return nil // the demotion state is unchanged → no active-order transition
-	}
-	// The transition KIND (condition 1b): the demoted set SHRANK → a failback (recovery); else a promotion (a
-	// member lost). old/new primary are DERIVED from the shared derivation over the old vs new demoted set.
-	oldActive := deriveActive(configured, current.Demoted)
-	newActive := deriveActive(configured, demoted)
-	action, condition := auditHubPromotion, "primary_stale"
-	if len(demoted) < len(current.Demoted) {
-		action, condition = auditHubFailback, "recovered"
-	}
-	// System actor (no user) — a CP-driven transition (actor_system convention). Persist + audit in ONE tx.
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
-		row, err := q.UpsertOrgHubSetDemoted(ctx, sqlc.UpsertOrgHubSetDemotedParams{OrgID: orgID, Demoted: demoted})
+	fc := s.failoverFor(orgID)
+	fc.seedDemoted(current.Demoted) // rehydrate the demotion set (#1) BEFORE the first Step
+	var demoted []uuid.UUID
+	if len(configured) >= 2 { // a single/zero-hub set has nothing to demote (configured still heals below)
+		rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
 		if err != nil {
 			return err
 		}
-		return audit(ctx, q, orgID, nil, action, "org", orgID.String(), map[string]any{
-			"old_primary": primaryOf(oldActive), "new_primary": primaryOf(newActive),
-			"generation": row.Generation, "condition": condition,
-		})
+		latest := latestByPubKey(rows)
+		freshness := make(map[uuid.UUID]bool, len(configured))
+		for _, id := range configured {
+			t := latest[pubkey[id]].LastHandshakeAt
+			freshness[id] = !t.IsZero() && now.Sub(t) < failoverStaleWindow
+		}
+		demoted = fc.Step(configured, freshness)
+	}
+
+	configuredChanged := !sameOrder(configured, current.Configured)
+	demotedChanged := !sameOrder(demoted, current.Demoted)
+	if !configuredChanged && !demotedChanged {
+		return nil // stable world → zero writes, no generation churn
+	}
+	oldActive := deriveActive(current.Configured, current.Demoted)
+	newActive := deriveActive(configured, demoted)
+	// #7: the transition KIND is derived per-member (added = newly demoted, restored = came out of demotion
+	// AND still configured), not a len() heuristic — a simultaneous demote+restore audits BOTH.
+	added, removed := diffSets(current.Demoted, demoted)
+	inConfigured := make(map[uuid.UUID]bool, len(configured))
+	for _, id := range configured {
+		inConfigured[id] = true
+	}
+	var restored []uuid.UUID
+	for _, id := range removed {
+		if inConfigured[id] { // a removed-from-demoted member that LEFT configured is a membership event, not a failback
+			restored = append(restored, id)
+		}
+	}
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if configuredChanged {
+			row, err := q.UpsertOrgHubSetConfigured(ctx, sqlc.UpsertOrgHubSetConfiguredParams{OrgID: orgID, Configured: configured})
+			if err != nil {
+				return err
+			}
+			if err := audit(ctx, q, orgID, nil, auditHubMembership, "org", orgID.String(), map[string]any{
+				"configured": idsToStrings(configured), "generation": row.Generation, "cause": "failover_corrector",
+			}); err != nil {
+				return err
+			}
+		}
+		if demotedChanged {
+			row, err := q.UpsertOrgHubSetDemoted(ctx, sqlc.UpsertOrgHubSetDemotedParams{OrgID: orgID, Demoted: demoted})
+			if err != nil {
+				return err
+			}
+			if len(added) > 0 {
+				if err := audit(ctx, q, orgID, nil, auditHubPromotion, "org", orgID.String(), map[string]any{
+					"demoted": idsToStrings(added), "old_primary": primaryOf(oldActive), "new_primary": primaryOf(newActive),
+					"generation": row.Generation, "condition": "primary_stale",
+				}); err != nil {
+					return err
+				}
+			}
+			if len(restored) > 0 {
+				if err := audit(ctx, q, orgID, nil, auditHubFailback, "org", orgID.String(), map[string]any{
+					"restored": idsToStrings(restored), "old_primary": primaryOf(oldActive), "new_primary": primaryOf(newActive),
+					"generation": row.Generation, "condition": "recovered",
+				}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
+}
+
+// diffSets returns (added, removed): members in b but not a (added, in b order), and in a but not b (removed,
+// in a order).
+func diffSets(a, b []uuid.UUID) (added, removed []uuid.UUID) {
+	inA := make(map[uuid.UUID]bool, len(a))
+	for _, id := range a {
+		inA[id] = true
+	}
+	inB := make(map[uuid.UUID]bool, len(b))
+	for _, id := range b {
+		inB[id] = true
+	}
+	for _, id := range b {
+		if !inA[id] {
+			added = append(added, id)
+		}
+	}
+	for _, id := range a {
+		if !inB[id] {
+			removed = append(removed, id)
+		}
+	}
+	return
 }
 
 // primaryOf is the head node-id of an ordered hub set as a string ("" when empty) — the audit's old/new
