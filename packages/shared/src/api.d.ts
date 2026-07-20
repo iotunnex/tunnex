@@ -1802,13 +1802,16 @@ export interface components {
             /** Format: uuid */
             org_id: string;
             /** @enum {string} */
-            src_kind: "group" | "user" | "site";
+            src_kind: "group" | "user" | "site" | "cidr";
             /** Format: uuid */
             src_group_id?: string | null;
             /** Format: uuid */
             src_user_id?: string | null;
             /** Format: uuid */
             src_site_id?: string | null;
+            /** @description Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise). */
+            src_cidr?: string | null;
+            cidr_outside_org_ranges: boolean;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site";
             /** Format: uuid */
@@ -1824,7 +1827,7 @@ export interface components {
         };
         CreatePolicyRuleRequest: {
             /** @enum {string} */
-            src_kind?: "group" | "user" | "site";
+            src_kind?: "group" | "user" | "site" | "cidr";
             /**
              * Format: uuid
              * @description Required when src_kind=group (or omitted).
@@ -1840,6 +1843,8 @@ export interface components {
              * @description Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source).
              */
             src_site_id?: string | null;
+            /** @description Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse). */
+            src_cidr?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site";
             /**

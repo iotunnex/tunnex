@@ -783,3 +783,39 @@ func TestNodeSetSeedCensus(t *testing.T) {
 			len(writes), writes)
 	}
 }
+
+// TestCIDRSourceGrantIsPrecise — S8.7 Slice 1: a src_kind='cidr' grant places the LITERAL CIDR (a /32) on
+// its CONTAINING site's gateway — the /32 reaches the dst, the REST of the site does NOT (the founder's
+// 172.31.17.64 → 10.0.0.4, "prove the rest of the site still drops"). A CIDR in NO site subnet compiles to
+// nothing (the warn-not-refuse case — no placement).
+func TestCIDRSourceGrantIsPrecise(t *testing.T) {
+	siteA := uuid.MustParse("00000000-0000-0000-0000-0000005c1d01")
+	gwA := uuid.MustParse("00000000-0000-0000-0000-0000000000d1")
+	res := uuid.MustParse("00000000-0000-0000-0000-0000000000d2")
+	snap := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "cidr", SrcCIDR: "172.31.17.64/32", DstKind: "resource", DstResourceID: res}},
+		Resources:   []policy.Resource{{ID: res, CIDR: "10.0.0.4/32", Protocol: "any"}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteA, CIDR: "172.31.0.0/16"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteA, NodeID: gwA, Endpoint: "a:51820"}},
+	}
+	a := allowsFor(policy.Compile(snap), gwA)
+	if !hasAllow(a, "172.31.17.64/32", "10.0.0.4/32") {
+		t.Fatalf("the /32 source must reach the dst, placed on the containing site's gateway, got %+v", a)
+	}
+	if hasAllow(a, "172.31.0.0/16", "10.0.0.4/32") {
+		t.Fatalf("the WHOLE site must NOT get the grant — /32 precision (the rest of the site drops), got %+v", a)
+	}
+
+	// A CIDR in NO site subnet → resolves to no containing site → compiles to nothing (warn-not-refuse).
+	orphan := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "cidr", SrcCIDR: "192.0.2.5/32", DstKind: "resource", DstResourceID: res}},
+		Resources:   []policy.Resource{{ID: res, CIDR: "10.0.0.4/32", Protocol: "any"}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteA, CIDR: "172.31.0.0/16"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteA, NodeID: gwA, Endpoint: "a:51820"}},
+	}
+	if a := allowsFor(policy.Compile(orphan), gwA); hasAllow(a, "192.0.2.5/32", "10.0.0.4/32") {
+		t.Fatalf("an out-of-world CIDR (in no site subnet) must compile to nothing, got %+v", a)
+	}
+}

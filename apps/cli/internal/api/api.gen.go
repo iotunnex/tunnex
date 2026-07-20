@@ -48,6 +48,7 @@ const (
 
 // Defines values for CreatePolicyRuleRequestSrcKind.
 const (
+	CreatePolicyRuleRequestSrcKindCidr  CreatePolicyRuleRequestSrcKind = "cidr"
 	CreatePolicyRuleRequestSrcKindGroup CreatePolicyRuleRequestSrcKind = "group"
 	CreatePolicyRuleRequestSrcKindSite  CreatePolicyRuleRequestSrcKind = "site"
 	CreatePolicyRuleRequestSrcKindUser  CreatePolicyRuleRequestSrcKind = "user"
@@ -219,6 +220,7 @@ const (
 
 // Defines values for PolicyRuleSrcKind.
 const (
+	PolicyRuleSrcKindCidr  PolicyRuleSrcKind = "cidr"
 	PolicyRuleSrcKindGroup PolicyRuleSrcKind = "group"
 	PolicyRuleSrcKindSite  PolicyRuleSrcKind = "site"
 	PolicyRuleSrcKindUser  PolicyRuleSrcKind = "user"
@@ -509,6 +511,9 @@ type CreatePolicyRuleRequest struct {
 
 	// ExpiresAt Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
 	ExpiresAt *time.Time `json:"expires_at"`
+
+	// SrcCidr Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse).
+	SrcCidr *string `json:"src_cidr"`
 
 	// SrcGroupId Required when src_kind=group (or omitted).
 	SrcGroupId *openapi_types.UUID             `json:"src_group_id"`
@@ -1040,18 +1045,22 @@ type PasswordResetRequest struct {
 
 // PolicyRule defines model for PolicyRule.
 type PolicyRule struct {
-	CreatedAt     time.Time           `json:"created_at"`
-	DstGroupId    *openapi_types.UUID `json:"dst_group_id"`
-	DstKind       PolicyRuleDstKind   `json:"dst_kind"`
-	DstResourceId *openapi_types.UUID `json:"dst_resource_id"`
-	DstSiteId     *openapi_types.UUID `json:"dst_site_id"`
-	ExpiresAt     *time.Time          `json:"expires_at"`
-	Id            openapi_types.UUID  `json:"id"`
-	OrgId         openapi_types.UUID  `json:"org_id"`
-	SrcGroupId    *openapi_types.UUID `json:"src_group_id"`
-	SrcKind       PolicyRuleSrcKind   `json:"src_kind"`
-	SrcSiteId     *openapi_types.UUID `json:"src_site_id"`
-	SrcUserId     *openapi_types.UUID `json:"src_user_id"`
+	CidrOutsideOrgRanges bool                `json:"cidr_outside_org_ranges"`
+	CreatedAt            time.Time           `json:"created_at"`
+	DstGroupId           *openapi_types.UUID `json:"dst_group_id"`
+	DstKind              PolicyRuleDstKind   `json:"dst_kind"`
+	DstResourceId        *openapi_types.UUID `json:"dst_resource_id"`
+	DstSiteId            *openapi_types.UUID `json:"dst_site_id"`
+	ExpiresAt            *time.Time          `json:"expires_at"`
+	Id                   openapi_types.UUID  `json:"id"`
+	OrgId                openapi_types.UUID  `json:"org_id"`
+
+	// SrcCidr Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise).
+	SrcCidr    *string             `json:"src_cidr"`
+	SrcGroupId *openapi_types.UUID `json:"src_group_id"`
+	SrcKind    PolicyRuleSrcKind   `json:"src_kind"`
+	SrcSiteId  *openapi_types.UUID `json:"src_site_id"`
+	SrcUserId  *openapi_types.UUID `json:"src_user_id"`
 }
 
 // PolicyRuleDstKind defines model for PolicyRule.DstKind.

@@ -626,3 +626,45 @@ func TestAuditedDeletesPersistMetadata(t *testing.T) {
 		assertAudit(t, f, "policy.rule_deleted", rule.ID.String())
 	})
 }
+
+// TestCIDRWarnShedsWhenRangeLands — S8.7 D1 warn-not-refuse: a src_kind='cidr' rule whose CIDR is in no
+// current site subnet WARNS (cidr_outside_org_ranges), and the warning SHEDS at READ time once a containing
+// subnet lands — no rule edit. Both directions: warn appears (out-of-world), warn clears (in-world).
+func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	svc := policy.NewService(pool)
+	org, site := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')`, org, "cw-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+	if _, e := pool.Exec(ctx, `INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org); e != nil {
+		t.Fatalf("site: %v", e)
+	}
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	if e != nil {
+		t.Fatalf("resource: %v", e)
+	}
+	cidr := "172.31.17.64/32"
+	rule, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID})
+	if e != nil {
+		t.Fatalf("cidr rule: %v", e)
+	}
+	// No site subnet contains 172.31.17.64 yet → WARN.
+	w, e := svc.PolicyRuleCidrWarnings(ctx, org)
+	if e != nil {
+		t.Fatalf("warnings: %v", e)
+	}
+	if !w[rule.ID] {
+		t.Fatal("an out-of-world cidr rule must WARN (cidr_outside_org_ranges)")
+	}
+	// The containing subnet lands (approved) → the warning SHEDS, read-time, no rule edit.
+	if _, e := pool.Exec(ctx, `INSERT INTO site_subnets (site_id,cidr,status) VALUES ($1,'172.31.0.0/16','approved')`, site); e != nil {
+		t.Fatalf("subnet: %v", e)
+	}
+	w2, _ := svc.PolicyRuleCidrWarnings(ctx, org)
+	if w2[rule.ID] {
+		t.Fatal("the warning must SHED once the containing range lands (read-time derived, no edit)")
+	}
+}

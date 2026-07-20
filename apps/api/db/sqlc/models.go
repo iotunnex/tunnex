@@ -294,6 +294,7 @@ type PolicyRule struct {
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 	DstSiteID     pgtype.UUID        `json:"dst_site_id"`
 	SrcSiteID     pgtype.UUID        `json:"src_site_id"`
+	SrcCidr       *string            `json:"src_cidr"`
 }
 
 type Resource struct {

@@ -36,10 +36,11 @@ type ResourceInput struct {
 // SrcUserID); ExpiresAt set makes it a temporary grant (nil = permanent). SrcKind
 // blank is treated as "group" (back-compat with pre-S7.5.4 callers).
 type RuleInput struct {
-	SrcKind       string // "" | group | user | site (S8.2)
+	SrcKind       string // "" | group | user | site (S8.2) | cidr (S8.7)
 	SrcGroupID    uuid.UUID
 	SrcUserID     *uuid.UUID
 	SrcSiteID     *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
+	SrcCIDR       *string    // S8.7: set iff SrcKind=="cidr" — a literal source CIDR (/32-precise grants)
 	DstKind       string     // resource | group | site (S8.1)
 	DstResourceID *uuid.UUID
 	DstGroupID    *uuid.UUID

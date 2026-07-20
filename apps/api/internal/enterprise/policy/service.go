@@ -274,6 +274,36 @@ func (s *Service) ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.
 	return s.q.ListPolicyRulesByOrg(ctx, orgID)
 }
 
+// PolicyRuleCidrWarnings computes, per rule id, the S8.7 read-time warning cidr_outside_org_ranges: true for
+// a src_kind='cidr' rule whose CIDR is inside NO current site subnet — a rule that compiles to nothing (the
+// reassuring-rule guard, D1 warn-not-refuse). ONE-TRUTH with the compiler placement: it reuses containingSite
+// over the SAME site subnets, so the warning fires EXACTLY when the placement finds no site (warn ⟺
+// won't-enforce). DERIVED at READ time from CURRENT ranges — a rule out-of-world at creation and in-world
+// after the range lands SHEDS its warning with no edit. (Routed-range/device-pool ranges are a noted S8.7
+// boundary: they neither place the grant nor clear the warning in this slice — a CIDR in only those ranges
+// still won't enforce, so warning it is honest.)
+func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
+	rules, err := s.q.ListPolicyRulesByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	siteSubnets, err := s.q.ListSiteSubnetsForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	siteCIDRs := map[uuid.UUID][]string{}
+	for _, ss := range siteSubnets {
+		siteCIDRs[ss.SiteID] = append(siteCIDRs[ss.SiteID], ss.Cidr.String())
+	}
+	out := map[uuid.UUID]bool{}
+	for _, r := range rules {
+		if r.SrcKind == "cidr" && r.SrcCidr != nil {
+			out[r.ID] = containingSite(*r.SrcCidr, siteCIDRs) == uuid.Nil
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error) {
 	// SOURCE-subject shape (S7.5.4): "" defaults to "group" (back-compat). Exactly one
 	// of src_group_id / src_user_id, matching src_kind (the DB CHECK backstops it).
@@ -294,8 +324,17 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		if in.SrcSiteID == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil {
 			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=site requires src_site_id (and no src_group_id/src_user_id)")
 		}
+	case "cidr": // S8.7: a literal source CIDR (/32-precise). Well-formed here; ORG-RANGE meaningfulness is a
+		// READ-TIME WARNING (warn-not-refuse, D1), NOT a creation refusal — an admin may pre-stage a rule for
+		// a range about to be declared.
+		if in.SrcCIDR == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil || in.SrcSiteID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=cidr requires src_cidr (and no src_group_id/src_user_id/src_site_id)")
+		}
+		if _, err := netip.ParsePrefix(*in.SrcCIDR); err != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_cidr must be a valid CIDR (e.g. 172.31.17.64/32)")
+		}
 	default:
-		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, or site")
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, site, or cidr")
 	}
 	// Destination shape: exactly one dst_* set, matching dst_kind.
 	switch in.DstKind {
@@ -336,15 +375,17 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 				}
 				return e
 			}
-		} else { // site (S8.2) — the source site must exist in THIS org. A SUBNETLESS source site is
-			// ALLOWED (symmetric to the dst ruling): it compiles to nothing until subnets are added, so
-			// refusing would impose an ordering dependency.
+		} else if srcKind == "site" { // S8.2 — the source site must exist in THIS org. A SUBNETLESS source
+			// site is ALLOWED (symmetric to the dst ruling): it compiles to nothing until subnets are added,
+			// so refusing would impose an ordering dependency.
 			if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: *in.SrcSiteID, OrgID: orgID}); e != nil {
 				if errors.Is(e, pgx.ErrNoRows) {
 					return apierr.BadRequest("site_not_found", "src site not found")
 				}
 				return e
 			}
+			// srcKind == "cidr" (S8.7): a LITERAL CIDR has no DB entity — no cross-org ref check. Its
+			// org-range meaningfulness is a READ-TIME warning (D1 warn-not-refuse), not a creation gate.
 		}
 		if in.DstResourceID != nil {
 			if _, e := q.GetResource(ctx, sqlc.GetResourceParams{ID: *in.DstResourceID, OrgID: orgID}); e != nil {
@@ -375,7 +416,7 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		var e error
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
-			SrcSiteID: toPgUUID(in.SrcSiteID),
+			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
 			DstKind:   in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
@@ -649,6 +690,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 			ID:         r.ID,
 			SrcKind:    r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
 			SrcSiteID:     fromPgUUID(r.SrcSiteID), // S8.2: src_kind='site' resolution
+			SrcCIDR:       derefString(r.SrcCidr),  // S8.7: src_kind='cidr' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 			DstSiteID:     fromPgUUID(r.DstSiteID),
@@ -859,6 +901,15 @@ func toPgUUID(id *uuid.UUID) pgtype.UUID {
 		return pgtype.UUID{Valid: false}
 	}
 	return pgtype.UUID{Bytes: *id, Valid: true}
+}
+
+// derefString maps a nullable text pointer (sqlc emits *string for a nullable column) to its value, "" when
+// NULL — the src_cidr (S8.7) read path.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // toPgUUIDVal maps a value UUID to nullable pg: uuid.Nil => SQL NULL (a per-user

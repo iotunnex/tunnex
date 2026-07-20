@@ -32,6 +32,9 @@ type policyPort interface {
 	DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
 	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
+	// PolicyRuleCidrWarnings returns per-rule-id the S8.7 cidr_outside_org_ranges warning (a src_kind='cidr'
+	// rule whose CIDR is in no current site subnet → compiles to nothing). Read-time derived.
+	PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
 	ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error)
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
@@ -247,9 +250,13 @@ func (s apiServer) ListPolicyRules(ctx context.Context, req api.ListPolicyRulesR
 	if err != nil {
 		return nil, err
 	}
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId) // S8.7 read-time warn (D1)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]api.PolicyRule, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, toAPIRule(r))
+		out = append(out, toAPIRule(r, warn[r.ID]))
 	}
 	return api.ListPolicyRules200JSONResponse{Body: out, Headers: api.ListPolicyRules200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
@@ -267,6 +274,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	in := policyspec.RuleInput{
 		SrcUserID:     req.Body.SrcUserId,
 		SrcSiteID:     req.Body.SrcSiteId, // S8.2: src_kind=site
+		SrcCIDR:       req.Body.SrcCidr,   // S8.7: src_kind=cidr
 		DstKind:       string(req.Body.DstKind),
 		DstResourceID: req.Body.DstResourceId,
 		DstGroupID:    req.Body.DstGroupId,
@@ -283,7 +291,11 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if err != nil {
 		return nil, err
 	}
-	return api.CreatePolicyRule201JSONResponse{Body: toAPIRule(r), Headers: api.CreatePolicyRule201ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId) // S8.7 read-time warn for the created rule
+	if err != nil {
+		return nil, err
+	}
+	return api.CreatePolicyRule201JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.CreatePolicyRule201ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 func (s apiServer) DeletePolicyRule(ctx context.Context, req api.DeletePolicyRuleRequestObject) (api.DeletePolicyRuleResponseObject, error) {
@@ -314,7 +326,11 @@ func (s apiServer) ExtendGrant(ctx context.Context, req api.ExtendGrantRequestOb
 	if err != nil {
 		return nil, err
 	}
-	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 // ── enforcement mode ──────────────────────────────────────────────────────────
@@ -391,10 +407,11 @@ func toAPIResource(r sqlc.Resource) api.Resource {
 	return out
 }
 
-func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
+func toAPIRule(r sqlc.PolicyRule, cidrOutside bool) api.PolicyRule {
 	out := api.PolicyRule{
 		Id: r.ID, OrgId: r.OrgID, SrcKind: api.PolicyRuleSrcKind(r.SrcKind),
 		DstKind: api.PolicyRuleDstKind(r.DstKind), CreatedAt: r.CreatedAt,
+		CidrOutsideOrgRanges: cidrOutside, // S8.7 warn-not-refuse (D1); always false for non-cidr sources
 	}
 	if r.SrcGroupID.Valid {
 		u := uuid.UUID(r.SrcGroupID.Bytes)
@@ -407,6 +424,9 @@ func toAPIRule(r sqlc.PolicyRule) api.PolicyRule {
 	if r.SrcSiteID.Valid { // S8.2: src_kind=site
 		u := uuid.UUID(r.SrcSiteID.Bytes)
 		out.SrcSiteId = &u
+	}
+	if r.SrcCidr != nil { // S8.7: src_kind=cidr
+		out.SrcCidr = r.SrcCidr
 	}
 	if r.DstResourceID.Valid {
 		u := uuid.UUID(r.DstResourceID.Bytes)

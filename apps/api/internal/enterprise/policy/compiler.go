@@ -22,6 +22,29 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 )
 
+// containingSite returns the site whose approved subnet CONTAINS the given source CIDR (S8.7 src_kind='cidr'
+// placement) — the site gateway that forwards that host's LAN traffic. Site subnets are disjoint (the S8.1
+// validator), so at most one contains it; uuid.Nil when none does (an out-of-world / device-pool / routed-
+// range CIDR → no site placement → the grant compiles to nothing, the warn-not-refuse case). Pure.
+func containingSite(cidr string, siteCIDRs map[uuid.UUID][]string) uuid.UUID {
+	c, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return uuid.Nil
+	}
+	for siteID, cidrs := range siteCIDRs {
+		for _, sc := range cidrs {
+			s, err := netip.ParsePrefix(sc)
+			if err != nil {
+				continue
+			}
+			if s.Bits() <= c.Bits() && s.Contains(c.Masked().Addr()) { // the src CIDR is within this site subnet
+				return siteID
+			}
+		}
+	}
+	return uuid.Nil
+}
+
 // Modes (mirror the organizations.zero_trust_mode CHECK).
 const (
 	ModeOff       = "off"
@@ -37,10 +60,11 @@ const (
 // filtered OUT of the Snapshot before Compile (the pure compiler is clockless).
 type Rule struct {
 	ID            uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
-	SrcKind       string    // "group" | "user" | "site" (S8.2) ("" treated as group for legacy rows)
+	SrcKind       string    // "group" | "user" | "site" (S8.2) | "cidr" (S8.7) ("" treated as group for legacy rows)
 	SrcGroupID    uuid.UUID
 	SrcUserID     uuid.UUID
 	SrcSiteID     uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
+	SrcCIDR       string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
 	DstKind       string
 	DstResourceID uuid.UUID
 	DstGroupID    uuid.UUID
@@ -399,15 +423,32 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	// placement is Slice 2 (the topology graph) — Slice 1 places the endpoints, correct for the
 	// co-located/direct case and provable now.
 	for _, r := range s.Rules {
-		if r.SrcKind != "site" {
+		// S8.7: src_kind='cidr' is site-src NARROWED to a literal CIDR — resolve the CIDR to its CONTAINING
+		// site subnet and place on that site's gateway (ONE emitter, mirroring the site-src path below). A
+		// CIDR in no site subnet (out-of-world, or a device-pool/routed-range address) resolves to no site →
+		// no placement → compiles to nothing (the warn-not-refuse case: the rule exists + warns, enforces
+		// nothing until it is in-world). Routed-range/device-pool PLACEMENT is a noted S8.7 boundary (like
+		// S8.2 Slice-1 placed only the site endpoints); site-subnet-contained CIDRs are the ruled scope.
+		var srcCIDRs []string
+		var srcSite uuid.UUID
+		switch r.SrcKind {
+		case "site":
+			srcSite = r.SrcSiteID
+			srcCIDRs = siteCIDRs[r.SrcSiteID]
+		case "cidr":
+			if r.SrcCIDR == "" {
+				continue
+			}
+			srcSite = containingSite(r.SrcCIDR, siteCIDRs)
+			srcCIDRs = []string{r.SrcCIDR}
+		default:
 			continue
 		}
-		srcCIDRs := siteCIDRs[r.SrcSiteID]
 		if len(srcCIDRs) == 0 {
 			continue // subnetless source site
 		}
 		enforceNodes := map[uuid.UUID]bool{}
-		if n := siteNode[r.SrcSiteID]; n != uuid.Nil {
+		if n := siteNode[srcSite]; n != uuid.Nil {
 			enforceNodes[n] = true
 		}
 		if r.DstKind == "site" {
