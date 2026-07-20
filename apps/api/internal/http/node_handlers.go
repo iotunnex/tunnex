@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -102,6 +103,14 @@ func (s apiServer) RevokeNode(ctx context.Context, req api.RevokeNodeRequestObje
 	p, _ := authctx.PrincipalFrom(ctx)
 	if err := s.nodes.Revoke(ctx, p.UserID, req.OrgId, req.NodeId); err != nil {
 		return nil, err
+	}
+	// S8.6 #4 (revoke-path): revoking a gateway removes it from the hub-set candidate pool (it just dropped
+	// out of ListSiteGatewaysForOrg via status='active') → re-elect + persist the configured membership so
+	// the drop is durable + audited (hub_set.membership). Best-effort, like bind/unbind: a reconcile hiccup
+	// must not fail the revoke (the set self-heals on the next membership event / tick). A non-gateway node
+	// is a harmless no-op (it was never in the set).
+	if _, err := s.nodes.ReconcileHubSet(ctx, req.OrgId); err != nil {
+		slog.WarnContext(ctx, "hub_set_reconcile_failed", "op", "revoke", "org_id", req.OrgId.String(), "error", err.Error())
 	}
 	return api.RevokeNode204Response{
 		Headers: api.RevokeNode204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},

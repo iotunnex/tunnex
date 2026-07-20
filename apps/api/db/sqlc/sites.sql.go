@@ -305,7 +305,7 @@ func (q *Queries) ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID
 
 const listSiteGatewaysForOrg = `-- name: ListSiteGatewaysForOrg :many
 SELECT id, site_id, wg_public_key, endpoint, last_seen_at, hub_priority FROM nodes
-WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> ''
+WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '' AND status = 'active'
 `
 
 type ListSiteGatewaysForOrgRow struct {
@@ -322,6 +322,11 @@ type ListSiteGatewaysForOrgRow struct {
 // yet can't be a peer, so it is excluded. endpoint is ” for a NAT'd spoke (it dials out).
 // S8.6: last_seen_at + hub_priority are the election ORDERING inputs (health + the admin pin) — additive,
 // the S8.2 site-link-graph consumers read only id/site_id/wg_public_key/endpoint.
+// S8.6 #4 (revoke-path): status='active' — a REVOKED gateway must not be a site-link peer NOR a hub
+// candidate (revocation is a full sweep; "revoked but still electable as the org's transit hub" contradicts
+// the product's loudest promise at the topology tier). Revoking a gateway drops it here → the derive-then-
+// filter drops it from the active order (no blackhole) and RevokeNode's ReconcileHubSet trigger makes the
+// configured drop durable + audited.
 func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listSiteGatewaysForOrg, orgID)
 	if err != nil {

@@ -469,3 +469,84 @@ func TestReconcileHubSetMembershipAudit(t *testing.T) {
 		t.Fatalf("view must agree with the reconciled set: [g2 primary], got %+v", view.Members)
 	}
 }
+
+// TestRevokedGatewayLeavesHubSet — S8.6 #4 (revoke-path): a REVOKED gateway drops from the hub-set candidate
+// pool (the status='active' filter on ListSiteGatewaysForOrg) and RevokeNode's ReconcileHubSet trigger makes
+// the drop durable. Revoking the PRIMARY (the loudest case — the org's active transit hub itself) removes it
+// from configured, promotes the standby to the active head via the ORDINARY derivation (no blackhole), bumps
+// the generation, and audits hub_set.membership. "Revoked but still electable as the org's transit hub" —
+// the promise-contradiction at the topology tier — is closed.
+func TestRevokedGatewayLeavesHubSet(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "rv-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	primary, standby := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, "e:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(primary, "primary", "KPRI", 1)
+	mk(standby, "standby", "KSTB", 2)
+
+	svc := NewService(pool, nil, nil)
+	hs1, e := svc.ReconcileHubSet(ctx, org) // configured=[primary, standby]
+	if e != nil {
+		t.Fatalf("reconcile 1: %v", e)
+	}
+	if len(hs1.Configured) != 2 || hs1.Active()[0] != primary {
+		t.Fatalf("configured must be [primary, standby], got %v", hs1.Configured)
+	}
+	membershipAudits := func() int {
+		var n int
+		_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs WHERE org_id=$1 AND action='hub_set.membership'", org).Scan(&n)
+		return n
+	}
+
+	// REVOKE THE PRIMARY (the active transit hub). It drops from ListSiteGatewaysForOrg (status='active') —
+	// this is what RevokeNode's trigger reconciles against.
+	if _, e := pool.Exec(ctx, "UPDATE nodes SET status='revoked' WHERE id=$1", primary); e != nil {
+		t.Fatalf("revoke primary: %v", e)
+	}
+	hs2, e := svc.ReconcileHubSet(ctx, org) // the RevokeNode trigger's effect
+	if e != nil {
+		t.Fatalf("reconcile 2: %v", e)
+	}
+	if len(hs2.Configured) != 1 || hs2.Configured[0] != standby {
+		t.Fatalf("a revoked primary must leave configured; the standby becomes the set, got %v", hs2.Configured)
+	}
+	if hs2.Active()[0] != standby {
+		t.Fatalf("the standby must be the NEW active primary (promotion-shaped, no blackhole), got %v", hs2.Active())
+	}
+	if hs2.Generation <= hs1.Generation {
+		t.Fatalf("a revoked-gateway membership change must bump the generation: %d -> %d", hs1.Generation, hs2.Generation)
+	}
+	if membershipAudits() != 2 {
+		t.Fatalf("the revoke membership change must audit hub_set.membership (2 total), got %d", membershipAudits())
+	}
+	// The view agrees — the revoked primary is GONE, the standby is primary (no ghost hub candidate).
+	view, _ := svc.GetHubSetView(ctx, org)
+	if len(view.Members) != 1 || view.Members[0].NodeID != standby {
+		t.Fatalf("the view must show only the live standby as primary, got %+v", view.Members)
+	}
+}
