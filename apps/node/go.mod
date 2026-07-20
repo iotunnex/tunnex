@@ -10,13 +10,13 @@ go 1.25
 toolchain go1.25.11
 
 require (
+	github.com/florianl/go-conntrack v0.7.0
 	github.com/florianl/go-nflog/v2 v2.3.0
 	golang.org/x/net v0.50.0
 	golang.org/x/sys v0.41.0
 )
 
 require (
-	github.com/florianl/go-conntrack v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/mdlayher/netlink v1.9.1-0.20260312172110-2a932c0fc1ae // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
