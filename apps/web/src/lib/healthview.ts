@@ -34,6 +34,8 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       return { label: "site link down", tone: "danger" }; // S8.2: a site-to-site tunnel has no fresh handshake
     case "site_subnet_unreachable":
       return { label: "site subnet unreachable", tone: "danger" }; // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped)
+    case "conntrack_flush_unavailable":
+      return { label: "expiry-flush degraded", tone: "warn" }; // S8.7: can't tear down expired-grant flows (CAP_NET_ADMIN?) — revoked flows may linger
     default:
       // Degraded per the authoritative bool but the kind is absent/healthy — still show a
       // badge (never less alarmed than the bool).

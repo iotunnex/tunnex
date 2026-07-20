@@ -20,6 +20,11 @@ func TestDegradedKind(t *testing.T) {
 		want PolicyDegradedKind
 	}{
 		{"healthy — in sync, fresh", base, KindHealthy},
+		// S8.7 Slice 2: policy in sync but the expired-grant flush is failing → conntrack_flush_unavailable
+		// (lowest-priority degradation, surfaced only when otherwise healthy).
+		{"conntrack_flush_unavailable — synced but flush failing", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now, ConntrackFlushUnavailable: true}, KindConntrackFlushUnavailable},
+		// MASKED: a louder desync outranks it — flush-unavailable is the quietest signal, never the headline.
+		{"masked — desync outranks flush-unavailable", KindInput{PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second), ConntrackFlushUnavailable: true}, KindSilentDesync},
 		{"apply_failing — error + failing_since", KindInput{PolicyError: "boom", PolicyFailingSince: "t0", ReportAge: fresh, Now: now}, KindApplyFailing},
 		{"stuck_enforcing — error + NO failing_since", KindInput{PolicyError: "boom", ReportAge: fresh, Now: now}, KindStuckEnforcing},
 		// [fold 3] TERM-2: failing_since set with NO error must be apply_failing, NEVER the benign

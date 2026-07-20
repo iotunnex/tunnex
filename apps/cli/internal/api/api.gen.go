@@ -187,16 +187,17 @@ const (
 
 // Defines values for NodePolicyDegradedKind.
 const (
-	ApplyFailing             NodePolicyDegradedKind = "apply_failing"
-	Converging               NodePolicyDegradedKind = "converging"
-	DesyncUnknown            NodePolicyDegradedKind = "desync_unknown"
-	Healthy                  NodePolicyDegradedKind = "healthy"
-	SilentDesync             NodePolicyDegradedKind = "silent_desync"
-	SiteHubDown              NodePolicyDegradedKind = "site_hub_down"
-	SiteLinkDown             NodePolicyDegradedKind = "site_link_down"
-	SiteSubnetUnreachable    NodePolicyDegradedKind = "site_subnet_unreachable"
-	StuckEnforcing           NodePolicyDegradedKind = "stuck_enforcing"
-	UnsupportedPolicyVersion NodePolicyDegradedKind = "unsupported_policy_version"
+	ApplyFailing              NodePolicyDegradedKind = "apply_failing"
+	ConntrackFlushUnavailable NodePolicyDegradedKind = "conntrack_flush_unavailable"
+	Converging                NodePolicyDegradedKind = "converging"
+	DesyncUnknown             NodePolicyDegradedKind = "desync_unknown"
+	Healthy                   NodePolicyDegradedKind = "healthy"
+	SilentDesync              NodePolicyDegradedKind = "silent_desync"
+	SiteHubDown               NodePolicyDegradedKind = "site_hub_down"
+	SiteLinkDown              NodePolicyDegradedKind = "site_link_down"
+	SiteSubnetUnreachable     NodePolicyDegradedKind = "site_subnet_unreachable"
+	StuckEnforcing            NodePolicyDegradedKind = "stuck_enforcing"
+	UnsupportedPolicyVersion  NodePolicyDegradedKind = "unsupported_policy_version"
 )
 
 // Defines values for NodeStatus.

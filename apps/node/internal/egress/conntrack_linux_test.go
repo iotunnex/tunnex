@@ -48,6 +48,11 @@ func TestMatchesTupleScoped(t *testing.T) {
 		{"different dst", "172.31.17.64", "10.0.0.5", 6, 5432},
 		{"different proto", "172.31.17.64", "10.0.0.4", 17, 5432},
 		{"different dst-port", "172.31.17.64", "10.0.0.4", 6, 5433},
+		// GAP-3 ruling: orig-tuple-only matching is correct. A flow whose ORIGIN runs the OTHER way (B→A,
+		// B-initiated) was authorized by a DIFFERENT grant and must SURVIVE the A→B rule's flush — matching
+		// the reply tuple would over-delete, violating innocent-neighbor from the opposite side. (Deleting
+		// the A→B flow's conntrack entry already kills BOTH its directions — one entry, orig+reply.)
+		{"reply-direction (B-initiated, own grant)", "10.0.0.4", "172.31.17.64", 6, 5432},
 	}
 	for _, n := range survivors {
 		if matchesTuple(con(n.src, n.dst, n.proto, n.dport), rt) {
@@ -144,5 +149,22 @@ func TestFlushFailureSurfacedNotSilent(t *testing.T) {
 	m.mu.Unlock()
 	if fe == nil {
 		t.Fatal("a flush failure must be SURFACED in flushErr (never silent)")
+	}
+	// SURFACED on the health plane: the agent reports it via ConntrackFlushFailing → conntrack_flush_unavailable.
+	if !m.ConntrackFlushFailing() {
+		t.Fatal("a persistent flush failure must be reported via ConntrackFlushFailing (health-plane surface)")
+	}
+	// RECOVERY: the next successful flush clears it (CAP restored / netlink healthy) → the kind clears.
+	m.ctFlush = func(context.Context, []flowTuple) (int, error) { return 1, nil }
+	if err := m.applyAndTrack(ctx, "ruleset", &nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Allow: []nodepolicy.AllowEntry{a}}); err != nil {
+		t.Fatalf("re-add grant: %v", err)
+	}
+	m.drainFlush(ctx)
+	if err := m.applyAndTrack(ctx, "ruleset", &nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing}); err != nil {
+		t.Fatalf("re-remove grant: %v", err)
+	}
+	m.drainFlush(ctx)
+	if m.ConntrackFlushFailing() {
+		t.Fatal("a successful flush must CLEAR the failing state (recovery → kind clears)")
 	}
 }

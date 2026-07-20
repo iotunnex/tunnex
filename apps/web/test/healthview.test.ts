@@ -36,6 +36,12 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
     expect(policyHealthBadge(node(true))).not.toBeNull();
   });
 
+  it("S8.7 conntrack_flush_unavailable → a distinct warn badge (expiry-flush degraded)", () => {
+    const b = policyHealthBadge(node(true, "conntrack_flush_unavailable"));
+    expect(b?.tone).toBe("warn");
+    expect(b?.label).toMatch(/flush/i);
+  });
+
   it("S8.2 kinds render distinct danger badges (site hub/link down, agent too old)", () => {
     expect(policyHealthBadge(node(true, "unsupported_policy_version"))?.tone).toBe("danger");
     const hub = policyHealthBadge(node(true, "site_hub_down"));

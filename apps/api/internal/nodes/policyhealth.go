@@ -15,11 +15,11 @@ type PolicyDegradedKind string
 
 const (
 	KindHealthy        PolicyDegradedKind = "healthy"
-	KindApplyFailing   PolicyDegradedKind = "apply_failing"    // enforcing apply currently failing
-	KindStuckEnforcing PolicyDegradedKind = "stuck_enforcing"  // enforcing a disabled/off policy it can't swap out
-	KindConverging     PolicyDegradedKind = "converging"       // pushed!=applied, fresh, age < T — a normal push settling
-	KindSilentDesync   PolicyDegradedKind = "silent_desync"    // pushed!=applied, fresh, age >= T — stuck (the S7.2 nightmare)
-	KindDesyncUnknown  PolicyDegradedKind = "desync_unknown"   // can't determine: pushed-hash unavailable, or stamped + reports stale
+	KindApplyFailing   PolicyDegradedKind = "apply_failing"   // enforcing apply currently failing
+	KindStuckEnforcing PolicyDegradedKind = "stuck_enforcing" // enforcing a disabled/off policy it can't swap out
+	KindConverging     PolicyDegradedKind = "converging"      // pushed!=applied, fresh, age < T — a normal push settling
+	KindSilentDesync   PolicyDegradedKind = "silent_desync"   // pushed!=applied, fresh, age >= T — stuck (the S7.2 nightmare)
+	KindDesyncUnknown  PolicyDegradedKind = "desync_unknown"  // can't determine: pushed-hash unavailable, or stamped + reports stale
 	// KindUnsupportedPolicyVersion (S8.1 D1): the agent REFUSED the compiled artifact — its
 	// Version exceeds what the agent can apply — and went deny-all. UNIQUE remedy: upgrade the
 	// agent (every other kind's remedy is CP-side). Highest priority: a refusing gateway isn't
@@ -41,6 +41,15 @@ const (
 	// site-link kinds: a reachability/deploy fault whose remedy is operator-side (fix the gateway's host
 	// networking — run host-mode / correct the advertised subnet), like the version-refused kind.
 	KindSiteSubnetUnreachable PolicyDegradedKind = "site_subnet_unreachable"
+	// KindConntrackFlushUnavailable (S8.7 Slice 2): the agent could NOT flush the conntrack entries of an
+	// expired/revoked grant (CAP_NET_ADMIN absent in this deployment shape, or a netlink fault) — so
+	// established flows under a since-removed grant may LINGER past the grant's death. The policy applies
+	// correctly (this is NOT a desync); the degradation is enforcement HYGIENE — a revoked grant's open
+	// flows aren't torn down. LOWEST priority: surfaced only when policy is otherwise synced + links up (a
+	// desync/apply/link fault is the louder headline and masks it); remedy operator-side (restore
+	// CAP_NET_ADMIN to the gateway). Never silent — it lives on the same health plane as every other
+	// degradation, not just a log line.
+	KindConntrackFlushUnavailable PolicyDegradedKind = "conntrack_flush_unavailable"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -84,12 +93,16 @@ type KindInput struct {
 	DesyncSince        time.Time     // CP-stamped onset of term-3 (zero = not stamped)
 	ReportAge          time.Duration // now − last_seen_at (report freshness)
 	Now                time.Time
-	UnsupportedVersion bool          // agent-reported: it REFUSED a too-new artifact (S8.1 D1) → highest-priority kind
-	SiteHubDown        bool          // S8.2: a site gateway whose HUB site-link has no fresh WG handshake (all spokes' site traffic dead)
-	SiteLinkDown       bool          // S8.2: a site gateway with ≥1 spoke site-link with no fresh handshake (that spoke's traffic dead)
+	UnsupportedVersion bool // agent-reported: it REFUSED a too-new artifact (S8.1 D1) → highest-priority kind
+	SiteHubDown        bool // S8.2: a site gateway whose HUB site-link has no fresh WG handshake (all spokes' site traffic dead)
+	SiteLinkDown       bool // S8.2: a site gateway with ≥1 spoke site-link with no fresh handshake (that spoke's traffic dead)
 	// SiteSubnetUnreachable (S8.2c D3): the gateway advertises a local subnet no host address is inside —
 	// the reassuring-green bridge-mode trap. INDEPENDENT of SiteLinkDown (fires when the link is FRESH).
 	SiteSubnetUnreachable bool
+	// ConntrackFlushUnavailable (S8.7 Slice 2): the agent's expired-grant conntrack flush is failing (no
+	// CAP_NET_ADMIN / netlink fault). Lowest-priority degradation — surfaced only when policy is otherwise
+	// healthy.
+	ConntrackFlushUnavailable bool
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -111,6 +124,7 @@ var transitionTable = []TransitionRule{
 	{KindConverging, "term-3 (pushed!=applied), reports fresh, age < T"},
 	{KindSilentDesync, "term-3 (pushed!=applied), reports fresh, age >= T"},
 	{KindDesyncUnknown, "pushed-hash UNAVAILABLE, OR (stamped AND reports stale) — cannot determine"},
+	{KindConntrackFlushUnavailable, "policy in sync but the expired-grant conntrack flush is failing (ConntrackFlushUnavailable) — lowest priority; remedy = restore CAP_NET_ADMIN"},
 }
 
 // degradedKind projects the advisory kind (pure — mirrors transitionTable). Order matters:
@@ -157,6 +171,12 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	// pushed "" = non-enforcing (off/mesh) — no enforcement boundary, so never a desync
 	// (mirrors the bool's term-3 `h != ""` guard). Equal hashes = in sync / reconverged.
 	if in.PushedHash == "" || in.AppliedHash == in.PushedHash {
+		// S8.7 Slice 2 — LOWEST priority: policy is in sync, but the expired-grant conntrack flush is
+		// failing (revoked grants' flows may linger). Ranked here so any louder fault (version/apply/desync/
+		// link) masks it; only an otherwise-healthy gateway surfaces conntrack_flush_unavailable.
+		if in.ConntrackFlushUnavailable {
+			return KindConntrackFlushUnavailable
+		}
 		return KindHealthy
 	}
 	// pushed != applied. A stale report can't confirm ONGOING desync → desync_unknown (the

@@ -152,6 +152,17 @@ func New(wgIface string) *Manager {
 // into the site_subnet_unreachable health signal so it never blackholes green.
 func (m *Manager) ForwardBlocked() bool { return m.forwardBlocked.Load() }
 
+// ConntrackFlushFailing reports whether the last expired-grant conntrack flush FAILED and hasn't recovered
+// (S8.7 Slice 2) — no CAP_NET_ADMIN in this deployment shape, or a netlink fault. The agent surfaces it as
+// the conntrack_flush_unavailable health kind so an operator sees expiry-flush is degraded on the health
+// plane, never just a log line. Cleared by the next successful flush (recovery). The reactive capability
+// signal (D-gap-2): an EPERM from the netlink op IS the CAP_NET_ADMIN-absent evidence — no proactive read.
+func (m *Manager) ConntrackFlushFailing() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.flushErr != nil
+}
+
 // SetFlowLogGroup enables flow logging by pointing the forward-chain log clauses at an
 // nflog group (>0). 0 disables it. Non-terminal + best-effort: the log clause NEVER changes
 // a packet's accept/drop fate (kernel semantics), so this cannot affect enforcement.

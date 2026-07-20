@@ -12,11 +12,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"log/slog"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -167,7 +167,7 @@ func main() {
 	r := reconcile.New(backend, wgPriv, wgPub, logger)
 	r.SetSiteLinkStaleSink(&siteLinkStale)
 	r.SetSiteSubnetUnreachableSink(&siteSubnetUnreachable) // D3: unreachable-advertised-subnet health signal
-	r.SetForwardBlockedFn(egressMgr.ForwardBlocked)       // WF-4: Docker FORWARD DROP swallowing the forward → same signal
+	r.SetForwardBlockedFn(egressMgr.ForwardBlocked)        // WF-4: Docker FORWARD DROP swallowing the forward → same signal
 	// Every desired-state fetch hands the compiled Zero Trust policy (nil = legacy
 	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
 	r.OnPolicy(func(p *nodepolicy.Compiled) {
@@ -308,7 +308,7 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		// canonical hash of what is IN FORCE, plus the last apply error. The control
 		// plane compares against what it pushed — a stale gateway must be visible.
 		v, h, failingSince, applyErr := egressMgr.AppliedStatus()
-		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion}
+		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), ConntrackFlushUnavailable: egressMgr.ConntrackFlushFailing(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
 			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)

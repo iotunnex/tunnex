@@ -1047,6 +1047,10 @@ type AppliedPolicy struct {
 	// SiteSubnetUnreachable (S8.2c D3) is agent-computed: the gateway advertises a local site subnet no
 	// host address is inside (bridge-trapped wg0 / misconfig). Surfaced as site_subnet_unreachable.
 	SiteSubnetUnreachable bool `json:"site_subnet_unreachable"`
+	// ConntrackFlushUnavailable (S8.7 Slice 2) is agent-reported: the expired-grant conntrack flush is
+	// failing (no CAP_NET_ADMIN / netlink fault) — revoked grants' flows may linger. Surfaced as
+	// conntrack_flush_unavailable.
+	ConntrackFlushUnavailable bool `json:"conntrack_flush_unavailable"`
 	// MaxSupportedVersion (S8.3 CW) is the highest artifact Version the agent can apply. Observability
 	// (outside the hash); stored so the UI can warn which gateways would deny-all on a version bump.
 	MaxSupportedVersion int `json:"max_policy_version"`
@@ -1086,15 +1090,16 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 	// it server-side from the typed report so a compromised agent can't inject
 	// arbitrary JSON. egress_nat gates full-tunnel device creation (gateway_no_egress).
 	caps, err := json.Marshal(map[string]any{
-		"egress_nat":              egressNAT,
-		"policy_version":          applied.Version,
-		"policy_hash":             applied.Hash,
-		"policy_error":            applied.Error,
-		"policy_failing_since":    applied.FailingSince,
-		"policy_refused_version":  applied.RefusedVersion,
-		"site_link_stale":         applied.SiteLinkStale,
-		"site_subnet_unreachable": applied.SiteSubnetUnreachable,
-		"max_policy_version":      applied.MaxSupportedVersion,
+		"egress_nat":                  egressNAT,
+		"policy_version":              applied.Version,
+		"policy_hash":                 applied.Hash,
+		"policy_error":                applied.Error,
+		"policy_failing_since":        applied.FailingSince,
+		"policy_refused_version":      applied.RefusedVersion,
+		"site_link_stale":             applied.SiteLinkStale,
+		"site_subnet_unreachable":     applied.SiteSubnetUnreachable,
+		"conntrack_flush_unavailable": applied.ConntrackFlushUnavailable,
+		"max_policy_version":          applied.MaxSupportedVersion,
 	})
 	if err != nil {
 		return err
@@ -1187,6 +1192,9 @@ type NodeCapabilities struct {
 	// SiteSubnetUnreachable (S8.2c D3) — agent-computed: advertises a local subnet no host addr is inside.
 	// Drives the `site_subnet_unreachable` health kind (the reassuring-green bridge-mode trap).
 	SiteSubnetUnreachable bool `json:"site_subnet_unreachable"`
+	// ConntrackFlushUnavailable (S8.7 Slice 2) — agent-reported: the expired-grant conntrack flush is
+	// failing. Drives the `conntrack_flush_unavailable` health kind (lowest priority).
+	ConntrackFlushUnavailable bool `json:"conntrack_flush_unavailable"`
 	// MaxPolicyVersion (S8.3 CW) — the agent's reported max-supported policy version. 0 = never reported
 	// (a pre-CW/pre-upgrade agent): read as BELOW the ceiling, never unknown-treated-as-ready (S7.5.3
 	// absence-is-not-compliance). Surfaced on the Node API for the cross-site upgrade warning.
@@ -1358,9 +1366,13 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// (bridge-trapped wg0 / misconfig). A REACHABILITY fault the agent detects even when the link is
 		// fresh — the reassuring-green trap. Edition-independent (routing is core, D11).
 		siteSubnetUnreachable := caps.SiteSubnetUnreachable
+		// conntrack_flush_unavailable (S8.7 Slice 2): the agent's expired-grant flush is failing — a
+		// LOWEST-priority enforcement-hygiene degradation (revoked grants' flows may linger). Only fires in
+		// enterprise (an open gateway has no grants → no flush → never set).
+		conntrackFlushUnavailable := caps.ConntrackFlushUnavailable
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
-		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable || conntrackFlushUnavailable
 		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
@@ -1382,24 +1394,27 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindSiteLinkDown
 		case !enterprise && siteSubnetUnreachable:
 			kind = KindSiteSubnetUnreachable // D3, edition-independent
+		case !enterprise && conntrackFlushUnavailable:
+			kind = KindConntrackFlushUnavailable // S8.7 (structural agreement; open never sets it — no grants)
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
 			kind = KindStuckEnforcing
 		case enterprise:
 			kind = degradedKind(KindInput{
-				PolicyError:           caps.PolicyError,
-				PolicyFailingSince:    caps.PolicyFailingSince,
-				PushKnown:             pushKnown,
-				PushedHash:            pushed[n.ID],
-				AppliedHash:           caps.PolicyHash,
-				DesyncSince:           tsTime(n.PolicyDesyncSince),
-				ReportAge:             reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
-				Now:                   now,
-				UnsupportedVersion:    caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
-				SiteHubDown:           siteHubDown,                   // S8.2 Item 7/9 (B2)
-				SiteLinkDown:          siteLinkDown,                  // S8.2 H5
-				SiteSubnetUnreachable: siteSubnetUnreachable,         // S8.2c D3
+				PolicyError:               caps.PolicyError,
+				PolicyFailingSince:        caps.PolicyFailingSince,
+				PushKnown:                 pushKnown,
+				PushedHash:                pushed[n.ID],
+				AppliedHash:               caps.PolicyHash,
+				DesyncSince:               tsTime(n.PolicyDesyncSince),
+				ReportAge:                 reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
+				Now:                       now,
+				UnsupportedVersion:        caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
+				SiteHubDown:               siteHubDown,                   // S8.2 Item 7/9 (B2)
+				SiteLinkDown:              siteLinkDown,                  // S8.2 H5
+				SiteSubnetUnreachable:     siteSubnetUnreachable,         // S8.2c D3
+				ConntrackFlushUnavailable: conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
 			})
 		}
 		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}
