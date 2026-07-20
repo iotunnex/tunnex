@@ -150,3 +150,9 @@ RETURNING org_id, members, generation, updated_at;
 -- lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
 -- so a cross-org node id no-ops (0 rows -> typed 404 at the service).
 UPDATE nodes SET hub_priority = @hub_priority WHERE id = @node_id AND org_id = @org_id;
+
+-- name: ListFailoverOrgs :many
+-- lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
+-- MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
+-- fail over (S8.6 Slice 4).
+SELECT org_id FROM org_hub_set WHERE array_length(members, 1) > 1;

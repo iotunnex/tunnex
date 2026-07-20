@@ -181,7 +181,7 @@ func TestReportStatusNodePeerSibling(t *testing.T) {
 	// node_peer_status: EXACTLY the gateway peer landed — (hub, SPOKEKEY), rx 30. The device peer did NOT
 	// cross in.
 	var npCount int
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status").Scan(&npCount); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status WHERE node_id=$1", hub).Scan(&npCount); err != nil {
 		t.Fatal(err)
 	}
 	if npCount != 1 {
@@ -196,7 +196,7 @@ func TestReportStatusNodePeerSibling(t *testing.T) {
 	}
 	// NEITHER crosses: the DEVICE peer is NOT in node_peer_status; the GATEWAY peer is NOT in device_status.
 	var devInNodePeer, gwInDevice int
-	_ = tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status WHERE public_key='DEVKEY'").Scan(&devInNodePeer)
+	_ = tx.QueryRow(ctx, "SELECT count(*) FROM node_peer_status WHERE node_id=$1 AND public_key='DEVKEY'", hub).Scan(&devInNodePeer)
 	if devInNodePeer != 0 {
 		t.Fatal("a DEVICE peer must NOT land in node_peer_status (neither crosses)")
 	}

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,11 +110,16 @@ type Service struct {
 	// siteTopoLoad loads the S8.2 site topology. Defaults to loadSiteTopology; a test overrides it to
 	// inject a fault, proving the DesiredState-ATOMIC contract (a topology error fails the whole fetch).
 	siteTopoLoad func(context.Context, uuid.UUID) (siteTopology, error)
+	// failovers holds the per-org in-memory hysteresis state for the S8.6 failover tick — rebuilt from
+	// stored freshness on a CP restart (no persistence for state the substrate re-derives). Guarded by
+	// failoverMu (the tick runs on a background goroutine).
+	failovers  map[uuid.UUID]*FailoverController
+	failoverMu sync.Mutex
 }
 
 // NewService builds the node service.
 func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Service {
-	s := &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer}
+	s := &Service{pool: pool, q: sqlc.New(pool), ca: ca, sealer: sealer, failovers: map[uuid.UUID]*FailoverController{}}
 	s.siteTopoLoad = s.loadSiteTopology
 	return s
 }
@@ -367,6 +373,11 @@ type siteTopology struct {
 	// dnsForwards (S8.4) is the org's cross-site DNS forwarding table — the union of every site's
 	// dns_forwarding entries, compiled onto EVERY gateway so any gateway can answer for any site's zone.
 	dnsForwards []policyspec.DNSForward
+	// hubMembers (S8.6 Slice 4) is the PERSISTED ACTIVE hub order (org_hub_set.members) resolved to gateway
+	// rows IN ORDER — the ONE truth the compiler consumes (a failover promotion changes it, flowing through
+	// the ordinary compile+push). Empty when org_hub_set has no row (a not-yet-reconciled org) → the
+	// compiler falls back to electSiteHubSet (single-hub), so a fresh org still compiles.
+	hubMembers []sqlc.ListSiteGatewaysForOrgRow
 }
 
 // loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
@@ -402,7 +413,36 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 		}
 		fwds = append(fwds, entries...)
 	}
-	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds}, nil
+	// S8.6 Slice 4: the PERSISTED active hub order (org_hub_set), resolved to gateway rows in order — what
+	// the compiler consumes so a failover promotion (a change to the persisted members) flows through the
+	// ordinary compile. A member no longer a gateway (unbound/deleted) is skipped; no row → nil → fallback.
+	var hubMembers []sqlc.ListSiteGatewaysForOrgRow
+	if hs, herr := s.q.GetOrgHubSet(ctx, orgID); herr == nil {
+		byID := make(map[uuid.UUID]sqlc.ListSiteGatewaysForOrgRow, len(gws))
+		for _, g := range gws {
+			byID[g.ID] = g
+		}
+		for _, mid := range hs.Members {
+			if g, ok := byID[mid]; ok {
+				hubMembers = append(hubMembers, g)
+			}
+		}
+	} else if herr != pgx.ErrNoRows {
+		return siteTopology{}, herr
+	}
+	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers}, nil
+}
+
+// activeHubMembers is the compiler's ordered hub set — the PERSISTED active order (org_hub_set, maintained
+// by ReconcileHubSet + the failover tick), or a fallback single-hub election when org_hub_set has no row
+// yet (a not-yet-reconciled org). members[0] is the ACTIVE transit hub. This is the one seam through which
+// a failover promotion reaches the data plane: the tick changes the persisted order, the next compile reads
+// it here — no failover-special path.
+func activeHubMembers(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysForOrgRow {
+	if len(topo.hubMembers) > 0 {
+		return topo.hubMembers
+	}
+	return electSiteHubSet(topo, now)
 }
 
 // siteLinkGraphFrom builds a site-gateway node's site-link WG peers + kernel routes from a loaded
@@ -484,7 +524,7 @@ func hubLess(a, b *sqlc.ListSiteGatewaysForOrgRow, now time.Time) bool {
 // (site-link peers, routes, the is_site_hub API projection); the compiler uses ONLY this primary (single-hub
 // v1 — standbys don't grow tunnels until S8.6 Slice 3). PURE given now.
 func electSiteHub(topo siteTopology, now time.Time) *sqlc.ListSiteGatewaysForOrgRow {
-	set := electSiteHubSet(topo, now)
+	set := activeHubMembers(topo, now) // the ACTIVE head (persisted order), so is_site_hub/health reflect failover
 	if len(set) == 0 {
 		return nil
 	}
@@ -544,7 +584,7 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 	if !node.SiteID.Valid {
 		return nil, nil
 	}
-	members := electSiteHubSet(topo, time.Now()) // ordered [primary, standby...] (S8.6 D1)
+	members := activeHubMembers(topo, time.Now()) // the PERSISTED active order (S8.6 Slice 4), or single-hub fallback
 	// B2: no capable gateway (all NAT'd) → NO carrier for site traffic, so emit NO routes and NO peers.
 	// A route with no peer to carry it is the silent blackhole; surfaced CP-side as site_hub_down.
 	if len(members) == 0 {

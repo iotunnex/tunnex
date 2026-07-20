@@ -26,19 +26,19 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
-	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
-	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
+	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
@@ -227,6 +227,25 @@ func main() {
 				}
 				if err != nil {
 					logger.Error("flowlog_retention_sweep_failed", slog.String("error", err.Error()))
+				}
+				scancel()
+			}
+		}
+	}()
+	// S8.6 hub-HA failover tick: read member freshness → derive the active hub order → on a change, persist
+	// (atomic generation bump) + audit + let the ordinary compile+push carry it. Rides the same
+	// ticker-goroutine pattern as the retention sweep; a no-op for orgs without a multi-member hub set.
+	go func() {
+		t := time.NewTicker(nodes.FailoverTickInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				if err := nodeSvc.RunFailoverTick(sctx); err != nil {
+					logger.Error("failover_tick_failed", slog.String("error", err.Error()))
 				}
 				scancel()
 			}

@@ -409,6 +409,10 @@ type Querier interface {
 	// background poller iterates all tenants; each config is reconciled org-scoped downstream.
 	// lint:cross-org
 	ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfig, error)
+	// lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
+	// MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
+	// fail over (S8.6 Slice 4).
+	ListFailoverOrgs(ctx context.Context) ([]uuid.UUID, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]ListGroupMembersRow, error)
 	// Compiler input: every (group, user) pair in the org.
 	ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListGroupMembershipsByOrgRow, error)

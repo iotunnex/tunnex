@@ -285,6 +285,33 @@ func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) 
 	return items, nil
 }
 
+const listFailoverOrgs = `-- name: ListFailoverOrgs :many
+SELECT org_id FROM org_hub_set WHERE array_length(members, 1) > 1
+`
+
+// lint:cross-org — CP-internal (the failover tick iterates every org). Orgs whose persisted hub set has
+// MORE THAN ONE member — i.e. a pinned HA set with at least one standby; a single-hub org has nothing to
+// fail over (S8.6 Slice 4).
+func (q *Queries) ListFailoverOrgs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listFailoverOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var org_id uuid.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodePeerStatusForOrg = `-- name: ListNodePeerStatusForOrg :many
 SELECT nps.node_id, nps.public_key, nps.last_handshake_at, nps.rx_bytes, nps.tx_bytes, nps.updated_at
 FROM node_peer_status nps
