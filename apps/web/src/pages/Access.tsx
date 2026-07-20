@@ -386,6 +386,13 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                   <span className="text-slate-200">
                     <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
                     <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
+                    {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim — a CIDR
+                        rule matching no current org range (a reassuring-rule). Self-clears when a range lands. */}
+                    {row.cidrOutsideRanges && (
+                      <span className="ml-2 text-xs text-amber-400" title="This CIDR is inside no current site subnet — the rule matches nothing until the range is declared.">
+                        ⚠ outside org ranges
+                      </span>
+                    )}
                     {/* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant
                         stays visible (audit-history), rendered distinctly — never hidden. */}
                     {exp.state !== "permanent" && (
@@ -550,12 +557,13 @@ function RuleFormModal({
   // (empty group select) until BOTH dropdowns are flipped — a dead end. Default to the kind that's actually
   // available so a fresh site-to-site org can Create immediately.
   const hasGroups = groups.length > 0;
-  const [srcKind, setSrcKind] = useState<"group" | "user" | "site">(
-    defaultSrcKind({ editingKind: editing?.src_kind === "user" ? "user" : editing?.src_kind === "site" ? "site" : undefined, hasGroups, hasSites: sites.length > 0 }),
+  const [srcKind, setSrcKind] = useState<"group" | "user" | "site" | "cidr">(
+    defaultSrcKind({ editingKind: editing?.src_kind === "user" ? "user" : editing?.src_kind === "site" ? "site" : editing?.src_kind === "cidr" ? "cidr" : undefined, hasGroups, hasSites: sites.length > 0 }),
   );
   const [src, setSrc] = useState(editing?.src_group_id ?? groups[0]?.id ?? "");
   const [srcUser, setSrcUser] = useState(editing?.src_user_id ?? members[0]?.user_id ?? "");
   const [srcSite, setSrcSite] = useState(editing?.src_site_id ?? sites[0]?.id ?? "");
+  const [srcCidr, setSrcCidr] = useState(editing?.src_cidr ?? ""); // S8.7: literal source CIDR (free-text)
   // Default to the first dst kind that HAS options (re-review #4: the src-side fix left the dst side able to
   // dead-end — a no-groups org with resources/sites opened on "group" with an empty select, un-submittable).
   const [dstKind, setDstKind] = useState<"group" | "resource" | "site">(
@@ -578,7 +586,7 @@ function RuleFormModal({
   const [err, setErr] = useState<string | null>(null);
 
   function bodyFor(): CreatePolicyRuleRequest {
-    return ruleBody({ srcKind, dstKind, src, srcUser, srcSite, dstGroup, dstResource, dstSite, expiresAt, editing: !!editing });
+    return ruleBody({ srcKind, dstKind, src, srcUser, srcSite, srcCidr, dstGroup, dstResource, dstSite, expiresAt, editing: !!editing });
   }
 
   async function submit() {
@@ -624,7 +632,7 @@ function RuleFormModal({
           <Button
             disabled={
               busy ||
-              (srcKind === "group" ? !src : srcKind === "user" ? !srcUser : !srcSite) ||
+              (srcKind === "group" ? !src : srcKind === "user" ? !srcUser : srcKind === "cidr" ? !srcCidr.trim() : !srcSite) ||
               (dstKind === "group" ? !dstGroup : dstKind === "resource" ? !dstResource : !dstSite)
             }
             onClick={submit}
@@ -640,12 +648,18 @@ function RuleFormModal({
         <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Source</legend>
           <Field label="Source type">
-            <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user" | "site")}>
+            <Select value={srcKind} onChange={(e) => setSrcKind(e.target.value as "group" | "user" | "site" | "cidr")}>
               <option value="group">Group</option>
               <option value="user">User (a single person)</option>
               {sites.length > 0 && <option value="site">Site (a LAN behind a gateway)</option>}
+              <option value="cidr">CIDR (a specific host or subnet)</option>
             </Select>
           </Field>
+          {srcKind === "cidr" && (
+            <Field label="Source CIDR">
+              <Input value={srcCidr} onChange={(e) => setSrcCidr(e.target.value)} placeholder="172.31.17.64/32" />
+            </Field>
+          )}
           {srcKind === "group" ? (
             <Field label="Source group">
               <Select value={src} onChange={(e) => setSrc(e.target.value)}>

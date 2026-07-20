@@ -160,6 +160,14 @@ export interface RuleRow {
   dst: RefLabel;
   /** true if either end is not "ok" — the row renders a warning marker but is NEVER hidden. */
   broken: boolean;
+  /**
+   * S8.7 warn-not-refuse (D1): the SERVER's read-time judgment that a src_kind='cidr' rule's CIDR is inside
+   * no current org range — a rule matching nothing (a reassuring-rule). Rendered VERBATIM from the served
+   * `cidr_outside_org_ranges` field; the UI NEVER re-derives org ranges (one-validator). Self-clears when the
+   * server re-derives on the next list (a range landed). Distinct from `broken` — an out-of-world CIDR is a
+   * VALID rule that warns, not a broken reference.
+   */
+  cidrOutsideRanges: boolean;
 }
 
 // loaded flags say whether each referent SET loaded successfully. When a set failed to
@@ -224,7 +232,9 @@ export function ruleRow(
       ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
       : rule.src_kind === "site" // WF-8: resolve to the site NAME, not the ambiguous UUIDv7 prefix
         ? resolveSite(rule.src_site_id ?? "", sites, loaded.sitesLoaded ?? false)
-        : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
+        : rule.src_kind === "cidr" // S8.7: a literal CIDR — a VALUE, never a referent, so always "ok"
+          ? { id: rule.src_cidr ?? "", label: rule.src_cidr ?? "cidr", state: "ok" }
+          : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site NAME (WF-8), NOT the
   // resource branch (which would render a valid site rule as a broken 'deleted resource'), preserving
   // the never-mislabeled invariant.
@@ -234,7 +244,8 @@ export function ruleRow(
       : rule.dst_kind === "site"
         ? resolveSite(rule.dst_site_id ?? "", sites, loaded.sitesLoaded ?? false)
         : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
-  return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok" };
+  // S8.7: the warn is the SERVER's read-time field, rendered verbatim (no client-side org-range re-check).
+  return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok", cidrOutsideRanges: rule.cidr_outside_org_ranges };
 }
 
 // ── S7.5.4 temporary-grant expiry (the linger model — expired grants stay VISIBLE) ────
@@ -311,10 +322,10 @@ export function defaultDstKind(i: {
 }
 
 export function defaultSrcKind(i: {
-  editingKind?: "group" | "user" | "site";
+  editingKind?: "group" | "user" | "site" | "cidr";
   hasGroups: boolean;
   hasSites: boolean;
-}): "group" | "user" | "site" {
+}): "group" | "user" | "site" | "cidr" {
   if (i.editingKind) return i.editingKind;
   if (i.hasGroups) return "group";
   if (i.hasSites) return "site"; // a no-groups site org creates site→ rules; users alone can't open the modal
@@ -322,11 +333,12 @@ export function defaultSrcKind(i: {
 }
 
 export interface RuleBodyInput {
-  srcKind: "group" | "user" | "site";
+  srcKind: "group" | "user" | "site" | "cidr";
   dstKind: "group" | "resource" | "site";
   src: string; // group id
   srcUser: string;
   srcSite: string;
+  srcCidr: string; // S8.7: literal source CIDR (src_kind='cidr')
   dstGroup: string;
   dstResource: string;
   dstSite: string;
@@ -340,7 +352,9 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
       ? { src_kind: "user" as const, src_user_id: i.srcUser }
       : i.srcKind === "site"
         ? { src_kind: "site" as const, src_site_id: i.srcSite }
-        : { src_kind: "group" as const, src_group_id: i.src };
+        : i.srcKind === "cidr" // S8.7: a literal source CIDR (free-text, server-validated)
+          ? { src_kind: "cidr" as const, src_cidr: i.srcCidr }
+          : { src_kind: "group" as const, src_group_id: i.src };
   const dstPart =
     i.dstKind === "group"
       ? { dst_kind: "group" as const, dst_group_id: i.dstGroup }

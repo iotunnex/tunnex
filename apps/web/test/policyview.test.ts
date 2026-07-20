@@ -130,6 +130,24 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
   });
 });
 
+describe("S8.7 ruleRow — cidr source: literal label + read-time warn badge (served verbatim, no client re-derivation)", () => {
+  const grp = [G("g1", "Eng")];
+  const cidrRule = (outside: boolean): PolicyRule =>
+    ({ id: "c1", src_kind: "cidr", src_cidr: "172.31.17.64/32", dst_kind: "group", dst_group_id: "g1", cidr_outside_org_ranges: outside } as PolicyRule);
+  it("src renders the LITERAL CIDR, always ok (a value, never a deletable referent)", () => {
+    const row = ruleRow(cidrRule(false), grp, [], [], [], LOADED);
+    expect(row.src.label).toBe("172.31.17.64/32");
+    expect(row.src.state).toBe("ok");
+    expect(row.broken).toBe(false); // an out-of-world cidr is NOT broken — a valid rule that WARNS
+  });
+  it("the warn badge is the SERVED field verbatim — appears when outside, clears when inside (both directions)", () => {
+    expect(ruleRow(cidrRule(true), grp, [], [], [], LOADED).cidrOutsideRanges).toBe(true);
+    expect(ruleRow(cidrRule(false), grp, [], [], [], LOADED).cidrOutsideRanges).toBe(false);
+    // still not "broken" even when warning — warn-not-refuse
+    expect(ruleRow(cidrRule(true), grp, [], [], [], LOADED).broken).toBe(false);
+  });
+});
+
 describe("loadOne — the class armed-guard: a failure NEVER reads as absence", () => {
   it("non-2xx (error present, data undefined) → NOT ok (never a reassuring empty)", async () => {
     const r = await loadOne(async () => ({ data: undefined, error: { error: { message: "boom" } } }));
@@ -191,7 +209,7 @@ describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (faile
 });
 
 describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rules (via the API, not a DB insert)", () => {
-  const base = { src: "g1", srcUser: "u1", srcSite: "s1", dstGroup: "g2", dstResource: "r1", dstSite: "s2", expiresAt: "", editing: false };
+  const base = { src: "g1", srcUser: "u1", srcSite: "s1", srcCidr: "172.31.17.64/32", dstGroup: "g2", dstResource: "r1", dstSite: "s2", expiresAt: "", editing: false };
   it("site → site sets ONLY the site ids (the demo's DB-insert path, now first-class in the UI)", () => {
     const b = ruleBody({ ...base, srcKind: "site", dstKind: "site" });
     expect(b).toMatchObject({ src_kind: "site", src_site_id: "s1", dst_kind: "site", dst_site_id: "s2" });
@@ -200,6 +218,12 @@ describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rule
   });
   it("group → site (a device group reaching a site LAN)", () => {
     expect(ruleBody({ ...base, srcKind: "group", dstKind: "site" })).toMatchObject({ src_kind: "group", src_group_id: "g1", dst_kind: "site", dst_site_id: "s2" });
+  });
+  it("S8.7 cidr → resource sets ONLY src_cidr (the /32-precise source)", () => {
+    const b = ruleBody({ ...base, srcKind: "cidr", dstKind: "resource" });
+    expect(b).toMatchObject({ src_kind: "cidr", src_cidr: "172.31.17.64/32", dst_kind: "resource", dst_resource_id: "r1" });
+    expect("src_group_id" in b).toBe(false);
+    expect("src_site_id" in b).toBe(false);
   });
   it("existing kinds unchanged (group→group, user→resource)", () => {
     expect(ruleBody({ ...base, srcKind: "group", dstKind: "group" })).toMatchObject({ src_kind: "group", dst_kind: "group", dst_group_id: "g2" });
