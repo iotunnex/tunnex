@@ -45,7 +45,12 @@ func (f *fakeBackend) ApplyRoutes(_ context.Context, cidrs []string, srcHint str
 	return nil
 }
 func (f *fakeBackend) appliedSrcHint() string { f.mu.Lock(); defer f.mu.Unlock(); return f.srcHint }
-func (f *fakeBackend) setStat(s PeerStat)  { f.mu.Lock(); f.stats = []PeerStat{s}; f.statsErr = nil; f.mu.Unlock() }
+func (f *fakeBackend) setStat(s PeerStat) {
+	f.mu.Lock()
+	f.stats = []PeerStat{s}
+	f.statsErr = nil
+	f.mu.Unlock()
+}
 func (f *fakeBackend) setStatsErr(e error) { f.mu.Lock(); f.statsErr = e; f.mu.Unlock() }
 func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) {
 	f.mu.Lock()
@@ -92,11 +97,19 @@ func (f *fakeBackend) count() int {
 	return len(f.peers)
 }
 
+// appliedPeers returns the peers as APPLIED (with AllowedIPs intact — unlike Peers() which strips SiteLink
+// to mimic the kernel read). For asserting the agent applies the CP's AllowedIPs verbatim.
+func (f *fakeBackend) appliedPeers() []Peer {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Peer(nil), f.peers...)
+}
+
 type fakeClient struct {
-	mu      sync.Mutex
-	desired DesiredState
+	mu       sync.Mutex
+	desired  DesiredState
 	fetchErr error
-	watch   chan struct{}
+	watch    chan struct{}
 }
 
 func (c *fakeClient) set(ds DesiredState) { c.mu.Lock(); c.desired = ds; c.mu.Unlock() }
@@ -204,7 +217,9 @@ func TestRunOnceDerivesSrcHintAndUnreachableSignal(t *testing.T) {
 	c := &fakeClient{watch: make(chan struct{})}
 
 	// Host is ON the advertised subnet → src-hint threaded, NOT unreachable.
-	r.hostAddrsFn = func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("10.99.0.1"), netip.MustParseAddr("172.31.24.206")} }
+	r.hostAddrsFn = func() []netip.Addr {
+		return []netip.Addr{netip.MustParseAddr("10.99.0.1"), netip.MustParseAddr("172.31.24.206")}
+	}
 	c.set(DesiredState{Policy: &nodepolicy.Compiled{
 		Version: 5, Mode: nodepolicy.ModeEnforcing,
 		Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}}, LocalSubnets: []string{"172.31.0.0/16"},
@@ -519,4 +534,73 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met within deadline")
+}
+
+// TestReconcileAppliesDesiredVerbatimNoLocalPromotion (S8.6 Slice 5 — the absence-proof) — the agent
+// applies the CP's peers VERBATIM: a spoke's primary carries the subnets, the standby is keepalive-only
+// (EMPTY AllowedIPs), and there is NO agent code path that moves the subnets onto the standby. A spoke
+// cannot locally promote a standby (observe-never-vote / CP-single-authority) — the empty-AllowedIPs
+// standby stays inert until a NEW CP artifact rewrites it. This is the dead-code assertion inverted:
+// failover redirection is impossible spoke-side by the absence of any local-election path.
+func TestReconcileAppliesDesiredVerbatimNoLocalPromotion(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	ctx := context.Background()
+	desired := []Peer{
+		{PublicKey: "primary", AllowedIPs: []string{"172.31.0.0/16"}, Endpoint: "p:51820", SiteLink: true, PersistentKeepalive: 25},
+		{PublicKey: "standby", AllowedIPs: []string{}, Endpoint: "s:51820", SiteLink: true, PersistentKeepalive: 25},
+	}
+	if _, err := r.Reconcile(ctx, desired); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	var gp, gs *Peer
+	for i, p := range b.appliedPeers() {
+		if p.PublicKey == "primary" {
+			gp = &b.appliedPeers()[i]
+		}
+		if p.PublicKey == "standby" {
+			gs = &b.appliedPeers()[i]
+		}
+	}
+	if gp == nil || len(gp.AllowedIPs) != 1 || gp.AllowedIPs[0] != "172.31.0.0/16" {
+		t.Fatalf("primary must keep its subnets verbatim (no local mutation), got %+v", gp)
+	}
+	if gs == nil || len(gs.AllowedIPs) != 0 {
+		t.Fatalf("standby must stay keepalive-only EMPTY — NO local path moves subnets onto it, got %+v", gs)
+	}
+}
+
+// TestReconcileFailStaticKeepsStandby (S8.6 Slice 5 — case (b), CP-outage fail-static with a standby
+// present) — a CP that goes unreachable does NOT perturb the applied peers: the agent keeps its last-known
+// config (fail-static, proven since S3.1), and a standby peer in that config doesn't change the behavior.
+// The spoke keeps routing to the primary; it does NOT locally fail over to the standby (no CP → no
+// re-election, per-spoke — the named residue joining "CP-down = no failover").
+func TestReconcileFailStaticKeepsStandby(t *testing.T) {
+	b := &fakeBackend{}
+	r := New(b, "priv", "pub", discard())
+	c := &fakeClient{watch: make(chan struct{})}
+	ctx := context.Background()
+	c.set(DesiredState{Peers: []Peer{
+		{PublicKey: "primary", AllowedIPs: []string{"172.31.0.0/16"}, Endpoint: "p:51820", SiteLink: true, PersistentKeepalive: 25},
+		{PublicKey: "standby", AllowedIPs: []string{}, Endpoint: "s:51820", SiteLink: true, PersistentKeepalive: 25},
+	}})
+	if _, err := r.runOnce(ctx, c); err != nil {
+		t.Fatalf("runOnce (fetch ok): %v", err)
+	}
+	before := b.appliedPeers()
+	// CP unreachable → FetchDesired errors. Fail-static: the agent keeps last-applied, does NOT wipe/redirect.
+	c.setErr(errors.New("cp unreachable"))
+	if _, err := r.runOnce(ctx, c); err == nil {
+		t.Fatal("a fetch error must surface (fail-static, not silent)")
+	}
+	after := b.appliedPeers()
+	if len(after) != len(before) {
+		t.Fatalf("fail-static: a CP outage must NOT change the applied peers (a standby present is unperturbed), got %d want %d", len(after), len(before))
+	}
+	// The primary still carries the subnets; nothing locally moved them to the standby.
+	for _, p := range after {
+		if p.PublicKey == "standby" && len(p.AllowedIPs) != 0 {
+			t.Fatalf("under a CP outage the standby must stay empty — NO local failover, got %+v", p)
+		}
+	}
 }
