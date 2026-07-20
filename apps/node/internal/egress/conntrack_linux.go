@@ -22,81 +22,14 @@ import (
 // too wide tears down innocent neighbors — a self-inflicted outage on the busiest gateway. "Scoped" is
 // proven by the neighbor's SURVIVAL, not the filter's appearance (the innocent-neighbor red).
 
-// governedSpace is the source address space THIS gateway's policy governs (S8.7 [6]): the WG pool (every
-// device source is a /32 inside it) + this gateway's local site subnets (a site-src grant originates from the
-// local LAN). A conntrack flow whose ORIGIN src is inside this space is "ours to reconcile" at restart; a
-// flow outside it (the gateway's own SSH, an unrelated host) is NEVER swept — the innocent-neighbor
-// constraint, which binds HARDEST at restart.
-func governedSpace(poolCIDR string, localSubnets []string) []netip.Prefix {
-	var out []netip.Prefix
-	if p, ok := loosePrefix(poolCIDR); ok {
-		out = append(out, p)
-	}
-	for _, s := range localSubnets {
-		if p, ok := loosePrefix(s); ok {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// shouldReconcileFlush is the RESTART-sweep predicate (S8.7 [6], THE innocent-neighbor guard at restart): a
-// flow is swept IFF its origin src is inside our governed space AND the CURRENT policy permits it via NO
-// Allow entry. So a grant-covered flow SURVIVES (restart-with-live-legitimate-flows), a flow of a grant
-// revoked-while-down DIES (governed but no longer permitted), and an unrelated flow (src outside the governed
-// space) is NEVER touched. Pure — the whole safety of the restart sweep lives here.
-func shouldReconcileFlush(c conntrack.Con, governed []netip.Prefix, permit []flowTuple) bool {
-	src, ok := originSrc(c)
-	if !ok || !inGoverned(src, governed) {
-		return false // outside our governed source space → an innocent flow, never swept
-	}
-	for _, t := range permit {
-		if matchesTuple(c, t) {
-			return false // the current policy still permits it → survives
-		}
-	}
-	return true // governed source, not currently permitted → a leftover from a revoked-while-down grant
-}
-
-func originSrc(c conntrack.Con) (netip.Addr, bool) {
-	if c.Origin == nil || c.Origin.Src == nil {
-		return netip.Addr{}, false
-	}
-	a, ok := netip.AddrFromSlice(*c.Origin.Src)
-	if !ok {
-		return netip.Addr{}, false
-	}
-	return a.Unmap(), true
-}
-
-func inGoverned(src netip.Addr, governed []netip.Prefix) bool {
-	for _, p := range governed {
-		if p.Contains(src) {
-			return true
-		}
-	}
-	return false
-}
-
-// reconcileFlush is the restart dump-and-reconcile (S8.7 [6]): with no in-memory baseline after a restart,
-// dump conntrack and flush every flow shouldReconcileFlush selects — scoped to our governed space, sparing
-// grant-covered + unrelated flows. Returns the count killed; per-flow/dump errors surface (never silent).
-func reconcileFlush(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error) {
-	permit := make([]flowTuple, 0, len(allow))
-	for _, e := range allow {
-		if t, ok := tupleFromAllow(e); ok {
-			permit = append(permit, t)
-		}
-	}
-	// Dump only the families our GOVERNED space spans (RE4: a v4-only pool+subnets never dumps IPv6, so a
-	// v6-less kernel can't false-degrade the restart sweep — the same scoping flushTuples has).
-	return sweepConntrack(ctx, familiesOfPrefixes(governed), func(c conntrack.Con) (string, bool) {
-		if !shouldReconcileFlush(c, governed, permit) {
-			return "", false
-		}
-		return conLabel(c), true // F6: no rule id at restart — name the flow by its origin tuple
-	})
-}
+// NOTE (S8.7b): the BOOT-TIME restart reconcile sweep (governedSpace / shouldReconcileFlush / reconcileFlush)
+// was REMOVED after four defect rounds concentrated in it (the mode-boundary taxonomy — genuine-mesh vs
+// cold-nil vs enforcing — is where every round tripped). Deferred to S8.7b as a decision-first story, its own
+// state-model paper before any code. NAMED LIMITATION until then: a grant revoked/expired while a gateway's
+// agent is DOWN leaves its already-established flows alive after agent restart, until the flow ends naturally.
+// NEW connections are denied immediately; device revocation is unaffected (peer removal is crypto-death). The
+// LIVE flush below (removedTuples → flushTuples, on a grant leaving the applied set while the agent is UP) is
+// proven + founder-walked and stays.
 
 // flowTuple is a removed grant's EXACT conntrack match spec. A conntrack entry is flushed iff its ORIGIN
 // tuple falls inside src AND dst AND (proto unset or equal) AND (ports unset or in range) — never wider.
@@ -178,14 +111,13 @@ func matchesTuple(c conntrack.Con, t flowTuple) bool {
 	return true
 }
 
-// sweepConntrack is THE ONE flush primitive (S8.7 RE4+RE5 reduce): open a CT socket, dump each of `families`,
-// and delete every flow `selector` picks — counting kills, SURFACING per-flow delete + per-family dump errors
-// via errors.Join (never a silent skip that reports healthy, [7]), and a dump failure for ONE family never
-// discards ANOTHER family's kills ([11]). flushTuples (removed-tuple selector) and reconcileFlush (restart
-// governed+unmatched selector) are the two callers — the family-scoping/error-handling drift that caused RE4
-// is now impossible (one function, one fix surface). The selector returns (label, match): on a match the label
-// (the revoked grant's rule id, or the flow's src→dst context) is carried into the delete error so a failed
-// teardown NAMES which flow leaked (F6 — the abstraction must not drop the grant identity).
+// sweepConntrack is THE ONE flush primitive: open a CT socket, dump each of `families`, and delete every flow
+// `selector` picks — counting kills, SURFACING per-flow delete + per-family dump errors via errors.Join (never
+// a silent skip that reports healthy, [7]), and a dump failure for ONE family never discards ANOTHER family's
+// kills ([11]). flushTuples (the live removed-grant flush) is the sole caller after the boot restart-sweep was
+// deferred to S8.7b; the primitive stays a single family-scoping/error surface. The selector returns
+// (label, match): on a match the label (the revoked grant's rule id) is carried into the delete error so a
+// failed teardown NAMES which grant's flow leaked (F6 — the abstraction must not drop the grant identity).
 func sweepConntrack(ctx context.Context, families []conntrack.Family, selector func(conntrack.Con) (string, bool)) (int, error) {
 	if len(families) == 0 {
 		return 0, nil
@@ -205,6 +137,10 @@ func sweepConntrack(ctx context.Context, families []conntrack.Family, selector f
 		}
 		for i := range flows {
 			c := flows[i]
+			// [4] disposition (ACCEPT the alloc): the label is built on match though only used on a delete
+			// ERROR. A match happens ONLY for a flow we are about to delete — i.e. a removed-grant flow, a small
+			// bounded set (not every dumped flow) — so the "rule <id>" concat is per-killed-flow, negligible. A
+			// lazy thunk would cost a comparable closure alloc per match.
 			label, ok := selector(c)
 			if !ok {
 				continue
@@ -234,22 +170,6 @@ func flushTuples(ctx context.Context, tuples []flowTuple) (int, error) {
 		}
 		return "", false
 	})
-}
-
-// conLabel names a conntrack flow by its origin src→dst for an error message (F6) — the restart sweep has no
-// per-grant rule id (it reconciles against the dump, not a removed entry), so the flow's own tuple is its identity.
-func conLabel(c conntrack.Con) string {
-	src, sok := originSrc(c)
-	dst := netip.Addr{}
-	if c.Origin != nil && c.Origin.Dst != nil {
-		if a, ok := netip.AddrFromSlice(*c.Origin.Dst); ok {
-			dst = a.Unmap()
-		}
-	}
-	if !sok {
-		return "flow ?"
-	}
-	return "flow " + src.String() + "->" + dst.String()
 }
 
 // familiesOf returns the conntrack address families the removed tuples span (IPv4 and/or IPv6). The flush

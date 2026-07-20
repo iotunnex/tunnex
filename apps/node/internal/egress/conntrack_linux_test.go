@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"net/netip"
 	"testing"
 	"time"
 
@@ -92,9 +91,8 @@ func TestRemovedTuplesDiff(t *testing.T) {
 func TestFlushWiringOnRemoval(t *testing.T) {
 	var flushed [][]flowTuple
 	m := &Manager{
-		apply:         func(context.Context, string) error { return nil }, // apply always succeeds
-		now:           time.Now,
-		bootSweepDone: true, // steady state: the boot sweep already latched; this red is about the ordinary diff flush
+		apply: func(context.Context, string) error { return nil }, // apply always succeeds
+		now:   time.Now,
 		ctFlush: func(_ context.Context, ts []flowTuple) (int, error) {
 			flushed = append(flushed, ts)
 			return len(ts), nil
@@ -131,10 +129,9 @@ func TestFlushWiringOnRemoval(t *testing.T) {
 func TestFlushFailureSurfacedNotSilent(t *testing.T) {
 	boom := errors.New("conntrack open (CAP_NET_ADMIN?): operation not permitted")
 	m := &Manager{
-		apply:         func(context.Context, string) error { return nil },
-		now:           time.Now,
-		bootSweepDone: true, // steady state — this red is about an ordinary diff flush's error surfacing, not the boot sweep
-		ctFlush:       func(context.Context, []flowTuple) (int, error) { return 0, boom },
+		apply:   func(context.Context, string) error { return nil },
+		now:     time.Now,
+		ctFlush: func(context.Context, []flowTuple) (int, error) { return 0, boom },
 	}
 	a := nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rA"}
 	ctx := context.Background()
@@ -188,214 +185,9 @@ func TestFamiliesOf(t *testing.T) {
 	}
 }
 
-// TestRestartSweepPredicate — S8.7 [6] THE restart innocent-neighbor guard: the dump-and-reconcile sweep
-// flushes ONLY a flow whose src is in our governed space AND the current policy no longer permits. A
-// grant-covered flow survives (restart-with-live-legitimate-flows), a revoked-while-down flow dies, an
-// unrelated flow (src outside the governed space) is never touched.
-func TestRestartSweepPredicate(t *testing.T) {
-	governed := []netip.Prefix{netip.MustParsePrefix("10.99.0.0/24"), netip.MustParsePrefix("172.31.0.0/16")} // wg pool + a local site subnet
-	permit := []flowTuple{}
-	if t0, ok := tupleFromAllow(nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any"}); ok {
-		permit = append(permit, t0)
-	}
-	// (1) live legit flow — governed src, still permitted → SURVIVES.
-	if shouldReconcileFlush(con("10.99.0.10", "10.0.5.7", 6, 443), governed, permit) {
-		t.Fatal("a grant-covered flow must SURVIVE the restart sweep (restart-with-live-legitimate-flows)")
-	}
-	// (2) revoked-while-down — governed src, NO current permit → FLUSHED.
-	if !shouldReconcileFlush(con("10.99.0.11", "10.0.5.7", 6, 443), governed, permit) {
-		t.Fatal("a governed flow the current policy denies must be FLUSHED (revoked-while-down)")
-	}
-	// (3) unrelated — src OUTSIDE the governed space (the gateway's own egress) → NEVER swept.
-	if shouldReconcileFlush(con("203.0.113.5", "8.8.8.8", 6, 53), governed, permit) {
-		t.Fatal("a flow outside the governed source space must NEVER be swept (the innocent-neighbor constraint)")
-	}
-}
-
-// enfPol builds an enforcing Compiled for the restart-sweep tests.
+// enfPol builds an enforcing Compiled for the flush tests.
 func enfPol(allow ...nodepolicy.AllowEntry) *nodepolicy.Compiled {
 	return &nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Allow: allow}
-}
-
-// TestRestartSweepWiring — [6]: the FIRST enforcing apply after (re)start runs the boot RECONCILE sweep (no
-// in-memory baseline), NOT the removed-tuple diff; once bootSweepDone latches, every subsequent removal uses
-// the normal flush.
-func TestRestartSweepWiring(t *testing.T) {
-	var reconciled, flushed int
-	m := &Manager{
-		apply: func(context.Context, string) error { return nil }, now: time.Now, wgIface: "wg0",
-		poolSource: func(context.Context) string { return "10.99.0.1/24" }, // wg0 up: the boot-sweep precondition met
-		ctReconcile: func(context.Context, []netip.Prefix, []nodepolicy.AllowEntry) (int, error) {
-			reconciled++
-			return 0, nil
-		},
-		ctFlush: func(context.Context, []flowTuple) (int, error) { flushed++; return 0, nil },
-	}
-	a := nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"}
-	ctx := context.Background()
-	// First enforcing apply → BOOT SWEEP (reconcile), not the diff flush.
-	if err := m.applyAndTrack(ctx, "rs", enfPol(a)); err != nil {
-		t.Fatalf("apply 1: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 1 || flushed != 0 {
-		t.Fatalf("[6] the first enforcing apply must run the boot reconcile (not the diff), got reconciled=%d flushed=%d", reconciled, flushed)
-	}
-	// Subsequent removal → normal flush, reconcile NOT re-run.
-	if err := m.applyAndTrack(ctx, "rs", enfPol()); err != nil {
-		t.Fatalf("apply 2: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 1 || flushed != 1 {
-		t.Fatalf("after the boot sweep, a removal must use the normal flush, got reconciled=%d flushed=%d", reconciled, flushed)
-	}
-}
-
-// TestRestartSweepStateMachine — the REDUCED model (S8.7 RE1-5): the boot sweep is a MODE-LESS boolean, not a
-// stored obligation. Each tick = apply (captures THIS pass's current policy) + drain (runs it, or drops it). The
-// three rules: (1) pool unknown → sweep WAITS, no judgment, no health raised (F4 — a wg0 delay is the tunnel's
-// health, not a conntrack degradation); (2) pool up + sweep FAILS → bootSweepDone stays false, the NEXT tick
-// re-captures its OWN current policy and retries (RE1's retry, without a stored obligation — nothing to go
-// stale); (3) a verified success latches bootSweepDone → terminal, no re-sweep. Critically the sweep always runs
-// against the CURRENT tick's policy (never a stored one, F1).
-func TestRestartSweepStateMachine(t *testing.T) {
-	var pool string        // "" = wg0 down (precondition unmet); set = up
-	var reconcileErr error // toggled per phase
-	var sweptAllow []nodepolicy.AllowEntry
-	reconciled := 0
-	m := &Manager{
-		apply: func(context.Context, string) error { return nil }, now: time.Now,
-		poolSource: func(context.Context) string { return pool },
-		ctReconcile: func(_ context.Context, _ []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error) {
-			reconciled++
-			sweptAllow = allow
-			return 0, reconcileErr
-		},
-	}
-	polV1 := enfPol(nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"})
-	ctx := context.Background()
-
-	// Rule 1 — POOL UNKNOWN (F4/precondition): tick with wg0 down. The sweep WAITS — no reconcile, no health.
-	if err := m.applyAndTrack(ctx, "rs", polV1); err != nil {
-		t.Fatalf("apply v1: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 0 {
-		t.Fatalf("pool unknown: the sweep must NOT run blind against unknown governed space, ran %d times", reconciled)
-	}
-	m.mu.Lock()
-	done, fe, pend := m.bootSweepDone, m.flushErr, m.pendingRestart
-	m.mu.Unlock()
-	if done {
-		t.Fatal("pool unknown: bootSweepDone must stay false (nothing was swept)")
-	}
-	if fe != nil {
-		t.Fatal("F4: a wg0/pool-not-up wait must NOT raise the conntrack-flush kind (it is the tunnel's health, not a conntrack degradation)")
-	}
-	if pend != nil {
-		t.Fatal("the this-pass capture must be CONSUMED (dropped) on a pool-unknown drain, never carried to a later pass")
-	}
-
-	// Rule 2 — POOL UP, sweep FAILS: the NEXT tick re-captures ITS current policy (F1: never a stored one) and
-	// runs; a failure keeps bootSweepDone false so the tick after retries.
-	pool = "10.99.0.1/24"
-	reconcileErr = errors.New("netlink dump: transient EINTR")
-	polV2 := enfPol(nodepolicy.AllowEntry{SrcIP: "10.99.0.11", DstCIDR: "10.0.9.0/24", Protocol: "any", RuleID: "rB"}) // policy MOVED since v1
-	if err := m.applyAndTrack(ctx, "rs", polV2); err != nil {
-		t.Fatalf("apply v2: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 1 {
-		t.Fatalf("pool up: the sweep must RUN, ran %d times", reconciled)
-	}
-	if len(sweptAllow) != 1 || sweptAllow[0].RuleID != "rB" {
-		t.Fatalf("F1: the sweep must run against THIS tick's CURRENT policy (rB), not a stored earlier one, got %+v", sweptAllow)
-	}
-	m.mu.Lock()
-	done, fe = m.bootSweepDone, m.flushErr
-	m.mu.Unlock()
-	if done {
-		t.Fatal("RE1: a FAILED sweep must NOT latch bootSweepDone (retry, don't false-declare clean)")
-	}
-	if fe == nil {
-		t.Fatal("a failed boot sweep must SURFACE its error (never silent)")
-	}
-
-	// Rule 3 — the retry SUCCEEDS: latches bootSweepDone (terminal), clears the error.
-	reconcileErr = nil
-	if err := m.applyAndTrack(ctx, "rs", polV2); err != nil {
-		t.Fatalf("apply v2 retry: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 2 {
-		t.Fatalf("RE1: a still-pending boot sweep must RETRY on the next tick, ran %d times total", reconciled)
-	}
-	m.mu.Lock()
-	done, fe = m.bootSweepDone, m.flushErr
-	m.mu.Unlock()
-	if !done {
-		t.Fatal("RE1: a VERIFIED successful sweep must latch bootSweepDone")
-	}
-	if fe != nil {
-		t.Fatal("a successful sweep must CLEAR the surfaced error (probe-less recovery on real work)")
-	}
-
-	// Terminal: a further enforcing tick is the ORDINARY diff path — no re-sweep.
-	if err := m.applyAndTrack(ctx, "rs", polV2); err != nil {
-		t.Fatalf("apply v2 terminal: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 2 {
-		t.Fatalf("bootSweepDone is terminal — no re-sweep, ran %d times total", reconciled)
-	}
-}
-
-// TestBootSweepDischargedMootOnMesh — F1's exact scenario as a fixture: an enforcing apply lands while wg0 is
-// down (boot sweep pends), THEN the org switches to mesh BEFORE wg0 comes up. Mesh discharges the boot sweep as
-// MOOT (mesh permits everything — a revoked-while-down flow has nothing to sweep). When wg0 finally comes up, NO
-// sweep must ever run against the now-stale enforcing policy — the reduce makes F1 structurally impossible
-// (there is nothing stored to execute later under a moved world), tearing down zero live flows.
-func TestBootSweepDischargedMootOnMesh(t *testing.T) {
-	var pool string // wg0 down initially
-	reconciled := 0
-	m := &Manager{
-		apply: func(context.Context, string) error { return nil }, now: time.Now,
-		poolSource: func(context.Context) string { return pool },
-		ctReconcile: func(context.Context, []netip.Prefix, []nodepolicy.AllowEntry) (int, error) {
-			reconciled++
-			return 0, nil
-		},
-		ctFlush: func(context.Context, []flowTuple) (int, error) { return 0, nil },
-	}
-	enf := enfPol(nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"})
-	ctx := context.Background()
-
-	// Enforcing apply while wg0 is down → boot sweep pends (nothing runs yet).
-	if err := m.applyAndTrack(ctx, "rs", enf); err != nil {
-		t.Fatalf("apply enforcing: %v", err)
-	}
-	m.drainFlush(ctx)
-	if reconciled != 0 {
-		t.Fatalf("wg0 down: no sweep yet, ran %d times", reconciled)
-	}
-
-	// Org disables Zero Trust → mesh apply (still wg0-down). This DISCHARGES the boot sweep as moot.
-	if err := m.applyAndTrack(ctx, "rs", &nodepolicy.Compiled{Mesh: true}); err != nil { // non-enforcing Mode → mesh branch
-		t.Fatalf("apply mesh: %v", err)
-	}
-	m.mu.Lock()
-	done, pend := m.bootSweepDone, m.pendingRestart
-	m.mu.Unlock()
-	if !done || pend != nil {
-		t.Fatalf("mesh must DISCHARGE the boot sweep as moot (done=%v, pendingRestart=%v)", done, pend)
-	}
-
-	// wg0 finally comes up. A drain now must NOT sweep against the stale enforcing policy (F1 dissolved).
-	pool = "10.99.0.1/24"
-	m.drainFlush(ctx)
-	if reconciled != 0 {
-		t.Fatalf("F1: no sweep may EVER run against the stale enforcing policy after a mesh transition, ran %d times", reconciled)
-	}
 }
 
 // TestPartialFlushFailureKeepsKindRaised — F2/RE5 the per-family/per-flow accounting surface: a flush that kills
@@ -403,9 +195,9 @@ func TestBootSweepDischargedMootOnMesh(t *testing.T) {
 // NOT mask a v6 dump/delete failure — the standing over-report preference (annoyance heals, silence doesn't).
 func TestPartialFlushFailureKeepsKindRaised(t *testing.T) {
 	m := &Manager{
-		apply: func(context.Context, string) error { return nil }, now: time.Now,
-		bootSweepDone: true, // steady state — exercise the ordinary flush's error surfacing
-		ctFlush:       func(context.Context, []flowTuple) (int, error) { return 2, errors.New("conntrack dump ipv6: ENOBUFS") },
+		apply:   func(context.Context, string) error { return nil },
+		now:     time.Now,
+		ctFlush: func(context.Context, []flowTuple) (int, error) { return 2, errors.New("conntrack dump ipv6: ENOBUFS") },
 	}
 	a := nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"}
 	ctx := context.Background()
@@ -419,23 +211,5 @@ func TestPartialFlushFailureKeepsKindRaised(t *testing.T) {
 	m.drainFlush(ctx)
 	if !m.ConntrackFlushFailing() {
 		t.Fatal("a flush that killed some flows but returned a joined error must KEEP the kind raised (kills never mask a partial failure)")
-	}
-}
-
-// TestFamiliesOfPrefixes — RE4 the SECOND caller: the restart reconcile sweep (governed by netip.Prefix, not
-// flowTuple) dumps ONLY the families its governed space spans, exactly like the diff-flush caller (TestFamiliesOf).
-// An all-v4 governed space never touches IPv6, so a v6-less kernel can't false-fail the restart sweep either —
-// the ONE primitive's family scoping is proven through BOTH callers.
-func TestFamiliesOfPrefixes(t *testing.T) {
-	v4 := netip.MustParsePrefix("10.99.0.0/24")
-	v6 := netip.MustParsePrefix("2001:db8::/64")
-	if f := familiesOfPrefixes([]netip.Prefix{v4}); len(f) != 1 || f[0] != conntrack.IPv4 {
-		t.Fatalf("v4-only governed space → [IPv4] only, got %v", f)
-	}
-	if f := familiesOfPrefixes([]netip.Prefix{v6}); len(f) != 1 || f[0] != conntrack.IPv6 {
-		t.Fatalf("v6-only governed space → [IPv6] only, got %v", f)
-	}
-	if f := familiesOfPrefixes([]netip.Prefix{v4, v6}); len(f) != 2 {
-		t.Fatalf("mixed governed space → both families, got %v", f)
 	}
 }

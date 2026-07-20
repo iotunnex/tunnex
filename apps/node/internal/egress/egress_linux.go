@@ -86,13 +86,6 @@ type Manager struct {
 	// ctFlush deletes the conntrack entries matching a removed-grant tuple set (S8.7 Slice 2), scoped exactly
 	// to those tuples; injectable so the innocent-neighbor red asserts the scope without a live conntrack.
 	ctFlush func(context.Context, []flowTuple) (int, error)
-	// ctReconcile is the BOOT restart-sweep (S8.7 [6]): scoped to `governed`, it flushes conntrack flows the
-	// current `allow` no longer permits (a grant revoked while the agent was down). Injectable so the restart
-	// red family asserts the scope without a live conntrack.
-	ctReconcile func(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error)
-	// poolSource returns the WG pool CIDR ("" until wg0 is up) — the boot-sweep precondition. IPv4 by
-	// construction (ipalloc.GatewayCIDR/prefix reject non-v4). Injectable so the red drives wg0 up/down.
-	poolSource func(context.Context) string
 	// nftRun runs an arbitrary `nft <args...>` (list/insert/delete) and returns stdout;
 	// injectable for the DOCKER-USER foreign-chain reconcile tests (WF-4). Distinct from
 	// `apply` (the atomic `-f -` full-table replace) — the Docker-owned chain can't be
@@ -138,15 +131,10 @@ type Manager struct {
 	// more permissive, nothing to kill.
 	appliedAllow []nodepolicy.AllowEntry
 	// pendingFlush is the removed-grant tuple set captured under mu at apply-success, drained + flushed by
-	// Reconcile OUTSIDE the lock (a netlink dump must not block status reads).
+	// Reconcile OUTSIDE the lock (a netlink dump must not block status reads). This is the LIVE flush: a grant
+	// leaving the applied allow set while the agent is UP. The boot-time restart reconcile (a grant revoked
+	// while the agent was DOWN) was deferred to S8.7b — see the NOTE in conntrack_linux.go.
 	pendingFlush []flowTuple
-	// The [6] boot restart-sweep is a MODE-LESS boolean, not a stored obligation (S8.7 RE1-5 reduce). bootSweepDone
-	// latches true once the boot sweep has run against a KNOWN pool (F1: nothing is stored to go stale). pendingRestart
-	// is the THIS-PASS sweep input, captured under mu at enforcing apply-success and consumed by the SAME-TICK
-	// drainFlush (never carried across passes — like pendingFlush). If the pool isn't up yet the pass is dropped and
-	// the NEXT enforcing apply re-captures its OWN current policy: RE1's retry, without an obligation object.
-	bootSweepDone  bool
-	pendingRestart *restartSweep
 	// flushErr is the last conntrack-flush error (CAP_NET_ADMIN absent / netlink fault), surfaced never
 	// silent — the rule removal already succeeded, the lingering flows are degraded-not-broken.
 	flushErr error
@@ -158,19 +146,7 @@ func New(wgIface string) *Manager {
 	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
-	m.ctReconcile = reconcileFlush
-	// poolSource is the boot-sweep precondition: "" until wg0 is up with the pool known.
-	// Injectable so the red drives the wg0-up/down gate without a real interface.
-	m.poolSource = func(ctx context.Context) string { return wgSubnet(ctx, m.wgIface) }
 	return m
-}
-
-// restartSweep is the BOOT restart-sweep input for ONE pass — the current enforcing policy's Allow set and
-// local subnets, captured at apply-success and consumed by the SAME-TICK drainFlush. Never carried across
-// passes (F1: there is nothing stored to go stale — a later pass re-captures its own current policy).
-type restartSweep struct {
-	allow        []nodepolicy.AllowEntry
-	localSubnets []string
 }
 
 // ForwardBlocked reports the WF-4 / D-WF4-d condition: a Docker host whose FORWARD DROP is
@@ -616,12 +592,6 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 			m.applyErr = nil
 			m.failingSince = time.Time{}
 			m.appliedAllow = nil // S8.7: mesh/off has no grants — nothing to diff/flush against next
-			// F1 dissolves: a mesh/off apply DISCHARGES the boot sweep as MOOT. Mesh permits everything, so a
-			// grant revoked-while-down has nothing to sweep; a later enforcing transition diffs from this live
-			// mesh baseline via the ordinary appliedAllow path. No stored enforcing policy survives to be swept
-			// under a moved world.
-			m.bootSweepDone = true
-			m.pendingRestart = nil // drop any un-run boot capture — mesh made it moot
 			return nil
 		}
 		// The apply FAILED, so the kernel keeps the PREVIOUS ruleset in force.
@@ -654,18 +624,12 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	m.appliedEnforcing = true
 	m.applyErr = nil
 	m.failingSince = time.Time{} // apply succeeded -> no mismatch -> not stale
-	// S8.7 Slice 2: capture the grants that LEFT the allow set (expired/deleted) under the lock; Reconcile
-	// flushes their established flows OUTSIDE the lock. The apply already removed the ACCEPT rule above, so
-	// the flush cannot race a re-accept.
-	if !m.bootSweepDone {
-		// [6]/RE1 (reduced): the boot restart-sweep is due. Capture THIS pass's current policy for the
-		// SAME-TICK drainFlush to sweep against — never a stored policy carried across passes (F1: nothing
-		// to go stale). If the pool isn't up yet the drain drops it and the NEXT enforcing apply re-captures
-		// its OWN current policy; bootSweepDone latches only on a successful sweep. No baseline diff until then.
-		m.pendingRestart = &restartSweep{allow: pol.Allow, localSubnets: pol.LocalSubnets}
-	} else {
-		m.pendingFlush = removedTuples(m.appliedAllow, pol.Allow)
-	}
+	// S8.7 Slice 2 (LIVE flush): capture the grants that LEFT the allow set (expired/deleted) since the last
+	// applied enforcing set, under the lock; Reconcile flushes their established flows OUTSIDE the lock. The
+	// apply already removed the ACCEPT rule above, so the flush cannot race a re-accept. On the FIRST enforcing
+	// apply appliedAllow is nil → removedTuples yields nothing (there is no prior baseline to diff) — that
+	// while-DOWN gap (a grant revoked before this baseline existed) is the S8.7b boot-reconcile deferral.
+	m.pendingFlush = removedTuples(m.appliedAllow, pol.Allow)
 	m.appliedAllow = pol.Allow
 	return nil
 }
@@ -704,47 +668,21 @@ func allowKey(e nodepolicy.AllowEntry) string {
 // behavior, not a new failure.
 func (m *Manager) drainFlush(ctx context.Context) {
 	m.mu.Lock()
-	restart := m.pendingRestart // this-pass boot-sweep input; consumed now, NEVER carried across passes
-	m.pendingRestart = nil
 	tuples := m.pendingFlush
 	m.pendingFlush = nil
 	m.mu.Unlock()
 
-	if restart != nil && m.ctReconcile != nil && m.poolSource != nil {
-		// [6] boot restart-sweep against THIS pass's current policy (F1: nothing stored to go stale).
-		// PRECONDITION: wg0 up with the pool known — a governed-space sweep without the pool is fail-open by
-		// construction. If unmet the pass is DROPPED silently: a wg0 bring-up delay is the tunnel's own health
-		// to own, NOT a conntrack degradation (F4 — pending never writes flushErr), and bootSweepDone stays
-		// false so the next enforcing apply re-captures + retries (RE1). poolSource shells `ip`, OUTSIDE the lock.
-		if pool := m.poolSource(ctx); pool != "" {
-			governed := governedSpace(pool, restart.localSubnets)
-			killed, err := m.ctReconcile(ctx, governed, restart.allow)
-			m.mu.Lock()
-			m.flushErr = err // success CLEARS, an actual dump/delete failure RAISES — probe-less recovery on real work
-			if err == nil {
-				m.bootSweepDone = true // latch on VERIFIED SUCCESS only
-			}
-			m.mu.Unlock()
-			if err != nil {
-				slog.Error("conntrack_restart_sweep_failed", "error", err.Error())
-			} else if killed > 0 {
-				slog.Info("conntrack_restart_swept", "flows", killed)
-			}
-		}
-		return
-	}
-	// Ordinary removed-grant flush. Recovery is PROBE-LESS (F2/F5): conntrack_flush_unavailable clears on the
-	// next SUCCESSFUL actual flush — no synthetic Dump, no probe cadence. The trade (the kind may over-persist
-	// when no flushes occur) is the standing over-report preference: annoyance heals, silence doesn't.
+	// LIVE removed-grant flush. Recovery is PROBE-LESS: conntrack_flush_unavailable clears on the next
+	// SUCCESSFUL actual flush — no synthetic probe. The trade (the kind may over-persist when no flushes occur)
+	// is the standing over-report preference: annoyance heals, silence doesn't.
 	if len(tuples) == 0 {
 		return
 	}
 	if m.ctFlush == nil { // no flusher wired (a directly-constructed Manager) → skip
 		return
 	}
-	// PRECONDITION PROOF for the ordinary flush path: no pool gate needed. Unlike the boot sweep (which judges
-	// governed-space against the pool), these `tuples` are EXPLICIT src/dst pairs derived from the removed Allow
-	// entries themselves (tupleFromAllow), independent of the WG pool. Nothing here is fail-open without wg0.
+	// These `tuples` are EXPLICIT src/dst pairs derived from the removed Allow entries themselves (tupleFromAllow),
+	// independent of the WG pool — no pool gate needed.
 	killed, err := m.ctFlush(ctx, tuples)
 	m.mu.Lock()
 	m.flushErr = err
