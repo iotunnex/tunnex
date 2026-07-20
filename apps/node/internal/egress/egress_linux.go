@@ -83,6 +83,9 @@ type Manager struct {
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
+	// ctFlush deletes the conntrack entries matching a removed-grant tuple set (S8.7 Slice 2), scoped exactly
+	// to those tuples; injectable so the innocent-neighbor red asserts the scope without a live conntrack.
+	ctFlush func(context.Context, []flowTuple) (int, error)
 	// nftRun runs an arbitrary `nft <args...>` (list/insert/delete) and returns stdout;
 	// injectable for the DOCKER-USER foreign-chain reconcile tests (WF-4). Distinct from
 	// `apply` (the atomic `-f -` full-table replace) — the Docker-owned chain can't be
@@ -122,11 +125,26 @@ type Manager struct {
 	// (no log clauses) — the safety default, so enabling observation is opt-in and its
 	// absence is byte-for-byte the pre-S7.5.1 enforcement ruleset.
 	flowLogGroup int
+	// appliedAllow is the Allow set of the last SUCCESSFUL enforcing apply (under mu). S8.7 Slice 2: the
+	// conntrack flush diffs the NEW allow set against this to find REMOVED grants (expired/deleted); a
+	// removed entry's established flows are torn down. nil after a non-enforcing (mesh/off) apply — mesh is
+	// more permissive, nothing to kill.
+	appliedAllow []nodepolicy.AllowEntry
+	// pendingFlush is the removed-grant tuple set captured under mu at apply-success, drained + flushed by
+	// Reconcile OUTSIDE the lock (a netlink dump must not block status reads).
+	pendingFlush []flowTuple
+	// flushErr is the last conntrack-flush error (CAP_NET_ADMIN absent / netlink fault), surfaced never
+	// silent — the rule removal already succeeded, the lingering flows are degraded-not-broken.
+	flushErr error
 }
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager {
-	return &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
+	m := &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
+	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
+	// without a live conntrack table (the innocent-neighbor red).
+	m.ctFlush = func(ctx context.Context, tuples []flowTuple) (int, error) { return flushTuples(ctx, tuples, nil) }
+	return m
 }
 
 // ForwardBlocked reports the WF-4 / D-WF4-d condition: a Docker host whose FORWARD DROP is
@@ -236,6 +254,7 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	if err := m.applyAndTrack(ctx, m.rulesetWith(subnet, pol), pol); err != nil {
 		return false, err // no nftables / IPv4 NAT support, or a bad ruleset → not egress-capable
 	}
+	m.drainFlush(ctx) // S8.7 Slice 2: tear down established flows of any grant that just left the allow set
 	// WF-4: on a Docker host, clear Docker's `filter FORWARD` DROP for the approved site routes
 	// (a Routes-scoped DOCKER-USER accept) so site-to-site forwarding works with zero gateway touch.
 	// Best-effort + idempotent; a Docker-blocked forward it can't clear is surfaced via ForwardBlocked().
@@ -559,6 +578,7 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 			m.appliedEnforcing = false
 			m.applyErr = nil
 			m.failingSince = time.Time{}
+			m.appliedAllow = nil // S8.7: mesh/off has no grants — nothing to diff/flush against next
 			return nil
 		}
 		// The apply FAILED, so the kernel keeps the PREVIOUS ruleset in force.
@@ -591,7 +611,65 @@ func (m *Manager) applyAndTrack(ctx context.Context, ruleset string, pol *nodepo
 	m.appliedEnforcing = true
 	m.applyErr = nil
 	m.failingSince = time.Time{} // apply succeeded -> no mismatch -> not stale
+	// S8.7 Slice 2: capture the grants that LEFT the allow set (expired/deleted) under the lock; Reconcile
+	// flushes their established flows OUTSIDE the lock. The apply already removed the ACCEPT rule above, so
+	// the flush cannot race a re-accept.
+	m.pendingFlush = removedTuples(m.appliedAllow, pol.Allow)
+	m.appliedAllow = pol.Allow
 	return nil
+}
+
+// removedTuples returns the flush specs for grants present in the OLD applied allow set but ABSENT from the
+// NEW one — the expired/deleted grants whose established flows must be torn down (S8.7 Slice 2). Keyed on the
+// exact enforcement tuple (src/dst/proto/ports); a malformed entry that can't be parsed is skipped (never
+// flushed on a bad tuple). ONE function — it is agnostic to WHY a grant left (expiry vs manual delete both
+// arrive here as an absent entry), which is exactly D5's "one function, two triggers".
+func removedTuples(old, current []nodepolicy.AllowEntry) []flowTuple {
+	inCurrent := make(map[string]bool, len(current))
+	for _, e := range current {
+		inCurrent[allowKey(e)] = true
+	}
+	var out []flowTuple
+	for _, e := range old {
+		if inCurrent[allowKey(e)] {
+			continue
+		}
+		if t, ok := tupleFromAllow(e); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// allowKey is the canonical identity of an AllowEntry for the removed-set diff (enforcement fields only —
+// RuleID/SrcDeviceID are observability and excluded).
+func allowKey(e nodepolicy.AllowEntry) string {
+	return fmt.Sprintf("%s|%s|%s|%d|%d", e.SrcIP, e.DstCIDR, e.Protocol, e.PortLow, e.PortHigh)
+}
+
+// drainFlush runs the pending conntrack flush OUTSIDE the status lock, after a successful apply. Best-effort:
+// a flush error (CAP_NET_ADMIN absent / netlink fault) is LOGGED + recorded in flushErr (surfaced, never
+// silent) — the rule removal already succeeded, so lingering flows are the pre-existing degraded-not-broken
+// behavior, not a new failure.
+func (m *Manager) drainFlush(ctx context.Context) {
+	m.mu.Lock()
+	tuples := m.pendingFlush
+	m.pendingFlush = nil
+	m.mu.Unlock()
+	if len(tuples) == 0 || m.ctFlush == nil { // no flusher wired (a directly-constructed Manager) → skip
+		return
+	}
+	killed, err := m.ctFlush(ctx, tuples)
+	m.mu.Lock()
+	m.flushErr = err
+	m.mu.Unlock()
+	if err != nil {
+		slog.Error("conntrack_flush_failed", "error", err.Error(), "tuples", len(tuples))
+		return
+	}
+	if killed > 0 {
+		slog.Info("conntrack_flushed", "flows", killed, "tuples", len(tuples))
+	}
 }
 
 // nftApply pipes a ruleset to `nft -f -` (a single atomic netlink transaction: every
