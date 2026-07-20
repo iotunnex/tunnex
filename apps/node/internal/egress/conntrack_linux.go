@@ -81,42 +81,18 @@ func inGoverned(src netip.Addr, governed []netip.Prefix) bool {
 // reconcileFlush is the restart dump-and-reconcile (S8.7 [6]): with no in-memory baseline after a restart,
 // dump conntrack and flush every flow shouldReconcileFlush selects — scoped to our governed space, sparing
 // grant-covered + unrelated flows. Returns the count killed; per-flow/dump errors surface (never silent).
-func reconcileFlush(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry, emit func(ruleID string)) (int, error) {
+func reconcileFlush(ctx context.Context, governed []netip.Prefix, allow []nodepolicy.AllowEntry) (int, error) {
 	permit := make([]flowTuple, 0, len(allow))
 	for _, e := range allow {
 		if t, ok := tupleFromAllow(e); ok {
 			permit = append(permit, t)
 		}
 	}
-	nfct, err := conntrack.Open(&conntrack.Config{})
-	if err != nil {
-		return 0, fmt.Errorf("conntrack open (CAP_NET_ADMIN?): %w", err)
-	}
-	defer nfct.Close()
-	killed := 0
-	var errs []error
-	for _, fam := range []conntrack.Family{conntrack.IPv4, conntrack.IPv6} { // a restart doesn't know the family span → both
-		flows, derr := nfct.Dump(conntrack.Conntrack, fam)
-		if derr != nil {
-			errs = append(errs, fmt.Errorf("conntrack dump %v: %w", fam, derr))
-			continue
-		}
-		for i := range flows {
-			c := flows[i]
-			if !shouldReconcileFlush(c, governed, permit) {
-				continue
-			}
-			if delErr := nfct.Delete(conntrack.Conntrack, fam, c); delErr != nil {
-				errs = append(errs, fmt.Errorf("conntrack delete: %w", delErr))
-			} else {
-				killed++
-				if emit != nil {
-					emit("restart_sweep")
-				}
-			}
-		}
-	}
-	return killed, errors.Join(errs...)
+	// Dump only the families our GOVERNED space spans (RE4: a v4-only pool+subnets never dumps IPv6, so a
+	// v6-less kernel can't false-degrade the restart sweep — the same scoping flushTuples has).
+	return sweepConntrack(ctx, familiesOfPrefixes(governed), func(c conntrack.Con) bool {
+		return shouldReconcileFlush(c, governed, permit)
+	})
 }
 
 // probeConntrack reactively checks CT-netlink capability by opening + closing a conntrack socket. An error
@@ -127,7 +103,12 @@ func probeConntrack(_ context.Context) error {
 	if err != nil {
 		return err
 	}
-	return nfct.Close()
+	defer nfct.Close()
+	// RE2: a REAL capability check — the flush needs Dump, so the probe must EXERCISE it. Open-only was the
+	// false-green (a socket opens even when seccomp/ENOBUFS blocks Dump/Delete). One IPv4 dump is cheap enough
+	// for the reconcile cadence but fails exactly when the flush would.
+	_, err = nfct.Dump(conntrack.Conntrack, conntrack.IPv4)
+	return err
 }
 
 // flowTuple is a removed grant's EXACT conntrack match spec. A conntrack entry is flushed iff its ORIGIN
@@ -217,8 +198,14 @@ func matchesTuple(c conntrack.Con, t flowTuple) bool {
 // (flowlog.VerdictTerminated + the revoked grant's RuleID); the default caller passes nil — the flush's
 // surface is the structured log + Manager.flushErr, and pushing the VerdictTerminated event into the
 // flow-log STREAM rides the flowlog-sink threading (S8.7 rider, the buffer is pump-owned, not Manager-held).
-func flushTuples(ctx context.Context, tuples []flowTuple, emit func(ruleID string)) (int, error) {
-	if len(tuples) == 0 {
+// sweepConntrack is THE ONE flush primitive (S8.7 RE4+RE5 reduce): open a CT socket, dump each of `families`,
+// and delete every flow `selector` picks — counting kills, SURFACING per-flow delete + per-family dump errors
+// via errors.Join (never a silent skip that reports healthy, [7]), and a dump failure for ONE family never
+// discards ANOTHER family's kills ([11]). flushTuples (removed-tuple selector) and reconcileFlush (restart
+// governed+unmatched selector) are the two callers — the family-scoping/error-handling drift that caused RE4
+// is now impossible (one function, one fix surface).
+func sweepConntrack(ctx context.Context, families []conntrack.Family, selector func(conntrack.Con) bool) (int, error) {
+	if len(families) == 0 {
 		return 0, nil
 	}
 	nfct, err := conntrack.Open(&conntrack.Config{})
@@ -226,46 +213,62 @@ func flushTuples(ctx context.Context, tuples []flowTuple, emit func(ruleID strin
 		return 0, fmt.Errorf("conntrack open (CAP_NET_ADMIN?): %w", err)
 	}
 	defer nfct.Close()
-
 	killed := 0
 	var errs []error
-	// Dump ONLY the address families the removed tuples actually span ([17]) — an IPv4-only removal never
-	// dumps IPv6, so it can't false-fail on a kernel with no v6 conntrack path ([11]).
-	for _, fam := range familiesOf(tuples) {
+	for _, fam := range families {
 		flows, derr := nfct.Dump(conntrack.Conntrack, fam)
 		if derr != nil {
-			errs = append(errs, fmt.Errorf("conntrack dump %v: %w", fam, derr)) // surfaced, but the OTHER family's kills stand ([11])
+			errs = append(errs, fmt.Errorf("conntrack dump %v: %w", fam, derr)) // surfaced; other family's kills stand
 			continue
 		}
 		for i := range flows {
 			c := flows[i]
-			for _, t := range tuples {
-				if matchesTuple(c, t) {
-					if delErr := nfct.Delete(conntrack.Conntrack, fam, c); delErr != nil {
-						// [7]: a per-flow delete failure is SURFACED, never silently skipped — the revoked flow
-						// survives, so the caller must raise conntrack_flush_unavailable, not report healthy.
-						errs = append(errs, fmt.Errorf("conntrack delete (rule %s): %w", t.ruleID, delErr))
-					} else {
-						killed++
-						if emit != nil {
-							emit(t.ruleID)
-						}
-					}
-					break // one tuple match is enough; don't double-count/double-delete a flow
-				}
+			if !selector(c) {
+				continue
+			}
+			if delErr := nfct.Delete(conntrack.Conntrack, fam, c); delErr != nil {
+				errs = append(errs, fmt.Errorf("conntrack delete: %w", delErr)) // [7]: surfaced, never silently skipped
+			} else {
+				killed++
 			}
 		}
 	}
 	return killed, errors.Join(errs...)
 }
 
+// flushTuples deletes the conntrack entries matching ANY removed-grant tuple, scoped exactly — a selector over
+// the ONE primitive (S8.7 Slice 2). Dumps only the families the tuples span ([11]/[17]).
+func flushTuples(ctx context.Context, tuples []flowTuple) (int, error) {
+	if len(tuples) == 0 {
+		return 0, nil
+	}
+	return sweepConntrack(ctx, familiesOf(tuples), func(c conntrack.Con) bool {
+		for _, t := range tuples {
+			if matchesTuple(c, t) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // familiesOf returns the conntrack address families the removed tuples span (IPv4 and/or IPv6). The flush
 // dumps ONLY these — never a family with no matching tuple ([17]), so a v6-less kernel is never touched for
 // an all-v4 removal ([11]).
 func familiesOf(tuples []flowTuple) []conntrack.Family {
+	ps := make([]netip.Prefix, len(tuples))
+	for i, t := range tuples {
+		ps[i] = t.src
+	}
+	return familiesOfPrefixes(ps)
+}
+
+// familiesOfPrefixes returns the conntrack families a set of prefixes spans — the ONE family-scoping
+// function both the removed-tuple flush and the restart sweep use ([11]/[17]/RE4).
+func familiesOfPrefixes(ps []netip.Prefix) []conntrack.Family {
 	var v4, v6 bool
-	for _, t := range tuples {
-		if a := t.src.Addr(); a.Is4() || a.Is4In6() {
+	for _, p := range ps {
+		if a := p.Addr(); a.Is4() || a.Is4In6() {
 			v4 = true
 		} else {
 			v6 = true

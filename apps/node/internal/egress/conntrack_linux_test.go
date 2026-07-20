@@ -92,8 +92,9 @@ func TestRemovedTuplesDiff(t *testing.T) {
 func TestFlushWiringOnRemoval(t *testing.T) {
 	var flushed [][]flowTuple
 	m := &Manager{
-		apply: func(context.Context, string) error { return nil }, // apply always succeeds
-		now:   time.Now,
+		apply:        func(context.Context, string) error { return nil }, // apply always succeeds
+		now:          time.Now,
+		startupSwept: true, // steady state: the restart obligation is already discharged; this red is about the ordinary diff flush
 		ctFlush: func(_ context.Context, ts []flowTuple) (int, error) {
 			flushed = append(flushed, ts)
 			return len(ts), nil
@@ -130,9 +131,10 @@ func TestFlushWiringOnRemoval(t *testing.T) {
 func TestFlushFailureSurfacedNotSilent(t *testing.T) {
 	boom := errors.New("conntrack open (CAP_NET_ADMIN?): operation not permitted")
 	m := &Manager{
-		apply:   func(context.Context, string) error { return nil },
-		now:     time.Now,
-		ctFlush: func(context.Context, []flowTuple) (int, error) { return 0, boom },
+		apply:        func(context.Context, string) error { return nil },
+		now:          time.Now,
+		startupSwept: true, // steady state — this red is about an ordinary diff flush's error surfacing, not the restart sweep
+		ctFlush:      func(context.Context, []flowTuple) (int, error) { return 0, boom },
 	}
 	a := nodepolicy.AllowEntry{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432, RuleID: "rA"}
 	ctx := context.Background()
@@ -236,6 +238,7 @@ func TestRestartSweepWiring(t *testing.T) {
 	var reconciled, flushed int
 	m := &Manager{
 		apply: func(context.Context, string) error { return nil }, now: time.Now, wgIface: "wg0",
+		poolSource:  func(context.Context) string { return "10.99.0.1/24" }, // wg0 up: the restart precondition (RE3) is met
 		ctReconcile: func(context.Context, []netip.Prefix, []nodepolicy.AllowEntry) (int, error) { reconciled++; return 0, nil },
 		ctFlush:     func(context.Context, []flowTuple) (int, error) { flushed++; return 0, nil },
 	}
@@ -259,5 +262,102 @@ func TestRestartSweepWiring(t *testing.T) {
 	m.drainFlush(ctx)
 	if reconciled != 1 || flushed != 1 {
 		t.Fatalf("after the restart sweep, a removal must use the normal flush, got reconciled=%d flushed=%d", reconciled, flushed)
+	}
+}
+
+// TestRestartSweepStateMachine — RE1+RE3 the state model: the restart sweep is a PENDING OBLIGATION with two
+// states (pending → discharged), no third. It waits while the precondition is unmet (wg0/pool down, RE3), it
+// does NOT discharge on a FAILED sweep (the latch moves on SUCCESS only, RE1 — so a transient netlink fault
+// re-attempts next pass instead of silently declaring the restart clean), and it discharges exactly once on a
+// verified success. A false-declared-clean restart would leave revoked-while-down flows alive forever.
+func TestRestartSweepStateMachine(t *testing.T) {
+	var pool string                        // "" = wg0 down (precondition unmet); set = up
+	var reconcileErr error                 // toggled per phase
+	reconciled := 0
+	m := &Manager{
+		apply: func(context.Context, string) error { return nil }, now: time.Now,
+		poolSource:  func(context.Context) string { return pool },
+		ctReconcile: func(context.Context, []netip.Prefix, []nodepolicy.AllowEntry) (int, error) { reconciled++; return 0, reconcileErr },
+	}
+	enf := &nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Allow: []nodepolicy.AllowEntry{
+		{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "any", RuleID: "rA"},
+	}}
+	ctx := context.Background()
+	if err := m.applyAndTrack(ctx, "rs", enf); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	// Phase 1 — PRECONDITION UNMET (RE3): wg0 down (pool == ""). The obligation WAITS: the sweep must not run
+	// blind against unknown governed space, and a brief startup wait must NOT raise health.
+	m.drainFlush(ctx)
+	if reconciled != 0 {
+		t.Fatalf("RE3: a sweep must NOT run before wg0/pool is up (fail-open against unknown governed space), ran %d times", reconciled)
+	}
+	m.mu.Lock()
+	swept, fe := m.startupSwept, m.flushErr
+	m.mu.Unlock()
+	if swept {
+		t.Fatal("RE1: the obligation must stay PENDING while the precondition is unmet (no discharge without a sweep)")
+	}
+	if fe != nil {
+		t.Fatal("RE3: a brief precondition wait must NOT raise health (only pending PAST the threshold degrades)")
+	}
+
+	// Phase 2 — PRECONDITION MET but the sweep FAILS (RE1): wg0 up, ctReconcile errors. The sweep runs, the
+	// error surfaces, but the obligation must STAY PENDING (the latch moves on success only) so it retries.
+	pool = "10.99.0.1/24"
+	reconcileErr = errors.New("netlink dump: transient EINTR")
+	m.drainFlush(ctx)
+	if reconciled != 1 {
+		t.Fatalf("RE3: the sweep must RUN once the precondition is met, ran %d times", reconciled)
+	}
+	m.mu.Lock()
+	swept, fe = m.startupSwept, m.flushErr
+	m.mu.Unlock()
+	if swept {
+		t.Fatal("RE1: a FAILED sweep must NOT discharge the obligation (the latch moves on VERIFIED SUCCESS only)")
+	}
+	if fe == nil {
+		t.Fatal("a failed restart sweep must SURFACE its error (never silent)")
+	}
+
+	// Phase 3 — the retry SUCCEEDS (RE1): the obligation discharges exactly once, the error clears.
+	reconcileErr = nil
+	m.drainFlush(ctx)
+	if reconciled != 2 {
+		t.Fatalf("RE1: a still-pending obligation must RETRY next pass, ran %d times total", reconciled)
+	}
+	m.mu.Lock()
+	swept, fe = m.startupSwept, m.flushErr
+	m.mu.Unlock()
+	if !swept {
+		t.Fatal("RE1: a VERIFIED successful sweep must DISCHARGE the obligation")
+	}
+	if fe != nil {
+		t.Fatal("a successful sweep must CLEAR the surfaced error")
+	}
+
+	// Phase 4 — DISCHARGED is terminal (two states, no third): a further drain must NOT re-sweep.
+	m.drainFlush(ctx)
+	if reconciled != 2 {
+		t.Fatalf("discharged is terminal — no re-sweep, ran %d times total", reconciled)
+	}
+}
+
+// TestFamiliesOfPrefixes — RE4 the SECOND caller: the restart reconcile sweep (governed by netip.Prefix, not
+// flowTuple) dumps ONLY the families its governed space spans, exactly like the diff-flush caller (TestFamiliesOf).
+// An all-v4 governed space never touches IPv6, so a v6-less kernel can't false-fail the restart sweep either —
+// the ONE primitive's family scoping is proven through BOTH callers.
+func TestFamiliesOfPrefixes(t *testing.T) {
+	v4 := netip.MustParsePrefix("10.99.0.0/24")
+	v6 := netip.MustParsePrefix("2001:db8::/64")
+	if f := familiesOfPrefixes([]netip.Prefix{v4}); len(f) != 1 || f[0] != conntrack.IPv4 {
+		t.Fatalf("v4-only governed space → [IPv4] only, got %v", f)
+	}
+	if f := familiesOfPrefixes([]netip.Prefix{v6}); len(f) != 1 || f[0] != conntrack.IPv6 {
+		t.Fatalf("v6-only governed space → [IPv6] only, got %v", f)
+	}
+	if f := familiesOfPrefixes([]netip.Prefix{v4, v6}); len(f) != 2 {
+		t.Fatalf("mixed governed space → both families, got %v", f)
 	}
 }
