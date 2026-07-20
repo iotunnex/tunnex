@@ -570,11 +570,13 @@ type MemberMetrics struct {
 }
 
 // HubMemberView is one hub-set member as SERVED: its node id, its ROLE (primary = members[0], else
-// standby), and its latest metrics (nil when not reporting).
+// standby), its admin hub_priority (the CONFIGURED order — so the UI can show a promotion "in effect" when
+// the active order diverges), and its latest metrics (nil when not reporting).
 type HubMemberView struct {
-	NodeID  uuid.UUID
-	Role    string
-	Metrics *MemberMetrics
+	NodeID      uuid.UUID
+	Role        string
+	HubPriority *int32
+	Metrics     *MemberMetrics
 }
 
 // HubSetView is the org's persisted hub set as SERVED (S8.6 Slice 6): the D5 generation (the set's version
@@ -597,8 +599,10 @@ func (s *Service) GetHubSetView(ctx context.Context, orgID uuid.UUID) (HubSetVie
 		return HubSetView{}, err
 	}
 	keyByNode := make(map[uuid.UUID]string, len(gws))
-	for _, g := range gws {
-		keyByNode[g.ID] = g.WgPublicKey
+	prioByNode := make(map[uuid.UUID]*int32, len(gws))
+	for i := range gws {
+		keyByNode[gws[i].ID] = gws[i].WgPublicKey
+		prioByNode[gws[i].ID] = gws[i].HubPriority
 	}
 	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
 	if err != nil {
@@ -612,7 +616,7 @@ func (s *Service) GetHubSetView(ctx context.Context, orgID uuid.UUID) (HubSetVie
 	}
 	view := HubSetView{Generation: hs.Generation, Members: make([]HubMemberView, 0, len(hs.Members))}
 	for i, mid := range hs.Members {
-		mv := HubMemberView{NodeID: mid, Role: "standby"}
+		mv := HubMemberView{NodeID: mid, Role: "standby", HubPriority: prioByNode[mid]}
 		if i == 0 {
 			mv.Role = "primary"
 		}

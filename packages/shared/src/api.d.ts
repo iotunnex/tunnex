@@ -1913,6 +1913,8 @@ export interface components {
             node_id: string;
             /** @enum {string} */
             role: "primary" | "standby";
+            /** @description The admin pin (the CONFIGURED order) — so the UI can show a promotion 'in effect' when the active order diverges. Null = unpinned. */
+            hub_priority?: number | null;
             /** @description Latest node_peer_status observation, or ABSENT when this member is not reporting (distinct from an idle link with zero bytes). */
             metrics?: components["schemas"]["HubMemberMetrics"] | null;
         };

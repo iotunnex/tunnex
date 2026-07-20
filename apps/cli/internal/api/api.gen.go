@@ -760,6 +760,9 @@ type HealthResponseStatus string
 
 // HubMember defines model for HubMember.
 type HubMember struct {
+	// HubPriority The admin pin (the CONFIGURED order) — so the UI can show a promotion 'in effect' when the active order diverges. Null = unpinned.
+	HubPriority *int `json:"hub_priority"`
+
 	// Metrics Latest node_peer_status observation, or ABSENT when this member is not reporting (distinct from an idle link with zero bytes).
 	Metrics *HubMemberMetrics  `json:"metrics"`
 	NodeId  openapi_types.UUID `json:"node_id"`

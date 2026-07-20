@@ -327,6 +327,10 @@ func (s apiServer) GetHubSet(ctx context.Context, req api.GetHubSetRequestObject
 	members := make([]api.HubMember, 0, len(view.Members))
 	for _, m := range view.Members {
 		hm := api.HubMember{NodeId: m.NodeID, Role: api.HubMemberRole(m.Role)}
+		if m.HubPriority != nil {
+			v := int(*m.HubPriority)
+			hm.HubPriority = &v
+		}
 		if m.Metrics != nil { // absent metrics stay absent (not-reporting ≠ idle-with-zeroes)
 			hm.Metrics = &api.HubMemberMetrics{LastHandshakeAt: m.Metrics.LastHandshakeAt, RxBytes: m.Metrics.RxBytes, TxBytes: m.Metrics.TxBytes}
 		}

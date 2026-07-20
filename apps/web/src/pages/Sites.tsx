@@ -12,7 +12,9 @@ import {
   type SiteSubnet,
   type SiteReferences,
   type Node,
+  type HubSet,
 } from "../lib/api";
+import { hubSetView } from "../lib/hubsetview";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import { LoadRetry } from "../components/LoadRetry";
@@ -42,6 +44,7 @@ interface Raw {
   sites: Site[];
   nodes: Node[];
   subnetsBySite: Record<string, SiteSubnet[]>;
+  hubSet: HubSet | null; // S8.6 — the persisted HA hub set (null when unpinned / load failed: no HA surface)
 }
 
 export default function Sites() {
@@ -96,7 +99,12 @@ export default function Sites() {
       if (!subRes.ok) return setLoadError(subRes.error); // any failed subnet load → legible retry, not a partial topology
       subnetsBySite[sRes.data[i].id] = subRes.data;
     }
-    setRaw({ sites: sRes.data, nodes: nRes.data, subnetsBySite });
+    // S8.6 hub set (member-readable). NON-fatal: a load failure just hides the HA surface (render-floor —
+    // show nothing rather than a broken card or block the whole topology).
+    const hRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/hub-set", { params: { path: { orgId: first.id } } }),
+    )) as Loaded<HubSet>;
+    setRaw({ sites: sRes.data, nodes: nRes.data, subnetsBySite, hubSet: hRes.ok ? hRes.data : null });
   }, [myId]);
   useEffect(() => {
     reload();
@@ -156,6 +164,7 @@ export default function Sites() {
               onDone={reload}
             />
           )}
+          <HubSetSection orgId={org.id} canManage={gate.canManage} hubSet={raw.hubSet} gateways={allGateways} onDone={reload} />
           <Topology
             cards={cards}
             canManage={gate.canManage}
@@ -225,6 +234,128 @@ function RouteLANModal({ orgId, nodes, onDone, onClose }: { orgId: string; nodes
       </Field>
       <ErrorText>{err}</ErrorText>
     </Modal>
+  );
+}
+
+// ── S8.6 hub set (HA): the operator surface + the L1 metrics ─────────────────────────
+// The persisted HA hub set — ordered candidates (PRIMARY on members[0], evolving the HUB badge vocabulary),
+// warm/handshake state + L1 byte counters per member (from node_peer_status — render-floor: a not-reporting
+// link shows "—", NEVER 0; an idle link shows its real 0 bytes), and the generation as the set's version
+// tag. When the active order diverges from the configured pins a failover is IN EFFECT — stated, with the
+// demoted member marked and an audit pointer. Member-readable; the pin control is manage-gated.
+function HubSetSection({
+  orgId,
+  canManage,
+  hubSet,
+  gateways,
+  onDone,
+}: {
+  orgId: string;
+  canManage: boolean;
+  hubSet: HubSet | null;
+  gateways: GatewayView[];
+  onDone: () => void;
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const view = hubSetView(hubSet, Date.now());
+  const nameOf = (id: string) => gateways.find((g) => g.id === id)?.name ?? id.slice(0, 8);
+  const priorityByNode = new Map<string, number | null>();
+  for (const m of hubSet?.members ?? []) priorityByNode.set(m.node_id, m.hub_priority ?? null);
+
+  async function setPin(nodeId: string, priority: number | null) {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.PUT("/api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority", {
+      params: { path: { orgId, nodeId } },
+      body: { priority },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not set the hub priority."));
+    onDone();
+  }
+
+  // Nothing to show a MEMBER when no HA set is configured (zero-config — no HA surface).
+  if (!view && !canManage) return null;
+
+  return (
+    <Card className="mt-6">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold text-slate-300">Hub high-availability</h2>
+        {view && <span className="text-[11px] text-slate-500">hub set v{view.generation}</span>}
+      </div>
+
+      {view ? (
+        <>
+          {view.promotionInEffect && (
+            <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs text-amber-300">
+              Failover in effect — the configured primary is unreachable; a standby is carrying transit. The
+              hub restores when it recovers. See the audit log (<span className="font-mono">hub_set.promotion</span>) for the timeline.
+            </p>
+          )}
+          <ul className="mt-2 space-y-1">
+            {view.members.map((m) => (
+              <li key={m.nodeId} className="flex items-center gap-2 text-sm">
+                <span className="text-slate-200">{nameOf(m.nodeId)}</span>
+                {m.role === "primary" ? (
+                  <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-sky-300">primary</span>
+                ) : (
+                  <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">standby</span>
+                )}
+                {m.demoted && <span className="text-[11px] text-amber-400">demoted (stale)</span>}
+                {m.warm === true && <span className="text-[11px] text-emerald-400">warm</span>}
+                {m.warm === false && <span className="text-[11px] text-rose-400">stale</span>}
+                <span className="ml-auto text-[11px] text-slate-500">
+                  ↓{m.rx} ↑{m.tx} · {m.handshakeAge === "—" ? "no data" : `handshake ${m.handshakeAge}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-slate-600">Byte counters are cumulative since the last handshake (raw gauges). Refreshed on load.</p>
+        </>
+      ) : (
+        canManage && (
+          <p className="mt-2 text-xs text-slate-500">
+            No HA hub set. Pin two or more gateways below to create one — the pinned gateways become the
+            ordered hub candidates (primary + standbys) and the CP fails transit over if the primary goes stale.
+          </p>
+        )
+      )}
+
+      {canManage && (
+        <div className="mt-3 border-t border-white/5 pt-3">
+          <p className="text-[11px] text-slate-500">
+            Pin a gateway as a hub candidate (lower number = more preferred). Pinning creates/edits the HA hub set.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {gateways.map((g) => {
+              const pri = priorityByNode.get(g.id);
+              const pinned = pri != null;
+              const pins = [...priorityByNode.values()].filter((v): v is number => v != null);
+              const nextPin = pins.length ? Math.max(...pins) + 1 : 1; // append after the current candidates
+              return (
+                <li key={g.id} className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-300">{g.name}</span>
+                  {pinned && <span className="text-[11px] text-slate-500">pin #{pri}</span>}
+                  <span className="ml-auto flex gap-1">
+                    {pinned ? (
+                      <Button variant="ghost" className="px-2 py-0.5 text-xs" disabled={busy} onClick={() => setPin(g.id, null)}>
+                        unpin
+                      </Button>
+                    ) : (
+                      <Button variant="ghost" className="px-2 py-0.5 text-xs" disabled={busy} onClick={() => setPin(g.id, nextPin)}>
+                        {nextPin === 1 ? "pin as primary" : `pin #${nextPin}`}
+                      </Button>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      <ErrorText>{err}</ErrorText>
+    </Card>
   );
 }
 

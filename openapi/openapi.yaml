@@ -2368,6 +2368,10 @@ components:
       properties:
         node_id: { type: string, format: uuid }
         role: { type: string, enum: [primary, standby] }
+        hub_priority:
+          type: integer
+          nullable: true
+          description: "The admin pin (the CONFIGURED order) — so the UI can show a promotion 'in effect' when the active order diverges. Null = unpinned."
         metrics:
           allOf: [ { $ref: "#/components/schemas/HubMemberMetrics" } ]
           nullable: true
