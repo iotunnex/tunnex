@@ -70,3 +70,33 @@ reds were the SUBSTITUTE).
    azure's agent-computed `site_link_stale` while transit actually flows via the new
    hub. Cleared on fail-back. Misleading-health-during-failover candidate; disposition
    post-deck.
+
+## Dispositions (founder-ruled)
+
+- **Rematch VERDICT: Deck B PASSES.** 4m48s matching the derivation to the second,
+  138ms transit following the hub, zero flicker, single clean fail-back at M=5, both
+  audit events landed. The model didn't just work — it PREDICTED. The self-heal bonus
+  (observability caught + the fold cleaned the 90s-era contaminated demotion state)
+  goes in the record as the fix cleaning forward.
+
+- **Finding 1 (enforcing-face counter) — SUBSTITUTE ACCEPTED, trigger named.** The
+  mechanism is proven twice: the review's #1 red pins grant-follows-derived-hub in
+  fixture, and the rematch proved transit itself followed the hub live (138ms). Missing
+  only the live counter observation on the promoted chain, which needs an aws-site
+  behind-host the topology lacks. Trigger: the epic-close walk OR the first topology
+  with an aws-site behind-host, whichever first. NOT merge-gating.
+
+- **Finding 2 (transient azure site-link-down) — HONEST-BY-DESIGN + verified.** The
+  spoke keeps a warm keepalive peer to the demoted (dead) primary per the fail-back
+  machinery; that peer's handshake genuinely goes stale, so site_link_down reporting
+  it tells the truth about a link that IS down. VERIFY (from the captured screenshots):
+  the UI rendered the two truths DISTINCTLY — the Hub-HA banner showed transit healthy
+  via the standby while the `site link down` badge sat on the azure-gw gateway ROW (the
+  site header stayed neutral). NO conflation of "link to a demoted member down" with
+  "site down." Cleared on fail-back (azure-gw online at 08:39). Working-as-designed for
+  correctness. ONE residual for the Deck-D UI harvest: the badge doesn't disambiguate
+  WHICH peer link is down (active hub vs demoted member) — a legibility refinement, not
+  a correctness bug.
+
+## Sequence (ruled): C3–C5 now → Deck D → merge train (S8.5→S8.6→S8.7, Pawan's words,
+## all decks green + CI green against one complete evidence set).
