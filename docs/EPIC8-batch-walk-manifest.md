@@ -127,3 +127,13 @@ Three cross-cloud decks + a UI deck, run live. Realistic: **half a day to a full
 Deck B (three-VM HA, second-gateway enroll + kill + tcpdump) is the long pole; Deck A has
 8 legs across two client OSes; Deck C is quick (one kernel, one flow). Env pre-flight (static
 azure IP, SG rules, source/dest-check, second-gateway enroll) is real setup time BEFORE Leg 1.
+
+---
+
+## Deck B scope note (2026-07-21) — device-transit variant DEFERRED (A3b)
+
+Deck B's continuity legs are **behind-host paths** — an Azure behind-host ↔ the AWS LAN via the promoted
+standby (the A1 / S8.2c-class eth0-side geometry, proven on the folded train). The **device→remote-site
+transit** variant is **explicitly dropped from Deck B** — it depends on A3b (device→remote-site hub transit,
+WG cryptokey-routing), a registered follow-up story, not this deck. Keeping the leg list honest: Deck B proves
+hub-role failover for behind-host site traffic; it does NOT prove device-through-hub-to-remote-site.

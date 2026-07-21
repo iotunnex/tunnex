@@ -33,3 +33,15 @@ none of this.
 Disposition: HELD for founder — own story (hub-transit routing model, candidate S8.6b-follow-up / S8.2-family).
 KEY QUESTION FOR DECK B: does the HA failover proof route device traffic to a REMOTE site via the hub, or to a
 behind-host of the hub's OWN site (A1-covered)? If the latter, A3b does NOT block Deck B.
+
+--- REGISTERED (founder 2026-07-21): named story candidate "device→remote-site hub transit" ---
+Three coordinated layers → decision-first paper, NEVER a walk-window patch. Commit-one fork PRE-NAMED:
+  (a) NAT device traffic onto the site-link at the hub — extend the masquerade to wg0→wg0 for device-pool
+      src → src becomes the hub's site address → existing far AllowedIPs + site-transit grants match.
+      SMALL, but BENDS the un-NAT'd invariant and loses per-device attribution at the far end.
+  (b) Widen site-link AllowedIPs to include the device pool + compile device grants onto far gateways —
+      PRESERVES attribution, touches the compiler's peer model (the S8.2/S8.6 heartland). Larger.
+Both faces argued in its commit-one, not at a walk tail.
+NAMED LIMITATION until it lands: a device reaches the HUB'S OWN site (A1, proven); device→REMOTE-site
+transit through a hub is the registered follow-up. The A3 walk leg CLOSES as: Docker half proven (S8.6b),
+end-to-end deferred to A3b with the characterization committed.

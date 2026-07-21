@@ -43,3 +43,30 @@ C5 device-revoke-exempt · Deck D (UI: CW-confirm, topology, stale-button).
 ## Standing
 Merge = Pawan's explicit word, per-story, train order, after the decks. Nothing merged this session.
 GATE-REPORT-NEEDS-SHA honored throughout (phantom accepts refused; real shas built + reported).
+
+---
+
+## Session 2 addendum (2026-07-21 cont.) — S8.6b fold + A3b + Deck-B-fresh
+
+**S8.6b wg0→wg0 hub-transit fold BUILT + PROVEN (scope).** Founder ruled A3=(a); phantom acceptance refused
+(GATE-REPORT-NEEDS-SHA). Route DOCKER-USER rules RELAXED (D-transit-1 B: `oifname wg0 daddr`/`iifname wg0
+saddr`, one rule covers eth0→wg0 + wg0→wg0) + drift-detection convergence (D-transit-2: orientation signature,
+replace-on-drift one pass) + 5 reds. Deployed live: aws-gw rules relaxed + old orientation swept one pass;
+aws-gw now forwards the wg0→wg0 transit (tcpdump egress). Node gates GREEN.
+
+**A3b registered (distinct finding, NOT the fold).** device→remote-site end-to-end still fails: transit keeps
+src=device-pool (un-NAT'd, masq excludes wg0→wg0) → azure-gw WG cryptokey-routing rejects (pool ∉ site-link
+peer AllowedIPs) + no far device grant. Named story "device→remote-site hub transit", commit-one fork
+pre-named (NAT-at-hub vs widen-AllowedIPs+compile-far-grants). Named limitation: device reaches the hub's own
+site (A1); remote-site transit deferred.
+
+**Deck B UNBLOCKED, runs FRESH.** Continuity legs = behind-host paths (A1/S8.2c geometry); device-transit
+variant dropped as A3b-deferred. Deferred to a fresh session (tail-of-turn: the hub-kill timeline IS the
+evidence, deserves fresh hands + fresh clock).
+
+**TRAIN (git cat-file verified):** S8.5 `fc7c4b8` · S8.6 `4506772` · S8.7 code `2517e60` / tip `3001ad4`.
+
+**RESUME order:** Deck B (standby enroll 3.25.125.203 → pin → warm-verify → primary-kill + clock → fail-back)
+→ C3 CIDR-source → C4 flush-fail → C5 device-revoke-exempt → Deck D (UI harvest: group-membership-no-UI,
+resource-no-port-field, CW-confirm, topology, stale-button). Then A3b as its own decision-first story.
+Merge = Pawan's word, per-story, train order, after decks. Nothing merged.
