@@ -36,3 +36,23 @@ DISPOSITION: HELD for founder — MERGE-GATING candidate for S8.6. Needs a DECIS
 view), who keeps a dead hub's LastHandshakeAt aging, and a red that KILLS a primary in a fake clock and asserts
 the standby is promoted within N ticks. Deck B's failover proof is BLOCKED on this. The kill did its job: it
 proved automatic failover does not happen.
+
+--- DISPOSITION (founder 2026-07-21): MERGE-GATING, decision-first fix in a FRESH session ---
+The batch directive's risk clause paid its bill: the epic's headline promise ("kill the hub, the spare takes
+over") failed on the FIRST real kill it ever faced — before a customer, a demo, a merge — caught by the only
+fixture that could (real iron, a real corpse). S8.6 does NOT merge with its headline non-functional; no
+argument entertained.
+
+FIX COMMIT-ONE (next session, investigation-first):
+LEAD DECIDE-ITEM — the ONE liveness truth for hub members. What does node_peer_status actually hold for a DEAD
+hub? Does LastHandshakeAt AGE, FREEZE, or VANISH when the reporter dies? (S7.4b class: a dead node can't report
+its own death — the controller may be reading a signal only LIVING peers refresh, from the WRONG side of the
+link.) Is latestByPubKey the SAME derivation as GetHubSetView's freshness (one-truth census extended to
+LIVENESS, not just election)? Do Step's staleness expectations match the substrate's actual aging?
+GATING RED — the walk's exact scenario in a FAKE CLOCK: primary killed -> reports cease -> N ticks -> standby
+PROMOTED, generation bumped, audit row. PLUS the inverse: a merely-idle-but-reporting primary NEVER demotes.
+RE-PROOF — Deck B re-run on iron, same kill, timeline clocked.
+SIBLING — finding #4 (standby-warm-flickers-stale) is a PROBABLE same-root sibling (freshness-source confusion
+seen from the badge side); one investigation answers both — fold it into this commit-one.
+CO-FOLD — finding #2 (cannot-bind-2nd-gateway-UI) folds in the SAME session (HA unreachable via UI = the
+operator flow doesn't exist; Sites.tsx:491 single-bind = the CH-probe/list-of-one class in an action path).

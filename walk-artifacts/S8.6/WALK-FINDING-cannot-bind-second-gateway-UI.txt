@@ -10,3 +10,9 @@ Backend is fine: POST /sites/{siteId}/bind (bindSiteNode) accepts a node_id for 
 Fix: the site card must offer "Bind another gateway" even when hasGateway (show BOTH bind + unbind, or a
 "+ gateway" affordance), gated on unboundNodes. Walk workaround: bind via the API so Deck B proceeds.
 Disposition: HELD — candidate merge-gating for S8.6 (headline feature not operable via UI), founder rules.
+
+--- DISPOSITION (founder 2026-07-21): merge-relevant, folds WITH the failover fix (same session) ---
+HA unreachable through the product's own UI = the operator flow doesn't exist (the walk needed an API
+workaround — Zero-Touch-adjacent gap on the flagship). Sites.tsx:491's hasGateway?unbind:bind single-bind
+assumption is the CH-probe class (list-of-one) surviving in an ACTION path. Small fix, same session as the
+failover commit-one.

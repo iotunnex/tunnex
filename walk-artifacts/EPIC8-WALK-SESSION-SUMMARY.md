@@ -70,3 +70,31 @@ evidence, deserves fresh hands + fresh clock).
 → C3 CIDR-source → C4 flush-fail → C5 device-revoke-exempt → Deck D (UI harvest: group-membership-no-UI,
 resource-no-port-field, CW-confirm, topology, stale-button). Then A3b as its own decision-first story.
 Merge = Pawan's word, per-story, train order, after decks. Nothing merged.
+
+---
+
+## Session 3 addendum (2026-07-21 cont.) — Deck B: BLOCKED on failover fix
+
+Deck B ran fully to the kill on live iron. Standby (aws-gw-2) enrolled (folded image), bound to aws-site (via
+API — UI can't add a 2nd gateway), pinned {aws-gw#1, aws-gw-2#2}, PROVABLY WARM. Kill = docker-stop + ip-link-
+del wg0 on aws-gw (container-stop; AWS-VM1 has no EIP so instance-stop would break fail-back — noted variant).
+
+**RESULT: NO FAILOVER (merge-gating S8.6).** 5min post-kill: hub-set stuck (dead aws-gw still PRIMARY, warm
+aws-gw-2 never promoted), ping never recovered, zero post-kill promotion in the audit. deriveActive exonerated;
+break is failoverOrg's freshness source. Deck B BLOCKED.
+
+Deck B findings + dispositions (all walk-artifacts/S8.6/):
+1. failover-does-not-fire — MERGE-GATING, decision-first fix next session (lead decide-item: the ONE liveness
+   truth for hub members; gating red: fake-clock kill->promote + idle-reporting-never-demotes; re-proof: Deck B
+   re-run on iron).
+2. cannot-bind-2nd-gateway-UI — merge-relevant, folds WITH #1 (same session).
+3. emitted-enroll-hardcodes-ghcr — registered low (future deploy-surface).
+4. standby-warm-flickers-stale — registered low, PROBABLE same-root sibling of #1 (fold into #1's commit-one).
+
+FIFTH walk-found merge-gater of the batch (WF-4-local, [others], wg0→wg0's own arc, failover). S8.6 does NOT
+merge with its headline non-functional.
+
+TRAIN HELD: S8.5 fc7c4b8 · S8.6 4506772 · S8.7 code 2517e60 / tip <this commit>.
+NEXT SESSION: the failover commit-one (investigation-first → liveness-truth decide-item → fake-clock red →
+fold #1+#2+#4 → gates → rebase S8.7 → Deck B re-run on iron). Then C3-C5, Deck D. Pawan restarts aws-gw's agent
+at his convenience (stuck state has served). Merge = Pawan's word, per-story, train order, after decks.
