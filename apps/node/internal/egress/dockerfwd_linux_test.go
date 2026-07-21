@@ -13,14 +13,15 @@ import (
 // fakeNft models the DOCKER-USER + FORWARD chains for the WF-4 reconcile. It tracks the
 // agent's comment-marked accept rules (daddr -> handle) so idempotence + full-sweep are testable.
 type fakeNft struct {
-	chainAbsent  bool              // list chain DOCKER-USER errors (bare-metal / non-Docker host)
-	forwardDrop  bool              // `list chain ip filter FORWARD` reports policy drop
-	insertErr    bool              // inserts fail (can't place the accept → forwardBlocked path)
-	listErr      bool              // the `-a list` enumeration errors (transient nft busy/lock)
-	rules        map[string]string // daddr (as nft PRINTS it) -> handle (the agent's tunnex-marked rules)
-	nextHandle   int
-	inserts      []string // daddr order of inserts (assert scoping)
-	deletes      []string // handles deleted
+	chainAbsent bool              // list chain DOCKER-USER errors (bare-metal / non-Docker host)
+	forwardDrop bool              // `list chain ip filter FORWARD` reports policy drop
+	insertErr   bool              // inserts fail (can't place the accept → forwardBlocked path)
+	listErr     bool              // the `-a list` enumeration errors (transient nft busy/lock)
+	rules       map[string]string // daddr (as nft PRINTS it) -> handle (the agent's tunnex-marked rules)
+	nextHandle  int
+	inserts     []string   // daddr order of inserts (assert scoping)
+	insertArgs  [][]string // full arg vector per insert (assert iif/oif ORIENTATION — WF-4-local)
+	deletes     []string   // handles deleted
 }
 
 func newFakeNft() *fakeNft { return &fakeNft{rules: map[string]string{}, nextHandle: 10} }
@@ -71,6 +72,7 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		f.nextHandle++
 		f.rules[key] = fmt.Sprint(f.nextHandle)
 		f.inserts = append(f.inserts, key)
+		f.insertArgs = append(f.insertArgs, append([]string(nil), args...))
 		return "", nil
 	case len(args) >= 2 && args[0] == "delete" && args[1] == "rule":
 		handle := args[len(args)-1]
@@ -96,7 +98,7 @@ func mgrWithNft(f *fakeNft) *Manager {
 func TestDockerForwardScopedInsert(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"})
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil)
 	// TWO Route-scoped accepts per route: forward (d:) + return (s:) — the return path is why the re-walk
 	// forward-ping passed but the reply dropped.
 	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
@@ -115,9 +117,9 @@ func TestDockerForwardIdempotent(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	routes := []string{"10.0.0.0/24"}
-	m.reconcileDockerForward(context.Background(), routes)
+	m.reconcileDockerForward(context.Background(), routes, nil)
 	n := len(f.inserts)
-	m.reconcileDockerForward(context.Background(), routes)
+	m.reconcileDockerForward(context.Background(), routes, nil)
 	if len(f.inserts) != n {
 		t.Fatalf("second reconcile must insert nothing (idempotent); inserts went %d -> %d", n, len(f.inserts))
 	}
@@ -128,8 +130,8 @@ func TestDockerForwardIdempotent(t *testing.T) {
 func TestDockerForwardFullSweep(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"})
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // 172.31 withdrawn
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // 172.31 withdrawn
 	for _, k := range []string{"d:172.31.0.0/16", "s:172.31.0.0/16"} {
 		if _, still := f.rules[k]; still {
 			t.Fatalf("a withdrawn route's rule %s must be swept, still present: %v", k, f.rules)
@@ -152,12 +154,12 @@ func TestDockerForwardHostRouteIdempotent(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	routes := []string{"10.0.0.5/32"}
-	m.reconcileDockerForward(context.Background(), routes)
+	m.reconcileDockerForward(context.Background(), routes, nil)
 	n := len(f.inserts)
 	if n != 2 { // fwd + ret for the one /32
 		t.Fatalf("first reconcile inserts the /32 fwd+ret accepts, got %d", n)
 	}
-	m.reconcileDockerForward(context.Background(), routes)
+	m.reconcileDockerForward(context.Background(), routes, nil)
 	if len(f.inserts) != n || len(f.deletes) != 0 {
 		t.Fatalf("a /32 route must be idempotent (no churn); inserts %d→%d, deletes %d", n, len(f.inserts), len(f.deletes))
 	}
@@ -168,10 +170,10 @@ func TestDockerForwardHostRouteIdempotent(t *testing.T) {
 func TestDockerForwardListErrorSkips(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // places one
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // places one
 	before := len(f.inserts)
 	f.listErr = true
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}) // list fails → must NOT re-insert
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // list fails → must NOT re-insert
 	if len(f.inserts) != before {
 		t.Fatalf("a transient list error must skip inserts (no duplicates); inserts %d→%d", before, len(f.inserts))
 	}
@@ -183,7 +185,7 @@ func TestDockerForwardBareMetalNoOp(t *testing.T) {
 	f := newFakeNft()
 	f.chainAbsent = true
 	m := mgrWithNft(f)
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}); blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); blocked {
 		t.Fatal("bare-metal (no DOCKER-USER) must not report forwardBlocked")
 	}
 	if len(f.inserts) != 0 {
@@ -201,7 +203,7 @@ func TestDockerForwardBlockedSignal(t *testing.T) {
 	f.forwardDrop = true
 	f.insertErr = true
 	m := mgrWithNft(f)
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}); !blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); !blocked {
 		t.Fatal("Docker FORWARD-drop + unplaceable accept + routes present → must report forwardBlocked")
 	}
 	if !m.ForwardBlocked() {
@@ -209,7 +211,80 @@ func TestDockerForwardBlockedSignal(t *testing.T) {
 	}
 	// Recovery: inserts succeed → not blocked.
 	f.insertErr = false
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}); blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); blocked {
 		t.Fatal("once the accept is placed, forwardBlocked must clear")
+	}
+}
+
+// hasArgSeq reports whether args contains seq as a contiguous subsequence.
+func hasArgSeq(args, seq []string) bool {
+	for i := 0; i+len(seq) <= len(args); i++ {
+		ok := true
+		for j := range seq {
+			if args[i+j] != seq[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+// findInsertWith returns the first recorded insert arg-vector whose (dirTok, addr) pair matches.
+func findInsertWith(f *fakeNft, dirTok, addr string) []string {
+	for _, a := range f.insertArgs {
+		for i := 0; i+1 < len(a); i++ {
+			if a[i] == dirTok && a[i+1] == addr {
+				return a
+			}
+		}
+	}
+	return nil
+}
+
+// TestDockerForwardLocalSubnetMirrored — WF-4-LOCAL (S8.5), the walk fixture as a red: a split-tunnel device
+// reaching the LAN BEHIND its own gateway is forwarded wg0→eth0; Docker's FORWARD DROP swallowed it even
+// though the ZT chain accepted it (wire-proven). The fix opens a DOCKER-USER accept for the gateway's OWN
+// advertised subnets too — but in the MIRRORED orientation vs a remote route. A remote route is a behind-LAN
+// host initiating OUT to the site-link (iif!=wg0 → oif=wg0, daddr); a local subnet is a DEVICE initiating IN
+// to the local LAN (iif=wg0 → oif!=wg0, daddr) — the mirror. A wrong (route) orientation would leave the
+// device→own-LAN forward dropped exactly as before the fix. BOTH faces asserted: (a) Docker's structural drop
+// opened in the RIGHT direction; (b) the ZT enforcement chain (`ip tunnex`) is NEVER touched here — this lifts
+// only Docker's isolation, so the grant still adjudicates.
+func TestDockerForwardLocalSubnetMirrored(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	// a REMOTE route 10.0.0.0/24 (site-to-site) + this gateway's OWN advertised subnet 172.31.0.0/16.
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+
+	// Both get fwd (d:) + ret (s:) accepts — 4 rules, disjoint addrs, no key collision across orientations.
+	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
+		if f.rules[k] == "" {
+			t.Fatalf("missing accept %s; got %v", k, f.rules)
+		}
+	}
+
+	// ORIENTATION — the crux. Route FORWARD (daddr=route) = LAN→remote: iif!=wg0 → oif=wg0.
+	if fwd := findInsertWith(f, "daddr", "10.0.0.0/24"); !hasArgSeq(fwd, []string{"iifname", "!=", "wg0", "oifname", "wg0"}) {
+		t.Fatalf("route forward must be iif!=wg0 → oif=wg0 (LAN→remote), got %v", fwd)
+	}
+	// LOCAL-SUBNET FORWARD (daddr=localsubnet) = device→own-LAN: the MIRROR iif=wg0 → oif!=wg0.
+	if fwd := findInsertWith(f, "daddr", "172.31.0.0/16"); !hasArgSeq(fwd, []string{"iifname", "wg0", "oifname", "!=", "wg0"}) {
+		t.Fatalf("WF-4-local: local-subnet forward must be MIRRORED iif=wg0 → oif!=wg0 (device→own-LAN), got %v", fwd)
+	}
+	// LOCAL-SUBNET RETURN (saddr=localsubnet) = own-LAN→device: iif!=wg0 → oif=wg0.
+	if ret := findInsertWith(f, "saddr", "172.31.0.0/16"); !hasArgSeq(ret, []string{"iifname", "!=", "wg0", "oifname", "wg0"}) {
+		t.Fatalf("WF-4-local: local-subnet return must be iif!=wg0 → oif=wg0 (own-LAN→device), got %v", ret)
+	}
+
+	// SECOND FACE: this reconcile touches ONLY DOCKER-USER (Docker's structural drop), NEVER the `ip tunnex`
+	// ZT enforcement chain — the grant still adjudicates. No insert may target the tunnex table.
+	for _, a := range f.insertArgs {
+		if hasArgSeq(a, []string{"ip", "tunnex"}) {
+			t.Fatalf("reconcileDockerForward must not touch the ZT enforcement chain, got %v", a)
+		}
 	}
 }

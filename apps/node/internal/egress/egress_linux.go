@@ -239,13 +239,17 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	// WF-4: on a Docker host, clear Docker's `filter FORWARD` DROP for the approved site routes
 	// (a Routes-scoped DOCKER-USER accept) so site-to-site forwarding works with zero gateway touch.
 	// Best-effort + idempotent; a Docker-blocked forward it can't clear is surfaced via ForwardBlocked().
-	var routeCIDRs []string
+	var routeCIDRs, localSubnets []string
 	if pol != nil {
 		for _, rt := range pol.Routes {
 			routeCIDRs = append(routeCIDRs, rt.DstCIDR)
 		}
+		// WF-4-local: this gateway's OWN advertised subnets (LocalSubnets) also need a DOCKER-USER accept —
+		// a split-tunnel device reaching the LAN BEHIND this gateway is forwarded wg0→eth0 and Docker's
+		// FORWARD DROP swallows it exactly as it did remote routes. Same union, mirrored orientation.
+		localSubnets = append(localSubnets, pol.LocalSubnets...)
 	}
-	m.reconcileDockerForward(ctx, routeCIDRs)
+	m.reconcileDockerForward(ctx, routeCIDRs, localSubnets)
 	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
 	// (default route) — otherwise full-tunnel would blackhole, so report NOT capable.
 	if subnet == "" || !hasDefaultRoute(ctx) {
@@ -615,37 +619,42 @@ const dockerUserComment = "tunnex-site-fwd" // marks the agent's own DOCKER-USER
 // accept passed the forward ping but dropped the reply on the re-walk.
 var dockerUserRuleRE = regexp.MustCompile(`ip ([sd])addr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
 
-// reconcileDockerForward makes site-to-site forwarding work on a DOCKER host with ZERO gateway
-// touch (WF-4). Docker sets `filter FORWARD` policy DROP + a DOCKER-USER hook; the agent's
-// `ip tunnex` forward accept is a SEPARATE base chain, so Docker's drop terminally kills the
-// forwarded behind-host packet. This inserts a Routes-SCOPED accept into DOCKER-USER (jumped
-// FIRST from FORWARD; an accept there clears the hook's drop) — mirroring the D1 rule, NEVER a
-// blanket ACCEPT. The `ip tunnex` chain still enforces the grant (proven on the wire: enforcing
-// with no grant stayed 100% loss even with a blanket DOCKER-USER accept), so this only lifts
-// Docker's isolation for approved site subnets, not the policy.
+// reconcileDockerForward makes forwarding work on a DOCKER host with ZERO gateway touch (WF-4).
+// Docker sets `filter FORWARD` policy DROP + a DOCKER-USER hook; the agent's `ip tunnex` forward
+// accept is a SEPARATE base chain, so Docker's drop terminally kills the forwarded packet even
+// after the ZT chain accepted it. This inserts SCOPED accepts into DOCKER-USER (jumped FIRST from
+// FORWARD; an accept there clears the hook's drop) — mirroring the tunnex rule, NEVER a blanket
+// ACCEPT. TWO scoped sets: remote Routes (site-to-site, S8.2c) AND this gateway's own LocalSubnets
+// (WF-4-local, S8.5 — a split-tunnel device reaching the LAN behind its gateway is forwarded
+// wg0→eth0 and Docker's drop swallowed it; the ZT chain accepted it, proven on the wire). The `ip
+// tunnex` chain still ENFORCES the grant (enforcing with no grant stays 100% loss even with the
+// DOCKER-USER accept), so this only lifts Docker's structural isolation, never the policy.
 //
 // Idempotent (list → insert only what's missing) + full-sweep (delete comment-marked rules whose
-// daddr left Routes) → re-run every reconcile tick, so a dockerd reload that recreates DOCKER-USER
-// self-heals within one interval (D-WF4-a). Docker-CONDITIONAL: no DOCKER-USER chain (bare metal /
-// the D4 bare-metal path) → no-op, forwarding rides the host's own FORWARD (D-WF4-c). Returns
-// forwardBlocked when we have routes to carry, FORWARD is policy-drop, yet we could not place the
-// accept — the D-WF4-d loud signal.
-func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (forwardBlocked bool) {
+// addr left Routes∪LocalSubnets) → re-run every reconcile tick, so a dockerd reload that recreates
+// DOCKER-USER self-heals within one interval (D-WF4-a). Docker-CONDITIONAL: no DOCKER-USER chain
+// (bare metal / the D4 bare-metal path) → no-op, forwarding rides the host's own FORWARD (D-WF4-c).
+// Returns forwardBlocked when we have subnets to carry, FORWARD is policy-drop, yet we could not
+// place the accept — the D-WF4-d loud signal.
+func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubnets []string) (forwardBlocked bool) {
 	wg := m.wgIface
 	// Probe DOCKER-USER. Absent → not a Docker-managed FORWARD host; nothing to satisfy.
 	if _, err := m.nftRun(ctx, "list", "chain", "ip", "filter", "DOCKER-USER"); err != nil {
 		m.forwardBlocked.Store(false)
 		return false
 	}
-	// Desired = TWO Route-scoped accepts per v4 route — forward (daddr=route) AND return (saddr=route) —
-	// keyed "d:"/"s:" + the CANONICAL address nft PRINTS (host route bare, else masked). Both directions
-	// are needed: a forward-only accept passed the ping's echo-request but Docker's FORWARD DROP killed the
-	// reply (re-walk). #1: nft drops the /32 from a host addr, so keying on Masked() "x/32" would never
-	// match the listed bare "x" and thrash — canonDaddr keys both sides the same way. args are built from
-	// canonical prefixes (no operator/CP string reaches nft raw).
+	// Desired = TWO accepts per v4 CIDR — forward (daddr) AND return (saddr) — keyed "d:"/"s:" + the CANONICAL
+	// address nft PRINTS (host route bare, else masked). Both directions are needed: a forward-only accept
+	// passed the ping's echo-request but Docker's FORWARD DROP killed the reply (re-walk). #1: nft drops the
+	// /32 from a host addr, so keying on Masked() "x/32" would never match the listed bare "x" and thrash —
+	// canonDaddr keys both sides the same way. args are built from canonical prefixes (no operator/CP string
+	// reaches nft raw). Routes and LocalSubnets are DISJOINT by construction (remote vs this-gateway), so the
+	// "d:"/"s:" address keying never collides across the two orientations.
 	desired := map[string]bool{}
 	insertArgs := map[string][]string{}
 	comment := `"` + dockerUserComment + `"`
+	// REMOTE routes: a behind-LAN host (eth0) initiates OUT to a remote site via the site-link (wg0). Forward =
+	// iif!=wg0 → oif=wg0, daddr=route; return = iif=wg0 → oif!=wg0, saddr=route.
 	for _, c := range routes {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
@@ -653,6 +662,22 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes []string) (
 			desired[fk], desired[rk] = true, true
 			insertArgs[fk] = []string{"iifname", "!=", wg, "oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment}
 			insertArgs[rk] = []string{"iifname", wg, "oifname", "!=", wg, "ip", "saddr", a, "counter", "accept", "comment", comment}
+		}
+	}
+	// WF-4-local (S8.5): this gateway's OWN advertised subnets. A DEVICE (wg0) initiates IN to the local LAN
+	// (eth0) — the MIRROR of the route orientation. Forward = iif=wg0 → oif!=wg0, daddr=localsubnet; return =
+	// iif!=wg0 → oif=wg0, saddr=localsubnet. Without this, Docker's FORWARD DROP swallows the device→own-LAN
+	// forward even though the ZT chain accepted it (wire-proven). Same marked/swept discipline as routes.
+	for _, c := range localSubnets {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
+			a := canonDaddr(p)
+			fk, rk := "d:"+a, "s:"+a
+			if desired[fk] || desired[rk] {
+				continue // a route already claimed this addr (disjoint-by-construction guard); do not overwrite
+			}
+			desired[fk], desired[rk] = true, true
+			insertArgs[fk] = []string{"iifname", wg, "oifname", "!=", wg, "ip", "daddr", a, "counter", "accept", "comment", comment}
+			insertArgs[rk] = []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment}
 		}
 	}
 	// Current tunnex-marked rules: "dir:addr" -> handle. A LIST ERROR (not just empty) means we can't know
