@@ -617,7 +617,27 @@ const dockerUserComment = "tunnex-site-fwd" // marks the agent's own DOCKER-USER
 // captures direction (s|d addr) + the address + the handle, for a comment-marked rule. BOTH directions
 // are Route-scoped (forward: daddr=route; return: saddr=route) — the return path is why a single-direction
 // accept passed the forward ping but dropped the reply on the re-walk.
-var dockerUserRuleRE = regexp.MustCompile(`ip ([sd])addr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
+// captures: (1) the iif/oif orientation prefix (for drift-detection, S8.6b), (2) direction s|d, (3) the addr,
+// (4) the handle. The orientation prefix distinguishes an old iif!=wg0-predicated rule from the relaxed form
+// under the same daddr/saddr key.
+var dockerUserRuleRE = regexp.MustCompile(`((?:iifname|oifname)[^\n]*?)?ip ([sd])addr (\S+).*comment "` + dockerUserComment + `".*# handle (\d+)`)
+
+// orientSig canonicalizes a rule's iif/oif match predicates (spaces + quotes stripped) so nft's printed form
+// and our insert-args form normalize identically — the drift-detection comparator (S8.6b D-transit-2).
+func orientSig(s string) string { return strings.NewReplacer(" ", "", `"`, "").Replace(s) }
+
+// argOrientSig derives the orientation signature from an insert-args vector: the tokens BEFORE "ip" (the
+// iifname/oifname clause), normalized the same way as orientSig.
+func argOrientSig(args []string) string {
+	var pre []string
+	for _, t := range args {
+		if t == "ip" {
+			break
+		}
+		pre = append(pre, t)
+	}
+	return orientSig(strings.Join(pre, " "))
+}
 
 // reconcileDockerForward makes forwarding work on a DOCKER host with ZERO gateway touch (WF-4).
 // Docker sets `filter FORWARD` policy DROP + a DOCKER-USER hook; the agent's `ip tunnex` forward
@@ -652,16 +672,23 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 	// "d:"/"s:" address keying never collides across the two orientations.
 	desired := map[string]bool{}
 	insertArgs := map[string][]string{}
+	desiredSig := map[string]string{} // key -> iif/oif orientation signature (drift-detection, S8.6b D-transit-2)
 	comment := `"` + dockerUserComment + `"`
-	// REMOTE routes: a behind-LAN host (eth0) initiates OUT to a remote site via the site-link (wg0). Forward =
-	// iif!=wg0 → oif=wg0, daddr=route; return = iif=wg0 → oif!=wg0, saddr=route.
+	set := func(k string, args []string) {
+		desired[k] = true
+		insertArgs[k] = args
+		desiredSig[k] = argOrientSig(args)
+	}
+	// REMOTE routes (S8.6b D-transit-1, RELAXED): Docker must not structurally drop traffic whose daddr/saddr
+	// is a Route — the ZT chain adjudicates. The old iif!=wg0/oif!=wg0 predicates were "the direction the walk
+	// proved" (eth0→wg0), never a security predicate (see docs/S8.6-decisions.md — narrowing-was-incidental).
+	// Relaxed, ONE rule covers eth0→wg0 (route) AND wg0→wg0 (device→remote-site hub transit). Forward =
+	// oif=wg0, daddr=route; return = iif=wg0, saddr=route. A future PR must NOT re-add the iif/oif predicates.
 	for _, c := range routes {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
-			fk, rk := "d:"+a, "s:"+a
-			desired[fk], desired[rk] = true, true
-			insertArgs[fk] = []string{"iifname", "!=", wg, "oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment}
-			insertArgs[rk] = []string{"iifname", wg, "oifname", "!=", wg, "ip", "saddr", a, "counter", "accept", "comment", comment}
+			set("d:"+a, []string{"oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
+			set("s:"+a, []string{"iifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
 		}
 	}
 	// WF-4-local (S8.5): this gateway's OWN advertised subnets. A DEVICE (wg0) initiates IN to the local LAN
@@ -671,13 +698,11 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 	for _, c := range localSubnets {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
-			fk, rk := "d:"+a, "s:"+a
-			if desired[fk] || desired[rk] {
+			if desired["d:"+a] || desired["s:"+a] {
 				continue // a route already claimed this addr (disjoint-by-construction guard); do not overwrite
 			}
-			desired[fk], desired[rk] = true, true
-			insertArgs[fk] = []string{"iifname", wg, "oifname", "!=", wg, "ip", "daddr", a, "counter", "accept", "comment", comment}
-			insertArgs[rk] = []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment}
+			set("d:"+a, []string{"iifname", wg, "oifname", "!=", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
+			set("s:"+a, []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
 		}
 	}
 	// Current tunnex-marked rules: "dir:addr" -> handle. A LIST ERROR (not just empty) means we can't know
@@ -687,9 +712,16 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 	if err != nil {
 		return m.forwardBlocked.Load()
 	}
-	current := map[string]string{}
+	// current: key -> {handle, orientation signature}. The SIGNATURE (drift-detection, S8.6b D-transit-2) lets
+	// a reconcile REPLACE an old orientation-predicated rule with the relaxed form under the SAME daddr/saddr
+	// key — key-only idempotence would skip it (key present) and strand the old rule, breaking transit forever.
+	type curRule struct {
+		handle string
+		sig    string
+	}
+	current := map[string]curRule{}
 	for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
-		dir, addr, handle := mt[1], mt[2], mt[3]
+		orient, dir, addr, handle := mt[1], mt[2], mt[3], mt[4]
 		key := ""
 		if p, e := netip.ParsePrefix(addr); e == nil {
 			key = dir + ":" + canonDaddr(p)
@@ -697,14 +729,25 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 			key = dir + ":" + a.String() // nft prints a host route as a bare address
 		}
 		if key != "" {
-			current[key] = handle
+			current[key] = curRule{handle: handle, sig: orientSig(orient)}
 		}
 	}
 	placeErr := false
-	// Add missing — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN.
+	// Add missing OR REPLACE drifted — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN. A key
+	// present with a MATCHING signature is idempotent (skip); present with a DIFFERENT signature (an old
+	// orientation-predicated rule vs the relaxed desired) is deleted first, then re-inserted — one pass, no
+	// orphan window (D-transit-2 sweep-hygiene).
 	for key, args := range insertArgs {
-		if _, have := current[key]; have {
-			continue
+		if cur, have := current[key]; have {
+			if cur.sig == desiredSig[key] {
+				continue // idempotent — same rule already in force
+			}
+			// drifted: remove the stale-orientation rule before placing the relaxed one (same key)
+			if _, err := m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", cur.handle); err != nil {
+				placeErr = true
+				continue // couldn't remove the old rule → don't stack a second; retry next tick
+			}
+			delete(current, key) // it's gone; the sweep must not try to delete it again by the old handle
 		}
 		if _, err := m.nftRun(ctx, append([]string{"insert", "rule", "ip", "filter", "DOCKER-USER"}, args...)...); err != nil {
 			placeErr = true
@@ -712,12 +755,12 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 	}
 	// Full-sweep: delete comment-marked rules whose daddr left Routes. #5: surface a failed delete (a
 	// lingering foreign-chain accept is retried next tick, but a persistent failure must not be silent).
-	for key, handle := range current {
+	for key, cur := range current {
 		if desired[key] {
 			continue
 		}
-		if _, err := m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle); err != nil {
-			slog.Warn("docker_user_sweep_failed", "handle", handle, "daddr", key, "error", err.Error())
+		if _, err := m.nftRun(ctx, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", cur.handle); err != nil {
+			slog.Warn("docker_user_sweep_failed", "handle", cur.handle, "daddr", key, "error", err.Error())
 		}
 	}
 	// D-WF4-d: routes to carry + FORWARD policy-drop + our accept couldn't be placed → blocked (loud).
