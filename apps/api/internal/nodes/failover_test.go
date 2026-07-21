@@ -262,6 +262,75 @@ func TestFailoverPromotionAudits(t *testing.T) {
 	}
 }
 
+// TestFailoverWindowClearsWireGuardRekeyCadence (the inverse steady-state red) — the corrected window MUST
+// clear WG's rekey ceiling + slack, so a HEALTHY link's sawtoothing observed age (up to ~180s REJECT_AFTER_TIME;
+// the box-walk saw 202s) reads FRESH and produces ZERO demotions. This is the #4 flicker fixture INVERTED: the
+// old 90s window marked these living ages dead every cycle.
+func TestFailoverWindowClearsWireGuardRekeyCadence(t *testing.T) {
+	if failoverStaleWindow < 180*time.Second {
+		t.Fatalf("failoverStaleWindow (%v) must clear WG's ~180s REJECT_AFTER_TIME ceiling, else it marks living hubs dead", failoverStaleWindow)
+	}
+	for _, healthy := range []time.Duration{89 * time.Second, 120 * time.Second, 202 * time.Second} {
+		if !(healthy < failoverStaleWindow) {
+			t.Fatalf("a healthy steady-state age %v must read FRESH against the window %v (no false demotion)", healthy, failoverStaleWindow)
+		}
+	}
+	// A healthy primary observed at a 2–3min age across many ticks demotes NOTHING.
+	fc := NewFailoverController()
+	p, s := idAt(1), idAt(2)
+	cfg := []uuid.UUID{p, s}
+	healthy := map[uuid.UUID]bool{p: true, s: true} // 202s < 240s window → fresh
+	for i := 0; i < 20; i++ {
+		if got := fc.Step(cfg, healthy); len(got) != 0 {
+			t.Fatalf("a healthy 2–3min sawtooth must produce ZERO demotions, got demoted %v", got)
+		}
+	}
+}
+
+// TestFailoverNoObserverNoVerdict (the no-spokes / NULL edge) — a member ABSENT from the freshness map (no
+// living witness reported a valid handshake: no spoke peers it, or only NULL entries) must NEVER be demoted on
+// silence. D1: no witness, no ruling. A present-but-stale member still demotes.
+func TestFailoverNoObserverNoVerdict(t *testing.T) {
+	fc := NewFailoverController()
+	p, s := idAt(1), idAt(2)
+	cfg := []uuid.UUID{p, s}
+	// p is observed-and-stale; s is UNOBSERVED (deliberately absent from the map — no verdict).
+	onlyPrimaryObserved := map[uuid.UUID]bool{p: false}
+	var demoted []uuid.UUID
+	for i := 0; i < failoverDemoteTicks*3; i++ {
+		demoted = fc.Step(cfg, onlyPrimaryObserved)
+	}
+	if !sameOrder(demoted, []uuid.UUID{p}) {
+		t.Fatalf("present-but-stale demotes; an UNOBSERVED member must NOT demote on silence, got demoted=%v", demoted)
+	}
+	// The unobserved member's counters never advanced (held, not accrued as stale).
+	if fc.stale[s] != 0 {
+		t.Fatalf("an unobserved member's stale counter must stay 0 (no verdict), got %d", fc.stale[s])
+	}
+}
+
+// TestLatestByPubKeySkipsNullHandshake (the NULL-handshake red, locking the existing guard) — a NULL
+// last_handshake row (the same-site hub pair's never-handshaked peer entry) must NEVER enter `latest`: it is
+// not fresh, and it must not poison the MAX over a valid observation of the same pubkey.
+func TestLatestByPubKeySkipsNullHandshake(t *testing.T) {
+	fresh := time.Now()
+	// NULL-only pubkey → absent from latest (no verdict downstream, never "fresh").
+	nullOnly := latestByPubKey([]sqlc.NodePeerStatus{
+		{PublicKey: "KNULL", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
+	})
+	if _, ok := nullOnly["KNULL"]; ok {
+		t.Fatal("a NULL-handshake row must NOT enter latest (never fresh)")
+	}
+	// A NULL row alongside a VALID one for the SAME pubkey must not clobber the valid handshake (no MAX poison).
+	mixed := latestByPubKey([]sqlc.NodePeerStatus{
+		{PublicKey: "K", LastHandshakeAt: pgtype.Timestamptz{Time: fresh, Valid: true}},
+		{PublicKey: "K", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
+	})
+	if !mixed["K"].LastHandshakeAt.Equal(fresh) {
+		t.Fatalf("a NULL row must not poison the MAX over a valid observation, got %v", mixed["K"].LastHandshakeAt)
+	}
+}
+
 // TestFailoverRehydratesDemotionOnRestart — S8.6 #1: a fresh controller (a CP restart) rehydrates the
 // persisted demotion set BEFORE its first Step, so a still-stale demoted primary is NOT spuriously restored
 // on the first tick — no blackhole window. seedDemoted is idempotent (runs once).
@@ -270,7 +339,7 @@ func TestFailoverRehydratesDemotionOnRestart(t *testing.T) {
 	cfg := []uuid.UUID{p, s}
 	stale := map[uuid.UUID]bool{p: false, s: true} // the primary is STILL stale after the restart
 
-	fc := NewFailoverController() // fresh = a restart (counters zeroed)
+	fc := NewFailoverController()  // fresh = a restart (counters zeroed)
 	fc.seedDemoted([]uuid.UUID{p}) // the persisted demoted=[p] is rehydrated
 	demoted := fc.Step(cfg, stale)
 	if !sameOrder(demoted, []uuid.UUID{p}) {

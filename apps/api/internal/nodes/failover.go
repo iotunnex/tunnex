@@ -2,6 +2,8 @@ package nodes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -24,9 +26,27 @@ const (
 	// failoverRestoreTicks (M > N) — consecutive fresh ticks (the hold window) before a demoted member is
 	// RESTORED (fail-back SLOW). The asymmetry lives entirely in N vs M.
 	failoverRestoreTicks = 5
-	// failoverStaleWindow — a member with no handshake within this window is STALE for THIS tick. Reuses the
-	// hub freshness idea; N ticks of it before demotion.
-	failoverStaleWindow = 90 * time.Second
+	// failoverStaleWindow — an OBSERVED handshake older than this marks a member STALE for THIS tick (N such
+	// ticks demote it). DERIVED FROM THE WIREGUARD PROTOCOL CADENCE, deliberately NOT a round guess (the
+	// narrowing-was-incidental lesson — the next reader must know why it is NOT 90s):
+	//
+	//   WireGuard renews a peer's handshake on the REKEY_AFTER_TIME (120s) / REJECT_AFTER_TIME (180s) cycle, so
+	//   a LIVING but idle-ish link's last-handshake age legitimately sawtooths up to ~180s before a rekey
+	//   resets it. The box-walk observed HEALTHY steady-state ages of 1:29–3:22 (up to 202s) against the OLD
+	//   90s window — which marked living hubs dead every cycle (the #4 false-stale badge; the consecutive-stale
+	//   counter kept resetting on the rekey, so a real death fired erratically / not at all). The window MUST
+	//   clear WG's rekey ceiling plus report+tick slack: 180s (REJECT_AFTER_TIME) + one ~30s agent report
+	//   interval + tick jitter, rounded up ABOVE the observed 202s healthy ceiling → 240s. N=3 ticks of
+	//   hysteresis (90s) confirm on top, so a DEAD member (frozen handshake, no rekey possible) still demotes
+	//   in bounded time while a living sawtooth never does.
+	//
+	// RELATIONSHIP TO apps/node reconcile.siteLinkStaleWindow (180s): NOT one shared constant — deliberately
+	// distinct, across the api↔node module boundary, tracking the SAME protocol cadence but tuned in OPPOSITE
+	// error directions. The agent's 180s drives an over-report-safe HEALTH BADGE (a false site_link_down is a
+	// mere annoyance). This 240s drives an under-report-safe DEMOTION (a false demotion CHURNS the org's
+	// transit hub — the costlier error), so it sits ABOVE the agent's badge window by design. If WG's cadence
+	// ever changes, BOTH move; these paired comments are the cross-reference so neither drifts silently.
+	failoverStaleWindow = 240 * time.Second
 )
 
 // The hub-set audit actions (S8.6 REDUCE #2, landing a — NAMED constants via the standard audit() path, the
@@ -85,7 +105,16 @@ func (fc *FailoverController) seedDemoted(persisted []uuid.UUID) {
 // configured order unchanged — fail-back IS that convergence.
 func (fc *FailoverController) Step(configured []uuid.UUID, freshness map[uuid.UUID]bool) []uuid.UUID {
 	for _, id := range configured {
-		if freshness[id] {
+		v, observed := freshness[id]
+		if !observed {
+			// NO VERDICT this tick — no living observer reported a VALID handshake for this member (no spoke
+			// peers it, or only NULL/never-handshaked entries exist). D1: liveness is testimony from the living;
+			// with no witness there is no ruling, so HOLD the hysteresis counters (neither demote nor restore on
+			// absence). A member is demoted ONLY on a PRESENT-but-STALE observation, never on silence — this is
+			// the no-spokes edge + the NULL-handshake row, both handled here by construction.
+			continue
+		}
+		if v {
 			fc.fresh[id]++
 			fc.stale[id] = 0
 			if fc.demoted[id] && fc.fresh[id] >= fc.m {
@@ -141,12 +170,18 @@ func (s *Service) RunFailoverTick(ctx context.Context) error {
 		return err
 	}
 	now := time.Now()
+	var errs []error
 	for _, orgID := range orgs {
 		if err := s.failoverOrg(ctx, orgID, now); err != nil {
-			slog.WarnContext(ctx, "failover_tick_failed", "org_id", orgID.String(), "error", err.Error())
+			// Defect A: a per-org failure is logged at ERROR (a silently-failing failover controller is the
+			// box-walk's finding-(b) made permanent) AND surfaced up the return — the fleet still completes
+			// EVERY org (one org must not stall the others), but the caller SEES the failures instead of a
+			// swallowed nil.
+			slog.ErrorContext(ctx, "failover_org_failed", "org_id", orgID.String(), "error", err.Error())
+			errs = append(errs, fmt.Errorf("org %s: %w", orgID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // failoverOrg advances one org's tick — the ONE loop that owns the whole hub-set reconciliation (S8.6 #4/#5
@@ -160,6 +195,7 @@ func (s *Service) RunFailoverTick(ctx context.Context) error {
 //     pure function, convergent by construction (a racing stale write self-heals the next tick).
 //   - DEMOTED (hysteresis): rehydrate the demotion set on the first post-restart tick (#1), advance the
 //     counts, collect the demoted set.
+//
 // Both fields persist via their own per-field atomic upsert (writer partition preserved) IN ONE TX with their
 // audits (#5 — an audit failure rolls the whole tick back; the next tick retries). Idempotent: a stable world
 // changes neither field → zero writes, no generation churn.
@@ -185,27 +221,30 @@ func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Tim
 	fc := s.failoverFor(orgID)
 	fc.seedDemoted(current.Demoted) // rehydrate the demotion set (#1) BEFORE the first Step
 	var demoted []uuid.UUID
+	var freshness map[uuid.UUID]bool
+	var ages map[uuid.UUID]time.Duration
 	if len(configured) >= 2 { // a single/zero-hub set has nothing to demote (configured still heals below)
 		rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
 		if err != nil {
 			return err
 		}
 		latest := latestByPubKey(rows)
-		freshness := make(map[uuid.UUID]bool, len(configured))
+		freshness = make(map[uuid.UUID]bool, len(configured))
+		ages = make(map[uuid.UUID]time.Duration, len(configured))
 		for _, id := range configured {
-			t := latest[pubkey[id]].LastHandshakeAt
-			freshness[id] = !t.IsZero() && now.Sub(t) < failoverStaleWindow
+			m, observed := latest[pubkey[id]] // present ONLY for a VALID (non-NULL) handshake — latestByPubKey
+			if !observed {                    // skips NULL, so absence = no living witness → no verdict (Step HOLDS)
+				continue
+			}
+			age := now.Sub(m.LastHandshakeAt)
+			ages[id] = age
+			freshness[id] = age < failoverStaleWindow
 		}
 		demoted = fc.Step(configured, freshness)
 	}
 
 	configuredChanged := !sameOrder(configured, current.Configured)
 	demotedChanged := !sameOrder(demoted, current.Demoted)
-	if !configuredChanged && !demotedChanged {
-		return nil // stable world → zero writes, no generation churn
-	}
-	oldActive := deriveActive(current.Configured, current.Demoted)
-	newActive := deriveActive(configured, demoted)
 	// #7: the transition KIND is derived per-member (added = newly demoted, restored = came out of demotion
 	// AND still configured), not a len() heuristic — a simultaneous demote+restore audits BOTH.
 	added, removed := diffSets(current.Demoted, demoted)
@@ -219,6 +258,17 @@ func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Tim
 			restored = append(restored, id)
 		}
 	}
+	// Observability (defect A): emit ONE structured line per multi-member org per tick — BEFORE any early
+	// return — so the failover loop's rulings are ALWAYS visible in CP logs (the box-walk paid five blind
+	// minutes for an invisible controller). A single/zero-hub org has no failover to narrate.
+	if len(configured) >= 2 {
+		logFailoverTick(ctx, orgID, configured, freshness, ages, fc, added, restored)
+	}
+	if !configuredChanged && !demotedChanged {
+		return nil // stable world → zero writes, no generation churn
+	}
+	oldActive := deriveActive(current.Configured, current.Demoted)
+	newActive := deriveActive(configured, demoted)
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
 		if configuredChanged {
 			row, err := q.UpsertOrgHubSetConfigured(ctx, sqlc.UpsertOrgHubSetConfiguredParams{OrgID: orgID, Configured: configured})
@@ -288,4 +338,39 @@ func primaryOf(order []uuid.UUID) string {
 		return ""
 	}
 	return order[0].String()
+}
+
+// logFailoverTick emits ONE structured line per multi-member org per tick — the failover loop's decisions made
+// VISIBLE. A controller whose rulings are invisible is unfalsifiable; the Deck-B box-walk paid five blind
+// minutes for exactly that. Chosen at Info as ONE compact line per HA org (multi-member sets are rare, so it
+// will not drown ops) OVER per-member Debug, precisely so the rematch can confirm the ticker is live and read
+// WHY it fired-or-not from CP logs at the DEFAULT level, BEFORE the kill. Diagnosis machinery for a live
+// decision loop — NOT dormant lifecycle code, so the dormant-machinery law does not bite. Per member: the
+// observed handshake age (or "none" = no living witness), the fresh/stale/no-observation verdict, the
+// consecutive counters, and the demoted flag; plus the tick's decision (none / demote+restore ids).
+func logFailoverTick(ctx context.Context, orgID uuid.UUID, configured []uuid.UUID, freshness map[uuid.UUID]bool, ages map[uuid.UUID]time.Duration, fc *FailoverController, added, restored []uuid.UUID) {
+	detail := make([]string, 0, len(configured))
+	for _, id := range configured {
+		verdict, age := "no-observation", "none"
+		if a, ok := ages[id]; ok {
+			age = a.Round(time.Second).String()
+			if freshness[id] {
+				verdict = "fresh"
+			} else {
+				verdict = "stale"
+			}
+		}
+		detail = append(detail, fmt.Sprintf("%s age=%s %s stale_n=%d fresh_n=%d demoted=%t",
+			id.String(), age, verdict, fc.stale[id], fc.fresh[id], fc.demoted[id]))
+	}
+	decision := "none"
+	if len(added) > 0 || len(restored) > 0 {
+		decision = fmt.Sprintf("demote=%v restore=%v", idsToStrings(added), idsToStrings(restored))
+	}
+	slog.InfoContext(ctx, "failover_tick",
+		slog.String("org_id", orgID.String()),
+		slog.Int("members", len(configured)),
+		slog.String("decision", decision),
+		slog.Any("detail", detail),
+	)
 }

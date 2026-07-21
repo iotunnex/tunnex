@@ -488,12 +488,16 @@ function SiteCardView({
       {canManage && (
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="ghost" onClick={() => setModal("subnet")}>Advertise subnet</Button>
-          {hasGateway ? (
+          {/* S8.6 D4: Bind and Unbind are NOT mutually exclusive — a site can carry MORE THAN ONE gateway (an
+              HA hub pair is exactly that). The old `hasGateway ? Unbind : Bind` was the list-of-one assumption
+              in the action path: once the first gateway bound, the second was unreachable through the product's
+              own UI (the box-walk had to POST /bind from the console). Unbind shows when a gateway is bound;
+              Bind shows whenever an unbound gateway exists — both can show together. */}
+          {hasGateway && (
             <Button variant="ghost" onClick={() => setModal("unbind")}>Unbind gateway</Button>
-          ) : (
-            <Button variant="ghost" onClick={() => setModal("bind")} disabled={unboundNodes.length === 0}>
-              Bind gateway
-            </Button>
+          )}
+          {unboundNodes.length > 0 && (
+            <Button variant="ghost" onClick={() => setModal("bind")}>Bind gateway</Button>
           )}
           <Button variant="danger" onClick={() => setModal("delete")}>Delete site</Button>
         </div>
