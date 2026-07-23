@@ -49,3 +49,6 @@ func (m *MemBackend) ApplyRoutes(_ context.Context, cidrs []string, _ string) er
 
 // Stats returns no telemetry (the in-memory backend has no real device).
 func (m *MemBackend) Stats(context.Context) ([]PeerStat, error) { return nil, nil }
+
+// Close is a no-op for the in-memory backend — no real interface to tear down (WF-C Layer 1).
+func (m *MemBackend) Close(context.Context) error { return nil }
