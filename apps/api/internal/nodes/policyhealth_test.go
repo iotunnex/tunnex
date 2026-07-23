@@ -73,6 +73,16 @@ func TestDegradedKind(t *testing.T) {
 		{"S8.2c — site_link_down OUTRANKS site_subnet_unreachable", KindInput{SiteLinkDown: true, SiteSubnetUnreachable: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now}, KindSiteLinkDown},
 		// site_subnet_unreachable OUTRANKS the policy apply/desync kinds (a reachability fault is the headline).
 		{"S8.2c — site_subnet_unreachable OUTRANKS silent_desync", KindInput{SiteSubnetUnreachable: true, PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindSiteSubnetUnreachable},
+
+		// WF-C L2 (D-WFC2-1a) — the zombie hub: HubForwardingNotReconciling (wire fresh, agent dead) →
+		// hub_forwarding_not_reconciling.
+		{"WF-C L2 — hub_forwarding_not_reconciling", KindInput{HubForwardingNotReconciling: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: ReportFreshnessWindow, Now: now}, KindHubForwardingNotReconciling},
+		// OUTRANKS the apply/desync kinds: a dead agent's LAST report is frozen, so a stale apply_failing /
+		// silent_desync must NOT mask "the agent is dead, restart it".
+		{"WF-C L2 — zombie OUTRANKS a stale apply-error + desync", KindInput{HubForwardingNotReconciling: true, PolicyError: "boom", PolicyFailingSince: "t0", PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: ReportFreshnessWindow, Now: now, DesyncSince: now.Add(-90 * time.Second)}, KindHubForwardingNotReconciling},
+		// BELOW the site-reachability kinds: a dead ORG TRANSIT (site_link_down) is the louder headline; a
+		// standby zombie can co-occur with the active primary's link-down → the transit failure wins.
+		{"WF-C L2 — site_link_down OUTRANKS a standby zombie", KindInput{SiteLinkDown: true, HubForwardingNotReconciling: true, PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: ReportFreshnessWindow, Now: now}, KindSiteLinkDown},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

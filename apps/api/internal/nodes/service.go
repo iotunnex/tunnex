@@ -1424,6 +1424,10 @@ type SiteTopoBatch struct {
 	// cannot name a peer or know demotion — D-WFB-1b).
 	siteLinkHeadlineDown bool      // the ACTIVE PRIMARY hub is stale → org site transit is genuinely dead (the headline)
 	demotedDeadPeer      uuid.UUID // a DEMOTED member is dead while the primary is fresh → subordinate named line (Nil = none)
+	// memberWireFresh (WF-C L2 D-WFC2-1a): per hub-set member, whether its spoke-observed handshake is FRESH
+	// (deriveMemberLiveness .Observed && .Fresh) — the wire half of the zombie-hub conjunction. Populated from
+	// THE ONE liveness derivation in fillSiteLinkVerdict; a non-member (or unobserved member) is absent/false.
+	memberWireFresh map[uuid.UUID]bool
 }
 
 // LoadSiteTopoBatch loads the site topology once for a node list + elects the hub once (electSiteHub — the
@@ -1484,6 +1488,12 @@ func (s *Service) fillSiteLinkVerdict(ctx context.Context, orgID uuid.UUID, b *S
 	}
 	live := deriveMemberLiveness(members, pubkey, rows, demoted, now)
 	b.siteLinkHeadlineDown, b.demotedDeadPeer = siteLinkVerdictFrom(members, activePrimary, live)
+	// WF-C L2 (D-WFC2-1a): surface each member's WIRE freshness from THE SAME liveness map (no recompute) —
+	// the zombie-hub kind's wire half. Only observed-AND-fresh members are true; silence/staleness → false.
+	b.memberWireFresh = make(map[uuid.UUID]bool, len(live))
+	for id, ml := range live {
+		b.memberWireFresh[id] = ml.Observed && ml.Fresh
+	}
 }
 
 // siteLinkVerdictFrom is the PURE WF-B verdict (unit-pinnable, no DB): given the hub members, the active
@@ -1613,9 +1623,16 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// LOWEST-priority enforcement-hygiene degradation (revoked grants' flows may linger). Only fires in
 		// enterprise (an open gateway has no grants → no flush → never set).
 		conntrackFlushUnavailable := caps.ConntrackFlushUnavailable
+		// hub_forwarding_not_reconciling (WF-C L2 D-WFC2-1a): the zombie-hub CONJUNCTION — this hub-set
+		// member's wire is FRESH (b.memberWireFresh, from THE ONE liveness derivation) while its OWN agent is
+		// SILENT (last_seen stale, the SAME hubStaleWindow the hub ordering uses — no new freshness). A dead
+		// agent forwarding headless: stale-enforcement, edition-independent. A non-member is absent from the
+		// map → false, so this can only fire for a hub-set member. (last_seen absent = never-seen = dead too.)
+		agentDead := !(n.LastSeenAt.Valid && now.Sub(n.LastSeenAt.Time) < hubStaleWindow)
+		hubForwardingNotReconciling := b.memberWireFresh[n.ID] && agentDead
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
-		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable || conntrackFlushUnavailable
+		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable || conntrackFlushUnavailable || hubForwardingNotReconciling
 		if !deg && pushKnown {
 			if h := pushed[n.ID]; h != "" && h != caps.PolicyHash { // term (3)
 				deg = true
@@ -1637,6 +1654,10 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindSiteLinkDown
 		case !enterprise && siteSubnetUnreachable:
 			kind = KindSiteSubnetUnreachable // D3, edition-independent
+		case !enterprise && hubForwardingNotReconciling:
+			// WF-C L2 (D-WFC2-1a): zombie hub — edition-independent (a crashed agent is core). Ranked above
+			// the apply kinds (a dead agent's stale report must not mask it), below the site-reachability kinds.
+			kind = KindHubForwardingNotReconciling
 		case !enterprise && caps.PolicyFailingSince != "":
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
@@ -1647,19 +1668,20 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindConntrackFlushUnavailable
 		case enterprise:
 			kind = degradedKind(KindInput{
-				PolicyError:               caps.PolicyError,
-				PolicyFailingSince:        caps.PolicyFailingSince,
-				PushKnown:                 pushKnown,
-				PushedHash:                pushed[n.ID],
-				AppliedHash:               caps.PolicyHash,
-				DesyncSince:               tsTime(n.PolicyDesyncSince),
-				ReportAge:                 reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
-				Now:                       now,
-				UnsupportedVersion:        caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
-				SiteHubDown:               siteHubDown,                   // S8.2 Item 7/9 (B2)
-				SiteLinkDown:              siteLinkDown,                  // S8.2 H5
-				SiteSubnetUnreachable:     siteSubnetUnreachable,         // S8.2c D3
-				ConntrackFlushUnavailable: conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
+				PolicyError:                 caps.PolicyError,
+				PolicyFailingSince:          caps.PolicyFailingSince,
+				PushKnown:                   pushKnown,
+				PushedHash:                  pushed[n.ID],
+				AppliedHash:                 caps.PolicyHash,
+				DesyncSince:                 tsTime(n.PolicyDesyncSince),
+				ReportAge:                   reportAge(now, n.PolicyReportedAt), // [fold 1] the REPORT clock, not last_seen
+				Now:                         now,
+				UnsupportedVersion:          caps.PolicyRefusedVersion > 0, // S8.1 D1: highest-priority kind
+				SiteHubDown:                 siteHubDown,                   // S8.2 Item 7/9 (B2)
+				SiteLinkDown:                siteLinkDown,                  // S8.2 H5
+				SiteSubnetUnreachable:       siteSubnetUnreachable,         // S8.2c D3
+				ConntrackFlushUnavailable:   conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
+				HubForwardingNotReconciling: hubForwardingNotReconciling,   // WF-C L2 D-WFC2-1a (zombie hub)
 			})
 		}
 		ph := PolicyHealth{Degraded: deg, Kind: kind}
