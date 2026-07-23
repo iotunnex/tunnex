@@ -687,3 +687,79 @@ func TestContentDerivedVersion(t *testing.T) {
 		t.Fatalf("an off-mode mesh artifact must be v4, got %d", v)
 	}
 }
+
+// TestDeviceSiteGrantFarPlacement — A3b D-A3b-2 (founder-ruled BOTH-ENFORCE): a device→site grant lands
+// on EVERY chain the transited packet crosses — the device's own node (entry), the transit HUB, and the
+// DESTINATION site's gateway. Forward-blind far gateways would hang their security off every hub's
+// integrity (wrong trust direction for customer-operated hubs); the far counter is the attribution point,
+// the hub counter the transit witness.
+func TestDeviceSiteGrantFarPlacement(t *testing.T) {
+	siteFar := uuid.MustParse("00000000-0000-0000-0000-00000051efa1")
+	nodeHub := uuid.MustParse("00000000-0000-0000-0000-0000000000b1")
+	nodeFar := uuid.MustParse("00000000-0000-0000-0000-0000000000c1")
+	snap := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Devices:     []policy.Device{{ID: uuid.New(), UserID: uAlice, NodeID: nodeHub, AssignedIP: "10.99.0.10"}},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Rules:       []policy.Rule{{ID: uuid.New(), SrcKind: "group", SrcGroupID: gAdmins, DstKind: "site", DstSiteID: siteFar}},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteFar, CIDR: "10.2.0.0/24"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteFar, NodeID: nodeFar}},
+		ActiveHub:   nodeHub,
+	}
+	out := policy.Compile(snap)
+	// Entry (device node == hub here) and the FAR gateway both carry the grant; map-dedup means the
+	// hub==device-node overlap emits ONCE per node, never twice.
+	for _, n := range []uuid.UUID{nodeHub, nodeFar} {
+		entries := allowsFor(out, n)
+		if !hasAllow(entries, "10.99.0.10", "10.2.0.0/24") {
+			t.Fatalf("device→site grant must land on node %s (both-enforce), got %+v", n, entries)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("exactly ONE deduped entry per node, got %d: %+v", len(entries), entries)
+		}
+	}
+}
+
+// TestDeviceResourceInSiteFarPlacement — A3b: a device→resource grant whose CIDR lives INSIDE a site's
+// approved subnet is site-fronted — same 3-way placement (entry + hub + far). A resource in NO site
+// subnet keeps the pre-A3b device-node-only placement (the siteOwning Nil edge).
+func TestDeviceResourceInSiteFarPlacement(t *testing.T) {
+	siteFar := uuid.MustParse("00000000-0000-0000-0000-00000051efa2")
+	nodeDev := uuid.MustParse("00000000-0000-0000-0000-0000000000d1")
+	nodeHub := uuid.MustParse("00000000-0000-0000-0000-0000000000b2")
+	nodeFar := uuid.MustParse("00000000-0000-0000-0000-0000000000c2")
+	resIn := uuid.New()  // inside the far site's subnet
+	resOut := uuid.New() // in no site subnet
+	snap := policy.Snapshot{
+		Mode:        policy.ModeEnforcing,
+		Devices:     []policy.Device{{ID: uuid.New(), UserID: uAlice, NodeID: nodeDev, AssignedIP: "10.99.0.10"}},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Resources: []policy.Resource{
+			{ID: resIn, CIDR: "10.2.0.8/32", Protocol: "tcp", PortLow: 443, PortHigh: 443},
+			{ID: resOut, CIDR: "192.0.2.0/24", Protocol: "any"},
+		},
+		Rules: []policy.Rule{
+			{ID: uuid.New(), SrcKind: "group", SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: resIn},
+			{ID: uuid.New(), SrcKind: "group", SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: resOut},
+		},
+		SiteSubnets: []policy.SiteSubnet{{SiteID: siteFar, CIDR: "10.2.0.0/24"}},
+		SiteNodes:   []policy.SiteNode{{SiteID: siteFar, NodeID: nodeFar}},
+		ActiveHub:   nodeHub,
+	}
+	out := policy.Compile(snap)
+	// The in-site resource: entry + hub + far all adjudicate.
+	for _, n := range []uuid.UUID{nodeDev, nodeHub, nodeFar} {
+		if !hasAllow(allowsFor(out, n), "10.99.0.10", "10.2.0.8/32") {
+			t.Fatalf("in-site resource grant must land on node %s (both-enforce), got %+v", n, allowsFor(out, n))
+		}
+	}
+	// The non-site resource: device node ONLY — the hub/far chains never learn it.
+	if !hasAllow(allowsFor(out, nodeDev), "10.99.0.10", "192.0.2.0/24") {
+		t.Fatalf("non-site resource must still land on the device's node, got %+v", allowsFor(out, nodeDev))
+	}
+	for _, n := range []uuid.UUID{nodeHub, nodeFar} {
+		if hasAllow(allowsFor(out, n), "10.99.0.10", "192.0.2.0/24") {
+			t.Fatalf("a resource in NO site subnet must NOT land on node %s, got %+v", n, allowsFor(out, n))
+		}
+	}
+}

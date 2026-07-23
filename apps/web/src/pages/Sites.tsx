@@ -475,6 +475,14 @@ function SiteCardView({
               <span className="font-semibold text-slate-300">AWS:</span> disable <span className="font-mono">source/dest check</span> on the gateway ENI; route table → add
               <span className="font-mono"> &lt;REMOTE_CIDR&gt;</span> → target = the gateway instance/ENI.
             </p>
+            {/* A3b PD-4: the DEVICE POOL needs the same return route as the site ranges — behind-host
+                replies to a connected device (its 10.99.x pool address) die at the cloud router without
+                it. Wording sourced from the Deck-D Leg-10 console fixes (the walk that found the gap). */}
+            <p>
+              <span className="font-semibold text-slate-300">Devices too:</span> add the SAME route for the org's
+              <span className="font-mono"> device pool CIDR</span> (Settings shows it, e.g. <span className="font-mono">10.99.0.0/24</span>)
+              → this gateway — behind-host replies to a connected device need a way back, exactly like a remote site's CIDR.
+            </p>
             <p className="text-slate-500">Full reference: <span className="font-mono">docs/deploy-cloud-gateway.md</span>.</p>
           </div>
         </details>

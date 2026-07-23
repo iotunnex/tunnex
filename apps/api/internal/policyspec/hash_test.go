@@ -122,3 +122,28 @@ func TestCanonicalHashSrcDeviceIDIsObservabilityOnly(t *testing.T) {
 		t.Fatal("a DIFFERENT src_device_id must NOT change the hash")
 	}
 }
+
+// TestRequiredVersionPoolTriggerV6 — A3b (S8.6) LAW guard. A Compiled carrying PoolCIDR MUST derive
+// RequiredVersion == 6: an old agent has no pool-class DOCKER-USER render, so it must REFUSE rather than
+// silently strand device transit on Docker hosts (dead-while-green — the Routes precedent). PoolCIDR is
+// ALSO hash-blind (reachability plumbing, out of the CanonicalHash enforcement projection).
+func TestRequiredVersionPoolTriggerV6(t *testing.T) {
+	withPool := policyspec.Compiled{NodeID: "n", Mode: "off", Mesh: true, PoolCIDR: "10.99.0.0/24"}
+	if v := policyspec.RequiredVersion(withPool); v != 6 {
+		t.Fatalf("a Compiled with PoolCIDR must derive RequiredVersion == 6 (the LAW guard); got %d", v)
+	}
+	// pool WITH routes still 6 (the max shape wins, not the first trigger hit)
+	withBoth := withPool
+	withBoth.Routes = []policyspec.Route{{DstCIDR: "10.2.0.0/24"}}
+	if v := policyspec.RequiredVersion(withBoth); v != 6 {
+		t.Fatalf("PoolCIDR+Routes must derive 6, got %d", v)
+	}
+	noPool := policyspec.Compiled{NodeID: "n", Mode: "off", Mesh: true}
+	if policyspec.CanonicalHash(withPool) != policyspec.CanonicalHash(noPool) {
+		t.Fatal("PoolCIDR must be hash-blind (plumbing, out of the projection) — adding the pool changed CanonicalHash")
+	}
+	// a pool-less artifact must NOT version-bump (content-derived: single-site orgs keep pre-v6 bytes)
+	if v := policyspec.RequiredVersion(noPool); v != 4 {
+		t.Fatalf("a pool-less mesh artifact must stay v4 (content-derived), got %d", v)
+	}
+}

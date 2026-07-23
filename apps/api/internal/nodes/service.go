@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,7 +40,9 @@ import (
 // destination kind — Option A, no new wire field, but Version IS in-hash so v4 is a real hash change,
 // and S8.1 D1's agent gate makes an agent at maxSupported<4 REFUSE it rather than mis-enforce (the
 // v4 bump is no longer "safe to safe-ignore" — it is the enforcement boundary the gate protects).
-const ProtocolVersion = 5
+// v6 (A3b, S8.6): pool_cidr on the site-gateway artifact (device-pool Docker accepts) — an old agent
+// would silently strand device transit on Docker hosts, so the gate refuses (lockstep with policyspec).
+const ProtocolVersion = 6
 
 const joinTokenTTL = time.Hour
 
@@ -397,6 +400,14 @@ type siteTopology struct {
 	// the ordinary compile+push). Empty when org_hub_set has no row (a not-yet-reconciled org) → the
 	// compiler falls back to electSiteHubSet (single-hub), so a fresh org still compiles.
 	hubMembers []sqlc.ListSiteGatewaysForOrgRow
+	// poolCIDR (A3b, S8.6) is the org's device pool (organizations.pool_cidr), canonical masked form.
+	// Consumed by siteLinkGraphFrom (the spoke's hub-PRIMARY peer AllowedIPs — device transit reachability)
+	// and finalizeArtifact (Compiled.PoolCIDR → the agent's pool-class DOCKER-USER accepts). Scope (paper):
+	// pool rides at most ONE peer per node (the wg single-valued invariant), so A3b covers devices-on-HUB
+	// reaching remote sites; devices-on-SPOKES cross-site is the REGISTERED residual (per-device placement
+	// on the hub's spoke peers = the churn class D-A3b-1 rejected). Empty when the org row is gone
+	// (soft-deleted org — its gateways are converging to teardown anyway).
+	poolCIDR string
 }
 
 // loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
@@ -454,7 +465,18 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 	} else if herr != pgx.ErrNoRows {
 		return siteTopology{}, herr
 	}
-	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers}, nil
+	// A3b: the org's device pool, canonical masked. A read ERROR fails the load (DesiredState-ATOMIC — a
+	// silently-empty pool would strand device transit dead-while-green, the exact class the law exists
+	// for); ErrNoRows (soft-deleted org) degrades to empty — those gateways are tearing down regardless.
+	var poolCIDR string
+	if org, oerr := s.q.GetOrganizationByID(ctx, orgID); oerr == nil {
+		if p, perr := netip.ParsePrefix(org.PoolCidr); perr == nil {
+			poolCIDR = p.Masked().String()
+		}
+	} else if oerr != pgx.ErrNoRows {
+		return siteTopology{}, oerr
+	}
+	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers, poolCIDR: poolCIDR}, nil
 }
 
 // deriveActive is THE shared hub-order derivation (S8.6 REDUCE) — the ONE function every consumer reads
@@ -837,7 +859,18 @@ func siteLinkGraphFrom(topo siteTopology, node sqlc.Node) ([]Peer, []policyspec.
 		// handshakes (warm + observable in node_peer_status). Promotion (Slice 4) re-compiles the subnets onto
 		// the standby's AllowedIPs — no build, no handshake wait: the tunnel is already up.
 		primary := &members[0]
-		peers = append(peers, Peer{PublicKey: primary.WgPublicKey, AllowedIPs: append([]string(nil), routeCIDRs...), Endpoint: primary.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
+		// A3b: the device POOL rides the hub-PRIMARY peer's AllowedIPs alongside the remote routes — the
+		// far half of device→remote-site transit: inbound, wg admits device-sourced (pool-saddr) packets
+		// arriving via the hub; outbound, replies to pool addresses crypto-route back to the hub. Primary
+		// ONLY — a standby stays AllowedIPs-empty (single-valued invariant), and promotion recompiles the
+		// pool onto the new primary exactly as it does routeCIDRs. Reachability, not permission: the far
+		// gateway's ip tunnex chain adjudicates via compiled far-grants (D-A3b-1/2).
+		spokeIPs := append([]string(nil), routeCIDRs...)
+		if topo.poolCIDR != "" {
+			spokeIPs = append(spokeIPs, topo.poolCIDR)
+			sort.Strings(spokeIPs)
+		}
+		peers = append(peers, Peer{PublicKey: primary.WgPublicKey, AllowedIPs: spokeIPs, Endpoint: primary.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
 		for i := 1; i < len(members); i++ {
 			sb := &members[i]
 			peers = append(peers, Peer{PublicKey: sb.WgPublicKey, AllowedIPs: []string{}, Endpoint: sb.Endpoint, SiteLink: true, PersistentKeepalive: siteLinkKeepaliveSecs})
@@ -869,14 +902,20 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	// so a route-carrying artifact stays byte-identical for the desync baseline). Every gateway carries the
 	// whole table so any gateway answers for any site's zone. nil for a no-DNS org (empty until Slice 2).
 	dns := append([]policyspec.DNSForward(nil), topo.dnsForwards...)
+	// A3b: attach the org pool so the agent renders the pool-class DOCKER-USER accepts (device transit /
+	// device↔device at the Docker tier; the chain adjudicates). Rides WITH routes (this point is past the
+	// routes==0 return), so v6 stays content-derived: only multi-site orgs' gateways carry it — a
+	// single-site org keeps its pre-v6 artifact byte-identical (and its Docker-dark device↔device is the
+	// REGISTERED PD-3 residual, with non-site gateways).
 	if pol != nil {
 		pol.Routes = routes
 		pol.LocalSubnets = local
 		pol.DNSForwards = dns
+		pol.PoolCIDR = topo.poolCIDR
 		pol.Version = policyspec.RequiredVersion(*pol)
 		return pol
 	}
-	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local, DNSForwards: dns}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local, DNSForwards: dns, PoolCIDR: topo.poolCIDR}
 	c.Version = policyspec.RequiredVersion(c)
 	return &c
 }

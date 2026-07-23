@@ -83,7 +83,13 @@ type AffectedDevice struct {
 // keeps a byte-identical v4 artifact (hash unchanged, no re-converge, old agents do not refuse); only
 // orgs adopting site-to-site flip to v5 and (via D1) deny-all their un-upgraded gateways loudly. The
 // constant below is the CEILING — the max shape the CP can emit — not what every artifact carries.
-const ProtocolVersion = 5
+//
+// v6 (A3b, S8.6): PoolCIDR — the org device pool delivered to site gateways so the agent renders the
+// pool's DOCKER-USER accepts (device transit / device↔device at the Docker tier; the ZT chain still
+// adjudicates, D-transit-3 applied uniformly). An old agent would silently ignore the field and leave
+// device traffic structurally dropped on Docker hosts while reporting green — the Routes precedent —
+// so PoolCIDR presence triggers RequiredVersion=6 and an old gated agent refuses loudly (D1).
+const ProtocolVersion = 6
 
 // RequiredVersion is the MINIMUM agent version required to correctly render this artifact (S8.2 D1b,
 // content-derived version). It returns the OLDEST protocol version whose shape fully covers the
@@ -102,6 +108,12 @@ const ProtocolVersion = 5
 // leaves this function untouched is a silent-accept bug — the artifact would carry new content at an old
 // version and old agents would accept it. The D2 checklist asks "RequiredVersion updated? y/n".
 func RequiredVersion(c Compiled) int {
+	//	v6 trigger (A3b, S8.6): a non-empty PoolCIDR — an old agent has no pool-class DOCKER-USER
+	//	render, so it would silently leave device transit structurally dropped on Docker hosts
+	//	(dead-while-green, the Routes class). It must REFUSE the whole artifact.
+	if c.PoolCIDR != "" {
+		return 6
+	}
 	if len(c.Routes) > 0 {
 		return 5
 	}
@@ -201,6 +213,16 @@ type Compiled struct {
 	// where names don't resolve (visibly degraded, user-diagnosable), never a dead bridge while green. So it
 	// is neither hashed nor version-gated; a no-DNS org's artifact is byte-identical.
 	DNSForwards []DNSForward `json:"dns_forwards,omitempty"`
+	// PoolCIDR (v6, A3b/S8.6) is the org's device pool, delivered to SITE gateways so the agent renders
+	// the pool's RELAXED DOCKER-USER accepts (fwd: oif=wg0 daddr=pool; ret: iif=wg0 saddr=pool) — lifting
+	// Docker's structural FORWARD DROP for device-sourced transit AND device↔device (PD-3), while the
+	// `ip tunnex` chain remains the sole adjudicator (D-transit-3 applied uniformly to the pool class:
+	// enforcing-no-grant still drops AT the chain, with counter evidence). Reachability PLUMBING, so OUT
+	// of CanonicalHash — but an old agent ignoring it leaves device paths dead-while-green on Docker
+	// hosts, so presence triggers RequiredVersion=6 (refuse-not-silent, the Routes precedent). Rides only
+	// with the site-gateway artifact (finalizeArtifact, the ONE source); non-site gateways keep Docker-
+	// dark device↔device — REGISTERED PD-3 residual, trigger = first non-site device↔device walk.
+	PoolCIDR string `json:"pool_cidr,omitempty"`
 }
 
 // DNSForward is one forwarded zone: queries for Domain go to ResolverIP (an address inside the declaring

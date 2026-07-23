@@ -28,7 +28,10 @@ const (
 // v4 (S8.1 Slice 3): this agent now SUPPORTS the sites bump (Option A — same-shape wire, a
 // device→site-subnet grant is a plain AllowEntry), so it applies v4 rather than refusing it. An
 // agent still at 3 (pre-Slice-3 binary) refuses v4 — the go-forward interlock (D1).
-const MaxSupportedVersion = 5
+// v6 (A3b, S8.6): this agent renders PoolCIDR (the device pool's relaxed DOCKER-USER accepts), so it
+// applies v6; an agent still at 5 refuses a pool-carrying artifact rather than silently stranding
+// device transit on Docker hosts (the D1 interlock again).
+const MaxSupportedVersion = 6
 
 // AllowEntry is one compiled default-deny grant: SrcIP (a device /32 host) may reach
 // DstCIDR on Protocol within [PortLow,PortHigh]. PortLow==0 means all ports.
@@ -74,6 +77,12 @@ type Compiled struct {
 	// DNSForwards (S8.4) — the org cross-site DNS forwarding table {domain -> resolver_ip} the in-agent
 	// forwarder serves. Out-of-hash CONVENIENCE, no version trigger; mirror of policyspec.Compiled.DNSForwards.
 	DNSForwards []DNSForward `json:"dns_forwards,omitempty"`
+	// PoolCIDR (v6, A3b/S8.6) — the org device pool; the agent renders its RELAXED DOCKER-USER accepts
+	// (fwd: oif=wg0 daddr=pool; ret: iif=wg0 saddr=pool) so Docker's FORWARD DROP never structurally
+	// swallows device transit or device↔device — the ip tunnex chain remains the sole adjudicator
+	// (D-transit-3, uniform). Out-of-hash PLUMBING; presence triggers RequiredVersion=6 CP-side. Mirror
+	// of policyspec.Compiled.PoolCIDR (field order + tag must match — hash is marshal-order-sensitive).
+	PoolCIDR string `json:"pool_cidr,omitempty"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site

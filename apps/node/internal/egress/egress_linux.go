@@ -240,6 +240,7 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 	// (a Routes-scoped DOCKER-USER accept) so site-to-site forwarding works with zero gateway touch.
 	// Best-effort + idempotent; a Docker-blocked forward it can't clear is surfaced via ForwardBlocked().
 	var routeCIDRs, localSubnets []string
+	var poolCIDR string
 	if pol != nil {
 		for _, rt := range pol.Routes {
 			routeCIDRs = append(routeCIDRs, rt.DstCIDR)
@@ -248,8 +249,11 @@ func (m *Manager) Reconcile(ctx context.Context) (bool, error) {
 		// a split-tunnel device reaching the LAN BEHIND this gateway is forwarded wg0→eth0 and Docker's
 		// FORWARD DROP swallows it exactly as it did remote routes. Same union, mirrored orientation.
 		localSubnets = append(localSubnets, pol.LocalSubnets...)
+		// A3b (v6): the org device pool — the pool-class accepts (relaxed, wg0↔wg0 included) so Docker
+		// never structurally drops device transit or device↔device; the ip tunnex chain adjudicates.
+		poolCIDR = pol.PoolCIDR
 	}
-	m.reconcileDockerForward(ctx, routeCIDRs, localSubnets)
+	m.reconcileDockerForward(ctx, routeCIDRs, localSubnets, poolCIDR)
 	// egress_nat is true only when the pool is known (wg0 up) AND an egress path exists
 	// (default route) — otherwise full-tunnel would blackhole, so report NOT capable.
 	if subnet == "" || !hasDefaultRoute(ctx) {
@@ -656,7 +660,7 @@ func argOrientSig(args []string) string {
 // (bare metal / the D4 bare-metal path) → no-op, forwarding rides the host's own FORWARD (D-WF4-c).
 // Returns forwardBlocked when we have subnets to carry, FORWARD is policy-drop, yet we could not
 // place the accept — the D-WF4-d loud signal.
-func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubnets []string) (forwardBlocked bool) {
+func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubnets []string, poolCIDR string) (forwardBlocked bool) {
 	wg := m.wgIface
 	// Probe DOCKER-USER. Absent → not a Docker-managed FORWARD host; nothing to satisfy.
 	if _, err := m.nftRun(ctx, "list", "chain", "ip", "filter", "DOCKER-USER"); err != nil {
@@ -703,6 +707,23 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 			}
 			set("d:"+a, []string{"iifname", wg, "oifname", "!=", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
 			set("s:"+a, []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
+		}
+	}
+	// POOL class (A3b v6, fork-ruled (ii) RELAXED): the org device pool. Forward = oif=wg0, daddr=pool
+	// (LAN→device replies AND wg0→wg0 device↔device forward); return = iif=wg0, saddr=pool (device-sourced
+	// any direction, incl. wg0→wg0 transit at a hub). NO iif/oif exclusions — Docker's match tier never
+	// structurally drops what the ip tunnex chain is entitled to adjudicate (the D-transit-3 boundary,
+	// applied uniformly to the pool class; the amended D-A3b-1 condition). Under enforcing, device↔device
+	// without a grant still drops AT THE CHAIN with counter evidence (the re-targeted spoke-isolation red).
+	// Same ONE engine: same comment marker, same "d:"/"s:" key space, same drift-detection transition.
+	// Existing-key guard mirrors localSubnets (a pool colliding with a route/local addr never overwrites).
+	if poolCIDR != "" {
+		if p, err := netip.ParsePrefix(poolCIDR); err == nil && p.Addr().Is4() {
+			a := canonDaddr(p)
+			if !desired["d:"+a] && !desired["s:"+a] {
+				set("d:"+a, []string{"oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
+				set("s:"+a, []string{"iifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
+			}
 		}
 	}
 	// Current tunnex-marked rules: "dir:addr" -> handle. A LIST ERROR (not just empty) means we can't know

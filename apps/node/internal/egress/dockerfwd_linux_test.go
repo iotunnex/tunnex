@@ -123,7 +123,7 @@ func mgrWithNft(f *fakeNft) *Manager {
 func TestDockerForwardScopedInsert(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil, "")
 	// TWO Route-scoped accepts per route: forward (d:) + return (s:) — the return path is why the re-walk
 	// forward-ping passed but the reply dropped.
 	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
@@ -142,9 +142,9 @@ func TestDockerForwardIdempotent(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	routes := []string{"10.0.0.0/24"}
-	m.reconcileDockerForward(context.Background(), routes, nil)
+	m.reconcileDockerForward(context.Background(), routes, nil, "")
 	n := len(f.inserts)
-	m.reconcileDockerForward(context.Background(), routes, nil)
+	m.reconcileDockerForward(context.Background(), routes, nil, "")
 	if len(f.inserts) != n {
 		t.Fatalf("second reconcile must insert nothing (idempotent); inserts went %d -> %d", n, len(f.inserts))
 	}
@@ -155,8 +155,8 @@ func TestDockerForwardIdempotent(t *testing.T) {
 func TestDockerForwardFullSweep(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // 172.31 withdrawn
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil, "")
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "") // 172.31 withdrawn
 	for _, k := range []string{"d:172.31.0.0/16", "s:172.31.0.0/16"} {
 		if _, still := f.rules[k]; still {
 			t.Fatalf("a withdrawn route's rule %s must be swept, still present: %v", k, f.rules)
@@ -179,12 +179,12 @@ func TestDockerForwardHostRouteIdempotent(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	routes := []string{"10.0.0.5/32"}
-	m.reconcileDockerForward(context.Background(), routes, nil)
+	m.reconcileDockerForward(context.Background(), routes, nil, "")
 	n := len(f.inserts)
 	if n != 2 { // fwd + ret for the one /32
 		t.Fatalf("first reconcile inserts the /32 fwd+ret accepts, got %d", n)
 	}
-	m.reconcileDockerForward(context.Background(), routes, nil)
+	m.reconcileDockerForward(context.Background(), routes, nil, "")
 	if len(f.inserts) != n || len(f.deletes) != 0 {
 		t.Fatalf("a /32 route must be idempotent (no churn); inserts %d→%d, deletes %d", n, len(f.inserts), len(f.deletes))
 	}
@@ -195,10 +195,10 @@ func TestDockerForwardHostRouteIdempotent(t *testing.T) {
 func TestDockerForwardListErrorSkips(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // places one
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "") // places one
 	before := len(f.inserts)
 	f.listErr = true
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil) // list fails → must NOT re-insert
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "") // list fails → must NOT re-insert
 	if len(f.inserts) != before {
 		t.Fatalf("a transient list error must skip inserts (no duplicates); inserts %d→%d", before, len(f.inserts))
 	}
@@ -210,7 +210,7 @@ func TestDockerForwardBareMetalNoOp(t *testing.T) {
 	f := newFakeNft()
 	f.chainAbsent = true
 	m := mgrWithNft(f)
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, ""); blocked {
 		t.Fatal("bare-metal (no DOCKER-USER) must not report forwardBlocked")
 	}
 	if len(f.inserts) != 0 {
@@ -228,7 +228,7 @@ func TestDockerForwardBlockedSignal(t *testing.T) {
 	f.forwardDrop = true
 	f.insertErr = true
 	m := mgrWithNft(f)
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); !blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, ""); !blocked {
 		t.Fatal("Docker FORWARD-drop + unplaceable accept + routes present → must report forwardBlocked")
 	}
 	if !m.ForwardBlocked() {
@@ -236,7 +236,7 @@ func TestDockerForwardBlockedSignal(t *testing.T) {
 	}
 	// Recovery: inserts succeed → not blocked.
 	f.insertErr = false
-	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil); blocked {
+	if blocked := m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, ""); blocked {
 		t.Fatal("once the accept is placed, forwardBlocked must clear")
 	}
 }
@@ -283,7 +283,7 @@ func TestDockerForwardLocalSubnetMirrored(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	// a REMOTE route 10.0.0.0/24 (site-to-site) + this gateway's OWN advertised subnet 172.31.0.0/16.
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "")
 
 	// Both get fwd (d:) + ret (s:) accepts — 4 rules, disjoint addrs, no key collision across orientations.
 	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
@@ -326,7 +326,7 @@ func TestDockerForwardTransitionConverges(t *testing.T) {
 	f.rules["d:10.0.0.0/24"], f.orient["d:10.0.0.0/24"] = "77", `iifname != "wg0" oifname "wg0"`
 	f.rules["s:10.0.0.0/24"], f.orient["s:10.0.0.0/24"] = "78", `iifname "wg0" oifname != "wg0"`
 	m := mgrWithNft(f)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "")
 
 	// converged to the RELAXED form under the same key.
 	if fwd := findInsertWith(f, "daddr", "10.0.0.0/24"); !hasArgSeq(fwd, []string{"oifname", "wg0", "ip", "daddr"}) || hasArgSeq(fwd, []string{"iifname"}) {
@@ -349,7 +349,7 @@ func TestDockerForwardTransitionConverges(t *testing.T) {
 	}
 	// idempotence re-verified against the RELAXED render — a second pass churns nothing.
 	insN, delN := len(f.inserts), len(f.deletes)
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "")
 	if len(f.inserts) != insN || len(f.deletes) != delN {
 		t.Fatalf("transition: post-convergence must be idempotent, inserts %d→%d deletes %d→%d", insN, len(f.inserts), delN, len(f.deletes))
 	}
@@ -363,7 +363,7 @@ func TestDockerForwardSpokeIsolation(t *testing.T) {
 	f := newFakeNft()
 	m := mgrWithNft(f)
 	// a remote route + a local subnet; the WG device pool 10.99.0.0/24 is NEITHER.
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "")
 	allowed := map[string]bool{"10.0.0.0/24": true, "172.31.0.0/16": true}
 	for key := range f.rules {
 		addr := key[2:]
@@ -382,8 +382,8 @@ func TestDockerForwardSpokeIsolation(t *testing.T) {
 func TestDockerForwardFailoverSymmetry(t *testing.T) {
 	routes := []string{"10.0.0.0/24", "172.31.9.0/24"}
 	fa, fb := newFakeNft(), newFakeNft()
-	mgrWithNft(fa).reconcileDockerForward(context.Background(), routes, nil)
-	mgrWithNft(fb).reconcileDockerForward(context.Background(), routes, nil)
+	mgrWithNft(fa).reconcileDockerForward(context.Background(), routes, nil, "")
+	mgrWithNft(fb).reconcileDockerForward(context.Background(), routes, nil, "")
 	if len(fa.rules) != len(fb.rules) || len(fa.rules) == 0 {
 		t.Fatalf("failover-symmetry: rule counts differ/empty, primary=%d standby=%d", len(fa.rules), len(fb.rules))
 	}
@@ -409,7 +409,7 @@ func TestDockerForwardOpensDockerNotEnforcement(t *testing.T) {
 		cmds = append(cmds, append([]string(nil), args...))
 		return f.run(ctx, args...)
 	}
-	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"})
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "")
 	for _, c := range cmds {
 		if hasArgSeq(c, []string{"ip", "tunnex"}) {
 			t.Fatalf("ZT-boundary: reconcileDockerForward must never touch ip tunnex, got %v", c)
@@ -417,5 +417,72 @@ func TestDockerForwardOpensDockerNotEnforcement(t *testing.T) {
 		if (c[0] == "insert" || c[0] == "delete") && !hasArgSeq(c, []string{"ip", "filter", "DOCKER-USER"}) {
 			t.Fatalf("ZT-boundary: a rule op must be scoped to DOCKER-USER, got %v", c)
 		}
+	}
+}
+
+// TestDockerForwardPoolClassRelaxed — A3b v6, fork-ruled (ii): the org device pool gets RELAXED accepts —
+// forward oif=wg0 daddr=pool (LAN→device replies AND wg0→wg0 device↔device), return iif=wg0 saddr=pool
+// (device-sourced any direction, incl. wg0→wg0 hub transit). NO iif/oif exclusions: Docker's match tier
+// never structurally drops what the ip tunnex chain adjudicates (D-transit-3 uniform; the amended D-A3b-1
+// condition — darkness lives at the CHAIN, per-grant, not here).
+func TestDockerForwardPoolClassRelaxed(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "10.99.0.0/24")
+
+	for _, k := range []string{"d:10.99.0.0/24", "s:10.99.0.0/24"} {
+		if f.rules[k] == "" {
+			t.Fatalf("missing pool accept %s; got %v", k, f.rules)
+		}
+	}
+	// RELAXED: forward = oif=wg0 only; return = iif=wg0 only — a re-added exclusion predicate would
+	// silently re-break device↔device / hub transit at the Docker tier.
+	if fwd := findInsertWith(f, "daddr", "10.99.0.0/24"); !hasArgSeq(fwd, []string{"oifname", "wg0", "ip", "daddr"}) || hasArgSeq(fwd, []string{"iifname"}) {
+		t.Fatalf("pool forward must be RELAXED oif=wg0 (no iif predicate), got %v", fwd)
+	}
+	if ret := findInsertWith(f, "saddr", "10.99.0.0/24"); !hasArgSeq(ret, []string{"iifname", "wg0", "ip", "saddr"}) || hasArgSeq(ret, []string{"oifname"}) {
+		t.Fatalf("pool return must be RELAXED iif=wg0 (no oif predicate), got %v", ret)
+	}
+}
+
+// TestDockerForwardKeySpaceCensus — the A3b census red (D-A3b-3 founder condition): the engine's key space
+// enumerates EXACTLY the classes the paper names — routes, local subnets, pool — two keys (d:/s:) each,
+// nothing else. A class silently added here without its paper entry is the drift this red exists to catch.
+func TestDockerForwardKeySpaceCensus(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "10.99.0.0/24")
+
+	want := map[string]bool{
+		"d:10.0.0.0/24": true, "s:10.0.0.0/24": true, // route class (S8.2c WF-4, relaxed S8.6b)
+		"d:172.31.0.0/16": true, "s:172.31.0.0/16": true, // local-subnet class (S8.5 WF-4-local)
+		"d:10.99.0.0/24": true, "s:10.99.0.0/24": true, // pool class (A3b v6)
+	}
+	if len(f.rules) != len(want) {
+		t.Fatalf("key-space census: want exactly %d keys (route+local+pool × d/s), got %v", len(want), f.rules)
+	}
+	for k := range want {
+		if f.rules[k] == "" {
+			t.Fatalf("key-space census: missing %s; got %v", k, f.rules)
+		}
+	}
+}
+
+// TestDockerForwardPoolCollisionGuard — a pool CIDR colliding with an already-claimed route/local addr
+// must NOT overwrite it (the same disjoint-by-construction guard localSubnets carries): first claim wins,
+// the collision surfaces via the validator CP-side, never via a silently re-oriented accept.
+func TestDockerForwardPoolCollisionGuard(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.reconcileDockerForward(context.Background(), []string{"10.99.0.0/24"}, nil, "10.99.0.0/24")
+
+	// the ROUTE claimed the addr; the pool must not have re-oriented it (route fwd = daddr with oif=wg0 —
+	// identical here — but the RETURN differs: route ret iif=wg0 saddr; pool would be the same relaxed form,
+	// so assert exactly 2 rules exist (no duplicate insert churn).
+	if len(f.rules) != 2 {
+		t.Fatalf("collision guard: route claim must win, exactly 2 rules, got %v", f.rules)
+	}
+	if len(f.inserts) != 2 {
+		t.Fatalf("collision guard: no duplicate inserts on collision, got %v", f.inserts)
 	}
 }

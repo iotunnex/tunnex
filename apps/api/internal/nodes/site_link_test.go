@@ -270,3 +270,105 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 		t.Fatalf("after unbinding the spoke, the hub must have no site peer/route (full-sweep), got peers=%+v routes=%+v", hp2, hr2)
 	}
 }
+
+// TestSpokePrimaryCarriesPoolStandbyEmpty — A3b D-A3b-1/4 + the failover-symmetry red. The device POOL
+// rides the spoke's hub-PRIMARY peer AllowedIPs (the far half of device→remote-site transit: inbound wg
+// admits device-sourced packets via the hub; outbound, replies to pool addrs crypto-route back). Primary
+// ONLY — the standby stays AllowedIPs-EMPTY (the S8.6 single-valued invariant; pool on two peers would be
+// the overlapping-AllowedIPs nondeterminism). Promotion (hubMembers reorder) moves the pool WITH the
+// routes onto the new primary — no pool-special failover path.
+func TestSpokePrimaryCarriesPoolStandbyEmpty(t *testing.T) {
+	siteA, siteB := uuid.New(), uuid.New()
+	hub1, hub2, spoke := uuid.New(), uuid.New(), uuid.New()
+	g1 := sqlc.ListSiteGatewaysForOrgRow{ID: hub1, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH1", Endpoint: "h1.example:51820"}
+	g2 := sqlc.ListSiteGatewaysForOrgRow{ID: hub2, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH2", Endpoint: "h2.example:51820"}
+	gs := sqlc.ListSiteGatewaysForOrgRow{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KS"}
+	topo := siteTopology{
+		gws:        []sqlc.ListSiteGatewaysForOrgRow{g1, g2, gs},
+		subnets:    map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
+		hubMembers: []sqlc.ListSiteGatewaysForOrgRow{g1, g2},
+		poolCIDR:   "10.99.0.0/24",
+	}
+	spokeNode := sqlc.Node{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}}
+
+	peers, _ := siteLinkGraphFrom(topo, spokeNode)
+	var prim, stand *Peer
+	for i := range peers {
+		switch peers[i].PublicKey {
+		case "KH1":
+			prim = &peers[i]
+		case "KH2":
+			stand = &peers[i]
+		}
+	}
+	if prim == nil || stand == nil {
+		t.Fatalf("spoke must peer with primary + standby, got %+v", peers)
+	}
+	if !sliceHas(prim.AllowedIPs, "10.99.0.0/24") || !sliceHas(prim.AllowedIPs, "10.1.0.0/24") {
+		t.Fatalf("hub-PRIMARY peer must carry the pool alongside the routes, got %v", prim.AllowedIPs)
+	}
+	if len(stand.AllowedIPs) != 0 {
+		t.Fatalf("standby must stay AllowedIPs-EMPTY (single-valued invariant), got %v", stand.AllowedIPs)
+	}
+
+	// FAILOVER SYMMETRY: promotion (order flip) moves the pool onto the NEW primary; the demoted drains.
+	topo.hubMembers = []sqlc.ListSiteGatewaysForOrgRow{g2, g1}
+	peers2, _ := siteLinkGraphFrom(topo, spokeNode)
+	for i := range peers2 {
+		switch peers2[i].PublicKey {
+		case "KH2":
+			if !sliceHas(peers2[i].AllowedIPs, "10.99.0.0/24") {
+				t.Fatalf("promotion must move the pool onto the new primary, got %v", peers2[i].AllowedIPs)
+			}
+		case "KH1":
+			if len(peers2[i].AllowedIPs) != 0 {
+				t.Fatalf("the demoted member must drain to empty (pool included), got %v", peers2[i].AllowedIPs)
+			}
+		}
+	}
+
+	// An empty pool (soft-deleted org edge) emits routes only — no empty-string AllowedIP artifact.
+	topo.poolCIDR = ""
+	peers3, _ := siteLinkGraphFrom(topo, spokeNode)
+	for i := range peers3 {
+		if peers3[i].PublicKey == "KH2" && sliceHas(peers3[i].AllowedIPs, "") {
+			t.Fatalf("empty pool must not emit an empty AllowedIP, got %v", peers3[i].AllowedIPs)
+		}
+	}
+}
+
+// TestFinalizeAttachesPoolV6 — A3b: finalizeArtifact attaches PoolCIDR to a route-carrying site-gateway
+// artifact and the content-derived version lands at 6; a topo WITHOUT routes (single-site org) returns the
+// artifact UNCHANGED (no pool, pre-v6 bytes — the content-derived blast-radius guard).
+func TestFinalizeAttachesPoolV6(t *testing.T) {
+	siteA, siteB := uuid.New(), uuid.New()
+	hub, spoke := uuid.New(), uuid.New()
+	topo := siteTopology{
+		gws: []sqlc.ListSiteGatewaysForOrgRow{
+			{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH", Endpoint: "h:51820"},
+			{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KS"},
+		},
+		subnets:  map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
+		poolCIDR: "10.99.0.0/24",
+	}
+	svc := &Service{}
+	spokeNode := sqlc.Node{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}}
+	final := svc.finalizeArtifact(topo, spokeNode, nil)
+	if final == nil || final.PoolCIDR != "10.99.0.0/24" {
+		t.Fatalf("a route-carrying site artifact must carry the pool, got %+v", final)
+	}
+	if final.Version != 6 {
+		t.Fatalf("pool-carrying artifact must derive v6 (content-derived), got %d", final.Version)
+	}
+
+	// single-site (no remote routes): unchanged — no pool, no v6 (the blast-radius guard).
+	soloTopo := siteTopology{
+		gws:      []sqlc.ListSiteGatewaysForOrgRow{{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH", Endpoint: "h:51820"}},
+		subnets:  map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}},
+		poolCIDR: "10.99.0.0/24",
+	}
+	hubNode := sqlc.Node{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}}
+	if got := svc.finalizeArtifact(soloTopo, hubNode, nil); got != nil {
+		t.Fatalf("a single-site (route-less) gateway must stay unchanged (nil artifact stays nil), got %+v", got)
+	}
+}

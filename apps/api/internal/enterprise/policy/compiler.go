@@ -14,6 +14,7 @@
 package policy
 
 import (
+	"net/netip"
 	"sort"
 
 	"github.com/google/uuid"
@@ -244,12 +245,73 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	}
 	add := func(nodeID uuid.UUID, e policyspec.AllowEntry) {
 		a := acc[nodeID]
+		if a == nil {
+			// A3b defensive: a placement target outside the initial nodeSet (e.g. a threaded ActiveHub that
+			// is not itself device-hosting or site-bound) still accumulates + emits an artifact — silently
+			// dropping a placed grant would under-enforce at exactly the chain both-enforce added.
+			a = &nodeAcc{set: map[allowKey]bool{}}
+			acc[nodeID] = a
+			nodeSet[nodeID] = true
+		}
 		k := allowKey{e.SrcIP, e.DstCIDR, e.Protocol, e.PortLow, e.PortHigh}
 		if a.set[k] {
 			return // first rule to grant this tuple keeps the rule_id stamp
 		}
 		a.set[k] = true
 		a.list = append(a.list, e)
+	}
+
+	// A3b (S8.6) far-grant placement: site subnets parsed ONCE so a device→dst grant whose destination
+	// lives in a SITE lands on every chain the transited packet crosses — the device's own node (entry),
+	// the transit HUB, and the DESTINATION site's gateway. BOTH-ENFORCE (D-A3b-2, founder-ruled):
+	// defense-in-depth at zero marginal cost (all chains compile from the same grant); forward-blind far
+	// gateways would hang their security off every hub's integrity — wrong trust direction for
+	// customer-operated hubs. The far counter is the attribution point; the hub counter stays the transit
+	// witness. Placement mirrors the S8.2 B1 precedent (unconditional hub add, map-deduped).
+	type sitePfx struct {
+		site uuid.UUID
+		pfx  netip.Prefix
+	}
+	var sitePfxs []sitePfx
+	for _, ss := range s.SiteSubnets {
+		if p, err := netip.ParsePrefix(ss.CIDR); err == nil {
+			sitePfxs = append(sitePfxs, sitePfx{ss.SiteID, p})
+		}
+	}
+	// siteOwning resolves a destination CIDR to the site whose approved subnet contains it (uuid.Nil =
+	// no site owns it — a non-site resource, no far placement). Conservative containment: the dst's
+	// network address inside the subnet AND at least as specific.
+	siteOwning := func(cidr string) uuid.UUID {
+		p, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			a, aerr := netip.ParseAddr(cidr)
+			if aerr != nil {
+				return uuid.Nil
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		for _, sp := range sitePfxs {
+			if sp.pfx.Contains(p.Addr()) && p.Bits() >= sp.pfx.Bits() {
+				return sp.site
+			}
+		}
+		return uuid.Nil
+	}
+	// devGrantNodes returns the enforcement nodes for a device→dst grant: always the device's node;
+	// plus, when the dst resolves to a bound site, that site's gateway and the hub (both-enforce).
+	// add() dedups per-node tuples, so overlapping targets (device on the hub, dst on the hub's own
+	// site) never double-emit.
+	devGrantNodes := func(deviceNode uuid.UUID, dstSite uuid.UUID) []uuid.UUID {
+		nodes := []uuid.UUID{deviceNode}
+		if dstSite != uuid.Nil {
+			if n := siteNode[dstSite]; n != uuid.Nil {
+				nodes = append(nodes, n)
+			}
+			if hubNode != uuid.Nil {
+				nodes = append(nodes, hubNode)
+			}
+		}
+		return nodes
 	}
 
 	for _, d := range s.Devices { // d is the SOURCE device
@@ -276,15 +338,20 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 				if !ok || res.CIDR == "" {
 					continue
 				}
-				add(d.NodeID, policyspec.AllowEntry{
-					SrcIP:       d.AssignedIP,
-					DstCIDR:     res.CIDR,
-					Protocol:    normProto(res.Protocol),
-					PortLow:     res.PortLow,
-					PortHigh:    res.PortHigh,
-					RuleID:      r.ID.String(),
-					SrcDeviceID: d.ID.String(),
-				})
+				// A3b: a resource inside a site's approved subnet is site-fronted — the grant also lands
+				// on that site's gateway + the hub (both-enforce). A non-site resource keeps the
+				// device-node-only placement.
+				for _, node := range devGrantNodes(d.NodeID, siteOwning(res.CIDR)) {
+					add(node, policyspec.AllowEntry{
+						SrcIP:       d.AssignedIP,
+						DstCIDR:     res.CIDR,
+						Protocol:    normProto(res.Protocol),
+						PortLow:     res.PortLow,
+						PortHigh:    res.PortHigh,
+						RuleID:      r.ID.String(),
+						SrcDeviceID: d.ID.String(),
+					})
+				}
 			case "group":
 				for _, dstIP := range groupDeviceIPs[r.DstGroupID] {
 					if dstIP == d.AssignedIP {
@@ -302,14 +369,18 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 				// S8.1 Option A: expand to ONE same-shape AllowEntry per the target site's subnet
 				// (a plain Dst-CIDR grant — the site KIND stays CP-side, never on the wire). A
 				// subnetless site yields nothing; a multi-subnet site yields one grant per subnet.
+				// A3b: the grant also lands on the destination site's gateway + the hub (both-enforce)
+				// — the far chain is what admits the transited device packet under enforcing.
 				for _, cidr := range siteCIDRs[r.DstSiteID] {
-					add(d.NodeID, policyspec.AllowEntry{
-						SrcIP:       d.AssignedIP,
-						DstCIDR:     cidr,
-						Protocol:    policyspec.ProtoAny, // a site subnet is an L3 LAN
-						RuleID:      r.ID.String(),
-						SrcDeviceID: d.ID.String(),
-					})
+					for _, node := range devGrantNodes(d.NodeID, r.DstSiteID) {
+						add(node, policyspec.AllowEntry{
+							SrcIP:       d.AssignedIP,
+							DstCIDR:     cidr,
+							Protocol:    policyspec.ProtoAny, // a site subnet is an L3 LAN
+							RuleID:      r.ID.String(),
+							SrcDeviceID: d.ID.String(),
+						})
+					}
 				}
 			}
 		}
