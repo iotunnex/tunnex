@@ -137,16 +137,21 @@ build-editions: ## Compile both open and enterprise builds (catches edition rot)
 	docker run --rm -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly $(GO_IMAGE) go build -tags enterprise ./...
 
 .PHONY: test-editions
+# -p 1: api packages run SERIALLY. The integration suites share ONE live DB and several commit
+# fixture rows (orgs) outside any tx — package-level parallelism made globally-counted state
+# (the open-edition org limit, list counts) race across packages (first exposed by the S8.5
+# sites suite on CI). Serial execution kills the class structurally; per-test scoping can't
+# (the org limit is a GLOBAL count by product semantics).
 test-editions: ## Run the suite in BOTH editions against the live DB
 	$(COMPOSE) up -d --wait postgres
 	@echo ">> open edition tests"
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go test ./...
+	  $(GO_IMAGE) go test -p 1 ./...
 	@echo ">> enterprise edition tests (-tags enterprise)"
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go test -tags enterprise ./...
+	  $(GO_IMAGE) go test -p 1 -tags enterprise ./...
 
 .PHONY: test-node
 test-node: ## Run the node-agent data-plane tests (reconcile idempotence, no DB)
