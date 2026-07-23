@@ -43,6 +43,17 @@ type Service struct {
 	// a concurrent CreateDevice into that window. Always nil in production; a
 	// per-Service field (not a package global) so parallel tests can't clobber it.
 	afterResizeCheck func()
+	// dialResolver (WF-A D-WFA-6, optional) derives a node's ACTIVE-HUB dial (endpoint + gateway pubkey)
+	// so a NEW device on a hub-set member's config dials the active hub, not its arbitrary assigned gateway.
+	// Wired to nodes.NodeDial. nil (tests / open build / not wired) → the device keeps its assigned node's
+	// endpoint (pre-WF-A behavior); a resolver ERROR is also a silent keep (mint must not fail on a topology
+	// blip — the re-home poll fixes the endpoint shortly after).
+	dialResolver func(ctx context.Context, orgID, nodeID uuid.UUID) (endpoint, pubkey string, derived bool, err error)
+}
+
+// SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
+func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {
+	s.dialResolver = fn
 }
 
 // NewService builds the device service. hub may be nil (no push; interval
@@ -257,11 +268,21 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	// Only the server-generated flow can produce a complete config (it holds the
 	// one-time private key); the client-generated flow assembles its own.
 	if oneTimePriv != "" {
+		// WF-A D-WFA-6: a NEW device on a hub-set member dials the ACTIVE HUB (the widening hosts it there),
+		// not its arbitrary assigned gateway — so the config points at the re-home target from the first
+		// handshake. derived=false / a resolver error → keep the assigned node's endpoint (spoke-device case,
+		// or a topology blip; the re-home poll corrects it shortly after). Carries no device-identity change.
+		serverPubKey, endpoint := node.WgPublicKey, node.Endpoint
+		if s.dialResolver != nil {
+			if ep, pk, derived, derr := s.dialResolver(ctx, in.OrgID, node.ID); derr == nil && derived {
+				serverPubKey, endpoint = pk, ep
+			}
+		}
 		res.Config = buildConfig(configParams{
 			address:      assignedIP,
 			privateKey:   oneTimePriv,
-			serverPubKey: node.WgPublicKey,
-			endpoint:     node.Endpoint,
+			serverPubKey: serverPubKey,
+			endpoint:     endpoint,
 			allowedIPs:   allowedIPsFor(in.FullTunnel, poolCIDR),
 			dns:          dnsFor(in.FullTunnel),
 		})

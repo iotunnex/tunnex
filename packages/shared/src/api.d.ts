@@ -1456,7 +1456,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** The org's declared routed LAN ranges for split-tunnel device AllowedIPs (S8.5). Ranges-ONLY (no keys/endpoints/pool/policy) — the never-re-fetch identity invariant survives. Approved-only, sorted + canonical. Empty is a first-class answer. */
+        /** The org's VOLATILE network-topology facts for a split-tunnel device (S8.5 + WF-A). Carries ONLY what the network currently looks like (ranges, and — with device_id — the device's dial endpoint + gateway pubkey); NEVER device-identity material (no private key, no pool-address re-issue, no enrollment token). The device's own identity is minted once and never re-fetched; the gateway it dials is a routing fact the network makes volatile (WF-A — the hub can change beneath a running device). Approved-only, sorted + canonical. Empty is a first-class answer. */
         get: operations["listRoutedRanges"];
         put?: never;
         post?: never;
@@ -1892,6 +1892,10 @@ export interface components {
             ranges: string[];
             /** @description DNS forwards whose resolver is REACHABLE via the returned ranges (S8.5 Slice 3). GATED: a forward is included only if its resolver_ip falls inside a routed range — a resolver you can't reach is never handed over (no SERVFAIL generator). Empty when none reachable. */
             forwards: components["schemas"]["DNSForward"][];
+            /** @description WF-A: the device's current dial ENDPOINT (host:port) — the ACTIVE PRIMARY hub's endpoint when the device's assigned node is a hub-set member, so a running device re-homes on promotion. A network fact, not identity. NULL when no device_id was passed, or the device's node is not a hub-set member (it keeps its baked endpoint — the deferred spoke-device case). */
+            dial_endpoint?: string | null;
+            /** @description WF-A: the active-primary hub's WireGuard PUBLIC key — the peer the device swaps to on re-home (a different gateway = a different pubkey; the client does a peer SWAP, not an endpoint update). A public network address, not a secret. NULL under the same conditions as dial_endpoint; always paired with it. */
+            dial_pubkey?: string | null;
         };
         RouteLANRequest: {
             /**
@@ -4809,7 +4813,10 @@ export interface operations {
     };
     listRoutedRanges: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description WF-A: when present, the response ALSO carries this device's dial (endpoint + gateway pubkey) derived from the org's ACTIVE HUB, so a running device re-homes on promotion via the SAME poll. The device MUST belong to the calling org AND be owned by the authenticated user — a device fetches only its OWN dial (cross-org/cross-device is refused). Omit for the pre-WF-A ranges-only behavior. */
+                device_id?: string;
+            };
             header?: never;
             path: {
                 orgId: string;

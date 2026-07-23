@@ -67,8 +67,25 @@ func (s apiServer) ListRoutedRanges(ctx context.Context, req api.ListRoutedRange
 	for _, f := range fwds {
 		apiFwds = append(apiFwds, api.DNSForward{Domain: f.Domain, ResolverIp: f.ResolverIP})
 	}
+	body := api.RoutedRanges{Ranges: ranges, Forwards: apiFwds}
+	// WF-A D-WFA-6: when a device_id is passed, ALSO carry that device's dial (endpoint + gateway pubkey)
+	// derived from the ACTIVE HUB, so a running device re-homes on promotion via THIS poll. DeviceDial does
+	// the cross-org (org-scoped GetDevice) + cross-device (owner) guard — a device fetches only its OWN dial.
+	// nil dial (device's node not a hub-set member) leaves the fields NULL → the client keeps its baked
+	// endpoint (the deferred spoke-device case). The dial carries NO device-identity material (channel contract).
+	if req.Params.DeviceId != nil {
+		p, _ := authctx.PrincipalFrom(ctx)
+		ep, pk, derived, derr := s.nodes.DeviceDial(ctx, req.OrgId, *req.Params.DeviceId, p.UserID)
+		if derr != nil {
+			return nil, derr
+		}
+		if derived {
+			body.DialEndpoint = &ep
+			body.DialPubkey = &pk
+		}
+	}
 	return api.ListRoutedRanges200JSONResponse{
-		Body:    api.RoutedRanges{Ranges: ranges, Forwards: apiFwds},
+		Body:    body,
 		Headers: api.ListRoutedRanges200ResponseHeaders{XRequestId: reqID(ctx)},
 	}, nil
 }

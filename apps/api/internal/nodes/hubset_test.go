@@ -769,3 +769,76 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 		t.Fatalf("standby g2 must hold the device WARM (empty AllowedIPs); the /32 rides promotion, got %v", allowed)
 	}
 }
+
+// TestDeviceDialAuthAndDerivation — WF-A D-WFA-6 cond 2: a device fetches ONLY its own dial. The org-scoped
+// GetDevice is the cross-ORG guard; the owner check is the cross-DEVICE guard. A non-owner (or wrong-org)
+// caller gets device_not_found (no-oracle). The owner gets the ACTIVE-HUB dial (endpoint+pubkey of the
+// active primary) — the re-home target — because the device's node is a hub-set member.
+func TestDeviceDialAuthAndDerivation(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "dd-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, "DELETE FROM devices WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM users WHERE email LIKE $1", "dd-%")
+		_, _ = pool.Exec(bg, "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	g1, g2 := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, name+".example:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(g1, "g1", "KG1", 1) // active primary
+	mk(g2, "g2", "KG2", 2) // standby
+	owner, other, dev := uuid.New(), uuid.New(), uuid.New()
+	for _, u := range []uuid.UUID{owner, other} {
+		if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", u, "dd-"+u.String()[:8]+"@t"); e != nil {
+			t.Fatalf("seed user: %v", e)
+		}
+	}
+	// The device is assigned to g2 (a standby member) but OWNED by `owner`.
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'laptop','KDEV','10.99.0.2')",
+		dev, org, owner, g2); e != nil {
+		t.Fatalf("seed device: %v", e)
+	}
+
+	svc := NewService(pool, nil, nil)
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[g1,g2], g1 the active primary
+		t.Fatalf("reconcile hub set: %v", e)
+	}
+
+	// OWNER → the ACTIVE PRIMARY's dial (g1), even though the device is assigned to g2 (the re-home target).
+	ep, pk, derived, e := svc.DeviceDial(ctx, org, dev, owner)
+	if e != nil || !derived || ep != "g1.example:51820" || pk != "KG1" {
+		t.Fatalf("owner must get the ACTIVE-PRIMARY dial, got ep=%q pk=%q derived=%v err=%v", ep, pk, derived, e)
+	}
+
+	// CROSS-DEVICE: a different user must NOT fetch this device's dial → device_not_found (no-oracle).
+	if _, _, _, e := svc.DeviceDial(ctx, org, dev, other); e == nil {
+		t.Fatal("cross-device: a non-owner must be refused (device_not_found), got nil error")
+	}
+
+	// CROSS-ORG: a device id under a different org → not found (the org-scoped GetDevice guard).
+	if _, _, _, e := svc.DeviceDial(ctx, uuid.New(), dev, owner); e == nil {
+		t.Fatal("cross-org: a device under a different org must be refused, got nil error")
+	}
+}
