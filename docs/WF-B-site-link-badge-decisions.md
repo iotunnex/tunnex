@@ -41,7 +41,19 @@ function called twice can't disagree with itself — the whole point of the lead
 comment claiming equivalence (that comment class died in the S8.6 reduce; do not resurrect it).
 **GREP-RED:** no freshness computation exists outside the shared function.
 
-## D-WFB-2 (needs ruling) — the data-model change
+## D-WFB-1b (surfaced at slice-1 handoff) — the agent bool's disposition
+
+Slice 2 replaces `caps.SiteLinkStale` (the AGENT's own view of "my site-link is stale") with the
+CP-derived per-peer verdict. A field that is reported-but-no-longer-consumed is the DORMANT-DATA
+cousin of dormant machinery — the reviewer WILL ask what becomes of it. **RULED (founder lean):
+the CP derivation REPLACES it as the one truth** — the agent bool is structurally weaker (it
+cannot name peers, cannot know demotion). Disposition: RETIRE the field from consumption; either
+drop it from the capabilities payload OR mark it **vestigial-until-agent-vN** with a one-line
+comment at its read site (so a future agent-side use is a deliberate re-adoption, not a silent
+resurrection). State the chosen form in the slice-2 build; a bool left reported-but-dead is a
+finding.
+
+## D-WFB-2 (RULED) — the data-model change
 
 `SiteLinkDown bool` → must carry the DOWN-PEER IDENTITY + a DEMOTED flag, threaded
 `KindInput` → the API health payload (OpenAPI codegen) → the web badge. Decide the wire shape:
