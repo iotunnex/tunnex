@@ -331,6 +331,30 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		if h := electSiteHub(topo, time.Now()); h != nil { // the ONE derivation head, fed to policy + graph
 			activeHub = h.ID
 		}
+		// WF-A D-WFA-5b — device-peer HOSTING (the companion to endpoint-derivation). A device assigned to a
+		// HUB-SET MEMBER is hosted on EVERY member's DesiredState, so the promoted hub already knows the
+		// device when the re-homed dial lands (without this, ListActivePeersForNode's node_id scoping means
+		// the promoted hub lacks the device → the dial handshake fails → (C) is a half-fix). On the ACTIVE
+		// PRIMARY the device peer carries its /32 (crypto-routes the device); on a STANDBY it is WARM (empty
+		// AllowedIPs — pubkey known so the handshake completes, the /32 rides the active-primary recompile on
+		// promotion, mirroring the site-link single-valued invariant). A device on a NON-member gateway is
+		// UNCHANGED (its own /32; it dials its own gateway — the spoke-device gap stays deferred).
+		members := activeHubMembers(topo, time.Now())
+		isMember, thisIsPrimary := false, false
+		memberIDs := make([]uuid.UUID, 0, len(members))
+		for i := range members {
+			memberIDs = append(memberIDs, members[i].ID)
+			if members[i].ID == node.ID {
+				isMember, thisIsPrimary = true, i == 0
+			}
+		}
+		if isMember {
+			wp, werr := s.widenedDevicePeers(ctx, memberIDs, thisIsPrimary)
+			if werr != nil {
+				return DesiredState{}, werr // DesiredState-ATOMIC: a widening query fault fails the whole fetch
+			}
+			ds.Peers = wp // REPLACE the node's own /32 device peers with the union (site-link peers append below)
+		}
 	}
 
 	if s.policy != nil {
@@ -384,6 +408,36 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		ds.Policy = s.finalizeArtifact(topo, node, ds.Policy)
 	}
 	return ds, nil
+}
+
+// widenedDevicePeers is WF-A D-WFA-5b's device-peer hosting: the UNION of device peers across all hub-set
+// members (deduped by pubkey), so a device assigned to any member is present on every member. thisIsPrimary
+// decides AllowedIPs: the ACTIVE PRIMARY carries each device's /32 (crypto-routing); a STANDBY holds the
+// peer WARM (empty AllowedIPs — the /32 lands when it's promoted and recompiles). Sorted by pubkey so the
+// agent's reconcile is a steady-state no-op. A per-member query error fails the whole fetch (atomic).
+func (s *Service) widenedDevicePeers(ctx context.Context, memberIDs []uuid.UUID, thisIsPrimary bool) ([]Peer, error) {
+	seen := map[string]bool{}
+	out := make([]Peer, 0)
+	for _, mid := range memberIDs {
+		rows, err := s.q.ListActivePeersForNode(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if seen[r.PublicKey] {
+				continue
+			}
+			seen[r.PublicKey] = true
+			p := Peer{PublicKey: r.PublicKey}
+			if thisIsPrimary && r.AssignedIp != nil && *r.AssignedIp != "" {
+				p.AllowedIPs = []string{*r.AssignedIp + "/32"} // active primary crypto-routes the device
+			}
+			// standby: empty AllowedIPs (warm) — pubkey known, handshake completes, no routing until promotion
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PublicKey < out[j].PublicKey })
+	return out, nil
 }
 
 // siteTopology is the org's site-link input, loaded ONCE (loadSiteTopology) and consumed per-node by the
