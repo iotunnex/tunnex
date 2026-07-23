@@ -372,3 +372,37 @@ func TestFinalizeAttachesPoolV6(t *testing.T) {
 		t.Fatalf("a single-site (route-less) gateway must stay unchanged (nil artifact stays nil), got %+v", got)
 	}
 }
+
+// TestActiveHubDialFromWF_A — WF-A D-WFA-5 (C): a device whose assigned node is a hub-set member DIALS the
+// active primary (endpoint follows promotions); a device on a non-member gateway is NOT derived (keeps its
+// own endpoint — the deferred spoke-device case). Identity (node_id) is untouched either way.
+func TestActiveHubDialFromWF_A(t *testing.T) {
+	primary, standby, spoke := uuid.New(), uuid.New(), uuid.New()
+	// Active order: [primary, standby] (deriveActive's head is the active primary).
+	active := []sqlc.ListSiteGatewaysForOrgRow{
+		{ID: primary, Endpoint: "primary.example:51820", WgPublicKey: "KPRIM"},
+		{ID: standby, Endpoint: "standby.example:51820", WgPublicKey: "KSTBY"},
+	}
+
+	// A device on the PRIMARY → dials the primary (itself).
+	if ep, pk, ok := activeHubDialFrom(primary, active); !ok || ep != "primary.example:51820" || pk != "KPRIM" {
+		t.Fatalf("device on primary must dial the primary, got (%q,%q,%v)", ep, pk, ok)
+	}
+	// A device on the STANDBY → STILL dials the ACTIVE PRIMARY (the re-home target), not the standby.
+	if ep, pk, ok := activeHubDialFrom(standby, active); !ok || ep != "primary.example:51820" || pk != "KPRIM" {
+		t.Fatalf("device on a hub member must dial the ACTIVE PRIMARY, got (%q,%q,%v)", ep, pk, ok)
+	}
+	// A device on a NON-member spoke → NOT derived (caller keeps the node's own endpoint).
+	if _, _, ok := activeHubDialFrom(spoke, active); ok {
+		t.Fatalf("device on a non-member gateway must NOT be hub-derived (spoke-device case deferred)")
+	}
+	// After a promotion (order flips to [standby, primary]), the SAME device on `primary` now dials `standby`.
+	flipped := []sqlc.ListSiteGatewaysForOrgRow{active[1], active[0]}
+	if ep, _, ok := activeHubDialFrom(primary, flipped); !ok || ep != "standby.example:51820" {
+		t.Fatalf("post-promotion the dial must follow the new active primary, got (%q,%v)", ep, ok)
+	}
+	// Empty hub set → not derived.
+	if _, _, ok := activeHubDialFrom(primary, nil); ok {
+		t.Fatal("no hub members → not derived")
+	}
+}
