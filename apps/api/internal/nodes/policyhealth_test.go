@@ -3,6 +3,8 @@ package nodes
 import (
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // degradedKind reds — X-3's render set. The kind is advisory over the authoritative bool;
@@ -89,5 +91,43 @@ func TestPolicyHealthWindowsAreTwiceReportInterval(t *testing.T) {
 	}
 	if AssumedReportInterval != 30*time.Second {
 		t.Fatalf("R must mirror the agent default 30s, got %v", AssumedReportInterval)
+	}
+}
+
+// TestSiteLinkVerdictWF_B — WF-B slice 2: the pure org-level site-link verdict from THE ONE liveness map.
+// Pins the three ruled cases: the walk's exact state (demoted-dead while primary fresh → subordinate
+// named line, healthy headline), the INVERSE (active-primary stale → headline down, the reassuring-green
+// -at-precedence guard), and all-fresh → neither. Consumes deriveMemberLiveness's output (the two-truths
+// red is structural: this function CANNOT see freshness except through that map).
+func TestSiteLinkVerdictWF_B(t *testing.T) {
+	primary, demotedMember := idAt(1), idAt(2)
+	members := []uuid.UUID{primary, demotedMember}
+
+	fresh := MemberLiveness{Observed: true, Fresh: true}
+	stale := MemberLiveness{Observed: true, Fresh: false}
+	staleDemoted := MemberLiveness{Observed: true, Fresh: false, Demoted: true}
+	freshDemoted := MemberLiveness{Observed: true, Fresh: true, Demoted: true}
+
+	// WALK STATE: primary fresh, the demoted member dead → SUBORDINATE (no headline, name the demoted peer).
+	hd, sub := siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{primary: fresh, demotedMember: staleDemoted})
+	if hd || sub != demotedMember {
+		t.Fatalf("walk state: want (headline=false, sub=demoted), got (headline=%v, sub=%v)", hd, sub)
+	}
+
+	// INVERSE: the ACTIVE PRIMARY is stale → HEADLINE down, NO subordinate (a real failure isn't softened).
+	hd, sub = siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{primary: stale, demotedMember: staleDemoted})
+	if !hd || sub != uuid.Nil {
+		t.Fatalf("inverse: want (headline=true, sub=nil), got (headline=%v, sub=%v)", hd, sub)
+	}
+
+	// ALL FRESH (incl. a fresh demoted member — a recovering standby): neither headline nor note.
+	hd, sub = siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{primary: fresh, demotedMember: freshDemoted})
+	if hd || sub != uuid.Nil {
+		t.Fatalf("all-fresh: want (false, nil), got (%v, %v)", hd, sub)
+	}
+
+	// SILENCE: primary unobserved (no witness) → no headline (never down on silence).
+	if hd, _ := siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{demotedMember: staleDemoted}); hd {
+		t.Fatalf("silence: an unobserved primary must NOT read headline-down, got headline=%v", hd)
 	}
 }

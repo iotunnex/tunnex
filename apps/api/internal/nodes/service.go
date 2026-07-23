@@ -1133,7 +1133,7 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_error":                applied.Error,
 		"policy_failing_since":        applied.FailingSince,
 		"policy_refused_version":      applied.RefusedVersion,
-		"site_link_stale":             applied.SiteLinkStale,
+		"site_link_stale":             applied.SiteLinkStale, // VESTIGIAL (WF-B D-WFB-1b): still reported+persisted for backward-compat, but NO LONGER CONSUMED — the CP derives site-link health from the ONE liveness derivation (fillSiteLinkVerdict). Retire or re-adopt deliberately in an agent-vN; do not silently resurrect.
 		"site_subnet_unreachable":     applied.SiteSubnetUnreachable,
 		"conntrack_flush_unavailable": applied.ConntrackFlushUnavailable,
 		"max_policy_version":          applied.MaxSupportedVersion,
@@ -1283,6 +1283,13 @@ const zeroTrustOff = "off"
 type PolicyHealth struct {
 	Degraded bool
 	Kind     PolicyDegradedKind
+	// WF-B: the SUBORDINATE site-link note — INDEPENDENT of the headline Kind (D-WFB-2/D-WFB-3). Set when a
+	// DEMOTED hub member's link is dead WHILE transit rides the active primary (healthy): the site's
+	// headline stays its real state, and this names the demoted-dead peer as a distinct line item
+	// ("aws-gw-1 (demoted)"). Empty peer = no note. NEVER set when the headline is site_link_down (a real
+	// transit failure is not accompanied by a reassuring subordinate line — the inverse red's guard).
+	SiteLinkNotePeer    string // the demoted-dead peer's display name ("" = no note)
+	SiteLinkNoteDemoted bool   // always true when SiteLinkNotePeer set (carries the render's "(demoted)" qualifier)
 }
 
 // NodeDisplayExtras is per-node S8.3 display truth surfaced on the Node API: the hub designation (a
@@ -1300,6 +1307,12 @@ type SiteTopoBatch struct {
 	ok     bool      // false = a node is a site gateway but the topology LOAD failed (hub-health can't determine)
 	hubID  uuid.UUID // the elected hub's node id (valid only when hasHub)
 	hasHub bool      // electSiteHub(topo) != nil — the ONE election, computed once for the batch
+	// WF-B (site-link health from THE ONE liveness derivation — deriveMemberLiveness): the ORG-LEVEL
+	// site-link verdict, computed ONCE per batch and applied to every site gateway (transit health is
+	// org-level — the hub set serves all sites). NEVER caps.SiteLinkStale (the retired agent bool, which
+	// cannot name a peer or know demotion — D-WFB-1b).
+	siteLinkHeadlineDown bool      // the ACTIVE PRIMARY hub is stale → org site transit is genuinely dead (the headline)
+	demotedDeadPeer      uuid.UUID // a DEMOTED member is dead while the primary is fresh → subordinate named line (Nil = none)
 }
 
 // LoadSiteTopoBatch loads the site topology once for a node list + elects the hub once (electSiteHub — the
@@ -1315,16 +1328,70 @@ func (s *Service) LoadSiteTopoBatch(ctx context.Context, orgID uuid.UUID, nodes 
 		}
 	}
 	if anySite {
+		now := time.Now()
 		if t, err := s.loadSiteTopology(ctx, orgID); err == nil {
 			b.topo = t
-			if hub := electSiteHub(t, time.Now()); hub != nil {
+			if hub := electSiteHub(t, now); hub != nil {
 				b.hubID, b.hasHub = hub.ID, true
 			}
+			s.fillSiteLinkVerdict(ctx, orgID, &b, now)
 		} else {
 			b.ok = false // load failed → can't determine hub-health (never a wrong designation)
 		}
 	}
 	return b
+}
+
+// fillSiteLinkVerdict derives the ORG-LEVEL site-link health (WF-B) from THE ONE liveness derivation
+// (deriveMemberLiveness — the same symbol the failover controller reads; no second freshness, the
+// two-truths guard). PINNED org: members = the persisted hub set, active primary = deriveActive[0], a
+// DEMOTED-yet-dead member becomes the subordinate note. UNPINNED-but-hubbed org: the sole member = the
+// ELECTED hub (no failover, so no demotion → no subordinate note, just the headline). No hub → no verdict
+// (the batch's zero value: headline false, no peer). A no-witness (unobserved) member yields NO verdict
+// (never a headline-down on silence — the same HOLD the controller applies).
+func (s *Service) fillSiteLinkVerdict(ctx context.Context, orgID uuid.UUID, b *SiteTopoBatch, now time.Time) {
+	pubkey := make(map[uuid.UUID]string, len(b.topo.gws))
+	for i := range b.topo.gws {
+		pubkey[b.topo.gws[i].ID] = b.topo.gws[i].WgPublicKey
+	}
+	hs, herr := s.GetHubSet(ctx, orgID) // empty (Configured nil) on ErrNoRows — an unpinned org
+	var members, demoted []uuid.UUID
+	var activePrimary uuid.UUID
+	if herr == nil && len(hs.Configured) > 0 {
+		members, demoted = hs.Configured, hs.Demoted
+		if active := deriveActive(hs.Configured, hs.Demoted); len(active) > 0 {
+			activePrimary = active[0]
+		}
+	} else if b.hasHub {
+		members, activePrimary = []uuid.UUID{b.hubID}, b.hubID // unpinned: the elected hub, no demotion
+	} else {
+		return // no hub → no site-link verdict
+	}
+	rows, err := s.q.ListNodePeerStatusForOrg(ctx, orgID)
+	if err != nil {
+		return // can't read the substrate → no verdict (never a false headline)
+	}
+	live := deriveMemberLiveness(members, pubkey, rows, demoted, now)
+	b.siteLinkHeadlineDown, b.demotedDeadPeer = siteLinkVerdictFrom(members, activePrimary, live)
+}
+
+// siteLinkVerdictFrom is the PURE WF-B verdict (unit-pinnable, no DB): given the hub members, the active
+// primary, and THE ONE liveness map (deriveMemberLiveness), returns (headlineDown, demotedDeadPeer).
+//   - HEADLINE: the active primary is observed-but-stale → org transit is genuinely dead. A real transit
+//     failure is the headline and NO subordinate note competes with it (the inverse-red guard).
+//   - SUBORDINATE: else, a DEMOTED member observed-but-stale while the primary is fresh — the walk's exact
+//     case (transit rides the primary at 0% loss; the demoted-dead link is a named line, not the headline).
+//   - A no-witness (unobserved) member yields neither — never a headline-down on silence.
+func siteLinkVerdictFrom(members []uuid.UUID, activePrimary uuid.UUID, live map[uuid.UUID]MemberLiveness) (headlineDown bool, demotedDead uuid.UUID) {
+	if ml := live[activePrimary]; ml.Observed && !ml.Fresh {
+		return true, uuid.Nil
+	}
+	for _, id := range members {
+		if ml := live[id]; ml.Demoted && ml.Observed && !ml.Fresh {
+			return false, id
+		}
+	}
+	return false, uuid.Nil
 }
 
 // siteTopoBatchFor returns the caller-provided prefetched batch, or loads one — so a caller that passes no
@@ -1391,14 +1458,32 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		}
 	}
 	now := time.Now()
+	// WF-B: resolve the demoted-dead peer's display NAME once (from the node list — the peer is a hub
+	// member, present in an org-wide ListNodes). Fallback to a short id if a subset call omits it.
+	nameByID := make(map[uuid.UUID]string, len(nodes))
+	for _, n := range nodes {
+		nameByID[n.ID] = n.Name
+	}
+	subPeerName := ""
+	if b.demotedDeadPeer != uuid.Nil {
+		if nm := nameByID[b.demotedDeadPeer]; nm != "" {
+			subPeerName = nm
+		} else {
+			subPeerName = b.demotedDeadPeer.String()[:8]
+		}
+	}
 	for _, n := range nodes {
 		caps := Capabilities(n.Capabilities)
 		// Site-link health (S8.2, edition-independent — routing is core). site_hub_down (B2): this site
 		// gateway has remote subnets to reach but the org has NO hub (no carrier) — CP-derived from the
-		// topology. site_link_down (H5): agent-reported stale/absent site-link handshake. Both are
-		// blackholes that must never read green.
+		// topology. site_link_down (H5, WF-B): the ORG-LEVEL site-link HEADLINE — the ACTIVE PRIMARY hub is
+		// stale (org transit dead), derived from THE ONE liveness derivation (SiteTopoBatch.fillSiteLink
+		// Verdict), applied to every site gateway. NOT caps.SiteLinkStale: the agent bool is RETIRED from
+		// consumption (D-WFB-1b) — it cannot name a peer or know demotion, so the CP derivation replaces it
+		// as the one truth. The field stays reported in the caps payload (backward-compat), VESTIGIAL until
+		// an agent-vN drops or re-adopts it deliberately (dormant-data guard: not silently resurrected).
 		siteHubDown := topoOK && siteHubMissing(hubExists, topo, n)
-		siteLinkDown := caps.SiteLinkStale
+		siteLinkDown := n.SiteID.Valid && b.siteLinkHeadlineDown
 		// site_subnet_unreachable (S8.2c D3): the gateway advertises a local subnet it isn't on
 		// (bridge-trapped wg0 / misconfig). A REACHABILITY fault the agent detects even when the link is
 		// fresh — the reassuring-green trap. Edition-independent (routing is core, D11).
@@ -1456,7 +1541,16 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				ConntrackFlushUnavailable: conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
 			})
 		}
-		out[n.ID] = PolicyHealth{Degraded: deg, Kind: kind}
+		ph := PolicyHealth{Degraded: deg, Kind: kind}
+		// WF-B subordinate note: a DEMOTED member is dead while transit rides the active primary. Attach the
+		// named line to every OTHER site gateway (not the dead peer itself — it renders offline), and NEVER
+		// when this node's own headline is site_link_down (the inverse-red guard: a real transit failure gets
+		// no reassuring subordinate). INDEPENDENT of Kind — the headline stays its real state.
+		if subPeerName != "" && n.SiteID.Valid && n.ID != b.demotedDeadPeer && !siteLinkDown {
+			ph.SiteLinkNotePeer = subPeerName
+			ph.SiteLinkNoteDemoted = true
+		}
+		out[n.ID] = ph
 	}
 	return out
 }
