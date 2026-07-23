@@ -1136,6 +1136,12 @@ type RouteLANRequest struct {
 
 // RoutedRanges defines model for RoutedRanges.
 type RoutedRanges struct {
+	// DialEndpoint WF-A: the device's current dial ENDPOINT (host:port) — the ACTIVE PRIMARY hub's endpoint when the device's assigned node is a hub-set member, so a running device re-homes on promotion. A network fact, not identity. NULL when no device_id was passed, or the device's node is not a hub-set member (it keeps its baked endpoint — the deferred spoke-device case).
+	DialEndpoint *string `json:"dial_endpoint"`
+
+	// DialPubkey WF-A: the active-primary hub's WireGuard PUBLIC key — the peer the device swaps to on re-home (a different gateway = a different pubkey; the client does a peer SWAP, not an endpoint update). A public network address, not a secret. NULL under the same conditions as dial_endpoint; always paired with it.
+	DialPubkey *string `json:"dial_pubkey"`
+
 	// Forwards DNS forwards whose resolver is REACHABLE via the returned ranges (S8.5 Slice 3). GATED: a forward is included only if its resolver_ip falls inside a routed range — a resolver you can't reach is never handed over (no SERVFAIL generator). Empty when none reachable.
 	Forwards []DNSForward `json:"forwards"`
 
@@ -1302,6 +1308,12 @@ type ListAuditLogsParams struct {
 	CursorTs *time.Time          `form:"cursor_ts,omitempty" json:"cursor_ts,omitempty"`
 	CursorId *openapi_types.UUID `form:"cursor_id,omitempty" json:"cursor_id,omitempty"`
 	Limit    *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListRoutedRangesParams defines parameters for ListRoutedRanges.
+type ListRoutedRangesParams struct {
+	// DeviceId WF-A: when present, the response ALSO carries this device's dial (endpoint + gateway pubkey) derived from the org's ACTIVE HUB, so a running device re-homes on promotion via the SAME poll. The device MUST belong to the calling org AND be owned by the authenticated user — a device fetches only its OWN dial (cross-org/cross-device is refused). Omit for the pre-WF-A ranges-only behavior.
+	DeviceId *openapi_types.UUID `form:"device_id,omitempty" json:"device_id,omitempty"`
 }
 
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
@@ -1846,7 +1858,7 @@ type ClientInterface interface {
 	RouteLAN(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRoutedRanges request
-	ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, params *ListRoutedRangesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPendingSiteSubnets request
 	ListPendingSiteSubnets(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3396,8 +3408,8 @@ func (c *Client) RouteLAN(ctx context.Context, orgId openapi_types.UUID, body Ro
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListRoutedRangesRequest(c.Server, orgId)
+func (c *Client) ListRoutedRanges(ctx context.Context, orgId openapi_types.UUID, params *ListRoutedRangesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRoutedRangesRequest(c.Server, orgId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7355,7 +7367,7 @@ func NewRouteLANRequestWithBody(server string, orgId openapi_types.UUID, content
 }
 
 // NewListRoutedRangesRequest generates requests for ListRoutedRanges
-func NewListRoutedRangesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+func NewListRoutedRangesRequest(server string, orgId openapi_types.UUID, params *ListRoutedRangesParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -7378,6 +7390,28 @@ func NewListRoutedRangesRequest(server string, orgId openapi_types.UUID) (*http.
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.DeviceId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "device_id", runtime.ParamLocationQuery, *params.DeviceId); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -8590,7 +8624,7 @@ type ClientWithResponsesInterface interface {
 	RouteLANWithResponse(ctx context.Context, orgId openapi_types.UUID, body RouteLANJSONRequestBody, reqEditors ...RequestEditorFn) (*RouteLANResponse, error)
 
 	// ListRoutedRangesWithResponse request
-	ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error)
+	ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListRoutedRangesParams, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error)
 
 	// ListPendingSiteSubnetsWithResponse request
 	ListPendingSiteSubnetsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingSiteSubnetsResponse, error)
@@ -12096,8 +12130,8 @@ func (c *ClientWithResponses) RouteLANWithResponse(ctx context.Context, orgId op
 }
 
 // ListRoutedRangesWithResponse request returning *ListRoutedRangesResponse
-func (c *ClientWithResponses) ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error) {
-	rsp, err := c.ListRoutedRanges(ctx, orgId, reqEditors...)
+func (c *ClientWithResponses) ListRoutedRangesWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListRoutedRangesParams, reqEditors ...RequestEditorFn) (*ListRoutedRangesResponse, error) {
+	rsp, err := c.ListRoutedRanges(ctx, orgId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

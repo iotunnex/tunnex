@@ -568,6 +568,39 @@ func activeHubMembers(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysF
 	return electSiteHubSet(topo, now)
 }
 
+// DeviceDial is WF-A D-WFA-6: a device's CURRENT dial (endpoint + gateway pubkey) derived from the org's
+// ACTIVE HUB, so a running device re-homes on promotion via the routed-ranges poll. AUTH (D-WFA-6 cond 2):
+// the org-scoped GetDevice is the cross-ORG guard; the owner check is the cross-DEVICE guard — a device
+// fetches ONLY its own dial. A non-owned / missing device returns device_not_found (no-oracle: never reveal
+// another user's device exists). derived=false (empty endpoint+pubkey) when the device's node is NOT a
+// hub-set member — the client then keeps its baked endpoint (the deferred spoke-device case).
+func (s *Service) DeviceDial(ctx context.Context, orgID, deviceID, callerUserID uuid.UUID) (endpoint, pubkey string, derived bool, err error) {
+	dev, e := s.q.GetDevice(ctx, sqlc.GetDeviceParams{ID: deviceID, OrgID: orgID})
+	if e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
+			return "", "", false, apierr.NotFound("device_not_found", "no such device in this organization")
+		}
+		return "", "", false, e
+	}
+	if dev.UserID != callerUserID { // cross-device guard: only the owner may fetch a device's dial (no-oracle NotFound)
+		return "", "", false, apierr.NotFound("device_not_found", "no such device in this organization")
+	}
+	return s.NodeDial(ctx, orgID, dev.NodeID)
+}
+
+// NodeDial derives the active-hub dial (endpoint + gateway pubkey) for a NODE (WF-A D-WFA-6) — the shared
+// core of DeviceDial + the mint-time device-config derivation (a new device on a hub-set member dials the
+// active hub, not its arbitrary assigned gateway). No auth (the caller has already authorized the node/
+// device). derived=false when the node is not a hub-set member (caller keeps the node's own endpoint).
+func (s *Service) NodeDial(ctx context.Context, orgID, nodeID uuid.UUID) (endpoint, pubkey string, derived bool, err error) {
+	topo, e := s.loadSiteTopology(ctx, orgID)
+	if e != nil {
+		return "", "", false, e
+	}
+	ep, pk, ok := activeHubDialFrom(nodeID, activeHubMembers(topo, time.Now()))
+	return ep, pk, ok, nil
+}
+
 // activeHubDialFrom is WF-A's endpoint-derivation primitive (D-WFA-5 (C)): a device whose assigned node is a
 // HUB-SET MEMBER dials the ACTIVE PRIMARY (activeMembers[0] — the head of the ONE derivation, activeHub
 // Members), so its dial FOLLOWS promotions while identity (node_id) stays put. Returns the active primary's
