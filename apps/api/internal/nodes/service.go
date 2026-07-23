@@ -680,6 +680,43 @@ func latestByPubKey(rows []sqlc.NodePeerStatus) map[string]MemberMetrics {
 	return latest
 }
 
+// MemberLiveness is ONE hub-set member's liveness verdict from THE ONE derivation (WF-B D-WFB-1,
+// founder-ruled shared pure function): spoke-observed handshake freshness ⋂ hub-set membership.
+// BOTH the failover controller (reads .Fresh for its Step) AND the site-link health surface (reads
+// .Fresh + .Demoted for the badge) call deriveMemberLiveness — a SINGLE symbol, never two functions
+// with a "MUST match" comment claiming equivalence (that class died in the S8.6 reduce). A health
+// badge disagreeing with the controller about who is stale is the two-truths class at the failover
+// seam; one pure function called twice cannot disagree with itself.
+type MemberLiveness struct {
+	Observed bool          // a living witness reported a VALID (non-NULL) handshake for this member (else NO verdict)
+	Fresh    bool          // Observed AND age < failoverStaleWindow (meaningless when !Observed)
+	Age      time.Duration // now − last handshake (valid only when Observed; for the controller's log line)
+	Demoted  bool          // the failover controller has failed-over-PAST this member (in the demoted set)
+}
+
+// deriveMemberLiveness is THE ONE liveness derivation (WF-B D-WFB-1). Pure + clockless (now passed
+// in). GREP-RED (docs/WF-B-site-link-badge-decisions.md): no site-link freshness computation
+// (`now.Sub(…LastHandshakeAt) < failoverStaleWindow`) exists ANYWHERE outside this function — the
+// controller and the health surface both read its output.
+func deriveMemberLiveness(configured []uuid.UUID, pubkey map[uuid.UUID]string, rows []sqlc.NodePeerStatus, demoted []uuid.UUID, now time.Time) map[uuid.UUID]MemberLiveness {
+	latest := latestByPubKey(rows)
+	dem := make(map[uuid.UUID]bool, len(demoted))
+	for _, id := range demoted {
+		dem[id] = true
+	}
+	out := make(map[uuid.UUID]MemberLiveness, len(configured))
+	for _, id := range configured {
+		ml := MemberLiveness{Demoted: dem[id]}
+		if m, observed := latest[pubkey[id]]; observed { // latestByPubKey skips NULL handshakes → absence = no witness
+			ml.Observed = true
+			ml.Age = now.Sub(m.LastHandshakeAt)
+			ml.Fresh = ml.Age < failoverStaleWindow
+		}
+		out[id] = ml
+	}
+	return out
+}
+
 // idsToStrings renders a node-id slice for audit metadata (stable, ordered).
 func idsToStrings(ids []uuid.UUID) []string {
 	out := make([]string, len(ids))

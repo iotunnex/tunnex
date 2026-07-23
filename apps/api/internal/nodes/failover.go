@@ -228,17 +228,18 @@ func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Tim
 		if err != nil {
 			return err
 		}
-		latest := latestByPubKey(rows)
+		// WF-B D-WFB-1: THE ONE liveness derivation (shared pure function). The controller reads .Fresh
+		// for its Step; the site-link health surface reads the SAME function's output for the badge — no
+		// second freshness computation exists (the grep-red). A member with no living witness (!Observed)
+		// is absent from `freshness` → Step HOLDS (no verdict on silence).
+		liveness := deriveMemberLiveness(configured, pubkey, rows, current.Demoted, now)
 		freshness = make(map[uuid.UUID]bool, len(configured))
 		ages = make(map[uuid.UUID]time.Duration, len(configured))
 		for _, id := range configured {
-			m, observed := latest[pubkey[id]] // present ONLY for a VALID (non-NULL) handshake — latestByPubKey
-			if !observed {                    // skips NULL, so absence = no living witness → no verdict (Step HOLDS)
-				continue
+			if ml := liveness[id]; ml.Observed {
+				freshness[id] = ml.Fresh
+				ages[id] = ml.Age
 			}
-			age := now.Sub(m.LastHandshakeAt)
-			ages[id] = age
-			freshness[id] = age < failoverStaleWindow
 		}
 		demoted = fc.Step(configured, freshness)
 	}

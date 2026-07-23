@@ -353,3 +353,29 @@ func TestFailoverRehydratesDemotionOnRestart(t *testing.T) {
 		t.Fatal("seedDemoted must run ONCE — a later seed must not add members")
 	}
 }
+
+// TestDeriveMemberLivenessSharedTruth — WF-B D-WFB-1: the ONE liveness derivation both the failover
+// controller and the health surface consume. Pins {observed, fresh, demoted} per member: a fresh
+// handshake reads Fresh; a stale one reads !Fresh; a NULL/absent witness reads !Observed (no verdict);
+// the demoted set threads through. The grep-red (no freshness outside this fn) is enforced by the build.
+func TestDeriveMemberLivenessSharedTruth(t *testing.T) {
+	now := time.Now()
+	a, b, c := idAt(1), idAt(2), idAt(3)
+	pubkey := map[uuid.UUID]string{a: "KA", b: "KB", c: "KC"}
+	rows := []sqlc.NodePeerStatus{
+		{PublicKey: "KA", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-10 * time.Second), Valid: true}},  // fresh
+		{PublicKey: "KB", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-600 * time.Second), Valid: true}}, // stale (>240s)
+		{PublicKey: "KC", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},                                   // NULL → no witness
+	}
+	live := deriveMemberLiveness([]uuid.UUID{a, b, c}, pubkey, rows, []uuid.UUID{b}, now)
+
+	if !live[a].Observed || !live[a].Fresh || live[a].Demoted {
+		t.Fatalf("a: fresh non-demoted, got %+v", live[a])
+	}
+	if !live[b].Observed || live[b].Fresh || !live[b].Demoted {
+		t.Fatalf("b: stale AND demoted (the walk's demoted-dead peer), got %+v", live[b])
+	}
+	if live[c].Observed || live[c].Fresh {
+		t.Fatalf("c: NULL witness → !Observed, never Fresh (Step HOLDS), got %+v", live[c])
+	}
+}
