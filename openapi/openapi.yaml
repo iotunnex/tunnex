@@ -2742,7 +2742,7 @@ components:
             so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes.
         policy_degraded_kind:
           type: string
-          enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version, site_hub_down, site_link_down, site_subnet_unreachable, conntrack_flush_unavailable]
+          enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version, site_hub_down, site_link_down, site_subnet_unreachable, conntrack_flush_unavailable, hub_forwarding_not_reconciling]
           description: >-
             Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail
             over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on
@@ -2764,6 +2764,15 @@ components:
             address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link
             state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded
             traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it).
+            `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed
+            handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale —
+            crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain
+            dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still
+            enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards)
+            NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine).
+            A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen
+            staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen
+            last report can't mask it.
         site_link_note_peer:
           type: string
           nullable: true

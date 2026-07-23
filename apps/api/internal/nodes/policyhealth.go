@@ -50,6 +50,17 @@ const (
 	// CAP_NET_ADMIN to the gateway). Never silent — it lives on the same health plane as every other
 	// degradation, not just a log line.
 	KindConntrackFlushUnavailable PolicyDegradedKind = "conntrack_flush_unavailable"
+	// KindHubForwardingNotReconciling (WF-C Layer 2, D-WFC2-1a): a HUB-SET MEMBER whose spoke-observed
+	// handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — the
+	// agent crashed/OOM'd but the interface it created in the host netns survives). A "zombie hub": the wire
+	// is warm, the brain is dead. It CANNOT reconcile — a since-revoked device or tightened grant it never
+	// received is still enforced as the frozen last artifact (stale-enforcement, the two-truths class). This
+	// is NOT plain "offline" (that would deny it forwards) and NEVER healthy/green (that would deny it's
+	// stale) — a THIRD honest state the product could previously not name. Detection is a pure CONJUNCTION of
+	// two EXISTING signals — deriveMemberLiveness's wire-freshness ⋂ the node's last_seen staleness — so it
+	// mints NO new freshness (the WF-B no-third-freshness discipline). Remedy is unique: restart the agent
+	// (the wire is fine — do NOT touch the tunnel). Edition-independent (a crashed agent is core, not policy).
+	KindHubForwardingNotReconciling PolicyDegradedKind = "hub_forwarding_not_reconciling"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -103,6 +114,11 @@ type KindInput struct {
 	// CAP_NET_ADMIN / netlink fault). Lowest-priority degradation — surfaced only when policy is otherwise
 	// healthy.
 	ConntrackFlushUnavailable bool
+	// HubForwardingNotReconciling (WF-C L2 D-WFC2-1a): the zombie-hub conjunction, computed by the CALLER
+	// (wire-fresh via deriveMemberLiveness ⋂ agent last_seen stale) — passed in as ONE precomputed bool so
+	// degradedKind stays pure and no freshness is recomputed here. Ranked above the apply/desync kinds: a
+	// dead agent's LAST report is stale, so its apply-error/desync fields must not mask "the agent is dead".
+	HubForwardingNotReconciling bool
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -118,6 +134,7 @@ var transitionTable = []TransitionRule{
 	{KindSiteHubDown, "site gateway, HUB site-link no fresh handshake (SiteHubDown) — remedy = fix the hub; outranks a single spoke link-down"},
 	{KindSiteLinkDown, "site gateway, a spoke site-link no fresh handshake (SiteLinkDown) — remedy = fix that spoke's tunnel/NAT"},
 	{KindSiteSubnetUnreachable, "site gateway advertises a local subnet no host addr is inside (SiteSubnetUnreachable) — reassuring-green trap; remedy = fix the gateway's host networking"},
+	{KindHubForwardingNotReconciling, "hub-set member, wire FRESH but agent last_seen STALE (HubForwardingNotReconciling) — zombie hub, remedy = restart the agent; ranked above apply/desync so a dead agent's stale report can't mask it"},
 	{KindHealthy, "not degraded: no error, pushed==applied, reports fresh"},
 	{KindApplyFailing, "policy_error set AND policy_failing_since set"},
 	{KindStuckEnforcing, "policy_error set AND policy_failing_since EMPTY (pushed=='' && applied!='')"},
@@ -154,6 +171,13 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	// fault, remedy operator-side (fix the gateway host networking), not a CP-side policy issue.
 	if in.SiteSubnetUnreachable {
 		return KindSiteSubnetUnreachable
+	}
+	// WF-C L2 (D-WFC2-1a) — the zombie hub: wire fresh, agent dead. Ranked ABOVE the apply/desync kinds
+	// because the agent's last report (PolicyError/FailingSince/AppliedHash) is FROZEN at the crash — a
+	// stale "apply_failing" must not mask "the agent is dead, restart it". Below the site-reachability kinds
+	// (a dead org transit is the louder headline; a standby zombie can co-occur with the primary's link-down).
+	if in.HubForwardingNotReconciling {
+		return KindHubForwardingNotReconciling
 	}
 	// Agent-reported apply failure (from the last report — a reported fact, not a server compare).
 	// [fold 3] mirror the bool's TERM-2: policy_failing_since alone (error empty) is a failing

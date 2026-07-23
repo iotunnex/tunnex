@@ -9,11 +9,52 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 )
+
+// TestZombieHubConjunction_WFC_L2 (D-WFC2-1a) — the zombie-hub kind is the CONJUNCTION of two existing
+// signals: this hub-set member's WIRE is fresh (b.memberWireFresh, from THE ONE liveness derivation) AND
+// its own agent is dead (last_seen stale). The founder's exact acceptance: agent-stale + wire-fresh → the
+// conflict kind; both-fresh → healthy; both-stale (nothing forwarding) → NOT this kind (ordinary offline).
+// DB-less via the `pre` SiteTopoBatch seam; open edition (the kind is edition-independent).
+func TestZombieHubConjunction_WFC_L2(t *testing.T) {
+	org, id, site := uuid.New(), uuid.New(), uuid.New()
+	now := time.Now()
+	open := &Service{policy: nil}
+	node := func(lastSeen time.Time, seenValid bool) sqlc.Node {
+		return sqlc.Node{ID: id, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true},
+			LastSeenAt:   pgtype.Timestamptz{Time: lastSeen, Valid: seenValid},
+			Capabilities: capsJSON(map[string]any{})}
+	}
+	wireFresh := SiteTopoBatch{ok: true, hasHub: true, memberWireFresh: map[uuid.UUID]bool{id: true}} // hasHub avoids site_hub_down
+	wireStale := SiteTopoBatch{ok: true, hasHub: true, memberWireFresh: map[uuid.UUID]bool{id: false}}
+	kind := func(pre SiteTopoBatch, n sqlc.Node) (bool, PolicyDegradedKind) {
+		h := open.PolicyHealthForNodes(context.Background(), org, []sqlc.Node{n}, pre)[id]
+		return h.Degraded, h.Kind
+	}
+
+	// agent-stale + wire-fresh → the zombie kind (degraded).
+	if deg, k := kind(wireFresh, node(now.Add(-10*time.Minute), true)); !deg || k != KindHubForwardingNotReconciling {
+		t.Fatalf("agent-stale + wire-fresh must be hub_forwarding_not_reconciling, got deg=%v k=%q", deg, k)
+	}
+	// never-seen agent (NULL last_seen) + wire-fresh → also the zombie kind (dead is dead).
+	if _, k := kind(wireFresh, node(time.Time{}, false)); k != KindHubForwardingNotReconciling {
+		t.Fatalf("never-seen agent + wire-fresh must be the zombie kind, got %q", k)
+	}
+	// both-fresh → healthy (never green-lies over a zombie, never zombie-lies over a healthy hub).
+	if deg, k := kind(wireFresh, node(now.Add(-5*time.Second), true)); deg || k != KindHealthy {
+		t.Fatalf("agent-fresh + wire-fresh must be healthy, got deg=%v k=%q", deg, k)
+	}
+	// both-stale (wire dead too — nothing is forwarding) → NOT the zombie kind (ordinary offline is a
+	// separate last_seen surface, not this policy kind).
+	if _, k := kind(wireStale, node(now.Add(-10*time.Minute), true)); k == KindHubForwardingNotReconciling {
+		t.Fatalf("both-stale must NOT be the zombie kind (nothing forwards), got %q", k)
+	}
+}
 
 type fakeProvider struct {
 	pol *policyspec.Compiled

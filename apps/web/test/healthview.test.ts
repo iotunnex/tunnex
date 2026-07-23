@@ -51,6 +51,13 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
     expect(policyHealthBadge(node(true, "site_subnet_unreachable"))?.tone).toBe("danger"); // S8.2c D3
   });
 
+  it("WF-C L2 hub_forwarding_not_reconciling → danger, names BOTH halves (forwarding + agent down) + the remedy", () => {
+    const b = policyHealthBadge(node(true, "hub_forwarding_not_reconciling"));
+    expect(b?.tone).toBe("danger"); // stale enforcement is serious, never a soft warn
+    expect(b?.label).toMatch(/forward/i); // lies in neither direction: it IS forwarding ...
+    expect(b?.label).toMatch(/agent|restart/i); // ... but the agent is down — restart it
+  });
+
   it("forward-compat: an unknown future kind falls through to the 'degraded' default (never null while degraded)", () => {
     // A kind the switch doesn't enumerate must still badge (the default guards the next kind we add).
     const b = policyHealthBadge(node(true, "some_future_kind" as Node["policy_degraded_kind"]));

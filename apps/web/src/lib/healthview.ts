@@ -36,6 +36,11 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       return { label: "site subnet unreachable", tone: "danger" }; // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped)
     case "conntrack_flush_unavailable":
       return { label: "expiry-flush degraded", tone: "warn" }; // S8.7: can't tear down expired-grant flows (CAP_NET_ADMIN?) — revoked flows may linger
+    case "hub_forwarding_not_reconciling":
+      // WF-C L2: zombie hub — wire fresh, agent dead. The label names BOTH halves so it lies in neither
+      // direction (not "offline" — it forwards; not "healthy" — it's stale). Remedy: restart the agent
+      // (the wire is fine, the brain is dead). Danger: it enforces a policy the CP has since changed.
+      return { label: "agent down — still forwarding (restart agent)", tone: "danger" };
     default:
       // Degraded per the authoritative bool but the kind is absent/healthy — still show a
       // badge (never less alarmed than the bool).
