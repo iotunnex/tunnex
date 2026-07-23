@@ -69,6 +69,26 @@ the site-link single-valued invariant). Sub-item: standby device-peer AllowedIPs
 empty-warm, single-valued, the promotion recompile adds the /32). RED: a device assigned to a
 hub-set member appears in the promoted hub's peer set (the dial's handshake completes post-promotion).
 
+**BUILD STATUS (CP tier DONE):** slice 1a `widenedDevicePeers` (`e18d4df`, DB-red PASS: primary /32,
+standby empty-warm — the empty-warm sub-item ruled at build per the lean) + slice 1b
+`activeHubDialFrom` pure primitive (`0807f3a`, red pins primary/standby→active-primary,
+spoke→not-derived, promotion-follows). CP foundation is one-truth + gate-able standalone.
+
+### D-WFA-6 (BANKED for slice 2 — the dial-endpoint CHANNEL) — RULED direction: ride routed-ranges
+
+The dial-endpoint the client polls to re-home is the THIRD volatile-operational client channel
+(revocation → routed-ranges → dial-endpoint). **RULED (founder lean, strong): FOLD it into the
+EXISTING routed-ranges channel — one poll, more fields — NOT a third poller.** The endpoint is
+volatile-operational EXACTLY like routed-ranges (same auth class = revocation-poll, same fail-static
+semantics, same cadence); three independent pollers = three cadences, three failure modes, three
+fail-static implementations — the one-truth law applied to the client's control plane. Argue for a
+separate channel ONLY if the shapes genuinely differ at build; otherwise the endpoint is a field on
+the routed-ranges response (`sites.ListRoutedRanges`/the client `RoutedRangesMonitor`), derived
+CP-side via `activeHubDialFrom`. NOTE: routed-ranges is ORG-scoped but the dial endpoint is
+DEVICE-scoped (depends on the device's node_id + hub set) — verify at build whether the channel
+carries device-scoped state cleanly, or the endpoint needs the device context threaded (it may make
+the channel device-scoped, which is fine — the client polls for ITS device).
+
 ## D-WFA-0 (BLOCKING PREREQUISITE — decides the whole fork) — control-path independence
 
 Does the device's CONTROL channel to the CP survive its DATA tunnel being down? If it rides the
