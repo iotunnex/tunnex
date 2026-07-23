@@ -164,3 +164,42 @@ func TestRoutesToPruneCanonicalCompare(t *testing.T) {
 		t.Fatalf("only the stale route must prune (the /32 must NOT churn): %v", del)
 	}
 }
+
+// TestBackendCloseDeletesInterface — WF-C Layer 1: Close is the symmetric destroy for the interface
+// Configure creates. When the interface EXISTS, Close issues `ip link del <iface>` (so a graceful
+// docker stop tears the data plane down, not a zombie hub). IDEMPOTENT: when it's already ABSENT
+// (`ip link show` errors), Close is a no-op success — no `ip link del`, no error.
+func TestBackendCloseDeletesInterface(t *testing.T) {
+	ctx := context.Background()
+
+	// EXISTS: `ip link show` succeeds → Close must issue `ip link del wg0`.
+	var calls [][]string
+	present := &wgctrlBackend{iface: "wg0", runFn: func(_ context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, append([]string{name}, args...))
+		return "", nil // show + del both succeed
+	}}
+	if err := present.Close(ctx); err != nil {
+		t.Fatalf("Close on a present interface must succeed, got %v", err)
+	}
+	sawDel := false
+	for _, c := range calls {
+		if len(c) >= 4 && c[0] == "ip" && c[1] == "link" && c[2] == "del" && c[3] == "wg0" {
+			sawDel = true
+		}
+	}
+	if !sawDel {
+		t.Fatalf("Close must delete the interface (ip link del wg0), calls=%v", calls)
+	}
+
+	// ABSENT: `ip link show` errors → Close is a no-op success, NEVER an `ip link del`.
+	absent := &wgctrlBackend{iface: "wg0", runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "link" && args[1] == "show" {
+			return "", errors.New("Cannot find device \"wg0\"")
+		}
+		t.Fatalf("Close on an absent interface must NOT issue further commands, got args=%v", args)
+		return "", nil
+	}}
+	if err := absent.Close(ctx); err != nil {
+		t.Fatalf("Close on an absent interface must be idempotent (no error), got %v", err)
+	}
+}

@@ -93,6 +93,13 @@ type WGBackend interface {
 	ApplyRoutes(ctx context.Context, cidrs []string, srcHint string) error
 	// Stats reports per-peer live telemetry (handshake/bytes/endpoint).
 	Stats(ctx context.Context) ([]PeerStat, error)
+	// Close tears the WG interface DOWN on agent shutdown (WF-C Layer 1). Configure CREATES the interface
+	// (ensureDevice: `ip link add … type wireguard`); Close is its symmetric destroy — `ip link del`. With
+	// `--network host` wg0 lives in the HOST netns and OUTLIVES the container, so without this a graceful
+	// `docker stop` leaves the data plane FORWARDING HEADLESS (the zombie-hub / failover-blind class).
+	// IDEMPOTENT: an already-absent interface is not an error. (A hard SIGKILL skips this — that residue
+	// is WF-C Layer 2, the liveness-model question, a separate paper.)
+	Close(ctx context.Context) error
 }
 
 // ControlClient is the agent's view of the control plane.

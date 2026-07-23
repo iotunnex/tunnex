@@ -198,6 +198,18 @@ func (b *wgctrlBackend) Stats(ctx context.Context) ([]PeerStat, error) {
 	return parseWGStats(out), nil
 }
 
+// Close deletes the WG interface on agent shutdown (WF-C Layer 1) — the symmetric destroy for
+// ensureDevice's `ip link add`. Without it, `--network host` wg0 outlives the container on a graceful
+// stop and forwards headless (zombie hub). IDEMPOTENT: if the interface is already gone (never created,
+// or a prior Close), `ip link del` errors "Cannot find device" — treated as success (nothing to tear down).
+func (b *wgctrlBackend) Close(ctx context.Context) error {
+	if _, err := b.runFn(ctx, "ip", "link", "show", b.iface); err != nil {
+		return nil // already absent → nothing to delete (idempotent)
+	}
+	_, err := b.runFn(ctx, "ip", "link", "del", b.iface)
+	return err
+}
+
 // parseWGStats parses the peer lines of a dump into telemetry. Peer fields:
 // pubkey, psk, endpoint, allowed-ips, latest-handshake(unix), rx, tx, keepalive.
 func parseWGStats(out string) []PeerStat {

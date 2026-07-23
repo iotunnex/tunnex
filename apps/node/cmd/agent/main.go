@@ -164,6 +164,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("agent_backend_selected", slog.String("backend", wgBackend), slog.String("interface", wgIface))
+	// WF-C Layer 1: tear the WG interface DOWN on graceful shutdown — the symmetric destroy for the
+	// interface Configure creates. Without it, `--network host` wg0 outlives the container on `docker stop`
+	// and forwards headless (zombie hub / failover-blind). Idempotent. (A hard SIGKILL skips this defer —
+	// that residue is WF-C Layer 2, a separate liveness-model paper.)
+	defer func() { _ = backend.Close(context.Background()) }()
 	r := reconcile.New(backend, wgPriv, wgPub, logger)
 	r.SetSiteLinkStaleSink(&siteLinkStale)
 	r.SetSiteSubnetUnreachableSink(&siteSubnetUnreachable) // D3: unreachable-advertised-subnet health signal

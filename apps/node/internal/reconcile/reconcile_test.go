@@ -60,6 +60,8 @@ func (f *fakeBackend) Stats(context.Context) ([]PeerStat, error) {
 	}
 	return append([]PeerStat(nil), f.stats...), nil
 }
+
+func (f *fakeBackend) Close(context.Context) error { return nil } // WF-C Layer 1: no-op fake teardown
 func (f *fakeBackend) Peers(context.Context) ([]Peer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
