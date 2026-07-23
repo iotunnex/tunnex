@@ -60,6 +60,14 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 		an.PolicyDegraded = &h.Degraded
 		k := api.NodePolicyDegradedKind(h.Kind)
 		an.PolicyDegradedKind = &k
+		// WF-B: the subordinate site-link note (a demoted-dead peer while transit is healthy) — nullable,
+		// set only when one is genuinely down-but-subordinate so the badge names a peer only then.
+		if h.SiteLinkNotePeer != "" {
+			peer := h.SiteLinkNotePeer
+			an.SiteLinkNotePeer = &peer
+			dem := h.SiteLinkNoteDemoted
+			an.SiteLinkNoteDemoted = &dem
+		}
 		e := extras[n.ID]
 		an.IsSiteHub = &e.IsSiteHub
 		if e.MaxPolicyVersion > 0 { // nullable: 0 = never reported → leave nil (the UI reads absence as below-ceiling)
