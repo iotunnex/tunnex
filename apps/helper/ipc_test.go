@@ -170,6 +170,90 @@ func TestIPCAllowedIPsRejectedOnOtherVerbs(t *testing.T) {
 	}
 }
 
+// TestIPCSetGatewayPeerRoutesAndTunnelUntouched (WF-A) — set_gateway_peer reaches the swap with the new
+// peer + endpoint and NEVER changes tunnel state or ownership (the kill-switch-untouched probe).
+func TestIPCSetGatewayPeerRoutesAndTunnelUntouched(t *testing.T) {
+	srv, sup := newServer(t, &fakeBackend{}, trustedResolver)
+	var gotKey, gotEP string
+	called := 0
+	srv.setGatewayPeer = func(k, ep string) error { called++; gotKey, gotEP = k, ep; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+
+	cfg := goodConfig()
+	cfg.FullTunnel = false
+	cfg.AllowedIPs = []string{"10.99.0.0/24"}
+	if resp, err := Do(c1, req(VerbTunnelUp, cfg)); err != nil || !resp.OK {
+		t.Fatalf("up: err=%v resp=%+v", err, resp)
+	}
+	const newKey = "bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetGatewayPeer, GatewayPeer: &GatewayPeer{PeerPublicKey: newKey, Endpoint: "gw-b.example:51820"}})
+	if err != nil || !resp.OK {
+		t.Fatalf("set_gateway_peer: err=%v resp=%+v", err, resp)
+	}
+	if called != 1 || gotKey != newKey || gotEP != "gw-b.example:51820" {
+		t.Fatalf("swap not routed: called=%d key=%q ep=%q", called, gotKey, gotEP)
+	}
+	if sup.State() != StateUp {
+		t.Fatalf("set_gateway_peer disturbed the tunnel: state=%s", sup.State())
+	}
+}
+
+// TestIPCGatewayPeerRejectedOnOtherVerbs (WF-A) — a gateway_peer smuggled onto a non-set_gateway_peer verb
+// is rejected by the envelope validator (no peer swap on tunnel_down).
+func TestIPCGatewayPeerRejectedOnOtherVerbs(t *testing.T) {
+	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
+	called := 0
+	srv.setGatewayPeer = func(string, string) error { called++; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+	resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbTunnelDown, GatewayPeer: &GatewayPeer{PeerPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", Endpoint: "gw-b.example:51820"}})
+	if err != nil {
+		t.Fatalf("io: %v", err)
+	}
+	if resp.OK || resp.Code != "unexpected_gateway_peer" {
+		t.Fatalf("want unexpected_gateway_peer, got %+v", resp)
+	}
+	if called != 0 {
+		t.Fatalf("must not swap for a non-set_gateway_peer verb")
+	}
+}
+
+// TestIPCGatewayPeerRequiredAndValidated (WF-A) — set_gateway_peer with no peer is rejected
+// (gateway_peer_required); a bad key / unsafe endpoint is rejected as strictly as a tunnel_up peer.
+func TestIPCGatewayPeerRequiredAndValidated(t *testing.T) {
+	srv, _ := newServer(t, &fakeBackend{}, trustedResolver)
+	called := 0
+	srv.setGatewayPeer = func(string, string) error { called++; return nil }
+	c1, c2 := net.Pipe()
+	go srv.handle(c2)
+	defer c1.Close()
+
+	// missing gateway_peer
+	if resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetGatewayPeer}); err != nil {
+		t.Fatalf("io: %v", err)
+	} else if resp.OK || resp.Code != "gateway_peer_required" {
+		t.Fatalf("want gateway_peer_required, got %+v", resp)
+	}
+	// bad key
+	if resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetGatewayPeer, GatewayPeer: &GatewayPeer{PeerPublicKey: "not-base64", Endpoint: "gw-b.example:51820"}}); err != nil {
+		t.Fatalf("io: %v", err)
+	} else if resp.OK || resp.Code != "bad_peer_key" {
+		t.Fatalf("want bad_peer_key, got %+v", resp)
+	}
+	// unsafe endpoint (loopback host barred by validEndpoint)
+	if resp, err := Do(c1, &Request{Version: ProtocolVersion, AuthMode: AuthModePathCheck, Verb: VerbSetGatewayPeer, GatewayPeer: &GatewayPeer{PeerPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", Endpoint: "127.0.0.1:51820"}}); err != nil {
+		t.Fatalf("io: %v", err)
+	} else if resp.OK || resp.Code != "bad_endpoint" {
+		t.Fatalf("want bad_endpoint, got %+v", resp)
+	}
+	if called != 0 {
+		t.Fatalf("no swap must reach the backend on a rejected envelope: called=%d", called)
+	}
+}
+
 func TestIPCUntrustedCallerRejected(t *testing.T) {
 	srv, _ := newServer(t, &fakeBackend{}, untrustedResolver)
 	c1, c2 := net.Pipe()

@@ -1,4 +1,4 @@
-import type { DeviceApi } from "./deviceconfig";
+import type { DeviceApi, DialTarget } from "./deviceconfig";
 import type { ResolverForward } from "./helperclient";
 import { PollMonitor } from "./pollmonitor";
 import { REVOKE_POLL_MS, REVOKE_BACKOFF_MAX_MS } from "./revocation";
@@ -19,6 +19,13 @@ export function canonForwards(fwds: ResolverForward[]): string {
   )
     .sort()
     .join(",");
+}
+
+// canonDial folds a dial target into a stable string for change-compare (WF-A). A null dial (server derived
+// none) folds to "" — the SAME as an unchanged seed, so it never reads as a change and drives ZERO helper
+// calls. endpoint|pubkey is the identity of a gateway peer; a matching pair is not a re-home.
+export function canonDial(d: DialTarget | null): string {
+  return d ? `${d.endpoint.trim()}|${d.pubkey.trim()}` : "";
 }
 
 export type RangesOutcome = "skipped" | "applied" | "unchanged" | "inconclusive";
@@ -46,6 +53,10 @@ export class RoutedRangesMonitor extends PollMonitor {
   // lastForwards = the canonical fold of the resolvers the helper currently holds. Seeded EMPTY: up()
   // applies dns_forwards=[] (forwards are volatile, never baked), so an empty-forwards org is "unchanged".
   private lastForwards = "";
+  // lastDial = the canonical fold (endpoint|pubkey) of the gateway peer the helper currently dials (WF-A).
+  // Seeded from the MINTED peer (currentDial), so the first poll returning that same active hub is
+  // "unchanged" — zero helper calls until the active primary actually moves (failover).
+  private lastDial: string;
 
   constructor(
     private readonly orgId: string,
@@ -62,9 +73,22 @@ export class RoutedRangesMonitor extends PollMonitor {
     // baked DNS can't answer internal cross-site zones, so it needs the forwards). The mode ruling that once
     // skipped the whole monitor for full-tunnel lapsed when Slice 3 grew the payload past routes.
     private readonly routesEnabled: boolean = true,
+    // WF-A: the device id whose active-hub dial the poll should fetch (scopes the dial to THIS device on the
+    // server). Absent → the dial is never requested and the dial tier is inert (the monitor pre-dates WF-A).
+    private readonly deviceId?: string,
+    // WF-A: apply a dial change by re-homing the gateway peer (TunnelController.setGatewayPeer). Absent →
+    // the dial tier is inert (no re-home wiring).
+    private readonly applyDial?: (endpoint: string, pubkey: string) => Promise<void>,
+    // WF-A: whether to apply the DIAL tier. FALSE for a full-tunnel session in v1 — a full tunnel's endpoint
+    // host-route + kill-switch pass rule must move WITH the peer, which is the D-WFA-4 carve-out (a separate
+    // slice); until then a full-tunnel re-home is refused, so we do not drive it.
+    private readonly dialEnabled: boolean = false,
+    // WF-A: the MINTED gateway peer, to seed lastDial so the first poll matching it is a no-op.
+    currentDial: DialTarget | null = null,
   ) {
     super(baseMs, maxMs, setTimer, clearTimer);
     this.lastRanges = canonRanges(base).join(",");
+    this.lastDial = canonDial(currentDial);
   }
 
   // IMMEDIATE first poll (the mint-ruling-A condition): a NEW device gets its ranges + forwards within
@@ -80,11 +104,12 @@ export class RoutedRangesMonitor extends PollMonitor {
     if (this.stopped || this.inFlight) return "skipped";
     this.inFlight = true;
     try {
-      const cfg = await this.api.routedConfig(this.orgId);
+      const cfg = await this.api.routedConfig(this.orgId, this.deviceId);
       if (this.stopped) return "skipped"; // disconnecting — abandon the result
       const merged = canonRanges([...this.base, ...cfg.ranges]);
       const rangesKey = merged.join(",");
       const forwardsKey = canonForwards(cfg.forwards);
+      const dialKey = canonDial(cfg.dial);
 
       let changed = false;
       let failed = false;
@@ -104,6 +129,19 @@ export class RoutedRangesMonitor extends PollMonitor {
         try {
           await this.applyForwards(cfg.forwards);
           this.lastForwards = forwardsKey;
+          changed = true;
+        } catch {
+          failed = true;
+        }
+      }
+      // DIAL tier (WF-A) — re-home the gateway peer via set_gateway_peer when the active hub moved.
+      // INDEPENDENT fail-static, same as the other tiers. A NULL dial folds to "" and — because we only act
+      // on a DIFFERING non-empty key — never swaps the peer away (a single-gateway org or a server blip that
+      // returns no dial keeps the current peer). Gated OFF for full-tunnel in v1 (D-WFA-4 carve-out).
+      if (this.dialEnabled && this.applyDial && cfg.dial && dialKey !== this.lastDial) {
+        try {
+          await this.applyDial(cfg.dial.endpoint, cfg.dial.pubkey);
+          this.lastDial = dialKey;
           changed = true;
         } catch {
           failed = true;

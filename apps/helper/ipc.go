@@ -101,6 +101,10 @@ type Server struct {
 	// default, injectable so dispatch tests never touch a real wg device.
 	setAllowedIPs func([]string) error
 
+	// setGatewayPeer live-swaps the gateway peer (WF-A re-homing) — Supervisor.UpdateGatewayPeer by
+	// default, injectable so dispatch tests never touch a real wg device.
+	setGatewayPeer func(newPubKey, newEndpoint string) error
+
 	mu    sync.Mutex
 	owner net.Conn // the connection that brought the current tunnel up (nil if down)
 }
@@ -110,15 +114,16 @@ type Server struct {
 // separate knob to drift out of sync with the real check.
 func NewServer(sup *Supervisor, verify CallerVerifier, resolve PeerResolver) *Server {
 	return &Server{
-		sup:           sup,
-		verify:        verify,
-		resolve:       resolve,
-		readTimeout:   defaultReadTimeout,
-		writeTimeout:  defaultWriteTimeout,
-		sem:           make(chan struct{}, defaultMaxConns),
-		posture:       collectPosture,
-		resolvers:     setResolvers,
-		setAllowedIPs: sup.UpdateAllowedIPs,
+		sup:            sup,
+		verify:         verify,
+		resolve:        resolve,
+		readTimeout:    defaultReadTimeout,
+		writeTimeout:   defaultWriteTimeout,
+		sem:            make(chan struct{}, defaultMaxConns),
+		posture:        collectPosture,
+		resolvers:      setResolvers,
+		setAllowedIPs:  sup.UpdateAllowedIPs,
+		setGatewayPeer: sup.UpdateGatewayPeer,
 	}
 }
 
@@ -300,6 +305,15 @@ func (s *Server) dispatch(req *Request) *Response {
 		// failure returns a typed code; the client fail-STATIC (keeps the tunnel + its last routes,
 		// the new route just doesn't push). Full-tunnel is a no-op (Supervisor.UpdateAllowedIPs).
 		if err := s.setAllowedIPs(req.AllowedIPs); err != nil {
+			return errorResponse(codeOf(err), err.Error())
+		}
+		return okResponse(nil)
+	case VerbSetGatewayPeer:
+		// State-changing but NOT tunnel-owning (same class as set_allowed_ips): a peer swap re-homes the
+		// tunnel, never touching tunnel state / the owner connection / the kill-switch. A failure returns a
+		// typed code; the client fail-STATIC (keeps its current peer, the re-home just doesn't apply). Full-
+		// tunnel is refused upstream (Supervisor.UpdateGatewayPeer) — its carve-out is a separate slice.
+		if err := s.setGatewayPeer(req.GatewayPeer.PeerPublicKey, req.GatewayPeer.Endpoint); err != nil {
 			return errorResponse(codeOf(err), err.Error())
 		}
 		return okResponse(nil)

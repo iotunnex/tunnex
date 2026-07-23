@@ -51,6 +51,14 @@ type darwinBackend struct {
 	// kernel — set on Up (baked base), reconciled by SetAllowedIPs, cleared on Down. NEVER persisted. Keys
 	// are canonical route-targets (routeSet form). See reconcileRoutes for the belief-drift stance.
 	applied map[string]bool
+	// peer* track the CURRENT gateway peer so a WF-A re-home (SetGatewayPeer) knows which key to remove and
+	// which allowed_ips/keepalive to preserve onto the new peer. peerPubKey seeds on Up and advances on each
+	// re-home (the config's PeerPublicKey goes stale after the first swap); peerAllowedIPs seeds on Up and
+	// advances on every SetAllowedIPs route push (so a re-home carries the LIVE crypto-routing, not the
+	// baked set). Cleared on Down.
+	peerPubKey     string
+	peerAllowedIPs []string
+	peerKeepalive  int
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -171,6 +179,9 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.ifname = dev, tdev, name
+	// Seed the current-peer cache for a WF-A re-home (SetGatewayPeer): the key to swap out, and the
+	// allowed_ips/keepalive to carry onto the new peer.
+	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = cfg.PeerPublicKey, append([]string(nil), cfg.AllowedIPs...), cfg.PersistentKeepalive
 	return nil
 }
 
@@ -190,9 +201,39 @@ func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) er
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
+	// Advance the peer cache so a subsequent WF-A re-home carries the LIVE routing, not the baked set.
+	b.peerAllowedIPs = append([]string(nil), allowedIPs...)
 	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
 	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
 	return reconcileRoutes(b.applied, routeSet(allowedIPs), b.routeCmd)
+}
+
+// SetGatewayPeer live re-homes the tunnel onto a new gateway peer (WF-A) — a peer SWAP with the CURRENT
+// peer's allowed_ips/keepalive preserved, no bounce, no handshake reset on the surviving interface. The
+// device identity (own key), the interface address, and (n/a here — split-tunnel only) the kill-switch are
+// UNTOUCHED. The OS routes point at the interface, not the peer, so a split-tunnel swap needs NO route
+// reconcile — only the crypto peer changes. Full-tunnel is refused upstream (Supervisor.UpdateGatewayPeer):
+// its endpoint host-route + pf pass rule re-point is the D-WFA-4 carve-out.
+func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dev == nil {
+		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	// Resolve a hostname endpoint to ONE IP so the peer dials exactly what we intend (parity with Up).
+	ep, err := resolveEndpoint(newEndpoint)
+	if err != nil {
+		return err
+	}
+	uapi, err := gatewayPeerSwapUAPI(b.peerPubKey, newPubKey, ep, b.peerKeepalive, b.peerAllowedIPs)
+	if err != nil {
+		return err
+	}
+	if err := b.dev.IpcSet(uapi); err != nil {
+		return &ProtocolError{Code: "gateway_peer_apply_failed", Msg: err.Error()}
+	}
+	b.peerPubKey = newPubKey // the new peer is now current; a later re-home swaps IT out
+	return nil
 }
 
 // routeCmd is the darwin per-target route seam for reconcileRoutes: add|delete a `-net <target>` route on
@@ -224,7 +265,8 @@ func (b *darwinBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.ifname = nil, nil, ""
-	b.applied = nil // device closed drops its utun routes; belief cleared (drift-heal c). A home-LAN range
+	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = "", nil, 0 // drop the current-peer cache with the device
+	b.applied = nil                                              // device closed drops its utun routes; belief cleared (drift-heal c). A home-LAN range
 	// whose connected route we deleted-before-add re-derives on the next network event (verify: walk's
 	// home-LAN-collision leg — not unit-reachable).
 	if b.endpointHost != "" {

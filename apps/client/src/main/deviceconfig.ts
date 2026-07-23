@@ -9,6 +9,17 @@ import type { ResolverForward, TunnelConfig } from "./helperclient";
 export interface RoutedConfig {
   ranges: string[];
   forwards: ResolverForward[];
+  // dial is the device's ACTIVE-HUB gateway (WF-A): the endpoint + peer public key it should dial RIGHT
+  // NOW, derived server-side from the hub set's active primary. null when the server does not derive one
+  // (single-gateway org, no hub set, an older server) — the client then keeps its current peer (fail-static).
+  // A routing FACT about the network, NEVER device identity — the never-re-fetch invariant holds.
+  dial: DialTarget | null;
+}
+
+// DialTarget is the re-home target's public routing facts (WF-A) — mirrors the RoutedRanges dial fields.
+export interface DialTarget {
+  endpoint: string;
+  pubkey: string;
 }
 
 // DeviceApi is the seam over the tenant API (called from MAIN with the bearer).
@@ -38,10 +49,12 @@ export interface DeviceApi {
   // "gone" = 404/410 (device no longer exists). Any other failure THROWS (inconclusive
   // — retry with backoff, same discipline as deviceStatus).
   reportHealth(deviceId: string, orgId: string, facts: HealthFacts): Promise<HealthReportResult | "unsupported" | "gone">;
-  // routedConfig fetches the org's declared routed LAN ranges + the reachable DNS forwards (S8.5) — the
-  // volatile-routes channel (ranges + forwards only, NEVER identity — the never-re-fetch invariant holds).
-  // Throws on any read error (inconclusive: the RoutedRangesMonitor keeps its last-applied set, fail-static).
-  routedConfig(orgId: string): Promise<RoutedConfig>;
+  // routedConfig fetches the org's declared routed LAN ranges + the reachable DNS forwards (S8.5) + the
+  // device's active-hub dial (WF-A) — the volatile-FACTS channel (routes/forwards/dial only, NEVER identity
+  // — the never-re-fetch invariant holds). deviceId scopes the dial to THIS device (the server refuses any
+  // other device's dial, no-oracle); absent → no dial derived. Throws on any read error (inconclusive: the
+  // RoutedRangesMonitor keeps its last-applied sets, fail-static).
+  routedConfig(orgId: string, deviceId?: string): Promise<RoutedConfig>;
 }
 
 // HealthFacts are the client-collected posture facts (S7.5.3). disk_encrypted is

@@ -126,6 +126,21 @@ export class TunnelController {
     throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_resolvers failed"));
   }
 
+  // setGatewayPeer re-homes the tunnel onto a new active-hub peer (WF-A) via the helper's peer SWAP — the
+  // device's own key/address/kill-switch are untouched, so the session survives without re-enrollment.
+  // POLL-driven like setAllowedIPs, so it THROWS on failure: the RoutedRangesMonitor's dial tier catches
+  // it, keeps its last-applied dial (fail-static), and retries with backoff. A refusal (old helper
+  // unknown_verb, or the full-tunnel carve-out rehome_full_tunnel_unsupported) and a wire error both throw.
+  async setGatewayPeer(peerPublicKey: string, endpoint: string): Promise<void> {
+    const r = await this.conn.request({
+      version: PROTOCOL_VERSION,
+      auth_mode: "path_check",
+      verb: "set_gateway_peer",
+      gateway_peer: { peer_public_key: peerPublicKey, endpoint },
+    });
+    if (!r.ok) throw new Error(r.code ? `${r.code}: ${r.error ?? ""}` : (r.error ?? "set_gateway_peer failed"));
+  }
+
   async down(): Promise<void> {
     this.stopHeartbeat();
     this.address = undefined;

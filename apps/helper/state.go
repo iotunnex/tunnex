@@ -78,6 +78,11 @@ type Backend interface {
 	// set) — a wireguard-go uapi update (no handshake reset) + an OS-route full-sweep. It NEVER touches
 	// the kill-switch, the device identity, or the peer's keys/endpoint. Called only while a tunnel is up.
 	SetAllowedIPs(peerPubKey string, allowedIPs []string) error
+	// SetGatewayPeer (WF-A) LIVE-swaps the gateway peer to newPubKey@newEndpoint, preserving the current
+	// peer's allowed_ips (routing) and the device identity (own key/address/kill-switch). A peer SWAP, not
+	// an endpoint edit — WG keys a peer by pubkey. Split-tunnel only in v1 (full-tunnel refused upstream).
+	// Called only while a split tunnel is up.
+	SetGatewayPeer(newPubKey, newEndpoint string) error
 }
 
 // Supervisor owns the tunnel lifecycle and enforces the FAIL-CLOSED invariant: any
@@ -297,6 +302,28 @@ func (s *Supervisor) UpdateAllowedIPs(allowedIPs []string) error {
 		return nil // full-tunnel: routes subsumed by 0.0.0.0/0; kill-switch never touched
 	}
 	return s.be.SetAllowedIPs(peer, allowedIPs)
+}
+
+// UpdateGatewayPeer LIVE-re-homes the tunnel onto a new active-hub peer (WF-A). Like UpdateAllowedIPs it
+// reads state under the lock then applies the (bounded) backend swap OUTSIDE it, and is NOT tunnel-owning:
+// it changes the peer, never the kill-switch / state / owner connection.
+//   - tunnel not up → not_up (nothing to re-home).
+//   - FULL-TUNNEL → REFUSED (rehome_full_tunnel_unsupported), NOT a silent no-op: a full tunnel's endpoint
+//     host-route AND its kill-switch pass rule must move WITH the peer or the new gateway's outer packets
+//     are blocked — that carve-out is D-WFA-4 (a separate slice). Silently no-op'ing would strand a
+//     full-tunnel device on a dead hub; an explicit typed refusal lets the client fail-static honestly.
+func (s *Supervisor) UpdateGatewayPeer(newPubKey, newEndpoint string) error {
+	s.mu.Lock()
+	if s.state != StateUp || s.lastCfg == nil {
+		s.mu.Unlock()
+		return &ProtocolError{Code: "not_up", Msg: "no tunnel is up"}
+	}
+	full := s.lastCfg.FullTunnel
+	s.mu.Unlock()
+	if full {
+		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home is not supported in this version"}
+	}
+	return s.be.SetGatewayPeer(newPubKey, newEndpoint)
 }
 
 // OnPeerLost is invoked when the IPC channel to the owning app drops — either the tunnel

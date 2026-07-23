@@ -100,6 +100,47 @@ func allowedIPsUAPI(peerPubKeyB64 string, allowedIPs []string) (string, error) {
 	return sb.String(), nil
 }
 
+// gatewayPeerSwapUAPI renders a wireguard-go uapi string that RE-HOMES the tunnel onto a new gateway peer
+// WITHOUT a bounce (WF-A). A re-home is a peer SWAP, not an endpoint edit: WireGuard identifies a peer by
+// its PUBLIC KEY, and the active hub's key differs from the standby's, so the device must drop the old
+// peer and adopt the new one. The uapi does exactly that, ADD-BEFORE-REMOVE so the crypto-routing for
+// `allowedIPs` is never momentarily unowned:
+//  1. add the NEW peer (public_key=new, endpoint=new, keepalive, replace_allowed_ips + the CURRENT set) —
+//     the same allowed_ips the old peer carried, so routing coverage is preserved across the swap;
+//  2. remove the OLD peer (public_key=old, remove=true) — WG would have stolen its allowed_ips to the new
+//     peer anyway (a single crypto-routing trie), but we drop it explicitly so no inert peer lingers.
+// It carries NO private_key and NO replace_peers, so the DEVICE IDENTITY (its own key), the interface
+// address, and the kill-switch are ALL untouched — the session survives, no re-enrollment. The OS routes
+// point at the INTERFACE, not the peer, so a split-tunnel swap needs no route reconcile (the endpoint
+// host-route + kill-switch re-point that a FULL tunnel needs is the D-WFA-4 carve-out, a separate slice).
+func gatewayPeerSwapUAPI(oldPubB64, newPubB64, endpoint string, keepalive int, allowedIPs []string) (string, error) {
+	oldHex, err := b64ToHex(oldPubB64)
+	if err != nil {
+		return "", &ProtocolError{Code: "bad_peer_key", Msg: err.Error()}
+	}
+	newHex, err := b64ToHex(newPubB64)
+	if err != nil {
+		return "", &ProtocolError{Code: "bad_peer_key", Msg: err.Error()}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "public_key=%s\n", newHex)
+	fmt.Fprintf(&sb, "endpoint=%s\n", endpoint)
+	if keepalive > 0 {
+		fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", keepalive)
+	}
+	fmt.Fprintf(&sb, "replace_allowed_ips=true\n")
+	for _, aip := range allowedIPs {
+		fmt.Fprintf(&sb, "allowed_ip=%s\n", aip)
+	}
+	// Remove the OLD peer only when it actually differs — re-homing back to the same key (or a first
+	// call where old==new) must not add-then-immediately-remove the peer we just installed.
+	if oldHex != newHex {
+		fmt.Fprintf(&sb, "public_key=%s\n", oldHex)
+		fmt.Fprintf(&sb, "remove=true\n")
+	}
+	return sb.String(), nil
+}
+
 // routeSet expands AllowedIPs to the concrete OS route targets (routeTargets splits full-tunnel halves).
 // Shared by both backends' S8.5 live route full-sweep diff.
 func routeSet(allowedIPs []string) map[string]bool {
