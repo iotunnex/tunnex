@@ -568,6 +568,24 @@ func activeHubMembers(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysF
 	return electSiteHubSet(topo, now)
 }
 
+// activeHubDialFrom is WF-A's endpoint-derivation primitive (D-WFA-5 (C)): a device whose assigned node is a
+// HUB-SET MEMBER dials the ACTIVE PRIMARY (activeMembers[0] — the head of the ONE derivation, activeHub
+// Members), so its dial FOLLOWS promotions while identity (node_id) stays put. Returns the active primary's
+// (endpoint, pubkey) + derived=true when nodeID is a member; derived=false otherwise — the caller keeps the
+// node's OWN endpoint (the deferred spoke-device case; no promotion event fires there). PURE: the active
+// order is passed in (already deriveActive'd), never re-elected here.
+func activeHubDialFrom(nodeID uuid.UUID, activeMembers []sqlc.ListSiteGatewaysForOrgRow) (endpoint, pubkey string, derived bool) {
+	if len(activeMembers) == 0 {
+		return "", "", false
+	}
+	for i := range activeMembers {
+		if activeMembers[i].ID == nodeID {
+			return activeMembers[0].Endpoint, activeMembers[0].WgPublicKey, true
+		}
+	}
+	return "", "", false
+}
+
 // siteLinkGraphFrom builds a site-gateway node's site-link WG peers + kernel routes from a loaded
 // siteLinkKeepaliveSecs (S8.3 CK) is the persistent-keepalive interval on every site-link peer — the
 // wireguard-conventional 25s, comfortably under NAT UDP-mapping timeouts, so a NAT'd spoke stays dialable
