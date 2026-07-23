@@ -11,6 +11,37 @@ redundancy.** This is a FEATURE, not a hotfix — decision-first, held for found
 (the walk's exact scenario).** Roaming / latency-based / nearest-hub selection is explicitly
 NOT this story.
 
+## D-WFA-5 (NEW — surfaced at WF-A build-start; HALT, needs ruling BEFORE code) — the device→gateway model
+
+The ruling says "the device's config re-compiles to the promoted HUB." But the mint-path trace
+shows a device is NOT necessarily on the hub: the client picks `activeNodeId` = **the FIRST active
+node** (`apps/client/src/main/httpdeviceapi.ts:46-52`; web: `nodes[0].id`,
+`apps/web/src/pages/Devices.tsx:80`), and the CP bakes the config endpoint = **that node's**
+Endpoint (`apps/api/internal/devices/service.go:264`, `node.Endpoint`). In the walk the first
+active gateway HAPPENED to be the hub (aws-gw-1), so the two coincided — but they are not the same
+thing. Before building, RULE the model:
+
+- **(A) devices attach to the ACTIVE HUB by construction.** The mint-path picks the active primary
+  hub (not "first active"); the config endpoint is DERIVED from the active hub; re-home = follow the
+  hub's promotion. Cleanest re-home story (one moving target — the hub), but changes the mint-path
+  node selection AND makes a device's gateway a derived value, not a stored node_id. Question: what
+  about an org with NO hub set (single gateway, unpinned)? → the sole/elected gateway, degenerate-fine.
+- **(B) devices keep their assigned node_id; re-home fires only when THAT node is a hub-set member
+  that gets demoted.** Minimal change to the mint model; but a device on a NON-hub gateway (a future
+  per-site local device) never re-homes — is that in scope? For v1 (the walk = a device on the hub)
+  it covers the case, but leaves a "device on a spoke gateway" gap unaddressed (register it).
+- **(C) hybrid:** keep node_id, but on promotion re-point the config endpoint to the promoted hub
+  when the device's node was the demoted primary. The device's "home" stays its node_id for
+  identity/peer-placement, but its DIAL endpoint follows the active hub.
+
+**LEAN (mine, for the ruling): (A) — a device's gateway SHOULD be the active hub; making it a
+derived value (not a baked node_id) is what makes re-home ride the existing promotion→compile path
+without a second reassignment mechanism.** But this is the founder's call — it decides whether the
+CP slice touches the MINT path (A) or only the CONFIG-endpoint derivation (C) or just adds a
+demotion-triggered re-point (B). The reds (D-WFA-1) assume the device re-homes to the promoted hub;
+(A)/(C) satisfy that directly, (B) only when the device sat on the demoted primary. **HELD — no
+code until ruled.**
+
 ## D-WFA-0 (BLOCKING PREREQUISITE — decides the whole fork) — control-path independence
 
 Does the device's CONTROL channel to the CP survive its DATA tunnel being down? If it rides the
