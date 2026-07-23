@@ -106,10 +106,45 @@ gap as beta-blocking. (b) stays rejected-with-rationale in this paper (findable 
 - **(b) if ruled:** wg0 in the container netns dies on SIGKILL (a red that kills -9 the agent and
   asserts wg0 gone from the host netns); every gateway-forwarding path (transit, egress, DNS) re-walked.
 
-## Sequence
+## D-WFC2-1 — RULED (founder, 2026-07-23): (a) BUILT + (c) REGISTERED + (b) REFUSED
 
-This paper (HELD) → founder ruling on D-WFC2-1 → build the ruled option decision-first (reds + walk
-where a wire proof applies; (a) is UI-surfacing, (c)/(b) are wire-provable) → the surfacing/controller
-change re-earns a targeted review only if it touches the failover controller (option c). Until ruled:
-nothing built. Layer 1 (`52e3f7e`) already closed the graceful-stop leak — the walk's original
-"docker stop didn't fail over" confusion is gone; this is only the hard-crash residual.
+**(a) — BUILT (`6900509`).** The founder's sharpening: (a) is nearly FREE because the CP already holds
+BOTH signals — the zombie state is *definitionally* the disagreement between two facts the control
+plane can already see (the node's own report stale ∧ the spoke-observed handshake fresh). No new
+machinery: a pure CONJUNCTION of `deriveMemberLiveness`'s output (THE ONE liveness derivation — no
+third freshness, the WF-B discipline) and the node's `last_seen` staleness (the SAME `hubStaleWindow`
+the hub ordering already uses). Rendered as its own honest kind `hub_forwarding_not_reconciling` —
+**never green** (would deny it's stale), **never plain "offline"** (would deny it forwards) — the
+honest-health law applied to a state the product could previously not name. The badge copy names both
+halves + the remedy ("agent down — still forwarding (restart agent)": the wire is fine, the brain is
+dead). Ranked above the apply/desync kinds (a dead agent's frozen last report can't mask it), below
+the site-reachability headline (a dead org transit is louder). Reds: the conjunction three-way
+(agent-stale + wire-fresh → the kind · both-stale → not the kind/ordinary offline · both-fresh →
+healthy) + the ranking. Edition-independent (a crashed agent is core, not policy).
+
+**(c) two-signal liveness — REGISTERED as the real fix.** Trigger set (founder-widened to THREE):
+  1. a customer runs hub-sole-enforcement ZTNA tightening (the residual becomes load-bearing);
+  2. a security review flags the enforcement-freshness gap as beta-blocking;
+  3. **NEW (structural, WF-A-induced):** WF-A makes devices dial the ACTIVE PRIMARY — so a zombie
+     that stays primary is a hub **devices keep dialing while it cannot receive policy updates**.
+     This does not change today's severity (still bounded: can't-grow, client-side revocation
+     self-heals, A3b both-enforce), but it gives the residual a DEVICE dimension. **If WF-A's
+     box-walk (or any future walk) shows a device dialing a zombie, that is (c)'s trigger firing on
+     evidence** — record it in the walk, don't wave it off.
+  (c) closes the residual at the ONE liveness authority (the failover controller), hysteresis-managed
+  (N-stale-to-demote / M-fresh-to-failback, mirroring the data-plane window) — NOT a fourth liveness
+  opinion. It re-earns a targeted review when built (it touches the reviewed controller).
+
+**(b) container-netns — REFUSED (recorded so it isn't re-argued).** A deploy-architecture change
+requiring a re-walk of every gateway-forwarding path (site transit, egress NAT, DNS forwarder), to
+kill a BOUNDED class that (a) now NAMES and (c) can ACT on at the existing liveness authority. The
+cost/benefit doesn't clear: eliminating the class isn't worth re-opening surfaces this epic closed.
+
+## Sequence (done / next)
+
+This paper (`b2a8387`) → founder ruling (above) → (a) BUILT + gated (`6900509`, both editions green,
+web 152, generate-check clean) → **combined box-walk run-sheet** (the walk's hard-kill leg now shows
+`hub_forwarding_not_reconciling` on the dashboard rather than a lie in either direction — (a)'s live
+proof, costing the walk ONE extra observation, not a new leg). Layer 1 (`52e3f7e`) already closed the
+graceful-stop leak. (a) is UI-surfacing on a clean-reviewed derivation (deriveMemberLiveness) — no new
+review earned; (c), when triggered, does.
