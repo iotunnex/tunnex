@@ -32,3 +32,27 @@ policy-consequential, same class as create/delete) · toggle on the ROW vs in th
 
 Reds (for the eventual build): disabled → ZERO emission → default-denied · re-enable → emission
 restored → flows · toggle audited.
+
+## Helper-protocol hardening pass (WF-A slice-3 review — deferred defense-in-depth)
+
+Registered from the WF-A undiscounted review (dispositions #4, #6). None is a live defect —
+each is guarded upstream AND/OR downstream today. Ride ONE future helper-protocol hardening pass:
+
+- **#4 — `b64ToHex` length check** (`apps/helper/wgcommon.go`): decodes base64 without asserting
+  32 bytes. Every caller is `validKey`-guarded upstream (tunnel_up + set_gateway_peer via
+  `ValidateRequest`; set_allowed_ips' peer key is the validated Up config) and wireguard-go
+  rejects a bad-length key downstream. Add `if len(raw) != 32` as belt-and-suspenders.
+- **#6 — `set_allowed_ips` CIDR envelope validation** (`apps/helper/protocol.go` `ValidateRequest`):
+  the `AllowedIPs` list is not CIDR-checked at the envelope; invalid CIDRs reach the uapi and are
+  rejected there. PRE-EXISTING (S8.5), not WF-A. Add a `netip.ParsePrefix` loop mirroring
+  `TunnelConfig.Validate`.
+
+TRIGGER: next helper-protocol change touching the uapi/validation surface (natural home for both).
+
+## CP endpoint carve-out — multi-IP CP (WF-A slice-3, registered)
+
+The D-WFA-4 CP carve-out pins ONE resolved IP (host-route + pf pass), exactly like the WG endpoint.
+A CP behind a rotating/multi-IP load balancer could resolve to a different IP than the one pinned
+→ the control channel's escape path misses. v1 assumes a single stable CP IP (true for the walk +
+single-region deploys). TRIGGER = multi-region CP / CP behind a rotating LB. Fix candidates: pin the
+full resolved set, or a CIDR pass for the CP's published range, or a CP-provided stable anycast IP.

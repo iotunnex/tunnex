@@ -841,4 +841,15 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 	if _, _, _, e := svc.DeviceDial(ctx, uuid.New(), dev, owner); e == nil {
 		t.Fatal("cross-org: a device under a different org must be refused, got nil error")
 	}
+
+	// PENDING (review #3): a not-yet-active device has no gateway peer — its dial is refused (no-oracle),
+	// so the API never contradicts the data-plane's "peers only when active" rule. Same device_not_found.
+	pend := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status) VALUES ($1,$2,$3,$4,'pending-laptop','KPEND','10.99.0.3','pending')",
+		pend, org, owner, g2); e != nil {
+		t.Fatalf("seed pending device: %v", e)
+	}
+	if _, _, _, e := svc.DeviceDial(ctx, org, pend, owner); e == nil {
+		t.Fatal("pending: a non-active device's dial must be refused, got nil error")
+	}
 }

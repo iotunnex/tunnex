@@ -264,6 +264,8 @@ func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) e
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
 	// Advance the peer cache so a subsequent WF-A re-home carries the LIVE routing, not the baked set.
+	// (review #5 — advancing before reconcileRoutes is correct: the cache feeds only the re-home crypto
+	// allowed_ips, and a re-home never touches OS routes. See the darwin SetAllowedIPs note.)
 	b.peerAllowedIPs = append([]string(nil), allowedIPs...)
 	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
 	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
@@ -278,6 +280,12 @@ func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) e
 // control channel + the new gateway are permitted) is DEFERRED on Windows (S8.6b-win-carveout) — until then
 // a Windows full-tunnel device stranded on a dead hub needs a manual reconnect. Split-tunnel is unaffected.
 func (b *windowsBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
+	// Resolve BEFORE taking b.mu (review #1): DNS latency must never hold a lock the fail-closed path needs
+	// (the kill-switch-no-unbounded-I/O law — see the darwin backend's SetGatewayPeer note).
+	ep, err := resolveEndpoint(newEndpoint)
+	if err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.dev == nil {
@@ -285,10 +293,6 @@ func (b *windowsBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	}
 	if b.fullTunnel {
 		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home is not supported on Windows yet (WFP CP carve-out deferred)"}
-	}
-	ep, err := resolveEndpoint(newEndpoint)
-	if err != nil {
-		return err
 	}
 	uapi, err := gatewayPeerSwapUAPI(b.peerPubKey, newPubKey, ep, b.peerKeepalive, b.peerAllowedIPs)
 	if err != nil {
