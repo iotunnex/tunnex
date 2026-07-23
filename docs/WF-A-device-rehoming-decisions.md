@@ -44,7 +44,7 @@ scenario) → control path INDEPENDENT → CP-driven VIABLE.**
 **GATE RESULT:** D-WFA-1 is UNBLOCKED for split-tunnel (CP-driven confirmed). Full-tunnel gets a
 clean resolution path (a CP-endpoint kill-switch carve-out), not a fork-flip.
 
-## D-WFA-1 (LEAD — needs ruling) — the re-home MECHANISM
+## D-WFA-1 (RULED — CP-driven, locked) — the re-home MECHANISM
 
 - **(a) CP-driven re-homing** — on promotion, the device's compiled config re-points its
   endpoint to the promoted hub; rides the EXISTING promotion→compile→push path (the same
@@ -72,17 +72,33 @@ across both modes and is a small, bounded helper change (a new decide-item **D-W
 (b) client-side multi-endpoint stays REGISTERED for genuinely-CP-unreachable cases (CP itself
 down / network-partitioned), out of v1 scope.
 
-## D-WFA-4 (NEW, surfaced by the D-WFA-0 verify) — full-tunnel CP-endpoint carve-out
+**RULED (founder) — CP-driven re-homing, LOCKED.** On promotion, the device's config re-compiles
+to the promoted hub (endpoint + the AllowedIPs the device already holds), rides the EXISTING
+promotion→compile→push path, the client applies via the ordinary reconcile. Zero election logic
+in the client; observe-never-vote preserved end to end. Conditions:
+- **(a) promotion-triggered, NOT health-triggered.** The client NEVER decides its gateway is dead
+  — the CP's failover controller (the ONE liveness truth) decides, and the device follows the
+  SAME verdict the spokes follow. No client-side liveness opinion enters.
+- **(b) the re-home is AUDITED on the same generation machinery** as everything else — a device
+  silently hopping gateways is the two-truths class; the audit row IS the truth.
+- **(c) fail-back re-homes the device home the SAME way** — one mechanism, both directions (the
+  device-tier echo of the D4 hysteresis; failback promotion re-compiles the device onto the
+  restored primary).
+
+## D-WFA-4 (RULED — IN for v1) — full-tunnel CP-endpoint carve-out
 
 Full-tunnel's kill-switch blocks the control channel (D-WFA-0). For CP-driven re-homing to work
-in full-tunnel, the kill-switch must permit egress to the CP endpoint — mirroring the WG-endpoint
-carve-out that already exists (`backend_darwin.go:301-323`). Decide: is this IN v1 (CP-driven
-must work in both modes → yes, add it) or is v1 SPLIT-ONLY (the walk's scenario) with full-tunnel
-re-homing deferred? **Lean: include it — it is small, mirrors an existing pattern, and a
-full-tunnel device losing its gateway is the harder outage this feature exists for.** Security
-note: the carve-out is a single CP-IP pass rule (the CP is already the trust root the device
-authenticates to over TLS); it does NOT widen the kill-switch's threat surface the way a broad
-exception would. Held for ruling with D-WFA-1.
+in full-tunnel, the kill-switch must permit egress to the CP endpoint.
+
+**RULED (founder) — IN for v1.** Shipping split-only would give the MOST security-conscious
+configuration (kill-switch on) the WORST HA — backwards; the full-tunnel outage is exactly the
+one a kill-switch user bought the product for. Terms:
+- ONE CP-endpoint pass rule, mirroring the existing WG-endpoint host-route pattern
+  (`backend_darwin.go:126-150,301-323` — precedent cited, mechanism proven), scoped to the CP's
+  IP/port EXACTLY.
+- **Threat argument (one line, founder-framed):** the CP is already the TLS trust root the device
+  authenticates to — a pass rule to it widens NOTHING; the client still authenticates everything
+  it receives. Not a broad exception; a single named carve-out.
 
 ## D-WFA-2 (RULED direction) — re-home rides the generation/audit machinery
 
@@ -97,17 +113,26 @@ return to it, or stay on the standby-now-primary? v1 default: follow the active 
 device tracks the hub set's members[0]), same rule as the site-link graph — consistent, no
 device-special path. State explicitly.
 
-## Reds (to define at build, after ruling)
+## Reds (RULED — the acceptance set)
 
-1. The walk's EXACT fixture: connected device on the primary → primary data-plane dies →
-   standby promoted → device re-homes to the promoted hub WITHOUT a manual reconnect (the
-   scenario that failed live).
-2. Generation/audit: the re-home emits its event; no silent hop (D-WFA-2).
-3. Failback: original hub reclaims → device follows per D-WFA-3.
-4. Control-path independence proof (D-WFA-0) is a NAMED precondition red — if it fails, the
-   fork flips to (b) and this red set is rewritten.
+1. **ACCEPTANCE (the walk's EXACT fixture, CLOCKED):** connected device on the primary → gateway
+   killed → promotion → the device's config re-homes within ONE push cycle → tunnel re-establishes
+   to the promoted hub → traffic resumes — WITHOUT a manual reconnect. Stopwatch the re-home; this
+   timeline joins the 4m48s failover as the demo's SECOND number.
+2. **Run RED 1 in BOTH modes** — split AND full re-home IDENTICALLY (the D-WFA-4 carve-out makes
+   full-tunnel reach the CP; the re-home path is otherwise one mechanism).
+3. **Promotion-triggered, not health-triggered (D-WFA-1a):** the client emits NO liveness verdict;
+   the re-home fires only from the CP controller's promotion. A test that flaps a gateway's
+   data-plane WITHOUT a promotion must NOT re-home the device.
+4. **Generation/audit (D-WFA-1b/D-WFA-2):** the re-home emits its audit event on the same
+   generation machinery; no silent hop.
+5. **Fail-back (D-WFA-1c/D-WFA-3):** original hub reclaims (M=5 fresh) → device re-homes back the
+   same way; one mechanism both directions.
+6. **Kill-switch invariant (D-WFA-4):** full-tunnel + kill-switch armed → CP reachable (carve-out
+   live) AND everything else still dropped — the block-all invariant re-verified MINUS exactly one
+   new named exception (the kill-switch's own reds re-run with the carve-out present).
 
-**Sequence:** this paper → D-WFA-0 verify (control-path independence — the fork-decider) →
-founder ruling on D-WFA-1 → build as its OWN story (touches the compiler's peer model + the
-client — the epic's most-reviewed surfaces) → targeted review → box-walk the walk's exact
-fixture. NOT a hotfix — a story.
+**Sequence:** this paper (RULED) → build as its OWN story (compiler device-config path + client
+reconcile + helper CP-endpoint carve-out) → targeted review on the peer-model + kill-switch
+surfaces (both most-reviewed classes, UNDISCOUNTED) → box-walk: the walk's exact fixture, BOTH
+tunnel modes, stopwatch on the re-home. NOT a hotfix — a story.
