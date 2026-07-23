@@ -13,12 +13,36 @@ NOT this story.
 
 ## D-WFA-0 (BLOCKING PREREQUISITE — decides the whole fork) — control-path independence
 
-Does the device's CONTROL channel to the CP survive its DATA tunnel being down? The device
-fetches config / reports over some path; if that path rides the WG tunnel (through the dead
-gateway), the CP-driven option is impossible — a device whose tunnel is down can't be told to
-re-home. **VERIFY FIRST, cite the answer.** If the control path is independent (direct HTTPS to
-the CP public endpoint, NOT through the tunnel), CP-driven is viable. If it rides the tunnel,
-only client-side failover works. **This item gates D-WFA-1.**
+Does the device's CONTROL channel to the CP survive its DATA tunnel being down? If it rides the
+WG tunnel (through the dead gateway), CP-driven re-homing is impossible — a device whose tunnel
+is down can't be told to re-home.
+
+**VERIFIED (2026-07-23, cited both ends) — the answer is CONDITIONAL on tunnel mode:**
+
+**SPLIT-tunnel (the desktop DEFAULT — `index.ts:23` `DEFAULT_FULL_TUNNEL=false`; the walk's EXACT
+scenario) → control path INDEPENDENT → CP-driven VIABLE.**
+- Client transport: `HttpDeviceApi` uses the global (undici) `fetch`, NO wg0/utun binding, NO
+  custom dispatcher/proxy — follows the OS routing table. All calls hit `${origin}/api/v1/...`
+  where origin = the CP base URL (`cred.server`): `httpdeviceapi.ts:26-30,47,58,100,109,118,129,143`,
+  bound at `ipc.ts:61,206,307,331`. Every monitor (Revocation/Approval/RoutedRanges/Health) rides
+  this same CP origin, never a gateway.
+- Helper routing: a split tunnel arms **NO kill-switch**; only the peer AllowedIPs (pool + org LAN
+  ranges) route to utun; the cleartext physical default is left intact BY DESIGN
+  (`backend_darwin.go:79-84`). The CP's PUBLIC IP is in neither the pool nor the org LAN ranges,
+  so CP traffic egresses the physical interface and survives the gateway dying.
+- **Empirically confirmed on the walk:** the app kept rendering live CP data (gateway states, hub
+  set, sites) the whole time the tunnel read "Connecting…".
+
+**FULL-tunnel → control path RIDES the tunnel → CP-driven FAILS (as-is).**
+- The full-tunnel kill-switch does `block drop out all` with carve-outs ONLY for {loopback, tunnel
+  iface, the WG ENDPOINT UDP, DHCP, NDP} — **NO exception for the CP** (`backend_darwin.go:301-323`,
+  armed full-only `:85-89`). The CP's public IP is captured by the `0.0.0.0/1`+`128.0.0.0/1` tunnel
+  half-routes (`wgcommon.go:123-139`) and/or dropped. Tunnel down → CP unreachable.
+- The ONLY physical-gateway carve-out today is the WG endpoint host-route (`backend_darwin.go:126-150`)
+  — **the CP could join it the same way** (see D-WFA-1's resolution).
+
+**GATE RESULT:** D-WFA-1 is UNBLOCKED for split-tunnel (CP-driven confirmed). Full-tunnel gets a
+clean resolution path (a CP-endpoint kill-switch carve-out), not a fork-flip.
 
 ## D-WFA-1 (LEAD — needs ruling) — the re-home MECHANISM
 
@@ -37,6 +61,28 @@ only client-side failover works. **This item gates D-WFA-1.**
 **FOUNDER LEAN:** (a) CP-driven as PRIMARY **IF D-WFA-0 confirms the control path is
 independent** (cite it); (b) client-side multi-endpoint REGISTERED as the follow-up for
 CP-unreachable scenarios. Ruling held.
+
+**D-WFA-0 RESULT FOLDS IN (2026-07-23):** control path is independent for SPLIT-tunnel
+(confirmed, cited) → **(a) CP-driven is viable for v1** (the walk's split-tunnel scenario).
+Full-tunnel's control path rides the tunnel — but the fix is NOT a fork-flip to (b): it is a
+**CP-endpoint kill-switch carve-out** — add the CP's IP to the full-tunnel pf pass rules exactly
+as the WG endpoint host-route already is (`backend_darwin.go:126-150,301-323`), so a full-tunnel
+device with a dead gateway can still reach the CP to be re-homed. This keeps CP-driven UNIFORM
+across both modes and is a small, bounded helper change (a new decide-item **D-WFA-4** below).
+(b) client-side multi-endpoint stays REGISTERED for genuinely-CP-unreachable cases (CP itself
+down / network-partitioned), out of v1 scope.
+
+## D-WFA-4 (NEW, surfaced by the D-WFA-0 verify) — full-tunnel CP-endpoint carve-out
+
+Full-tunnel's kill-switch blocks the control channel (D-WFA-0). For CP-driven re-homing to work
+in full-tunnel, the kill-switch must permit egress to the CP endpoint — mirroring the WG-endpoint
+carve-out that already exists (`backend_darwin.go:301-323`). Decide: is this IN v1 (CP-driven
+must work in both modes → yes, add it) or is v1 SPLIT-ONLY (the walk's scenario) with full-tunnel
+re-homing deferred? **Lean: include it — it is small, mirrors an existing pattern, and a
+full-tunnel device losing its gateway is the harder outage this feature exists for.** Security
+note: the carve-out is a single CP-IP pass rule (the CP is already the trust root the device
+authenticates to over TLS); it does NOT widen the kill-switch's threat surface the way a broad
+exception would. Held for ruling with D-WFA-1.
 
 ## D-WFA-2 (RULED direction) — re-home rides the generation/audit machinery
 
