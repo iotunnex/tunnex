@@ -1383,9 +1383,19 @@ func (s *Service) fillSiteLinkVerdict(ctx context.Context, orgID uuid.UUID, b *S
 //     case (transit rides the primary at 0% loss; the demoted-dead link is a named line, not the headline).
 //   - A no-witness (unobserved) member yields neither — never a headline-down on silence.
 func siteLinkVerdictFrom(members []uuid.UUID, activePrimary uuid.UUID, live map[uuid.UUID]MemberLiveness) (headlineDown bool, demotedDead uuid.UUID) {
-	if ml := live[activePrimary]; ml.Observed && !ml.Fresh {
-		return true, uuid.Nil
+	ap, apObserved := live[activePrimary]
+	if apObserved && !ap.Fresh {
+		return true, uuid.Nil // primary observed-STALE → org transit is genuinely dead → the headline
 	}
+	if !apObserved {
+		// SILENCE on the primary yields NOTHING — no headline (silence ≠ death) AND no subordinate. A
+		// subordinate note asserts "transit is fine, only this demoted link is down"; an UNOBSERVED primary
+		// is precisely the state where we cannot assert transit is fine, so a reassuring subordinate here is
+		// the reassuring-green class rebuilt one tier down — the combination the inverse-red didn't cover
+		// (WF-B review F1). Silence yields nothing: no headline, no subordinate, no reassurance.
+		return false, uuid.Nil
+	}
+	// primary observed-FRESH → transit is healthy; a DEMOTED member observed-stale is the subordinate note.
 	for _, id := range members {
 		if ml := live[id]; ml.Demoted && ml.Observed && !ml.Fresh {
 			return false, id
