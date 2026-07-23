@@ -100,6 +100,19 @@ is the failed-over-past member" vs "a live peer's link is actually down."
 5. **Fixture fidelity:** the health test-double must not out-capability the substrate (the S8.2
    law) — it carries the same per-peer freshness + membership shape the controller reads.
 
+## Review fold F1+F2 (2026-07-23) — SILENCE YIELDS NOTHING (the class)
+
+The health-surface review caught the inverse-red's principle ("no witness → no verdict") being
+UNDER-applied: it guarded the HEADLINE but not the SUBORDINATE. A subordinate note asserts
+"transit is fine, only this dead demoted link is down" — and an UNOBSERVED primary is exactly the
+state where we cannot assert transit is fine. A reassuring subordinate on primary-silence is the
+reassuring-green class rebuilt ONE TIER DOWN. **CLASS (paper it): silence yields nothing — no
+headline, no subordinate, no reassurance.** Fixed at `siteLinkVerdictFrom` (guard: primary
+unobserved → (false, Nil) before the demoted loop); the silence red now asserts the FULL tuple +
+carries the exact combo (unobserved primary WHILE a demoted member stale). F2's lesson: a red that
+asserts only half the return value cannot fail on the other half — assert the whole tuple. Fold
+`3a19e00`, re-review waived (guard + red, not feature-sized).
+
 ## Reds — RULED addition to #3 (the inverse)
 
 3 (as stated) + **3-inverse: active-primary-stale → the site headline IS degraded (site-link-down).**
