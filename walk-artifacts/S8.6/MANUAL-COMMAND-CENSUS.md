@@ -15,7 +15,7 @@ TEST-ACTION (fault injection that IS the proof's subject) · DIAGNOSTIC/FIXTURE
 
 | # | Command (where) | Why it was needed | Owning fix |
 |---|---|---|---|
-| P1 | `iptables -I DOCKER-USER … -s/-d 10.99.0.0/16 ACCEPT` (aws-gw-1, azure-gw, aws-gw-2; Deck D Leg 10 + Test A pre-flight) | device-pool traffic structurally dropped by Docker FORWARD — pool ∉ Routes, deliberately outside S8.6b accepts | **WF-1 / A3b** |
+| P1 | `iptables -I DOCKER-USER … -s/-d 10.99.0.0/16 ACCEPT` (aws-gw-1, azure-gw, aws-gw-2; Deck D Leg 10 + Test A pre-flight) | **RECLASSIFIED (founder-accepted): the device↔SITE portion is BRANCH-WALK-FRICTION** — branch-tip agent code (S8.6b relaxed route rules + S8.5 WF-4-local) already passes device transit at the Docker tier; the manual accepts compensated for the stale ghcr agent. Residual PRODUCT scope = the pool key class for device↔device only (PD-3, ruled (ii) relaxed) | **A3b D-A3b-3 (residual)** |
 | P2 | `wg set wg0 peer <hub> allowed-ips …,10.99.0.0/16` (azure-gw, Leg 10 proof; reconcile reverted it) | pool CIDR never compiled into spoke hub-peer AllowedIPs — wg crypto-routing drops device transit | **WF-1 / A3b** |
 | P3 | `nsenter … iptables -I FORWARD -i wg0 -o wg0 -j ACCEPT` (docs/gateway-device-to-device.md, demo era) | device→device wg0↔wg0 at hub = pool-daddr forward, same structural exclusion (S8.6b red #1 proves pool untouched) | **A3b family** |
 | P4 | Cloud console: AWS route `10.99.0.0/16 → gw ENI` + Azure UDR `vpn-rt` (Leg 10) | console visits are sanctioned by the fabric panel — but the panel documents SITE ranges only; pool return-route is undocumented | **WF-1c: fabric teaching text** |
