@@ -34,13 +34,40 @@ thing. Before building, RULE the model:
   when the device's node was the demoted primary. The device's "home" stays its node_id for
   identity/peer-placement, but its DIAL endpoint follows the active hub.
 
-**LEAN (mine, for the ruling): (A) — a device's gateway SHOULD be the active hub; making it a
-derived value (not a baked node_id) is what makes re-home ride the existing promotion→compile path
-without a second reassignment mechanism.** But this is the founder's call — it decides whether the
-CP slice touches the MINT path (A) or only the CONFIG-endpoint derivation (C) or just adds a
-demotion-triggered re-point (B). The reds (D-WFA-1) assume the device re-homes to the promoted hub;
-(A)/(C) satisfy that directly, (B) only when the device sat on the demoted primary. **HELD — no
-code until ruled.**
+**RULED (founder): (C) — identity STAYS (node_id), the dial endpoint DERIVES.** node_id conflates
+two facts: WHICH gateway holds the device's peer/identity (assignment — stable; revocation + audit
+reference it) and WHERE the client dials (endpoint — situational; must follow the active hub). (A)
+collapses them → re-mints identity every promotion, churns the home for a transport concern, makes
+device history unreadable across failovers. (B) keeps them conflated + inherits the spoke gap. (C)
+SEPARATES them: keep node_id as identity/assignment, derive the dial endpoint from the active hub
+set at config-compile time.
+
+**Conditions (ruled):**
+- **Endpoint from the ONE-truth chain:** the device config endpoint = `deriveActive`'s HEAD (the
+  active primary) — the SAME value the compiler threads to the data-plane graph + policy compiler.
+  Not a second election, not a snapshot. RED: promotion → the device's next compiled config carries
+  the promoted hub's endpoint, by construction of the shared value.
+- **Devices-on-spokes gap STAYS REGISTERED** (not silently closed): (C) fixes a device whose dial
+  target is a FAILED HUB. A device whose assigned node is a non-hub SPOKE that dies is a different
+  scenario (no promotion event fires) — the named deferral stands, with (C)'s derivation noted as
+  the seam a future fix extends.
+- **Identity-stable RED:** a device's node_id, audit history, and revocation semantics are
+  UNCHANGED by a promotion — the proof (C) didn't smuggle (A).
+
+### D-WFA-5b (peer-hosting verify — VERIFIED, the companion rides this story)
+
+**VERIFIED (cited): (C) is a HALF-FIX without a companion.** `ListActivePeersForNode`
+(`apps/api/db/queries/devices.sql:164`, `WHERE d.node_id = $1`) scopes a device's peer to its
+ASSIGNED node only. So a device with node_id = the demoted primary, dialing the PROMOTED hub's
+derived endpoint, hits a hub whose peer set does NOT include it → **the handshake fails, (C) alone
+is a half-fix.** COMPLETION (rides this story, same fix's other half): **a device assigned to a
+hub-set member is compiled onto EVERY hub-set member's DesiredState** — warm on standbys exactly as
+site-links are warm (the standby HOLDS the device peer so the dial lands on a hub that already knows
+the device; the device's /32 AllowedIPs rides the active-primary recompile on promotion, mirroring
+the site-link single-valued invariant). Sub-item: standby device-peer AllowedIPs — empty-warm
+(pubkey only, /32 added on promotion) vs full — decide at build per the site-link precedent (lean:
+empty-warm, single-valued, the promotion recompile adds the /32). RED: a device assigned to a
+hub-set member appears in the promoted hub's peer set (the dial's handshake completes post-promotion).
 
 ## D-WFA-0 (BLOCKING PREREQUISITE — decides the whole fork) — control-path independence
 
