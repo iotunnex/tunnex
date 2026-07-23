@@ -1204,6 +1204,11 @@ type TokenRequest struct {
 	Token string `json:"token"`
 }
 
+// UnbindSiteNodeRequest defines model for UnbindSiteNodeRequest.
+type UnbindSiteNodeRequest struct {
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+}
+
 // UpdateOrganizationRequest Only the name is mutable; the slug is fixed at creation.
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
@@ -1404,7 +1409,7 @@ type RouteLANJSONRequestBody = RouteLANRequest
 type RegisterSiteJSONRequestBody = RegisterSiteRequest
 
 // UnbindSiteNodeJSONRequestBody defines body for UnbindSiteNode for application/json ContentType.
-type UnbindSiteNodeJSONRequestBody = BindSiteNodeRequest
+type UnbindSiteNodeJSONRequestBody = UnbindSiteNodeRequest
 
 // BindSiteNodeJSONRequestBody defines body for BindSiteNode for application/json ContentType.
 type BindSiteNodeJSONRequestBody = BindSiteNodeRequest

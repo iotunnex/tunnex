@@ -1964,6 +1964,10 @@ export interface components {
             /** Format: uuid */
             node_id: string;
         };
+        UnbindSiteNodeRequest: {
+            /** Format: uuid */
+            node_id?: string;
+        };
         ExtendGrantRequest: {
             /**
              * Format: date-time
@@ -5059,7 +5063,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["BindSiteNodeRequest"];
+                "application/json": components["schemas"]["UnbindSiteNodeRequest"];
             };
         };
         responses: {

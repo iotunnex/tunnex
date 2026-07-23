@@ -2035,7 +2035,7 @@ paths:
       tags: [sites]
       requestBody:
         required: false
-        content: { application/json: { schema: { $ref: "#/components/schemas/BindSiteNodeRequest" } } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/UnbindSiteNodeRequest" } } }
       responses:
         "204": { description: Unbound. }
         default: { $ref: "#/components/responses/Error" }
@@ -2425,6 +2425,14 @@ components:
     BindSiteNodeRequest:
       type: object
       required: [node_id]
+      additionalProperties: false
+      properties:
+        node_id: { type: string, format: uuid }
+    UnbindSiteNodeRequest:
+      # S8.6 #6: node_id is OPTIONAL on unbind — with it, unbind THAT gateway (#3 explicit-id);
+      # without it (the legacy bodyless caller, shimmed to {} at the router), unbind the site's
+      # sole gateway. A separate schema from Bind, whose node_id is required.
+      type: object
       additionalProperties: false
       properties:
         node_id: { type: string, format: uuid }

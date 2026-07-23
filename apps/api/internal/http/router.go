@@ -6,8 +6,10 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -143,6 +145,25 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 
 	// CSRF protection for cookie-authenticated state changes.
 	r.Use(csrfGuard)
+
+	// S8.6 #6 compat shim: oapi-codegen's strict server decodes a JSON body UNCONDITIONALLY even
+	// when the spec marks it optional (required: false) — a BODYLESS DELETE …/sites/{id}/bind (the
+	// legacy caller shape #6 exists for) died on an EOF decode error BEFORE auth: sessionless
+	// requests got 500 instead of 401 (the no-oracle posture broken) and the bodyless
+	// sole-gateway path was unreachable over real HTTP (the unit tests constructed RequestObjects
+	// directly — the fixture-fidelity trap; the spec-driven wire walk caught it). Rewrite the
+	// empty body to the empty JSON object so the optional body is ACTUALLY optional on the wire.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodDelete && req.ContentLength == 0 &&
+				strings.Contains(req.URL.Path, "/sites/") && strings.HasSuffix(req.URL.Path, "/bind") {
+				req.Body = io.NopCloser(strings.NewReader("{}"))
+				req.ContentLength = 2
+				req.Header.Set("Content-Type", "application/json")
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
 
 	// Validate every request against the spec; render failures as the envelope.
 	swagger, err := api.GetSwagger()

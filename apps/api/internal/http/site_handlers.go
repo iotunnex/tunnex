@@ -158,11 +158,12 @@ func (s apiServer) UnbindSiteNode(ctx context.Context, req api.UnbindSiteNodeReq
 	if _, err := authorize(ctx, req.OrgId, rbac.PermSiteManage); err != nil {
 		return nil, err
 	}
-	// S8.6 #6 compat: the body is OPTIONAL. With a node_id, unbind that gateway (the #3 explicit-id path);
-	// without a body (the legacy caller shape), UnbindSiteNode resolves the site's sole gateway.
+	// S8.6 #6 compat: the body is OPTIONAL (spec: UnbindSiteNodeRequest, node_id optional; a bodyless
+	// legacy request is shimmed to {} at the router). With a node_id, unbind that gateway (the #3
+	// explicit-id path); without one, UnbindSiteNode resolves the site's sole gateway (uuid.Nil).
 	var nodeID uuid.UUID
-	if req.Body != nil {
-		nodeID = req.Body.NodeId
+	if req.Body != nil && req.Body.NodeId != nil {
+		nodeID = *req.Body.NodeId
 	}
 	if err := s.sites.UnbindSiteNode(ctx, req.OrgId, req.SiteId, nodeID); err != nil {
 		return nil, err
