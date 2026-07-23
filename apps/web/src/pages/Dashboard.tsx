@@ -4,11 +4,15 @@ import { api, apiErrorMessage, type OrgOverview } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Card, ErrorText } from "../components/ui";
 import { TunnelControl } from "../components/TunnelControl";
+import { desktop } from "../lib/desktop";
 
 export default function Dashboard() {
   const [orgName, setOrgName] = useState("");
   const [data, setData] = useState<OrgOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // WF-2 (Deck D Leg 10): bump to refetch the overview. The CP count is correct the moment a device is
+  // revoked (CountActiveDevicesByOrg excludes it) — the stale number was THIS view's mount-once fetch.
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +37,20 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
+  }, [refresh]);
+
+  // WF-2: desktop only — the refetch rides the RevocationMonitor's EXISTING signal (the same status
+  // event that flips TunnelControl's banner). On the transition EDGE into "revoked", re-pull the
+  // overview so the first number an admin sees stops counting the device the server just swept.
+  // Browser build: desktop() is null → no subscription, zero web-tier change.
+  useEffect(() => {
+    const d = desktop();
+    if (!d) return;
+    let prev = "";
+    return d.tunnel.onStatusChanged((s) => {
+      if (s.state === "revoked" && prev !== "revoked") setRefresh((r) => r + 1);
+      prev = s.state;
+    });
   }, []);
 
   return (

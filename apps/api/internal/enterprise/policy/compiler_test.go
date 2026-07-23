@@ -4,6 +4,8 @@ package policy_test
 
 import (
 	"encoding/json"
+	"os"
+	"regexp"
 	"testing"
 
 	"github.com/google/uuid"
@@ -761,5 +763,23 @@ func TestDeviceResourceInSiteFarPlacement(t *testing.T) {
 		if hasAllow(allowsFor(out, n), "10.99.0.10", "192.0.2.0/24") {
 			t.Fatalf("a resource in NO site subnet must NOT land on node %s, got %+v", n, allowsFor(out, n))
 		}
+	}
+}
+
+// TestNodeSetSeedCensus — the F1 fold's one-truth check (census-style grep-proof): nodeSet is written at
+// EXACTLY three seed sites — devices, SiteNodes, and the threaded ActiveHub — and nowhere else. No lazy
+// admit path exists: every grant-placement target is in nodeSet by construction, so a cross-org node
+// reaching the compiled output is STRUCTURALLY impossible (construction-over-convention, 3rd instance —
+// the uapi field omission and allowedIPsFor's ranges-free signature are its siblings). A fourth write
+// site appearing here without its paper entry is the drift this red exists to catch.
+func TestNodeSetSeedCensus(t *testing.T) {
+	src, err := os.ReadFile("compiler.go")
+	if err != nil {
+		t.Fatalf("read compiler.go: %v", err)
+	}
+	writes := regexp.MustCompile(`nodeSet\[[^\]]+\] = true`).FindAll(src, -1)
+	if len(writes) != 3 {
+		t.Fatalf("nodeSet must have EXACTLY 3 seed writes (devices, SiteNodes, ActiveHub) — got %d: %s",
+			len(writes), writes)
 	}
 }

@@ -146,6 +146,16 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	// site→site grant lands on the hub too (it forwards spoke↔spoke traffic), so its default-deny forward
 	// chain accepts the transited pair — without this the hub silently drops site-to-site between two spokes.
 	hubNode := s.ActiveHub
+	// A3b F1 (construction-over-convention, 3rd instance): SEED the hub into nodeSet HERE — the ActiveHub
+	// is threaded from the one shared derivation, trusted at exactly SiteNodes' level. With devices,
+	// SiteNodes, and the hub all seeded up front, EVERY placement target (devGrantNodes) is in nodeSet by
+	// construction — so add() needs no lazy-admit branch, and a cross-org node reaching the output is
+	// structurally impossible rather than checked-against. (A guard validating a lazy admit would be code
+	// defending a state the construction should forbid.) The nodeSet-seed census red pins that these three
+	// seeds are the ONLY writes.
+	if hubNode != uuid.Nil {
+		nodeSet[hubNode] = true
+	}
 
 	out := make(map[uuid.UUID]policyspec.Compiled, len(nodeSet))
 
@@ -244,15 +254,10 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		acc[nodeID] = &nodeAcc{set: map[allowKey]bool{}}
 	}
 	add := func(nodeID uuid.UUID, e policyspec.AllowEntry) {
+		// Every caller's target is in nodeSet by construction (devices + SiteNodes + the seeded hub) —
+		// see the F1 seed above; no lazy admit exists, so an unknown node here would be a programming
+		// error the acc lookup surfaces immediately, never a silent artifact for an unvetted node.
 		a := acc[nodeID]
-		if a == nil {
-			// A3b defensive: a placement target outside the initial nodeSet (e.g. a threaded ActiveHub that
-			// is not itself device-hosting or site-bound) still accumulates + emits an artifact — silently
-			// dropping a placed grant would under-enforce at exactly the chain both-enforce added.
-			a = &nodeAcc{set: map[allowKey]bool{}}
-			acc[nodeID] = a
-			nodeSet[nodeID] = true
-		}
 		k := allowKey{e.SrcIP, e.DstCIDR, e.Protocol, e.PortLow, e.PortHigh}
 		if a.set[k] {
 			return // first rule to grant this tuple keeps the rule_id stamp
