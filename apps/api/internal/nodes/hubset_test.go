@@ -682,3 +682,90 @@ func TestFailoverCorrectorIdempotent(t *testing.T) {
 		t.Fatalf("a stable world must not churn the generation across ticks: %d -> %d", g0.Generation, g1.Generation)
 	}
 }
+
+// TestDevicePeerWidenedAcrossHubSet — WF-A D-WFA-5b: a device assigned to a hub-set member is HOSTED on
+// EVERY member's DesiredState, so the promoted hub already knows it when the re-homed dial lands. On the
+// ACTIVE PRIMARY the device peer carries its /32; on a STANDBY it is WARM (empty AllowedIPs — pubkey known,
+// the /32 rides the promotion recompile). Without the widening the standby lacks the device (node_id-scoped)
+// → the post-promotion dial would fail → (C) a half-fix.
+func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "wd-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, "DELETE FROM devices WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM users WHERE id IN (SELECT user_id FROM devices WHERE org_id=$1)", org)
+		_, _ = pool.Exec(bg, "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	g1, g2 := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, "e:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(g1, "g1", "KG1", 1) // primary
+	mk(g2, "g2", "KG2", 2) // standby
+	usr, dev := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
+		t.Fatalf("seed user: %v", e)
+	}
+	// The device is assigned to g1 (node_id=g1). Its /32 is 10.99.0.2.
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'laptop','KDEV','10.99.0.2')",
+		dev, org, usr, g1); e != nil {
+		t.Fatalf("seed device: %v", e)
+	}
+
+	svc := NewService(pool, nil, nil)
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[g1,g2], g1 the active primary
+		t.Fatalf("reconcile hub set: %v", e)
+	}
+
+	devPeer := func(ds DesiredState) (present bool, allowed []string) {
+		for _, p := range ds.Peers {
+			if p.PublicKey == "KDEV" {
+				return true, p.AllowedIPs
+			}
+		}
+		return false, nil
+	}
+
+	// ACTIVE PRIMARY (g1): the device peer present WITH its /32.
+	ds1, e := svc.DesiredState(ctx, sqlc.Node{ID: g1, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true}})
+	if e != nil {
+		t.Fatalf("DesiredState(g1): %v", e)
+	}
+	if present, allowed := devPeer(ds1); !present || len(allowed) != 1 || allowed[0] != "10.99.0.2/32" {
+		t.Fatalf("primary g1 must host the device with its /32, got present=%v allowed=%v", present, allowed)
+	}
+
+	// STANDBY (g2): the device peer PRESENT (widened) but WARM — empty AllowedIPs.
+	ds2, e := svc.DesiredState(ctx, sqlc.Node{ID: g2, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true}})
+	if e != nil {
+		t.Fatalf("DesiredState(g2): %v", e)
+	}
+	present, allowed := devPeer(ds2)
+	if !present {
+		t.Fatal("standby g2 must HOST the device peer (widening) so a post-promotion dial's handshake completes")
+	}
+	if len(allowed) != 0 {
+		t.Fatalf("standby g2 must hold the device WARM (empty AllowedIPs); the /32 rides promotion, got %v", allowed)
+	}
+}
