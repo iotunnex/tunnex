@@ -74,7 +74,42 @@ standby empty-warm — the empty-warm sub-item ruled at build per the lean) + sl
 `activeHubDialFrom` pure primitive (`0807f3a`, red pins primary/standby→active-primary,
 spoke→not-derived, promotion-follows). CP foundation is one-truth + gate-able standalone.
 
-### D-WFA-6 (BANKED for slice 2 — the dial-endpoint CHANNEL) — RULED direction: ride routed-ranges
+### D-WFA-6 (RULED — (1) fold + reframe) — the dial-endpoint CHANNEL
+
+**RULED (founder): (1) fold into routed-ranges + REFRAME the invariant** (the invariant was
+MIS-STATED, not bent). Reframe, verbatim: *"The device's own identity — its private key, its pool
+address, its enrollment — is minted once and NEVER re-fetched. The gateway it dials is not the
+device's identity; it is a routing fact about the network, and WF-A makes it volatile by design
+(the hub can change beneath a running device). Volatile routing facts ride the volatile channel."*
+The S8.5 "no keys/endpoints" clause was written when the dial target was IMMUTABLE, so excluding it
+cost nothing and looked like a security property. WF-A changes the world, not the principle: a
+gateway's public key is not a secret and not the device's identity — it is the ADDRESS of a peer
+the network says to talk to. The never-re-fetch invariant survives, correctly scoped: nothing the
+device IS comes back over the wire; only what the network currently LOOKS LIKE.
+
+**Condition 1 — field-level channel contract (in-spec):** the OpenAPI description states the
+channel may carry NETWORK-TOPOLOGY facts (ranges, dial endpoint + gateway pubkey) and NEVER
+device-identity material (no private key, no pool-address re-issue, no enrollment token) — so a
+future field meets the RULE, not the precedent.
+
+**Condition 2 — device_id authorization:** org auth stays (org:view); the handler ALSO verifies the
+requested device belongs to the calling org (and, per the credential, the caller). The client
+credential is the USER's session bearer (D-WFA-0 trace: `httpdeviceapi` uses the user bearer, not a
+device cert) → the device must be OWNED by the authenticated user. MANDATORY cross-org/cross-device
+RED (a device fetches ONLY its own dial) — the fixture the routed-ranges original cross-org red
+established, extended to the device dimension.
+
+### D-WFA-6-peer-swap (ACCEPTED) — the helper verb is a peer SWAP, not an endpoint update
+
+Re-homing crosses to a DIFFERENT gateway → DIFFERENT pubkey → the verb is `set_gateway_peer`
+(pubkey + endpoint: remove old, add new), same no-bounce dispatch class + kill-switch-untouched
+probe as set_allowed_ips. **Condition A — atomic from the tunnel's view:** old-peer-remove +
+new-peer-add in ONE uapi transaction where the substrate allows (a window with NO gateway peer is a
+dead tunnel); if not atomic, order it ADD-then-REMOVE and say so. **Condition B — preserve the
+device's own interface state:** address, private key, kill-switch arming UNTOUCHED — the red proves
+the tunnel SURVIVES the swap + traffic resumes WITHOUT re-enrollment.
+
+### D-WFA-6 (superseded banking note) — RULED direction: ride routed-ranges
 
 The dial-endpoint the client polls to re-home is the THIRD volatile-operational client channel
 (revocation → routed-ranges → dial-endpoint). **RULED (founder lean, strong): FOLD it into the
