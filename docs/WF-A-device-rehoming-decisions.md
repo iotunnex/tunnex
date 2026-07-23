@@ -249,3 +249,49 @@ device-special path. State explicitly.
 reconcile + helper CP-endpoint carve-out) → targeted review on the peer-model + kill-switch
 surfaces (both most-reviewed classes, UNDISCOUNTED) → box-walk: the walk's exact fixture, BOTH
 tunnel modes, stopwatch on the re-home. NOT a hotfix — a story.
+
+## D-WFA-4 — SLICE 3 BUILD RECORD (the carve-out landed; darwin)
+
+Built on `story/S8.6-hub-ha` after slices 2a/2b. The ruled outcome ("full re-home identically")
+required THREE mechanical pieces, all reusing the cited precedent — none a new mechanism, none a
+new decide-item:
+
+1. **CP-endpoint carve-out (the ruled "one named pass rule").** Full-tunnel Up now permits egress
+   to the CP endpoint EXACTLY (`pass out proto tcp to <cp-ip> port <cp-port>`) + pins a host-route
+   for the CP IP via the physical gateway — the identical mechanism as the WG-endpoint host-route
+   (`buildPFRules` + the step-3a endpoint pin). Effect: the control channel becomes tunnel-
+   INDEPENDENT in full-tunnel, matching split-tunnel's D-WFA-0 independence — which is *why* the
+   dial tier can drive full-tunnel: the poll reaches the CP whether the tunnel is alive or dead.
+   Threat argument (as ruled): the CP is already the TLS trust root; a direct pass to it widens
+   NOTHING, and the client still authenticates everything it receives.
+2. **WG-endpoint re-point on the swap (required for the swap to land).** A re-home moves to a
+   DIFFERENT gateway box (new IP). pf permits by ENDPOINT IP, so the peer swap alone would leave the
+   new gateway's handshake `block drop`'d and route-looped. So full-tunnel `SetGatewayPeer` now
+   re-arms pf with the new WG endpoint (re-emitting the CP pass) + re-pins the WG host-route — the
+   SAME Up mechanism, applied to the new gateway. Not a new surface: re-pointing an already-permitted
+   class from hub A to hub B, strictly the identical trust posture.
+3. **dialEnabled flipped on for full-tunnel + the refusal seam retired.** `UpdateGatewayPeer` no
+   longer blanket-refuses full-tunnel; the BACKEND owns the policy. On darwin the full-tunnel re-home
+   works when the CP carve-out is present. `rehome_full_tunnel_unsupported` is now reachable ONLY
+   when the carve-out is ABSENT — i.e. the darwin backend received a full-tunnel Up with no
+   `control_plane_endpoint` (a defensive refusal, never the normal path), OR the Windows backend
+   (below). The refusal is retired on the working path, retained as the honest failure seam.
+
+**Config plumbing:** `TunnelConfig.control_plane_endpoint` (optional, additive at ProtocolVersion 1).
+The client derives it from the tenant API origin (host:port, 443 default) and sends it on full-tunnel
+Up; the darwin backend carves it. Single-IP-CP assumption (the CP host resolves to one pinned IP,
+exactly like the WG endpoint) — a multi-IP/rotating CP is a REGISTERED follow-up, not v1.
+
+**PLATFORM PARITY — darwin lands, Windows DEFERS (named trigger + honest consequence).** macOS pf
+permits by endpoint IP, so the carve-out is a `pass out` rule + host-route (landed, wire-provable on
+the macOS walk box). Windows WFP permits by PROCESS (`permitWireGuardService`) — the WG endpoint
+needs no per-IP permit (the helper process egress covers any gateway), BUT the CLIENT's CP TLS is the
+Electron main process, which WFP's block-all drops in full-tunnel. A Windows CP carve-out is a NEW
+WFP permit filter (remote CP IP+port) + a winipcfg host-route on the pinned wireguard-windows fork —
+a change-averse surface (upstream-sync obligation) that CANNOT be wire-proven this session (the walk
+box is macOS). **DEFERRED to S8.6b-win-carveout; TRIGGER = the first Windows full-tunnel HA walk (or
+public-beta Windows readiness), whichever comes first. HONEST CONSEQUENCE until then: on Windows,
+full-tunnel re-home is UNSUPPORTED — the windows backend refuses `SetGatewayPeer` for full-tunnel
+(`rehome_full_tunnel_unsupported`), the client's dial tier fail-STATICs (keeps the current peer), and
+a Windows full-tunnel device stranded on a dead hub needs a manual reconnect. Windows SPLIT-tunnel
+re-home is UNAFFECTED (no kill-switch, control path already independent) and works identically.**

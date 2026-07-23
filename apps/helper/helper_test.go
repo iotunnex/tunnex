@@ -53,6 +53,11 @@ func TestConfigValidate(t *testing.T) {
 			c.FullTunnel = true
 			c.AllowedIPs = []string{"0.0.0.0/0"}
 		}},
+		// D-WFA-4: a malformed CP endpoint is rejected as strictly as the WG endpoint (no port / loopback /
+		// metacharacters) so a bad value can't steer the pf carve-out.
+		{"cp endpoint no port", "bad_control_plane_endpoint", func(c *TunnelConfig) { c.ControlPlaneEndpoint = "api.example.com" }},
+		{"cp endpoint loopback", "bad_control_plane_endpoint", func(c *TunnelConfig) { c.ControlPlaneEndpoint = "127.0.0.1:443" }},
+		{"cp endpoint metachars", "bad_control_plane_endpoint", func(c *TunnelConfig) { c.ControlPlaneEndpoint = "a b;c:443" }},
 	}
 	for _, tc := range cases {
 		c := goodConfig()
@@ -96,6 +101,14 @@ func TestEndpointAndFullTunnel(t *testing.T) {
 	c.AllowedIPs = []string{"10.0.0.0/8"}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("valid split-tunnel rejected: %v", err)
+	}
+	// D-WFA-4: a valid CP endpoint on a full tunnel is accepted (the carve-out target).
+	c = goodConfig()
+	c.FullTunnel = true
+	c.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
+	c.ControlPlaneEndpoint = "api.example.com:443"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid full-tunnel + CP endpoint rejected: %v", err)
 	}
 }
 
@@ -252,6 +265,7 @@ type fakeBackend struct {
 	lastGwPubKey   string
 	lastGwEndpoint string
 	setGwPeerCnt   int
+	rehomeErr      error // when set, SetGatewayPeer returns it (models a backend refusal, e.g. carve-out absent)
 }
 
 func (f *fakeBackend) Up(cfg *TunnelConfig) error {
@@ -283,7 +297,7 @@ func (f *fakeBackend) SetAllowedIPs(peer string, aips []string) error {
 func (f *fakeBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	f.setGwPeerCnt++
 	f.lastGwPubKey, f.lastGwEndpoint = newPubKey, newEndpoint
-	return nil
+	return f.rehomeErr
 }
 
 // TestDeadManHoldsAfterUpFailure is the guard for the FAIL-OPEN regression (review
@@ -467,10 +481,10 @@ func TestUpdateGatewayPeerRoutesToBackend(t *testing.T) {
 	}
 }
 
-// TestUpdateGatewayPeerFullTunnelRefused (WF-A / D-WFA-4) — a full-tunnel re-home is REFUSED with a typed
-// code (NOT a silent no-op): its endpoint host-route + kill-switch pass rule must move with the peer, a
-// separate carve-out. The backend is NOT called; the client fail-static keeps its current peer honestly.
-func TestUpdateGatewayPeerFullTunnelRefused(t *testing.T) {
+// TestUpdateGatewayPeerDelegatesFullTunnel (WF-A / D-WFA-4) — the Supervisor's blanket full-tunnel refusal
+// is RETIRED: full-tunnel now DELEGATES to the backend (which owns the kill-switch and decides). Proves the
+// interim seam is gone — the darwin backend re-points the carve-out; the refusal moved down.
+func TestUpdateGatewayPeerDelegatesFullTunnel(t *testing.T) {
 	fb := &fakeBackend{}
 	s := NewSupervisor(fb)
 	cfg := goodConfig() // full-tunnel (0.0.0.0/0 + ::/0)
@@ -478,11 +492,27 @@ func TestUpdateGatewayPeerFullTunnelRefused(t *testing.T) {
 	if err := s.Up(cfg); err != nil {
 		t.Fatalf("up: %v", err)
 	}
-	if err := s.UpdateGatewayPeer("bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=", "gw-b.example:51820"); err == nil || codeOf(err) != "rehome_full_tunnel_unsupported" {
-		t.Fatalf("want rehome_full_tunnel_unsupported, got %v", err)
+	if err := s.UpdateGatewayPeer("bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=", "gw-b.example:51820"); err != nil {
+		t.Fatalf("full-tunnel must delegate to the backend now, got %v", err)
 	}
-	if fb.setGwPeerCnt != 0 {
-		t.Fatalf("full-tunnel re-home must NOT call the backend: got %d", fb.setGwPeerCnt)
+	if fb.setGwPeerCnt != 1 {
+		t.Fatalf("full-tunnel re-home must reach the backend (blanket refusal retired): got %d", fb.setGwPeerCnt)
+	}
+}
+
+// TestUpdateGatewayPeerPropagatesBackendRefusal (WF-A / D-WFA-4) — when the backend refuses (the honest seam:
+// carve-out absent / Windows deferral), the Supervisor returns that typed code VERBATIM so the client's dial
+// tier fail-statics on it.
+func TestUpdateGatewayPeerPropagatesBackendRefusal(t *testing.T) {
+	fb := &fakeBackend{rehomeErr: &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "carve-out absent"}}
+	s := NewSupervisor(fb)
+	cfg := goodConfig()
+	cfg.FullTunnel = true
+	if err := s.Up(cfg); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if err := s.UpdateGatewayPeer("bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=", "gw-b.example:51820"); err == nil || codeOf(err) != "rehome_full_tunnel_unsupported" {
+		t.Fatalf("want the backend's typed refusal propagated, got %v", err)
 	}
 }
 

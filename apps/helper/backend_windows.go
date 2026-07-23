@@ -76,6 +76,10 @@ type windowsBackend struct {
 	peerPubKey     string
 	peerAllowedIPs []string
 	peerKeepalive  int
+	// fullTunnel records whether the live tunnel is full (WFP kill-switch armed). A full-tunnel WF-A re-home
+	// needs a WFP CP carve-out (D-WFA-4) that is DEFERRED on Windows (S8.6b-win-carveout) — so SetGatewayPeer
+	// refuses full-tunnel here; split-tunnel re-home is a bare peer swap and works.
+	fullTunnel bool
 }
 
 // NewBackend returns the Windows tunnel backend.
@@ -235,6 +239,7 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.luid = dev, tdev, luid
+	b.fullTunnel = cfg.FullTunnel
 	// Seed the current-peer cache for a WF-A re-home (SetGatewayPeer): the key to swap out, and the
 	// allowed_ips/keepalive to carry onto the new peer.
 	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = cfg.PeerPublicKey, append([]string(nil), cfg.AllowedIPs...), cfg.PersistentKeepalive
@@ -267,14 +272,19 @@ func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) e
 
 // SetGatewayPeer live re-homes the tunnel onto a new gateway peer (WF-A) — a peer SWAP (the SAME uapi
 // swap as macOS: add-new-before-remove-old, no handshake reset) with the current peer's allowed_ips/
-// keepalive preserved. The device identity, the interface address, and the WFP kill-switch are UNTOUCHED.
-// OS routes point at the LUID, not the peer, so a split-tunnel swap needs NO route reconcile. Full-tunnel
-// is refused upstream (Supervisor.UpdateGatewayPeer): its endpoint host-route + WFP re-point is D-WFA-4.
+// keepalive preserved. The device identity and the interface address are UNTOUCHED. OS routes point at the
+// LUID, not the peer, so a split-tunnel swap needs NO route reconcile. FULL-TUNNEL is REFUSED
+// (rehome_full_tunnel_unsupported): the WFP CP carve-out that a full-tunnel re-home needs (D-WFA-4, so the
+// control channel + the new gateway are permitted) is DEFERRED on Windows (S8.6b-win-carveout) — until then
+// a Windows full-tunnel device stranded on a dead hub needs a manual reconnect. Split-tunnel is unaffected.
 func (b *windowsBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.dev == nil {
 		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	if b.fullTunnel {
+		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home is not supported on Windows yet (WFP CP carve-out deferred)"}
 	}
 	ep, err := resolveEndpoint(newEndpoint)
 	if err != nil {
@@ -369,7 +379,8 @@ func (b *windowsBackend) Down() error {
 	}
 	b.dev, b.tunDev, b.luid = nil, nil, 0
 	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = "", nil, 0 // drop the current-peer cache with the device
-	b.applied = nil                                              // device closed drops its routes; belief cleared (drift-heal c)
+	b.fullTunnel = false
+	b.applied = nil // device closed drops its routes; belief cleared (drift-heal c)
 	if b.epPinned {
 		_ = b.epLUID.DeleteRoute(b.epDest, b.epNH) // on the physical iface → not auto-removed
 		b.epPinned = false

@@ -59,6 +59,16 @@ type darwinBackend struct {
 	peerPubKey     string
 	peerAllowedIPs []string
 	peerKeepalive  int
+	// fullTunnel records whether the live tunnel is full (kill-switch armed). A WF-A re-home of a FULL
+	// tunnel must re-point the pf carve-out + WG host-route (D-WFA-4); a split re-home is a bare peer swap.
+	fullTunnel bool
+	// cpEndpoint is the resolved CP host:port the full-tunnel kill-switch carves ONE pass out to (D-WFA-4),
+	// so the control channel survives the tunnel going down. Empty = no carve-out (split tunnel, or a
+	// full tunnel whose client sent no control_plane_endpoint / a CP that would not resolve) → full-tunnel
+	// re-home is refused. cpHost/cpFam are the pinned host-route for Down cleanup.
+	cpEndpoint string
+	cpHost     string
+	cpFam      string
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -75,6 +85,18 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		return err
 	}
 	cfg.Endpoint = ep
+
+	b.fullTunnel = cfg.FullTunnel
+	// D-WFA-4: for a FULL tunnel, resolve the CP endpoint to ONE IP up front (best-effort) so the pf
+	// carve-out below (armPF reads b.cpEndpoint) permits + pins exactly it. A CP that will not resolve =
+	// NO carve-out: the tunnel still comes up, but full-tunnel re-home is then unavailable (SetGatewayPeer
+	// refuses, the client fail-statics) — an honest degrade, never a broadened block.
+	b.cpEndpoint = ""
+	if cfg.FullTunnel && cfg.ControlPlaneEndpoint != "" {
+		if cpEp, e := resolveEndpoint(cfg.ControlPlaneEndpoint); e == nil {
+			b.cpEndpoint = cpEp
+		}
+	}
 
 	// 0) CLEAN stale kill-switch state from a prior FailClosed/crash before (re)arming.
 	//    A SPLIT tunnel must NOT inherit a full tunnel's block-all (it wants cleartext
@@ -138,22 +160,29 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 	//     egresses (what `wg-quick` calls the endpoint route).
 	if cfg.FullTunnel {
 		if epHost, _ := splitEndpoint(cfg.Endpoint); epHost != "" {
-			v6 := strings.Contains(epHost, ":")
-			fam := "-inet"
-			if v6 {
-				fam = "-inet6"
+			fam, perr := b.pinPhysHostRoute(epHost)
+			if perr != nil {
+				dev.Close()
+				return perr
 			}
-			if gw := gatewayFor(epHost, fam); gw != "" {
-				// Idempotent: a prior FailClosed/crash may have left this route (which
-				// survives the utun since it's via the PHYSICAL gateway) — delete first
-				// so the re-add can't fail "File exists" and block reconnect (review #3).
-				_ = run("route", "-q", "delete", fam, "-host", epHost)
-				if err := run("route", "-q", "add", fam, "-host", epHost, gw); err != nil {
-					dev.Close()
-					return fmt.Errorf("pin endpoint route %s via %s: %w", epHost, gw, err)
-				}
+			if fam != "" {
 				b.endpointHost, b.endpointFam = epHost, fam
 			}
+		}
+	}
+	// 3b) FULL TUNNEL + D-WFA-4: pin the CP endpoint host-route via the physical gateway too — same reason
+	//     as the WG endpoint: the control channel's TLS must egress PHYSICALLY (not loop into the tunnel),
+	//     so it survives the tunnel going down and the re-home poll works during a hard hub death. The pf
+	//     pass alone (armed above) is not enough — without the route the CP IP matches the 0.0.0.0/1 tunnel
+	//     half. Hard fail like the WG pin: a half carve-out (pass, no route) must never persist.
+	if cfg.FullTunnel && b.cpEndpoint != "" {
+		if cpHost, _ := splitEndpoint(b.cpEndpoint); cpHost != "" {
+			fam, perr := b.pinPhysHostRoute(cpHost)
+			if perr != nil {
+				dev.Close()
+				return perr
+			}
+			b.cpHost, b.cpFam = cpHost, fam
 		}
 	}
 	// Baked routes go through the ONE reconciler (S8.5 reduce, #9) — same delete-before-add + per-route
@@ -210,15 +239,23 @@ func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) er
 
 // SetGatewayPeer live re-homes the tunnel onto a new gateway peer (WF-A) — a peer SWAP with the CURRENT
 // peer's allowed_ips/keepalive preserved, no bounce, no handshake reset on the surviving interface. The
-// device identity (own key), the interface address, and (n/a here — split-tunnel only) the kill-switch are
-// UNTOUCHED. The OS routes point at the interface, not the peer, so a split-tunnel swap needs NO route
-// reconcile — only the crypto peer changes. Full-tunnel is refused upstream (Supervisor.UpdateGatewayPeer):
-// its endpoint host-route + pf pass rule re-point is the D-WFA-4 carve-out.
+// device identity (own key) and the interface address are UNTOUCHED.
+//   - SPLIT tunnel: a bare peer swap — the OS routes point at the interface, not the peer, so no route
+//     reconcile is needed, and there is no kill-switch.
+//   - FULL tunnel (D-WFA-4): after the swap, RE-POINT the kill-switch to the NEW gateway — re-arm pf with
+//     the new WG endpoint (re-emitting the CP carve-out) + move the WG endpoint host-route — or the new
+//     gateway's handshake is block-dropped + route-looped. REQUIRES the CP carve-out (b.cpEndpoint): without
+//     it a full-tunnel device could never have polled a re-home in the first place, so refuse honestly.
 func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.dev == nil {
 		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	if b.fullTunnel && b.cpEndpoint == "" {
+		// A full tunnel with no CP carve-out cannot safely re-home (its handshake to the new gateway would
+		// be block-dropped, and it never had a tunnel-independent control path). The honest failure seam.
+		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home requires the CP carve-out (control_plane_endpoint)"}
 	}
 	// Resolve a hostname endpoint to ONE IP so the peer dials exactly what we intend (parity with Up).
 	ep, err := resolveEndpoint(newEndpoint)
@@ -229,11 +266,59 @@ func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	if err != nil {
 		return err
 	}
+	// Swap the crypto peer FIRST (swap-first is recoverable: if the pf re-point below fails, the client
+	// fail-statics and retries; a pf-first order could strand the OLD tunnel if the swap then failed).
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "gateway_peer_apply_failed", Msg: err.Error()}
 	}
 	b.peerPubKey = newPubKey // the new peer is now current; a later re-home swaps IT out
+
+	if b.fullTunnel {
+		// Re-arm pf with the NEW WG endpoint (buildPFRules re-emits the CP pass from b.cpEndpoint), so the
+		// new gateway's encrypted UDP is permitted and the old endpoint no longer is.
+		if err := b.armPF(ep, b.ifname); err != nil {
+			return &ProtocolError{Code: "gateway_peer_pf_failed", Msg: err.Error()}
+		}
+		// Move the WG endpoint host-route: delete the OLD pin, add the NEW (so the new gateway's outer
+		// packets egress physically instead of looping into the tunnel).
+		newHost, _ := splitEndpoint(ep)
+		if b.endpointHost != "" && b.endpointHost != newHost {
+			_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
+			b.endpointHost, b.endpointFam = "", ""
+		}
+		if newHost != "" {
+			fam, perr := b.pinPhysHostRoute(newHost)
+			if perr != nil {
+				return &ProtocolError{Code: "gateway_peer_route_failed", Msg: perr.Error()}
+			}
+			if fam != "" {
+				b.endpointHost, b.endpointFam = newHost, fam
+			}
+		}
+	}
 	return nil
+}
+
+// pinPhysHostRoute pins a /32 (or /128) host route for `host` via the CURRENT physical default gateway, so
+// a packet to that host egresses on the physical NIC instead of matching the 0.0.0.0/1 tunnel half and
+// looping (the WG endpoint + the D-WFA-4 CP carve-out both need this). Idempotent (delete-before-add, so a
+// prior FailClosed/crash's leftover physical-gateway route can't fail the re-add "File exists"). Returns the
+// family flag ("-inet"/"-inet6") pinned, or "" when the host is on-link/unresolved (nothing to pin — not an
+// error). b.mu is held by every caller (Up / SetGatewayPeer).
+func (b *darwinBackend) pinPhysHostRoute(host string) (fam string, err error) {
+	fam = "-inet"
+	if strings.Contains(host, ":") {
+		fam = "-inet6"
+	}
+	gw := gatewayFor(host, fam)
+	if gw == "" {
+		return "", nil // on-link / unresolved next-hop → nothing to pin
+	}
+	_ = run("route", "-q", "delete", fam, "-host", host)
+	if err := run("route", "-q", "add", fam, "-host", host, gw); err != nil {
+		return "", fmt.Errorf("pin host route %s via %s: %w", host, gw, err)
+	}
+	return fam, nil
 }
 
 // routeCmd is the darwin per-target route seam for reconcileRoutes: add|delete a `-net <target>` route on
@@ -273,6 +358,13 @@ func (b *darwinBackend) Down() error {
 		_ = run("route", "-q", "delete", b.endpointFam, "-host", b.endpointHost)
 		b.endpointHost, b.endpointFam = "", ""
 	}
+	// D-WFA-4: drop the CP carve-out host-route + state with the tunnel (the pf anchor is flushed by
+	// releasePF below, taking its CP pass with it).
+	if b.cpHost != "" {
+		_ = run("route", "-q", "delete", b.cpFam, "-host", b.cpHost)
+		b.cpHost, b.cpFam = "", ""
+	}
+	b.cpEndpoint, b.fullTunnel = "", false
 	// Restore the system resolver a full tunnel hijacked (no-op if none was saved).
 	restoreDNS()
 	return b.releasePF()
@@ -340,7 +432,7 @@ func (b *darwinBackend) Stats() (TunnelStatus, error) {
 //     spoofing DHCP/RA, which is out of scope for a VPN egress kill-switch (and
 //     already a risk pre-VPN). Worth it to avoid the tunnel silently dying on a
 //     DHCP renew.
-func buildPFRules(endpoint, ifname string) string {
+func buildPFRules(endpoint, ifname, cpEndpoint string) string {
 	host, port := splitEndpoint(endpoint)
 	var b strings.Builder
 	// `set skip on <iface>` is REJECTED inside a pf anchor — `set` options are
@@ -358,6 +450,13 @@ func buildPFRules(endpoint, ifname string) string {
 	}
 	b.WriteString("block drop out all\n")
 	fmt.Fprintf(&b, "pass out proto udp to %s port %s\n", host, port)
+	// D-WFA-4: the ONE named carve-out — permit the control channel's TLS to the CP endpoint EXACTLY, so
+	// the device can still poll the CP (to learn a re-home) when the tunnel is down. The CP is already the
+	// TLS trust root; a pass to it widens nothing. Only present for a full tunnel that supplied a CP endpoint.
+	if cpEndpoint != "" {
+		cpHost, cpPort := splitEndpoint(cpEndpoint)
+		fmt.Fprintf(&b, "pass out proto tcp to %s port %s\n", cpHost, cpPort)
+	}
 	b.WriteString("pass out proto udp from any port 68 to any port 67\n")   // DHCPv4
 	b.WriteString("pass out proto udp from any port 546 to any port 547\n") // DHCPv6
 	b.WriteString("pass out inet6 proto icmp6 all\n")                       // NDP
@@ -373,7 +472,7 @@ func buildPFRules(endpoint, ifname string) string {
 // that reference (removed on uninstall). The smoke asserts ENFORCEMENT (a blocked
 // ping), not rule presence — so a non-referenced anchor is caught.
 func (b *darwinBackend) armPF(endpoint, ifname string) error {
-	if err := runStdin(buildPFRules(endpoint, ifname), "pfctl", "-a", pfAnchor, "-f", "-"); err != nil {
+	if err := runStdin(buildPFRules(endpoint, ifname, b.cpEndpoint), "pfctl", "-a", pfAnchor, "-f", "-"); err != nil {
 		return err
 	}
 	if b.pfToken == "" {

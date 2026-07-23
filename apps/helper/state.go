@@ -306,23 +306,19 @@ func (s *Supervisor) UpdateAllowedIPs(allowedIPs []string) error {
 
 // UpdateGatewayPeer LIVE-re-homes the tunnel onto a new active-hub peer (WF-A). Like UpdateAllowedIPs it
 // reads state under the lock then applies the (bounded) backend swap OUTSIDE it, and is NOT tunnel-owning:
-// it changes the peer, never the kill-switch / state / owner connection.
+// it changes the peer, never the state / owner connection.
 //   - tunnel not up → not_up (nothing to re-home).
-//   - FULL-TUNNEL → REFUSED (rehome_full_tunnel_unsupported), NOT a silent no-op: a full tunnel's endpoint
-//     host-route AND its kill-switch pass rule must move WITH the peer or the new gateway's outer packets
-//     are blocked — that carve-out is D-WFA-4 (a separate slice). Silently no-op'ing would strand a
-//     full-tunnel device on a dead hub; an explicit typed refusal lets the client fail-static honestly.
+//   - full-vs-split policy lives in the BACKEND (it owns the kill-switch): the darwin backend re-points the
+//     pf carve-out + WG host-route for a FULL tunnel (D-WFA-4) when the CP carve-out is present, and refuses
+//     (rehome_full_tunnel_unsupported) when it is absent — the Windows backend refuses full-tunnel outright
+//     (its WFP carve-out is deferred). Split-tunnel re-home is a bare peer swap on every backend.
 func (s *Supervisor) UpdateGatewayPeer(newPubKey, newEndpoint string) error {
 	s.mu.Lock()
 	if s.state != StateUp || s.lastCfg == nil {
 		s.mu.Unlock()
 		return &ProtocolError{Code: "not_up", Msg: "no tunnel is up"}
 	}
-	full := s.lastCfg.FullTunnel
 	s.mu.Unlock()
-	if full {
-		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home is not supported in this version"}
-	}
 	return s.be.SetGatewayPeer(newPubKey, newEndpoint)
 }
 
