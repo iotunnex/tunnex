@@ -54,12 +54,16 @@ func TestOrgLifecycle(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Get + list + count include it.
+	// Get + list include it. The list assertion is SCOPED to THIS org (present after create,
+	// absent after soft-delete below) — a GLOBAL count here races with any concurrently-running
+	// package whose integration fixtures commit org rows (pool.Exec, no rollback; the S8.5 sites
+	// suite was the first to expose it on CI's shared test DB). The soft-delete-exclusion
+	// semantics are fully proven on the test's own org; a global count proves nothing extra.
 	if _, err := svc.GetOrganization(ctx, org.ID); err != nil {
 		t.Fatalf("get after create: %v", err)
 	}
-	if orgs, _ := svc.ListOrganizations(ctx); len(orgs) != 1 {
-		t.Fatalf("list after create = %d, want 1", len(orgs))
+	if orgs, _ := svc.ListOrganizations(ctx); !containsOrg(orgs, org.ID) {
+		t.Fatalf("list after create must include the created org, got %d orgs", len(orgs))
 	}
 
 	// Update name; slug must be unchanged (immutable).
@@ -80,8 +84,8 @@ func TestOrgLifecycle(t *testing.T) {
 	if _, err := svc.GetOrganization(ctx, org.ID); !isCode(err, "org_not_found") {
 		t.Fatalf("get after delete: want org_not_found, got %v", err)
 	}
-	if orgs, _ := svc.ListOrganizations(ctx); len(orgs) != 0 {
-		t.Fatalf("list after delete = %d, want 0", len(orgs))
+	if orgs, _ := svc.ListOrganizations(ctx); containsOrg(orgs, org.ID) {
+		t.Fatal("list after delete must EXCLUDE the soft-deleted org")
 	}
 
 	// Deleting again is a not-found (idempotent, no phantom audit).
@@ -113,4 +117,14 @@ func TestOrgLifecycle(t *testing.T) {
 func isCode(err error, code string) bool {
 	var apiErr *apierr.Error
 	return errors.As(err, &apiErr) && apiErr.Code == code
+}
+
+// containsOrg reports whether the list carries the given org id (the race-free scoped assertion).
+func containsOrg(orgs []sqlc.Organization, id uuid.UUID) bool {
+	for _, o := range orgs {
+		if o.ID == id {
+			return true
+		}
+	}
+	return false
 }
