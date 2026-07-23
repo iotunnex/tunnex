@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { policyHealthBadge } from "../src/lib/healthview";
+import { policyHealthBadge, siteLinkNote } from "../src/lib/healthview";
 import type { Node } from "../src/lib/api";
 
 const node = (degraded: boolean, kind?: Node["policy_degraded_kind"]) =>
@@ -55,5 +55,28 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
     // A kind the switch doesn't enumerate must still badge (the default guards the next kind we add).
     const b = policyHealthBadge(node(true, "some_future_kind" as Node["policy_degraded_kind"]));
     expect(b).toEqual({ label: "degraded", tone: "warn" });
+  });
+});
+describe("siteLinkNote — WF-B subordinate line, independent of the headline badge", () => {
+  const n = (peer?: string | null, demoted?: boolean) =>
+    ({ site_link_note_peer: peer ?? null, site_link_note_demoted: demoted ?? null }) as Pick<
+      Node,
+      "site_link_note_peer" | "site_link_note_demoted"
+    >;
+
+  it("no peer → no note (null)", () => {
+    expect(siteLinkNote(n(null))).toBeNull();
+    expect(siteLinkNote(n(undefined))).toBeNull();
+  });
+
+  it("a demoted-dead peer → named note carrying the (demoted) qualifier", () => {
+    expect(siteLinkNote(n("aws-gw-1", true))).toEqual({ peer: "aws-gw-1", demoted: true });
+  });
+
+  it("the note is INDEPENDENT of policy_degraded_kind — a healthy headline can still carry it (the walk's state)", () => {
+    // The CP only sets the note when the headline is NOT site_link_down; the render shows both truths distinct.
+    const healthyHeadline = { policy_degraded: false, policy_degraded_kind: "healthy" } as Pick<Node, "policy_degraded" | "policy_degraded_kind">;
+    expect(policyHealthBadge(healthyHeadline)).toBeNull(); // headline healthy
+    expect(siteLinkNote(n("aws-gw-1", true))).not.toBeNull(); // + a subordinate named line
   });
 });

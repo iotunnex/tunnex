@@ -1,7 +1,7 @@
 import type { Node, Site, SiteSubnet } from "./api";
 import { can } from "./rbac";
 import type { Role } from "./api";
-import { policyHealthBadge, type HealthBadge } from "./healthview";
+import { policyHealthBadge, siteLinkNote, type HealthBadge, type SiteLinkNote } from "./healthview";
 import { relativeAge } from "./format";
 
 // sitesview — PURE, electron-free view-models for the Sites page (S8.3 Slice 2). The page is a thin
@@ -55,6 +55,7 @@ export interface GatewayView {
   status: Node["status"]; // active | revoked
   isHub: boolean; // READ from node.is_site_hub (backend election), never recomputed here
   health: HealthBadge | null; // null = healthy (no badge); otherwise the S7.4b/S8.2 kind badge
+  siteLinkNote: SiteLinkNote | null; // WF-B: the SUBORDINATE demoted-dead-peer line, INDEPENDENT of `health`
   maxPolicyVersion: number | null; // reported max; null = never reported (below-ceiling — CW, Slice 3 uses it)
   agentVersion: string;
   lastSeenAt: string | null; // S8.4 rider (VERIFY-0): the freshness fact the Devices page already renders
@@ -182,6 +183,7 @@ export function assembleTopology(sites: Site[], subnetsBySite: Record<string, Si
         status: n.status,
         isHub: n.is_site_hub === true,
         health: policyHealthBadge(n),
+        siteLinkNote: siteLinkNote(n), // WF-B: independent of `health` — the demoted-dead-peer subordinate line
         maxPolicyVersion: n.max_policy_version ?? null,
         agentVersion: n.agent_version,
         lastSeenAt: n.last_seen_at ?? null,

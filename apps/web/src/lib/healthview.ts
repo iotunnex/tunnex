@@ -43,6 +43,22 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
   }
 }
 
+// SiteLinkNote — WF-B: the SUBORDINATE site-link line, INDEPENDENT of the headline badge
+// (policyHealthBadge). A DEMOTED hub member whose link is dead WHILE org transit rides the active
+// primary (healthy): the site's headline stays its real state and this names the demoted-dead peer as a
+// distinct line ("site link down: aws-gw-1 (demoted)"). The `(demoted)` qualifier tells the operator
+// "expected — this member was failed-over-past" vs a live peer's real outage. NEVER accompanies a
+// `site_link_down` HEADLINE (the CP never sets the note then — the inverse-red guard).
+export interface SiteLinkNote {
+  peer: string;
+  demoted: boolean;
+}
+
+export function siteLinkNote(node: Pick<Node, "site_link_note_peer" | "site_link_note_demoted">): SiteLinkNote | null {
+  if (!node.site_link_note_peer) return null; // render-floor: the field it consumes, present ⇒ a note
+  return { peer: node.site_link_note_peer, demoted: node.site_link_note_demoted ?? false };
+}
+
 export function badgeClass(tone: BadgeTone): string {
   return {
     warn: "text-amber-400",
