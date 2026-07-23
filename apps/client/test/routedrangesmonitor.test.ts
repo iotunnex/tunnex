@@ -294,10 +294,23 @@ test("dial tier fail-static is INDEPENDENT: a re-home throw keeps lastDial, retr
   assert.deepEqual(rehomed[0], { endpoint: "gw-b:51820", pubkey: "KB" });
 });
 
-test("dial tier GATED OFF for full-tunnel (D-WFA-4 carve-out): no set_gateway_peer even when the hub moved", async () => {
+test("dial tier flag mechanic: dialEnabled=false skips the tier entirely (no set_gateway_peer)", async () => {
+  // Post-D-WFA-4 the client passes dialEnabled=true for BOTH modes (the helper refuses where its carve-out
+  // is absent). This pins the FLAG mechanic itself: when off, the tier is inert regardless of a moved hub.
   const seed = DIAL("gw-a:51820", "KA");
   const newHub = DIAL("gw-b:51820", "KB");
   const { m, rehomed } = mkD(seed, [newHub], { dialEnabled: false });
   assert.equal(await m.checkOnce(), "unchanged");
-  assert.equal(rehomed.length, 0, "full-tunnel re-home is refused in v1 — the client must not drive it");
+  assert.equal(rehomed.length, 0, "dialEnabled=false must make the dial tier inert");
+});
+
+test("dial tier drives full-tunnel too (D-WFA-4): dialEnabled=true re-homes on a hub move; helper owns any refusal", async () => {
+  // The full-tunnel base shape no longer gates the dial tier at the client — the carve-out makes the
+  // control path independent, so the client drives the re-home and the HELPER refuses (fail-static) only
+  // where its carve-out is absent (Windows). Here the apply succeeds → applied.
+  const seed = DIAL("gw-a:51820", "KA");
+  const newHub = DIAL("gw-b:51820", "KB");
+  const { m, rehomed } = mkD(seed, [newHub], { dialEnabled: true });
+  assert.equal(await m.checkOnce(), "applied");
+  assert.deepEqual(rehomed[0], { endpoint: "gw-b:51820", pubkey: "KB" });
 });

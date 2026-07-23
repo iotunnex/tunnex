@@ -324,7 +324,8 @@ export function registerIpc(
         !requestedFullTunnel, // routesEnabled: routes tier split-only; resolver tier always
         sc.deviceId, // WF-A: scope the dial to THIS device
         (endpoint, pubkey) => tunnel.setGatewayPeer(pubkey, endpoint), // WF-A: re-home on active-hub move
-        !requestedFullTunnel, // dialEnabled: split-tunnel only in v1 (full-tunnel carve-out = D-WFA-4)
+        true, // dialEnabled: BOTH modes now (D-WFA-4 carve-out landed); the helper refuses a full-tunnel
+        //        re-home only where its carve-out is absent (Windows) → the dial tier fail-statics there.
         { endpoint: sc.config.endpoint, pubkey: sc.config.peer_public_key }, // seed = the minted peer
       );
       routedRangesMonitor.start();

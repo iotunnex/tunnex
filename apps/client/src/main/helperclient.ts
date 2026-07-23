@@ -32,6 +32,10 @@ export interface TunnelConfig {
   // cross-site name resolution. Absent/empty until S8.5's device-routes slice
   // populates them — the client is inert-safe when there are none.
   dns_forwards?: ResolverForward[];
+  // control_plane_endpoint (WF-A / D-WFA-4): the tenant API host:port. Sent for a FULL tunnel so the
+  // helper's kill-switch carves ONE pass to the CP — the control channel then survives the tunnel going
+  // down, so the device can poll a re-home during a hard hub death. Omitted for split (no kill-switch).
+  control_plane_endpoint?: string;
 }
 
 export interface HelperRequest {

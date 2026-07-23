@@ -89,12 +89,31 @@ export class PendingApprovalError extends Error {
 // desktop OWNS creation — create a device, capture its one-time config, persist it,
 // and return it. full_tunnel is set from the create INTENT (the helper enforces
 // both-family completeness when true).
+// cpEndpointFromOrigin derives the tenant API host:port from the server origin (WF-A / D-WFA-4), for the
+// helper's full-tunnel kill-switch carve-out. Default port 443 (https). Returns "" if the origin can't be
+// parsed — the helper then simply gets no carve-out (full-tunnel re-home fail-static, honest degrade).
+export function cpEndpointFromOrigin(origin: string): string {
+  try {
+    const u = new URL(origin);
+    if (!u.hostname) return "";
+    const port = u.port || (u.protocol === "http:" ? "80" : "443");
+    return `${u.hostname}:${port}`;
+  } catch {
+    return "";
+  }
+}
+
 export async function resolveTunnelConfig(
   origin: string,
   fullTunnel: boolean,
   api: DeviceApi,
   store: TunnelConfigStore,
 ): Promise<TunnelConfig> {
+  // WF-A: for a FULL tunnel, attach the CP endpoint so the helper carves the kill-switch to it (the control
+  // channel must survive the tunnel going down to re-home). NEVER persisted — it's an origin-derived routing
+  // fact, re-attached each connect on top of the stored identity-only config. Split → no carve-out.
+  const withCP = (cfg: TunnelConfig): TunnelConfig =>
+    fullTunnel ? { ...cfg, control_plane_endpoint: cpEndpointFromOrigin(origin) } : cfg;
   let existing = store.get(origin);
   if (existing && !existing.orgId) {
     // DEFENSE (reduction 2): connect() migrates a legacy (no-orgId) config BEFORE tunnel.up —
@@ -134,7 +153,7 @@ export async function resolveTunnelConfig(
     } catch {
       stillThere = true;
     }
-    if (stillThere) return existing.config;
+    if (stillThere) return withCP(existing.config);
     store.remove(origin);
   }
 
@@ -147,7 +166,7 @@ export async function resolveTunnelConfig(
   if (pendingApproval) {
     throw new PendingApprovalError(deviceId); // S7.3: abort — do NOT arm the helper
   }
-  return config;
+  return withCP(config);
 }
 
 // migrateLegacyConfig migrates a LEGACY (no-orgId) config with REVOKE-FIRST ordering (S7.3

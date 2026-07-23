@@ -37,7 +37,7 @@ func TestRouteTargets(t *testing.T) {
 // `pass quick on <iface>` (honored in an anchor) so loopback + the tunnel interface
 // bypass the block. This pins that regression without a live pf.
 func TestBuildPFRulesUsesPassQuickNotSetSkip(t *testing.T) {
-	rules := buildPFRules("40.65.63.141:51820", "utun4")
+	rules := buildPFRules("40.65.63.141:51820", "utun4", "")
 
 	// `set skip` must NEVER appear — pf drops it in an anchor, silently disarming the bypass.
 	if strings.Contains(rules, "set skip") {
@@ -62,11 +62,53 @@ func TestBuildPFRulesUsesPassQuickNotSetSkip(t *testing.T) {
 
 	// Before the tunnel exists (ifname ""), only loopback is passed — no tunnel iface,
 	// so the initial arm blocks everything except the endpoint (fail-closed).
-	initial := buildPFRules("40.65.63.141:51820", "")
+	initial := buildPFRules("40.65.63.141:51820", "", "")
 	if strings.Contains(initial, "pass quick on utun") {
 		t.Errorf("no tunnel-iface pass should be emitted before the tunnel exists:\n%s", initial)
 	}
 	if !strings.Contains(initial, "pass quick on lo0 all") {
 		t.Errorf("loopback must always be passed:\n%s", initial)
+	}
+	// D-WFA-4: with NO CP endpoint (the default / split-tunnel), the ruleset must carry NO tcp carve-out —
+	// the kill-switch is unchanged from before this slice (proves the carve-out is opt-in, widens nothing
+	// when absent).
+	if strings.Contains(rules, "proto tcp") {
+		t.Errorf("no CP carve-out must appear when cpEndpoint is empty:\n%s", rules)
+	}
+}
+
+// TestBuildPFRulesCPCarveOut (WF-A / D-WFA-4) — THE kill-switch invariant with the carve-out present:
+// block-all + EXACTLY the named exceptions, plus ONE new named exception (the CP endpoint, tcp, its exact
+// port). Proves the carve-out is scoped to the CP endpoint EXACTLY and nothing broader — the block-all
+// invariant re-verified minus exactly one named line.
+func TestBuildPFRulesCPCarveOut(t *testing.T) {
+	rules := buildPFRules("40.65.63.141:51820", "utun4", "203.0.113.9:443")
+
+	// The FULL exception set — and NOTHING else broad. block-all present; each pass is a NAMED, scoped line.
+	wantExact := []string{
+		"pass quick on lo0 all",
+		"pass quick on utun4 all",
+		"block drop out all",
+		"pass out proto udp to 40.65.63.141 port 51820", // WG endpoint
+		"pass out proto tcp to 203.0.113.9 port 443",    // D-WFA-4 CP carve-out — scoped to the CP IP:port EXACTLY
+		"pass out proto udp from any port 68 to any port 67",
+		"pass out proto udp from any port 546 to any port 547",
+		"pass out inet6 proto icmp6 all",
+	}
+	for _, w := range wantExact {
+		if !strings.Contains(rules, w) {
+			t.Errorf("carve-out ruleset missing %q\n---\n%s", w, rules)
+		}
+	}
+	// The carve-out must come BELOW block-all (block-all is the default; the passes are exceptions). Only
+	// the `quick` passes short-circuit above it — the tcp CP pass is a plain (non-quick) pass evaluated
+	// after the block, exactly like the WG endpoint pass.
+	if strings.Contains(rules, "pass quick") && strings.Index(rules, "proto tcp to 203.0.113.9") < strings.Index(rules, "block drop out all") {
+		t.Errorf("the CP carve-out must be a plain pass (below block-all), not a quick short-circuit:\n%s", rules)
+	}
+	// SCOPED EXACTLY: the CP pass names a single host:port, never a broad `to any` — the one thing that
+	// would turn a named carve-out into a hole.
+	if strings.Contains(rules, "pass out proto tcp to any") {
+		t.Errorf("the CP carve-out must NOT be a broad `to any` — scoped to the CP endpoint exactly:\n%s", rules)
 	}
 }

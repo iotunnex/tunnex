@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { parseWgConf } from "../src/main/wgconf";
 import { TunnelConfigStore } from "../src/main/tunnelstore";
-import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError, type DeviceApi } from "../src/main/deviceconfig";
+import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError, cpEndpointFromOrigin, type DeviceApi } from "../src/main/deviceconfig";
 import { InsecureStorageError, type Persistence, type SafeStorageLike } from "../src/main/credential";
 
 const CONF = `[Interface]
@@ -105,6 +105,28 @@ test("resolveTunnelConfig: get-or-create, never re-fetch (D2)", async () => {
   const c2 = await resolveTunnelConfig(origin, true, api, store);
   assert.equal(api.creates, 1);
   assert.equal(c2.private_key, c1.private_key);
+});
+
+test("cpEndpointFromOrigin: host:port, 443 default (WF-A / D-WFA-4)", () => {
+  assert.equal(cpEndpointFromOrigin("https://api.example.com"), "api.example.com:443");
+  assert.equal(cpEndpointFromOrigin("https://api.example.com:8443"), "api.example.com:8443");
+  assert.equal(cpEndpointFromOrigin("http://localhost:3000"), "localhost:3000");
+  assert.equal(cpEndpointFromOrigin("not a url"), ""); // unparseable → no carve-out
+});
+
+test("resolveTunnelConfig: full-tunnel ATTACHES control_plane_endpoint (D-WFA-4), split OMITS it", async () => {
+  const origin = "https://api.example.com";
+  // FULL: the CP endpoint rides on top, on both the fresh mint AND the reused-config path.
+  const fullStore = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const fullApi = fakeApi();
+  const cf = await resolveTunnelConfig(origin, true, fullApi, fullStore);
+  assert.equal(cf.control_plane_endpoint, "api.example.com:443", "full-tunnel must carry the CP endpoint");
+  const cf2 = await resolveTunnelConfig(origin, true, fullApi, fullStore); // reused path
+  assert.equal(cf2.control_plane_endpoint, "api.example.com:443", "reused config must ALSO re-attach the CP endpoint");
+  // SPLIT: no kill-switch → no carve-out → field omitted.
+  const splitStore = new TunnelConfigStore(fakeSafe(), fakePersist(), false);
+  const cs = await resolveTunnelConfig(origin, false, fakeApi(), splitStore);
+  assert.equal(cs.control_plane_endpoint, undefined, "split-tunnel must NOT carry a CP endpoint (no kill-switch)");
 });
 
 test("clearTunnelConfigForOrigin: removes + best-effort revokes that origin's device", async () => {
