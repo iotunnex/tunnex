@@ -70,6 +70,12 @@ type windowsBackend struct {
 	// applied is the per-session BELIEF CACHE (S8.5 reduce) of the OS route-targets we believe are in the
 	// kernel — set on Up, reconciled by SetAllowedIPs, cleared on Down. NEVER persisted. See reconcileRoutes.
 	applied map[string]bool
+	// peer* track the CURRENT gateway peer for a WF-A re-home (SetGatewayPeer) — the key to swap out plus
+	// the allowed_ips/keepalive to preserve onto the new peer. Mirrors backend_darwin: peerPubKey seeds on
+	// Up + advances on each re-home; peerAllowedIPs seeds on Up + advances on every SetAllowedIPs push.
+	peerPubKey     string
+	peerAllowedIPs []string
+	peerKeepalive  int
 }
 
 // NewBackend returns the Windows tunnel backend.
@@ -229,6 +235,9 @@ func (b *windowsBackend) Up(cfg *TunnelConfig) error {
 	}
 
 	b.dev, b.tunDev, b.luid = dev, tdev, luid
+	// Seed the current-peer cache for a WF-A re-home (SetGatewayPeer): the key to swap out, and the
+	// allowed_ips/keepalive to carry onto the new peer.
+	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = cfg.PeerPublicKey, append([]string(nil), cfg.AllowedIPs...), cfg.PersistentKeepalive
 	return nil
 }
 
@@ -249,9 +258,37 @@ func (b *windowsBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) e
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
+	// Advance the peer cache so a subsequent WF-A re-home carries the LIVE routing, not the baked set.
+	b.peerAllowedIPs = append([]string(nil), allowedIPs...)
 	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
 	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
 	return reconcileRoutes(b.applied, routeSet(allowedIPs), b.routeCmd)
+}
+
+// SetGatewayPeer live re-homes the tunnel onto a new gateway peer (WF-A) — a peer SWAP (the SAME uapi
+// swap as macOS: add-new-before-remove-old, no handshake reset) with the current peer's allowed_ips/
+// keepalive preserved. The device identity, the interface address, and the WFP kill-switch are UNTOUCHED.
+// OS routes point at the LUID, not the peer, so a split-tunnel swap needs NO route reconcile. Full-tunnel
+// is refused upstream (Supervisor.UpdateGatewayPeer): its endpoint host-route + WFP re-point is D-WFA-4.
+func (b *windowsBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dev == nil {
+		return &ProtocolError{Code: "not_up", Msg: "no active tunnel device"}
+	}
+	ep, err := resolveEndpoint(newEndpoint)
+	if err != nil {
+		return err
+	}
+	uapi, err := gatewayPeerSwapUAPI(b.peerPubKey, newPubKey, ep, b.peerKeepalive, b.peerAllowedIPs)
+	if err != nil {
+		return err
+	}
+	if err := b.dev.IpcSet(uapi); err != nil {
+		return &ProtocolError{Code: "gateway_peer_apply_failed", Msg: err.Error()}
+	}
+	b.peerPubKey = newPubKey
+	return nil
 }
 
 // routeCmd is the windows per-target route seam for reconcileRoutes: add|delete a route on the tunnel LUID
@@ -331,7 +368,8 @@ func (b *windowsBackend) Down() error {
 		b.dev.Close()
 	}
 	b.dev, b.tunDev, b.luid = nil, nil, 0
-	b.applied = nil // device closed drops its routes; belief cleared (drift-heal c)
+	b.peerPubKey, b.peerAllowedIPs, b.peerKeepalive = "", nil, 0 // drop the current-peer cache with the device
+	b.applied = nil                                              // device closed drops its routes; belief cleared (drift-heal c)
 	if b.epPinned {
 		_ = b.epLUID.DeleteRoute(b.epDest, b.epNH) // on the physical iface → not auto-removed
 		b.epPinned = false

@@ -94,13 +94,22 @@ export class HttpDeviceApi implements DeviceApi {
     return (await this.deviceStatus(deviceId, orgId)) === "active";
   }
 
-  // routedConfig GETs the org's declared routed ranges + reachable DNS forwards (S8.5). Throws on a non-OK
-  // read (inconclusive — the monitor keeps its last-applied set, never strip-to-baked). Ranges + forwards.
-  async routedConfig(orgId: string): Promise<RoutedConfig> {
-    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/routed-ranges`, { headers: this.headers() });
+  // routedConfig GETs the org's declared routed ranges + reachable DNS forwards (S8.5) + this device's
+  // active-hub dial (WF-A, when deviceId is passed). Throws on a non-OK read (inconclusive — the monitor
+  // keeps its last-applied sets, never strip-to-baked). The dial is present only when the server derives
+  // one (multi-gateway hub set) AND device_id was sent; a null/absent pair means keep the current peer.
+  async routedConfig(orgId: string, deviceId?: string): Promise<RoutedConfig> {
+    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+    const r = await fetch(`${this.origin}/api/v1/organizations/${orgId}/routed-ranges${q}`, { headers: this.headers() });
     if (!r.ok) throw new Error(`routed_ranges_failed: ${r.status}`);
-    const body = (await r.json()) as { ranges?: string[]; forwards?: ResolverForward[] };
-    return { ranges: body.ranges ?? [], forwards: body.forwards ?? [] };
+    const body = (await r.json()) as {
+      ranges?: string[];
+      forwards?: ResolverForward[];
+      dial_endpoint?: string | null;
+      dial_pubkey?: string | null;
+    };
+    const dial = body.dial_endpoint && body.dial_pubkey ? { endpoint: body.dial_endpoint, pubkey: body.dial_pubkey } : null;
+    return { ranges: body.ranges ?? [], forwards: body.forwards ?? [], dial };
   }
 
   // deviceInOrg fetches ONE org's device list and maps the device's status, or null if it is

@@ -7,7 +7,7 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export type AuthMode = "path_check" | "code_signing";
-export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status" | "set_resolvers" | "set_allowed_ips";
+export type Verb = "tunnel_up" | "tunnel_down" | "status" | "posture_status" | "set_resolvers" | "set_allowed_ips" | "set_gateway_peer";
 
 // ResolverForward mirrors apps/helper ResolverForward (S8.4): a domain whose names
 // resolve via a remote site's internal DNS (ResolverIP) over the tunnel.
@@ -44,6 +44,16 @@ export interface HelperRequest {
   // allowed_ips rides ONLY on set_allowed_ips — the full desired peer AllowedIPs set (baked-stable ∪
   // declared-ranges), live-applied without a bounce. S8.5. Mirrors apps/helper.
   allowed_ips?: string[];
+  // gateway_peer rides ONLY on set_gateway_peer — the new active-hub peer to re-home onto (WF-A). The
+  // helper preserves the current peer's allowed_ips; device identity is untouched. Mirrors apps/helper.
+  gateway_peer?: GatewayPeer;
+}
+
+// GatewayPeer mirrors apps/helper GatewayPeer (WF-A): the re-home target's public routing facts —
+// its WireGuard public key and host:port endpoint. NEVER the device's own key.
+export interface GatewayPeer {
+  peer_public_key: string;
+  endpoint: string;
 }
 
 export interface TunnelStatus {

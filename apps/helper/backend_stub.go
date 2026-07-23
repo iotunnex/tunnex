@@ -16,6 +16,9 @@ func (StubBackend) CleanStale() error { return nil }
 func (StubBackend) SetAllowedIPs(string, []string) error {
 	return &ProtocolError{Code: "not_implemented", Msg: "no tunnel backend on this platform"}
 }
+func (StubBackend) SetGatewayPeer(string, string) error {
+	return &ProtocolError{Code: "not_implemented", Msg: "no tunnel backend on this platform"}
+}
 func (StubBackend) Stats() (TunnelStatus, error) {
 	return TunnelStatus{}, &ProtocolError{Code: "not_implemented", Msg: "stats not implemented on this build"}
 }

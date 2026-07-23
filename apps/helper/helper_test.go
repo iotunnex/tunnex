@@ -248,6 +248,10 @@ type fakeBackend struct {
 	lastAllowedIPs []string
 	lastPeer       string
 	setAllowedCnt  int
+	// WF-A: record the last gateway-peer re-home (new key + endpoint) so the swap path is provable.
+	lastGwPubKey   string
+	lastGwEndpoint string
+	setGwPeerCnt   int
 }
 
 func (f *fakeBackend) Up(cfg *TunnelConfig) error {
@@ -274,6 +278,11 @@ func (f *fakeBackend) Stats() (TunnelStatus, error) { return TunnelStatus{RxByte
 func (f *fakeBackend) SetAllowedIPs(peer string, aips []string) error {
 	f.setAllowedCnt++
 	f.lastPeer, f.lastAllowedIPs = peer, aips
+	return nil
+}
+func (f *fakeBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
+	f.setGwPeerCnt++
+	f.lastGwPubKey, f.lastGwEndpoint = newPubKey, newEndpoint
 	return nil
 }
 
@@ -431,6 +440,60 @@ func TestUpdateAllowedIPsNotUp(t *testing.T) {
 		t.Fatalf("want not_up, got %v", err)
 	}
 	if fb.setAllowedCnt != 0 {
+		t.Error("no backend call when down")
+	}
+}
+
+// TestUpdateGatewayPeerRoutesToBackend (WF-A) — a split-tunnel re-home passes the NEW peer + endpoint to the
+// backend swap, without disturbing tunnel state (a peer swap, not a bounce).
+func TestUpdateGatewayPeerRoutesToBackend(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	cfg := goodConfig()
+	cfg.FullTunnel = false
+	cfg.AllowedIPs = []string{"10.99.0.0/24"}
+	if err := s.Up(cfg); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	newKey := "bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="
+	if err := s.UpdateGatewayPeer(newKey, "gw-b.example:51820"); err != nil {
+		t.Fatalf("re-home: %v", err)
+	}
+	if fb.setGwPeerCnt != 1 || fb.lastGwPubKey != newKey || fb.lastGwEndpoint != "gw-b.example:51820" {
+		t.Fatalf("swap not routed: cnt=%d key=%q ep=%q", fb.setGwPeerCnt, fb.lastGwPubKey, fb.lastGwEndpoint)
+	}
+	if s.State() != StateUp {
+		t.Fatalf("re-home disturbed the tunnel: %s", s.State())
+	}
+}
+
+// TestUpdateGatewayPeerFullTunnelRefused (WF-A / D-WFA-4) — a full-tunnel re-home is REFUSED with a typed
+// code (NOT a silent no-op): its endpoint host-route + kill-switch pass rule must move with the peer, a
+// separate carve-out. The backend is NOT called; the client fail-static keeps its current peer honestly.
+func TestUpdateGatewayPeerFullTunnelRefused(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	cfg := goodConfig() // full-tunnel (0.0.0.0/0 + ::/0)
+	cfg.FullTunnel = true
+	if err := s.Up(cfg); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if err := s.UpdateGatewayPeer("bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=", "gw-b.example:51820"); err == nil || codeOf(err) != "rehome_full_tunnel_unsupported" {
+		t.Fatalf("want rehome_full_tunnel_unsupported, got %v", err)
+	}
+	if fb.setGwPeerCnt != 0 {
+		t.Fatalf("full-tunnel re-home must NOT call the backend: got %d", fb.setGwPeerCnt)
+	}
+}
+
+// TestUpdateGatewayPeerNotUp (WF-A) — a down tunnel has no peer to re-home → not_up, no backend call.
+func TestUpdateGatewayPeerNotUp(t *testing.T) {
+	fb := &fakeBackend{}
+	s := NewSupervisor(fb)
+	if err := s.UpdateGatewayPeer("bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=", "gw-b.example:51820"); err == nil || codeOf(err) != "not_up" {
+		t.Fatalf("want not_up, got %v", err)
+	}
+	if fb.setGwPeerCnt != 0 {
 		t.Error("no backend call when down")
 	}
 }

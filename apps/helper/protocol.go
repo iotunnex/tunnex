@@ -121,10 +121,22 @@ const (
 	// there. ADDITIVE at ProtocolVersion 1 like posture/set_resolvers: an old helper answers unknown_verb
 	// and the client fail-STATIC (routes just don't push).
 	VerbSetAllowedIPs Verb = "set_allowed_ips"
+	// VerbSetGatewayPeer (WF-A re-homing) LIVE-swaps the tunnel's gateway peer to a new active hub —
+	// public key + endpoint — WITHOUT a bounce. A re-home is a peer SWAP (WG keys a peer by pubkey, and
+	// the active hub's key differs from a standby's), so the helper adds the new peer with the CURRENT
+	// peer's allowed_ips (routing preserved) and removes the old — the DEVICE IDENTITY (own key, address,
+	// enrollment) and the kill-switch are UNTOUCHED. The dial is a routing FACT about the network, never
+	// device identity — it rides the volatile channel, the never-re-fetch identity invariant holds. STATE-
+	// CHANGING but NOT tunnel-owning (same class as set_allowed_ips): never touches the owner connection.
+	// SPLIT-TUNNEL ONLY in v1: a full tunnel's endpoint host-route + kill-switch pass rule must move WITH
+	// the peer, which is the D-WFA-4 carve-out (a separate slice) — the Supervisor refuses full-tunnel here.
+	// ADDITIVE at ProtocolVersion 1 like posture/set_resolvers/set_allowed_ips: an old helper answers
+	// unknown_verb and the client fail-STATIC (keeps its current peer; the re-home just doesn't apply).
+	VerbSetGatewayPeer Verb = "set_gateway_peer"
 )
 
 func validVerb(v Verb) bool {
-	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus || v == VerbSetResolvers || v == VerbSetAllowedIPs
+	return v == VerbTunnelUp || v == VerbTunnelDown || v == VerbStatus || v == VerbPostureStatus || v == VerbSetResolvers || v == VerbSetAllowedIPs || v == VerbSetGatewayPeer
 }
 
 // Request is one app→helper message. Config is REQUIRED for tunnel_up and must be
@@ -139,6 +151,16 @@ type Request struct {
 	// AllowedIPs is the COMPLETE desired peer AllowedIPs set for VerbSetAllowedIPs only (nil elsewhere) —
 	// the full baked-stable ∪ declared-ranges set, applied as a full-sweep (replace_allowed_ips).
 	AllowedIPs []string `json:"allowed_ips,omitempty"`
+	// GatewayPeer is the new active-hub peer for VerbSetGatewayPeer only (nil elsewhere) — the re-home
+	// target (WF-A). The helper preserves the current peer's allowed_ips onto it; identity is untouched.
+	GatewayPeer *GatewayPeer `json:"gateway_peer,omitempty"`
+}
+
+// GatewayPeer names a gateway to re-home onto (WF-A): its WireGuard public key and host:port endpoint.
+// It carries NO key material of the device's own — only the peer's PUBLIC routing facts.
+type GatewayPeer struct {
+	PeerPublicKey string `json:"peer_public_key"`
+	Endpoint      string `json:"endpoint"`
 }
 
 // ResolverForward is one domain-scoped resolver: names under Domain resolve via
@@ -215,6 +237,24 @@ func ValidateRequest(r *Request) error {
 	// AllowedIPs ride ONLY on set_allowed_ips — no smuggling a routing change onto another verb.
 	if r.Verb != VerbSetAllowedIPs && r.AllowedIPs != nil {
 		return &ProtocolError{Code: "unexpected_allowed_ips", Msg: "allowed_ips are only valid on set_allowed_ips"}
+	}
+	// GatewayPeer rides ONLY on set_gateway_peer — no smuggling a peer swap onto another verb; and it is
+	// REQUIRED there (a re-home with no target is nonsense). Its fields are validated as strictly as a
+	// tunnel_up peer: a base64/32-byte key and a safe host:port (validEndpoint bars loopback/link-local/
+	// metacharacters), so a typo can never steer the root helper's dial.
+	if r.Verb != VerbSetGatewayPeer && r.GatewayPeer != nil {
+		return &ProtocolError{Code: "unexpected_gateway_peer", Msg: "gateway_peer is only valid on set_gateway_peer"}
+	}
+	if r.Verb == VerbSetGatewayPeer {
+		if r.GatewayPeer == nil {
+			return &ProtocolError{Code: "gateway_peer_required", Msg: "set_gateway_peer requires a gateway_peer"}
+		}
+		if err := validKey(r.GatewayPeer.PeerPublicKey); err != nil {
+			return &ProtocolError{Code: "bad_peer_key", Msg: err.Error()}
+		}
+		if !validEndpoint(r.GatewayPeer.Endpoint) {
+			return &ProtocolError{Code: "bad_endpoint", Msg: "endpoint must be host:port"}
+		}
 	}
 	return nil
 }

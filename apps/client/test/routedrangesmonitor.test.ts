@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { RoutedRangesMonitor, canonRanges, canonForwards } from "../src/main/routedrangesmonitor";
+import { RoutedRangesMonitor, canonRanges, canonForwards, canonDial } from "../src/main/routedrangesmonitor";
 import type { ResolverForward } from "../src/main/helperclient";
+import type { DialTarget } from "../src/main/deviceconfig";
 
 // mk builds a monitor whose poll returns rangesSeq[i] (an Error throws) with EMPTY forwards, and records
 // every applied ranges set. Forwards-tier tests use mkF.
@@ -13,7 +14,7 @@ function mk(base: string[], rangesSeq: Array<string[] | Error>) {
     routedConfig: async () => {
       const v = rangesSeq[Math.min(i++, rangesSeq.length - 1)];
       if (v instanceof Error) throw v;
-      return { ranges: v, forwards: [] };
+      return { ranges: v, forwards: [], dial: null };
     },
   };
   const m = new RoutedRangesMonitor(
@@ -39,7 +40,7 @@ function mkF(base: string[], fwdSeq: Array<ResolverForward[] | Error>, failForwa
     routedConfig: async () => {
       const v = fwdSeq[Math.min(i++, fwdSeq.length - 1)];
       if (v instanceof Error) throw v;
-      return { ranges: [] as string[], forwards: v };
+      return { ranges: [] as string[], forwards: v, dial: null };
     },
   };
   const m = new RoutedRangesMonitor(
@@ -100,7 +101,7 @@ test("apply failure keeps lastApplied → retries on the next poll", async () =>
   const base = ["10.99.0.0/24"];
   let fail = true;
   const applied: string[][] = [];
-  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [] }) };
+  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [], dial: null }) };
   const m = new RoutedRangesMonitor(
     "org",
     base,
@@ -123,7 +124,7 @@ test("apply failure keeps lastApplied → retries on the next poll", async () =>
 test("immediate first poll: start() applies within the first tick, then schedules the 30s cadence (ruling A)", async () => {
   const applied: string[][] = [];
   const delays: number[] = [];
-  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [] }) };
+  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [], dial: null }) };
   const m = new RoutedRangesMonitor(
     "org",
     ["10.99.0.0/24"],
@@ -180,7 +181,7 @@ test("forwards tier fail-static is INDEPENDENT: a resolver-write throw keeps las
 test("#5 full-tunnel: resolver tier applies, routes tier is SKIPPED (no set_allowed_ips call)", async () => {
   const applied: string[][] = [];
   const fwdApplied: ResolverForward[][] = [];
-  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [FWD("corp.local", "10.20.0.53")] }) };
+  const api = { routedConfig: async () => ({ ranges: ["192.168.5.0/24"], forwards: [FWD("corp.local", "10.20.0.53")], dial: null }) };
   const m = new RoutedRangesMonitor(
     "org",
     ["0.0.0.0/0", "::/0"], // full-tunnel base
@@ -208,4 +209,95 @@ test("stop abandons an in-flight poll's result (no apply after disconnect)", asy
   m.stop();
   assert.equal(await p, "skipped");
   assert.equal(applied.length, 0);
+});
+
+// --- WF-A dial tier -----------------------------------------------------------------------------------
+const DIAL = (endpoint: string, pubkey: string): DialTarget => ({ endpoint, pubkey });
+
+// mkD builds a monitor exercising the DIAL tier in isolation: fixed empty ranges/forwards, dialSeq[i] as
+// the poll's dial, seeded from `seed` (the minted peer). Records every re-home (endpoint,pubkey). applyDial
+// throws once when failDial is set. dialEnabled defaults true (split-tunnel); pass false for the full-tunnel
+// gate test.
+function mkD(seed: DialTarget | null, dialSeq: Array<DialTarget | null | Error>, opts: { failDial?: boolean; dialEnabled?: boolean } = {}) {
+  const rehomed: Array<{ endpoint: string; pubkey: string }> = [];
+  let i = 0;
+  let fail = opts.failDial ?? false;
+  const api = {
+    routedConfig: async () => {
+      const v = dialSeq[Math.min(i++, dialSeq.length - 1)];
+      if (v instanceof Error) throw v;
+      return { ranges: [] as string[], forwards: [] as ResolverForward[], dial: v };
+    },
+  };
+  const m = new RoutedRangesMonitor(
+    "org",
+    ["10.99.0.0/24"],
+    api,
+    async () => {},
+    async () => {},
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true, // routesEnabled
+    "dev-1", // deviceId
+    async (endpoint, pubkey) => {
+      if (fail) {
+        fail = false;
+        throw new Error("re-home refused");
+      }
+      rehomed.push({ endpoint, pubkey });
+    },
+    opts.dialEnabled ?? true,
+    seed,
+  );
+  return { m, rehomed };
+}
+
+test("canonDial: a null dial folds to '' (never a change → zero re-homes)", () => {
+  assert.equal(canonDial(null), "");
+  assert.equal(canonDial(DIAL("gw-a:51820", "KA")), "gw-a:51820|KA");
+});
+
+test("dial tier no-churn: first poll returning the SEEDED (minted) hub = unchanged, ZERO set_gateway_peer", async () => {
+  const seed = DIAL("gw-a:51820", "KA");
+  const { m, rehomed } = mkD(seed, [seed, seed, seed]);
+  assert.equal(await m.checkOnce(), "unchanged");
+  assert.equal(await m.checkOnce(), "unchanged");
+  assert.equal(rehomed.length, 0, "the device already dials the active hub — a re-home would be a pointless privileged call");
+});
+
+test("dial tier re-homes on active-hub move: applies set_gateway_peer(new), then no-churn on repeat", async () => {
+  const seed = DIAL("gw-a:51820", "KA"); // minted on hub A
+  const newHub = DIAL("gw-b:51820", "KB"); // failover promoted hub B
+  const { m, rehomed } = mkD(seed, [newHub, newHub]);
+  assert.equal(await m.checkOnce(), "applied");
+  assert.deepEqual(rehomed[0], { endpoint: "gw-b:51820", pubkey: "KB" }, "re-homes onto the NEW active hub");
+  assert.equal(await m.checkOnce(), "unchanged"); // same new hub → no second swap
+  assert.equal(rehomed.length, 1);
+});
+
+test("dial tier: a NULL dial keeps the current peer (single-gateway / server blip never swaps away)", async () => {
+  const seed = DIAL("gw-a:51820", "KA");
+  const { m, rehomed } = mkD(seed, [null, null]);
+  assert.equal(await m.checkOnce(), "unchanged");
+  assert.equal(rehomed.length, 0, "a null dial must NEVER tear down the peer to nothing — keep the current hub");
+});
+
+test("dial tier fail-static is INDEPENDENT: a re-home throw keeps lastDial, retries — routes/forwards untouched", async () => {
+  const seed = DIAL("gw-a:51820", "KA");
+  const newHub = DIAL("gw-b:51820", "KB");
+  const { m, rehomed } = mkD(seed, [newHub, newHub], { failDial: true });
+  assert.equal(await m.checkOnce(), "inconclusive"); // re-home threw → keep, no advance
+  assert.equal(rehomed.length, 0, "a failed re-home must not read as applied");
+  assert.equal(await m.checkOnce(), "applied"); // retry succeeds
+  assert.deepEqual(rehomed[0], { endpoint: "gw-b:51820", pubkey: "KB" });
+});
+
+test("dial tier GATED OFF for full-tunnel (D-WFA-4 carve-out): no set_gateway_peer even when the hub moved", async () => {
+  const seed = DIAL("gw-a:51820", "KA");
+  const newHub = DIAL("gw-b:51820", "KB");
+  const { m, rehomed } = mkD(seed, [newHub], { dialEnabled: false });
+  assert.equal(await m.checkOnce(), "unchanged");
+  assert.equal(rehomed.length, 0, "full-tunnel re-home is refused in v1 — the client must not drive it");
 });
