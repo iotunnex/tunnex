@@ -32,13 +32,14 @@ disagreeing with the controller about who is stale is the two-truths class at th
 health source, OR demoted to a corroborating-only signal — the AUTHORITATIVE per-peer verdict is
 the controller's.
 
-Sub-item (the HOW, needs ruling): share by **(a) a shared PURE function** both the controller and
-the health computation call (one derivation, two callers — literally one truth), OR **(b) the
-controller PERSISTS its per-member verdict** and the health path reads it (one writer, the health
-path never re-derives). **Lean: (a) shared pure function** — the derivation is already pure
-(`deriveActive` + a freshness fold); extracting the per-member "is this member's link fresh, and
-is it demoted" as one function keeps it clockless + unit-pinnable, and there is no persistence
-race. (b) risks a staleness lag between the controller's tick and the health read.
+Sub-item (the HOW) — **RULED (founder): (a) shared PURE function.** The controller AND the health
+surface both call the ONE derivation (spoke-observed freshness ⋂ hub-set membership) at their own
+read moments — NO persisted verdict (that would make the badge as stale as the tick interval AND
+add a second writer to org_hub_set's territory — the writer-partition law forbids it). A pure
+function called twice can't disagree with itself — the whole point of the lead ruling.
+**CONDITION:** the function is the SAME SYMBOL both call — NOT two functions with a "MUST match"
+comment claiming equivalence (that comment class died in the S8.6 reduce; do not resurrect it).
+**GREP-RED:** no freshness computation exists outside the shared function.
 
 ## D-WFB-2 (needs ruling) — the data-model change
 
@@ -48,19 +49,23 @@ race. (b) risks a staleness lag between the controller's tick and the health rea
   transit_healthy }` — explicit, extensible.
 - **(b)** flat fields on the existing health payload: `site_link_down_peer` (string, "" = none) +
   `site_link_down_peer_demoted` (bool).
-**Lean: (b)** — minimal codegen surface, matches the existing flat health-field convention
-(policy_degraded_kind et al.); the badge needs only name + demoted + the ranking already knows
-transit health from the kind precedence (D-WFB-3).
+**RULED (founder): (b) flat fields.** The structured sub-object is speculative generality for a
+payload with exactly ONE consumer (the badge render); if a second consumer ever needs structure,
+that refactor is mechanical. Flat fields keep the codegen diff minimal + the render-floor mapping
+obvious. The render CITES the fields it consumes (render-floor law).
 
-## D-WFB-3 (needs ruling) — subordination precedence
+## D-WFB-3 (RULED) — subordination precedence
 
-When the down peer is a DEMOTED member AND transit flows via the active primary (its link fresh),
-the demoted-dead link is a LINE ITEM, never the site's headline — the site's transit IS healthy,
-and the rendering must not contradict the wire. Ruling: `degradedKind` (policyhealth.go) drops a
-DEMOTED-member-only link-down BELOW `KindHealthy` for the site headline, surfacing it as a
-distinct subordinate line. A NON-demoted (active-primary) link-down STAYS the headline (a real
-failure must never be subordinated). This is the honest-by-design disposition from Deck-B
-finding-2, now with the legibility fix it was owed.
+**RULED (founder), stated as a PRINCIPLE for the paper: a link's health ranks by its CONSEQUENCE
+for the site's transit.** A demoted member's dead link has ZERO transit consequence (traffic
+rides the active primary — the walk proved it at 0% loss), so it renders as a named line item
+BELOW a healthy headline. An active primary's link failure has TOTAL consequence and IS the
+headline. `degradedKind` (policyhealth.go) drops a DEMOTED-member-only link-down below
+`KindHealthy` for the site headline; a non-demoted (active-primary) link-down STAYS the headline.
+**BOTH cases are reds** (see Reds 1 + 3): the walk's exact state AND the inverse. The inverse
+matters as much — subordination must NEVER accidentally bury a real transit failure, which would
+be the reassuring-green class rebuilt at the precedence tier. Honest-by-design disposition from
+Deck-B finding-2, with the legibility fix it was owed.
 
 ## D-WFB-4 (RULED direction) — naming
 
@@ -83,7 +88,15 @@ is the failed-over-past member" vs "a live peer's link is actually down."
 5. **Fixture fidelity:** the health test-double must not out-capability the substrate (the S8.2
    law) — it carries the same per-peer freshness + membership shape the controller reads.
 
-**Sequence:** this paper → founder rulings on D-WFB-1(how)/D-WFB-2/D-WFB-3 → build (shared
-liveness derivation + KindInput/API/codegen + web badge) → targeted review on the health surface
-(the S7.4b/S8.2 most-reviewed class, UNDISCOUNTED) → box-walk the walk's exact failover state.
-Own story, not a hotfix (data-model + reviewed-surface change).
+## Reds — RULED addition to #3 (the inverse)
+
+3 (as stated) + **3-inverse: active-primary-stale → the site headline IS degraded (site-link-down).**
+Subordination must never bury a real transit failure — the reassuring-green class at the
+precedence tier. This red carries equal weight to the walk's case.
+
+**Sequence (RULED — WF-B builds FIRST, then WF-A):** this paper (fully ruled) → build (shared
+pure liveness function + KindInput flat fields + API/codegen + web badge) → gates → targeted
+review on the health surface (S7.4b/S8.2 most-reviewed class, UNDISCOUNTED) → [WF-C characterize
+rides the gap, read-only] → WF-A build → its review → the COMBINED box-walk: ONE hub-kill, TWO
+acceptances — WF-B's badge shows transit-healthy + named-demoted-peer WHILE WF-A's device
+re-homes on the stopwatch. Own story, not a hotfix.
