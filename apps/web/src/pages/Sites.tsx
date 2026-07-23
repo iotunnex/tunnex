@@ -555,6 +555,15 @@ function GatewayRow({ g }: { g: GatewayView }) {
       {live.offline && <span className={`text-xs ${badgeClass("danger")}`}>offline</span>}
       {g.health && <span className={`text-xs ${badgeClass(g.health.tone)}`}>{g.health.label}</span>}
       {online && <span className="text-xs text-emerald-400">online</span>}
+      {/* WF-B: the SUBORDINATE site-link note — a demoted-dead peer while transit is healthy. A distinct
+          muted line item naming the peer + "(demoted)", NEVER the headline (a healthy failover reads
+          transit-healthy above; this is the "why is there a dead link" detail). Independent of g.health. */}
+      {g.siteLinkNote && (
+        <span className="text-xs text-slate-500">
+          site link down: {g.siteLinkNote.peer}
+          {g.siteLinkNote.demoted && " (demoted)"}
+        </span>
+      )}
       <span className="ml-auto text-[11px] text-slate-500">
         {live.lastSeen}
         {" · "}

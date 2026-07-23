@@ -79,6 +79,17 @@ describe("assembleTopology — the wire-truth join (CH list-of-one, backend hub,
     expect(cards[0].gateways[1].health?.tone).toBe("danger");
   });
 
+  it("WF-B: the subordinate site-link note rides the join, INDEPENDENT of the headline (the walk's state)", () => {
+    // A healthy-headline gateway that still carries a demoted-dead-peer note — both truths distinct.
+    const cards = assembleTopology([sA], {}, [
+      node({ id: "g1", site_id: "sa", policy_degraded: false, site_link_note_peer: "aws-gw-1", site_link_note_demoted: true }),
+      node({ id: "g2", site_id: "sa", policy_degraded: false }),
+    ]);
+    expect(cards[0].gateways[0].health).toBeNull(); // headline healthy
+    expect(cards[0].gateways[0].siteLinkNote).toEqual({ peer: "aws-gw-1", demoted: true }); // + subordinate line
+    expect(cards[0].gateways[1].siteLinkNote).toBeNull(); // no note when the field is absent
+  });
+
   it("subnets render their REAL status (pending is never shown as approved)", () => {
     const cards = assembleTopology([sA], { sa: [subnet("s1", "sa", "10.1.0.0/24", "approved"), subnet("s2", "sa", "10.2.0.0/24", "pending")] }, []);
     expect(cards[0].subnets).toEqual([
