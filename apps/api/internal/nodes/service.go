@@ -585,6 +585,12 @@ func (s *Service) DeviceDial(ctx context.Context, orgID, deviceID, callerUserID 
 	if dev.UserID != callerUserID { // cross-device guard: only the owner may fetch a device's dial (no-oracle NotFound)
 		return "", "", false, apierr.NotFound("device_not_found", "no such device in this organization")
 	}
+	// Active-only (review #3): the data-plane rule is "peers exist only for an ACTIVE device" — a pending
+	// device has no gateway peer, so its dial is useless AND serving it would make this API contradict that
+	// model. (Revoked devices are already excluded — GetDevice filters deleted_at.) Same no-oracle NotFound.
+	if dev.Status != "active" {
+		return "", "", false, apierr.NotFound("device_not_found", "no such device in this organization")
+	}
 	return s.NodeDial(ctx, orgID, dev.NodeID)
 }
 

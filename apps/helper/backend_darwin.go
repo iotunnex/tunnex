@@ -182,7 +182,12 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 				dev.Close()
 				return perr
 			}
-			b.cpHost, b.cpFam = cpHost, fam
+			// Guard fam like the WG-endpoint pin above (review #2): an on-link CP (gatewayFor "" → fam "")
+			// pins NO route and needs none (its connected route is more specific than the tunnel half), so
+			// don't record cpHost with an empty fam — Down would else run `route delete` with a blank family.
+			if fam != "" {
+				b.cpHost, b.cpFam = cpHost, fam
+			}
 		}
 	}
 	// Baked routes go through the ONE reconciler (S8.5 reduce, #9) — same delete-before-add + per-route
@@ -231,6 +236,10 @@ func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) er
 		return &ProtocolError{Code: "allowed_ips_apply_failed", Msg: err.Error()}
 	}
 	// Advance the peer cache so a subsequent WF-A re-home carries the LIVE routing, not the baked set.
+	// (review #5 — no-change rationale, recorded: advancing BEFORE reconcileRoutes is correct. The cache
+	// feeds only the re-home's crypto allowed_ips, and a re-home NEVER touches OS routes — they ride the
+	// interface, not the peer. So a reconcile failure here can't make a later re-home lose routes; any
+	// crypto-vs-route skew is this SetAllowedIPs' own reconcile-fail, self-healing on the monitor's retry.)
 	b.peerAllowedIPs = append([]string(nil), allowedIPs...)
 	// OS-route full-sweep through the ONE reconciler (S8.5 reduce): delete-before-add, delete-stale-first,
 	// per-route advance against the belief cache. The crypto (replace_allowed_ips) already converged above.
@@ -247,6 +256,14 @@ func (b *darwinBackend) SetAllowedIPs(peerPubKey string, allowedIPs []string) er
 //     gateway's handshake is block-dropped + route-looped. REQUIRES the CP carve-out (b.cpEndpoint): without
 //     it a full-tunnel device could never have polled a re-home in the first place, so refuse honestly.
 func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
+	// Resolve to ONE IP BEFORE taking b.mu (review #1): a DNS lookup's latency must NEVER hold a lock the
+	// fail-closed path needs. b.mu is also taken by the dead-man's FailClosed — a slow re-home resolve
+	// blocking it would delay kill-switch enforcement during a failover, exactly when it matters most (the
+	// kill-switch-no-unbounded-I/O law; the RR2 FS-I/O-outside-the-lock lesson recurring at the DNS tier).
+	ep, err := resolveEndpoint(newEndpoint)
+	if err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.dev == nil {
@@ -256,11 +273,6 @@ func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 		// A full tunnel with no CP carve-out cannot safely re-home (its handshake to the new gateway would
 		// be block-dropped, and it never had a tunnel-independent control path). The honest failure seam.
 		return &ProtocolError{Code: "rehome_full_tunnel_unsupported", Msg: "full-tunnel re-home requires the CP carve-out (control_plane_endpoint)"}
-	}
-	// Resolve a hostname endpoint to ONE IP so the peer dials exactly what we intend (parity with Up).
-	ep, err := resolveEndpoint(newEndpoint)
-	if err != nil {
-		return err
 	}
 	uapi, err := gatewayPeerSwapUAPI(b.peerPubKey, newPubKey, ep, b.peerKeepalive, b.peerAllowedIPs)
 	if err != nil {
