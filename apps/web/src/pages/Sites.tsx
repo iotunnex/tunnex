@@ -483,6 +483,15 @@ function SiteCardView({
               <span className="font-mono"> device pool CIDR</span> (Settings shows it, e.g. <span className="font-mono">10.99.0.0/24</span>)
               → this gateway — behind-host replies to a connected device need a way back, exactly like a remote site's CIDR.
             </p>
+            {/* WF-B (EPIC-8 smooth walk): behind-host HA needs a CLOUD-side route failover. The overlay
+                fails over (a standby is promoted) but the VPC route to the gateway ENI is STATIC — the
+                zero-touch boundary Tunnex won't cross. By design; documented here so it's not a surprise. */}
+            <p>
+              <span className="font-semibold text-slate-300">High availability:</span> a promoted standby carries
+              overlay transit automatically, but a behind-host's VPC route points at ONE gateway ENI — on failover,
+              repoint it to the new hub (AWS: route-table health check / a small Lambda; or a Gateway Load Balancer.
+              Azure: a UDR update). Overlay HA is automatic; cloud-fabric HA is yours to wire (the zero-touch boundary).
+            </p>
             <p className="text-slate-500">Full reference: <span className="font-mono">docs/deploy-cloud-gateway.md</span>.</p>
           </div>
         </details>
