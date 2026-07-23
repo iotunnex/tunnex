@@ -126,8 +126,10 @@ func TestSiteLinkVerdictWF_B(t *testing.T) {
 		t.Fatalf("all-fresh: want (false, nil), got (%v, %v)", hd, sub)
 	}
 
-	// SILENCE: primary unobserved (no witness) → no headline (never down on silence).
-	if hd, _ := siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{demotedMember: staleDemoted}); hd {
-		t.Fatalf("silence: an unobserved primary must NOT read headline-down, got headline=%v", hd)
+	// SILENCE (WF-B review F1/F2): primary UNOBSERVED (no witness) WHILE a demoted member is stale → NEITHER.
+	// No headline (silence ≠ death) AND no subordinate (silence can't assert transit is healthy → no
+	// reassurance). FULL-tuple assertion (F2: a red that checks only half the return can't fail on the other).
+	if hd, sub := siteLinkVerdictFrom(members, primary, map[uuid.UUID]MemberLiveness{demotedMember: staleDemoted}); hd || sub != uuid.Nil {
+		t.Fatalf("silence + stale demoted → want (false, nil), got (headline=%v, sub=%v)", hd, sub)
 	}
 }
