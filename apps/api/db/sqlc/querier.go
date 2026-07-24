@@ -566,6 +566,9 @@ type Querier interface {
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
+	// F3: toggle a rule's disabled flag. RETURNING * so the API echoes the new state; the caller (mutate)
+	// recompiles + pushes — disabling changes the compiled artifact's CONTENT (in-hash, ordinary push).
+	SetPolicyRuleEnabled(ctx context.Context, arg SetPolicyRuleEnabledParams) (PolicyRule, error)
 	// lint:cross-org — the site is org-checked via GetSite before this write (S8.4 D7 CRUD).
 	SetSiteDNSForwarding(ctx context.Context, arg SetSiteDNSForwardingParams) error
 	// lint:cross-org — user-scoped credential.

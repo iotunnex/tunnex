@@ -871,3 +871,45 @@ func TestCIDRSourcePlacementBiconditional(t *testing.T) {
 		}
 	}
 }
+
+// F3 — a DISABLED rule compiles to NOTHING: its allow is withdrawn (as-if-absent under default-deny),
+// re-enabling restores it, and the toggle MOVES the CanonicalHash (a real, in-hash policy change) but NEVER
+// bumps RequiredVersion (only WHICH entries exist changes, not the AllowEntry shape).
+func TestDisabledRuleCompilesToNothing(t *testing.T) {
+	base := func(disabled bool) policy.Snapshot {
+		return policy.Snapshot{
+			Mode:        policy.ModeEnforcing,
+			Resources:   []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+			Rules:       []policy.Rule{{SrcGroupID: gAdmins, DstKind: "resource", DstResourceID: rDB, Disabled: disabled}},
+			Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+			Devices:     []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}},
+		}
+	}
+	enabled := policy.Compile(base(false))
+	disabled := policy.Compile(base(true))
+	// the same snapshot with the rule REMOVED entirely (the as-if-absent oracle).
+	removed := policy.Compile(policy.Snapshot{Mode: policy.ModeEnforcing,
+		Resources:   []policy.Resource{{ID: rDB, CIDR: "10.0.5.0/24", Protocol: "any"}},
+		Memberships: []policy.Membership{{GroupID: gAdmins, UserID: uAlice}},
+		Devices:     []policy.Device{{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"}}})
+
+	if len(allowsFor(enabled, nodeA)) != 1 {
+		t.Fatalf("enabled rule must grant, got %+v", allowsFor(enabled, nodeA))
+	}
+	if len(allowsFor(disabled, nodeA)) != 0 {
+		t.Fatalf("DISABLED rule must grant NOTHING (withdrawn allow), got %+v", allowsFor(disabled, nodeA))
+	}
+	// AS-IF-ABSENT: disabled compiles byte-identically to the rule not existing.
+	if policyspec.CanonicalHash(disabled[nodeA]) != policyspec.CanonicalHash(removed[nodeA]) {
+		t.Fatal("a disabled rule must compile IDENTICALLY to the rule not existing (as-if-absent)")
+	}
+	// HASH MOVES: an in-hash policy change (disabled differs from enabled) → ordinary push, NOT out-of-hash.
+	if policyspec.CanonicalHash(enabled[nodeA]) == policyspec.CanonicalHash(disabled[nodeA]) {
+		t.Fatal("disabling must MOVE the CanonicalHash (in-hash policy change)")
+	}
+	// NO VERSION BUMP: only which entries exist changed, not the artifact shape.
+	if policyspec.RequiredVersion(enabled[nodeA]) != policyspec.RequiredVersion(disabled[nodeA]) {
+		t.Fatalf("disabling must NOT bump RequiredVersion, got %d vs %d",
+			policyspec.RequiredVersion(enabled[nodeA]), policyspec.RequiredVersion(disabled[nodeA]))
+	}
+}

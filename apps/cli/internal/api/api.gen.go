@@ -1059,6 +1059,7 @@ type PolicyRule struct {
 	DstKind              PolicyRuleDstKind   `json:"dst_kind"`
 	DstResourceId        *openapi_types.UUID `json:"dst_resource_id"`
 	DstSiteId            *openapi_types.UUID `json:"dst_site_id"`
+	Enabled              bool                `json:"enabled"`
 	ExpiresAt            *time.Time          `json:"expires_at"`
 	Id                   openapi_types.UUID  `json:"id"`
 	OrgId                openapi_types.UUID  `json:"org_id"`
@@ -1148,6 +1149,12 @@ type RoutedRanges struct {
 
 	// Ranges Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared.
 	Ranges []string `json:"ranges"`
+}
+
+// SetPolicyRuleEnabledRequest defines model for SetPolicyRuleEnabledRequest.
+type SetPolicyRuleEnabledRequest struct {
+	// Enabled F3: true = the rule contributes its allow; false = disabled (permission withdrawn, as-if-absent under default-deny).
+	Enabled bool `json:"enabled"`
 }
 
 // SignupRequest defines model for SignupRequest.
@@ -1418,6 +1425,9 @@ type SetHubPriorityJSONRequestBody = HubPriorityRequest
 
 // CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
 type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
+
+// SetPolicyRuleEnabledJSONRequestBody defines body for SetPolicyRuleEnabled for application/json ContentType.
+type SetPolicyRuleEnabledJSONRequestBody = SetPolicyRuleEnabledRequest
 
 // ExtendGrantJSONRequestBody defines body for ExtendGrant for application/json ContentType.
 type ExtendGrantJSONRequestBody = ExtendGrantRequest
@@ -1826,6 +1836,11 @@ type ClientInterface interface {
 
 	// DeletePolicyRule request
 	DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPolicyRuleEnabledWithBody request with any body
+	SetPolicyRuleEnabledWithBody(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SetPolicyRuleEnabled(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body SetPolicyRuleEnabledJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ExtendGrantWithBody request with any body
 	ExtendGrantWithBody(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3255,6 +3270,30 @@ func (c *Client) CreatePolicyRule(ctx context.Context, orgId openapi_types.UUID,
 
 func (c *Client) DeletePolicyRule(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeletePolicyRuleRequest(c.Server, orgId, ruleId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetPolicyRuleEnabledWithBody(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPolicyRuleEnabledRequestWithBody(c.Server, orgId, ruleId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SetPolicyRuleEnabled(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body SetPolicyRuleEnabledJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPolicyRuleEnabledRequest(c.Server, orgId, ruleId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7043,6 +7082,60 @@ func NewDeletePolicyRuleRequest(server string, orgId openapi_types.UUID, ruleId 
 	return req, nil
 }
 
+// NewSetPolicyRuleEnabledRequest calls the generic SetPolicyRuleEnabled builder with application/json body
+func NewSetPolicyRuleEnabledRequest(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID, body SetPolicyRuleEnabledJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetPolicyRuleEnabledRequestWithBody(server, orgId, ruleId, "application/json", bodyReader)
+}
+
+// NewSetPolicyRuleEnabledRequestWithBody generates requests for SetPolicyRuleEnabled with any type of body
+func NewSetPolicyRuleEnabledRequestWithBody(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ruleId", runtime.ParamLocationPath, ruleId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/policies/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewExtendGrantRequest calls the generic ExtendGrant builder with application/json body
 func NewExtendGrantRequest(server string, orgId openapi_types.UUID, ruleId openapi_types.UUID, body ExtendGrantJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -8592,6 +8685,11 @@ type ClientWithResponsesInterface interface {
 
 	// DeletePolicyRuleWithResponse request
 	DeletePolicyRuleWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePolicyRuleResponse, error)
+
+	// SetPolicyRuleEnabledWithBodyWithResponse request with any body
+	SetPolicyRuleEnabledWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPolicyRuleEnabledResponse, error)
+
+	SetPolicyRuleEnabledWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body SetPolicyRuleEnabledJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPolicyRuleEnabledResponse, error)
 
 	// ExtendGrantWithBodyWithResponse request with any body
 	ExtendGrantWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExtendGrantResponse, error)
@@ -10449,6 +10547,29 @@ func (r DeletePolicyRuleResponse) StatusCode() int {
 	return 0
 }
 
+type SetPolicyRuleEnabledResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PolicyRule
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r SetPolicyRuleEnabledResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetPolicyRuleEnabledResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ExtendGrantResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12025,6 +12146,23 @@ func (c *ClientWithResponses) DeletePolicyRuleWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseDeletePolicyRuleResponse(rsp)
+}
+
+// SetPolicyRuleEnabledWithBodyWithResponse request with arbitrary body returning *SetPolicyRuleEnabledResponse
+func (c *ClientWithResponses) SetPolicyRuleEnabledWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPolicyRuleEnabledResponse, error) {
+	rsp, err := c.SetPolicyRuleEnabledWithBody(ctx, orgId, ruleId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPolicyRuleEnabledResponse(rsp)
+}
+
+func (c *ClientWithResponses) SetPolicyRuleEnabledWithResponse(ctx context.Context, orgId openapi_types.UUID, ruleId openapi_types.UUID, body SetPolicyRuleEnabledJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPolicyRuleEnabledResponse, error) {
+	rsp, err := c.SetPolicyRuleEnabled(ctx, orgId, ruleId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPolicyRuleEnabledResponse(rsp)
 }
 
 // ExtendGrantWithBodyWithResponse request with arbitrary body returning *ExtendGrantResponse
@@ -14748,6 +14886,39 @@ func ParseDeletePolicyRuleResponse(rsp *http.Response) (*DeletePolicyRuleRespons
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetPolicyRuleEnabledResponse parses an HTTP response from a SetPolicyRuleEnabledWithResponse call
+func ParseSetPolicyRuleEnabledResponse(rsp *http.Response) (*SetPolicyRuleEnabledResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetPolicyRuleEnabledResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PolicyRule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -462,6 +462,31 @@ func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID)
 	})
 }
 
+// SetPolicyRuleEnabled toggles a rule's disabled flag (F3). Enabling/disabling ACCESS is policy-
+// consequential (same class as create/delete): it uses s.mutate (recompile + push — disabling changes the
+// compiled artifact's CONTENT, in-hash, an ordinary desync-free push; NO version bump — only which entries
+// exist changes) and audits with TWO DISTINCT actions (policy.rule_enabled / policy.rule_disabled), so
+// "who cut access at 3am" is a one-read action filter, not a metadata query.
+func (s *Service) SetPolicyRuleEnabled(ctx context.Context, orgID, ruleID uuid.UUID, enabled bool) (sqlc.PolicyRule, error) {
+	var r sqlc.PolicyRule
+	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+		var e error
+		r, e = q.SetPolicyRuleEnabled(ctx, sqlc.SetPolicyRuleEnabledParams{ID: ruleID, OrgID: orgID, Disabled: !enabled})
+		if e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return apierr.NotFound("rule_not_found", "rule not found")
+			}
+			return e
+		}
+		action := "policy.rule_disabled"
+		if enabled {
+			action = "policy.rule_enabled"
+		}
+		return writeAudit(ctx, q, orgID, action, "policy_rule", ruleID.String(), nil)
+	})
+	return r, err
+}
+
 // ── temporary-grant lifecycle (S7.5.4 slice 2) ──────────────────────────────────
 
 // grantSweepInterval paces the expiry sweeper. Expiry is a PROMISE (a grant that
@@ -703,6 +728,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 			DstSiteID:     fromPgUUID(r.DstSiteID),
+			Disabled:      r.Disabled, // F3: carried to the compiler, which OWNS the skip (compiler-skip choice)
 		})
 	}
 	for _, ss := range siteSubnets {

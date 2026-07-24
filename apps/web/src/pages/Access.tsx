@@ -29,6 +29,7 @@ import {
   policyGate,
   roleFromMembers,
   ruleRow,
+  disableConfirmText,
   sectionRender,
   staleNoticeText,
   pruneStaleRuleIds,
@@ -278,6 +279,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
   const [extendingGrant, setExtendingGrant] = useState<PolicyRule | null>(null);
+  const [disablingRule, setDisablingRule] = useState<PolicyRule | null>(null); // F3: the rule pending a disable-confirm
   // SINGLE source of truth for the partial-swap warning: the SET of rule ids a create-then-
   // delete left un-deleted. The notice is DERIVED (staleNoticeText) — no separate state to
   // desync ([291]/[309]/[371]). Pruned ONLY on a successful load (amendment A), per-id (B).
@@ -334,6 +336,17 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
     load();
   }
 
+  // F3: toggle a rule enabled/disabled. Disabling withdraws its allow (in-hash push, effective in seconds);
+  // ENABLE is one-click (additive/harmless), DISABLE goes through the confirm modal (asymmetric ceremony).
+  async function setEnabled(id: string, enabled: boolean) {
+    const { error } = await api.PATCH("/api/v1/organizations/{orgId}/policies/{ruleId}", {
+      params: { path: { orgId, ruleId: id } },
+      body: { enabled },
+    });
+    if (error) return setErr(apiErrorMessage(error, enabled ? "Could not enable the rule." : "Could not disable the rule."));
+    load();
+  }
+
   const view = sectionRender(loadError, notice);
 
   return (
@@ -382,10 +395,12 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
               const row = ruleRow(r, groups, resources, members, sites, loaded);
               const exp = grantExpiry(r, Date.now());
               return (
-                <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm">
+                <li key={r.id} className={`flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm ${r.enabled ? "" : "opacity-50"}`}>
                   <span className="text-slate-200">
                     <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
                     <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
+                    {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
+                    {!r.enabled && <span className="ml-2 rounded bg-slate-600/50 px-1.5 py-0.5 text-xs text-slate-300">disabled</span>}
                     {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim — a CIDR
                         rule matching no current org range (a reassuring-rule). Self-clears when a range lands. */}
                     {row.cidrOutsideRanges && (
@@ -409,6 +424,16 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                       {canEditRuleInModal(r) && (
                         <Button variant="ghost" onClick={() => setEditing(r)}>
                           Edit
+                        </Button>
+                      )}
+                      {/* F3: enable = one click (additive); disable = confirm (revokes live access instantly). */}
+                      {r.enabled ? (
+                        <Button variant="ghost" onClick={() => setDisablingRule(r)}>
+                          Disable
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" onClick={() => setEnabled(r.id, true)}>
+                          Enable
                         </Button>
                       )}
                       <Button variant="danger" onClick={() => del(r.id)}>
@@ -459,6 +484,38 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
           }}
         />
       )}
+      {/* F3: the disable-confirm — NAMES the rule's own subject→destination + the immediate effect. Only
+          disable gets this (enable is one-click). Danger-styled; Cancel or backdrop dismisses. */}
+      {disablingRule &&
+        (() => {
+          const row = ruleRow(disablingRule, groups, resources, members, sites, loaded);
+          const r = disablingRule;
+          return (
+            <Modal
+              title="Disable rule?"
+              danger
+              onDismiss={() => setDisablingRule(null)}
+              actions={
+                <>
+                  <Button variant="ghost" onClick={() => setDisablingRule(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={async () => {
+                      setDisablingRule(null);
+                      await setEnabled(r.id, false);
+                    }}
+                  >
+                    Disable
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-sm text-slate-300">{disableConfirmText(row.src.label, row.dst.label)}</p>
+            </Modal>
+          );
+        })()}
     </Card>
   );
 }

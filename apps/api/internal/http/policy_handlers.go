@@ -38,6 +38,8 @@ type policyPort interface {
 	PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, rules []sqlc.PolicyRule) (map[uuid.UUID]bool, error)
 	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
 	ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error)
+	// SetPolicyRuleEnabled toggles a rule's enabled state (F3); disabling withdraws its allow (in-hash push).
+	SetPolicyRuleEnabled(ctx context.Context, orgID, ruleID uuid.UUID, enabled bool) (sqlc.PolicyRule, error)
 	GetMode(ctx context.Context, orgID uuid.UUID) (string, error)
 	SetMode(ctx context.Context, orgID uuid.UUID, mode string) (mode_ string, affected []policyspec.AffectedDevice, err error)
 }
@@ -334,6 +336,29 @@ func (s apiServer) ExtendGrant(ctx context.Context, req api.ExtendGrantRequestOb
 	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
+// SetPolicyRuleEnabled (F3) — enable/disable a rule without deleting it. policy:manage, enterprise-gated;
+// disabling is an in-hash policy change (recompile + push). The response echoes the new enabled state.
+func (s apiServer) SetPolicyRuleEnabled(ctx context.Context, req api.SetPolicyRuleEnabledRequestObject) (api.SetPolicyRuleEnabledResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermPolicyManage); err != nil {
+		return nil, err
+	}
+	if s.policy == nil {
+		return nil, policyEditionRequired()
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	r, err := s.policy.SetPolicyRuleEnabled(ctx, req.OrgId, req.RuleId, req.Body.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	warn, err := s.policy.PolicyRuleCidrWarnings(ctx, req.OrgId, []sqlc.PolicyRule{r})
+	if err != nil {
+		return nil, err
+	}
+	return api.SetPolicyRuleEnabled200JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.SetPolicyRuleEnabled200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 // ── enforcement mode ──────────────────────────────────────────────────────────
 
 func (s apiServer) GetZeroTrustMode(ctx context.Context, req api.GetZeroTrustModeRequestObject) (api.GetZeroTrustModeResponseObject, error) {
@@ -412,7 +437,8 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside bool) api.PolicyRule {
 	out := api.PolicyRule{
 		Id: r.ID, OrgId: r.OrgID, SrcKind: api.PolicyRuleSrcKind(r.SrcKind),
 		DstKind: api.PolicyRuleDstKind(r.DstKind), CreatedAt: r.CreatedAt,
-		CidrOutsideOrgRanges: cidrOutside, // S8.7 warn-not-refuse (D1); always false for non-cidr sources
+		CidrOutsideOrgRanges: cidrOutside,  // S8.7 warn-not-refuse (D1); always false for non-cidr sources
+		Enabled:              !r.Disabled, // F3: positive framing — a rule is enabled unless disabled
 	}
 	if r.SrcGroupID.Valid {
 		u := uuid.UUID(r.SrcGroupID.Bytes)

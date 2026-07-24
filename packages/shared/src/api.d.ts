@@ -1146,7 +1146,12 @@ export interface paths {
         delete: operations["deletePolicyRule"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Enable or disable an allow-rule without deleting it (enterprise, F3)
+         * @description F3: toggle a rule's enabled state. Disabling WITHDRAWS the rule's permission under default-deny ("as if the rule weren't there" — NOT a deny-rule, not active blocking); it is a real, in-hash policy change that recompiles + pushes (traffic matching the rule stops within a push cycle). Re-enabling restores the grant. Audited as two distinct actions (policy.rule_enabled / policy.rule_disabled). No RequiredVersion bump.
+         *
+         */
+        patch: operations["setPolicyRuleEnabled"];
         trace?: never;
     };
     "/api/v1/organizations/{orgId}/zero-trust-mode": {
@@ -1797,6 +1802,7 @@ export interface components {
             port_high?: number | null;
         };
         PolicyRule: {
+            enabled: boolean;
             /** Format: uuid */
             id: string;
             /** Format: uuid */
@@ -1983,6 +1989,10 @@ export interface components {
              * @description The grant's new expiry (must be in the future).
              */
             expires_at: string;
+        };
+        SetPolicyRuleEnabledRequest: {
+            /** @description F3: true = the rule contributes its allow; false = disabled (permission withdrawn, as-if-absent under default-deny). */
+            enabled: boolean;
         };
         ZeroTrustMode: {
             /**
@@ -4282,6 +4292,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setPolicyRuleEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPolicyRuleEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description The rule with its new enabled state. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyRule"];
+                };
             };
             default: components["responses"]["Error"];
         };

@@ -295,6 +295,7 @@ type PolicyRule struct {
 	DstSiteID     pgtype.UUID        `json:"dst_site_id"`
 	SrcSiteID     pgtype.UUID        `json:"src_site_id"`
 	SrcCidr       *string            `json:"src_cidr"`
+	Disabled      bool               `json:"disabled"`
 }
 
 type Resource struct {

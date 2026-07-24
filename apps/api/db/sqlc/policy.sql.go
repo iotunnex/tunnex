@@ -39,7 +39,7 @@ func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) 
 const createPolicyRule = `-- name: CreatePolicyRule :one
 INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled
 `
 
 type CreatePolicyRuleParams struct {
@@ -89,6 +89,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		&i.DstSiteID,
 		&i.SrcSiteID,
 		&i.SrcCidr,
+		&i.Disabled,
 	)
 	return i, err
 }
@@ -263,7 +264,7 @@ const extendPolicyRule = `-- name: ExtendPolicyRule :one
 UPDATE policy_rules
 SET expires_at = $3
 WHERE id = $1 AND org_id = $2 AND expires_at IS NOT NULL AND expires_at > now()
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled
 `
 
 type ExtendPolicyRuleParams struct {
@@ -295,12 +296,13 @@ func (q *Queries) ExtendPolicyRule(ctx context.Context, arg ExtendPolicyRulePara
 		&i.DstSiteID,
 		&i.SrcSiteID,
 		&i.SrcCidr,
+		&i.Disabled,
 	)
 	return i, err
 }
 
 const getPolicyRuleForOrg = `-- name: GetPolicyRuleForOrg :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr FROM policy_rules WHERE id = $1 AND org_id = $2
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled FROM policy_rules WHERE id = $1 AND org_id = $2
 `
 
 type GetPolicyRuleForOrgParams struct {
@@ -328,12 +330,13 @@ func (q *Queries) GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForO
 		&i.DstSiteID,
 		&i.SrcSiteID,
 		&i.SrcCidr,
+		&i.Disabled,
 	)
 	return i, err
 }
 
 const getPolicyRuleForUpdate = `-- name: GetPolicyRuleForUpdate :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
 `
 
 type GetPolicyRuleForUpdateParams struct {
@@ -362,6 +365,7 @@ func (q *Queries) GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleF
 		&i.DstSiteID,
 		&i.SrcSiteID,
 		&i.SrcCidr,
+		&i.Disabled,
 	)
 	return i, err
 }
@@ -472,7 +476,7 @@ func (q *Queries) ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) 
 }
 
 const listActivePolicyRulesForOrg = `-- name: ListActivePolicyRulesForOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled FROM policy_rules
 WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at
 `
@@ -503,6 +507,7 @@ func (q *Queries) ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UU
 			&i.DstSiteID,
 			&i.SrcSiteID,
 			&i.SrcCidr,
+			&i.Disabled,
 		); err != nil {
 			return nil, err
 		}
@@ -592,7 +597,7 @@ func (q *Queries) ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID
 }
 
 const listPolicyRulesByOrg = `-- name: ListPolicyRulesByOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled FROM policy_rules
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -621,6 +626,7 @@ func (q *Queries) ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]
 			&i.DstSiteID,
 			&i.SrcSiteID,
 			&i.SrcCidr,
+			&i.Disabled,
 		); err != nil {
 			return nil, err
 		}
@@ -751,6 +757,42 @@ func (q *Queries) SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustMo
 		&i.ZeroTrustMode,
 		&i.DeviceApproval,
 		&i.FlowSeq,
+	)
+	return i, err
+}
+
+const setPolicyRuleEnabled = `-- name: SetPolicyRuleEnabled :one
+UPDATE policy_rules SET disabled = $3
+WHERE id = $1 AND org_id = $2
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled
+`
+
+type SetPolicyRuleEnabledParams struct {
+	ID       uuid.UUID `json:"id"`
+	OrgID    uuid.UUID `json:"org_id"`
+	Disabled bool      `json:"disabled"`
+}
+
+// F3: toggle a rule's disabled flag. RETURNING * so the API echoes the new state; the caller (mutate)
+// recompiles + pushes — disabling changes the compiled artifact's CONTENT (in-hash, ordinary push).
+func (q *Queries) SetPolicyRuleEnabled(ctx context.Context, arg SetPolicyRuleEnabledParams) (PolicyRule, error) {
+	row := q.db.QueryRow(ctx, setPolicyRuleEnabled, arg.ID, arg.OrgID, arg.Disabled)
+	var i PolicyRule
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.SrcGroupID,
+		&i.DstKind,
+		&i.DstResourceID,
+		&i.DstGroupID,
+		&i.CreatedAt,
+		&i.SrcKind,
+		&i.SrcUserID,
+		&i.ExpiresAt,
+		&i.DstSiteID,
+		&i.SrcSiteID,
+		&i.SrcCidr,
+		&i.Disabled,
 	)
 	return i, err
 }
