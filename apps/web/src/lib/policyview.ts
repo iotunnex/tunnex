@@ -445,3 +445,11 @@ export function swapPartialMessage(oldIdShort: string): string {
 export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }): boolean {
   return rule.dst_kind !== "site" && rule.src_kind !== "site";
 }
+
+// disableConfirmText (F3) — the disable-confirm copy NAMES the rule's own subject→destination (never a
+// generic string) and states the immediate blast radius: disabling withdraws the grant and the push lands
+// in seconds. Only DISABLE gets this ceremony (asymmetric — enable is additive + harmless, so it's a
+// one-click no-confirm); scaled to the act's reach, lighter than a type-the-name (this is reversible).
+export function disableConfirmText(srcLabel: string, dstLabel: string): string {
+  return `Disable ${srcLabel} → ${dstLabel}? Traffic matching this rule stops immediately.`;
+}

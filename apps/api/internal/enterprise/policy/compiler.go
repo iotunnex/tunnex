@@ -83,6 +83,8 @@ type Rule struct {
 	DstResourceID uuid.UUID
 	DstGroupID    uuid.UUID
 	DstSiteID     uuid.UUID // S8.1: dst_kind='site' — resolved to the site's subnet CIDRs
+	Disabled      bool      // F3: a disabled rule compiles to ZERO AllowEntries (the skip below) — its allow is
+	//                        withdrawn, so under default-deny it's "as if the rule weren't there". Not a deny.
 }
 
 // SiteSubnet is one routed LAN of a site (S8.1). The compiler expands a dst_kind='site' rule to one
@@ -363,6 +365,9 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		}
 		owner := userGroups[d.UserID]
 		for _, r := range s.Rules {
+			if r.Disabled { // F3: withdrawn allow — contributes no grant (as-if-absent under default-deny)
+				continue
+			}
 			// Source-subject match (S7.5.4): a "user" rule matches iff this device's
 			// owner IS that user; a "group" rule matches iff the owner is in the group
 			// (the pre-S7.5.4 path, and the default for legacy blank src_kind).
@@ -437,6 +442,9 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	// placement is Slice 2 (the topology graph) — Slice 1 places the endpoints, correct for the
 	// co-located/direct case and provable now.
 	for _, r := range s.Rules {
+		if r.Disabled { // F3: withdrawn allow — no site-src/cidr placement either (as-if-absent)
+			continue
+		}
 		// S8.7: src_kind='cidr' is site-src NARROWED to a literal CIDR — resolve the CIDR to its CONTAINING
 		// site subnet and place on that site's gateway (ONE emitter, mirroring the site-src path below). A
 		// CIDR in no site subnet (out-of-world, or a device-pool/routed-range address) resolves to no site →

@@ -1451,6 +1451,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PolicyRule" }
         default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: setPolicyRuleEnabled
+      summary: Enable or disable an allow-rule without deleting it (enterprise, F3)
+      description: >
+        F3: toggle a rule's enabled state. Disabling WITHDRAWS the rule's permission under
+        default-deny ("as if the rule weren't there" — NOT a deny-rule, not active blocking); it
+        is a real, in-hash policy change that recompiles + pushes (traffic matching the rule stops
+        within a push cycle). Re-enabling restores the grant. Audited as two distinct actions
+        (policy.rule_enabled / policy.rule_disabled). No RequiredVersion bump.
+      tags: [policy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetPolicyRuleEnabledRequest" }
+      responses:
+        "200":
+          description: The rule with its new enabled state.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyRule" }
+        default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/zero-trust-mode:
     parameters:
@@ -2278,9 +2301,13 @@ components:
 
     PolicyRule:
       type: object
-      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges]
+      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges, enabled]
       additionalProperties: false
       properties:
+        # F3: true = the rule contributes its allow; false = DISABLED (permission withdrawn, compiled to
+        # nothing — "as if the rule weren't there" under default-deny). Toggled via PATCH; a disabled rule
+        # is shown distinctly (dimmed), never hidden, so the list can't lie about what's enforcing.
+        enabled: { type: boolean }
         id: { type: string, format: uuid }
         org_id: { type: string, format: uuid }
         # S7.5.4: the SOURCE subject is a group or a single user; S8.2: or a site's LAN; S8.7: or a literal CIDR (exactly one src_* set).
@@ -2465,6 +2492,13 @@ components:
       additionalProperties: false
       properties:
         expires_at: { type: string, format: date-time, description: "The grant's new expiry (must be in the future)." }
+
+    SetPolicyRuleEnabledRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean, description: "F3: true = the rule contributes its allow; false = disabled (permission withdrawn, as-if-absent under default-deny)." }
 
     ZeroTrustMode:
       type: object

@@ -478,3 +478,15 @@ describe("defaultSrcKind / defaultDstKind — the modal opens on a kind that HAS
     expect(defaultSrcKind({ hasGroups: false, hasSites: true })).toBe("site");
   });
 });
+
+import { disableConfirmText } from "../src/lib/policyview";
+
+describe("disableConfirmText (F3)", () => {
+  it("NAMES the rule's own subject→destination + the immediate effect, no generic/placeholder string", () => {
+    const t = disableConfirmText("nykaa", "aws-server");
+    expect(t).toContain("nykaa");
+    expect(t).toContain("aws-server");
+    expect(t).toMatch(/stops immediately/i);
+    expect(t).not.toMatch(/\{|\}|placeholder|undefined/); // never a generic/templated leftover
+  });
+});

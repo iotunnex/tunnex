@@ -104,6 +104,13 @@ ORDER BY created_at;
 DELETE FROM policy_rules
 WHERE id = $1 AND org_id = $2;
 
+-- name: SetPolicyRuleEnabled :one
+-- F3: toggle a rule's disabled flag. RETURNING * so the API echoes the new state; the caller (mutate)
+-- recompiles + pushes — disabling changes the compiled artifact's CONTENT (in-hash, ordinary push).
+UPDATE policy_rules SET disabled = $3
+WHERE id = $1 AND org_id = $2
+RETURNING *;
+
 -- name: ExtendPolicyRule :one
 -- S7.5.4: move a temporary grant's window IN PLACE (never delete+recreate — that would
 -- churn the /32 out+back and cause a spurious push). The `expires_at > now()` predicate
