@@ -260,6 +260,13 @@ export default function Devices() {
                   const pb = postureBadge(d);
                   return pb ? <span className={`ml-2 text-xs ${postureBadgeClass(pb.tone)}`}>{pb.label}</span> : null;
                 })()}
+              {/* S9.1 Part-2 stale-profile surface: a static profile whose baked site routes no longer
+                  match the org's current ranges — the never-silently-broken law made visible. */}
+              {d.status !== "revoked" && d.needs_reexport && (
+                <span className="ml-2 text-xs text-amber-400" title="This device's exported profile predates a site-range change — re-export and re-import it.">
+                  re-export needed
+                </span>
+              )}
             </div>
             {d.status === "active" && (
               <Button variant="danger" onClick={() => revoke(d.id)}>

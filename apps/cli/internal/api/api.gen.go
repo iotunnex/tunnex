@@ -571,14 +571,17 @@ type Device struct {
 	Id               openapi_types.UUID `json:"id"`
 	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
 	Name             string             `json:"name"`
-	NodeId           openapi_types.UUID `json:"node_id"`
-	Online           *bool              `json:"online,omitempty"`
-	Platform         *string            `json:"platform,omitempty"`
-	PublicKey        string             `json:"public_key"`
-	RxBytes          *int64             `json:"rx_bytes,omitempty"`
-	Status           DeviceStatus       `json:"status"`
-	TxBytes          *int64             `json:"tx_bytes,omitempty"`
-	UserId           openapi_types.UUID `json:"user_id"`
+
+	// NeedsReexport S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices.
+	NeedsReexport *bool              `json:"needs_reexport,omitempty"`
+	NodeId        openapi_types.UUID `json:"node_id"`
+	Online        *bool              `json:"online,omitempty"`
+	Platform      *string            `json:"platform,omitempty"`
+	PublicKey     string             `json:"public_key"`
+	RxBytes       *int64             `json:"rx_bytes,omitempty"`
+	Status        DeviceStatus       `json:"status"`
+	TxBytes       *int64             `json:"tx_bytes,omitempty"`
+	UserId        openapi_types.UUID `json:"user_id"`
 }
 
 // DeviceHealthFailedChecksKind defines model for Device.HealthFailedChecks.Kind.
