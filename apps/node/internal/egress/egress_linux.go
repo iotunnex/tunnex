@@ -51,6 +51,12 @@ var ruleIDRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 // compiled allow rules.
 type Manager struct {
 	wgIface string
+	// ovpnTun is the co-terminated OpenVPN server's tun interface name (S9.1 Slice 3), threaded
+	// from the OVPN server lifecycle's config — the ONE truth for the tunnel-ingress set, never
+	// re-derived. Empty when no OVPN server is configured (a WireGuard-only deployment), in which
+	// case tunnelIfaces() = {wg0} and every rendered rule is byte-identical to the pre-OVPN ruleset
+	// (the zero-config golden).
+	ovpnTun string
 	policy  atomic.Pointer[nodepolicy.Compiled]
 	// deviceByIP is the src /32 -> device_id map (S7.5.4 v3), rebuilt atomically on each
 	// SetPolicy from the applied Allow set. It is the AUTHORITATIVE /32->device mapping
@@ -147,6 +153,42 @@ func New(wgIface string) *Manager {
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
 	return m
+}
+
+// SetOVPNTun records the co-terminated OpenVPN server's tun interface name (S9.1 Slice 3). Called
+// once at wiring time from the OVPN server lifecycle's config (the ONE truth). Setting it adds that
+// interface to the tunnel-ingress set so OVPN clients forward like WireGuard devices; leaving it
+// unset keeps the ruleset byte-identical to a WireGuard-only deployment.
+func (m *Manager) SetOVPNTun(name string) { m.ovpnTun = name }
+
+// tunnelIfaces returns the crypto-authenticated tunnel-ingress interfaces. MEMBERSHIP IN THIS SET
+// MEANS THE PACKET ARRIVED THROUGH AN AUTHENTICATED TUNNEL; adding a LAN-facing interface here
+// breaks S3.7 spoke-isolation (an eth0-side host claiming a pool source could then reach spokes —
+// the anti-spoof anchor the mesh accepts rely on). Order is stable (wg first) for readable goldens;
+// the ip tunnex chain is an atomic full-replace so nft's set-canonicalization is irrelevant there.
+func (m *Manager) tunnelIfaces() []string {
+	if m.ovpnTun != "" {
+		return []string{m.wgIface, m.ovpnTun}
+	}
+	return []string{m.wgIface}
+}
+
+// ifClause renders an `iifname`/`oifname` match over the tunnel set: the BARE form for a single
+// member (byte-identical to the pre-OVPN ruleset — the zero-config golden) and an nft anonymous set
+// for many. neg=true renders the negated form (`!= "x"` / `!= { ... }`).
+func ifClause(field string, ifaces []string, neg bool) string {
+	op := ""
+	if neg {
+		op = "!= "
+	}
+	if len(ifaces) == 1 {
+		return fmt.Sprintf("%s %s\"%s\"", field, op, ifaces[0])
+	}
+	quoted := make([]string, len(ifaces))
+	for i, n := range ifaces {
+		quoted[i] = fmt.Sprintf("\"%s\"", n)
+	}
+	return fmt.Sprintf("%s %s{ %s }", field, op, strings.Join(quoted, ", "))
 }
 
 // ForwardBlocked reports the WF-4 / D-WF4-d condition: a Docker host whose FORWARD DROP is
@@ -320,13 +362,17 @@ func (m *Manager) ruleset(subnet string) string {
 // once and passes it here AND to applyAndTrack, so the rendered rules and the recorded
 // status can never be two different policies (no torn read across a SetPolicy).
 func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
-	wg := m.wgIface
 	// Masquerade line present only when the pool subnet is known (wg0 up). Scoped by
 	// SOURCE (ip saddr) — reliable in postrouting, unlike iifname — out ANY non-tunnel
 	// iface (ECMP/multi-homed-safe). nft masks e.g. 10.99.0.1/24 to the /24 network.
+	tun := m.tunnelIfaces()
 	masq := ""
 	if subnet != "" {
-		masq = fmt.Sprintf("    ip saddr %s oifname != \"%s\" masquerade\n", subnet, wg)
+		// Masquerade tunnel-sourced egress out any NON-tunnel iface. Scoped by SOURCE (ip saddr,
+		// reliable in postrouting) and by `oifname != <tunnel set>` — so traffic destined to ANY
+		// tunnel (spoke↔spoke, incl. device↔device ACROSS wg0/OVPN) stays un-NAT'd (the ZT chain
+		// needs the un-mangled source /32), and only true internet egress is masqueraded.
+		masq = fmt.Sprintf("    ip saddr %s %s masquerade\n", subnet, ifClause("oifname", tun, true))
 	}
 	v4fwd, v6fwd := m.forwardRules(pol, m.policyReceived.Load())
 	// S8.2 D9 MSS clamp: on the INTRA-TUNNEL forward path (wg0→wg0 — device-to-device and site-to-site,
@@ -337,17 +383,21 @@ func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
 	// it does not otherwise change forwarding. Node-local rendered rule, OUTSIDE CanonicalHash (the
 	// masquerade class, D2) — no version bump, twin goldens untouched. Non-terminal: it modifies then
 	// continues to the grant/drop below.
+	// MSS clamp on the intra-tunnel forward path: iif AND oif are both tunnel interfaces (wg0→wg0,
+	// and with OVPN co-terminated, tun↔wg0 device↔device across protocols).
+	mssClamp := fmt.Sprintf("    %s %s tcp flags syn tcp option maxseg size set rt mtu",
+		ifClause("iifname", tun, false), ifClause("oifname", tun, false))
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
   chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
-%[2]s  }
+%[1]s  }
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
-    iifname "%[1]s" oifname "%[1]s" tcp flags syn tcp option maxseg size set rt mtu
-%[3]s  }
+%[4]s
+%[2]s  }
 }
 add table ip6 tunnex
 flush table ip6 tunnex
@@ -355,9 +405,9 @@ table ip6 tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
-%[4]s  }
+%[3]s  }
 }
-`, wg, masq, v4fwd, v6fwd)
+`, masq, v4fwd, v6fwd, mssClamp)
 }
 
 // forwardRules renders the forward-chain accept lines (after the base policy-drop +
@@ -383,7 +433,6 @@ table ip6 tunnex {
 const dropCounter = "    counter comment \"tunnex_default_drop\"\n" // counts unmatched -> policy drop
 
 func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 string) {
-	wg := m.wgIface
 	if !received {
 		// COLD START, no policy fetched yet -> DENY-ALL (drop + ct only, no accepts).
 		// Fail-closed until the first desired-state delivery, so an enforcing gateway is
@@ -396,8 +445,15 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 		// below, which would apply a shape the agent can't interpret or open the mesh.
 		return dropCounter, dropCounter
 	}
+	tun := m.tunnelIfaces()
 	if pol == nil || pol.Mesh {
-		v4 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n    iifname \"%[1]s\" oifname != \"%[1]s\" counter accept\n", wg)
+		// The blanket mesh accepts. iifname over the TUNNEL SET is the S3.7 anti-spoof anchor:
+		// only traffic that arrived through an authenticated tunnel (wg0 or the co-terminated OVPN
+		// tun) forwards — an eth0-side host spoofing a pool source is dropped by the policy-drop
+		// base (never matched by an `iifname <tunnel-set>` accept). Device↔device = tunnel→tunnel;
+		// spoke→egress = tunnel→non-tunnel.
+		v4 = fmt.Sprintf("    %[1]s %[2]s counter accept\n    %[1]s %[3]s counter accept\n",
+			ifClause("iifname", tun, false), ifClause("oifname", tun, false), ifClause("oifname", tun, true))
 		// S8.2c D1: SYMMETRIC site forwarding in mesh. Mesh means "no doors" — a behind-gateway host must
 		// be able to INITIATE to a remote site (LAN→tunnel), not just receive. The wg0-ingress accepts
 		// above cover tunnel→LAN + spoke↔spoke but NOT LAN→tunnel (the S3.7 "egress LAN can never initiate
@@ -408,11 +464,13 @@ func (m *Manager) forwardRules(pol *nodepolicy.Compiled, received bool) (v4, v6 
 		if pol != nil {
 			for _, rt := range pol.Routes {
 				if p, err := netip.ParsePrefix(rt.DstCIDR); err == nil && p.Addr().Is4() {
-					v4 += fmt.Sprintf("    iifname != \"%[1]s\" oifname \"%[1]s\" ip daddr %[2]s counter accept\n", wg, p.Masked().String())
+					// LAN→tunnel = non-tunnel ingress → tunnel egress, scoped to the remote site subnet.
+					v4 += fmt.Sprintf("    %s %s ip daddr %s counter accept\n",
+						ifClause("iifname", tun, true), ifClause("oifname", tun, false), p.Masked().String())
 				}
 			}
 		}
-		v6 = fmt.Sprintf("    iifname \"%[1]s\" oifname \"%[1]s\" counter accept\n", wg)
+		v6 = fmt.Sprintf("    %s %s counter accept\n", ifClause("iifname", tun, false), ifClause("oifname", tun, false))
 		return v4, v6
 	}
 	var b strings.Builder
