@@ -3,6 +3,10 @@ package ovpn
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +18,56 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/ovpnca"
 )
+
+// TestRebuildCRLPutsRevokedSerialOnOrgCRL is the Slice 5b red: revoking a device's OVPN cert + RebuildCRL
+// stores a signed org CRL carrying that serial, and the per-org CRL number is MONOTONIC across rebuilds.
+func TestRebuildCRLPutsRevokedSerialOnOrgCRL(t *testing.T) {
+	svc, ctx, orgID, deviceID, _ := setup(t)
+	p, err := svc.Issue(ctx, orgID, deviceID, "cn")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := svc.q.RevokeOVPNClientCertsForDevice(ctx, deviceID); err != nil {
+		t.Fatalf("mark revoked: %v", err)
+	}
+	if err := svc.RebuildCRL(ctx, orgID); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	row, err := svc.q.GetOVPNCRLForOrg(ctx, orgID)
+	if err != nil {
+		t.Fatalf("get crl: %v", err)
+	}
+	blk, _ := pem.Decode(row.CrlPem)
+	if blk == nil {
+		t.Fatal("stored CRL is not valid PEM")
+	}
+	crl, err := x509.ParseRevocationList(blk.Bytes)
+	if err != nil {
+		t.Fatalf("parse crl: %v", err)
+	}
+	sn := new(big.Int)
+	b, _ := hex.DecodeString(p.Serial)
+	sn.SetBytes(b)
+	found := false
+	for _, e := range crl.RevokedCertificateEntries {
+		if e.SerialNumber.Cmp(sn) == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the revoked cert's serial must be on the org CRL")
+	}
+
+	// Monotonic per-org number: a second rebuild strictly increases it.
+	n1 := row.Number
+	if err := svc.RebuildCRL(ctx, orgID); err != nil {
+		t.Fatalf("rebuild 2: %v", err)
+	}
+	row2, _ := svc.q.GetOVPNCRLForOrg(ctx, orgID)
+	if row2.Number <= n1 {
+		t.Fatalf("per-org CRL number must be monotonic; got %d then %d", n1, row2.Number)
+	}
+}
 
 // setup opens a rolled-back tx against the test DB (skips when unset), plus a CA loaded through the
 // real LoadOrCreate path — so this test also covers the DB storage round-trip (D-S9.1-1).

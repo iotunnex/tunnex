@@ -38,3 +38,31 @@ SELECT * FROM ovpn_server_certs WHERE node_id = $1;
 INSERT INTO ovpn_server_certs (org_id, node_id, serial, cert_pem, sealed_key, not_after)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
+
+-- name: BumpOVPNCRLNumber :one
+-- Atomically ALLOCATE the next monotonic per-org CRL number (D-S9.5-1: per-org, never a global counter).
+-- Concurrent rebuilds get DISTINCT numbers; the crl_pem is set immediately after by SetOVPNCRL for THIS
+-- number, so the highest-numbered (latest) CRL wins. On first revocation the placeholder crl_pem is empty
+-- for the microseconds until SetOVPNCRL runs — delivery treats an empty crl_pem as not-yet-ready.
+INSERT INTO ovpn_crls (org_id, crl_pem, number) VALUES ($1, ''::bytea, 1)
+ON CONFLICT (org_id) DO UPDATE SET number = ovpn_crls.number + 1
+RETURNING number;
+
+-- name: SetOVPNCRL :exec
+-- Store the signed CRL for the number THIS rebuild allocated. WHERE number = $3 so a concurrent rebuild
+-- that bumped past us (higher number, later revocation snapshot) is authoritative — our lower-numbered CRL
+-- is simply not stored (the latest full-set CRL wins).
+UPDATE ovpn_crls SET crl_pem = $2, updated_at = now() WHERE org_id = $1 AND number = $3;
+
+-- name: GetOVPNCRLForOrg :one
+-- The org's current signed CRL (delivery reads this; empty crl_pem = not-yet-ready, skip this tick).
+SELECT crl_pem, number FROM ovpn_crls WHERE org_id = $1;
+
+-- name: RevokeOVPNClientCertsForNode :many
+-- The node-revoke sweep member: revoking a NODE revokes all its devices (RevokeDevicesForNode), so their
+-- live OVPN client certs are revoked too (revoked_at), returning the affected orgs so the shared RebuildCRL
+-- runs once per org. lint:cross-org — keyed by node_id inside the node-revoke transaction (org-authorized
+-- upstream, mirrors RevokeDevicesForNode).
+UPDATE ovpn_client_certs SET revoked_at = now()
+WHERE device_id IN (SELECT id FROM devices WHERE node_id = $1 AND deleted_at IS NULL) AND revoked_at IS NULL
+RETURNING org_id;

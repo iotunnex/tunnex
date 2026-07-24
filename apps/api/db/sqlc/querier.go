@@ -48,6 +48,11 @@ type Querier interface {
 	// write itself enforces the re-home refusal the read alone could only race on. The caller re-reads on 0
 	// rows to emit the right typed error (same-site no-op / already-bound-elsewhere / node-or-site-not-found).
 	BindNodeToSite(ctx context.Context, arg BindNodeToSiteParams) (int64, error)
+	// Atomically ALLOCATE the next monotonic per-org CRL number (D-S9.5-1: per-org, never a global counter).
+	// Concurrent rebuilds get DISTINCT numbers; the crl_pem is set immediately after by SetOVPNCRL for THIS
+	// number, so the highest-numbered (latest) CRL wins. On first revocation the placeholder crl_pem is empty
+	// for the microseconds until SetOVPNCRL runs — delivery treats an empty crl_pem as not-yet-ready.
+	BumpOVPNCRLNumber(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Atomically reserve `n` seq values for an org and return the NEW high-water. The UPDATE
 	// takes a ROW LOCK on the org, serializing concurrent same-org ingest so two batches can
 	// never derive colliding seq (review #1). flow_seq lives on organizations and is NEVER swept,
@@ -272,6 +277,8 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
+	// The org's current signed CRL (delivery reads this; empty crl_pem = not-yet-ready, skip this tick).
+	GetOVPNCRLForOrg(ctx context.Context, orgID uuid.UUID) (GetOVPNCRLForOrgRow, error)
 	// lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.
 	GetOVPNServerCertForNode(ctx context.Context, nodeID uuid.UUID) (OvpnServerCert, error)
 	// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6 REDUCE): the two
@@ -581,6 +588,11 @@ type Querier interface {
 	// lint:cross-org — keyed by device_id inside the device-revoke transaction, which the caller has
 	// already org-authorized (mirrors RevokeDevicesForNode); the device->org binding is verified upstream.
 	RevokeOVPNClientCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]string, error)
+	// The node-revoke sweep member: revoking a NODE revokes all its devices (RevokeDevicesForNode), so their
+	// live OVPN client certs are revoked too (revoked_at), returning the affected orgs so the shared RebuildCRL
+	// runs once per org. lint:cross-org — keyed by node_id inside the node-revoke transaction (org-authorized
+	// upstream, mirrors RevokeDevicesForNode).
+	RevokeOVPNClientCertsForNode(ctx context.Context, nodeID uuid.UUID) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by device_id inside the report/sweep transaction (org
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
@@ -599,6 +611,10 @@ type Querier interface {
 	// endpoint uses COALESCE(NULLIF(...)) so an agent that reports an empty endpoint
 	// (env unset on a restart) never clobbers a previously-good value.
 	SetNodeWGInfo(ctx context.Context, arg SetNodeWGInfoParams) (int64, error)
+	// Store the signed CRL for the number THIS rebuild allocated. WHERE number = $3 so a concurrent rebuild
+	// that bumped past us (higher number, later revocation snapshot) is authoritative — our lower-numbered CRL
+	// is simply not stored (the latest full-set CRL wins).
+	SetOVPNCRL(ctx context.Context, arg SetOVPNCRLParams) error
 	// S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
 	// build can never set it 'on', so enrollment there stays immediately-active.
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)

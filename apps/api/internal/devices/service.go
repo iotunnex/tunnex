@@ -55,6 +55,10 @@ type Service struct {
 	// check — the SAME one truth the Tunnex client polls, so the two renderings never diverge. nil / a
 	// query error → the export is NOT enriched (pool-only, pre-Part-2 behavior; never fail the mint).
 	exportEnrich func(ctx context.Context, orgID uuid.UUID) (ranges []string, hasDNS bool, err error)
+	// rebuildCRL (S9.1 Slice 5) — the SHARED revocation seam: after a device's OVPN client certs are
+	// marked revoked (in the revoke tx), regenerate + store the org's CRL. Wired to ovpn.Service.RebuildCRL;
+	// nil (no OVPN service) → no-op. Called from the ONE device-revoke path (D-S9.5-1 iii).
+	rebuildCRL func(ctx context.Context, orgID uuid.UUID) error
 	// approvalEnforced (WF-OVPN-6) — whether device-approval ENFORCEMENT is active for this edition.
 	// Device approval is an ENTERPRISE feature (S7.5.3 unlock-then-opt-in): the open build gates the
 	// admin surface (Get/SetDeviceApproval → 403 edition_required) AND must NOT enforce approval either,
@@ -67,6 +71,9 @@ type Service struct {
 // SetApprovalEnforced wires the edition's device-approval enforcement (WF-OVPN-6). Called from the server
 // wiring with apphttp.NewDeviceApprovalEdition() — true only on the enterprise build. Default false (open).
 func (s *Service) SetApprovalEnforced(v bool) { s.approvalEnforced = v }
+
+// SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) — ovpn.Service.RebuildCRL. nil → no-op.
+func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) { s.rebuildCRL = fn }
 
 // SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
 func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {
@@ -642,6 +649,12 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 		if e := q.DeleteDeviceStatus(ctx, deviceID); e != nil {
 			return e
 		}
+		// S9.1 Slice 5 (B2 full-sweep): mark the device's OVPN client certs revoked IN THE SAME TX (atomic
+		// with the device revoke). A no-op for a WireGuard device (no cert rows). The CRL is regenerated
+		// after commit (the shared seam); ccd-exclusive already blocks reconnect via the roster sweep.
+		if _, e := q.RevokeOVPNClientCertsForDevice(ctx, deviceID); e != nil {
+			return e
+		}
 		action := "device.revoked"
 		if prior.Status == "pending" {
 			action = "device.cancelled" // owner withdrew a pending enrollment
@@ -650,6 +663,14 @@ func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID
 	})
 	if err != nil {
 		return err
+	}
+	// S9.1 Slice 5: regenerate the org's CRL from the full revoked set (the shared seam), AFTER commit so
+	// the expensive signing is off the tx. Best-effort: the device is already revoked (can't reconnect); a
+	// failed rebuild leaves the live session until the scheduled rebuild backstops it — logged loudly.
+	if s.rebuildCRL != nil {
+		if e := s.rebuildCRL(ctx, orgID); e != nil {
+			s.logger.Error("ovpn_crl_rebuild_failed_after_revoke", "org_id", orgID.String(), "error", e.Error())
+		}
 	}
 	// PUSH ORG-WIDE (F1-part-3, a CORRECTNESS/SECURITY fix — not mere consistency): a
 	// revoked device's /32 may be a group-resolved DESTINATION in compiled allow-sets on

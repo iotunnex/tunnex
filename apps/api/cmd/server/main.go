@@ -193,6 +193,9 @@ func main() {
 	nodeSvc.SetOVPNServerCertProvider(func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, string, error) {
 		return ovpnSvc.EnsureServerCert(ctx, orgID, nodeID, "gateway-"+nodeID.String())
 	})
+	// S9.1 Slice 5: the SHARED CRL rebuild seam wired to BOTH revocation paths (device revoke + node revoke).
+	deviceSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
+	nodeSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
