@@ -2985,6 +2985,9 @@ components:
         node_id: { type: string, format: uuid }
         # Admins may mint on behalf of another org member; omit for self.
         user_id: { type: string, format: uuid }
+        # WF-OVPN-3: full-tunnel (route all client traffic) — parity with the WireGuard device form. Default
+        # split. Inherits the gateway_no_egress refusal (a gateway that can't source-NAT refuses full-tunnel).
+        full_tunnel: { type: boolean }
 
     ExportOVPNProfileResponse:
       type: object

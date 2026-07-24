@@ -717,9 +717,10 @@ type ErrorDetail struct {
 
 // ExportOVPNProfileRequest defines model for ExportOVPNProfileRequest.
 type ExportOVPNProfileRequest struct {
-	Name   string              `json:"name"`
-	NodeId openapi_types.UUID  `json:"node_id"`
-	UserId *openapi_types.UUID `json:"user_id,omitempty"`
+	FullTunnel *bool               `json:"full_tunnel,omitempty"`
+	Name       string              `json:"name"`
+	NodeId     openapi_types.UUID  `json:"node_id"`
+	UserId     *openapi_types.UUID `json:"user_id,omitempty"`
 }
 
 // ExportOVPNProfileResult defines model for ExportOVPNProfileResponse.

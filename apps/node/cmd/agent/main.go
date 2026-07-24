@@ -210,7 +210,7 @@ func main() {
 		} else {
 			clients := make([]ovpnserver.Client, 0, len(ds.OVPNClients))
 			for _, c := range ds.OVPNClients {
-				clients = append(clients, ovpnserver.Client{CommonName: c.CommonName, IP: c.IP})
+				clients = append(clients, ovpnserver.Client{CommonName: c.CommonName, IP: c.IP, FullTunnel: c.FullTunnel})
 			}
 			// The ranges + DNS to PUSH ride the compiled Policy the agent already holds (Part-3 fold).
 			var routes, dns []string

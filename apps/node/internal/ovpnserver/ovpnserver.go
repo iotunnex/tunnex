@@ -59,7 +59,15 @@ const (
 type Client struct {
 	CommonName string
 	IP         string // the CP-assigned host address, e.g. "10.99.0.7"
+	FullTunnel bool   // WF-OVPN-3: route ALL client traffic to the gateway (per-client redirect-gateway)
 }
+
+// fullTunnelDNS is pushed to a full-tunnel OVPN client so name resolution survives once its default
+// route is the tunnel — mirroring the WireGuard full-tunnel behavior. DELIBERATELY duplicates
+// devices.fullTunnelDNS: the two live in separate modules (api vs node) and cannot share a Go constant,
+// exactly like the AES-256-GCM cipher that appears in both the client profile and this server config. A
+// change to the product's full-tunnel resolver must touch BOTH sites.
+const fullTunnelDNS = "1.1.1.1"
 
 // Desired is the full desired state pushed on each control-plane fetch.
 type Desired struct {
@@ -231,6 +239,12 @@ func (m *Manager) serverConfig(routes, dns []string) string {
 	b.WriteString("cipher AES-256-GCM\n") // matches the client profile's pinned cipher
 	b.WriteString("auth SHA256\n")
 	b.WriteString("keepalive 10 60\n")
+	// Diagnosability (WF-OVPN walk gap): the supervisor spawns openvpn detached and does NOT capture its
+	// stdout/stderr, so auth/TLS failures were invisible on the box. openvpn writes its own log here at a
+	// modest verbosity (3 — connection + TLS + auth lines, NO key material). log-append keeps history
+	// across the per-tick self-heal respawns. `docker exec tunnex-node cat <cfgDir>/ovpn.log` reads it.
+	b.WriteString("verb 3\n")
+	fmt.Fprintf(&b, "log-append %s\n", filepath.Join(m.cfgDir, "ovpn.log"))
 	fmt.Fprintf(&b, "client-config-dir %s\n", m.ccdDir)
 	b.WriteString("ccd-exclusive\n") // a client with NO CCD entry is REFUSED — belt-and-suspenders on the single-authority rule
 	// learn-address hook (WF-OVPN-2): openvpn calls it as it learns/forgets each client's iroute'd /32,
@@ -286,8 +300,18 @@ func routeNetMask(cidr string) (net, mask string, ok bool) {
 //	iroute <ip> /32 — the server-side demux that makes an address OUTSIDE the tun's transit subnet
 //	    routable to THIS client. Paired with the learn-address kernel /32 route, it lets the client hold a
 //	    pool /32 while tunnex-ovpn owns only the transit /30 (so wg0 keeps the pool /24, no route fight).
-func ccdEntry(ip, mask string) string {
-	return fmt.Sprintf("ifconfig-push %s %s\niroute %s 255.255.255.255\n", ip, mask, ip)
+func ccdEntry(ip, mask string, fullTunnel bool) string {
+	e := fmt.Sprintf("ifconfig-push %s %s\niroute %s 255.255.255.255\n", ip, mask, ip)
+	// WF-OVPN-3: a full-tunnel client redirects its DEFAULT route through the gateway (bypass-dhcp keeps
+	// the local DHCP path off the tunnel) — the OpenVPN twin of WireGuard's full_tunnel flag, per-DEVICE
+	// via the CCD (never server-wide). A full-tunnel client also needs a resolver once its default route
+	// is the tunnel, so DNS is pushed too (mirroring the WG full-tunnel DNS). Split-tunnel (the default)
+	// emits neither — its routes come from the Part-3 server pushes.
+	if fullTunnel {
+		e += "push \"redirect-gateway def1 bypass-dhcp\"\n"
+		e += fmt.Sprintf("push \"dhcp-option DNS %s\"\n", fullTunnelDNS)
+	}
+	return e
 }
 
 // crlPresent reports whether a CRL has been delivered (S9.1 Slice 5). serverConfig emits crl-verify
@@ -391,7 +415,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if c.CommonName == "" || c.IP == "" {
 			continue // fail-static: skip a malformed client rather than write a bad ifconfig-push
 		}
-		want[c.CommonName] = ccdEntry(c.IP, mask)
+		want[c.CommonName] = ccdEntry(c.IP, mask, c.FullTunnel)
 	}
 	// Write/refresh desired CCD files.
 	names := make([]string, 0, len(want))

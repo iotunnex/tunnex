@@ -373,7 +373,7 @@ func (q *Queries) ListActiveFullTunnelDevices(ctx context.Context, orgID uuid.UU
 }
 
 const listActiveOVPNDevicesForNode = `-- name: ListActiveOVPNDevicesForNode :many
-SELECT id, assigned_ip FROM devices
+SELECT id, assigned_ip, full_tunnel FROM devices
 WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
   AND assigned_ip IS NOT NULL AND deleted_at IS NULL
 ORDER BY id
@@ -382,6 +382,7 @@ ORDER BY id
 type ListActiveOVPNDevicesForNodeRow struct {
 	ID         uuid.UUID `json:"id"`
 	AssignedIp *string   `json:"assigned_ip"`
+	FullTunnel bool      `json:"full_tunnel"`
 }
 
 // lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
@@ -397,7 +398,7 @@ func (q *Queries) ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.
 	items := []ListActiveOVPNDevicesForNodeRow{}
 	for rows.Next() {
 		var i ListActiveOVPNDevicesForNodeRow
-		if err := rows.Scan(&i.ID, &i.AssignedIp); err != nil {
+		if err := rows.Scan(&i.ID, &i.AssignedIp, &i.FullTunnel); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

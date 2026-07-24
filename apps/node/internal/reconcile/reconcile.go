@@ -62,6 +62,7 @@ type DesiredState struct {
 type OVPNClient struct {
 	CommonName string `json:"cn"`
 	IP         string `json:"ip"`
+	FullTunnel bool   `json:"ft,omitempty"` // WF-OVPN-3: per-device full-tunnel (redirect-gateway via CCD)
 }
 
 // OVPNServerMaterial is the gateway's OpenVPN server PKI (mirror of the CP's nodes.OVPNServerMaterial).
