@@ -389,6 +389,7 @@ type Querier interface {
 	// The CRL source: every un-revoked, issued client cert for an org (Slice 5 builds the CRL from
 	// the COMPLEMENT — revoked serials — but this read backs the "live profiles" surface).
 	ListActiveOVPNClientCertsByOrg(ctx context.Context, orgID uuid.UUID) ([]OvpnClientCert, error)
+	// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
 	// The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 	// homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 	// CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
@@ -583,6 +584,7 @@ type Querier interface {
 	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
 	// S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
 	// CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+	// lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 	SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error
 	// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
 	// so a cross-org node id no-ops (0 rows -> typed 404 at the service).

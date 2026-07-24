@@ -90,5 +90,5 @@ WHERE d.org_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
 -- is a full sweep at the agent tier (server stopped, tun leaves, CCD swept) — issued client certs
 -- SURVIVE (disable is not revocation).
 UPDATE organizations SET ovpn_enabled = $2, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
