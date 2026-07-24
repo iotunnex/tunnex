@@ -92,3 +92,23 @@ func (s apiServer) ExportOVPNProfile(ctx context.Context, req api.ExportOVPNProf
 		Headers: api.ExportOVPNProfile201ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
+
+// SetOVPNEnabled flips the org's OpenVPN opt-in (S9.1 D-S9.5-OPTIN). org:update perm (an org setting).
+// Unlock-then-opt-in: OFF by default; disabling is NOT revocation (issued certs survive, re-enable
+// restores). The agent runs the OVPN server on a gateway iff this is true (DesiredState.OVPNEnabled).
+func (s apiServer) SetOVPNEnabled(ctx context.Context, req api.SetOVPNEnabledRequestObject) (api.SetOVPNEnabledResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	org, err := s.orgs.SetOVPNEnabled(ctx, req.OrgId, req.Body.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	return api.SetOVPNEnabled200JSONResponse{
+		Body:    api.OVPNSetting{Enabled: org.OvpnEnabled},
+		Headers: api.SetOVPNEnabled200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}

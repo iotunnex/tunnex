@@ -162,3 +162,25 @@ func TestExportProfileAssemblesAndFingerprints(t *testing.T) {
 		t.Fatalf("fingerprint must be the serial, never the material; got %q", fingerprint)
 	}
 }
+
+// TestDisableDoesNotRevokeCerts (S9.1 D-S9.5-OPTIN d) locks the disable≠revocation rule: flipping the
+// org's OpenVPN opt-in OFF is a plain org update — it does NOT touch issued client certs. A re-enable
+// restores service with the same certs.
+func TestDisableDoesNotRevokeCerts(t *testing.T) {
+	svc, ctx, orgID, deviceID, _ := setup(t)
+	if _, err := svc.Issue(ctx, orgID, deviceID, "cn"); err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	// disable OpenVPN for the org.
+	if _, err := svc.q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: orgID, OvpnEnabled: false}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	// the issued cert SURVIVES — disable is not revocation.
+	active, err := svc.q.ListActiveOVPNClientCertsByOrg(ctx, orgID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("disabling OpenVPN must NOT revoke issued certs (disable != revocation); active=%d", len(active))
+	}
+}

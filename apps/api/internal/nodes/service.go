@@ -92,6 +92,12 @@ type DesiredState struct {
 	// OVPN device is NOT a WireGuard Peer (it has no WG key, so DesiredState's peer loop skips it) —
 	// but its /32 IS in the compiled Policy exactly as a WG device's (B1 data half on the wire).
 	OVPNClients []OVPNClient `json:"ovpn_clients,omitempty"`
+	// OVPNEnabled tells the agent whether to RUN the OpenVPN server on this gateway (S9.1 D-S9.5-OPTIN):
+	// the org opted in AND this gateway is enabled. false → the agent keeps the OVPN server DOWN (idle,
+	// no tun, zero egress rules — byte-identical to a WireGuard-only deployment). Per-gateway
+	// granularity is org-level for now (every gateway in an opted-in org); a node-level enable is the
+	// registered refinement.
+	OVPNEnabled bool `json:"ovpn_enabled,omitempty"`
 }
 
 // OVPNClient is one OpenVPN client's wire binding: its cert CommonName (= device id, the CCD filename)
@@ -321,6 +327,8 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		MTU:              1420,
 		ListenPort:       51820,
 		Peers:            peers,
+		// D-S9.5-OPTIN: run the OVPN server on this gateway iff the org opted in (org-level for now).
+		OVPNEnabled: orgErr == nil && org.OvpnEnabled,
 	}
 	// S9.1 Slice 4c: the OpenVPN roster for this gateway. Out-of-hash plumbing — a query fault DEGRADES
 	// (empty roster, logged) rather than failing the WireGuard fetch: an OVPN roster hiccup must never

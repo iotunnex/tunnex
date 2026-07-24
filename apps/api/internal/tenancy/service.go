@@ -119,6 +119,18 @@ func (s *Service) ListOrganizations(ctx context.Context) ([]sqlc.Organization, e
 	return s.q.ListOrganizations(ctx)
 }
 
+// SetOVPNEnabled flips the org's OpenVPN opt-in (S9.1 D-S9.5-OPTIN). Unlock-then-opt-in: OFF by
+// default; enabling makes the OVPN capability available on the org's gateways (the agent then runs
+// the server). Disabling is NOT revocation — issued client certs SURVIVE (D-S9.5-OPTIN d); a
+// re-enable restores service with the same certs.
+func (s *Service) SetOVPNEnabled(ctx context.Context, id uuid.UUID, enabled bool) (sqlc.Organization, error) {
+	org, err := s.q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: id, OvpnEnabled: enabled})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.Organization{}, orgNotFound()
+	}
+	return org, err
+}
+
 // UpdateOrganization updates the mutable settings (name only — slug is
 // immutable) and records an org.updated audit event atomically.
 func (s *Service) UpdateOrganization(ctx context.Context, id uuid.UUID, name string) (sqlc.Organization, error) {
