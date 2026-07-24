@@ -88,7 +88,7 @@ export default function Devices() {
       // OpenVPN export: mint an OVPN device + its one-time .ovpn (opt-in gated server-side).
       const { data, error } = await api.POST("/api/v1/organizations/{orgId}/ovpn-profiles", {
         params: { path: { orgId: org.id } },
-        body: { name, node_id: nodes[0].id },
+        body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel },
       });
       setBusy(false);
       if (error || !data) {
@@ -186,13 +186,13 @@ export default function Devices() {
                 </select>
               </Field>
             )}
-            {/* Full tunnel is a WireGuard-config choice here; OpenVPN routing is server-pushed. */}
-            {kind === "wireguard" && (
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
-                Full tunnel
-              </label>
-            )}
+            {/* WF-OVPN-3: full tunnel is a per-device choice for BOTH transports. For WireGuard it shapes
+                the exported config's AllowedIPs; for OpenVPN the server pushes redirect-gateway per client.
+                Either way the gateway must be able to source-NAT egress (gateway_no_egress refuses otherwise). */}
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
+              Full tunnel
+            </label>
             <Button type="submit" disabled={busy || nodes.length === 0}>
               {busy ? "Creating…" : kind === "openvpn" ? "Export OpenVPN profile" : "Create device"}
             </Button>
