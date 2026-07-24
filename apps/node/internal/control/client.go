@@ -174,6 +174,11 @@ type PolicyStatus struct {
 	// version bump. The control plane uses it to warn, BEFORE an org goes multi-site, which gateways
 	// are below the ceiling and would deny-all on the version bump.
 	MaxSupportedVersion int
+	// OVPNHealth (S9.1 4d) is the OpenVPN server's refuse-loudly kind ("" healthy, ovpn_certs_absent,
+	// ovpn_binary_absent). A DIFFERENT axis from policy health — surfaced on the gateway so an operator
+	// who enabled OpenVPN on a gateway missing its material sees WHY (the conntrack_flush_unavailable
+	// precedent). Reported every tick; resolves on its own when the material/binary appears.
+	OVPNHealth string
 }
 
 // ReportInfo reports the node's locally-generated WireGuard public key, its public
@@ -187,6 +192,7 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 		"policy_failing_since": ps.FailingSince, "policy_refused_version": ps.RefusedVersion,
 		"site_link_stale": ps.SiteLinkStale, "site_subnet_unreachable": ps.SiteSubnetUnreachable,
 		"conntrack_flush_unavailable": ps.ConntrackFlushUnavailable, "max_policy_version": ps.MaxSupportedVersion,
+		"ovpn_health": ps.OVPNHealth,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
