@@ -132,6 +132,38 @@ func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
 // pass, so the supervisor is structurally unable to crash-loop. Default is a no-op stub (tests).
 func (m *Manager) SetEnsureProc(fn func(ctx context.Context, confPath string) error) { m.ensureProc = fn }
 
+// WriteServerMaterial writes the CP-delivered CA + server cert + server KEY to cfgDir (D-S9.6). The key
+// is 0600; the certs 0644. Idempotent — re-asserted every tick, so a hand-deleted file heals on the
+// next reconcile (like wg0's rules). This is what clears the ovpn_certs_absent precondition.
+func (m *Manager) WriteServerMaterial(ca, cert, key string) error {
+	if err := os.MkdirAll(m.cfgDir, 0o700); err != nil {
+		return err
+	}
+	files := []struct {
+		name string
+		data string
+		perm os.FileMode
+	}{
+		{"ca.crt", ca, 0o644},
+		{"server.crt", cert, 0o644},
+		{"server.key", key, 0o600}, // the private key — restrictive perms, never logged
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(m.cfgDir, f.name), []byte(f.data), f.perm); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SweepServerMaterial removes the server cert files (D-S9.6: disable means nothing exists on disk;
+// the DB record survives, so re-enable re-delivers the same serial).
+func (m *Manager) SweepServerMaterial() {
+	for _, f := range []string{"ca.crt", "server.crt", "server.key"} {
+		_ = os.Remove(filepath.Join(m.cfgDir, f))
+	}
+}
+
 // Health returns the surfaced health kind ("" ok, or ovpn_certs_absent / ovpn_binary_absent) — the
 // agent reports it so an operator sees WHY an enabled gateway is not serving (surfaced, not logged).
 func (m *Manager) Health() string {

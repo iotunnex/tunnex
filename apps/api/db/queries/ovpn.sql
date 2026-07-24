@@ -29,3 +29,12 @@ UPDATE ovpn_client_certs
 SET revoked_at = now()
 WHERE device_id = $1 AND revoked_at IS NULL
 RETURNING serial;
+
+-- name: GetOVPNServerCertForNode :one
+-- lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.
+SELECT * FROM ovpn_server_certs WHERE node_id = $1;
+
+-- name: InsertOVPNServerCert :one
+INSERT INTO ovpn_server_certs (org_id, node_id, serial, cert_pem, sealed_key, not_after)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;

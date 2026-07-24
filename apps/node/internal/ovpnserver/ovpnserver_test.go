@@ -256,3 +256,40 @@ func TestTunActiveGatesTunPublish(t *testing.T) {
 		t.Fatal("after the server dies, TunActive must be false so the agent clears the egress tun")
 	}
 }
+
+// TestServerMaterialWriteThenSweep (D-S9.6) locks cert delivery on the agent side: writing the
+// CP-delivered material makes certsPresent TRUE (the ovpn_certs_absent precondition clears itself,
+// live), the key is 0600, and sweeping (disable) removes the files → certsPresent FALSE.
+func TestServerMaterialWriteThenSweep(t *testing.T) {
+	m := New(t.TempDir()) // real file-based certsPresent (not the stub)
+	if m.certsPresent() {
+		t.Fatal("no certs delivered yet → certsPresent must be false")
+	}
+	if err := m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !m.certsPresent() {
+		t.Fatal("after delivery the certs-present precondition must clear (heals ovpn_certs_absent)")
+	}
+	fi, err := os.Stat(filepath.Join(m.cfgDir, "server.key"))
+	if err != nil {
+		t.Fatalf("stat key: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("server.key must be 0600 (restrictive), got %o", fi.Mode().Perm())
+	}
+	// a hand-deleted file heals on the next write (idempotent re-assert).
+	_ = os.Remove(filepath.Join(m.cfgDir, "server.crt"))
+	if m.certsPresent() {
+		t.Fatal("a deleted cert file must make certsPresent false until re-asserted")
+	}
+	_ = m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM")
+	if !m.certsPresent() {
+		t.Fatal("re-assert must heal the hand-deleted file")
+	}
+	// disable → sweep → nothing on disk.
+	m.SweepServerMaterial()
+	if m.certsPresent() {
+		t.Fatal("after sweep (disable), certsPresent must be false — nothing exists on disk")
+	}
+}

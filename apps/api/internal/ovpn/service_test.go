@@ -53,7 +53,7 @@ func setup(t *testing.T) (*Service, context.Context, uuid.UUID, uuid.UUID, uuid.
 	userID := mustUser(t, ctx, q, orgID)
 	nodeID := mustNode(t, ctx, q, orgID)
 	deviceID := mustDevice(t, ctx, q, orgID, userID, nodeID)
-	return NewService(q, loadCA), ctx, orgID, deviceID, userID
+	return NewService(q, loadCA, sealer), ctx, orgID, deviceID, userID
 }
 
 // TestIssueRecordsSerialNotKey is the B2 + D-S9.2-1 red: Issue persists the cert IDENTITY (serial,
@@ -115,7 +115,7 @@ func mustUser(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID uuid.UUI
 
 func mustNode(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID uuid.UUID) uuid.UUID {
 	t.Helper()
-	n, err := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: orgID, Name: "gw", CertSerial: uuid.NewString(), AgentVersion: "test"})
+	n, err := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: orgID, Name: "gw-" + uuid.NewString()[:8], CertSerial: uuid.NewString(), AgentVersion: "test"})
 	if err != nil {
 		t.Fatalf("node: %v", err)
 	}
@@ -182,5 +182,32 @@ func TestDisableDoesNotRevokeCerts(t *testing.T) {
 	}
 	if len(active) != 1 {
 		t.Fatalf("disabling OpenVPN must NOT revoke issued certs (disable != revocation); active=%d", len(active))
+	}
+}
+
+// TestEnsureServerCertMintOnceReDeliver (D-S9.6) locks mint-once + idempotent re-delivery: the first
+// call MINTS + records the server cert (sealed key), and every later call re-delivers the SAME material
+// (never a fresh mint) — so redelivery on every reconcile is stable.
+func TestEnsureServerCertMintOnceReDeliver(t *testing.T) {
+	svc, ctx, orgID, _, _ := setup(t)
+	nodeID := mustNode(t, ctx, svc.q, orgID)
+
+	ca1, cert1, key1, err := svc.EnsureServerCert(ctx, orgID, nodeID, "gw")
+	if err != nil {
+		t.Fatalf("ensure 1: %v", err)
+	}
+	if cert1 == "" || key1 == "" || ca1 == "" {
+		t.Fatal("first call must deliver CA + server cert + server key")
+	}
+	ca2, cert2, key2, err := svc.EnsureServerCert(ctx, orgID, nodeID, "gw")
+	if err != nil {
+		t.Fatalf("ensure 2: %v", err)
+	}
+	if cert1 != cert2 || key1 != key2 || ca1 != ca2 {
+		t.Fatal("re-delivery must return the SAME material (mint-once), not a fresh mint")
+	}
+	// exactly one recorded row for the node.
+	if row, e := svc.q.GetOVPNServerCertForNode(ctx, nodeID); e != nil || row.CertPem != cert1 {
+		t.Fatalf("the mint must be recorded once; err=%v", e)
 	}
 }
