@@ -2185,6 +2185,11 @@ export interface components {
             site_id?: string | null;
             /** @description S8.3 (CW): the agent's REPORTED max-supported policy version — observability (a reported fact, OUTSIDE the compile hash; no ProtocolVersion bump). NULL = never reported (a pre-upgrade agent): absence reads as BELOW the current ceiling, never unknown-treated-as-ready (S7.5.3 absence-is- not-compliance, applied to version readiness). The UI's cross-site upgrade warning names the gateways whose max is below the ceiling. */
             max_policy_version?: number | null;
+            /**
+             * @description S9.1 (4d): the OpenVPN server's refuse-loudly kind, present ONLY when an OVPN-enabled gateway is not serving because its material or binary is missing. A DIFFERENT axis from policy health — surfaced so an operator sees WHY. Absent when healthy (resolves on its own once the material/binary appears).
+             * @enum {string}
+             */
+            ovpn_health?: "ovpn_certs_absent" | "ovpn_binary_absent";
             /** @description S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes. */
             is_site_hub?: boolean;
             /**

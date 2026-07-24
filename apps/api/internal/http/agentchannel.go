@@ -178,12 +178,14 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 		SiteSubnetUnreachable bool `json:"site_subnet_unreachable"` // S8.2c D3
 		// S8.3 CW: the agent's max-supported policy version (0 when a pre-CW agent omits it → below-ceiling).
 		MaxPolicyVersion int `json:"max_policy_version"`
+		// S9.1 4d: the OpenVPN server's refuse-loudly health kind ("" / ovpn_certs_absent / ovpn_binary_absent).
+		OVPNHealth string `json:"ovpn_health"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&body); err != nil || body.PublicKey == "" {
 		http.Error(w, "public_key required", http.StatusBadRequest)
 		return
 	}
-	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale, SiteSubnetUnreachable: body.SiteSubnetUnreachable, MaxSupportedVersion: body.MaxPolicyVersion}
+	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale, SiteSubnetUnreachable: body.SiteSubnetUnreachable, MaxSupportedVersion: body.MaxPolicyVersion, OVPNHealth: body.OVPNHealth}
 	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
 		var ae *apierr.Error
 		if errors.As(err, &ae) {
