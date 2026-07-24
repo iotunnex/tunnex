@@ -779,7 +779,7 @@ func (q *Queries) RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (i
 const setOrgDeviceApproval = `-- name: SetOrgDeviceApproval :one
 UPDATE organizations SET device_approval = $2, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval, flow_seq
+RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval, flow_seq, ovpn_enabled
 `
 
 type SetOrgDeviceApprovalParams struct {
@@ -804,6 +804,7 @@ func (q *Queries) SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceAppr
 		&i.ZeroTrustMode,
 		&i.DeviceApproval,
 		&i.FlowSeq,
+		&i.OvpnEnabled,
 	)
 	return i, err
 }

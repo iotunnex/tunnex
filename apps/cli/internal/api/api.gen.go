@@ -695,6 +695,20 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
+// ExportOVPNProfileRequest defines model for ExportOVPNProfileRequest.
+type ExportOVPNProfileRequest struct {
+	Name   string              `json:"name"`
+	NodeId openapi_types.UUID  `json:"node_id"`
+	UserId *openapi_types.UUID `json:"user_id,omitempty"`
+}
+
+// ExportOVPNProfileResult defines model for ExportOVPNProfileResponse.
+type ExportOVPNProfileResult struct {
+	Device      Device `json:"device"`
+	Fingerprint string `json:"fingerprint"`
+	Profile     string `json:"profile"`
+}
+
 // ExtendGrantRequest defines model for ExtendGrantRequest.
 type ExtendGrantRequest struct {
 	// ExpiresAt The grant's new expiry (must be in the future).
@@ -1022,6 +1036,9 @@ type Organization struct {
 	CreatedAt time.Time          `json:"created_at"`
 	Id        openapi_types.UUID `json:"id"`
 	Name      string             `json:"name"`
+
+	// OvpnEnabled S9.1 D-S9.5-OPTIN: whether this org has opted into OpenVPN. Default false. When false the OpenVPN device type is not offered and the export endpoint refuses (opt_in_required).
+	OvpnEnabled *bool `json:"ovpn_enabled,omitempty"`
 
 	// PoolCidr The org's flat WireGuard address pool (IPv4 CIDR).
 	PoolCidr  string    `json:"pool_cidr"`
@@ -1422,6 +1439,9 @@ type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
 // SetHubPriorityJSONRequestBody defines body for SetHubPriority for application/json ContentType.
 type SetHubPriorityJSONRequestBody = HubPriorityRequest
+
+// ExportOVPNProfileJSONRequestBody defines body for ExportOVPNProfile for application/json ContentType.
+type ExportOVPNProfileJSONRequestBody = ExportOVPNProfileRequest
 
 // CreatePolicyRuleJSONRequestBody defines body for CreatePolicyRule for application/json ContentType.
 type CreatePolicyRuleJSONRequestBody = CreatePolicyRuleRequest
@@ -1825,6 +1845,11 @@ type ClientInterface interface {
 
 	// GetOrgOverview request
 	GetOrgOverview(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportOVPNProfileWithBody request with any body
+	ExportOVPNProfileWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ExportOVPNProfile(ctx context.Context, orgId openapi_types.UUID, body ExportOVPNProfileJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPolicyRules request
 	ListPolicyRules(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3222,6 +3247,30 @@ func (c *Client) RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeI
 
 func (c *Client) GetOrgOverview(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetOrgOverviewRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ExportOVPNProfileWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportOVPNProfileRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ExportOVPNProfile(ctx context.Context, orgId openapi_types.UUID, body ExportOVPNProfileJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportOVPNProfileRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6960,6 +7009,53 @@ func NewGetOrgOverviewRequest(server string, orgId openapi_types.UUID) (*http.Re
 	return req, nil
 }
 
+// NewExportOVPNProfileRequest calls the generic ExportOVPNProfile builder with application/json body
+func NewExportOVPNProfileRequest(server string, orgId openapi_types.UUID, body ExportOVPNProfileJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewExportOVPNProfileRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewExportOVPNProfileRequestWithBody generates requests for ExportOVPNProfile with any type of body
+func NewExportOVPNProfileRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/ovpn-profiles", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListPolicyRulesRequest generates requests for ListPolicyRules
 func NewListPolicyRulesRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -8674,6 +8770,11 @@ type ClientWithResponsesInterface interface {
 
 	// GetOrgOverviewWithResponse request
 	GetOrgOverviewWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetOrgOverviewResponse, error)
+
+	// ExportOVPNProfileWithBodyWithResponse request with any body
+	ExportOVPNProfileWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportOVPNProfileResponse, error)
+
+	ExportOVPNProfileWithResponse(ctx context.Context, orgId openapi_types.UUID, body ExportOVPNProfileJSONRequestBody, reqEditors ...RequestEditorFn) (*ExportOVPNProfileResponse, error)
 
 	// ListPolicyRulesWithResponse request
 	ListPolicyRulesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPolicyRulesResponse, error)
@@ -10479,6 +10580,29 @@ func (r GetOrgOverviewResponse) StatusCode() int {
 	return 0
 }
 
+type ExportOVPNProfileResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *ExportOVPNProfileResult
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportOVPNProfileResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportOVPNProfileResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListPolicyRulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12111,6 +12235,23 @@ func (c *ClientWithResponses) GetOrgOverviewWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseGetOrgOverviewResponse(rsp)
+}
+
+// ExportOVPNProfileWithBodyWithResponse request with arbitrary body returning *ExportOVPNProfileResponse
+func (c *ClientWithResponses) ExportOVPNProfileWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportOVPNProfileResponse, error) {
+	rsp, err := c.ExportOVPNProfileWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportOVPNProfileResponse(rsp)
+}
+
+func (c *ClientWithResponses) ExportOVPNProfileWithResponse(ctx context.Context, orgId openapi_types.UUID, body ExportOVPNProfileJSONRequestBody, reqEditors ...RequestEditorFn) (*ExportOVPNProfileResponse, error) {
+	rsp, err := c.ExportOVPNProfile(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportOVPNProfileResponse(rsp)
 }
 
 // ListPolicyRulesWithResponse request returning *ListPolicyRulesResponse
@@ -14793,6 +14934,39 @@ func ParseGetOrgOverviewResponse(rsp *http.Response) (*GetOrgOverviewResponse, e
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseExportOVPNProfileResponse parses an HTTP response from a ExportOVPNProfileWithResponse call
+func ParseExportOVPNProfileResponse(rsp *http.Response) (*ExportOVPNProfileResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportOVPNProfileResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ExportOVPNProfileResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

@@ -17,6 +17,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
+	"github.com/tunnexio/tunnex/apps/api/internal/ovpn"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/sites"
@@ -94,6 +95,7 @@ type apiServer struct {
 	invites   *invites.Service
 	nodes     *nodes.Service
 	devices   *devices.Service
+	ovpn      *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export; nil in a stripped build
 	sites     *sites.Service
 	sessions  *session.Store
 	mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
@@ -220,12 +222,14 @@ func (s apiServer) DeleteOrganization(ctx context.Context, req api.DeleteOrganiz
 }
 
 func toAPIOrg(o sqlc.Organization) api.Organization {
+	ovpn := o.OvpnEnabled
 	return api.Organization{
-		Id:        o.ID,
-		Name:      o.Name,
-		Slug:      o.Slug,
-		PoolCidr:  o.PoolCidr,
-		CreatedAt: o.CreatedAt,
-		UpdatedAt: o.UpdatedAt,
+		Id:          o.ID,
+		Name:        o.Name,
+		Slug:        o.Slug,
+		PoolCidr:    o.PoolCidr,
+		OvpnEnabled: &ovpn, // D-S9.5-OPTIN: the UI hides the OpenVPN device type unless this is true
+		CreatedAt:   o.CreatedAt,
+		UpdatedAt:   o.UpdatedAt,
 	}
 }

@@ -821,6 +821,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/ovpn-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint an OpenVPN device + return its .ovpn profile ONCE (S9.1 D-S9.5-OPTIN gated)
+         * @description Creates an OpenVPN-transport device (no WireGuard key) and returns a one-time .ovpn profile carrying the client private key. The profile is served exactly once and never re-fetchable; a lost profile is recovered by revoking and re-issuing, never re-downloading. Refuses with opt_in_required when the org has not opted into OpenVPN.
+         */
+        post: operations["exportOVPNProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices/{deviceId}/revoke": {
         parameters: {
             query?: never;
@@ -1695,6 +1717,8 @@ export interface components {
             slug: string;
             /** @description The org's flat WireGuard address pool (IPv4 CIDR). */
             pool_cidr: string;
+            /** @description S9.1 D-S9.5-OPTIN: whether this org has opted into OpenVPN. Default false. When false the OpenVPN device type is not offered and the export endpoint refuses (opt_in_required). */
+            ovpn_enabled?: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -2207,6 +2231,18 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
             full_tunnel?: boolean;
+        };
+        ExportOVPNProfileRequest: {
+            name: string;
+            /** Format: uuid */
+            node_id: string;
+            /** Format: uuid */
+            user_id?: string;
+        };
+        ExportOVPNProfileResponse: {
+            device: components["schemas"]["Device"];
+            profile: string;
+            fingerprint: string;
         };
         CreateDeviceResponse: {
             device: components["schemas"]["Device"];
@@ -3653,6 +3689,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateDeviceResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exportOVPNProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportOVPNProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description The created OpenVPN device + its one-time .ovpn profile. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOVPNProfileResponse"];
                 };
             };
             default: components["responses"]["Error"];
