@@ -74,6 +74,10 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 			mv := e.MaxPolicyVersion
 			an.MaxPolicyVersion = &mv
 		}
+		if e.OVPNHealth != "" { // S9.1 4d: only present when the OVPN server is refusing loudly (surfaced, not logged)
+			oh := api.NodeOvpnHealth(e.OVPNHealth)
+			an.OvpnHealth = &oh
+		}
 		out = append(out, an)
 	}
 	return api.ListNodes200JSONResponse{

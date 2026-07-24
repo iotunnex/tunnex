@@ -1283,6 +1283,10 @@ type AppliedPolicy struct {
 	// MaxSupportedVersion (S8.3 CW) is the highest artifact Version the agent can apply. Observability
 	// (outside the hash); stored so the UI can warn which gateways would deny-all on a version bump.
 	MaxSupportedVersion int `json:"max_policy_version"`
+	// OVPNHealth (S9.1 4d) is the OpenVPN server's refuse-loudly kind ("" / ovpn_certs_absent /
+	// ovpn_binary_absent) — a DIFFERENT axis from policy health, stored so the gateway surface shows WHY
+	// an enabled gateway isn't serving.
+	OVPNHealth string `json:"ovpn_health"`
 }
 
 // ReportWGInfo records the agent's locally-generated WireGuard public key and
@@ -1329,6 +1333,7 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"site_subnet_unreachable":     applied.SiteSubnetUnreachable,
 		"conntrack_flush_unavailable": applied.ConntrackFlushUnavailable,
 		"max_policy_version":          applied.MaxSupportedVersion,
+		"ovpn_health":                 applied.OVPNHealth, // S9.1 4d
 	})
 	if err != nil {
 		return err
@@ -1428,6 +1433,10 @@ type NodeCapabilities struct {
 	// (a pre-CW/pre-upgrade agent): read as BELOW the ceiling, never unknown-treated-as-ready (S7.5.3
 	// absence-is-not-compliance). Surfaced on the Node API for the cross-site upgrade warning.
 	MaxPolicyVersion int `json:"max_policy_version"`
+	// OVPNHealth (S9.1 4d) — the agent-reported OpenVPN refuse-loudly kind ("" / ovpn_certs_absent /
+	// ovpn_binary_absent). Surfaced on the gateway so an operator sees WHY an OVPN-enabled gateway is
+	// not serving.
+	OVPNHealth string `json:"ovpn_health"`
 }
 
 // zeroTrustOff mirrors organizations.zero_trust_mode = 'off' (the compiler's ModeOff).
@@ -1488,7 +1497,8 @@ type PolicyHealth struct {
 // PROJECTION of electSiteHub, never re-elected UI-side — D2) and the agent's reported max policy version.
 type NodeDisplayExtras struct {
 	IsSiteHub        bool
-	MaxPolicyVersion int // 0 = never reported (pre-CW agent) → the UI reads this as below-ceiling
+	MaxPolicyVersion int    // 0 = never reported (pre-CW agent) → the UI reads this as below-ceiling
+	OVPNHealth       string // S9.1 4d: "" ok, or ovpn_certs_absent / ovpn_binary_absent
 }
 
 // SiteTopoBatch is the per-request site topology + elected hub, loaded ONCE for a node list and shared by
@@ -1622,7 +1632,7 @@ func (s *Service) NodeDisplayExtrasForNodes(ctx context.Context, orgID uuid.UUID
 	for _, n := range nodes {
 		var caps NodeCapabilities
 		_ = json.Unmarshal(n.Capabilities, &caps) // absent/garbage caps → zero-value (MaxPolicyVersion 0)
-		out[n.ID] = NodeDisplayExtras{IsSiteHub: b.hasHub && n.SiteID.Valid && n.ID == b.hubID, MaxPolicyVersion: caps.MaxPolicyVersion}
+		out[n.ID] = NodeDisplayExtras{IsSiteHub: b.hasHub && n.SiteID.Valid && n.ID == b.hubID, MaxPolicyVersion: caps.MaxPolicyVersion, OVPNHealth: caps.OVPNHealth}
 	}
 	return out
 }
