@@ -112,3 +112,47 @@ func TestBuildPFRulesCPCarveOut(t *testing.T) {
 		t.Errorf("the CP carve-out must NOT be a broad `to any` — scoped to the CP endpoint exactly:\n%s", rules)
 	}
 }
+
+// TestPhysGatewayForPerFamily (WF-A-FT-1) — the re-home pin selects the stored physical gateway by the new
+// endpoint's family: v6 host → the v6 gateway, else v4 (the fold-#2 per-family guard).
+func TestPhysGatewayForPerFamily(t *testing.T) {
+	if g := physGatewayFor("15.135.130.96", "192.168.1.1", "fe80::1"); g != "192.168.1.1" {
+		t.Fatalf("v4 endpoint must select the v4 gateway, got %q", g)
+	}
+	if g := physGatewayFor("2001:db8::2", "192.168.1.1", "fe80::1"); g != "fe80::1" {
+		t.Fatalf("v6 endpoint must select the v6 gateway, got %q", g)
+	}
+}
+
+// TestPinHostRouteViaUsesGivenGateway (WF-A-FT-1) — the re-home pin routes the new WG endpoint via the
+// EXPLICIT (stored physical) gateway. Because gw is a PARAMETER, this path structurally CANNOT re-derive the
+// tunnel next-hop via gatewayFor — the stuck-on-connecting loop the walk found is impossible here.
+func TestPinHostRouteViaUsesGivenGateway(t *testing.T) {
+	var got []string
+	b := &darwinBackend{routeRun: func(args ...string) error { got = append(got, strings.Join(args, " ")); return nil }}
+	fam, err := b.pinHostRouteVia("15.135.130.96", "192.168.1.1")
+	if err != nil || fam != "-inet" {
+		t.Fatalf("pin: fam=%q err=%v", fam, err)
+	}
+	var add string
+	for _, c := range got {
+		if strings.Contains(c, "add") {
+			add = c
+		}
+	}
+	// the ADD must be a HOST route for the endpoint, next-hop = the STORED gateway (not a tunnel next-hop).
+	if !strings.Contains(add, "add -inet -host 15.135.130.96 192.168.1.1") {
+		t.Fatalf("re-home pin must be `add -inet -host <endpoint> <stored-gw>`, got %q", add)
+	}
+}
+
+// TestPinHostRouteViaEmptyGatewaySkips (WF-A-FT-1) — no stored gateway (on-link / not captured) → nothing is
+// pinned, fam="" (never a bogus route). Guards the on-link edge + a full tunnel that captured no default.
+func TestPinHostRouteViaEmptyGatewaySkips(t *testing.T) {
+	called := 0
+	b := &darwinBackend{routeRun: func(args ...string) error { called++; return nil }}
+	fam, err := b.pinHostRouteVia("15.135.130.96", "")
+	if err != nil || fam != "" || called != 0 {
+		t.Fatalf("empty gw must pin nothing: fam=%q called=%d err=%v", fam, called, err)
+	}
+}

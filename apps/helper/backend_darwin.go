@@ -69,6 +69,42 @@ type darwinBackend struct {
 	cpEndpoint string
 	cpHost     string
 	cpFam      string
+	// physGwV4/physGwV6 are the PHYSICAL default gateway per family, captured at Up (WF-A-FT-1) BEFORE the
+	// full-tunnel default is installed. A re-home (SetGatewayPeer) pins the new WG endpoint's host-route via
+	// THIS stored value — NOT gatewayFor(), which at re-home time returns the TUNNEL next-hop (the tunnel
+	// 0.0.0.0/1 half is more specific than the physical 0.0.0.0/0, so a route-get for a new endpoint resolves
+	// into the tunnel → the new gateway's outer packets loop into the dead tunnel and the handshake never
+	// completes: the exact WF-A-FT-1 stuck-on-connecting failure the walk found).
+	//
+	// STALENESS (v1 stance, named seam): if the physical network CHANGES mid-session (Wi-Fi→Ethernet, a DHCP
+	// renew moving the router), this stored value goes stale. A re-home pin against a stale gateway then FAILS
+	// VISIBLY — the handshake doesn't complete — the SAME surface as a genuine network change, NOT a silent
+	// self-inflicted loop. WG socket rebinding handles real roaming; a future roaming story owns re-deriving
+	// this (it inherits this seam). The RR2-family alternative (re-derive with the tunnel routes temporarily
+	// excluded) is more machinery on the kill-switch path for an edge this stance already covers — refused
+	// unless store-at-Up proves unworkable.
+	physGwV4 string
+	physGwV6 string
+	// routeRun is the `route` exec seam (nil → the real `route` CLI) so the re-home pin's chosen next-hop is
+	// assertable in a test without a live routing table.
+	routeRun func(args ...string) error
+}
+
+// rr runs the `route` CLI (via the routeRun seam when set — tests capture the args).
+func (b *darwinBackend) rr(args ...string) error {
+	if b.routeRun != nil {
+		return b.routeRun(args...)
+	}
+	return run("route", args...)
+}
+
+// physGatewayFor selects the stored physical gateway for `host`'s family (WF-A-FT-1) — v6 host → v6 gateway,
+// else v4. Pure; the per-family guard (fold #2) applied to the re-home pin.
+func physGatewayFor(host, v4, v6 string) string {
+	if strings.Contains(host, ":") {
+		return v6
+	}
+	return v4
 }
 
 // NewBackend returns the macOS tunnel backend.
@@ -96,6 +132,15 @@ func (b *darwinBackend) Up(cfg *TunnelConfig) error {
 		if cpEp, e := resolveEndpoint(cfg.ControlPlaneEndpoint); e == nil {
 			b.cpEndpoint = cpEp
 		}
+	}
+	// WF-A-FT-1: capture the PHYSICAL default gateway per family NOW (before the tunnel default is installed
+	// below), so a later full-tunnel re-home pins the new WG endpoint via this stored next-hop instead of
+	// re-deriving it through the tunnel-polluted route table. Only meaningful for a full tunnel (a split
+	// tunnel has no kill-switch / endpoint host-route to move). Empty when there is no physical default.
+	b.physGwV4, b.physGwV6 = "", ""
+	if cfg.FullTunnel {
+		b.physGwV4 = gatewayFor("default", "-inet")
+		b.physGwV6 = gatewayFor("default", "-inet6")
 	}
 
 	// 0) CLEAN stale kill-switch state from a prior FailClosed/crash before (re)arming.
@@ -299,7 +344,10 @@ func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 			b.endpointHost, b.endpointFam = "", ""
 		}
 		if newHost != "" {
-			fam, perr := b.pinPhysHostRoute(newHost)
+			// WF-A-FT-1: pin via the STORED physical gateway (captured at Up), NOT gatewayFor — by re-home
+			// time the tunnel default is installed, so gatewayFor would return the tunnel next-hop and loop
+			// the new gateway's handshake (the stuck-on-connecting bug the walk found).
+			fam, perr := b.pinHostRouteVia(newHost, physGatewayFor(newHost, b.physGwV4, b.physGwV6))
 			if perr != nil {
 				return &ProtocolError{Code: "gateway_peer_route_failed", Msg: perr.Error()}
 			}
@@ -317,17 +365,32 @@ func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 // prior FailClosed/crash's leftover physical-gateway route can't fail the re-add "File exists"). Returns the
 // family flag ("-inet"/"-inet6") pinned, or "" when the host is on-link/unresolved (nothing to pin — not an
 // error). b.mu is held by every caller (Up / SetGatewayPeer).
+// pinPhysHostRoute derives the physical next-hop via gatewayFor (VALID only PRE-tunnel-default — i.e. at Up,
+// where 0.0.0.0/0 is still the most specific default) then pins. Used by Up's WG + CP endpoint pins.
+// A re-home must NOT use this (gatewayFor is polluted by the tunnel default) — it uses pinHostRouteVia with
+// the stored physical gateway (WF-A-FT-1).
 func (b *darwinBackend) pinPhysHostRoute(host string) (fam string, err error) {
+	famFlag := "-inet"
+	if strings.Contains(host, ":") {
+		famFlag = "-inet6"
+	}
+	return b.pinHostRouteVia(host, gatewayFor(host, famFlag))
+}
+
+// pinHostRouteVia pins a /32|/128 host-route for `host` via an EXPLICIT gateway `gw` (delete-before-add,
+// idempotent). Empty gw → nothing pinned, fam="" (on-link, or no stored physical gateway). The re-home path
+// passes the STORED physical gateway (WF-A-FT-1); Up passes gatewayFor's pre-tunnel result. Because gw is a
+// PARAMETER, this path structurally cannot re-derive the tunnel next-hop — the loop bug can't recur here.
+func (b *darwinBackend) pinHostRouteVia(host, gw string) (fam string, err error) {
 	fam = "-inet"
 	if strings.Contains(host, ":") {
 		fam = "-inet6"
 	}
-	gw := gatewayFor(host, fam)
 	if gw == "" {
-		return "", nil // on-link / unresolved next-hop → nothing to pin
+		return "", nil // on-link / no stored next-hop → nothing to pin
 	}
-	_ = run("route", "-q", "delete", fam, "-host", host)
-	if err := run("route", "-q", "add", fam, "-host", host, gw); err != nil {
+	_ = b.rr("-q", "delete", fam, "-host", host)
+	if err := b.rr("-q", "add", fam, "-host", host, gw); err != nil {
 		return "", fmt.Errorf("pin host route %s via %s: %w", host, gw, err)
 	}
 	return fam, nil
@@ -377,6 +440,7 @@ func (b *darwinBackend) Down() error {
 		b.cpHost, b.cpFam = "", ""
 	}
 	b.cpEndpoint, b.fullTunnel = "", false
+	b.physGwV4, b.physGwV6 = "", "" // WF-A-FT-1: session-scoped — the stored physical gateway clears with the tunnel
 	// Restore the system resolver a full tunnel hijacked (no-op if none was saved).
 	restoreDNS()
 	return b.releasePF()
