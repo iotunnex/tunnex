@@ -217,6 +217,7 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
     updated_at = now();
 
 -- name: ListActiveOVPNDevicesForNode :many
+-- lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
 -- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 -- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 -- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
@@ -228,8 +229,9 @@ ORDER BY id;
 -- name: SetDeviceProvisioning :exec
 -- S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
 -- CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+-- lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListStaticDevicesForOrg :many
 -- S9.1 Part-2 stale-profile surface: every static-provisioned device + its baked ranges snapshot. The

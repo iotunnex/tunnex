@@ -384,6 +384,7 @@ type ListActiveOVPNDevicesForNodeRow struct {
 	AssignedIp *string   `json:"assigned_ip"`
 }
 
+// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
 // The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 // homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 // CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
@@ -823,7 +824,7 @@ func (q *Queries) RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (i
 
 const setDeviceProvisioning = `-- name: SetDeviceProvisioning :exec
 UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 `
 
 type SetDeviceProvisioningParams struct {
@@ -834,6 +835,7 @@ type SetDeviceProvisioningParams struct {
 
 // S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
 // CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+// lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 func (q *Queries) SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error {
 	_, err := q.db.Exec(ctx, setDeviceProvisioning, arg.ID, arg.ProvisioningMode, arg.ProvisionedRanges)
 	return err
