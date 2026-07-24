@@ -13,6 +13,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getOVPNServerCertForNode = `-- name: GetOVPNServerCertForNode :one
+SELECT id, org_id, node_id, serial, cert_pem, sealed_key, not_after, issued_at FROM ovpn_server_certs WHERE node_id = $1
+`
+
+// lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.
+func (q *Queries) GetOVPNServerCertForNode(ctx context.Context, nodeID uuid.UUID) (OvpnServerCert, error) {
+	row := q.db.QueryRow(ctx, getOVPNServerCertForNode, nodeID)
+	var i OvpnServerCert
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.NodeID,
+		&i.Serial,
+		&i.CertPem,
+		&i.SealedKey,
+		&i.NotAfter,
+		&i.IssuedAt,
+	)
+	return i, err
+}
+
 const insertOVPNClientCert = `-- name: InsertOVPNClientCert :one
 
 INSERT INTO ovpn_client_certs (org_id, device_id, serial, common_name, not_after)
@@ -48,6 +69,44 @@ func (q *Queries) InsertOVPNClientCert(ctx context.Context, arg InsertOVPNClient
 		&i.NotAfter,
 		&i.IssuedAt,
 		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const insertOVPNServerCert = `-- name: InsertOVPNServerCert :one
+INSERT INTO ovpn_server_certs (org_id, node_id, serial, cert_pem, sealed_key, not_after)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, org_id, node_id, serial, cert_pem, sealed_key, not_after, issued_at
+`
+
+type InsertOVPNServerCertParams struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Serial    string    `json:"serial"`
+	CertPem   string    `json:"cert_pem"`
+	SealedKey string    `json:"sealed_key"`
+	NotAfter  time.Time `json:"not_after"`
+}
+
+func (q *Queries) InsertOVPNServerCert(ctx context.Context, arg InsertOVPNServerCertParams) (OvpnServerCert, error) {
+	row := q.db.QueryRow(ctx, insertOVPNServerCert,
+		arg.OrgID,
+		arg.NodeID,
+		arg.Serial,
+		arg.CertPem,
+		arg.SealedKey,
+		arg.NotAfter,
+	)
+	var i OvpnServerCert
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.NodeID,
+		&i.Serial,
+		&i.CertPem,
+		&i.SealedKey,
+		&i.NotAfter,
+		&i.IssuedAt,
 	)
 	return i, err
 }

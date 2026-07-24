@@ -11,14 +11,24 @@ package ovpn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/ovpnca"
 )
+
+// sealer seals/opens a secret under the master key (crypto.Sealer) — used for the SERVER private key
+// at rest (D-S9.6-CERT-DELIVERY: server keys are stored sealed so they can be re-delivered idempotently,
+// distinct from ephemeral client keys).
+type sealer interface {
+	Seal([]byte) (string, error)
+	Open(string) ([]byte, error)
+}
 
 // Service issues + records OpenVPN client certificates. The client CA loads LAZILY (D-S9.5-OPTIN(a)):
 // it is generated on the FIRST export in an opted-in org, NEVER at boot — so a deployment where no
@@ -26,13 +36,51 @@ import (
 type Service struct {
 	q      *sqlc.Queries
 	loadCA func(context.Context) (*ovpnca.CA, error)
+	sealer sealer
 	ca     atomic.Pointer[ovpnca.CA]
 }
 
 // NewService wires the OVPN service to the query set + a lazy CA loader (LoadOrCreate, called on
-// first use so the CA is generated only when OpenVPN is actually used, honoring D-S9.5-OPTIN(a)).
-func NewService(q *sqlc.Queries, loadCA func(context.Context) (*ovpnca.CA, error)) *Service {
-	return &Service{q: q, loadCA: loadCA}
+// first use so the CA is generated only when OpenVPN is actually used, honoring D-S9.5-OPTIN(a)) + a
+// sealer for the server private key at rest.
+func NewService(q *sqlc.Queries, loadCA func(context.Context) (*ovpnca.CA, error), s sealer) *Service {
+	return &Service{q: q, loadCA: loadCA, sealer: s}
+}
+
+// EnsureServerCert returns the gateway's OpenVPN server material (CA cert + server cert + server key)
+// for delivery as desired state (D-S9.6-CERT-DELIVERY). MINT-ONCE: the server cert is minted per
+// gateway (IssueServer, server-auth leaf) + recorded with its key SEALED, so every later call
+// re-delivers the SAME material (never a fresh mint). The key is returned for the agent to write at
+// cfgDir; it crosses the same mTLS control channel as policy/pool (no new trust). Never logged/audited.
+func (s *Service) EnsureServerCert(ctx context.Context, orgID, nodeID uuid.UUID, commonName string) (caPEM, certPEM, keyPEM string, err error) {
+	ca, err := s.caFor(ctx)
+	if err != nil {
+		return "", "", "", err
+	}
+	if row, gerr := s.q.GetOVPNServerCertForNode(ctx, nodeID); gerr == nil {
+		key, oerr := s.sealer.Open(row.SealedKey) // re-deliver the recorded material
+		if oerr != nil {
+			return "", "", "", oerr
+		}
+		return string(ca.CertPEM()), row.CertPem, string(key), nil
+	} else if !errors.Is(gerr, pgx.ErrNoRows) {
+		return "", "", "", gerr
+	}
+	// mint-once.
+	p, err := ca.IssueServer(commonName)
+	if err != nil {
+		return "", "", "", err
+	}
+	sealed, err := s.sealer.Seal([]byte(p.PrivateKeyPEM))
+	if err != nil {
+		return "", "", "", err
+	}
+	if _, err := s.q.InsertOVPNServerCert(ctx, sqlc.InsertOVPNServerCertParams{
+		OrgID: orgID, NodeID: nodeID, Serial: p.Serial, CertPem: p.CertPEM, SealedKey: sealed, NotAfter: p.NotAfter,
+	}); err != nil {
+		return "", "", "", err
+	}
+	return string(ca.CertPEM()), p.CertPEM, p.PrivateKeyPEM, nil
 }
 
 // caFor returns the platform client CA, generating it on first use (lazy — D-S9.5-OPTIN(a)) and
