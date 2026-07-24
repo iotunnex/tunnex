@@ -245,8 +245,12 @@ func (s *MembershipService) ChangeMemberRole(ctx context.Context, actor *uuid.UU
 // removal today — the exposed offboarding is DeactivateMember (reversible; status
 // flip + org-wide push). This method retains the ORG-WIDE PushOrgNodes below so that
 // IF a hard-remove endpoint is ever added, it inherits the Zero Trust <5s push
-// targeting (a removed member's /32 must leave every node's ruleset, not just their
-// own device-nodes). Do not wire an endpoint to this without that push intact.
+// targeting. A removed member's /32 then leaves EVERY node's ruleset — the compiled
+// enterprise policy AND the open-edition mesh WG peer set (ListActivePeersForNode),
+// BOTH of which gate on current membership (the identity-binding invariant). Until the
+// membership join was added to the peer query, this push rebuilt a query that still
+// served the removed member in open-edition mesh — the guarantee this comment claims
+// was only half-true. Do not wire an endpoint to this without that push intact.
 func (s *MembershipService) RemoveMember(ctx context.Context, actor *uuid.UUID, actorRole string, orgID, targetUserID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		target, e := q.GetMembership(ctx, sqlc.GetMembershipParams{OrgID: orgID, UserID: targetUserID})
