@@ -957,6 +957,31 @@ paths:
               schema: { $ref: "#/components/schemas/CreateDeviceResponse" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/ovpn-profiles:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: exportOVPNProfile
+      summary: "Mint an OpenVPN device + return its .ovpn profile ONCE (S9.1 D-S9.5-OPTIN gated)"
+      description: "Creates an OpenVPN-transport device (no WireGuard key) and returns a one-time .ovpn profile carrying the client private key. The profile is served exactly once and never re-fetchable; a lost profile is recovered by revoking and re-issuing, never re-downloading. Refuses with opt_in_required when the org has not opted into OpenVPN."
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportOVPNProfileRequest" }
+      responses:
+        "201":
+          description: The created OpenVPN device + its one-time .ovpn profile.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportOVPNProfileResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/devices/{deviceId}/revoke:
     parameters:
       - name: orgId
@@ -2165,6 +2190,9 @@ components:
         pool_cidr:
           type: string
           description: The org's flat WireGuard address pool (IPv4 CIDR).
+        ovpn_enabled:
+          type: boolean
+          description: "S9.1 D-S9.5-OPTIN: whether this org has opted into OpenVPN. Default false. When false the OpenVPN device type is not offered and the export endpoint refuses (opt_in_required)."
         created_at:
           type: string
           format: date-time
@@ -2901,6 +2929,30 @@ components:
         user_id: { type: string, format: uuid }
         # Route all traffic (0.0.0.0/0). Default false = split-tunnel (org network only).
         full_tunnel: { type: boolean }
+
+    ExportOVPNProfileRequest:
+      type: object
+      required: [name, node_id]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 100 }
+        node_id: { type: string, format: uuid }
+        # Admins may mint on behalf of another org member; omit for self.
+        user_id: { type: string, format: uuid }
+
+    ExportOVPNProfileResponse:
+      type: object
+      x-go-name: ExportOVPNProfileResult
+      required: [device, profile, fingerprint]
+      additionalProperties: false
+      properties:
+        device: { $ref: "#/components/schemas/Device" }
+        # The one-time .ovpn profile (carries the client private key). Shown ONCE, never
+        # re-fetchable — a lost profile is recovered by revoke + re-issue, never re-download.
+        profile: { type: string }
+        # The cert-serial fingerprint recorded in the audit row — the profile's keyed
+        # identity, NEVER the material.
+        fingerprint: { type: string }
 
     CreateDeviceResponse:
       type: object

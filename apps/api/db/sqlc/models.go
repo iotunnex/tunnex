@@ -272,6 +272,7 @@ type Organization struct {
 	ZeroTrustMode     string             `json:"zero_trust_mode"`
 	DeviceApproval    string             `json:"device_approval"`
 	FlowSeq           int64              `json:"flow_seq"`
+	OvpnEnabled       bool               `json:"ovpn_enabled"`
 }
 
 type OvpnClientCert struct {

@@ -84,3 +84,11 @@ JOIN users u ON u.id = d.user_id
 WHERE d.org_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
   AND u.status = 'active' AND u.deleted_at IS NULL
   AND ds.last_handshake_at >= $2;
+
+-- name: SetOrgOVPNEnabled :one
+-- D-S9.5-OPTIN org opt-in toggle (the admin flip is 4d; the column + gate land in 4b). Flipping OFF
+-- is a full sweep at the agent tier (server stopped, tun leaves, CCD swept) — issued client certs
+-- SURVIVE (disable is not revocation).
+UPDATE organizations SET ovpn_enabled = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

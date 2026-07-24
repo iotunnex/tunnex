@@ -582,6 +582,10 @@ type Querier interface {
 	// S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
 	// build can never set it 'on', so enrollment there stays immediately-active.
 	SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceApprovalParams) (Organization, error)
+	// D-S9.5-OPTIN org opt-in toggle (the admin flip is 4d; the column + gate land in 4b). Flipping OFF
+	// is a full sweep at the agent tier (server stopped, tun leaves, CCD swept) — issued client certs
+	// SURVIVE (disable is not revocation).
+	SetOrgOVPNEnabled(ctx context.Context, arg SetOrgOVPNEnabledParams) (Organization, error)
 	// ── org enforcement mode ────────────────────────────────────────────────────────
 	SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustModeParams) (Organization, error)
 	// F3: toggle a rule's disabled flag. RETURNING * so the API echoes the new state; the caller (mutate)
