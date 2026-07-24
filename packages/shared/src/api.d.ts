@@ -821,6 +821,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/ovpn-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the org OpenVPN opt-in (S9.1 D-S9.5-OPTIN — unlock-then-opt-in, OFF by default)
+         * @description Flips org-level OpenVPN. Enabling makes the OVPN capability available on the org's gateways; disabling is NOT revocation — issued client certs survive and a re-enable restores service.
+         */
+        put: operations["setOVPNEnabled"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/ovpn-profiles": {
         parameters: {
             query?: never;
@@ -2235,6 +2257,10 @@ export interface components {
             full_tunnel?: boolean;
             /** @enum {string} */
             provisioning?: "managed" | "static";
+        };
+        OVPNSetting: {
+            /** @description S9.1 D-S9.5-OPTIN: whether the org has opted into OpenVPN. */
+            enabled: boolean;
         };
         ExportOVPNProfileRequest: {
             name: string;
@@ -3693,6 +3719,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateDeviceResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setOVPNEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OVPNSetting"];
+            };
+        };
+        responses: {
+            /** @description Updated OpenVPN opt-in. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OVPNSetting"];
                 };
             };
             default: components["responses"]["Error"];

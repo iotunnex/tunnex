@@ -277,3 +277,53 @@ func TestDesiredStateOVPNRosterNotPeer(t *testing.T) {
 		t.Fatalf("roster entry must be the OVPN device's id+/32; got %+v", c)
 	}
 }
+
+// TestDesiredStateOVPNEnabledTracksOrgOptIn (S9.1 4d) locks two opt-in reds at the CP: org-OFF →
+// DesiredState.OVPNEnabled false (the agent then idles → ZERO OVPN artifacts, the zero-config golden);
+// and a disable→enable→disable round-trip flips it cleanly.
+func TestDesiredStateOVPNEnabledTracksOrgOptIn(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	q := sqlc.New(tx)
+	org, nodeID := uuid.New(), uuid.New()
+	if _, e := tx.Exec(ctx, "INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')", org, "n-"+org.String()); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	if _, e := tx.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint) VALUES ($1,$2,'gw',$3,'c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0=','gw:51820')", nodeID, org, "s-"+nodeID.String()); e != nil {
+		t.Fatalf("node: %v", e)
+	}
+	node, _ := q.GetNodeByCertSerial(ctx, "s-"+nodeID.String())
+	svc := &Service{q: q}
+
+	// org OFF (default) → OVPNEnabled false → agent idles → zero artifacts.
+	if ds, _ := svc.DesiredState(ctx, node); ds.OVPNEnabled {
+		t.Fatal("org opt-in OFF must yield DesiredState.OVPNEnabled=false (zero OVPN artifacts)")
+	}
+	// enable → true.
+	if _, e := q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: org, OvpnEnabled: true}); e != nil {
+		t.Fatalf("enable: %v", e)
+	}
+	if ds, _ := svc.DesiredState(ctx, node); !ds.OVPNEnabled {
+		t.Fatal("org opt-in ON must yield OVPNEnabled=true")
+	}
+	// disable → false again (round-trip clean).
+	if _, e := q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: org, OvpnEnabled: false}); e != nil {
+		t.Fatalf("disable: %v", e)
+	}
+	if ds, _ := svc.DesiredState(ctx, node); ds.OVPNEnabled {
+		t.Fatal("disable must return OVPNEnabled=false (round-trip)")
+	}
+}
