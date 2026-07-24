@@ -317,13 +317,15 @@ func TestDockerForwardLocalSubnetMirrored(t *testing.T) {
 	if fwd := findInsertWith(f, "daddr", "10.0.0.0/24"); !hasArgSeq(fwd, []string{"oifname", "wg0", "ip", "daddr"}) || hasArgSeq(fwd, []string{"iifname"}) {
 		t.Fatalf("route forward must be RELAXED oif=wg0 (no iif predicate), got %v", fwd)
 	}
-	// LOCAL-SUBNET FORWARD (daddr=localsubnet) = device→own-LAN: the MIRROR iif=wg0 → oif!=wg0.
-	if fwd := findInsertWith(f, "daddr", "172.31.0.0/16"); !hasArgSeq(fwd, []string{"iifname", "wg0", "oifname", "!=", "wg0"}) {
-		t.Fatalf("WF-4-local: local-subnet forward must be MIRRORED iif=wg0 → oif!=wg0 (device→own-LAN), got %v", fwd)
+	// LOCAL-SUBNET FORWARD (daddr=localsubnet) = tunnel-client→own-LAN. S9.1: keyed `iifname <tif> daddr`,
+	// the `oifname != wg0` NEGATION DROPPED (founder-ruled) — a packet to the gateway's own LAN can't egress a
+	// tunnel (routing + disjointness), so the negation added nothing. Here (single iface) tif=wg0.
+	if fwd := findInsertWith(f, "daddr", "172.31.0.0/16"); !hasArgSeq(fwd, []string{"iifname", "wg0", "ip", "daddr"}) || hasArgSeq(fwd, []string{"oifname"}) {
+		t.Fatalf("local-subnet forward must be iif=<tif> daddr (no oifname negation), got %v", fwd)
 	}
-	// LOCAL-SUBNET RETURN (saddr=localsubnet) = own-LAN→device: iif!=wg0 → oif=wg0.
-	if ret := findInsertWith(f, "saddr", "172.31.0.0/16"); !hasArgSeq(ret, []string{"iifname", "!=", "wg0", "oifname", "wg0"}) {
-		t.Fatalf("WF-4-local: local-subnet return must be iif!=wg0 → oif=wg0 (own-LAN→device), got %v", ret)
+	// LOCAL-SUBNET RETURN (saddr=localsubnet) = own-LAN→tunnel-client: keyed `oifname <tif> saddr`, no iif negation.
+	if ret := findInsertWith(f, "saddr", "172.31.0.0/16"); !hasArgSeq(ret, []string{"oifname", "wg0", "ip", "saddr"}) || hasArgSeq(ret, []string{"iifname"}) {
+		t.Fatalf("local-subnet return must be oif=<tif> saddr (no iifname negation), got %v", ret)
 	}
 
 	// SECOND FACE: this reconcile touches ONLY DOCKER-USER (Docker's structural drop), NEVER the `ip tunnex`
@@ -574,5 +576,80 @@ func TestDockerPoolZeroConfigByteIdentical(t *testing.T) {
 	}
 	if o := f.orient["s:wg0:10.99.0.0/24"]; o != `iifname "wg0"` {
 		t.Fatalf("zero-config pool return orient must be bare `iifname \"wg0\"`, got %q", o)
+	}
+}
+
+// TestDockerLocalSubnetPerInterface_PrimaryUseCase (S9.1 Slice 3, localSubnets fold): the PRIMARY
+// OpenVPN use case — a client dials in and reaches the LAN behind its own gateway. With the OVPN tun
+// co-terminated, the local-subnet class emits a tun-ingress accept per interface so Docker doesn't
+// structurally drop tunnel-client→own-LAN. The `oifname != wg0` NEGATION is dropped (founder-ruled):
+// a packet to the gateway's OWN LAN cannot egress a tunnel — routing sends it out the LAN interface,
+// and the subnet-disjointness validator guarantees NO site subnet overlaps a local subnet. The fake
+// cannot observe kernel egress, so that guarantee is CITED + pinned here, not packet-tested.
+func TestDockerLocalSubnetPerInterface_PrimaryUseCase(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.SetOVPNTun("tunnex-ovpn")
+	m.reconcileDockerForward(context.Background(), nil, []string{"172.31.0.0/16"}, "")
+	// per-interface: forward + return for BOTH wg0 and the OVPN tun (the OVPN path was structurally dropped before).
+	for _, k := range []string{
+		"d:wg0:172.31.0.0/16", "s:wg0:172.31.0.0/16",
+		"d:tunnex-ovpn:172.31.0.0/16", "s:tunnex-ovpn:172.31.0.0/16",
+	} {
+		if f.rules[k] == "" {
+			t.Fatalf("missing per-interface local-subnet rule %s (OVPN client→own-LAN would drop); got %v", k, f.rules)
+		}
+	}
+	// ANTI-SPOOF at the DOCKER-USER tier: every local-subnet forward is TUNNEL-INGRESS keyed
+	// (`iifname <tif>`), never a non-tunnel ingress and never a `!=` negation — an eth0 spoofer's
+	// packet (iifname=eth0 ∉ {wg0,tunnex-ovpn}) matches no local-subnet accept. (The ip tunnex chain
+	// is the real boundary — TestOVPNTunJoinsTunnelSet_MeshAntiSpoof; this confirms the coverage tier
+	// added no hole.)
+	if o := f.orient["d:tunnex-ovpn:172.31.0.0/16"]; o != `iifname "tunnex-ovpn"` {
+		t.Fatalf("OVPN local-subnet forward must be `iifname \"tunnex-ovpn\"` (ingress-keyed, no negation), got %q", o)
+	}
+	for k, o := range f.orient {
+		if strings.HasSuffix(k, "172.31.0.0/16") && strings.Contains(o, "!=") {
+			t.Fatalf("local-subnet accept %s must not carry a `!=` negation (anti-spoof: ingress-keyed), got %q", k, o)
+		}
+	}
+}
+
+// TestDockerLocalSubnetZeroConfigByteIdentical (S9.1 Slice 3): WireGuard-only emits exactly the two
+// local-subnet rules, tunnel-ingress keyed (the negation drop is the only intended shape change; a
+// WG-only deployment sees one pair, wg0-oriented).
+func TestDockerLocalSubnetZeroConfigByteIdentical(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f) // no SetOVPNTun
+	m.reconcileDockerForward(context.Background(), nil, []string{"172.31.0.0/16"}, "")
+	if len(f.rules) != 2 {
+		t.Fatalf("WG-only must emit exactly 2 local-subnet rules, got %v", f.rules)
+	}
+	if o := f.orient["d:wg0:172.31.0.0/16"]; o != `iifname "wg0"` {
+		t.Fatalf("zero-config local-subnet forward must be bare `iifname \"wg0\"`, got %q", o)
+	}
+	if o := f.orient["s:wg0:172.31.0.0/16"]; o != `oifname "wg0"` {
+		t.Fatalf("zero-config local-subnet return must be bare `oifname \"wg0\"`, got %q", o)
+	}
+}
+
+// TestDockerLocalSubnetSweepsDepartedTun (S9.1 Slice 3): the sweep covers the local-subnet class too —
+// a departed OVPN tun's local-subnet rules leave, wg0's survive.
+func TestDockerLocalSubnetSweepsDepartedTun(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.SetOVPNTun("tunnex-ovpn")
+	m.reconcileDockerForward(context.Background(), nil, []string{"172.31.0.0/16"}, "")
+	m.SetOVPNTun("")
+	m.reconcileDockerForward(context.Background(), nil, []string{"172.31.0.0/16"}, "")
+	for _, k := range []string{"d:tunnex-ovpn:172.31.0.0/16", "s:tunnex-ovpn:172.31.0.0/16"} {
+		if _, still := f.rules[k]; still {
+			t.Fatalf("departed tun's local-subnet rule %s must be swept, got %v", k, f.rules)
+		}
+	}
+	for _, k := range []string{"d:wg0:172.31.0.0/16", "s:wg0:172.31.0.0/16"} {
+		if f.rules[k] == "" {
+			t.Fatalf("wg0's local-subnet rule %s must survive, got %v", k, f.rules)
+		}
 	}
 }
