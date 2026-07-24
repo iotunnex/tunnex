@@ -795,6 +795,20 @@ var dockerUserRuleRE = regexp.MustCompile(`((?:iifname|oifname)[^\n]*?)?ip ([sd]
 // and our insert-args form normalize identically — the drift-detection comparator (S8.6b D-transit-2).
 func orientSig(s string) string { return strings.NewReplacer(" ", "", `"`, "").Replace(s) }
 
+// ifaceFromOrient extracts the tunnel interface name from a rule's iif/oif orientation prefix
+// (e.g. `oifname "wg0"` -> "wg0", or the insert-args form `oifname wg0`). It is how the per-interface
+// pool key (S9.1 Slice 3) is rebuilt from a listed DOCKER-USER rule. Pool rules always carry exactly one
+// interface token; returns "" defensively if none is present.
+func ifaceFromOrient(orient string) string {
+	fields := strings.Fields(orient)
+	for i, f := range fields {
+		if (f == "iifname" || f == "oifname") && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"`)
+		}
+	}
+	return ""
+}
+
 // argOrientSig derives the orientation signature from an insert-args vector: the tokens BEFORE "ip" (the
 // iifname/oifname clause), normalized the same way as orientSig.
 func argOrientSig(args []string) string {
@@ -874,20 +888,31 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 			set("s:"+a, []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
 		}
 	}
-	// POOL class (A3b v6, fork-ruled (ii) RELAXED): the org device pool. Forward = oif=wg0, daddr=pool
-	// (LAN→device replies AND wg0→wg0 device↔device forward); return = iif=wg0, saddr=pool (device-sourced
-	// any direction, incl. wg0→wg0 transit at a hub). NO iif/oif exclusions — Docker's match tier never
-	// structurally drops what the ip tunnex chain is entitled to adjudicate (the D-transit-3 boundary,
-	// applied uniformly to the pool class; the amended D-A3b-1 condition). Under enforcing, device↔device
-	// without a grant still drops AT THE CHAIN with counter evidence (the re-targeted spoke-isolation red).
-	// Same ONE engine: same comment marker, same "d:"/"s:" key space, same drift-detection transition.
-	// Existing-key guard mirrors localSubnets (a pool colliding with a route/local addr never overwrites).
+	// POOL class (A3b v6; S9.1 Slice 3 PER-INTERFACE): the org device pool. Docker must not structurally
+	// drop pool traffic to/from ANY crypto-authenticated tunnel-ingress interface — so we emit ONE accept
+	// pair (forward oif=tif daddr=pool; return iif=tif saddr=pool) PER tunnel interface (wg0, and the
+	// co-terminated OVPN tun when present). The ip tunnex chain (tunnel-set keyed) does the real
+	// adjudication; this only lifts Docker's blanket drop (the D-transit-3 boundary).
+	//
+	// PER-INTERFACE, NOT an nft set: this chain reconciles INCREMENTALLY, and nft canonicalizes set member
+	// order — so the drift-detection comparator (orientSig, which compares insert-args to nft's PRINTED
+	// form) could never match a set's printed order and would thrash every tick (empirically confirmed via
+	// a direct nft probe). This consumes the SAME one-truth as the ip tunnex chain, tunnelIfaces(); the ip
+	// tunnex chain renders that set atomically, DOCKER-USER renders it per-interface because its incremental
+	// comparator cannot match nft's set canonicalization — same truth, two renderings (D-S9.3-DOCKER (a)).
+	//
+	// Key = "dir:iface:addr" so the wg0 and tun rules COEXIST and full-sweep INDEPENDENTLY (a departed tun
+	// leaves → its rules leave). Routes/localSubnets keep the addr-only "dir:addr" key; the listing side
+	// disambiguates by the pool CIDR (poolCanon), which is DISJOINT from routes/locals by construction. The
+	// existing-key guard checks the addr-only key so a pool colliding with a route/local never double-places.
 	if poolCIDR != "" {
 		if p, err := netip.ParsePrefix(poolCIDR); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
-			if !desired["d:"+a] && !desired["s:"+a] {
-				set("d:"+a, []string{"oifname", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
-				set("s:"+a, []string{"iifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
+			if !desired["d:"+a] && !desired["s:"+a] { // never overwrite a route/local at this addr (disjoint guard)
+				for _, tif := range m.tunnelIfaces() {
+					set("d:"+tif+":"+a, []string{"oifname", tif, "ip", "daddr", a, "counter", "accept", "comment", comment})
+					set("s:"+tif+":"+a, []string{"iifname", tif, "ip", "saddr", a, "counter", "accept", "comment", comment})
+				}
 			}
 		}
 	}
@@ -905,18 +930,31 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 		handle string
 		sig    string
 	}
+	// poolCanon (S9.1 Slice 3): the pool's canonical address, used to recognize a listed rule as a
+	// PER-INTERFACE pool rule (keyed dir:iface:addr) vs an addr-only route/local rule.
+	poolCanon := ""
+	if poolCIDR != "" {
+		if p, e := netip.ParsePrefix(poolCIDR); e == nil && p.Addr().Is4() {
+			poolCanon = canonDaddr(p)
+		}
+	}
 	current := map[string]curRule{}
 	for _, mt := range dockerUserRuleRE.FindAllStringSubmatch(listing, -1) {
 		orient, dir, addr, handle := mt[1], mt[2], mt[3], mt[4]
-		key := ""
+		canon := ""
 		if p, e := netip.ParsePrefix(addr); e == nil {
-			key = dir + ":" + canonDaddr(p)
+			canon = canonDaddr(p)
 		} else if a, e := netip.ParseAddr(addr); e == nil {
-			key = dir + ":" + a.String() // nft prints a host route as a bare address
+			canon = a.String() // nft prints a host route as a bare address
 		}
-		if key != "" {
-			current[key] = curRule{handle: handle, sig: orientSig(orient)}
+		if canon == "" {
+			continue
 		}
+		key := dir + ":" + canon
+		if canon == poolCanon { // pool rules are per-interface keyed; derive the iface from the orientation
+			key = dir + ":" + ifaceFromOrient(orient) + ":" + canon
+		}
+		current[key] = curRule{handle: handle, sig: orientSig(orient)}
 	}
 	placeErr := false
 	// Add missing OR REPLACE drifted — INSERT (prepend) so it precedes DOCKER-USER's trailing RETURN. A key
