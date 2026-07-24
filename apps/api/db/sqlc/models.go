@@ -90,23 +90,25 @@ type CliDeviceCode struct {
 }
 
 type Device struct {
-	ID            uuid.UUID          `json:"id"`
-	OrgID         uuid.UUID          `json:"org_id"`
-	UserID        uuid.UUID          `json:"user_id"`
-	NodeID        uuid.UUID          `json:"node_id"`
-	Name          string             `json:"name"`
-	Platform      string             `json:"platform"`
-	PublicKey     string             `json:"public_key"`
-	AssignedIp    *string            `json:"assigned_ip"`
-	Status        string             `json:"status"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
-	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
-	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
-	FullTunnel    bool               `json:"full_tunnel"`
-	ApprovedBy    pgtype.UUID        `json:"approved_by"`
-	HealthBlocked bool               `json:"health_blocked"`
-	Transport     string             `json:"transport"`
+	ID                uuid.UUID          `json:"id"`
+	OrgID             uuid.UUID          `json:"org_id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	NodeID            uuid.UUID          `json:"node_id"`
+	Name              string             `json:"name"`
+	Platform          string             `json:"platform"`
+	PublicKey         string             `json:"public_key"`
+	AssignedIp        *string            `json:"assigned_ip"`
+	Status            string             `json:"status"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	FullTunnel        bool               `json:"full_tunnel"`
+	ApprovedBy        pgtype.UUID        `json:"approved_by"`
+	HealthBlocked     bool               `json:"health_blocked"`
+	Transport         string             `json:"transport"`
+	ProvisioningMode  string             `json:"provisioning_mode"`
+	ProvisionedRanges []byte             `json:"provisioned_ranges"`
 }
 
 type DeviceHealth struct {

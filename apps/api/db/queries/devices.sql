@@ -224,3 +224,16 @@ SELECT id, assigned_ip FROM devices
 WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
   AND assigned_ip IS NOT NULL AND deleted_at IS NULL
 ORDER BY id;
+
+-- name: SetDeviceProvisioning :exec
+-- S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
+-- CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
+WHERE id = $1;
+
+-- name: ListStaticDevicesForOrg :many
+-- S9.1 Part-2 stale-profile surface: every static-provisioned device + its baked ranges snapshot. The
+-- caller diffs each snapshot against the org's CURRENT routed ranges to flag "re-export needed".
+SELECT id, name, user_id, provisioned_ranges FROM devices
+WHERE org_id = $1 AND provisioning_mode = 'static' AND status = 'active' AND deleted_at IS NULL
+ORDER BY id;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -597,5 +598,94 @@ func TestCreateOVPNForkNoWGMaterialization(t *testing.T) {
 	// a WG public key on an OVPN device is rejected (wrong credential kind).
 	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "bad", Transport: "openvpn", PublicKey: "c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0="}); err == nil {
 		t.Fatal("a WG public key on an OVPN device must be rejected (wg_key_on_ovpn)")
+	}
+}
+
+// TestCreateStaticExportEnrichesAndRecords (S9.1 Part-2) locks the static-export enrichment: a static
+// profile bakes the approved ranges + DNS (its non-polling client can't learn them), and records the
+// provisioning mode + ranges snapshot (for the stale-profile surface).
+func TestCreateStaticExportEnrichesAndRecords(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	svc.exportEnrich = func(context.Context, uuid.UUID) ([]string, bool, error) {
+		return []string{"10.0.0.0/16", "172.31.0.0/16"}, true, nil
+	}
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "phone", Provisioning: "static"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// red 1: AllowedIPs carries the approved ranges + a DNS line is set.
+	for _, want := range []string{"10.0.0.0/16", "172.31.0.0/16"} {
+		if !strings.Contains(res.Config, want) {
+			t.Fatalf("static config must bake range %q; got:\n%s", want, res.Config)
+		}
+	}
+	if !strings.Contains(res.Config, "DNS = ") {
+		t.Fatalf("static config with DNS forwards must set a DNS line; got:\n%s", res.Config)
+	}
+	// recorded provisioning mode.
+	if res.Device.ProvisioningMode != "static" {
+		t.Fatalf("provisioning_mode = %q, want static", res.Device.ProvisioningMode)
+	}
+	// red 2 + 3: the snapshot is the EXPORT-TIME ranges (immutable) — a range added later is NOT in it,
+	// and the stale-profile surface lists the device for the diff.
+	stale, err := svc.q.ListStaticDevicesForOrg(ctx, org)
+	if err != nil {
+		t.Fatalf("list static: %v", err)
+	}
+	if len(stale) != 1 {
+		t.Fatalf("stale surface must list the 1 static device, got %d", len(stale))
+	}
+	var snap []string
+	if e := json.Unmarshal(stale[0].ProvisionedRanges, &snap); e != nil {
+		t.Fatalf("snapshot unmarshal: %v", e)
+	}
+	if len(snap) != 2 {
+		t.Fatalf("snapshot must be the 2 export-time ranges (immutable); got %v", snap)
+	}
+	// a subnet added AFTER export (192.168.0.0/24) is absent from the snapshot → the surface flags "re-export".
+	for _, c := range snap {
+		if c == "192.168.0.0/24" {
+			t.Fatal("a range added after export must NOT appear in the old profile's snapshot")
+		}
+	}
+}
+
+// TestCreateManagedExportNotEnriched (S9.1 Part-2) locks the derive-from-export-path ruling: a MANAGED
+// (polling) device does NOT bake ranges even when the org has them — it learns them from the poll.
+func TestCreateManagedExportNotEnriched(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	svc.exportEnrich = func(context.Context, uuid.UUID) ([]string, bool, error) {
+		return []string{"10.0.0.0/16"}, true, nil // ranges exist, but managed must ignore them
+	}
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "laptop"}) // managed default
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if strings.Contains(res.Config, "10.0.0.0/16") {
+		t.Fatalf("a managed (polling) device must NOT bake ranges; got:\n%s", res.Config)
+	}
+	if res.Device.ProvisioningMode != "managed" {
+		t.Fatalf("default provisioning must be managed, got %q", res.Device.ProvisioningMode)
+	}
+}
+
+// TestStaticExportZeroRangesIdentical (S9.1 Part-2) locks red 4: a static export in a zero-ranges org
+// produces a config identical to today (pool-only AllowedIPs, no DNS) — no enrichment out of nothing.
+func TestStaticExportZeroRangesIdentical(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+	svc.exportEnrich = func(context.Context, uuid.UUID) ([]string, bool, error) { return nil, false, nil }
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "phone", Provisioning: "static"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if strings.Contains(res.Config, "DNS = ") {
+		t.Fatalf("zero-DNS org must set no DNS line; got:\n%s", res.Config)
+	}
+	// AllowedIPs is exactly the pool (no extra ranges) — same as a managed device.
+	if strings.Count(res.Config, ",") != 0 || !strings.Contains(res.Config, "AllowedIPs = 10.") {
+		t.Fatalf("zero-ranges static must bake only the pool (identical to today); got:\n%s", res.Config)
 	}
 }

@@ -2929,6 +2929,8 @@ components:
         user_id: { type: string, format: uuid }
         # Route all traffic (0.0.0.0/0). Default false = split-tunnel (org network only).
         full_tunnel: { type: boolean }
+        # S9.1 Part-2: "static" for a file/QR export (bakes approved ranges + DNS since the client cannot poll); default "managed" (a polling Tunnex client).
+        provisioning: { type: string, enum: [managed, static] }
 
     ExportOVPNProfileRequest:
       type: object

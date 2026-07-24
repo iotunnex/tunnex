@@ -503,6 +503,9 @@ type Querier interface {
 	// APPROVED subnets. This same set is the resize disjointness input.
 	ListSiteSubnetsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteSubnetsForOrgRow, error)
 	ListSitesByOrg(ctx context.Context, orgID uuid.UUID) ([]Site, error)
+	// S9.1 Part-2 stale-profile surface: every static-provisioned device + its baked ranges snapshot. The
+	// caller diffs each snapshot against the org's CURRENT routed ranges to flag "re-export needed".
+	ListStaticDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListStaticDevicesForOrgRow, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
 	// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
@@ -569,6 +572,9 @@ type Querier interface {
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
 	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
+	// S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
+	// CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+	SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error
 	// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
 	// so a cross-org node id no-ops (0 rows -> typed 404 at the service).
 	SetNodeHubPriority(ctx context.Context, arg SetNodeHubPriorityParams) (int64, error)
