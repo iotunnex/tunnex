@@ -161,7 +161,7 @@ SELECT id, name, assigned_ip FROM devices
 WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status IN ('active', 'pending') AND deleted_at IS NULL
 ORDER BY assigned_ip;
 
--- name: ListActivePeersForNode :many
+-- name: ListActiveWireGuardPeersForNode :many
 -- lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 -- fetches the peers for its own node). A peer is present only while BOTH the
 -- device is active AND its owning user is active — so deactivating a user drops
@@ -169,11 +169,21 @@ ORDER BY assigned_ip;
 -- NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
 -- device drops from desired state regardless of approval status; the conjunction
 -- with status='active' excludes a pending+blocked device exactly once.
+-- public_key <> '' (S9.1 D-S9.4-MODEL / WF-OVPN-10): a KEYLESS device (an OpenVPN
+-- client carries a cert, not a WG key) is NEVER a WireGuard peer. This is the SINGLE
+-- SOURCE of that invariant — the query NAME + this WHERE own it, so EVERY consumer
+-- (the per-node peer list AND the hub-set widenedDevicePeers, plus any future one)
+-- gets keyed devices only. A keyless row would render `PublicKey = ` and make
+-- `wg syncconf` reject the ENTIRE config, bricking the gateway's whole WG reconcile
+-- (WF-OVPN-10: one OpenVPN client bricking the WireGuard fleet on a hub member). The
+-- OVPN device's /32 still reaches the data plane via the compiled artifact + the OVPN
+-- roster (assigned_ip), never this list.
 SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
 WHERE d.node_id = $1
   AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
+  AND d.public_key <> ''
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at;
 
@@ -217,7 +227,7 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
     updated_at = now();
 
 -- name: ListActiveOVPNDevicesForNode :many
--- lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
+-- lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActiveWireGuardPeersForNode.
 -- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 -- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 -- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.

@@ -103,3 +103,29 @@ func TestSyncConfRoundTrip(t *testing.T) {
 		t.Fatalf("syncconf [Interface] must echo key + port to avoid wiping them: %s", conf)
 	}
 }
+
+// TestSyncConfSkipsKeylessPeer is the WF-OVPN-10 boundary red (the WF-OVPN-1 config-completeness lesson:
+// a generated config for an external tool must be one that tool ACCEPTS). A peer with an EMPTY PublicKey
+// renders `PublicKey = ` and makes `wg syncconf` reject the ENTIRE file — one bad peer bricks the whole
+// interface. The renderer must SKIP a keyless peer, so the config it emits is always wg-valid regardless
+// of what the control plane sends.
+func TestSyncConfSkipsKeylessPeer(t *testing.T) {
+	peers := []Peer{
+		{PublicKey: "k1", AllowedIPs: []string{"10.99.0.2/32"}},
+		{PublicKey: "", AllowedIPs: []string{"10.99.0.6/32"}}, // a keyless (OVPN) device leaked in
+		{PublicKey: "k2", AllowedIPs: []string{"10.99.0.3/32"}},
+	}
+	conf := buildSyncConf("pk", 51820, peers)
+	// NO empty PublicKey line — that single line is what `wg syncconf` rejects the whole config over.
+	if strings.Contains(conf, "PublicKey = \n") || strings.Contains(conf, "PublicKey = \nAllowedIPs") {
+		t.Fatalf("keyless peer must be skipped — an empty `PublicKey = ` bricks wg syncconf:\n%s", conf)
+	}
+	// exactly the two KEYED peers render.
+	if strings.Count(conf, "[Peer]") != 2 || !strings.Contains(conf, "PublicKey = k1") || !strings.Contains(conf, "PublicKey = k2") {
+		t.Fatalf("both keyed peers must render, the keyless one dropped:\n%s", conf)
+	}
+	// the keyless peer's /32 must NOT leak into the WG config (it rides the OVPN roster).
+	if strings.Contains(conf, "10.99.0.6/32") {
+		t.Fatalf("the keyless (OVPN) device's /32 must not appear in the WG config:\n%s", conf)
+	}
+}

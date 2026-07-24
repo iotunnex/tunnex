@@ -389,11 +389,15 @@ type Querier interface {
 	// The CRL source: every un-revoked, issued client cert for an org (Slice 5 builds the CRL from
 	// the COMPLEMENT — revoked serials — but this read backs the "live profiles" surface).
 	ListActiveOVPNClientCertsByOrg(ctx context.Context, orgID uuid.UUID) ([]OvpnClientCert, error)
-	// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
+	// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActiveWireGuardPeersForNode.
 	// The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 	// homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 	// CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
 	ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveOVPNDevicesForNodeRow, error)
+	// COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
+	// an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The
+	// pure compiler stays clockless; this query applies now() at snapshot-build time.
+	ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops
@@ -401,11 +405,16 @@ type Querier interface {
 	// NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
 	// device drops from desired state regardless of approval status; the conjunction
 	// with status='active' excludes a pending+blocked device exactly once.
-	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
-	// COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
-	// an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The
-	// pure compiler stays clockless; this query applies now() at snapshot-build time.
-	ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
+	// public_key <> '' (S9.1 D-S9.4-MODEL / WF-OVPN-10): a KEYLESS device (an OpenVPN
+	// client carries a cert, not a WG key) is NEVER a WireGuard peer. This is the SINGLE
+	// SOURCE of that invariant — the query NAME + this WHERE own it, so EVERY consumer
+	// (the per-node peer list AND the hub-set widenedDevicePeers, plus any future one)
+	// gets keyed devices only. A keyless row would render `PublicKey = ` and make
+	// `wg syncconf` reject the ENTIRE config, bricking the gateway's whole WG reconcile
+	// (WF-OVPN-10: one OpenVPN client bricking the WireGuard fleet on a hub member). The
+	// OVPN device's /32 still reaches the data plane via the compiled artifact + the OVPN
+	// roster (assigned_ip), never this list.
+	ListActiveWireGuardPeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveWireGuardPeersForNodeRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
 	// nullable, so the S4.3 dashboard passes none (latest N). The cursor is written

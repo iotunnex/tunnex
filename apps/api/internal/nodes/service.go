@@ -309,16 +309,15 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 // MTU is explicit (WireGuard's default 1420).
 func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredState, error) {
 	_ = s.q.TouchNodeSeen(ctx, node.ID)
-	rows, err := s.q.ListActivePeersForNode(ctx, node.ID)
+	rows, err := s.q.ListActiveWireGuardPeersForNode(ctx, node.ID)
 	if err != nil {
 		return DesiredState{}, err
 	}
 	peers := make([]Peer, 0, len(rows))
 	for _, r := range rows {
-		// A device with NO WireGuard public key is not a WireGuard peer (S9.1 D-S9.4-MODEL: an OpenVPN
-		// device carries a cert, not a WG key — it rides the OVPN roster, not this peer list). Keyed on
-		// KEY-PRESENCE, not transport: a WG device always has a key, so this never drops one — it only
-		// excludes keyless OVPN devices. Their /32 still enters the compiled artifact by assigned_ip.
+		// Keyless (OVPN) devices are excluded AT THE SOURCE now (ListActiveWireGuardPeersForNode's
+		// `public_key <> ''` — the single owner of the D-S9.4-MODEL invariant). This stays as a cheap
+		// subordinate assertion so a query regression can't silently re-brick the fleet (WF-OVPN-10).
 		if r.PublicKey == "" {
 			continue
 		}
@@ -415,7 +414,7 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		}
 		// WF-A D-WFA-5b — device-peer HOSTING (the companion to endpoint-derivation). A device assigned to a
 		// HUB-SET MEMBER is hosted on EVERY member's DesiredState, so the promoted hub already knows the
-		// device when the re-homed dial lands (without this, ListActivePeersForNode's node_id scoping means
+		// device when the re-homed dial lands (without this, ListActiveWireGuardPeersForNode's node_id scoping means
 		// the promoted hub lacks the device → the dial handshake fails → (C) is a half-fix). On the ACTIVE
 		// PRIMARY the device peer carries its /32 (crypto-routes the device); on a STANDBY it is WARM (empty
 		// AllowedIPs — pubkey known so the handshake completes, the /32 rides the active-primary recompile on
@@ -501,11 +500,20 @@ func (s *Service) widenedDevicePeers(ctx context.Context, memberIDs []uuid.UUID,
 	seen := map[string]bool{}
 	out := make([]Peer, 0)
 	for _, mid := range memberIDs {
-		rows, err := s.q.ListActivePeersForNode(ctx, mid)
+		rows, err := s.q.ListActiveWireGuardPeersForNode(ctx, mid)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
+			// WF-OVPN-10: a KEYLESS (OpenVPN) device is NEVER a WireGuard peer — an empty PublicKey
+			// renders `PublicKey = ` and makes `wg syncconf` reject the ENTIRE config, bricking this
+			// hub member's whole WG reconcile (one OpenVPN client bricking the WireGuard fleet). This
+			// guard-not-mirrored miss (the main peer path had the D-S9.4-MODEL skip; this WF-A hub-set
+			// path predates keyless devices) is now owned at the SOURCE by ListActiveWireGuardPeersForNode's
+			// `public_key <> ''`; this is a subordinate assertion at the second consumer.
+			if r.PublicKey == "" {
+				continue
+			}
 			if seen[r.PublicKey] {
 				continue
 			}

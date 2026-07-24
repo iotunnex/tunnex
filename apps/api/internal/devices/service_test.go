@@ -75,7 +75,7 @@ func txOrSkip(t *testing.T) (context.Context, pgx.Tx) {
 
 func peerKeys(t *testing.T, svc *Service, node uuid.UUID) []string {
 	t.Helper()
-	rows, err := svc.q.ListActivePeersForNode(context.Background(), node)
+	rows, err := svc.q.ListActiveWireGuardPeersForNode(context.Background(), node)
 	if err != nil {
 		t.Fatalf("list peers: %v", err)
 	}
