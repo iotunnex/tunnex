@@ -243,8 +243,11 @@ func TestServerConfigCRLVerifyAlwaysOnAndReneg(t *testing.T) {
 	if !strings.Contains(cfg, "crl-verify ") {
 		t.Fatalf("crl-verify must be ALWAYS-ON (a real-or-empty CRL is always delivered):\n%s", cfg)
 	}
-	if !strings.Contains(cfg, "reneg-sec 60") {
-		t.Fatalf("reneg-sec must be 60 (bounds revocation latency to one reneg interval):\n%s", cfg)
+	// EXACT line (review #5): substring "reneg-sec 60" is satisfied by "reneg-sec 600"/"6000", so a
+	// regression to a 10-minute window would pass green. Assert the exact rendered line (WF-OVPN-1 class:
+	// a red asserting substring-presence proves the wrong thing).
+	if !strings.Contains(cfg, "reneg-sec 60\n") {
+		t.Fatalf("reneg-sec must be EXACTLY 60 (bounds revocation latency to one reneg interval):\n%s", cfg)
 	}
 }
 

@@ -231,10 +231,20 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
 -- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 -- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 -- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
-SELECT id, assigned_ip, full_tunnel FROM devices
-WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
-  AND assigned_ip IS NOT NULL AND deleted_at IS NULL
-ORDER BY id;
+-- Identity-binding parity (review #1): the roster gates on the OWNING USER's identity exactly like the
+-- WG peer query + the policy compiler (ListActiveDevicesForOrg) — a device credential is only valid for
+-- its owning user's ACTIVE, CURRENT-MEMBER identity. Without this, a deactivated / offboarded / removed-
+-- member / health-blocked user kept a live OpenVPN tunnel (open-edition mesh = full access) while their
+-- WireGuard device was severed. The users + memberships joins + NOT health_blocked mirror the compiler.
+-- Severance takes effect within one renegotiation interval (reneg-sec 60), the documented OVPN bound.
+SELECT d.id, d.assigned_ip, d.full_tunnel FROM devices d
+JOIN users u ON u.id = d.user_id
+JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
+WHERE d.node_id = $1 AND d.transport = 'openvpn' AND d.status = 'active'
+  AND NOT d.health_blocked
+  AND d.assigned_ip IS NOT NULL AND d.deleted_at IS NULL
+  AND u.status = 'active' AND u.deleted_at IS NULL
+ORDER BY d.id;
 
 -- name: SetDeviceProvisioning :exec
 -- S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after

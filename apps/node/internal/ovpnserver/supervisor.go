@@ -53,17 +53,22 @@ func (s *Supervisor) Stop() {
 
 func realSpawn(confPath string) (*os.Process, error) {
 	cmd := exec.Command("openvpn", "--config", confPath)
-	// The process outlives a single reconcile tick; it is reaped by liveness (signal 0), not by a
-	// per-tick context. cmd.Wait is intentionally not called here — a zombie is reaped on Stop /
-	// agent exit, and aliveness is what drives respawn.
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	// REAP the child on exit (review #2). Without Wait() a crashed/killed openvpn became a ZOMBIE whose
+	// PID still answered kill(pid,0), so procAlive reported it ALIVE and the self-heal NEVER respawned it
+	// while Reconcile reported serving=true/HealthOK — green-while-broken, the exact class the health
+	// surface exists to prevent, worse than a crash because self-heal silently never fired. The reaping
+	// goroutine Wait()s: it reaps the zombie AND marks the os.Process done, so procAlive's Signal then
+	// returns ErrProcessDone → false → Ensure respawns.
+	go func() { _ = cmd.Wait() }()
 	return cmd.Process, nil
 }
 
-// procAlive reports whether the process is still running (signal 0 is the portable liveness probe on
-// unix — the gateway agent's platform).
+// procAlive reports whether the process is still running. It relies on the realSpawn reaper: once the
+// child exits and the reaping Wait() marks the os.Process done, Signal returns ErrProcessDone (never
+// nil), so a reaped/zombie process is correctly NOT alive — Ensure then respawns (review #2).
 func procAlive(p *os.Process) bool {
 	if p == nil {
 		return false

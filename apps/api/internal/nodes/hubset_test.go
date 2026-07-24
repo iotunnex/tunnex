@@ -821,6 +821,10 @@ func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {
 	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
 		t.Fatalf("seed user: %v", e)
 	}
+	// review #1: the OVPN roster now requires the owner be an ACTIVE, CURRENT member — seed the membership.
+	if _, e := pool.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, usr); e != nil {
+		t.Fatalf("seed membership: %v", e)
+	}
 	// A WireGuard device (keyed) AND an OpenVPN device (keyless, public_key='', transport='openvpn'),
 	// BOTH homed to the active primary g1.
 	wgDev, ovDev := uuid.New(), uuid.New()

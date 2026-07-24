@@ -3,8 +3,38 @@ package ovpnserver
 import (
 	"context"
 	"os"
+	"os/exec"
 	"testing"
 )
+
+// TestProcAliveReflectsReapedProcess is the review-#2 red: it exercises the REAL procAlive (not the
+// injected fake) against a REAL reaped process — the zombie case that survived the original test. A
+// short-lived child, reaped like realSpawn does (a Wait goroutine), must NOT be reported alive; without
+// the reaper its PID would still answer kill(pid,0) and self-heal would never respawn (green-while-broken).
+func TestProcAliveReflectsReapedProcess(t *testing.T) {
+	// A live process IS alive.
+	long := exec.Command("sleep", "30")
+	if err := long.Start(); err != nil {
+		t.Skipf("cannot spawn a test process: %v", err)
+	}
+	go func() { _ = long.Wait() }()
+	defer func() { _ = long.Process.Kill() }()
+	if !procAlive(long.Process) {
+		t.Fatal("a running process must be reported alive")
+	}
+
+	// An EXITED + REAPED process must NOT be alive (the zombie must not pass kill(pid,0)).
+	short := exec.Command("sh", "-c", "exit 0")
+	if err := short.Start(); err != nil {
+		t.Skipf("cannot spawn a test process: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { _ = short.Wait(); close(done) }() // reap it, exactly like realSpawn
+	<-done
+	if procAlive(short.Process) {
+		t.Fatal("review #2: a reaped/exited process must NOT be reported alive — a zombie masquerading as alive is why self-heal silently never fired")
+	}
+}
 
 // TestSupervisorSpawnsIfNotAliveElseNoop (4d) locks the self-heal core: spawn when no process / a
 // dead process; leave a live one untouched. Deterministic — spawn + isAlive injected.

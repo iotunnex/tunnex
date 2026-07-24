@@ -124,10 +124,25 @@ func (s *Service) ListOrganizations(ctx context.Context) ([]sqlc.Organization, e
 // the server). Disabling is NOT revocation — issued client certs SURVIVE (D-S9.5-OPTIN d); a
 // re-enable restores service with the same certs.
 func (s *Service) SetOVPNEnabled(ctx context.Context, id uuid.UUID, enabled bool) (sqlc.Organization, error) {
-	org, err := s.q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: id, OvpnEnabled: enabled})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return sqlc.Organization{}, orgNotFound()
-	}
+	var org sqlc.Organization
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		o, e := q.SetOrgOVPNEnabled(ctx, sqlc.SetOrgOVPNEnabledParams{ID: id, OvpnEnabled: enabled})
+		if errors.Is(e, pgx.ErrNoRows) {
+			return orgNotFound()
+		}
+		if e != nil {
+			return e
+		}
+		org = o
+		// review #4: the opt-in toggle unlocks the ENTIRE OpenVPN surface (server + PKI + cert delivery).
+		// D-S9.5-OPTIN required an attributable audit; mirror every sibling org toggle — withTx + writeAudit,
+		// BOTH directions. Swallowed-audit at a feature's on-switch is the worst placement for it.
+		action := "org.ovpn_disabled"
+		if enabled {
+			action = "org.ovpn_enabled"
+		}
+		return writeAudit(ctx, q, id, actorFromCtx(ctx), action, "organization", id.String(), map[string]any{"enabled": enabled})
+	})
 	return org, err
 }
 
