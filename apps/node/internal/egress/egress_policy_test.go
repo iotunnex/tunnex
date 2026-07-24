@@ -694,3 +694,53 @@ func TestFailedEnforcingToOffApplySurfacesStuckEnforcing(t *testing.T) {
 		t.Fatalf("a non-enforcing gateway's later apply failure must stay quiet; got fs=%v e=%v", fs, e)
 	}
 }
+
+// TestB1EnforcingGrantHasNoInterfacePredicate (S9.1, Slice 1) LOCKS the D-S9.1-4 pre-verification:
+// the enforcing per-grant accept adjudicates by ADDRESS (ip saddr / ip daddr), NEVER by interface.
+// This is what makes B1 free for OpenVPN — an OVPN client's packet arriving on `tun` (not wg0)
+// meets the IDENTICAL rule a WireGuard device meets, because the rule names the /32, not the wire.
+// If a future change re-keys an enforcing grant on iifname/oifname (the S8.6b orientation-predicate
+// trap), OVPN enforcement parity silently breaks. See docs/S9.1-decisions.md (D-S9.1-4).
+//
+// RENDER-level proof (the harness stubs m.apply — no nft/netns, so it asserts the ruleset SHAPE,
+// not kernel packet fate). The kernel-fate + live-client proof is OWED, trigger = the S9.1 walk.
+func TestB1EnforcingGrantHasNoInterfacePredicate(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{
+		Mode: nodepolicy.ModeEnforcing, Mesh: false,
+		Allow: []nodepolicy.AllowEntry{
+			{SrcIP: "10.99.0.10", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432},
+		},
+	})
+	rs := m.ruleset("10.99.0.1/24")
+
+	// the grant is present, address-keyed.
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
+		t.Fatalf("enforcing grant must be address-keyed; got:\n%s", rs)
+	}
+	// no line carrying this grant's source may be scoped by an interface predicate.
+	for _, ln := range strings.Split(rs, "\n") {
+		if strings.Contains(ln, "ip saddr 10.99.0.10") &&
+			(strings.Contains(ln, "iifname") || strings.Contains(ln, "oifname")) {
+			t.Fatalf("B1: an enforcing grant must NOT carry an interface predicate "+
+				"(would miss OVPN tun ingress); offending line:\n%s", ln)
+		}
+	}
+}
+
+// TestB1EnforcingUngrantedPoolIPDropped (S9.1, Slice 1) LOCKS the B1 deliberate-red at render
+// level: an enforcing gateway with a pool /32 present but NO grant for it emits no accept for that
+// /32 — it falls to the default-deny drop, exactly as WireGuard would. The wire form (a real
+// OpenVPN Connect client, enforcing + zero grants, DROPPED byte-for-byte) is OWED, trigger = the
+// S9.1 box-walk after Slices 2-3 (docs/S9.1-decisions.md, B1 SUBSTITUTES != SATISFIES).
+func TestB1EnforcingUngrantedPoolIPDropped(t *testing.T) {
+	m := New("wg0")
+	m.SetPolicy(&nodepolicy.Compiled{Mode: nodepolicy.ModeEnforcing, Mesh: false}) // zero grants
+	rs := m.ruleset("10.99.0.1/24")
+	if strings.Contains(rs, "ip daddr") { // allow rules carry ip daddr; the masquerade (ip saddr) does not
+		t.Fatalf("enforcing zero-grants must emit no accept for any /32 (default-deny); got:\n%s", rs)
+	}
+	if !strings.Contains(rs, "policy drop") {
+		t.Fatal("enforcing must keep the default-deny drop base")
+	}
+}

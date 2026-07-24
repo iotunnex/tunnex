@@ -5,6 +5,7 @@ package policy_test
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -911,5 +912,59 @@ func TestDisabledRuleCompilesToNothing(t *testing.T) {
 	if policyspec.RequiredVersion(enabled[nodeA]) != policyspec.RequiredVersion(disabled[nodeA]) {
 		t.Fatalf("disabling must NOT bump RequiredVersion, got %d vs %d",
 			policyspec.RequiredVersion(enabled[nodeA]), policyspec.RequiredVersion(disabled[nodeA]))
+	}
+}
+
+// TestB1DeviceGrantIsTransportAgnostic (S9.1, Slice 1) LOCKS the epic's load-bearing finding:
+// "an OVPN device is just a Device row with a /32." The compiler keys a device subject by its
+// AssignedIP, and the ENFORCEMENT output (AllowEntry) carries NO transport dimension — so a
+// WireGuard device and an OpenVPN device at the same /32/owner/node compile byte-identically.
+// This is what makes B1 (ZT-coverage for OpenVPN) FREE: there is no transport fork in the
+// compiler, so grants are transport-agnostic BY CONSTRUCTION, not by a second code path.
+//
+// Two locks: (1) the device grant is keyed by the bare /32 (no transport qualifier on the source
+// match); (2) a checkpoint over AllowEntry's fields — if a future OVPN slice adds a field here,
+// this trips and forces a conscious proof that the enforcement path stays transport-blind (an
+// AllowEntry field that could encode transport would let an OVPN grant diverge from a WG grant at
+// the same /32 — the two-door risk B1 forbids). See docs/S9.1-decisions.md (B1, D-S9.1-4).
+//
+// SUBSTITUTES != SATISFIES: this is the in-code half of the B1 boundary proof; the wire form (a
+// real OpenVPN Connect client, enforcing + zero grants, DROPPED byte-for-byte) is OWED, trigger =
+// the S9.1 box-walk after Slices 2-3.
+func TestB1DeviceGrantIsTransportAgnostic(t *testing.T) {
+	snap := policy.Snapshot{
+		Mode:  policy.ModeEnforcing,
+		Rules: []policy.Rule{{SrcGroupID: gAdmins, DstKind: "group", DstGroupID: gServers}},
+		Memberships: []policy.Membership{
+			{GroupID: gAdmins, UserID: uAlice},
+			{GroupID: gServers, UserID: uBob},
+		},
+		Devices: []policy.Device{
+			{UserID: uAlice, NodeID: nodeA, AssignedIP: "10.99.0.10"},
+			{UserID: uBob, NodeID: nodeA, AssignedIP: "10.99.0.20"},
+		},
+	}
+	got := allowsFor(policy.Compile(snap), nodeA)
+
+	// (1) keyed by the bare /32 — the source match IS the assigned address, nothing else.
+	if !hasAllow(got, "10.99.0.10", "10.99.0.20/32") {
+		t.Fatalf("device grant must be keyed by the bare /32 (transport-blind); got %+v", got)
+	}
+
+	// (2) checkpoint: the AllowEntry field set is a conscious B1 boundary. A new field here is a
+	// deliberate decision — if it can encode transport, an OVPN grant could diverge from a WG grant
+	// at the same /32. Observability fields (RuleID, SrcDeviceID) are hash-EXCLUDED and listed so
+	// the guard is exact.
+	want := map[string]bool{
+		"SrcIP": true, "DstCIDR": true, "Protocol": true, "PortLow": true, "PortHigh": true,
+		"RuleID": true, "SrcDeviceID": true,
+	}
+	rt := reflect.TypeOf(policyspec.AllowEntry{})
+	for i := 0; i < rt.NumField(); i++ {
+		if name := rt.Field(i).Name; !want[name] {
+			t.Fatalf("AllowEntry gained field %q — B1 requires the enforcement output stay "+
+				"transport-blind. If this field can encode transport, prove the compiler AND the "+
+				"egress renderer ignore it, then update this guard (docs/S9.1-decisions.md B1).", name)
+		}
 	}
 }
