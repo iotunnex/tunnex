@@ -56,3 +56,26 @@ A CP behind a rotating/multi-IP load balancer could resolve to a different IP th
 → the control channel's escape path misses. v1 assumes a single stable CP IP (true for the walk +
 single-region deploys). TRIGGER = multi-region CP / CP behind a rotating LB. Fix candidates: pin the
 full resolved set, or a CIDR pass for the CP's published range, or a CP-provided stable anycast IP.
+
+## Feature 5 — DEVICE source kind for Access rules (founder-walked, registered 2026-07-24)
+
+Founder tested mobile WireGuard (static config, split + full tunnel, device approval, ZTNA enforcement
+— all working) and found **"give THIS specific device access to X" is unexpressible**: source kinds
+are Group / User / Site / CIDR only. Workarounds today: User source (ALL of that user's devices) or
+CIDR with the device's pool /32 (address-bound — **breaks on re-enrollment**).
+
+**Proposed commit-one shape:** `src_kind='device'` + `src_device_id` on the existing enum seam. NOTE:
+`src_device_id` already exists as a **v3 OBSERVABILITY field** (S7.5.4) — verify whether it can carry
+the policy meaning or needs a DISTINCT column (observability vs enforcement must not silently merge).
+
+**The design risk that makes this a PAPER, not a quick add:** a device's /32 is **reassignable**
+(proven live — a revoked device's address returned to the pool and was re-allocated). So the rule must
+bind to **device IDENTITY**, and the compiler must resolve identity→CURRENT-/32 at compile time (the
+User-source pattern), **never to a snapshotted address**.
+
+**Reds to spec:** a rule follows the device across a re-enrollment (new address, same device → grant
+follows) · a DIFFERENT device inheriting the old address does NOT inherit the grant (the reassignment
+trap, immortalized) · a revoked device → grant compiles to nothing.
+
+**Sequencing:** AFTER EPIC 9, alongside the registered policy-granularity family (Feature 2 port-scoped
+resources, the per-rule toggle) — same family: making rules say exactly what the operator means.
