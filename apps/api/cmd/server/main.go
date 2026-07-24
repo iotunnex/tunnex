@@ -159,6 +159,10 @@ func main() {
 	nodes.LogPolicyHealthTuning(logger) // S7.4b: assumed R + derived T (operator discoverability)
 	pushHub := nodepush.New()
 	deviceSvc := devices.NewService(pool, pushHub, logger)
+	// WF-OVPN-6: device-approval ENFORCEMENT follows the edition (enterprise only). The open build never
+	// enforces approval, so a stored device_approval='on' can't trap new devices when the admin surface is
+	// edition-gated away.
+	deviceSvc.SetApprovalEnforced(apphttp.NewDeviceApprovalEdition())
 	deviceSvc.SetDialResolver(nodeSvc.NodeDial) // WF-A D-WFA-6: a new device's config dials the active hub
 	siteSvc := sites.NewService(pool)
 	// S9.1 Part-2: the static-export enrichment source — the org's approved routed ranges (the SAME one

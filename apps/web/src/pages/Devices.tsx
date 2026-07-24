@@ -28,6 +28,10 @@ export default function Devices() {
   // ceremony renders a QR for WG only). Cleared on dismiss — never re-fetched (D2).
   const [secret, setSecret] = useState<string | null>(null);
   const [secretKind, setSecretKind] = useState<ExportKind>("wireguard");
+  // WF-OVPN-5: an exported profile for a device that enrolled PENDING (enterprise device approval) is a
+  // working-LOOKING file that cannot connect until an admin approves — the reassuring-success trap. Surface
+  // it at issuance (the export response already carries the device status).
+  const [pendingExport, setPendingExport] = useState(false);
   // The device transport the user is creating. OpenVPN is offered ONLY when the org has opted in
   // (D-S9.5-OPTIN(a): absent, not disabled — no dead affordance).
   const [kind, setKind] = useState<ExportKind>("wireguard");
@@ -97,6 +101,7 @@ export default function Devices() {
       }
       setName("");
       setSecretKind("openvpn");
+      setPendingExport(data.device?.status === "pending"); // WF-OVPN-5: warn if it won't connect until approved
       setSecret(data.profile); // shown once — the client key is never re-served
       await loadDevices(org.id);
       return;
@@ -225,8 +230,20 @@ export default function Devices() {
               Download {PRODUCT_NAME}.{exportCeremony(secretKind).ext}
             </Button>
           }
-          onDismiss={() => setSecret(null)}
+          onDismiss={() => {
+            setSecret(null);
+            setPendingExport(false);
+          }}
         >
+          {/* WF-OVPN-5: reassuring-success guard — a pending device's profile is real but won't connect
+              until an admin approves it. Said at issuance so the operator isn't left debugging an
+              "authentication failed" later. */}
+          {pendingExport && (
+            <div className="mt-3 rounded-md border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+              This device is <span className="font-semibold">pending approval</span> — the profile is valid
+              but won&rsquo;t connect until an admin approves the device.
+            </div>
+          )}
           {/* WireGuard only: a QR the official WG apps import natively. It lives inside the modal, so
               dismissing clears the secret and the QR is never re-rendered (D2 — no re-view). OpenVPN
               Connect has no native QR import, so no QR for .ovpn (Part-4 caveat). */}

@@ -45,6 +45,38 @@ func seedPostureOrg(t *testing.T, pool *pgxpool.Pool, approval string) (org, own
 	return org, owner, node
 }
 
+// TestApprovalEnforcementIsEnterpriseOnly is the WF-OVPN-6 red, BOTH ways: the SAME org with
+// device_approval='on' enrolls devices PENDING under the enterprise edition (approvalEnforced) and ACTIVE
+// under the open edition (default). Approval enforcement is an enterprise feature (S7.5.3 unlock-then-opt-in);
+// the open build gates the admin surface, so it must not enforce — else a stored 'on' traps every new device
+// with no way to approve (the edition line inverted). This is the downgrade-release seam by construction.
+func TestApprovalEnforcementIsEnterpriseOnly(t *testing.T) {
+	ctx := context.Background()
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	org, owner, node := seedPostureOrg(t, pool, "on") // device_approval = 'on'
+
+	// ENTERPRISE (approvalEnforced=true): device enrolls PENDING.
+	ent := NewService(pool, nil, nil)
+	ent.SetApprovalEnforced(true)
+	if e := mkDevice(t, ent, org, owner, owner, node, "ent"); e.Device.Status != "pending" || !e.PendingApproval {
+		t.Fatalf("enterprise + approval=on must enroll PENDING; got status=%q pending=%v", e.Device.Status, e.PendingApproval)
+	}
+
+	// OPEN (default approvalEnforced=false): the SAME org's device enrolls ACTIVE — enforcement releases.
+	open := NewService(pool, nil, nil)
+	if o := mkDevice(t, open, org, owner, owner, node, "open"); o.Device.Status != "active" || o.PendingApproval {
+		t.Fatalf("open + approval=on must enroll ACTIVE (enforcement is enterprise-only); got status=%q pending=%v", o.Device.Status, o.PendingApproval)
+	}
+}
+
 func mkDevice(t *testing.T, svc *Service, org, actor, owner, node uuid.UUID, name string) CreateResult {
 	t.Helper()
 	res, err := svc.Create(context.Background(), CreateInput{OrgID: org, ActorID: actor, OwnerID: owner, NodeID: node, Name: name})
@@ -68,6 +100,7 @@ func TestPendingDeviceHoldsIPThenRejectFrees(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "on") // approval ON -> devices land pending
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	a := mkDevice(t, svc, org, owner, owner, node, "A")
 	if !a.PendingApproval || a.Device.Status != "pending" {
@@ -105,6 +138,7 @@ func TestResizeStrandsPendingDeviceInOrphanList(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "on")
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending, holds the low IP (10.0.0.2)
 	ipA := *a.Device.AssignedIp
@@ -147,6 +181,7 @@ func TestApprovePushesOrgWideRejectOwnNode(t *testing.T) {
 	}
 	hub := nodepush.New()
 	svc := NewService(pool, hub, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending, on `node`
 	otherBefore := hub.Version(other)
@@ -188,6 +223,7 @@ func TestCreateAndRevokePushOrgWide(t *testing.T) {
 	}
 	hub := nodepush.New()
 	svc := NewService(pool, hub, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	// CREATE nudges the non-hosting node (group-dst reachability must land <5s there too).
 	before := hub.Version(other)
@@ -218,6 +254,7 @@ func TestPendingExcludedFromPeersAndCompilerInput(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "on")
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 	q := sqlc.New(pool)
 
 	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending
@@ -277,6 +314,7 @@ func TestApproveRecordsApproverAndSelfApproveAudit(t *testing.T) {
 		t.Fatalf("admin membership: %v", err)
 	}
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	// Admin approves the owner's device -> device.approved + approved_by=admin.
 	a := mkDevice(t, svc, org, owner, owner, node, "A")
@@ -323,6 +361,7 @@ func TestSetDeviceApprovalGrandfathersAndCounts(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "off") // start OFF -> devices are active
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	mkDevice(t, svc, org, owner, owner, node, "A")
 	mkDevice(t, svc, org, owner, owner, node, "B")
@@ -365,6 +404,7 @@ func TestPendingDevicesCountAgainstCap(t *testing.T) {
 		t.Fatalf("set cap: %v", err)
 	}
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	mkDevice(t, svc, org, owner, owner, node, "A") // pending, counts
 	mkDevice(t, svc, org, owner, owner, node, "B") // pending, counts (now at cap 2)
@@ -387,6 +427,7 @@ func TestNodeRevokeSweepsPendingAndFreesIP(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "on")
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true)                       // WF-OVPN-6: approval is enterprise
 	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending, holds an IP
 	if a.Device.Status != "pending" || a.Device.AssignedIp == nil {
 		t.Fatalf("precondition: A must be pending with an IP; got %+v", a.Device)
@@ -420,6 +461,7 @@ func TestOwnerCancelPendingAuditedDistinctly(t *testing.T) {
 	defer pool.Close()
 	org, owner, node := seedPostureOrg(t, pool, "on")
 	svc := NewService(pool, nil, nil)
+	svc.SetApprovalEnforced(true) // WF-OVPN-6: approval is enterprise
 
 	// Cancel a PENDING device -> device.cancelled + IP freed.
 	a := mkDevice(t, svc, org, owner, owner, node, "A")
