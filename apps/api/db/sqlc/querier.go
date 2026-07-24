@@ -381,12 +381,18 @@ type Querier interface {
 	// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
 	ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
-	// fetches the peers for its own node). A peer is present only while BOTH the
-	// device is active AND its owning user is active — so deactivating a user drops
-	// their peers from every node's desired state (and reactivation restores them).
-	// NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
-	// device drops from desired state regardless of approval status; the conjunction
-	// with status='active' excludes a pending+blocked device exactly once.
+	// fetches the peers for its own node). A peer is present only while its owning
+	// user has an ACTIVE, CURRENT-MEMBER identity — a device credential is only valid
+	// for its owning user's identity (the cross-cutting invariant). The users +
+	// memberships joins + NOT health_blocked mirror the policy compiler
+	// (ListActiveDevicesForOrg), the REFERENCE implementation of this invariant:
+	//   - u.status='active': deactivating a user drops their peers from every node
+	//     (reactivation restores them).
+	//   - memberships (was MISSING): REMOVING a member drops their peers from every
+	//     node's desired state — offboarding severs open-edition WG access, not only
+	//     the compiled policy. Without this, RemoveMember's org-wide push rebuilt a
+	//     query that still served the removed member (offboarding fail-to-sever).
+	//   - NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate.
 	ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error)
 	// COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
 	// an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The

@@ -253,6 +253,9 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 			if _, err := tx.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,$3)", user, "u@t", "U"); err != nil {
 				t.Fatalf("user: %v", err)
 			}
+			if _, err := tx.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, user); err != nil {
+				t.Fatalf("membership: %v", err) // the peer query gates on current membership (offboarding parity)
+			}
 			if _, err := tx.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,$3,$4)", node, org, "gw", "serial-"+node.String()); err != nil {
 				t.Fatalf("node: %v", err)
 			}

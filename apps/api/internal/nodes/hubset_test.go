@@ -727,6 +727,10 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
 		t.Fatalf("seed user: %v", e)
 	}
+	// The peer query gates on current membership (offboarding parity) — seed it.
+	if _, e := pool.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, usr); e != nil {
+		t.Fatalf("seed membership: %v", e)
+	}
 	// The device is assigned to g1 (node_id=g1). Its /32 is 10.99.0.2.
 	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'laptop','KDEV','10.99.0.2')",
 		dev, org, usr, g1); e != nil {
