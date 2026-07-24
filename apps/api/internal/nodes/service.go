@@ -118,6 +118,7 @@ type OVPNServerMaterial struct {
 type OVPNClient struct {
 	CommonName string `json:"cn"`
 	IP         string `json:"ip"`
+	FullTunnel bool   `json:"ft,omitempty"` // WF-OVPN-3: per-device full-tunnel (redirect-gateway via CCD)
 }
 
 // PolicyProvider compiles the Zero Trust policy artifact for one node (S7.2).
@@ -367,7 +368,7 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 			if ip == "" {
 				continue // a device without an assigned /32 can't be pushed a CCD ifconfig-push
 			}
-			ds.OVPNClients = append(ds.OVPNClients, OVPNClient{CommonName: r.ID.String(), IP: ip})
+			ds.OVPNClients = append(ds.OVPNClients, OVPNClient{CommonName: r.ID.String(), IP: ip, FullTunnel: r.FullTunnel})
 		}
 	}
 	// D-S9.6-CERT-DELIVERY: when this gateway runs OVPN, deliver its server MATERIAL (mint-once, then

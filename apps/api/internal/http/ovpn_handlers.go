@@ -59,9 +59,13 @@ func (s apiServer) ExportOVPNProfile(ctx context.Context, req api.ExportOVPNProf
 
 	// The create-fork: an OpenVPN device (no WG key/peer; pool /32; transport tagged) via the SHARED
 	// path (cap, pool, audit, and the org-wide push placing the /32 into the compiled artifact).
+	// WF-OVPN-3: full-tunnel is a per-device choice for OVPN too. FullTunnel rides the SHARED create path,
+	// so it inherits the gateway_no_egress refusal verbatim (a gateway without egress capability refuses a
+	// full-tunnel OVPN device exactly as it refuses full-tunnel WireGuard).
 	res, err := s.devices.Create(ctx, devices.CreateInput{
 		OrgID: req.OrgId, ActorID: p.UserID, OwnerID: owner, NodeID: req.Body.NodeId,
 		Name: req.Body.Name, Transport: "openvpn",
+		FullTunnel: req.Body.FullTunnel != nil && *req.Body.FullTunnel,
 	})
 	if err != nil {
 		return nil, err

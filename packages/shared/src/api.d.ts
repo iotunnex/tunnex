@@ -2273,6 +2273,7 @@ export interface components {
             node_id: string;
             /** Format: uuid */
             user_id?: string;
+            full_tunnel?: boolean;
         };
         ExportOVPNProfileResponse: {
             device: components["schemas"]["Device"];

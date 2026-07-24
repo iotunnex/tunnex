@@ -228,7 +228,7 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
 -- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 -- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 -- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
-SELECT id, assigned_ip FROM devices
+SELECT id, assigned_ip, full_tunnel FROM devices
 WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
   AND assigned_ip IS NOT NULL AND deleted_at IS NULL
 ORDER BY id;

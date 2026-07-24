@@ -66,6 +66,31 @@ func TestCCDPushesCPAssignedAddress(t *testing.T) {
 	}
 }
 
+// TestFullTunnelPushesRedirectGateway is the WF-OVPN-3 red, BOTH directions: a full-tunnel client's CCD
+// pushes redirect-gateway (+ a resolver, mirroring WG full-tunnel), and a split-tunnel client's does NOT
+// — the per-device tunnel mode is expressed in the CCD, never server-wide.
+func TestFullTunnelPushesRedirectGateway(t *testing.T) {
+	m, _ := newTestMgr(t)
+	m.SetDesired(Desired{PoolCIDR: "10.99.0.0/24", Clients: []Client{
+		{CommonName: "ft", IP: "10.99.0.7", FullTunnel: true},
+		{CommonName: "split", IP: "10.99.0.8", FullTunnel: false},
+	}})
+	if err := m.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	ft, _ := readCCD(t, m, "ft")
+	if !strings.Contains(ft, `push "redirect-gateway def1 bypass-dhcp"`) {
+		t.Fatalf("a full-tunnel client's CCD must push redirect-gateway; got %q", ft)
+	}
+	if !strings.Contains(ft, `push "dhcp-option DNS `) {
+		t.Fatalf("a full-tunnel client's CCD must push a resolver (WG parity); got %q", ft)
+	}
+	sp, _ := readCCD(t, m, "split")
+	if strings.Contains(sp, "redirect-gateway") {
+		t.Fatalf("a split-tunnel client's CCD must NOT redirect the default route; got %q", sp)
+	}
+}
+
 // TestServerModeComplete is the WF-OVPN-1 completeness red: the rendered config is a COMPLETE, RUNNABLE
 // TLS server — not merely one that contains/omits a few keys. The rc1 walk found openvpn started but
 // never brought up the tun because the config omitted mode server / tls-server / proto / port / ifconfig
@@ -146,7 +171,10 @@ func TestServerConfigAcceptedByOpenVPN(t *testing.T) {
 	// initialized (mode server, ifconfig, dh, certs), which is what proves acceptance.
 	out, _ := exec.CommandContext(ctx, "openvpn",
 		"--config", filepath.Join(m.cfgDir, "server.conf"), "--verb", "3").CombinedOutput()
-	s := string(out)
+	// The config's log-append routes runtime output to <cfgDir>/ovpn.log; config-PARSE errors still hit
+	// stderr (before the log opens). Read both so the acceptance markers (data-plane assembly) are seen.
+	logBytes, _ := os.ReadFile(filepath.Join(m.cfgDir, "ovpn.log"))
+	s := string(out) + string(logBytes)
 	// Fail only on config-level REJECTIONS: openvpn parses + validates the ENTIRE config (mode, proto,
 	// port, ifconfig, dh, certs, ccd, learn-address) before assembling the data plane, so any of these
 	// means a directive/value/combo it would not accept.

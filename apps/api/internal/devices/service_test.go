@@ -507,6 +507,32 @@ func TestFullTunnelRequiresGatewayEgress(t *testing.T) {
 	}
 }
 
+// TestOVPNFullTunnelRequiresGatewayEgress is the WF-OVPN-3 refusal-inheritance red: a full-tunnel
+// OpenVPN device inherits gateway_no_egress VERBATIM (the refusal is transport-agnostic, in the shared
+// create path) — refused on a no-egress gateway, allowed once egress is reported. Split OVPN is always
+// allowed. This is the "parity, not asymmetry" guarantee on the real path.
+func TestOVPNFullTunnelRequiresGatewayEgress(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	// No egress capability → full-tunnel OVPN refused with the SAME typed code as WireGuard.
+	_, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "ovpn-ft-deny", Transport: "openvpn", FullTunnel: true})
+	if code(err) != "gateway_no_egress" {
+		t.Fatalf("full-tunnel OVPN on no-egress gateway: want gateway_no_egress, got %v", err)
+	}
+	// Split-tunnel OVPN is always allowed.
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "ovpn-split-ok", Transport: "openvpn", FullTunnel: false}); err != nil {
+		t.Fatalf("split-tunnel OVPN should be allowed: %v", err)
+	}
+	// Egress reported → full-tunnel OVPN allowed.
+	if _, err := tx.Exec(ctx, `UPDATE nodes SET capabilities = '{"egress_nat":true}'::jsonb WHERE id = $1`, node); err != nil {
+		t.Fatalf("set capability: %v", err)
+	}
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "ovpn-ft-ok", Transport: "openvpn", FullTunnel: true}); err != nil {
+		t.Fatalf("full-tunnel OVPN on egress-capable gateway should be allowed: %v", err)
+	}
+}
+
 // TestResizePoolRefusesApprovedSiteOverlap — S8.1 Slice-4 S4.5b touch (D5/D7): growing the pool over an
 // APPROVED site subnet is refused (typed illegal_resize, the ONE validator's other direction). A PENDING
 // (unapproved) subnet does NOT block — only approved subnets count.
