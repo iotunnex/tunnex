@@ -400,6 +400,12 @@ type Querier interface {
 	// The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 	// homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 	// CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
+	// Identity-binding parity (review #1): the roster gates on the OWNING USER's identity exactly like the
+	// WG peer query + the policy compiler (ListActiveDevicesForOrg) — a device credential is only valid for
+	// its owning user's ACTIVE, CURRENT-MEMBER identity. Without this, a deactivated / offboarded / removed-
+	// member / health-blocked user kept a live OpenVPN tunnel (open-edition mesh = full access) while their
+	// WireGuard device was severed. The users + memberships joins + NOT health_blocked mirror the compiler.
+	// Severance takes effect within one renegotiation interval (reneg-sec 60), the documented OVPN bound.
 	ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveOVPNDevicesForNodeRow, error)
 	// COMPILER INPUT — excludes EXPIRED temporary grants (the expiry correctness backstop:
 	// an expired rule stops compiling on the next recompile REGARDLESS of the sweeper). The

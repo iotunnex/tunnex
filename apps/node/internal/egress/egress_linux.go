@@ -56,7 +56,11 @@ type Manager struct {
 	// re-derived. Empty when no OVPN server is configured (a WireGuard-only deployment), in which
 	// case tunnelIfaces() = {wg0} and every rendered rule is byte-identical to the pre-OVPN ruleset
 	// (the zero-config golden).
-	ovpnTun string
+	// ovpnTun (review #3): atomic — WRITTEN by SetOVPNTun on the reconcile goroutine every tick (OVPN
+	// up/down) and READ by tunnelIfaces() on the egress-loop goroutine. A bare string was a data race
+	// (-race flags it; a torn two-word read could render a garbage iifname and fail the atomic nft apply).
+	// Every sibling mutable field is atomic for the same reason.
+	ovpnTun atomic.Pointer[string]
 	policy  atomic.Pointer[nodepolicy.Compiled]
 	// deviceByIP is the src /32 -> device_id map (S7.5.4 v3), rebuilt atomically on each
 	// SetPolicy from the applied Allow set. It is the AUTHORITATIVE /32->device mapping
@@ -159,7 +163,7 @@ func New(wgIface string) *Manager {
 // once at wiring time from the OVPN server lifecycle's config (the ONE truth). Setting it adds that
 // interface to the tunnel-ingress set so OVPN clients forward like WireGuard devices; leaving it
 // unset keeps the ruleset byte-identical to a WireGuard-only deployment.
-func (m *Manager) SetOVPNTun(name string) { m.ovpnTun = name }
+func (m *Manager) SetOVPNTun(name string) { m.ovpnTun.Store(&name) }
 
 // tunnelIfaces returns the crypto-authenticated tunnel-ingress interfaces. MEMBERSHIP IN THIS SET
 // MEANS THE PACKET ARRIVED THROUGH AN AUTHENTICATED TUNNEL; adding a LAN-facing interface here
@@ -167,8 +171,8 @@ func (m *Manager) SetOVPNTun(name string) { m.ovpnTun = name }
 // the anti-spoof anchor the mesh accepts rely on). Order is stable (wg first) for readable goldens;
 // the ip tunnex chain is an atomic full-replace so nft's set-canonicalization is irrelevant there.
 func (m *Manager) tunnelIfaces() []string {
-	if m.ovpnTun != "" {
-		return []string{m.wgIface, m.ovpnTun}
+	if t := m.ovpnTun.Load(); t != nil && *t != "" {
+		return []string{m.wgIface, *t}
 	}
 	return []string{m.wgIface}
 }
