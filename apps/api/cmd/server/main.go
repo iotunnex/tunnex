@@ -36,6 +36,8 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
+	"github.com/tunnexio/tunnex/apps/api/internal/ovpn"
+	"github.com/tunnexio/tunnex/apps/api/internal/ovpnca"
 	"github.com/tunnexio/tunnex/apps/api/internal/secrets"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 	"github.com/tunnexio/tunnex/apps/api/internal/sites"
@@ -156,6 +158,13 @@ func main() {
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	deviceSvc.SetDialResolver(nodeSvc.NodeDial) // WF-A D-WFA-6: a new device's config dials the active hub
 	siteSvc := sites.NewService(pool)
+	// OpenVPN control-plane service (S9.1, D-S9.1-6 open-edition). The client CA loads LAZILY
+	// (D-S9.5-OPTIN(a)): generated on the first export in an opted-in org, NEVER at boot — so a
+	// deployment that never uses OpenVPN has no OVPN CA row (the zero-config golden at the platform tier).
+	ovpnSvc := ovpn.NewService(sqlc.New(pool), func(ctx context.Context) (*ovpnca.CA, error) {
+		ca, _, err := ovpnca.LoadOrCreate(ctx, sqlc.New(pool), sealer)
+		return ca, err
+	})
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
@@ -174,6 +183,7 @@ func main() {
 		Invites:               invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
 		Nodes:                 nodeSvc,
 		Devices:               deviceSvc,
+		Ovpn:                  ovpnSvc,
 		Sites:                 siteSvc,
 		Sessions:              sessions,
 		Mfa:                   mfaSvc,

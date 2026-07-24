@@ -17,7 +17,7 @@ import (
 
 // setup opens a rolled-back tx against the test DB (skips when unset), plus a CA loaded through the
 // real LoadOrCreate path — so this test also covers the DB storage round-trip (D-S9.1-1).
-func setup(t *testing.T) (*Service, context.Context, uuid.UUID, uuid.UUID) {
+func setup(t *testing.T) (*Service, context.Context, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -42,9 +42,10 @@ func setup(t *testing.T) (*Service, context.Context, uuid.UUID, uuid.UUID) {
 	if err != nil {
 		t.Fatalf("sealer: %v", err)
 	}
-	ca, created, err := ovpnca.LoadOrCreate(ctx, q, sealer)
-	if err != nil || !created {
-		t.Fatalf("LoadOrCreate: created=%v err=%v", created, err)
+	// Lazy CA loader (D-S9.5-OPTIN(a)) — LoadOrCreate on first use.
+	loadCA := func(ctx context.Context) (*ovpnca.CA, error) {
+		c, _, e := ovpnca.LoadOrCreate(ctx, q, sealer)
+		return c, e
 	}
 
 	// Minimal fixture: an org, a user, a node, a device to bind the cert to (FKs are enforced).
@@ -52,14 +53,14 @@ func setup(t *testing.T) (*Service, context.Context, uuid.UUID, uuid.UUID) {
 	userID := mustUser(t, ctx, q, orgID)
 	nodeID := mustNode(t, ctx, q, orgID)
 	deviceID := mustDevice(t, ctx, q, orgID, userID, nodeID)
-	return NewService(q, ca), ctx, orgID, deviceID
+	return NewService(q, loadCA), ctx, orgID, deviceID, userID
 }
 
 // TestIssueRecordsSerialNotKey is the B2 + D-S9.2-1 red: Issue persists the cert IDENTITY (serial,
 // expiry, device binding) so the Slice 5 CRL sweep has its source — and the row carries NO private
 // key column at all (the key is ephemeral, returned to the caller only).
 func TestIssueRecordsSerialNotKey(t *testing.T) {
-	svc, ctx, orgID, deviceID := setup(t)
+	svc, ctx, orgID, deviceID, _ := setup(t)
 
 	p, err := svc.Issue(ctx, orgID, deviceID, "device-"+deviceID.String())
 	if err != nil {
@@ -137,8 +138,8 @@ func mustDevice(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID, userI
 // ExportProfile issues + records the cert, assembles an importable .ovpn, and returns the SERIAL as
 // the fingerprint — the keyed identity the caller audits, never the material.
 func TestExportProfileAssemblesAndFingerprints(t *testing.T) {
-	svc, ctx, orgID, deviceID := setup(t)
-	profile, fingerprint, err := svc.ExportProfile(ctx, orgID, deviceID, "gw.example.com", 1194)
+	svc, ctx, orgID, deviceID, userID := setup(t)
+	profile, fingerprint, err := svc.ExportProfile(ctx, orgID, userID, deviceID, "gw.example.com", 1194)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
