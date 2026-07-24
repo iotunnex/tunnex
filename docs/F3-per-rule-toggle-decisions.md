@@ -44,28 +44,47 @@ opposite — it MUST move the hash.)
 - **Web:** `apps/web/src/pages/Access.tsx` — the toggle affordance (placement = decide-item below);
   a disabled rule renders visibly dimmed/"disabled" so the list never lies about what's enforcing.
 
-## Decide-items — HELD for founder ruling
+## Decide-items — RULED (founder, 2026-07-24)
 
-- **D-F3-1 — audit on toggle?** Founder prior: **YES** — enabling/disabling access is
-  policy-consequential, the same class as create/delete. Audit actions `policy.rule_disabled` /
-  `policy.rule_enabled` (system-actor-first convention; the actor is the admin). Held to confirm the
-  prior + the two action names (or one `policy.rule_toggled` with a `{enabled}` metadata — recommend
-  TWO distinct actions, mirroring create/delete, so an audit filter reads cleanly).
-- **D-F3-2 — toggle placement:** the rule **row** (inline switch, one-click, most discoverable) vs the
-  **Edit modal** (deliberate, groups with other rule edits). Lead: **row** for a one-click reversible
-  op, but held — a modal keeps the row read-only and avoids a fat-finger disable of a live grant.
+- **D-F3-1 — audit on toggle: RULED YES, TWO distinct actions** `policy.rule_disabled` /
+  `policy.rule_enabled` (NOT one action with an `{enabled}` field). Reasoning: a single toggle action
+  with a state field would make "who cut off access at 3am" a METADATA query instead of a FILTER — the
+  audit surface's job is answering that in one read. Two actions mirror create/delete, which is exactly
+  the class this is (enabling/disabling access is policy-consequential), and the audit-viewer's existing
+  action filters get them for free. Actor = the admin (the existing audit actor path).
+- **D-F3-2 — placement: RULED the rule ROW, with a confirm on the DISABLE direction ONLY.** Row wins on
+  discoverability (the toggle IS the feature; a modal makes it a setting, not an operation) and matches
+  the NetBird pattern. But the fat-finger risk is **asymmetric**: DISABLE revokes live access instantly
+  (compiler skips it, the push lands in seconds — the whole point), while ENABLE is additive + harmless.
+  So: **enable = one click; disable = one click + a confirm that NAMES what it cuts** — e.g. "Disable
+  nykaa → aws-server? Traffic matching this rule stops immediately." Destructive-action ceremony scaled
+  to the blast radius — lighter than type-the-name (this is reversible), heavier than nothing.
 
-## Reds (for the eventual build)
+## Hash / version classification (D2-checklist row, argued explicitly)
+
+Disabling a rule changes the compiled artifact's **content** (its `AllowEntry` rows disappear) →
+therefore **IN-HASH** → therefore an **ordinary desync-free push** (the gateway sees a new
+`CanonicalHash`, reconciles, the flow stops within a push cycle). It rides the SAME machinery as
+create/delete — no special path. **NO version bump:** the *shape* of `AllowEntry` is unchanged — only
+*which entries exist*. `ProtocolVersion` / `RequiredVersion` are untouched; a disabled rule is not a
+new artifact capability, just fewer entries. (Contrast S8.x content-derived version bumps, which added
+NEW fields to the artifact; this adds none.)
+
+## Reds (RULED — the acceptance set)
 
 - **compiler:** a disabled rule produces ZERO `AllowEntry`s → the gateway artifact drops those grants →
-  default-denied (the exact allow, no longer present). A red over `Compile`: same snapshot with one
-  rule disabled = the compiled output equals the snapshot-minus-that-rule, byte-for-byte.
-- **re-enable:** flipping `disabled` back → the `AllowEntry`s reappear → flows restored (the compiled
-  output equals the all-enabled snapshot).
-- **hash moves:** disabling changes `CanonicalHash` for the affected node (it's a real policy change,
-  not out-of-hash) — a red that the pushed hash differs enabled vs disabled.
-- **audit (if D-F3-1 = yes):** the toggle emits its audit row; a disabled-then-enabled cycle leaves two
-  distinct audit events.
+  default-denied. Red over `Compile`: same snapshot with one rule disabled = the compiled output equals
+  the snapshot-minus-that-rule, byte-for-byte.
+- **re-enable:** flipping `disabled` back → the `AllowEntry`s reappear → flows restored (equals the
+  all-enabled snapshot).
+- **hash moves + NO version bump:** disabling changes `CanonicalHash` for the affected node (real policy
+  change, in-hash) AND leaves `RequiredVersion`/`ProtocolVersion` unchanged (only which entries exist,
+  not the artifact shape). A red on both halves.
+- **audit — TWO distinct actions:** disable emits `policy.rule_disabled`, enable emits
+  `policy.rule_enabled`; a disable-then-enable cycle leaves two DISTINCT audit events (not one toggle
+  action with a flipping field).
+- **disable-confirm copy (web):** the confirm renders the rule's OWN subject→destination (no generic
+  string) — e.g. "nykaa → aws-server", derived from the rule's src/dst, never a placeholder.
 - **RBAC:** a member without `policy:manage` gets 403 on the PATCH (no new perm invented).
 
 ## Sequence
