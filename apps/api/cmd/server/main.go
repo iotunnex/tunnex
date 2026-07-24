@@ -193,9 +193,11 @@ func main() {
 	nodeSvc.SetOVPNServerCertProvider(func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, string, error) {
 		return ovpnSvc.EnsureServerCert(ctx, orgID, nodeID, "gateway-"+nodeID.String())
 	})
-	// S9.1 Slice 5: the SHARED CRL rebuild seam wired to BOTH revocation paths (device revoke + node revoke).
+	// S9.1 Slice 5: the SHARED CRL rebuild seam wired to BOTH revocation paths (device revoke + node revoke),
+	// plus CRL delivery (crl-verify always-on, lazy-inits an empty CRL).
 	deviceSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
 	nodeSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
+	nodeSvc.SetOVPNCRLProvider(ovpnSvc.GetCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
@@ -288,6 +290,31 @@ func main() {
 				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				if err := nodeSvc.RunFailoverTick(sctx); err != nil {
 					logger.Error("failover_tick_failed", slog.String("error", err.Error()))
+				}
+				scancel()
+			}
+		}
+	}()
+	// S9.1 Slice 5 (D-S9.5-1a): the scheduled CRL refresh — regenerate every OVPN-enabled org's CRL well
+	// inside CRLValidity (30d) so no CRL ever EXPIRES (an expired CRL can fail-OPEN, silently un-revoking a
+	// fleet). A content no-op when nothing changed — just a fresh nextUpdate + bumped number. 12h << 30d.
+	go func() {
+		t := time.NewTicker(12 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				if orgs, err := sqlc.New(pool).ListOVPNEnabledOrgs(sctx); err != nil {
+					logger.Error("ovpn_crl_refresh_list_failed", slog.String("error", err.Error()))
+				} else {
+					for _, org := range orgs {
+						if err := ovpnSvc.RebuildCRL(sctx, org); err != nil {
+							logger.Error("ovpn_crl_refresh_failed", slog.String("org_id", org.String()), slog.String("error", err.Error()))
+						}
+					}
 				}
 				scancel()
 			}

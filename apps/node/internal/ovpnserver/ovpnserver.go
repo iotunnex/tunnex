@@ -126,7 +126,11 @@ func New(cfgDir string) *Manager {
 	m.removeFile = os.Remove
 	m.binaryPresent = func() bool { _, err := exec.LookPath("openvpn"); return err == nil }
 	m.certsPresent = func() bool {
-		for _, f := range []string{"ca.crt", "server.crt", "server.key"} {
+		// crl.pem is REQUIRED (S9.1 Slice 5): crl-verify is ALWAYS-ON, so a config referencing a missing
+		// crl.pem is a server that won't start (the WF-OVPN-1 lesson). The CP always delivers a real-or-EMPTY
+		// signed CRL when OVPN is enabled; until it lands, the server refuses-loudly (ovpn_certs_absent) — never
+		// starts crl-verify-less (which would silently accept revoked certs).
+		for _, f := range []string{"ca.crt", "server.crt", "server.key", "crl.pem"} {
 			if _, err := os.Stat(filepath.Join(m.cfgDir, f)); err != nil {
 				return false
 			}
@@ -162,10 +166,12 @@ func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
 // pass, so the supervisor is structurally unable to crash-loop. Default is a no-op stub (tests).
 func (m *Manager) SetEnsureProc(fn func(ctx context.Context, confPath string) error) { m.ensureProc = fn }
 
-// WriteServerMaterial writes the CP-delivered CA + server cert + server KEY to cfgDir (D-S9.6). The key
-// is 0600; the certs 0644. Idempotent — re-asserted every tick, so a hand-deleted file heals on the
-// next reconcile (like wg0's rules). This is what clears the ovpn_certs_absent precondition.
-func (m *Manager) WriteServerMaterial(ca, cert, key string) error {
+// WriteServerMaterial writes the CP-delivered CA + server cert + server KEY + CRL to cfgDir (D-S9.6 +
+// Slice 5). The key is 0600; the certs + CRL 0644 (public). The CRL is a valid signed CRL, possibly EMPTY
+// (an org with zero revocations still gets a real CRL — crl-verify is always-on, never a missing file).
+// Idempotent — re-asserted every tick, so a hand-deleted file heals on the next reconcile. This is what
+// clears the ovpn_certs_absent precondition (which now REQUIRES crl.pem).
+func (m *Manager) WriteServerMaterial(ca, cert, key, crl string) error {
 	if err := os.MkdirAll(m.cfgDir, 0o700); err != nil {
 		return err
 	}
@@ -177,6 +183,7 @@ func (m *Manager) WriteServerMaterial(ca, cert, key string) error {
 		{"ca.crt", ca, 0o644},
 		{"server.crt", cert, 0o644},
 		{"server.key", key, 0o600}, // the private key — restrictive perms, never logged
+		{"crl.pem", crl, 0o644},    // the revocation list (Slice 5) — public; empty is first-class
 	}
 	for _, f := range files {
 		if err := os.WriteFile(filepath.Join(m.cfgDir, f.name), []byte(f.data), f.perm); err != nil {
@@ -186,10 +193,10 @@ func (m *Manager) WriteServerMaterial(ca, cert, key string) error {
 	return nil
 }
 
-// SweepServerMaterial removes the server cert files (D-S9.6: disable means nothing exists on disk;
-// the DB record survives, so re-enable re-delivers the same serial).
+// SweepServerMaterial removes the server material (D-S9.6: disable means nothing exists on disk;
+// the DB record survives, so re-enable re-delivers the same serial). Includes the CRL (Slice 5).
 func (m *Manager) SweepServerMaterial() {
-	for _, f := range []string{"ca.crt", "server.crt", "server.key"} {
+	for _, f := range []string{"ca.crt", "server.crt", "server.key", "crl.pem"} {
 		_ = os.Remove(filepath.Join(m.cfgDir, f))
 	}
 }
@@ -239,6 +246,12 @@ func (m *Manager) serverConfig(gwIP string, routes, dns []string) string {
 	b.WriteString("cipher AES-256-GCM\n") // matches the client profile's pinned cipher
 	b.WriteString("auth SHA256\n")
 	b.WriteString("keepalive 10 60\n")
+	// reneg-sec 60 (S9.1 Slice 5, D-S9.5-3): the TLS renegotiation interval bounds revocation latency —
+	// crl-verify is re-checked at each reneg, so a revoked client's live session dies within one interval.
+	// 60s (not the 3600s default) trades a little handshake overhead for near-immediate revocation, matching
+	// "WireGuard revocation is immediate; OpenVPN revocation takes effect within one renegotiation interval
+	// (60s)." These are hub gateways, not battery-constrained clients — the low end is right.
+	b.WriteString("reneg-sec 60\n")
 	// Diagnosability (WF-OVPN walk gap): the supervisor spawns openvpn detached and does NOT capture its
 	// stdout/stderr, so auth/TLS failures were invisible on the box. openvpn writes its own log here at a
 	// modest verbosity (3 — connection + TLS + auth lines, NO key material). log-append keeps history
@@ -256,11 +269,10 @@ func (m *Manager) serverConfig(gwIP string, routes, dns []string) string {
 	fmt.Fprintf(&b, "ca %s\n", filepath.Join(m.cfgDir, "ca.crt"))
 	fmt.Fprintf(&b, "cert %s\n", filepath.Join(m.cfgDir, "server.crt"))
 	fmt.Fprintf(&b, "key %s\n", filepath.Join(m.cfgDir, "server.key"))
-	// crl-verify ONLY when a CRL is present (S9.1 Slice 5 delivers it): referencing a missing crl.pem
-	// makes openvpn refuse to start. Pre-Slice-5 there is no revocation channel, so its absence is correct.
-	if m.crlPresent() {
-		fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem"))
-	}
+	// crl-verify ALWAYS-ON (S9.1 Slice 5, D-S9.5-2): the CP always delivers a real-or-EMPTY signed CRL when
+	// OVPN is enabled, and certsPresent REQUIRES crl.pem — so the server never runs crl-verify-less (which
+	// would silently accept a revoked cert). An empty CRL revokes nothing but keeps the check wired.
+	fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem"))
 	// PUSH the topology + gateway to the client (WF-OVPN-7, 4e-walk finding). Because this server uses
 	// manual `mode server` (not the `--server` helper), the topology is NOT auto-pushed — the client
 	// defaults to net30 and REJECTS the /24 ifconfig-push ("ifconfig addresses are not in the same /30
@@ -323,13 +335,6 @@ func ccdEntry(ip, mask string, fullTunnel bool) string {
 		e += fmt.Sprintf("push \"dhcp-option DNS %s\"\n", fullTunnelDNS)
 	}
 	return e
-}
-
-// crlPresent reports whether a CRL has been delivered (S9.1 Slice 5). serverConfig emits crl-verify
-// only when true — pointing at a missing crl.pem would make openvpn refuse to start.
-func (m *Manager) crlPresent() bool {
-	_, err := os.Stat(filepath.Join(m.cfgDir, "crl.pem"))
-	return err == nil
 }
 
 // transitConflicts is the LOCAL disjointness guard for the exempt transit range (see TransitCIDR): the

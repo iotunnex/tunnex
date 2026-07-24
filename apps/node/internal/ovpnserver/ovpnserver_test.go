@@ -204,7 +204,7 @@ func writeThrowawayServerMaterial(t *testing.T, dir string) {
 	caTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test-ca"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		IsCA: true, KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true,
+		IsCA: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, BasicConstraintsValid: true,
 	}
 	caDER, _ := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
 	caCert, _ := x509.ParseCertificate(caDER)
@@ -226,6 +226,46 @@ func writeThrowawayServerMaterial(t *testing.T, dir string) {
 	write("ca.crt", &pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 	write("server.crt", &pem.Block{Type: "CERTIFICATE", Bytes: srvDER})
 	write("server.key", &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(srvKey)})
+	// crl.pem (Slice 5): a valid EMPTY signed CRL — crl-verify is ALWAYS-ON, so the config references it and
+	// openvpn must be able to load it (the empty-is-first-class condition, proven on the real binary).
+	crlDER, _ := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number: big.NewInt(1), ThisUpdate: time.Now().Add(-time.Minute), NextUpdate: time.Now().Add(time.Hour),
+	}, caCert, caKey)
+	write("crl.pem", &pem.Block{Type: "X509 CRL", Bytes: crlDER})
+}
+
+// TestServerConfigCRLVerifyAlwaysOnAndReneg is the Slice 5 red: crl-verify is ALWAYS emitted (never
+// conditional — the CP delivers a real-or-empty CRL and certsPresent requires it), and reneg-sec is set
+// to the low value that bounds revocation latency to one renegotiation interval.
+func TestServerConfigCRLVerifyAlwaysOnAndReneg(t *testing.T) {
+	m, _ := newTestMgr(t)
+	cfg := m.serverConfig("10.99.0.1", nil, nil)
+	if !strings.Contains(cfg, "crl-verify ") {
+		t.Fatalf("crl-verify must be ALWAYS-ON (a real-or-empty CRL is always delivered):\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "reneg-sec 60") {
+		t.Fatalf("reneg-sec must be 60 (bounds revocation latency to one reneg interval):\n%s", cfg)
+	}
+}
+
+// TestCRLRequiredForCertsPresent is the Slice 5 guard: crl-verify is always-on, so crl.pem is REQUIRED —
+// ca+cert+key WITHOUT crl.pem must NOT satisfy certsPresent (else the server starts referencing a missing
+// crl.pem = won't start; the CP always delivers the CRL, and until it lands the gateway refuses loudly).
+func TestCRLRequiredForCertsPresent(t *testing.T) {
+	m := New(t.TempDir())
+	if e := os.MkdirAll(m.cfgDir, 0o700); e != nil {
+		t.Fatal(e)
+	}
+	for _, f := range []string{"ca.crt", "server.crt", "server.key"} {
+		_ = os.WriteFile(filepath.Join(m.cfgDir, f), []byte("x"), 0o644)
+	}
+	if m.certsPresent() {
+		t.Fatal("ca+cert+key WITHOUT crl.pem must NOT be certs-present (crl-verify is always-on)")
+	}
+	_ = os.WriteFile(filepath.Join(m.cfgDir, "crl.pem"), []byte("x"), 0o644)
+	if !m.certsPresent() {
+		t.Fatal("with crl.pem present, certs-present must be true")
+	}
 }
 
 // TestSelfAllocationDisabled is the allocator-single-authority red: the server config carries NO
@@ -455,7 +495,7 @@ func TestServerMaterialWriteThenSweep(t *testing.T) {
 	if m.certsPresent() {
 		t.Fatal("no certs delivered yet → certsPresent must be false")
 	}
-	if err := m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM"); err != nil {
+	if err := m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM", "CRL-PEM"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if !m.certsPresent() {
@@ -473,7 +513,7 @@ func TestServerMaterialWriteThenSweep(t *testing.T) {
 	if m.certsPresent() {
 		t.Fatal("a deleted cert file must make certsPresent false until re-asserted")
 	}
-	_ = m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM")
+	_ = m.WriteServerMaterial("CA-PEM", "CERT-PEM", "KEY-PEM", "CRL-PEM")
 	if !m.certsPresent() {
 		t.Fatal("re-assert must heal the hand-deleted file")
 	}

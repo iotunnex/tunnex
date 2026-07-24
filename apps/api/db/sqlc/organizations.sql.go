@@ -170,6 +170,32 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 	return i, err
 }
 
+const listOVPNEnabledOrgs = `-- name: ListOVPNEnabledOrgs :many
+SELECT id FROM organizations WHERE ovpn_enabled = true AND deleted_at IS NULL
+`
+
+// S9.1 Slice 5: orgs with OpenVPN enabled — the scheduled CRL refresh regenerates each org's CRL well
+// inside CRLValidity so no CRL ever EXPIRES (an expired CRL can fail-OPEN, silently un-revoking a fleet).
+func (q *Queries) ListOVPNEnabledOrgs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listOVPNEnabledOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrganizations = `-- name: ListOrganizations :many
 SELECT id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval, flow_seq, ovpn_enabled FROM organizations
 WHERE deleted_at IS NULL
