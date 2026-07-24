@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { PRODUCT_NAME } from "../brand";
 import { api, apiErrorMessage, type Device, type Node, type Org } from "../lib/api";
 import { relativeAge } from "../lib/format";
@@ -6,6 +7,7 @@ import { Button, Card, ErrorText, Field, Input, StatusDot } from "../components/
 import { Gateways } from "../components/Gateways";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 import { postureBadge, postureBadgeClass } from "../lib/postureview";
+import { exportCeremony, shouldRenderQR, type ExportKind } from "../lib/deviceexport";
 
 // lastSeen renders honest recency ("last seen 42s ago"), never a faked live claim
 // — WireGuard only knows the last handshake time (online is derived from it). The
@@ -22,8 +24,15 @@ export default function Devices() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [fullTunnel, setFullTunnel] = useState(false);
-  const [config, setConfig] = useState<string | null>(null);
+  // The one-time export secret (a WireGuard .conf or an OpenVPN .ovpn) + which kind it is (so the
+  // ceremony renders a QR for WG only). Cleared on dismiss — never re-fetched (D2).
+  const [secret, setSecret] = useState<string | null>(null);
+  const [secretKind, setSecretKind] = useState<ExportKind>("wireguard");
+  // The device transport the user is creating. OpenVPN is offered ONLY when the org has opted in
+  // (D-S9.5-OPTIN(a): absent, not disabled — no dead affordance).
+  const [kind, setKind] = useState<ExportKind>("wireguard");
   const [busy, setBusy] = useState(false);
+  const ovpnEnabled = org?.ovpn_enabled === true;
 
   async function loadDevices(orgId: string) {
     const { data, error } = await api.GET("/api/v1/organizations/{orgId}/devices", { params: { path: { orgId } } });
@@ -74,10 +83,29 @@ export default function Devices() {
     if (!org || nodes.length === 0) return;
     setBusy(true);
     setError(null);
-    setConfig(null);
+    setSecret(null);
+    if (kind === "openvpn") {
+      // OpenVPN export: mint an OVPN device + its one-time .ovpn (opt-in gated server-side).
+      const { data, error } = await api.POST("/api/v1/organizations/{orgId}/ovpn-profiles", {
+        params: { path: { orgId: org.id } },
+        body: { name, node_id: nodes[0].id },
+      });
+      setBusy(false);
+      if (error || !data) {
+        setError(apiErrorMessage(error, "Could not create the OpenVPN profile."));
+        return;
+      }
+      setName("");
+      setSecretKind("openvpn");
+      setSecret(data.profile); // shown once — the client key is never re-served
+      await loadDevices(org.id);
+      return;
+    }
+    // WireGuard export: a web download/QR is a STATIC export (its client can't poll routed ranges),
+    // so provisioning="static" bakes the approved ranges + DNS (Part-2) and records the snapshot.
     const { data, error } = await api.POST("/api/v1/organizations/{orgId}/devices", {
       params: { path: { orgId: org.id } },
-      body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel },
+      body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel, provisioning: "static" },
     });
     setBusy(false);
     if (error || !data) {
@@ -85,7 +113,8 @@ export default function Devices() {
       return;
     }
     setName("");
-    setConfig(data.config ?? null); // shown once — the private key is never re-served
+    setSecretKind("wireguard");
+    setSecret(data.config ?? null); // shown once — the private key is never re-served
     await loadDevices(org.id);
   }
 
@@ -103,15 +132,15 @@ export default function Devices() {
   }
 
   function download() {
-    if (!config) return;
+    if (!secret) return;
     // The private key is served exactly once, so this download must not fail:
     // the anchor is attached to the DOM (Firefox ignores clicks on detached
     // anchors) and the object URL is revoked on the next tick (not synchronously,
     // which can abort the save before the browser reads the Blob).
-    const url = URL.createObjectURL(new Blob([config], { type: "text/plain" }));
+    const url = URL.createObjectURL(new Blob([secret], { type: "text/plain" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${PRODUCT_NAME}.conf`;
+    a.download = `${PRODUCT_NAME}.${exportCeremony(secretKind).ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -143,12 +172,29 @@ export default function Devices() {
                 <Input value={name} onChange={(e) => setName(e.target.value)} required placeholder="my-laptop" />
               </Field>
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
-              Full tunnel
-            </label>
+            {/* The transport selector is present ONLY when the org has opted into OpenVPN
+                (D-S9.5-OPTIN(a): absent, not a disabled affordance). Otherwise WireGuard is implicit. */}
+            {ovpnEnabled && (
+              <Field label="Type">
+                <select
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as ExportKind)}
+                  className="rounded-md border border-white/10 bg-ink-950 px-2 py-1.5 text-sm text-slate-200"
+                >
+                  <option value="wireguard">WireGuard</option>
+                  <option value="openvpn">OpenVPN</option>
+                </select>
+              </Field>
+            )}
+            {/* Full tunnel is a WireGuard-config choice here; OpenVPN routing is server-pushed. */}
+            {kind === "wireguard" && (
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
+                Full tunnel
+              </label>
+            )}
             <Button type="submit" disabled={busy || nodes.length === 0}>
-              {busy ? "Creating…" : "Create device"}
+              {busy ? "Creating…" : kind === "openvpn" ? "Export OpenVPN profile" : "Create device"}
             </Button>
           </div>
           {nodes.length === 0 && (
@@ -161,19 +207,35 @@ export default function Devices() {
           app. The shared OneTimeSecretModal shows it exactly once (amber, blocks
           the page); the config lives only in page state, is never re-fetched, and
           must be acknowledged to dismiss. Navigating away also discards it. */}
-      {config && (
+      {secret && (
         <OneTimeSecretModal
-          title="Your configuration — shown once"
+          title={exportCeremony(secretKind).title}
           caption={
             <>
               This file contains your device&rsquo;s <span className="text-warn">private key</span>. It is shown{" "}
-              <span className="font-semibold">exactly once</span> and cannot be retrieved again — save it now.
+              <span className="font-semibold">exactly once</span> and cannot be retrieved again — save it now.{" "}
+              {/* The honesty line (Part-2): a static profile bakes the CURRENT site routes; a subnet
+                  added later won&rsquo;t appear until the profile is re-exported. Stated at issuance. */}
+              <span className="text-slate-300">{exportCeremony(secretKind).honesty}</span>
             </>
           }
-          secret={config}
-          leadingActions={<Button onClick={download}>Download {PRODUCT_NAME}.conf</Button>}
-          onDismiss={() => setConfig(null)}
-        />
+          secret={secret}
+          leadingActions={
+            <Button onClick={download}>
+              Download {PRODUCT_NAME}.{exportCeremony(secretKind).ext}
+            </Button>
+          }
+          onDismiss={() => setSecret(null)}
+        >
+          {/* WireGuard only: a QR the official WG apps import natively. It lives inside the modal, so
+              dismissing clears the secret and the QR is never re-rendered (D2 — no re-view). OpenVPN
+              Connect has no native QR import, so no QR for .ovpn (Part-4 caveat). */}
+          {shouldRenderQR(secretKind, secret) && (
+            <div className="mt-3 flex flex-col items-center gap-1 rounded-md bg-white p-3">
+              <QRCodeSVG value={secret} size={168} />
+            </div>
+          )}
+        </OneTimeSecretModal>
       )}
 
       <ul className="mt-6 space-y-2">

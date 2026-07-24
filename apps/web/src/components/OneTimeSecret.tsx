@@ -54,6 +54,7 @@ export function OneTimeSecretModal({
   copyLabel = "Copy",
   downloadFilename,
   leadingActions,
+  children,
   onDismiss,
 }: {
   title: string;
@@ -64,6 +65,10 @@ export function OneTimeSecretModal({
   // the offline fallback to Copy for the codes a user must keep (recovery codes).
   downloadFilename?: string;
   leadingActions?: ReactNode;
+  // Extra one-time content rendered inside the modal (e.g. a QR of the secret). Lives and dies with
+  // the modal — dismissing clears it, so a QR here inherits the one-time discipline (never re-rendered
+  // after close, since the secret it encodes is only in the caller's state and never re-fetched).
+  children?: ReactNode;
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -97,6 +102,7 @@ export function OneTimeSecretModal({
           <span className="text-sm font-semibold text-warn">{title}</span>
         </div>
         <p className="mt-2 text-xs text-slate-400">{caption}</p>
+        {children}
         <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-ink-950 p-3 font-mono text-xs text-slate-300">
           {secret}
         </pre>
