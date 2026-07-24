@@ -143,3 +143,42 @@ func TestSelfTest(t *testing.T) {
 		t.Fatalf("selftest: %v", err)
 	}
 }
+
+// TestIssueServerIsServerAuthNotClient (S9.1 Slice 4a) locks the client/server EKU split: the server
+// leaf carries server-auth ONLY (a client must never authenticate as the server, and the server leaf
+// must never pass as a client). Both chain to the same CA but are role-separated by EKU.
+func TestIssueServerIsServerAuthNotClient(t *testing.T) {
+	ca := newCA(t)
+	p, err := ca.IssueServer("gateway-aws-1")
+	if err != nil {
+		t.Fatalf("issue server: %v", err)
+	}
+	if p.PrivateKeyPEM == "" || p.Serial == "" {
+		t.Fatal("server issuance must return the key + serial")
+	}
+	leaf := parseLeaf(t, p.CertPEM)
+
+	// server-auth present, client-auth ABSENT.
+	var srv, cli bool
+	for _, eku := range leaf.ExtKeyUsage {
+		if eku == x509.ExtKeyUsageServerAuth {
+			srv = true
+		}
+		if eku == x509.ExtKeyUsageClientAuth {
+			cli = true
+		}
+	}
+	if !srv {
+		t.Fatal("server cert must carry the server-auth EKU")
+	}
+	if cli {
+		t.Fatal("server cert must NOT carry client-auth EKU (role separation)")
+	}
+	// verifies as a SERVER against the CA, and FAILS the client-auth usage.
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: ca.Pool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
+		t.Fatalf("server cert must verify for server-auth: %v", err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: ca.Pool(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err == nil {
+		t.Fatal("server cert must NOT verify for client-auth (a server leaf can't pass as a client)")
+	}
+}
