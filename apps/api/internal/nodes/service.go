@@ -111,6 +111,7 @@ type OVPNServerMaterial struct {
 	CA   string `json:"ca"`
 	Cert string `json:"cert"`
 	Key  string `json:"key"`
+	CRL  string `json:"crl,omitempty"` // S9.1 Slice 5: the org's signed CRL (real-or-empty); crl-verify always-on
 }
 
 // OVPNClient is one OpenVPN client's wire binding: its cert CommonName (= device id, the CCD filename)
@@ -163,6 +164,9 @@ type Service struct {
 	// rebuildCRL (S9.1 Slice 5, optional) — the SHARED OVPN CRL rebuild seam, called from node-revoke (the
 	// second revocation path) after the sweep marks the node's devices' OVPN certs revoked. ovpn.Service.RebuildCRL.
 	rebuildCRL func(ctx context.Context, orgID uuid.UUID) error
+	// ovpnCRL (S9.1 Slice 5, optional) — the org's signed CRL PEM for delivery (crl-verify always-on).
+	// Wired to ovpn.Service.GetCRL (lazy-inits an empty CRL once). nil → no CRL delivered (pre-Slice-5).
+	ovpnCRL func(ctx context.Context, orgID uuid.UUID) (string, error)
 }
 
 // NewService builds the node service.
@@ -182,6 +186,11 @@ func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, 
 
 // SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) for the node-revoke path — ovpn.Service.RebuildCRL.
 func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) { s.rebuildCRL = fn }
+
+// SetOVPNCRLProvider wires the org CRL delivery (Slice 5) — ovpn.Service.GetCRL.
+func (s *Service) SetOVPNCRLProvider(fn func(ctx context.Context, orgID uuid.UUID) (string, error)) {
+	s.ovpnCRL = fn
+}
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	if s.pool == nil {
@@ -385,7 +394,17 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		if ca, cert, key, cerr := s.ovpnServerCert(ctx, node.OrgID, node.ID); cerr != nil {
 			slog.Warn("ovpn_server_cert_degraded", "node_id", node.ID.String(), "error", cerr.Error())
 		} else {
-			ds.OVPNServer = &OVPNServerMaterial{CA: ca, Cert: cert, Key: key}
+			// S9.1 Slice 5: deliver the org's signed CRL alongside the server material (crl-verify is
+			// ALWAYS-ON). A real-or-EMPTY CRL always accompanies enabled OVPN; a CRL fault DEGRADES the
+			// material (no partial delivery — the agent refuses-loudly on the missing crl.pem) rather than
+			// serving crl-verify-less.
+			if s.ovpnCRL == nil {
+				ds.OVPNServer = &OVPNServerMaterial{CA: ca, Cert: cert, Key: key}
+			} else if crl, crlErr := s.ovpnCRL(ctx, node.OrgID); crlErr != nil {
+				slog.Warn("ovpn_crl_degraded", "node_id", node.ID.String(), "error", crlErr.Error())
+			} else {
+				ds.OVPNServer = &OVPNServerMaterial{CA: ca, Cert: cert, Key: key, CRL: crl}
+			}
 		}
 	}
 	// S8.6 REDUCE #1: load the site topology ONCE up front (site nodes only) and derive the active hub from

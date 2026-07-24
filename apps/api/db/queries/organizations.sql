@@ -92,3 +92,8 @@ WHERE d.org_id = $1 AND d.status = 'active' AND d.deleted_at IS NULL
 UPDATE organizations SET ovpn_enabled = $2, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
+
+-- name: ListOVPNEnabledOrgs :many
+-- S9.1 Slice 5: orgs with OpenVPN enabled — the scheduled CRL refresh regenerates each org's CRL well
+-- inside CRLValidity so no CRL ever EXPIRES (an expired CRL can fail-OPEN, silently un-revoking a fleet).
+SELECT id FROM organizations WHERE ovpn_enabled = true AND deleted_at IS NULL;

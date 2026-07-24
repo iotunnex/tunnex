@@ -19,6 +19,31 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/ovpnca"
 )
 
+// TestGetCRLLazyInitsEmpty is the Slice 5c red (empty-is-first-class): an org that has NEVER revoked still
+// gets a VALID, signed, EMPTY CRL from GetCRL — lazily generated once — so a gateway's crl-verify (always-on)
+// never points at a missing file (the WF-OVPN-1 lesson).
+func TestGetCRLLazyInitsEmpty(t *testing.T) {
+	svc, ctx, orgID, _, _ := setup(t)
+	pemStr, err := svc.GetCRL(ctx, orgID) // org has zero revocations
+	if err != nil {
+		t.Fatalf("get crl: %v", err)
+	}
+	blk, _ := pem.Decode([]byte(pemStr))
+	if blk == nil {
+		t.Fatal("GetCRL must return a valid CRL PEM, never empty (crl-verify is always-on)")
+	}
+	crl, err := x509.ParseRevocationList(blk.Bytes)
+	if err != nil {
+		t.Fatalf("parse crl: %v", err)
+	}
+	if len(crl.RevokedCertificateEntries) != 0 {
+		t.Fatalf("a never-revoked org's CRL must be EMPTY; got %d entries", len(crl.RevokedCertificateEntries))
+	}
+	if !crl.NextUpdate.After(crl.ThisUpdate) {
+		t.Fatal("even the empty CRL must carry a nextUpdate (never-expired discipline)")
+	}
+}
+
 // TestRebuildCRLPutsRevokedSerialOnOrgCRL is the Slice 5b red: revoking a device's OVPN cert + RebuildCRL
 // stores a signed org CRL carrying that serial, and the per-org CRL number is MONOTONIC across rebuilds.
 func TestRebuildCRLPutsRevokedSerialOnOrgCRL(t *testing.T) {

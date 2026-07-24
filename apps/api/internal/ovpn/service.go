@@ -188,6 +188,29 @@ func (s *Service) RebuildCRL(ctx context.Context, orgID uuid.UUID) error {
 	return s.q.SetOVPNCRL(ctx, sqlc.SetOVPNCRLParams{OrgID: orgID, CrlPem: crlPEM, Number: number})
 }
 
+// GetCRL returns the org's signed CRL PEM for delivery as desired state. If none exists yet (the org has
+// never revoked, or OVPN was just enabled), it lazily generates + stores the EMPTY signed CRL ONCE — so a
+// gateway's crl-verify (always-on) never points at a missing file (the WF-OVPN-1 lesson). This is NOT
+// recompute-on-fetch: after the first init the row exists and every fetch just READS it (revoke rebuilds it).
+func (s *Service) GetCRL(ctx context.Context, orgID uuid.UUID) (string, error) {
+	row, err := s.q.GetOVPNCRLForOrg(ctx, orgID)
+	if err == nil && len(row.CrlPem) > 0 {
+		return string(row.CrlPem), nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	// No CRL (or the placeholder) — generate the empty one once + store.
+	if err := s.RebuildCRL(ctx, orgID); err != nil {
+		return "", err
+	}
+	row, err = s.q.GetOVPNCRLForOrg(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	return string(row.CrlPem), nil
+}
+
 func (s *Service) audit(ctx context.Context, orgID, actor uuid.UUID, action, targetID string, meta map[string]any) error {
 	b := []byte("{}")
 	if meta != nil {

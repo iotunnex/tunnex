@@ -474,6 +474,9 @@ type Querier interface {
 	// with the storage, consumed by S8.6 Slice 4 + Slice 6).
 	ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID) ([]NodePeerStatus, error)
 	ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error)
+	// S9.1 Slice 5: orgs with OpenVPN enabled — the scheduled CRL refresh regenerates each org's CRL well
+	// inside CRLValidity so no CRL ever EXPIRES (an expired CRL can fail-OPEN, silently un-revoking a fleet).
+	ListOVPNEnabledOrgs(ctx context.Context) ([]uuid.UUID, error)
 	ListOrgHealthChecks(ctx context.Context, orgID uuid.UUID) ([]OrgHealthCheck, error)
 	// The org roster for the Users page: membership joined to the user record so the
 	// UI has name/email/status/verified in one query. Soft-deleted users are

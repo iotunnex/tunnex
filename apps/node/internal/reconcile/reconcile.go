@@ -90,6 +90,7 @@ type OVPNServerMaterial struct {
 	CA   string `json:"ca"`
 	Cert string `json:"cert"`
 	Key  string `json:"key"`
+	CRL  string `json:"crl,omitempty"` // S9.1 Slice 5: the org's signed CRL (real-or-empty); crl-verify always-on
 }
 
 // InterfaceConfig is the device-level configuration. The PrivateKey is supplied
