@@ -273,6 +273,17 @@ type Organization struct {
 	FlowSeq           int64              `json:"flow_seq"`
 }
 
+type OvpnClientCert struct {
+	ID         uuid.UUID          `json:"id"`
+	OrgID      uuid.UUID          `json:"org_id"`
+	DeviceID   uuid.UUID          `json:"device_id"`
+	Serial     string             `json:"serial"`
+	CommonName string             `json:"common_name"`
+	NotAfter   time.Time          `json:"not_after"`
+	IssuedAt   time.Time          `json:"issued_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+}
+
 type PlatformSecret struct {
 	Name         string    `json:"name"`
 	SecretSealed []byte    `json:"secret_sealed"`
