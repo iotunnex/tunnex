@@ -386,6 +386,10 @@ type Querier interface {
 	// The CRL source: every un-revoked, issued client cert for an org (Slice 5 builds the CRL from
 	// the COMPLEMENT — revoked serials — but this read backs the "live profiles" surface).
 	ListActiveOVPNClientCertsByOrg(ctx context.Context, orgID uuid.UUID) ([]OvpnClientCert, error)
+	// The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
+	// homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
+	// CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
+	ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveOVPNDevicesForNodeRow, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops

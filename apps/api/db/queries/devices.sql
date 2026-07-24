@@ -2,8 +2,8 @@
 -- status is 'active' normally, or 'pending' when the org requires device approval
 -- (S7.3). A pending device holds its assigned_ip from creation (excluded from every
 -- status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: ApproveDevice :one
@@ -215,3 +215,12 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
     rx_bytes = EXCLUDED.rx_bytes,
     tx_bytes = EXCLUDED.tx_bytes,
     updated_at = now();
+
+-- name: ListActiveOVPNDevicesForNode :many
+-- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
+-- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
+-- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
+SELECT id, assigned_ip FROM devices
+WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
+  AND assigned_ip IS NOT NULL AND deleted_at IS NULL
+ORDER BY id;
