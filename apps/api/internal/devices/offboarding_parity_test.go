@@ -12,7 +12,7 @@ import (
 // credential is only valid for its owning user's CURRENT-MEMBER identity, so REMOVING a member severs
 // their WireGuard device from every node's peer set — not only the compiled enterprise policy. This is the
 // identity-binding invariant's home: the policy compiler (ListActiveDevicesForOrg, the reference impl) and
-// the open-edition WG peer query (ListActivePeersForNode) answer IDENTICALLY for the same membership state.
+// the open-edition WG peer query (ListActiveWireGuardPeersForNode) answer IDENTICALLY for the same membership state.
 // (The OpenVPN roster is the third consumer of the same invariant, added in S9.1.)
 func TestOffboardingSeversPeerAndCompilerParity(t *testing.T) {
 	ctx, tx := txOrSkip(t)
@@ -31,7 +31,7 @@ func TestOffboardingSeversPeerAndCompilerParity(t *testing.T) {
 	ex("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'wg','wgkey','10.99.0.7')", dev, org, user, node)
 
 	peerServed := func() bool {
-		rows, e := q.ListActivePeersForNode(ctx, node)
+		rows, e := q.ListActiveWireGuardPeersForNode(ctx, node)
 		if e != nil {
 			t.Fatalf("peers: %v", e)
 		}
