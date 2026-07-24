@@ -288,6 +288,13 @@ type OvpnClientCert struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 }
 
+type OvpnCrl struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	CrlPem    []byte    `json:"crl_pem"`
+	Number    int64     `json:"number"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type OvpnServerCert struct {
 	ID        uuid.UUID `json:"id"`
 	OrgID     uuid.UUID `json:"org_id"`

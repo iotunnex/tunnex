@@ -160,6 +160,9 @@ type Service struct {
 	// delivery as desired state. Wired to ovpn.Service.EnsureServerCert. nil (WG-only / open build) →
 	// no server material delivered.
 	ovpnServerCert func(ctx context.Context, orgID, nodeID uuid.UUID) (ca, cert, key string, err error)
+	// rebuildCRL (S9.1 Slice 5, optional) — the SHARED OVPN CRL rebuild seam, called from node-revoke (the
+	// second revocation path) after the sweep marks the node's devices' OVPN certs revoked. ovpn.Service.RebuildCRL.
+	rebuildCRL func(ctx context.Context, orgID uuid.UUID) error
 }
 
 // NewService builds the node service.
@@ -176,6 +179,9 @@ func (s *Service) SetPolicyProvider(p PolicyProvider) { s.policy = p }
 func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (ca, cert, key string, err error)) {
 	s.ovpnServerCert = fn
 }
+
+// SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) for the node-revoke path — ovpn.Service.RebuildCRL.
+func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) { s.rebuildCRL = fn }
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	if s.pool == nil {
@@ -1866,6 +1872,11 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) er
 		if _, e := q.RevokeDevicesForNode(ctx, nodeID); e != nil {
 			return e
 		}
+		// S9.1 Slice 5 (B2): the same sweep revokes those devices' OVPN client certs in-tx (the second
+		// revocation path — the CRL rebuild after commit is the SHARED seam, D-S9.5-1 iii).
+		if _, e := q.RevokeOVPNClientCertsForNode(ctx, nodeID); e != nil {
+			return e
+		}
 		return audit(ctx, q, orgID, &actor, "node.revoked", "node", nodeID.String(), map[string]any{})
 	}); err != nil {
 		return err
@@ -1876,6 +1887,14 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) er
 	if wasGateway {
 		if _, err := s.ReconcileHubSet(ctx, orgID); err != nil {
 			slog.WarnContext(ctx, "hub_set_reconcile_failed", "op", "revoke", "org_id", orgID.String(), "error", err.Error())
+		}
+	}
+	// S9.1 Slice 5: regenerate the org's CRL from the full revoked set (the SHARED seam), after commit. A
+	// revoked gateway's OVPN clients must land on the CRL just as a device revoke's do. Best-effort (the
+	// devices are revoked regardless); the scheduled rebuild backstops a failure.
+	if s.rebuildCRL != nil {
+		if err := s.rebuildCRL(ctx, orgID); err != nil {
+			slog.WarnContext(ctx, "ovpn_crl_rebuild_failed_after_node_revoke", "org_id", orgID.String(), "error", err.Error())
 		}
 	}
 	return nil

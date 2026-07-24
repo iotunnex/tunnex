@@ -157,6 +157,37 @@ func (s *Service) ExportProfile(ctx context.Context, orgID, actorID, deviceID uu
 	return profile, p.Serial, nil
 }
 
+// RebuildCRL regenerates + stores the org's signed CRL from the FULL current revoked set (D-S9.5-1b:
+// rebuilt WHOLE, never appended). This is the ONE shared revocation seam (D-S9.5-1 condition iii): BOTH the
+// device-revoke and node-revoke paths call THIS after marking certs revoked — the rebuild lives in one
+// place, never re-implemented per caller (the WF-OVPN-10 guard-not-mirrored lesson applied preemptively).
+// Per-org, monotonic per-org number. Idempotent. Best-effort at the call site: the device is already
+// revoked (roster/ccd-exclusive blocks reconnect); the CRL kills the LIVE session, and the scheduled
+// rebuild is the backstop if a single rebuild fails.
+func (s *Service) RebuildCRL(ctx context.Context, orgID uuid.UUID) error {
+	ca, err := s.caFor(ctx)
+	if err != nil {
+		return err
+	}
+	number, err := s.q.BumpOVPNCRLNumber(ctx, orgID) // atomic per-org monotonic allocation
+	if err != nil {
+		return err
+	}
+	rows, err := s.q.ListRevokedOVPNSerialsByOrg(ctx, orgID) // the FULL current revoked set
+	if err != nil {
+		return err
+	}
+	revoked := make([]ovpnca.RevokedCert, 0, len(rows))
+	for _, r := range rows {
+		revoked = append(revoked, ovpnca.RevokedCert{Serial: r.Serial, RevokedAt: r.RevokedAt.Time})
+	}
+	crlPEM, err := ca.GenerateCRL(revoked, number)
+	if err != nil {
+		return err
+	}
+	return s.q.SetOVPNCRL(ctx, sqlc.SetOVPNCRLParams{OrgID: orgID, CrlPem: crlPEM, Number: number})
+}
+
 func (s *Service) audit(ctx context.Context, orgID, actor uuid.UUID, action, targetID string, meta map[string]any) error {
 	b := []byte("{}")
 	if meta != nil {
