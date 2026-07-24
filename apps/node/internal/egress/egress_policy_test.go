@@ -744,3 +744,71 @@ func TestB1EnforcingUngrantedPoolIPDropped(t *testing.T) {
 		t.Fatal("enforcing must keep the default-deny drop base")
 	}
 }
+
+// TestOVPNTunJoinsTunnelSet_MeshAntiSpoof (S9.1 Slice 3, D-S9.3-MESH) is the MANDATORY anti-spoof
+// centerpiece. Adding the co-terminated OVPN tun to the tunnel-ingress set must NOT open the S3.7
+// spoke-isolation boundary: an eth0-ingress packet claiming a pool source has NO matching mesh
+// accept — both blanket accepts REQUIRE tunnel-set ingress ({wg0, ovpn}, never eth0), and the only
+// non-tunnel-ingress accept (LAN→tunnel) is route-daddr-scoped while the device pool is never a
+// route — so the packet hits the policy-drop base. This re-proves S3.7 under the new keying.
+func TestOVPNTunJoinsTunnelSet_MeshAntiSpoof(t *testing.T) {
+	m := New("wg0")
+	m.SetOVPNTun("tunnex-ovpn")
+	m.SetPolicy(&nodepolicy.Compiled{
+		Mode: nodepolicy.ModeOff, Mesh: true,
+		Routes: []nodepolicy.Route{{DstCIDR: "10.2.0.0/24"}},
+	})
+	rs := m.ruleset("10.99.0.1/24")
+
+	// both blanket accepts require tunnel-SET ingress — the set is {wg0, ovpn}, NOT eth0.
+	if !strings.Contains(rs, `iifname { "wg0", "tunnex-ovpn" } oifname { "wg0", "tunnex-ovpn" } counter accept`) {
+		t.Fatalf("device↔device accept must require tunnel-set ingress; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, `iifname { "wg0", "tunnex-ovpn" } oifname != { "wg0", "tunnex-ovpn" } counter accept`) {
+		t.Fatalf("spoke→egress accept must require tunnel-set ingress; got:\n%s", rs)
+	}
+	// no BARE wg0 ingress accept survives — the tunnel set is the sole ingress key (grep-proof).
+	if strings.Contains(rs, `iifname "wg0" oifname`) {
+		t.Fatalf("a bare `iifname wg0` accept survived — set is not the sole ingress key:\n%s", rs)
+	}
+	// the ONLY non-tunnel ingress (`iifname != {set}`) accept is route-daddr-scoped, never the pool.
+	for _, ln := range strings.Split(rs, "\n") {
+		if strings.Contains(ln, `iifname != {`) && strings.Contains(ln, "accept") {
+			if !strings.Contains(ln, "ip daddr 10.2.0.0/24") {
+				t.Fatalf("non-tunnel-ingress accept is not route-scoped (anti-spoof hole):\n%s", ln)
+			}
+			if strings.Contains(ln, "10.99.") {
+				t.Fatalf("non-tunnel-ingress accept reaches the pool (spoof hole):\n%s", ln)
+			}
+		}
+	}
+	if !strings.Contains(rs, "policy drop") {
+		t.Fatal("mesh must keep the policy-drop base")
+	}
+}
+
+// TestZeroOVPNConfigByteIdentical (S9.1 Slice 3) is the zero-config golden: with NO OVPN tun set,
+// tunnelIfaces()={wg0}, ifClause renders the BARE legacy form, and a WireGuard-only deployment sees
+// NOT ONE rule change from this slice (the S8.6 zero-config pattern).
+func TestZeroOVPNConfigByteIdentical(t *testing.T) {
+	m := New("wg0") // no SetOVPNTun
+	m.SetPolicy(&nodepolicy.Compiled{Mode: nodepolicy.ModeOff, Mesh: true})
+	rs := m.ruleset("10.99.0.1/24")
+
+	if !strings.Contains(rs, `iifname "wg0" oifname "wg0" counter accept`) {
+		t.Fatalf("zero-config must render the bare legacy device↔device accept; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, `iifname "wg0" oifname != "wg0" counter accept`) {
+		t.Fatalf("zero-config must render the bare legacy spoke→egress accept; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, `oifname != "wg0" masquerade`) {
+		t.Fatalf("zero-config masquerade must be bare `oifname != wg0`; got:\n%s", rs)
+	}
+	if !strings.Contains(rs, `iifname "wg0" oifname "wg0" tcp flags syn`) {
+		t.Fatalf("zero-config MSS clamp must be bare wg0↔wg0; got:\n%s", rs)
+	}
+	// NO nft interface-set syntax anywhere — byte-identical to pre-OVPN.
+	if strings.Contains(rs, "iifname {") || strings.Contains(rs, "oifname {") {
+		t.Fatalf("zero-config must emit NO interface-set syntax; got:\n%s", rs)
+	}
+}
