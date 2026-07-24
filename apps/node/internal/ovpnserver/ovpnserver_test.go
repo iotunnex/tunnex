@@ -9,12 +9,16 @@ import (
 )
 
 // newTestMgr builds a Manager over a temp dir with an in-memory process seam (so tests never spawn
-// openvpn). It records ensureProc calls so self-heal is observable.
+// openvpn). It records ensureProc calls so self-heal is observable, and stubs the preconditions
+// PRESENT (binary + certs) so the happy-path tests reach ensureProc — the precondition-refusal tests
+// flip them explicitly.
 func newTestMgr(t *testing.T) (*Manager, *int) {
 	t.Helper()
 	m := New(t.TempDir())
 	starts := 0
 	m.ensureProc = func(context.Context, string) error { starts++; return nil }
+	m.binaryPresent = func() bool { return true }
+	m.certsPresent = func() bool { return true }
 	return m, &starts
 }
 
@@ -163,5 +167,92 @@ func TestServerConfigPushesRoutesAndDNS(t *testing.T) {
 	}
 	if strings.Contains(m.serverConfig(nil, nil), "push ") {
 		t.Fatalf("with no routes/dns the config must emit NO push directives; got:\n%s", m.serverConfig(nil, nil))
+	}
+}
+
+// TestReconcileRefusesLoudlyWhenBinaryAbsent (4d) locks the precondition-before-exec guard: an
+// enabled gateway (pool + roster) whose openvpn BINARY is missing REFUSES — the supervisor never
+// spawns (ensureProc not called) and the reason is surfaced on the health surface, not logged.
+func TestReconcileRefusesLoudlyWhenBinaryAbsent(t *testing.T) {
+	m, starts := newTestMgr(t)
+	m.binaryPresent = func() bool { return false }
+	m.SetDesired(Desired{PoolCIDR: "10.99.0.0/24", Clients: []Client{{CommonName: "d", IP: "10.99.0.7"}}})
+	if err := m.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if *starts != 0 {
+		t.Fatalf("the supervisor must NOT spawn when the binary is absent; starts=%d", *starts)
+	}
+	if m.Health() != HealthBinaryAbsent {
+		t.Fatalf("health must surface %q, got %q", HealthBinaryAbsent, m.Health())
+	}
+}
+
+// TestReconcileRefusesLoudlyWhenCertsAbsent (4d) — same guard for the CA/server material.
+func TestReconcileRefusesLoudlyWhenCertsAbsent(t *testing.T) {
+	m, starts := newTestMgr(t)
+	m.certsPresent = func() bool { return false }
+	m.SetDesired(Desired{PoolCIDR: "10.99.0.0/24"})
+	if err := m.Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if *starts != 0 {
+		t.Fatalf("the supervisor must NOT spawn when certs are absent; starts=%d", *starts)
+	}
+	if m.Health() != HealthCertsAbsent {
+		t.Fatalf("health must surface %q, got %q", HealthCertsAbsent, m.Health())
+	}
+	// no server.conf written either — refuse is a full stop before any output.
+	if _, err := os.Stat(filepath.Join(m.cfgDir, "server.conf")); !os.IsNotExist(err) {
+		t.Fatalf("a refused reconcile must write no server.conf; stat err=%v", err)
+	}
+}
+
+// TestHealthClearsOnRecovery (4d) locks the recovery-clears half: certs appear on a later tick →
+// health returns to OK and the supervisor spawns. Refuse-loudly is not sticky.
+func TestHealthClearsOnRecovery(t *testing.T) {
+	m, starts := newTestMgr(t)
+	absent := true
+	m.certsPresent = func() bool { return !absent }
+	m.SetDesired(Desired{PoolCIDR: "10.99.0.0/24"})
+	_ = m.Reconcile(context.Background())
+	if m.Health() != HealthCertsAbsent || *starts != 0 {
+		t.Fatalf("expected certs-absent refusal first; health=%q starts=%d", m.Health(), *starts)
+	}
+	absent = false // certs placed
+	_ = m.Reconcile(context.Background())
+	if m.Health() != HealthOK {
+		t.Fatalf("health must clear to OK on recovery, got %q", m.Health())
+	}
+	if *starts != 1 {
+		t.Fatalf("the supervisor must spawn once preconditions are met; starts=%d", *starts)
+	}
+}
+
+// TestTunActiveGatesTunPublish (4d, step-5 ordering + sweep-on-death) locks the cross-slice interaction:
+// TunActive is true ONLY while the server is up (preconditions met + process asserted) — the agent
+// publishes egress.SetOVPNTun(TunName) only then. When the server DIES (certs vanish → refuse), TunActive
+// flips false, so the agent publishes SetOVPNTun("") and the Slice-3 sweep-on-departed-tun removes the
+// tun's egress rules. Ordering: the tun is never in tunnelIfaces() unless it is actually up.
+func TestTunActiveGatesTunPublish(t *testing.T) {
+	m, _ := newTestMgr(t)
+	// idle → not active.
+	m.SetDesired(Desired{})
+	_ = m.Reconcile(context.Background())
+	if m.TunActive() {
+		t.Fatal("idle gateway: TunActive must be false (agent must NOT publish the tun)")
+	}
+	// serving → active (agent publishes SetOVPNTun(TunName)).
+	m.SetDesired(Desired{PoolCIDR: "10.99.0.0/24"})
+	_ = m.Reconcile(context.Background())
+	if !m.TunActive() {
+		t.Fatal("serving gateway: TunActive must be true")
+	}
+	// the server dies (certs vanish) → refuse → NOT active → agent publishes SetOVPNTun("") → egress
+	// sweeps the departed tun (proven at the egress tier by the Slice-3 sweep-on-departed-tun reds).
+	m.certsPresent = func() bool { return false }
+	_ = m.Reconcile(context.Background())
+	if m.TunActive() {
+		t.Fatal("after the server dies, TunActive must be false so the agent clears the egress tun")
 	}
 }

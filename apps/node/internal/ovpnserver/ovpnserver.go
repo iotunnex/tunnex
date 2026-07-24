@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -53,18 +54,34 @@ type Desired struct {
 	DNS []string
 }
 
+// Health kinds surfaced to the control plane (D-S9.5-OPTIN c + 4d). These are SURFACED HEALTH, not
+// logs: an operator who enables OpenVPN on a gateway missing its material sees WHY on the health
+// surface, and the gateway keeps doing everything else correctly (the conntrack_flush_unavailable /
+// D4 precedent). "" = healthy.
+const (
+	HealthOK           = ""
+	HealthCertsAbsent  = "ovpn_certs_absent"  // enabled + roster, but ca/server cert/key not placed
+	HealthBinaryAbsent = "ovpn_binary_absent" // enabled, but the openvpn binary is not on PATH
+)
+
 // Manager owns the openvpn process + its config/CCD. Process control + filesystem are injectable so
 // the lifecycle is unit-testable without spawning openvpn or touching a shared FS.
 type Manager struct {
 	cfgDir  string
 	ccdDir  string
 	desired atomic.Pointer[Desired]
+	health  atomic.Pointer[string]
+	serving atomic.Bool // the tun is up (preconditions met + process asserted) — gates egress.SetOVPNTun
 
 	// injectable seams (real implementations wired in New):
 	ensureProc func(ctx context.Context, confPath string) error // (re)start the process if not running (self-heal)
 	writeFile  func(path string, data []byte) error
 	removeFile func(path string) error
 	listCCD    func() ([]string, error)
+	// PRECONDITION probes (preconditions-before-exec): the supervisor is structurally UNABLE to spawn
+	// when either is false — refuse-loudly is a GUARD before ensureProc, never a post-failure handler.
+	binaryPresent func() bool // the openvpn binary is on PATH (ships unconditionally, D-S9.5-OPTIN b)
+	certsPresent  func() bool // ca.crt + server.crt + server.key are placed at cfgDir
 }
 
 // New builds a Manager rooted at cfgDir (server.conf + ccd/ live under it). Process control is a
@@ -77,6 +94,15 @@ func New(cfgDir string) *Manager {
 	m.ensureProc = func(context.Context, string) error { return nil } // wired in main
 	m.writeFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o600) }
 	m.removeFile = os.Remove
+	m.binaryPresent = func() bool { _, err := exec.LookPath("openvpn"); return err == nil }
+	m.certsPresent = func() bool {
+		for _, f := range []string{"ca.crt", "server.crt", "server.key"} {
+			if _, err := os.Stat(filepath.Join(m.cfgDir, f)); err != nil {
+				return false
+			}
+		}
+		return true
+	}
 	m.listCCD = func() ([]string, error) {
 		ents, err := os.ReadDir(m.ccdDir)
 		if err != nil {
@@ -101,6 +127,17 @@ func (m *Manager) TunName() string { return TunName }
 
 // SetDesired atomically swaps the desired state (called from the reconcile loop's OnPolicy each tick).
 func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
+
+// Health returns the surfaced health kind ("" ok, or ovpn_certs_absent / ovpn_binary_absent) — the
+// agent reports it so an operator sees WHY an enabled gateway is not serving (surfaced, not logged).
+func (m *Manager) Health() string {
+	if h := m.health.Load(); h != nil {
+		return *h
+	}
+	return HealthOK
+}
+
+func ptr(s string) *string { return &s }
 
 // serverConfig renders the openvpn server.conf. SELF-ALLOCATION IS DISABLED (the allocator tripwire):
 // there is deliberately NO `server` or `ifconfig-pool` directive — every client's address comes from
@@ -164,8 +201,25 @@ func ccdEntry(ip, mask string) string {
 func (m *Manager) Reconcile(ctx context.Context) error {
 	d := m.desired.Load()
 	if d == nil || d.PoolCIDR == "" {
-		return nil // not configured / no pool yet — stay idle
+		m.health.Store(ptr(HealthOK)) // idle / not opted-in on this gateway — nothing to be unhealthy about
+		m.serving.Store(false)        // no tun up when idle
+		return nil                    // not configured / no pool yet — stay idle
 	}
+	// PRECONDITIONS BEFORE EXEC (4d, ruled): the supervisor is structurally unable to spawn when the
+	// binary or certs are missing — these guards run BEFORE ensureProc, refuse LOUDLY via the health
+	// surface (not a log, not a post-failure handler), and the gateway keeps doing everything else.
+	// Binary first (nothing to serve without it), then certs.
+	if !m.binaryPresent() {
+		m.health.Store(ptr(HealthBinaryAbsent))
+		m.serving.Store(false) // the tun is NOT up → the agent publishes SetOVPNTun("") → Slice-3 sweep
+		return nil
+	}
+	if !m.certsPresent() {
+		m.health.Store(ptr(HealthCertsAbsent))
+		m.serving.Store(false)
+		return nil
+	}
+	m.health.Store(ptr(HealthOK)) // preconditions met — clears any prior refusal on recovery
 	mask, err := poolMask(d.PoolCIDR)
 	if err != nil {
 		return err
@@ -210,8 +264,20 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		}
 	}
 	// Self-heal: (re)start the process if it isn't running.
-	return m.ensureProc(ctx, filepath.Join(m.cfgDir, "server.conf"))
+	if err := m.ensureProc(ctx, filepath.Join(m.cfgDir, "server.conf")); err != nil {
+		m.serving.Store(false) // spawn failed — the tun is not up
+		return err
+	}
+	m.serving.Store(true) // the process is asserted → the tun is up → the agent may publish SetOVPNTun
+	return nil
 }
+
+// TunActive reports whether the OpenVPN tun is up (preconditions met + the process asserted). The
+// agent publishes egress.SetOVPNTun(TunName) ONLY when this is true — a tunnelIfaces() entry for a
+// tun that isn't up would render forward accepts for a non-existent ingress. When the server later
+// DIES (TunActive → false), the agent publishes SetOVPNTun("") and the Slice-3 sweep-on-departed-tun
+// path removes the tun's egress rules. Cross-slice: ovpnserver liveness drives egress' tunnel set.
+func (m *Manager) TunActive() bool { return m.serving.Load() }
 
 // poolMask returns the dotted-decimal netmask for a pool CIDR (topology subnet's ifconfig-push needs it).
 func poolMask(cidr string) (string, error) {
