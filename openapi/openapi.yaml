@@ -957,6 +957,31 @@ paths:
               schema: { $ref: "#/components/schemas/CreateDeviceResponse" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/ovpn-settings:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: setOVPNEnabled
+      summary: "Set the org OpenVPN opt-in (S9.1 D-S9.5-OPTIN — unlock-then-opt-in, OFF by default)"
+      description: "Flips org-level OpenVPN. Enabling makes the OVPN capability available on the org's gateways; disabling is NOT revocation — issued client certs survive and a re-enable restores service."
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OVPNSetting" }
+      responses:
+        "200":
+          description: Updated OpenVPN opt-in.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OVPNSetting" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/ovpn-profiles:
     parameters:
       - name: orgId
@@ -2934,6 +2959,13 @@ components:
         full_tunnel: { type: boolean }
         # S9.1 Part-2: "static" for a file/QR export (bakes approved ranges + DNS since the client cannot poll); default "managed" (a polling Tunnex client).
         provisioning: { type: string, enum: [managed, static] }
+
+    OVPNSetting:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean, description: "S9.1 D-S9.5-OPTIN: whether the org has opted into OpenVPN." }
 
     ExportOVPNProfileRequest:
       type: object

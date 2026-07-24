@@ -33,6 +33,7 @@ var walkBodies = map[string]string{
 	"issuejointoken":     `{"node_name":"walk-node"}`,
 	"createdevice":       `{"name":"walk-device","node_id":"00000000-0000-0000-0000-000000000000"}`,
 	"exportovpnprofile":  `{"name":"walk-ovpn","node_id":"00000000-0000-0000-0000-000000000000"}`,
+	"setovpnenabled":     `{"enabled":true}`,
 	// S5.1 CLI-auth gated ops (cliToken/cliDeviceStart/cliDeviceToken are public).
 	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,

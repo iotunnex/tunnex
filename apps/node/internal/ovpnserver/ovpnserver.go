@@ -128,6 +128,10 @@ func (m *Manager) TunName() string { return TunName }
 // SetDesired atomically swaps the desired state (called from the reconcile loop's OnPolicy each tick).
 func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
 
+// SetEnsureProc wires the real process supervisor (Supervisor.Ensure) — called only once preconditions
+// pass, so the supervisor is structurally unable to crash-loop. Default is a no-op stub (tests).
+func (m *Manager) SetEnsureProc(fn func(ctx context.Context, confPath string) error) { m.ensureProc = fn }
+
 // Health returns the surfaced health kind ("" ok, or ovpn_certs_absent / ovpn_binary_absent) — the
 // agent reports it so an operator sees WHY an enabled gateway is not serving (surfaced, not logged).
 func (m *Manager) Health() string {

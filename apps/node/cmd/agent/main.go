@@ -28,6 +28,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
 	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
+	"github.com/tunnexio/tunnex/apps/node/internal/ovpnserver"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
 )
 
@@ -181,6 +182,46 @@ func main() {
 		select {
 		case policyKick <- struct{}{}:
 		default: // a kick is already pending — the apply reads the latest policy anyway
+		}
+	})
+
+	// S9.1 4d: the agent-owned OpenVPN server (opt-in PER GATEWAY, D-S9.5-OPTIN). Structurally safe —
+	// the Manager's preconditions (binary + certs present) GUARD the supervisor before any spawn, so it
+	// cannot crash-loop; a missing binary/certs refuses LOUDLY on the health surface (reported below).
+	ovpnMgr := ovpnserver.New(getenv("TUNNEX_OVPN_CFG_DIR", "/etc/tunnex/ovpn"))
+	ovpnSup := ovpnserver.NewSupervisor()
+	ovpnMgr.SetEnsureProc(ovpnSup.Ensure)
+	defer ovpnSup.Stop()
+	r.OnOVPN(func(ds reconcile.DesiredState) {
+		if !ds.OVPNEnabled {
+			ovpnMgr.SetDesired(ovpnserver.Desired{}) // not opted in on this gateway → idle: no server, no tun
+		} else {
+			clients := make([]ovpnserver.Client, 0, len(ds.OVPNClients))
+			for _, c := range ds.OVPNClients {
+				clients = append(clients, ovpnserver.Client{CommonName: c.CommonName, IP: c.IP})
+			}
+			// The ranges + DNS to PUSH ride the compiled Policy the agent already holds (Part-3 fold).
+			var routes, dns []string
+			if ds.Policy != nil {
+				for _, rt := range ds.Policy.Routes {
+					routes = append(routes, rt.DstCIDR)
+				}
+				for _, d := range ds.Policy.DNSForwards {
+					dns = append(dns, d.ResolverIP)
+				}
+			}
+			// InterfaceAddress ("10.99.0.1/24") carries the pool prefix — the CCD ifconfig-push mask.
+			ovpnMgr.SetDesired(ovpnserver.Desired{PoolCIDR: ds.InterfaceAddress, Clients: clients, Routes: routes, DNS: dns})
+		}
+		if err := ovpnMgr.Reconcile(ctx); err != nil {
+			logger.Warn("ovpn_reconcile_failed", slog.String("error", err.Error()))
+		}
+		// STEP-5 ORDERING (ruled): publish the tun to egress ONLY once the server is actually up; when
+		// it dies (TunActive→false), CLEAR it so the Slice-3 sweep-on-departed-tun removes its egress rules.
+		if ovpnMgr.TunActive() {
+			egressMgr.SetOVPNTun(ovpnserver.TunName)
+		} else {
+			egressMgr.SetOVPNTun("")
 		}
 	})
 
