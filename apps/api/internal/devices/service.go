@@ -94,6 +94,10 @@ type CreateInput struct {
 	// FullTunnel routes all client traffic (0.0.0.0/0); default is split-tunnel
 	// (org network only) — the zero-trust posture.
 	FullTunnel bool
+	// Transport is the data-plane the device uses (S9.1 D-S9.4-MODEL): "" / "wireguard"
+	// (default) or "openvpn". FILTER-only — it selects the roster + export path, never the
+	// policy engine (an OVPN device is a device row, indistinguishable to the compiler).
+	Transport string
 }
 
 // CreateResult is the created device plus, only for the server-generated flow,
@@ -228,6 +232,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		}
 		assignedIP = ip
 
+		transport := in.Transport
+		if transport == "" {
+			transport = "wireguard"
+		}
 		created, e := q.CreateDevice(ctx, sqlc.CreateDeviceParams{
 			OrgID: in.OrgID, UserID: in.OwnerID, NodeID: in.NodeID,
 			Name: in.Name, Platform: in.Platform, PublicKey: pub,
@@ -236,6 +244,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			// devices whose egress the enforcing flip governs.
 			FullTunnel: in.FullTunnel,
 			Status:     deviceStatus, // S7.3: 'pending' when the org requires approval
+			// S9.1 D-S9.4-MODEL: the transport tag ('wireguard' default, 'openvpn' for a .ovpn
+			// client). FILTER-only — the roster/export path reads it; the compiler never sees it.
+			Transport: transport,
 		})
 		if e != nil {
 			if c := pgerr.UniqueConstraint(e); c != "" {
