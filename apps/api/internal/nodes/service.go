@@ -85,6 +85,20 @@ type DesiredState struct {
 	// (nil provider) and when no provider is wired -> the agent decodes nil and
 	// keeps the legacy blanket mesh (its asserted absent=mesh default).
 	Policy *policyspec.Compiled `json:"policy,omitempty"`
+	// OVPNClients is the OpenVPN roster homed to this gateway (S9.1 Slice 4c): each client's cert
+	// CommonName (= device id) + its CP-assigned /32. Out-of-hash PLUMBING (like Routes) — the agent
+	// renders these into CCD ifconfig-push entries; the ranges + DNS to PUSH ride the compiled Policy
+	// (Routes/DNSForwards) the agent already holds. Omitted when the node has no OpenVPN devices. An
+	// OVPN device is NOT a WireGuard Peer (it has no WG key, so DesiredState's peer loop skips it) —
+	// but its /32 IS in the compiled Policy exactly as a WG device's (B1 data half on the wire).
+	OVPNClients []OVPNClient `json:"ovpn_clients,omitempty"`
+}
+
+// OVPNClient is one OpenVPN client's wire binding: its cert CommonName (= device id, the CCD filename)
+// and its CP-assigned /32. The allocator stays authoritative; the agent renders, never allocates.
+type OVPNClient struct {
+	CommonName string `json:"cn"`
+	IP         string `json:"ip"`
 }
 
 // PolicyProvider compiles the Zero Trust policy artifact for one node (S7.2).
@@ -307,6 +321,24 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 		MTU:              1420,
 		ListenPort:       51820,
 		Peers:            peers,
+	}
+	// S9.1 Slice 4c: the OpenVPN roster for this gateway. Out-of-hash plumbing — a query fault DEGRADES
+	// (empty roster, logged) rather than failing the WireGuard fetch: an OVPN roster hiccup must never
+	// break WG peers (the classes are decoupled). Next fetch retries. The clients' /32s already reach
+	// the agent through the compiled Policy; this carries the CN↔/32 binding the agent needs for CCD.
+	if ovpnRows, oerr := s.q.ListActiveOVPNDevicesForNode(ctx, node.ID); oerr != nil {
+		slog.Warn("ovpn_roster_degraded", "node_id", node.ID.String(), "error", oerr.Error())
+	} else {
+		for _, r := range ovpnRows {
+			ip := ""
+			if r.AssignedIp != nil {
+				ip = *r.AssignedIp
+			}
+			if ip == "" {
+				continue // a device without an assigned /32 can't be pushed a CCD ifconfig-push
+			}
+			ds.OVPNClients = append(ds.OVPNClients, OVPNClient{CommonName: r.ID.String(), IP: ip})
+		}
 	}
 	// S8.6 REDUCE #1: load the site topology ONCE up front (site nodes only) and derive the active hub from
 	// it BEFORE the policy compile, so the policy transit grant and the data-plane site-link graph cite the
