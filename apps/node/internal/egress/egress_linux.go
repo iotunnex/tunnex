@@ -867,6 +867,12 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 	// proved" (eth0→wg0), never a security predicate (see docs/S8.6-decisions.md — narrowing-was-incidental).
 	// Relaxed, ONE rule covers eth0→wg0 (route) AND wg0→wg0 (device→remote-site hub transit). Forward =
 	// oif=wg0, daddr=route; return = iif=wg0, saddr=route. A future PR must NOT re-add the iif/oif predicates.
+	//
+	// S9.1: this wg0 is the SITE-LINK peer interface (remote sites are reached over WG site links; sites stay
+	// WireGuard by S9.3), NOT client ingress — so the tunnel-ingress SET does NOT apply here and this is NOT a
+	// "bare wg0" grep-proof violation. An OVPN client→remote-site rides the pool class (tun→wg0 transit) then
+	// this rule (wg0→site); `oifname <ovpn-tun> daddr remote-site` would be nonsensical (no route egresses a
+	// client tun). Do not thread the set through this class.
 	for _, c := range routes {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
@@ -874,18 +880,27 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 			set("s:"+a, []string{"iifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
 		}
 	}
-	// WF-4-local (S8.5): this gateway's OWN advertised subnets. A DEVICE (wg0) initiates IN to the local LAN
-	// (eth0) — the MIRROR of the route orientation. Forward = iif=wg0 → oif!=wg0, daddr=localsubnet; return =
-	// iif!=wg0 → oif=wg0, saddr=localsubnet. Without this, Docker's FORWARD DROP swallows the device→own-LAN
-	// forward even though the ZT chain accepted it (wire-proven). Same marked/swept discipline as routes.
+	// WF-4-local (S8.5) + S9.1 Slice 3 PER-INTERFACE: this gateway's OWN advertised subnets. A tunnel client
+	// (a WG device OR a co-terminated OVPN client — the PRIMARY OpenVPN use case: laptop dials in, reaches the
+	// office file server) initiates IN to the local LAN. Without a DOCKER-USER accept, Docker's FORWARD DROP
+	// swallows the tunnel→own-LAN forward even though the ZT chain accepted it (WF-4-local, wire-proven).
+	//
+	// Keyed `iifname <tif> daddr=localsubnet` (forward) / `oifname <tif> saddr=localsubnet` (return), ONE pair
+	// PER tunnel interface — the SAME one-truth as the pool class (D-S9.3-DOCKER (a)). The old `oifname != wg0`
+	// / `iifname != wg0` NEGATION is DROPPED (founder-ruled): a packet destined for the gateway's OWN LAN
+	// subnet cannot egress a tunnel — the routing table sends it out the LAN interface, and the disjointness
+	// validator guarantees NO site subnet overlaps a local subnet, so no other tunnel could legitimately own
+	// that destination. So `iifname <tif> daddr=localsub` is sufficient and the negation added nothing.
 	for _, c := range localSubnets {
 		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
 			a := canonDaddr(p)
 			if desired["d:"+a] || desired["s:"+a] {
 				continue // a route already claimed this addr (disjoint-by-construction guard); do not overwrite
 			}
-			set("d:"+a, []string{"iifname", wg, "oifname", "!=", wg, "ip", "daddr", a, "counter", "accept", "comment", comment})
-			set("s:"+a, []string{"iifname", "!=", wg, "oifname", wg, "ip", "saddr", a, "counter", "accept", "comment", comment})
+			for _, tif := range m.tunnelIfaces() {
+				set("d:"+tif+":"+a, []string{"iifname", tif, "ip", "daddr", a, "counter", "accept", "comment", comment})
+				set("s:"+tif+":"+a, []string{"oifname", tif, "ip", "saddr", a, "counter", "accept", "comment", comment})
+			}
 		}
 	}
 	// POOL class (A3b v6; S9.1 Slice 3 PER-INTERFACE): the org device pool. Docker must not structurally
@@ -930,12 +945,20 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 		handle string
 		sig    string
 	}
-	// poolCanon (S9.1 Slice 3): the pool's canonical address, used to recognize a listed rule as a
-	// PER-INTERFACE pool rule (keyed dir:iface:addr) vs an addr-only route/local rule.
-	poolCanon := ""
+	// perIfaceAddr (S9.1 Slice 3): the canonical addresses whose DOCKER-USER rules are PER-INTERFACE keyed
+	// (dir:iface:addr) rather than addr-only — the pool + this gateway's local subnets (both keyed on the
+	// tunnel-ingress interface). Routes stay addr-only (site-link keyed, class comment above). Built from the
+	// SAME inputs the desired rules were, so the listing side rebuilds the identical key. Disjoint by
+	// construction, so an address is in exactly one class.
+	perIfaceAddr := map[string]bool{}
 	if poolCIDR != "" {
 		if p, e := netip.ParsePrefix(poolCIDR); e == nil && p.Addr().Is4() {
-			poolCanon = canonDaddr(p)
+			perIfaceAddr[canonDaddr(p)] = true
+		}
+	}
+	for _, c := range localSubnets {
+		if p, e := netip.ParsePrefix(c); e == nil && p.Addr().Is4() {
+			perIfaceAddr[canonDaddr(p)] = true
 		}
 	}
 	current := map[string]curRule{}
@@ -951,7 +974,7 @@ func (m *Manager) reconcileDockerForward(ctx context.Context, routes, localSubne
 			continue
 		}
 		key := dir + ":" + canon
-		if canon == poolCanon { // pool rules are per-interface keyed; derive the iface from the orientation
+		if perIfaceAddr[canon] { // pool + local-subnet rules are per-interface keyed; derive the iface from orient
 			key = dir + ":" + ifaceFromOrient(orient) + ":" + canon
 		}
 		current[key] = curRule{handle: handle, sig: orientSig(orient)}
