@@ -426,7 +426,7 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
 			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
-			DstKind:   in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
 		if e != nil {
@@ -468,12 +468,29 @@ func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID)
 // exist changes) and audits with TWO DISTINCT actions (policy.rule_enabled / policy.rule_disabled), so
 // "who cut access at 3am" is a one-read action filter, not a metadata query.
 func (s *Service) SetPolicyRuleEnabled(ctx context.Context, orgID, ruleID uuid.UUID, enabled bool) (sqlc.PolicyRule, error) {
+	// F-A1: read current state FIRST and NO-OP if already in the desired state — no push, no audit. The
+	// wasted push is the smaller half; the real defect a naive toggle would introduce is an AUDIT LIE — a
+	// policy.rule_disabled row that corresponds to no change in access corrupts exactly the one-read
+	// "who cut access at 3am" answer the two-action design exists for. It is the swallowed-audit law's
+	// MIRROR: that law says a real change must always leave a row; this says a row must always correspond
+	// to a real change. API-only reachability doesn't lower it (scripts re-assert desired state routinely).
+	// The ExtendGrant lapse-guard is the precedent: a no-op returns the entity unchanged.
+	cur, err := s.q.GetPolicyRuleForOrg(ctx, sqlc.GetPolicyRuleForOrgParams{ID: ruleID, OrgID: orgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.PolicyRule{}, apierr.NotFound("rule_not_found", "rule not found")
+		}
+		return sqlc.PolicyRule{}, err
+	}
+	if cur.Disabled == !enabled {
+		return cur, nil // already in the desired state → no-op (no push, no audit)
+	}
 	var r sqlc.PolicyRule
-	err := s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
+	err = s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		var e error
 		r, e = q.SetPolicyRuleEnabled(ctx, sqlc.SetPolicyRuleEnabledParams{ID: ruleID, OrgID: orgID, Disabled: !enabled})
 		if e != nil {
-			if errors.Is(e, pgx.ErrNoRows) {
+			if errors.Is(e, pgx.ErrNoRows) { // deleted between the read and the write
 				return apierr.NotFound("rule_not_found", "rule not found")
 			}
 			return e
@@ -721,14 +738,14 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 	snap := Snapshot{Mode: org.ZeroTrustMode}
 	for _, r := range rules {
 		snap.Rules = append(snap.Rules, Rule{
-			ID:         r.ID,
-			SrcKind:    r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
+			ID:      r.ID,
+			SrcKind: r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
 			SrcSiteID:     fromPgUUID(r.SrcSiteID), // S8.2: src_kind='site' resolution
 			SrcCIDR:       derefString(r.SrcCidr),  // S8.7: src_kind='cidr' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
-			DstSiteID:     fromPgUUID(r.DstSiteID),
-			Disabled:      r.Disabled, // F3: carried to the compiler, which OWNS the skip (compiler-skip choice)
+			DstSiteID: fromPgUUID(r.DstSiteID),
+			Disabled:  r.Disabled, // F3: carried to the compiler, which OWNS the skip (compiler-skip choice)
 		})
 	}
 	for _, ss := range siteSubnets {

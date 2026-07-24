@@ -682,3 +682,59 @@ func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
 		t.Fatal("the warning must SHED once the range lands AND a gateway is bound (read-time, no edit)")
 	}
 }
+
+// TestSetPolicyRuleEnabledNoOpNoPushNoAudit (F-A1) — a NO-OP toggle (re-disabling an already-disabled rule
+// via the idempotent PATCH) must NOT push and must NOT emit an audit row: an audit row must ALWAYS
+// correspond to a REAL change (the swallowed-audit law's MIRROR — that law says a change always leaves a
+// row; this says a row always corresponds to a change), or the two-action "who cut access at 3am" read is
+// corrupted. The guard's INVERSE is pinned too: a GENUINE toggle still pushes + audits exactly once.
+func TestSetPolicyRuleEnabledNoOpNoPushNoAudit(t *testing.T) {
+	pool := testPool(t)
+	f := seed(t, pool)
+	s := policy.NewService(pool)
+	g, err := s.CreateGroup(f.ctx, f.org, "g", "")
+	if err != nil {
+		t.Fatalf("group: %v", err)
+	}
+	res, err := s.CreateResource(f.ctx, f.org, policyResource())
+	if err != nil {
+		t.Fatalf("resource: %v", err)
+	}
+	rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, res.ID))
+	if err != nil {
+		t.Fatalf("rule: %v", err)
+	}
+	n := &fakeNotifier{}
+	s.SetNotifier(n) // AFTER the creates → only toggles are captured
+
+	// REAL disable → pushes + audits rule_disabled ONCE.
+	if _, err := s.SetPolicyRuleEnabled(f.ctx, f.org, rule.ID, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if len(n.calls) != 1 {
+		t.Fatalf("a real disable must push exactly once, got %d", len(n.calls))
+	}
+	if auditCount(t, pool, f.org, "policy.rule_disabled") != 1 {
+		t.Fatal("disable must audit policy.rule_disabled once")
+	}
+	// NO-OP disable (already disabled) → NO push, NO 2nd audit row.
+	if _, err := s.SetPolicyRuleEnabled(f.ctx, f.org, rule.ID, false); err != nil {
+		t.Fatalf("noop disable: %v", err)
+	}
+	if len(n.calls) != 1 {
+		t.Fatalf("a no-op disable must NOT push, got %d total", len(n.calls))
+	}
+	if auditCount(t, pool, f.org, "policy.rule_disabled") != 1 {
+		t.Fatal("a no-op disable must NOT emit a 2nd audit row (audit-honesty — the swallowed-audit mirror)")
+	}
+	// GENUINE enable → pushes again + audits rule_enabled once (the guard's inverse — real changes still fire).
+	if _, err := s.SetPolicyRuleEnabled(f.ctx, f.org, rule.ID, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if len(n.calls) != 2 {
+		t.Fatalf("a real enable must push (2 total), got %d", len(n.calls))
+	}
+	if auditCount(t, pool, f.org, "policy.rule_enabled") != 1 {
+		t.Fatal("a real enable must audit policy.rule_enabled once")
+	}
+}
