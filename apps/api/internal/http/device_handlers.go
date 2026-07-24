@@ -35,12 +35,24 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	if err != nil {
 		return nil, err
 	}
+	// S9.1 Part-2 stale-profile surface: a static-provisioned device whose baked ranges no longer match
+	// the org's CURRENT routed ranges needs re-export. Fetch the current ranges ONCE (best-effort — a
+	// fault leaves the flag unset, never fails the list; the stale surface is advisory, not enforcement).
+	var current []string
+	if s.sites != nil {
+		current, _ = s.sites.ListRoutedRanges(ctx, req.OrgId)
+	}
 	out := make([]api.Device, 0, len(devs))
 	for _, d := range devs {
 		if !s.deviceHealthEnabled {
 			d.Health = nil // open build: never surface leftover enterprise posture rows
 		}
-		out = append(out, toAPIDeviceWithStatus(d))
+		ad := toAPIDeviceWithStatus(d)
+		if d.Device.ProvisioningMode == "static" {
+			stale := devices.RangesStale(d.Device.ProvisionedRanges, current)
+			ad.NeedsReexport = &stale
+		}
+		out = append(out, ad)
 	}
 	return api.ListDevices200JSONResponse{
 		Body:    out,

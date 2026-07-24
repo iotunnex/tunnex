@@ -2192,6 +2192,8 @@ export interface components {
             platform?: string;
             public_key: string;
             assigned_ip?: string;
+            /** @description S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices. */
+            needs_reexport?: boolean;
             /** @enum {string} */
             status: "active" | "revoked" | "pending";
             /**
