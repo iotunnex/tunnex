@@ -38,6 +38,12 @@ const secretName = "ovpn_client_ca"
 // NOT refuse-renewal; at expiry the client re-downloads a fresh profile (no in-band renewal).
 const ClientCertTTL = 365 * 24 * time.Hour
 
+// ServerCertTTL is the lifetime of an OpenVPN SERVER certificate (S9.1 Slice 4a) — the leaf the
+// gateway's openvpn process presents, which clients verify via the CA in their .ovpn (with
+// remote-cert-tls server, i.e. the server-auth EKU). Long-lived like the client cert; a gateway
+// re-enroll re-issues it.
+const ServerCertTTL = 2 * 365 * 24 * time.Hour
+
 type sealer interface {
 	Seal([]byte) (string, error)
 	Open(string) ([]byte, error)
@@ -173,6 +179,39 @@ func (c *CA) IssueClient(commonName string) (Profile, error) {
 		NotAfter:     time.Now().Add(ClientCertTTL),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
+	if err != nil {
+		return Profile{}, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	return Profile{
+		CertPEM:       string(certPEM),
+		PrivateKeyPEM: string(keyPEM),
+		Serial:        serialString(sn),
+		NotAfter:      tmpl.NotAfter,
+	}, nil
+}
+
+// IssueServer generates the OpenVPN SERVER keypair + a SERVER-AUTH leaf valid for ServerCertTTL
+// (S9.1 Slice 4a). The gateway's openvpn process presents this cert; clients verify it with
+// `remote-cert-tls server` (the server-auth EKU) against the CA in their .ovpn. The key is returned
+// to the caller for placement at the gateway (never persisted here). The server cert is distinct
+// from a client cert by EKU: a client cert must NEVER be usable as a server and vice-versa.
+func (c *CA) IssueServer(commonName string) (Profile, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return Profile{}, err
+	}
+	sn := bigSerial()
+	tmpl := &x509.Certificate{
+		SerialNumber: sn,
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(ServerCertTTL),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
 	if err != nil {
