@@ -2877,6 +2877,9 @@ components:
         platform: { type: string }
         public_key: { type: string }
         assigned_ip: { type: string }
+        needs_reexport:
+          type: boolean
+          description: "S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices."
         status: { type: string, enum: [active, revoked, pending] }
         approved_by:
           type: string
