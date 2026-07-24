@@ -1630,7 +1630,14 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// the same principle the failover window applied to the primary badge. A non-member is absent (zero
 		// value → !Observed → false), so this only fires for a hub-set member.
 		ml := b.memberLive[n.ID]
-		hubForwardingNotReconciling := ml.Observed && ml.Fresh && zombieAgentAge(now, n.LastSeenAt)-ml.Age >= hubStaleWindow
+		// F-Z1 (class): age-difference arithmetic on an AGENT-SUPPLIED timestamp clamps at zero — a skewed
+		// agent clock could report a FUTURE handshake (negative Age), which would inflate the (agentAge −
+		// wireAge) settle and spuriously fire. A skewed clock must never inflate a staleness computation.
+		wireAge := ml.Age
+		if wireAge < 0 {
+			wireAge = 0
+		}
+		hubForwardingNotReconciling := ml.Observed && ml.Fresh && zombieAgentAge(now, n.LastSeenAt)-wireAge >= hubStaleWindow
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
 		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable || conntrackFlushUnavailable || hubForwardingNotReconciling
@@ -1708,9 +1715,14 @@ func tsTime(ts pgtype.Timestamptz) time.Time {
 }
 
 // zombieAgentAge is how long since the node last CHECKED IN (last_seen_at) — the AGENT-liveness clock for
-// the WF-C L2 zombie settle (distinct from reportAge's policy_reported_at). A never-seen node → a large
-// sentinel (definitively stale). Compared against the wire handshake age to distinguish a clean death (ages
-// track) from a true zombie (agent frozen while the wire keeps refreshing).
+// the WF-C L2 zombie settle (distinct from reportAge's policy_reported_at). Compared against the wire
+// handshake age to distinguish a clean death (ages track → no flicker) from a true zombie (agent frozen
+// while the wire keeps refreshing → the gap grows past the settle).
+//
+// NEVER-SEEN invariant (F-Z2/F-Z3): a never-seen node → a large sentinel (definitively stale). A never-seen
+// agent is DEAD, and there is NO prior report to co-die with the wire, so there is no co-death flicker to
+// guard against — the zombie kind fires immediately, and the never-seen red asserts it. The settle is a
+// no-op for this case by construction (the sentinel dwarfs any wire age), which is correct.
 func zombieAgentAge(now time.Time, lastSeen pgtype.Timestamptz) time.Duration {
 	if !lastSeen.Valid {
 		return 1<<62 - 1 // never seen → forever stale
