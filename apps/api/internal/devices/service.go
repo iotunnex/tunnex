@@ -55,7 +55,18 @@ type Service struct {
 	// check — the SAME one truth the Tunnex client polls, so the two renderings never diverge. nil / a
 	// query error → the export is NOT enriched (pool-only, pre-Part-2 behavior; never fail the mint).
 	exportEnrich func(ctx context.Context, orgID uuid.UUID) (ranges []string, hasDNS bool, err error)
+	// approvalEnforced (WF-OVPN-6) — whether device-approval ENFORCEMENT is active for this edition.
+	// Device approval is an ENTERPRISE feature (S7.5.3 unlock-then-opt-in): the open build gates the
+	// admin surface (Get/SetDeviceApproval → 403 edition_required) AND must NOT enforce approval either,
+	// or the gate makes the OPEN tier LESS functional (devices trapped pending with no way to approve) —
+	// the edition line inverted. Wired from apphttp.NewDeviceApprovalEdition(); default false (open):
+	// devices enroll ACTIVE regardless of the org's stored approval mode (downgrade-release by construction).
+	approvalEnforced bool
 }
+
+// SetApprovalEnforced wires the edition's device-approval enforcement (WF-OVPN-6). Called from the server
+// wiring with apphttp.NewDeviceApprovalEdition() — true only on the enterprise build. Default false (open).
+func (s *Service) SetApprovalEnforced(v bool) { s.approvalEnforced = v }
 
 // SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
 func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {
@@ -233,8 +244,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		// S7.3 device posture: when the org requires approval, the device enrolls as
 		// PENDING (blocked — excluded from every status='active' reader, so no peer + no
 		// grants) until an admin approves. Default 'off' -> 'active', zero behavior change.
+		// WF-OVPN-6: only the ENTERPRISE edition (approvalEnforced) honors the org's approval mode. Open
+		// edition enrolls devices ACTIVE regardless — a gate whose admin surface is edition-locked must not
+		// also enforce, or it makes the open tier less functional (the edition line inverted). This is the
+		// downgrade-release seam by construction: an enterprise→open org's stored device_approval='on' stops
+		// trapping new devices the moment the edition can no longer manage it.
 		deviceStatus := "active"
-		if org.DeviceApproval == "on" {
+		if s.approvalEnforced && org.DeviceApproval == "on" {
 			deviceStatus = "pending"
 		}
 		if org.MaxDevicesPerUser > 0 {
