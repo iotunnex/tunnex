@@ -253,7 +253,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID uuid.UUID
 
 const setOrgOVPNEnabled = `-- name: SetOrgOVPNEnabled :one
 UPDATE organizations SET ovpn_enabled = $2, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, name, slug, created_at, updated_at, deleted_at, max_devices_per_user, pool_cidr, zero_trust_mode, device_approval, flow_seq, ovpn_enabled
 `
 
