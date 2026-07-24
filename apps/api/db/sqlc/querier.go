@@ -272,6 +272,8 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
+	// lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.
+	GetOVPNServerCertForNode(ctx context.Context, nodeID uuid.UUID) (OvpnServerCert, error)
 	// lint:cross-org — org-scoped by PK. The persisted transit-hub election (S8.6 REDUCE): the two
 	// writer-partitioned fields (configured + demoted) + the D5 generation. The ACTIVE order is DERIVED from
 	// these by deriveActive (never stored). No rows until the first ReconcileHubSet.
@@ -333,6 +335,7 @@ type Querier interface {
 	// S9.1 Slice 2: OpenVPN client-cert records. The issuance path records the cert identity so the
 	// Slice 5 revocation full-sweep + CRL have their source (B2). The private key is never stored.
 	InsertOVPNClientCert(ctx context.Context, arg InsertOVPNClientCertParams) (OvpnClientCert, error)
+	InsertOVPNServerCert(ctx context.Context, arg InsertOVPNServerCertParams) (OvpnServerCert, error)
 	// Create-if-absent; the caller reads-back on conflict. Never overwrites, so a
 	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
 	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error

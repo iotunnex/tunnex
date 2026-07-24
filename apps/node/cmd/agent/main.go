@@ -193,6 +193,15 @@ func main() {
 	ovpnMgr.SetEnsureProc(ovpnSup.Ensure)
 	defer ovpnSup.Stop()
 	r.OnOVPN(func(ds reconcile.DesiredState) {
+		// D-S9.6: write the CP-delivered server material to disk (or SWEEP it when off) BEFORE Reconcile,
+		// so the certs-present precondition sees the current truth. Re-asserted every tick (self-heal).
+		if ds.OVPNServer != nil {
+			if err := ovpnMgr.WriteServerMaterial(ds.OVPNServer.CA, ds.OVPNServer.Cert, ds.OVPNServer.Key); err != nil {
+				logger.Warn("ovpn_server_material_write_failed", slog.String("error", err.Error()))
+			}
+		} else {
+			ovpnMgr.SweepServerMaterial()
+		}
 		if !ds.OVPNEnabled {
 			ovpnMgr.SetDesired(ovpnserver.Desired{}) // not opted in on this gateway → idle: no server, no tun
 		} else {

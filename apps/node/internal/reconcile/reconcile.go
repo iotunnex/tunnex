@@ -53,12 +53,22 @@ type DesiredState struct {
 	// absent → OVPN idle. Decoded straight from the CP's DesiredState JSON.
 	OVPNEnabled bool         `json:"ovpn_enabled,omitempty"`
 	OVPNClients []OVPNClient `json:"ovpn_clients,omitempty"`
+	// OVPNServer (D-S9.6): the gateway's server material to write at cfgDir (ca/cert/key). nil → sweep
+	// the files. The key crosses the mTLS control channel (no new trust); the agent writes it 0600.
+	OVPNServer *OVPNServerMaterial `json:"ovpn_server,omitempty"`
 }
 
 // OVPNClient is one OpenVPN client's wire binding (mirror of the CP's nodes.OVPNClient).
 type OVPNClient struct {
 	CommonName string `json:"cn"`
 	IP         string `json:"ip"`
+}
+
+// OVPNServerMaterial is the gateway's OpenVPN server PKI (mirror of the CP's nodes.OVPNServerMaterial).
+type OVPNServerMaterial struct {
+	CA   string `json:"ca"`
+	Cert string `json:"cert"`
+	Key  string `json:"key"`
 }
 
 // InterfaceConfig is the device-level configuration. The PrivateKey is supplied

@@ -184,6 +184,10 @@ func main() {
 	ovpnSvc := ovpn.NewService(sqlc.New(pool), func(ctx context.Context) (*ovpnca.CA, error) {
 		ca, _, err := ovpnca.LoadOrCreate(ctx, sqlc.New(pool), sealer)
 		return ca, err
+	}, sealer)
+	// D-S9.6: deliver the gateway's OVPN server material as desired state (mint-once via EnsureServerCert).
+	nodeSvc.SetOVPNServerCertProvider(func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, string, error) {
+		return ovpnSvc.EnsureServerCert(ctx, orgID, nodeID, "gateway-"+nodeID.String())
 	})
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)

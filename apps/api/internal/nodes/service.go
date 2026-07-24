@@ -98,6 +98,19 @@ type DesiredState struct {
 	// granularity is org-level for now (every gateway in an opted-in org); a node-level enable is the
 	// registered refinement.
 	OVPNEnabled bool `json:"ovpn_enabled,omitempty"`
+	// OVPNServer (D-S9.6-CERT-DELIVERY): the gateway's OpenVPN server MATERIAL — CA + server cert +
+	// server KEY — delivered as desired state when OVPNEnabled, so the agent writes ca.crt/server.crt/
+	// server.key at cfgDir (the zero-touch precondition the guards protect). The key crosses the SAME
+	// mTLS control channel as policy + pool (no new trust). nil when OVPN is off → the agent SWEEPS the
+	// files. NEVER logged / audited (fingerprint-only convention).
+	OVPNServer *OVPNServerMaterial `json:"ovpn_server,omitempty"`
+}
+
+// OVPNServerMaterial is the gateway's OpenVPN server PKI, delivered for the agent to write to disk.
+type OVPNServerMaterial struct {
+	CA   string `json:"ca"`
+	Cert string `json:"cert"`
+	Key  string `json:"key"`
 }
 
 // OVPNClient is one OpenVPN client's wire binding: its cert CommonName (= device id, the CCD filename)
@@ -142,6 +155,10 @@ type Service struct {
 	// failoverMu (the tick runs on a background goroutine).
 	failovers  map[uuid.UUID]*FailoverController
 	failoverMu sync.Mutex
+	// ovpnServerCert (D-S9.6, optional) mints-once + returns the gateway's OpenVPN server material for
+	// delivery as desired state. Wired to ovpn.Service.EnsureServerCert. nil (WG-only / open build) →
+	// no server material delivered.
+	ovpnServerCert func(ctx context.Context, orgID, nodeID uuid.UUID) (ca, cert, key string, err error)
 }
 
 // NewService builds the node service.
@@ -153,6 +170,11 @@ func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Serv
 
 // SetPolicyProvider wires the enterprise policy engine (S7.2). Call before serving.
 func (s *Service) SetPolicyProvider(p PolicyProvider) { s.policy = p }
+
+// SetOVPNServerCertProvider wires the D-S9.6 server-cert delivery (ovpn.Service.EnsureServerCert).
+func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (ca, cert, key string, err error)) {
+	s.ovpnServerCert = fn
+}
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	if s.pool == nil {
@@ -346,6 +368,18 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 				continue // a device without an assigned /32 can't be pushed a CCD ifconfig-push
 			}
 			ds.OVPNClients = append(ds.OVPNClients, OVPNClient{CommonName: r.ID.String(), IP: ip})
+		}
+	}
+	// D-S9.6-CERT-DELIVERY: when this gateway runs OVPN, deliver its server MATERIAL (mint-once, then
+	// re-delivered idempotently) so the agent writes ca.crt/server.crt/server.key at cfgDir — the
+	// zero-touch precondition. Degrades (no material, logged) rather than failing the WG fetch; the
+	// agent then refuses loudly (ovpn_certs_absent) until the next fetch delivers. OFF → nil → the agent
+	// SWEEPS the files.
+	if ds.OVPNEnabled && s.ovpnServerCert != nil {
+		if ca, cert, key, cerr := s.ovpnServerCert(ctx, node.OrgID, node.ID); cerr != nil {
+			slog.Warn("ovpn_server_cert_degraded", "node_id", node.ID.String(), "error", cerr.Error())
+		} else {
+			ds.OVPNServer = &OVPNServerMaterial{CA: ca, Cert: cert, Key: key}
 		}
 	}
 	// S8.6 REDUCE #1: load the site topology ONCE up front (site nodes only) and derive the active hub from
