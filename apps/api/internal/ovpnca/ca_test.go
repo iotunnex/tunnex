@@ -182,3 +182,58 @@ func TestIssueServerIsServerAuthNotClient(t *testing.T) {
 		t.Fatal("server cert must NOT verify for client-auth (a server leaf can't pass as a client)")
 	}
 }
+
+// TestGenerateCRL is the Slice 5 D-S9.5-1/2 red: the CA signs a COMPLETE, verifiable CRL from the
+// revoked set; an issued cert's serial appears on it; the CRL's signature checks against the CA; and an
+// EMPTY revoked set still yields a valid, signed, EMPTY CRL (crl-verify always-on, never a missing file).
+func TestGenerateCRL(t *testing.T) {
+	ca := newCA(t)
+	p, err := ca.IssueClient("device-x")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	// Non-empty CRL: the revoked serial must appear, and the CRL must verify against the CA.
+	crlPEM, err := ca.GenerateCRL([]RevokedCert{{Serial: p.Serial, RevokedAt: time.Now()}}, 1)
+	if err != nil {
+		t.Fatalf("generate crl: %v", err)
+	}
+	blk, _ := pem.Decode(crlPEM)
+	if blk == nil {
+		t.Fatal("malformed CRL PEM")
+	}
+	crl, err := x509.ParseRevocationList(blk.Bytes)
+	if err != nil {
+		t.Fatalf("parse crl: %v", err)
+	}
+	if err := crl.CheckSignatureFrom(ca.cert); err != nil {
+		t.Fatalf("CRL must be signed by the CA: %v", err)
+	}
+	if len(crl.RevokedCertificateEntries) != 1 {
+		t.Fatalf("CRL must list exactly the one revoked serial; got %d", len(crl.RevokedCertificateEntries))
+	}
+	leaf := parseLeaf(t, p.CertPEM)
+	if crl.RevokedCertificateEntries[0].SerialNumber.Cmp(leaf.SerialNumber) != 0 {
+		t.Fatal("the CRL entry's serial must equal the revoked cert's serial")
+	}
+	if !crl.NextUpdate.After(crl.ThisUpdate) {
+		t.Fatal("CRL must carry a nextUpdate after thisUpdate (never-expired discipline)")
+	}
+
+	// Empty CRL is FIRST-CLASS: a valid, signed CRL with zero entries (never a missing file).
+	empty, err := ca.GenerateCRL(nil, 2)
+	if err != nil {
+		t.Fatalf("empty crl: %v", err)
+	}
+	eb, _ := pem.Decode(empty)
+	ecrl, err := x509.ParseRevocationList(eb.Bytes)
+	if err != nil {
+		t.Fatalf("parse empty crl: %v", err)
+	}
+	if err := ecrl.CheckSignatureFrom(ca.cert); err != nil {
+		t.Fatalf("empty CRL must still be CA-signed: %v", err)
+	}
+	if len(ecrl.RevokedCertificateEntries) != 0 {
+		t.Fatal("empty CRL must have zero entries")
+	}
+}
