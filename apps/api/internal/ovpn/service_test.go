@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -124,9 +125,39 @@ func mustDevice(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID, userI
 	t.Helper()
 	d, err := q.CreateDevice(ctx, sqlc.CreateDeviceParams{
 		OrgID: orgID, UserID: userID, NodeID: nodeID, Name: "ovpn-dev", PublicKey: "k", Status: "active",
+		Transport: "openvpn",
 	})
 	if err != nil {
 		t.Fatalf("device: %v", err)
 	}
 	return d.ID
+}
+
+// TestExportProfileAssemblesAndFingerprints (S9.1 Slice 4b-wiring) locks the export orchestration:
+// ExportProfile issues + records the cert, assembles an importable .ovpn, and returns the SERIAL as
+// the fingerprint — the keyed identity the caller audits, never the material.
+func TestExportProfileAssemblesAndFingerprints(t *testing.T) {
+	svc, ctx, orgID, deviceID := setup(t)
+	profile, fingerprint, err := svc.ExportProfile(ctx, orgID, deviceID, "gw.example.com", 1194)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	// the fingerprint is the RECORDED cert serial (the audit's keyed identity).
+	active, err := svc.q.ListActiveOVPNClientCertsByOrg(ctx, orgID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 1 || active[0].Serial != fingerprint {
+		t.Fatalf("fingerprint must be the recorded cert serial; got %q, rows=%d", fingerprint, len(active))
+	}
+	// importable profile: client directives + remote + inline material.
+	for _, want := range []string{"client\n", "remote gw.example.com 1194\n", "remote-cert-tls server\n", "<ca>\n", "<cert>\n", "<key>\n"} {
+		if !strings.Contains(profile, want) {
+			t.Fatalf("profile missing %q; got:\n%s", want, profile)
+		}
+	}
+	// the fingerprint is NEVER the material.
+	if strings.Contains(fingerprint, "PRIVATE KEY") || strings.Contains(fingerprint, "BEGIN") {
+		t.Fatalf("fingerprint must be the serial, never the material; got %q", fingerprint)
+	}
 }
