@@ -238,6 +238,49 @@ func (c *CA) Pool() *x509.CertPool {
 	return p
 }
 
+// CRLValidity is the CRL's nextUpdate horizon (Slice 5 / D-S9.5-1 condition a). Generous so a CRL never
+// EXPIRES between regenerations: an expired CRL can fail-OPEN on some OpenVPN versions (silently
+// un-revoking the fleet), so the service regenerates on every revoke AND on a schedule well inside this
+// window — the CRL served is always fresh AND never past nextUpdate.
+const CRLValidity = 30 * 24 * time.Hour
+
+// RevokedCert is one CRL entry: the hex cert serial + when it was revoked.
+type RevokedCert struct {
+	Serial    string
+	RevokedAt time.Time
+}
+
+// GenerateCRL signs a COMPLETE certificate revocation list from the given revoked set (D-S9.5-1(b):
+// rebuilt from the FULL current set, NEVER appended — a CRL is a complete statement; an incremental one
+// that drops an entry is a silent un-revocation). An EMPTY set yields a valid, signed, EMPTY CRL
+// (D-S9.5-2: crl-verify is always-on with a real/empty CRL, never a missing file — the WF-OVPN-1 lesson).
+// number is the monotonic CRL sequence number (the service supplies a strictly-increasing value).
+func (c *CA) GenerateCRL(revoked []RevokedCert, number int64) ([]byte, error) {
+	entries := make([]x509.RevocationListEntry, 0, len(revoked))
+	for _, r := range revoked {
+		b, err := hex.DecodeString(r.Serial)
+		if err != nil {
+			return nil, fmt.Errorf("crl: bad serial %q: %w", r.Serial, err)
+		}
+		entries = append(entries, x509.RevocationListEntry{
+			SerialNumber:   new(big.Int).SetBytes(b),
+			RevocationTime: r.RevokedAt.UTC(),
+		})
+	}
+	now := time.Now()
+	tmpl := &x509.RevocationList{
+		RevokedCertificateEntries: entries,
+		Number:                    big.NewInt(number),
+		ThisUpdate:                now.Add(-time.Minute),
+		NextUpdate:                now.Add(CRLValidity),
+	}
+	der, err := x509.CreateRevocationList(rand.Reader, tmpl, c.cert, c.key)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: der}), nil
+}
+
 // Fingerprint is a short, non-reversible id of the CA cert, safe to log.
 func (c *CA) Fingerprint() string {
 	sum := sha256.Sum256(c.cert.Raw)
