@@ -57,7 +57,7 @@ func TestCCDPushesCPAssignedAddress(t *testing.T) {
 // OpenVPN can never mint one. `ccd-exclusive` additionally REFUSES a client with no CCD entry.
 func TestSelfAllocationDisabled(t *testing.T) {
 	m, _ := newTestMgr(t)
-	cfg := m.serverConfig()
+	cfg := m.serverConfig(nil, nil)
 	for _, forbidden := range []string{"\nserver ", "ifconfig-pool"} {
 		if strings.Contains(cfg, forbidden) {
 			t.Fatalf("server config must NOT self-allocate (found %q):\n%s", forbidden, cfg)
@@ -140,7 +140,28 @@ func TestIdleWhenNoPool(t *testing.T) {
 // TunName() reports (the value threaded to egress.SetOVPNTun). No second source.
 func TestTunNameIsOneTruth(t *testing.T) {
 	m, _ := newTestMgr(t)
-	if !strings.Contains(m.serverConfig(), "dev "+m.TunName()) {
-		t.Fatalf("config `dev` must be TunName()=%q; config:\n%s", m.TunName(), m.serverConfig())
+	if !strings.Contains(m.serverConfig(nil, nil), "dev "+m.TunName()) {
+		t.Fatalf("config `dev` must be TunName()=%q; config:\n%s", m.TunName(), m.serverConfig(nil, nil))
+	}
+}
+
+// TestServerConfigPushesRoutesAndDNS (S9.1 Part-3 fold) locks the OVPN answer to the static-config
+// site-subnet gap: the server PUSHES the org's approved ranges + DNS, so a standard OpenVPN client
+// reaches site subnets + resolves cross-site names WITHOUT a client-side edit (unlike a static WG
+// config). With no routes/DNS the config emits no push lines (byte-identical to pre-fold).
+func TestServerConfigPushesRoutesAndDNS(t *testing.T) {
+	m, _ := newTestMgr(t)
+	cfg := m.serverConfig([]string{"10.0.0.0/16", "172.31.0.0/16"}, []string{"10.0.0.2"})
+	for _, want := range []string{
+		`push "route 10.0.0.0 255.255.0.0"`,
+		`push "route 172.31.0.0 255.255.0.0"`,
+		`push "dhcp-option DNS 10.0.0.2"`,
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("server config must push %q (Part-3: OVPN reaches site subnets server-side); got:\n%s", want, cfg)
+		}
+	}
+	if strings.Contains(m.serverConfig(nil, nil), "push ") {
+		t.Fatalf("with no routes/dns the config must emit NO push directives; got:\n%s", m.serverConfig(nil, nil))
 	}
 }

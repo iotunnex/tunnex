@@ -43,6 +43,14 @@ type Client struct {
 type Desired struct {
 	PoolCIDR string   // the org device pool (for the CCD ifconfig-push netmask); "" => server idle
 	Clients  []Client // the clients homed to this gateway
+	// Routes (S9.1 Part-3 fold): the org's approved reachable ranges (site subnets etc.). Unlike a
+	// WireGuard static config — which must BAKE routes because official apps do not poll — OpenVPN
+	// PUSHES routes dynamically, so an OVPN client reaches site subnets WITHOUT a client-side edit:
+	// the server emits `push "route <range>"` and the client installs them on connect. CIDR strings.
+	Routes []string
+	// DNS (S9.1 Part-3 fold): reachable cross-site DNS resolvers, pushed as `dhcp-option DNS` so name
+	// resolution works on a standard OpenVPN client (the WG static-config DNS gap has no OVPN twin).
+	DNS []string
 }
 
 // Manager owns the openvpn process + its config/CCD. Process control + filesystem are injectable so
@@ -98,7 +106,7 @@ func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
 // there is deliberately NO `server` or `ifconfig-pool` directive — every client's address comes from
 // its per-client CCD ifconfig-push (the CP-assigned /32). `topology subnet` + `client-config-dir` make
 // the CCD authoritative. The tun name is pinned (dev TunName) so egress' tunnel-ingress set matches.
-func (m *Manager) serverConfig() string {
+func (m *Manager) serverConfig(routes, dns []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "dev %s\n", TunName)
 	b.WriteString("dev-type tun\n")
@@ -113,7 +121,34 @@ func (m *Manager) serverConfig() string {
 	fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem")) // S9.1 Slice 5 revocation rides this
 	b.WriteString("persist-tun\n")
 	b.WriteString("persist-key\n")
+	// S9.1 Part-3 fold: PUSH the org's approved ranges + DNS. OpenVPN installs these on the client at
+	// connect (dynamic, server-side) — so a standard OpenVPN client reaches site subnets + resolves
+	// cross-site names WITHOUT the client-side edit a static WireGuard config would need. Ranges are
+	// canonically re-emitted (net + dotted mask) so nothing injects config directives.
+	for _, c := range routes {
+		if net, mask, ok := routeNetMask(c); ok {
+			fmt.Fprintf(&b, "push \"route %s %s\"\n", net, mask)
+		}
+	}
+	for _, d := range dns {
+		if a, err := netip.ParseAddr(d); err == nil && a.Is4() {
+			fmt.Fprintf(&b, "push \"dhcp-option DNS %s\"\n", a.String())
+		}
+	}
 	return b.String()
+}
+
+// routeNetMask converts a CIDR to OpenVPN's `route <network> <netmask>` form (dotted mask, not /bits).
+func routeNetMask(cidr string) (net, mask string, ok bool) {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil || !p.Addr().Is4() {
+		return "", "", false
+	}
+	m, err := poolMask(cidr) // dotted mask from the prefix length
+	if err != nil {
+		return "", "", false
+	}
+	return p.Masked().Addr().String(), m, true
 }
 
 // ccdEntry renders one client's CCD file: a fixed ifconfig-push from the CP-assigned /32 (never an
@@ -139,7 +174,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		return err
 	}
 	// Server config (idempotent write).
-	if err := m.writeFile(filepath.Join(m.cfgDir, "server.conf"), []byte(m.serverConfig())); err != nil {
+	if err := m.writeFile(filepath.Join(m.cfgDir, "server.conf"), []byte(m.serverConfig(d.Routes, d.DNS))); err != nil {
 		return err
 	}
 	// CCD: desired set, keyed by common name.
