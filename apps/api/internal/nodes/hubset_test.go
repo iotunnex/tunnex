@@ -774,6 +774,111 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 	}
 }
 
+// TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet is the WF-OVPN-10 blast-radius red: a KEYLESS (OpenVPN)
+// device homed to a hub-set member must NEVER appear as a WireGuard peer on ANY member's DesiredState —
+// an empty PublicKey renders `PublicKey = ` and makes `wg syncconf` reject the ENTIRE config, bricking
+// the member's whole WG reconcile (one OpenVPN client bricking the WireGuard fleet). The guard now lives
+// at the SOURCE (ListActiveWireGuardPeersForNode's `public_key <> ''`), consumed by both the per-node path
+// and widenedDevicePeers. The red pins BOTH halves: (a) no empty-pubkey peer anywhere, AND (b) the OVPN
+// device's /32 is still delivered — via the OVPN roster (assigned_ip) — so the B1 data half is unaffected.
+func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "ov-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, "DELETE FROM devices WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM users WHERE id IN (SELECT user_id FROM devices WHERE org_id=$1)", org)
+		_, _ = pool.Exec(bg, "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM sites WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	g1, g2 := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, key string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, key, "e:51820", prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(g1, "g1", "KG1", 1) // active primary
+	mk(g2, "g2", "KG2", 2) // standby
+	usr := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
+		t.Fatalf("seed user: %v", e)
+	}
+	// A WireGuard device (keyed) AND an OpenVPN device (keyless, public_key='', transport='openvpn'),
+	// BOTH homed to the active primary g1.
+	wgDev, ovDev := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'wg-laptop','KWG','10.99.0.2')",
+		wgDev, org, usr, g1); e != nil {
+		t.Fatalf("seed wg device: %v", e)
+	}
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,transport) VALUES ($1,$2,$3,$4,'ovpn-mac','','10.99.0.6','openvpn')",
+		ovDev, org, usr, g1); e != nil {
+		t.Fatalf("seed ovpn device: %v", e)
+	}
+
+	svc := NewService(pool, nil, nil)
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
+		t.Fatalf("reconcile hub set: %v", e)
+	}
+
+	// (a) NEITHER member's DesiredState may carry an empty-PublicKey peer (the config-brick vector), and
+	// the keyed WG device must still be hosted (the fix drops keyless ONLY).
+	for _, n := range []struct {
+		id   uuid.UUID
+		name string
+	}{{g1, "g1"}, {g2, "g2"}} {
+		ds, e := svc.DesiredState(ctx, sqlc.Node{ID: n.id, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true}})
+		if e != nil {
+			t.Fatalf("DesiredState(%s): %v", n.name, e)
+		}
+		wgHosted := false
+		for _, p := range ds.Peers {
+			if p.PublicKey == "" {
+				t.Fatalf("%s hosts an EMPTY-PublicKey peer — this bricks `wg syncconf` for the whole interface (WF-OVPN-10)", n.name)
+			}
+			if p.PublicKey == "KWG" {
+				wgHosted = true
+			}
+		}
+		if !wgHosted {
+			t.Fatalf("%s must still host the KEYED WireGuard device (the fix excludes keyless devices only)", n.name)
+		}
+	}
+
+	// (b) the OVPN device's /32 is still DELIVERED — via the OVPN roster on its home node — so the B1 data
+	// half is unaffected (it reaches the data plane by assigned_ip, never the WG peer list).
+	roster, e := sqlc.New(pool).ListActiveOVPNDevicesForNode(ctx, g1)
+	if e != nil {
+		t.Fatalf("ovpn roster: %v", e)
+	}
+	found := false
+	for _, r := range roster {
+		if r.AssignedIp != nil && *r.AssignedIp == "10.99.0.6" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the OpenVPN device's /32 must still be delivered via the OVPN roster (assigned_ip) — B1 data half intact")
+	}
+}
+
 // TestDeviceDialAuthAndDerivation — WF-A D-WFA-6 cond 2: a device fetches ONLY its own dial. The org-scoped
 // GetDevice is the cross-ORG guard; the owner check is the cross-DEVICE guard. A non-owner (or wrong-org)
 // caller gets device_not_found (no-oracle). The owner gets the ACTIVE-HUB dial (endpoint+pubkey of the

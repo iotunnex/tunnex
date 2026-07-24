@@ -385,7 +385,7 @@ type ListActiveOVPNDevicesForNodeRow struct {
 	FullTunnel bool      `json:"full_tunnel"`
 }
 
-// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
+// lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActiveWireGuardPeersForNode.
 // The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 // homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 // CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
@@ -409,44 +409,47 @@ func (q *Queries) ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.
 	return items, nil
 }
 
-const listActivePeersForNode = `-- name: ListActivePeersForNode :many
+const listActiveWireGuardPeersForNode = `-- name: ListActiveWireGuardPeersForNode :many
 SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
-JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
 WHERE d.node_id = $1
   AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
+  AND d.public_key <> ''
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at
 `
 
-type ListActivePeersForNodeRow struct {
+type ListActiveWireGuardPeersForNodeRow struct {
 	PublicKey  string  `json:"public_key"`
 	AssignedIp *string `json:"assigned_ip"`
 }
 
 // lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
-// fetches the peers for its own node). A peer is present only while its owning
-// user has an ACTIVE, CURRENT-MEMBER identity — a device credential is only valid
-// for its owning user's identity (the cross-cutting invariant). The users +
-// memberships joins + NOT health_blocked mirror the policy compiler
-// (ListActiveDevicesForOrg), the REFERENCE implementation of this invariant:
-//   - u.status='active': deactivating a user drops their peers from every node
-//     (reactivation restores them).
-//   - memberships (was MISSING): REMOVING a member drops their peers from every
-//     node's desired state — offboarding severs open-edition WG access, not only
-//     the compiled policy. Without this, RemoveMember's org-wide push rebuilt a
-//     query that still served the removed member (offboarding fail-to-sever).
-//   - NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate.
-func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActivePeersForNodeRow, error) {
-	rows, err := q.db.Query(ctx, listActivePeersForNode, nodeID)
+// fetches the peers for its own node). A peer is present only while BOTH the
+// device is active AND its owning user is active — so deactivating a user drops
+// their peers from every node's desired state (and reactivation restores them).
+// NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate — a health-blocked
+// device drops from desired state regardless of approval status; the conjunction
+// with status='active' excludes a pending+blocked device exactly once.
+// public_key <> ” (S9.1 D-S9.4-MODEL / WF-OVPN-10): a KEYLESS device (an OpenVPN
+// client carries a cert, not a WG key) is NEVER a WireGuard peer. This is the SINGLE
+// SOURCE of that invariant — the query NAME + this WHERE own it, so EVERY consumer
+// (the per-node peer list AND the hub-set widenedDevicePeers, plus any future one)
+// gets keyed devices only. A keyless row would render `PublicKey = ` and make
+// `wg syncconf` reject the ENTIRE config, bricking the gateway's whole WG reconcile
+// (WF-OVPN-10: one OpenVPN client bricking the WireGuard fleet on a hub member). The
+// OVPN device's /32 still reaches the data plane via the compiled artifact + the OVPN
+// roster (assigned_ip), never this list.
+func (q *Queries) ListActiveWireGuardPeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveWireGuardPeersForNodeRow, error) {
+	rows, err := q.db.Query(ctx, listActiveWireGuardPeersForNode, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListActivePeersForNodeRow{}
+	items := []ListActiveWireGuardPeersForNodeRow{}
 	for rows.Next() {
-		var i ListActivePeersForNodeRow
+		var i ListActiveWireGuardPeersForNodeRow
 		if err := rows.Scan(&i.PublicKey, &i.AssignedIp); err != nil {
 			return nil, err
 		}

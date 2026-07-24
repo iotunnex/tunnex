@@ -284,6 +284,15 @@ func buildSyncConf(privKey string, listenPort int, peers []Peer) string {
 		sb.WriteString("ListenPort = " + strconv.Itoa(listenPort) + "\n")
 	}
 	for _, p := range peers {
+		// WF-OVPN-10 boundary guard (the WF-OVPN-1 lesson: a config that meets an external tool must be one
+		// that tool ACCEPTS). A peer with an EMPTY PublicKey renders `PublicKey = ` and makes `wg syncconf`
+		// reject the ENTIRE file — one bad peer bricks the whole interface (its blast radius is what made
+		// WF-OVPN-10 merge-blocking). The control plane already excludes keyless (OpenVPN) devices at the
+		// source (ListActiveWireGuardPeersForNode); this is the last-line guarantee that no peer set can
+		// brick wg here, whatever the CP sends.
+		if p.PublicKey == "" {
+			continue
+		}
 		sb.WriteString("\n[Peer]\nPublicKey = " + p.PublicKey + "\n")
 		if len(p.AllowedIPs) > 0 {
 			sb.WriteString("AllowedIPs = " + strings.Join(p.AllowedIPs, ",") + "\n")
