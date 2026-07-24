@@ -330,6 +330,9 @@ type Querier interface {
 	// audit_logs is append-only: there are intentionally NO update or delete queries
 	// here, and the DB enforces it (see 0002 triggers).
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (AuditLog, error)
+	// S9.1 Slice 2: OpenVPN client-cert records. The issuance path records the cert identity so the
+	// Slice 5 revocation full-sweep + CRL have their source (B2). The private key is never stored.
+	InsertOVPNClientCert(ctx context.Context, arg InsertOVPNClientCertParams) (OvpnClientCert, error)
 	// Create-if-absent; the caller reads-back on conflict. Never overwrites, so a
 	// concurrent boot can't clobber the CA (fail-loud-never-regenerate lives above).
 	InsertPlatformSecret(ctx context.Context, arg InsertPlatformSecretParams) error
@@ -380,6 +383,9 @@ type Querier interface {
 	// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
 	// to identical bytes = reconcile no-op, so over-notifying is safe + correct).
 	ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// The CRL source: every un-revoked, issued client cert for an org (Slice 5 builds the CRL from
+	// the COMPLEMENT — revoked serials — but this read backs the "live profiles" surface).
+	ListActiveOVPNClientCertsByOrg(ctx context.Context, orgID uuid.UUID) ([]OvpnClientCert, error)
 	// lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
 	// fetches the peers for its own node). A peer is present only while BOTH the
 	// device is active AND its owning user is active — so deactivating a user drops
@@ -463,6 +469,9 @@ type Querier interface {
 	// Admin LIST — every rule incl. expired ones (the UI shows a lapsed grant distinctly).
 	ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]PolicyRule, error)
 	ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Resource, error)
+	// The CRL entries for an org: serials revoked and not yet past expiry (an expired cert need not
+	// appear on the CRL — it's rejected on validity anyway). Slice 5 renders these into the CRL.
+	ListRevokedOVPNSerialsByOrg(ctx context.Context, orgID uuid.UUID) ([]ListRevokedOVPNSerialsByOrgRow, error)
 	// lint:cross-org — org-scoped directly. S8.4: each site's dns_forwarding JSONB ([{domain,resolver_ip}]),
 	// unioned CP-side into the org forwarding table compiled onto every gateway.
 	ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID) ([][]byte, error)
@@ -547,6 +556,11 @@ type Querier interface {
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
+	// The B2 sweep member: revoking a device revokes ALL its live OVPN certs, returning their serials
+	// so the caller pushes the updated CRL to the gateway (one sweep with address-release + status-clear).
+	// lint:cross-org — keyed by device_id inside the device-revoke transaction, which the caller has
+	// already org-authorized (mirrors RevokeDevicesForNode); the device->org binding is verified upstream.
+	RevokeOVPNClientCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]string, error)
 	// lint:cross-org — keyed by device_id inside the report/sweep transaction (org
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
