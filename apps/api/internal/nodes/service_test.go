@@ -200,3 +200,80 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 		t.Fatalf("desired-state version: %+v err=%v", ds, err)
 	}
 }
+
+// TestDesiredStateOVPNRosterNotPeer (S9.1 Slice 4c) locks the roster channel + the WG-peer exclusion:
+// on a gateway hosting BOTH a WireGuard device and an OpenVPN device, DesiredState.Peers carries the
+// WG peer but NOT the OVPN device (it has no WG key), while DesiredState.OVPNClients carries the OVPN
+// device's CN(=id)+/32 but NOT the WG device. The OVPN /32 reaches the agent through the roster (and,
+// under enforcing, the compiled Policy) exactly as a WG device's does — B1's data half on the wire.
+func TestDesiredStateOVPNRosterNotPeer(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	q := sqlc.New(tx)
+
+	org, user, nodeID := uuid.New(), uuid.New(), uuid.New()
+	mustExec := func(sql string, args ...any) {
+		if _, e := tx.Exec(ctx, sql, args...); e != nil {
+			t.Fatalf("exec %q: %v", sql, e)
+		}
+	}
+	mustExec("INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')", org, "n-"+org.String())
+	mustExec("INSERT INTO users (id,email,name,status) VALUES ($1,$2,'U','active')", user, "u-"+user.String()+"@t")
+	mustExec("INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, user)
+	mustExec("INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint) VALUES ($1,$2,'gw',$3,'c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0=','gw.example.com:51820')",
+		nodeID, org, "s-"+nodeID.String())
+	// a WireGuard device (has a pubkey) + an OpenVPN device (no pubkey, transport openvpn).
+	wgDev, ovDev := uuid.New(), uuid.New()
+	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1,$2,$3,$4,'wg','WGKEY000000000000000000000000000000000000000=','10.99.0.5','active','wireguard')",
+		wgDev, org, user, nodeID)
+	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1,$2,$3,$4,'ovpn','','10.99.0.6','active','openvpn')",
+		ovDev, org, user, nodeID)
+
+	node, err := q.GetNodeByCertSerial(ctx, "s-"+nodeID.String())
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	svc := &Service{q: q}
+	ds, err := svc.DesiredState(ctx, node)
+	if err != nil {
+		t.Fatalf("DesiredState: %v", err)
+	}
+
+	// WG peer present, OVPN NOT a peer (no key).
+	var wgPeer, ovPeer bool
+	for _, p := range ds.Peers {
+		if p.PublicKey == "WGKEY000000000000000000000000000000000000000=" {
+			wgPeer = true
+		}
+		if p.PublicKey == "" {
+			ovPeer = true
+		}
+	}
+	if !wgPeer {
+		t.Fatalf("the WG device must be a peer; peers=%+v", ds.Peers)
+	}
+	if ovPeer {
+		t.Fatal("an OpenVPN device (no WG key) must NOT appear as a WireGuard peer")
+	}
+	// OVPN roster carries the OVPN device (CN=id, /32), NOT the WG device.
+	if len(ds.OVPNClients) != 1 {
+		t.Fatalf("roster must carry exactly the 1 OVPN device, got %+v", ds.OVPNClients)
+	}
+	c := ds.OVPNClients[0]
+	if c.CommonName != ovDev.String() || c.IP != "10.99.0.6" {
+		t.Fatalf("roster entry must be the OVPN device's id+/32; got %+v", c)
+	}
+}
