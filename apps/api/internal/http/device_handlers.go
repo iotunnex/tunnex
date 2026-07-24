@@ -83,6 +83,9 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	if req.Body.FullTunnel != nil {
 		in.FullTunnel = *req.Body.FullTunnel
 	}
+	if req.Body.Provisioning != nil {
+		in.Provisioning = string(*req.Body.Provisioning)
+	}
 	res, err := s.devices.Create(ctx, in)
 	if err != nil {
 		return nil, err

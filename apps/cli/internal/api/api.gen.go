@@ -39,6 +39,12 @@ const (
 	ChangeRoleRequestRoleOwner  ChangeRoleRequestRole = "owner"
 )
 
+// Defines values for CreateDeviceRequestProvisioning.
+const (
+	Managed CreateDeviceRequestProvisioning = "managed"
+	Static  CreateDeviceRequestProvisioning = "static"
+)
+
 // Defines values for CreatePolicyRuleRequestDstKind.
 const (
 	CreatePolicyRuleRequestDstKindGroup    CreatePolicyRuleRequestDstKind = "group"
@@ -477,13 +483,17 @@ type CliCredentialGrant struct {
 
 // CreateDeviceRequest defines model for CreateDeviceRequest.
 type CreateDeviceRequest struct {
-	FullTunnel *bool               `json:"full_tunnel,omitempty"`
-	Name       string              `json:"name"`
-	NodeId     openapi_types.UUID  `json:"node_id"`
-	Platform   *string             `json:"platform,omitempty"`
-	PublicKey  *string             `json:"public_key,omitempty"`
-	UserId     *openapi_types.UUID `json:"user_id,omitempty"`
+	FullTunnel   *bool                            `json:"full_tunnel,omitempty"`
+	Name         string                           `json:"name"`
+	NodeId       openapi_types.UUID               `json:"node_id"`
+	Platform     *string                          `json:"platform,omitempty"`
+	Provisioning *CreateDeviceRequestProvisioning `json:"provisioning,omitempty"`
+	PublicKey    *string                          `json:"public_key,omitempty"`
+	UserId       *openapi_types.UUID              `json:"user_id,omitempty"`
 }
+
+// CreateDeviceRequestProvisioning defines model for CreateDeviceRequest.Provisioning.
+type CreateDeviceRequestProvisioning string
 
 // CreateDeviceResult defines model for CreateDeviceResponse.
 type CreateDeviceResult struct {

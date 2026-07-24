@@ -49,11 +49,23 @@ type Service struct {
 	// endpoint (pre-WF-A behavior); a resolver ERROR is also a silent keep (mint must not fail on a topology
 	// blip — the re-home poll fixes the endpoint shortly after).
 	dialResolver func(ctx context.Context, orgID, nodeID uuid.UUID) (endpoint, pubkey string, derived bool, err error)
+	// exportEnrich (S9.1 Part-2, optional) returns the org's currently-approved routed ranges + whether
+	// it has cross-site DNS forwarding, for a STATIC export (a file/QR profile whose non-polling client
+	// can't learn ranges from the routed-ranges poll). Wired to sites.ListRoutedRanges + the DNS-forward
+	// check — the SAME one truth the Tunnex client polls, so the two renderings never diverge. nil / a
+	// query error → the export is NOT enriched (pool-only, pre-Part-2 behavior; never fail the mint).
+	exportEnrich func(ctx context.Context, orgID uuid.UUID) (ranges []string, hasDNS bool, err error)
 }
 
 // SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
 func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {
 	s.dialResolver = fn
+}
+
+// SetExportEnrich wires the S9.1 Part-2 static-export enrichment source (the org's routed ranges + DNS
+// presence). Optional — nil keeps exports pool-only (pre-Part-2).
+func (s *Service) SetExportEnrich(fn func(ctx context.Context, orgID uuid.UUID) ([]string, bool, error)) {
+	s.exportEnrich = fn
 }
 
 // NewService builds the device service. hub may be nil (no push; interval
@@ -98,6 +110,12 @@ type CreateInput struct {
 	// (default) or "openvpn". FILTER-only — it selects the roster + export path, never the
 	// policy engine (an OVPN device is a device row, indistinguishable to the compiler).
 	Transport string
+	// Provisioning (S9.1 Part-2): "" / "managed" (default — a polling Tunnex client that learns
+	// routed ranges from the poll) or "static" (a file/QR export whose non-polling client needs the
+	// approved ranges + DNS BAKED into the config). Derives from the EXPORT PATH: the web
+	// download/QR ceremony sets "static"; the Tunnex client leaves it managed. Recorded on the
+	// device as an immutable provisioning fact (for the stale-profile surface), not a live flag.
+	Provisioning string
 }
 
 // CreateResult is the created device plus, only for the server-generated flow,
@@ -142,6 +160,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		pub, oneTimePriv = generated, priv
 	} else if !wgkey.Valid(pub) {
 		return CreateResult{}, apierr.BadRequest("invalid_wg_key", "public_key must be a 32-byte base64 WireGuard key")
+	}
+
+	// S9.1 Part-2: for a STATIC export, snapshot the org's currently-approved routed ranges NOW — used
+	// for BOTH the baked config and the recorded snapshot (one truth, one query). A nil provider or a
+	// query error → no enrichment (pool-only, pre-Part-2), never a mint failure.
+	isStatic := in.Provisioning == "static"
+	var staticRanges []string
+	var staticHasDNS bool
+	if isStatic && s.exportEnrich != nil {
+		if r, hd, e := s.exportEnrich(ctx, in.OrgID); e == nil {
+			staticRanges, staticHasDNS = r, hd
+		}
 	}
 
 	var dev sqlc.Device
@@ -269,12 +299,29 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			return e
 		}
 		dev = created
+		// S9.1 Part-2: record the STATIC provisioning fact + the ranges snapshot baked in, so the
+		// stale-profile surface can later flag "a subnet was added — re-export". Immutable record, in
+		// the same tx as the create (a static device is never silently indistinguishable from managed).
+		if isStatic {
+			rj, _ := json.Marshal(staticRanges)
+			if e := q.SetDeviceProvisioning(ctx, sqlc.SetDeviceProvisioningParams{
+				ID: dev.ID, ProvisioningMode: "static", ProvisionedRanges: rj,
+			}); e != nil {
+				return e
+			}
+			dev.ProvisioningMode = "static"
+			dev.ProvisionedRanges = rj
+		}
 		keySource := "client"
 		if oneTimePriv != "" {
 			keySource = "server"
 		}
+		provMode := "managed"
+		if isStatic {
+			provMode = "static"
+		}
 		return audit(ctx, q, in.OrgID, &in.ActorID, "device.created", "device", dev.ID.String(),
-			map[string]any{"name": in.Name, "owner": in.OwnerID.String(), "node_id": in.NodeID.String(), "key_source": keySource})
+			map[string]any{"name": in.Name, "owner": in.OwnerID.String(), "node_id": in.NodeID.String(), "key_source": keySource, "provisioning": provMode})
 	})
 	if err != nil {
 		return CreateResult{}, err
@@ -300,13 +347,29 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 				serverPubKey, endpoint = pk, ep
 			}
 		}
+		allowed := allowedIPsFor(in.FullTunnel, poolCIDR)
+		dns := dnsFor(in.FullTunnel)
+		// S9.1 Part-2: a STATIC export (non-polling client) needs the approved ranges + DNS BAKED, since
+		// it can't learn them from the routed-ranges poll. Only for split-tunnel — a full-tunnel export
+		// already routes everything (0.0.0.0/0), so range enrichment is moot. AllowedIPs = pool + ranges;
+		// DNS points at the gateway forwarder (which does the per-domain routing) when the org has forwards.
+		if isStatic && !in.FullTunnel {
+			allowed = append(allowed, staticRanges...)
+			if staticHasDNS {
+				if gw, e := ipalloc.GatewayCIDR(poolCIDR); e == nil {
+					if ip, _, ok := strings.Cut(gw, "/"); ok {
+						dns = ip
+					}
+				}
+			}
+		}
 		res.Config = buildConfig(configParams{
 			address:      assignedIP,
 			privateKey:   oneTimePriv,
 			serverPubKey: serverPubKey,
 			endpoint:     endpoint,
-			allowedIPs:   allowedIPsFor(in.FullTunnel, poolCIDR),
-			dns:          dnsFor(in.FullTunnel),
+			allowedIPs:   allowed,
+			dns:          dns,
 		})
 	}
 	return res, nil

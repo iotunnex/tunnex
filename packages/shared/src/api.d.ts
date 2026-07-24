@@ -2231,6 +2231,8 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
             full_tunnel?: boolean;
+            /** @enum {string} */
+            provisioning?: "managed" | "static";
         };
         ExportOVPNProfileRequest: {
             name: string;
