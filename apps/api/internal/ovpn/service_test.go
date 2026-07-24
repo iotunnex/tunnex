@@ -218,7 +218,7 @@ func mustDevice(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID, userI
 // the fingerprint — the keyed identity the caller audits, never the material.
 func TestExportProfileAssemblesAndFingerprints(t *testing.T) {
 	svc, ctx, orgID, deviceID, userID := setup(t)
-	profile, fingerprint, err := svc.ExportProfile(ctx, orgID, userID, deviceID, "gw.example.com", 1194)
+	profile, fingerprint, err := svc.ExportProfile(ctx, orgID, userID, deviceID, []string{"gw.example.com"}, 1194)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}

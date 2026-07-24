@@ -13,12 +13,21 @@ import (
 // it is never stored server-side, so it cannot be re-fetched; a lost profile is re-MINTED, not
 // re-served. `remote-cert-tls server` pins the server-auth EKU so a stolen CLIENT cert cannot
 // impersonate the gateway (the role separation IssueServer/IssueClient enforces, Slice 4a).
-func BuildProfile(caPEM string, p ovpnca.Profile, host string, port int) string {
+func BuildProfile(caPEM string, p ovpnca.Profile, remotes []string, port int) string {
 	var b strings.Builder
 	b.WriteString("client\n")
 	b.WriteString("dev tun\n")
 	b.WriteString("proto udp\n")
-	fmt.Fprintf(&b, "remote %s %d\n", host, port)
+	// WF-OVPN-9 multi-remote: one `remote` per hub-set member in PRIORITY ORDER — OpenVPN's NATIVE
+	// client-side failover (tries them top-down, connects to whichever gateway is up). Every listed member
+	// hosts this device's CCD (the widened roster, same hub-set authority), so a fail-over target ACCEPTS
+	// rather than refusing (ccd-exclusive). STATIC SNAPSHOT (like the WG routed-ranges bake): the list is
+	// current-at-export — a hub-set change after export is not reflected in an already-downloaded .ovpn
+	// (re-export after a topology change; the client-side failover across the listed remotes is what makes
+	// it degrade gracefully meanwhile). A non-hub-set device gets exactly one remote (zero-config golden).
+	for _, r := range remotes {
+		fmt.Fprintf(&b, "remote %s %d\n", r, port)
+	}
 	b.WriteString("resolv-retry infinite\n")
 	b.WriteString("nobind\n")
 	b.WriteString("remote-cert-tls server\n") // verify the gateway presents a SERVER-auth cert (Slice 4a)

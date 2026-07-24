@@ -21,8 +21,11 @@ export function exportCeremony(kind: ExportKind): ExportCeremony {
     title: wg ? "Your configuration — shown once" : "Your OpenVPN profile — shown once",
     ext: wg ? "conf" : "ovpn",
     showQR: wg,
-    honesty:
-      "This profile includes your current site routes and DNS. Add a subnet later? Re-export and re-import on the device.",
+    honesty: wg
+      ? "This profile includes your current site routes and DNS. Add a subnet later? Re-export and re-import on the device."
+      : // WF-OVPN-9: the .ovpn lists the current gateway(s) at export time and fails over between them
+        // automatically. If the gateway set changes later, re-export to pick up the new list.
+        "This profile includes your current site routes, DNS, and gateway list (with automatic failover). Change a subnet or your gateways later? Re-export and re-import on the device.",
   };
 }
 

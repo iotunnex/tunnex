@@ -71,18 +71,27 @@ func (s apiServer) ExportOVPNProfile(ctx context.Context, req api.ExportOVPNProf
 		return nil, err
 	}
 
-	// Resolve the gateway remote: the node's endpoint host + the OVPN UDP port.
-	endpoint, _, _, err := s.nodes.NodeDial(ctx, req.OrgId, req.Body.NodeId)
+	// Resolve the gateway remote(s). WF-OVPN-9: for a device homed on a HUB-SET member, the profile lists
+	// EVERY member as a `remote` in priority order (native client-side failover, same hub-set authority the
+	// widened roster reads). A non-hub-set device gets a single remote — its own gateway's endpoint.
+	remotes, err := s.nodes.OVPNRemotes(ctx, req.OrgId, req.Body.NodeId)
 	if err != nil {
 		return nil, err
 	}
-	host := endpoint
-	if h, _, e := net.SplitHostPort(endpoint); e == nil {
-		host = h
+	if len(remotes) == 0 {
+		endpoint, _, _, dErr := s.nodes.NodeDial(ctx, req.OrgId, req.Body.NodeId)
+		if dErr != nil {
+			return nil, dErr
+		}
+		host := endpoint
+		if h, _, e := net.SplitHostPort(endpoint); e == nil {
+			host = h
+		}
+		remotes = []string{host}
 	}
 
 	// Mint the cert, assemble the one-time profile, audit the KEYED FINGERPRINT (never the material).
-	profile, fingerprint, err := s.ovpn.ExportProfile(ctx, req.OrgId, p.UserID, res.Device.ID, host, ovpnServerPort)
+	profile, fingerprint, err := s.ovpn.ExportProfile(ctx, req.OrgId, p.UserID, res.Device.ID, remotes, ovpnServerPort)
 	if err != nil {
 		return nil, err
 	}

@@ -138,7 +138,7 @@ func (s *Service) Issue(ctx context.Context, orgID, deviceID uuid.UUID, commonNa
 // host/port are the gateway's OpenVPN remote (resolved by the caller from the device's node). A lost
 // profile is NOT re-fetchable — the key is never stored — so recovery is revoke + re-issue (an
 // ordinary revoke, Slice 5), never a re-download.
-func (s *Service) ExportProfile(ctx context.Context, orgID, actorID, deviceID uuid.UUID, host string, port int) (profile, fingerprint string, err error) {
+func (s *Service) ExportProfile(ctx context.Context, orgID, actorID, deviceID uuid.UUID, remotes []string, port int) (profile, fingerprint string, err error) {
 	ca, err := s.caFor(ctx)
 	if err != nil {
 		return "", "", err
@@ -153,7 +153,7 @@ func (s *Service) ExportProfile(ctx context.Context, orgID, actorID, deviceID uu
 		map[string]any{"fingerprint": p.Serial}); err != nil {
 		return "", "", err
 	}
-	profile = BuildProfile(string(ca.CertPEM()), p, host, port)
+	profile = BuildProfile(string(ca.CertPEM()), p, remotes, port)
 	return profile, p.Serial, nil
 }
 

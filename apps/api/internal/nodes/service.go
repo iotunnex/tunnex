@@ -460,6 +460,14 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 				return DesiredState{}, werr // DesiredState-ATOMIC: a widening query fault fails the whole fetch
 			}
 			ds.Peers = wp // REPLACE the node's own /32 device peers with the union (site-link peers append below)
+			// WF-OVPN-9: widen the OVPN roster (CCD) across the SAME members so a multi-remote .ovpn reaches an
+			// accepting gateway whichever it fails over to — the OpenVPN twin of the WG peer widening above,
+			// reading the same activeHubMembers authority. REPLACES the node's own per-node roster.
+			wr, werr := s.widenedOVPNRoster(ctx, memberIDs)
+			if werr != nil {
+				return DesiredState{}, werr
+			}
+			ds.OVPNClients = wr
 		}
 	}
 
@@ -553,6 +561,74 @@ func (s *Service) widenedDevicePeers(ctx context.Context, memberIDs []uuid.UUID,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PublicKey < out[j].PublicKey })
 	return out, nil
+}
+
+// widenedOVPNRoster is WF-OVPN-9's OpenVPN twin of widenedDevicePeers: the UNION of OVPN clients across all
+// hub-set members (deduped by device id), so a device homed on ANY member has its CCD on EVERY member. The
+// multi-remote .ovpn lists all members; whichever gateway it fails over to ACCEPTS it (ccd-exclusive is
+// satisfied WARM everywhere). Unlike the WG peer (warm-EMPTY on standbys), an OVPN CCD is BINARY, so every
+// member carries the FULL entry — the device's ONE pool /32 + full-tunnel flag, IDENTICAL across members
+// (the indistinguishable-/32 is unchanged; widening is about WHICH gateways host the CCD, never the address).
+// Same authority (activeHubMembers). Sorted by CN (steady-state no-op). A per-member fault fails the fetch.
+func (s *Service) widenedOVPNRoster(ctx context.Context, memberIDs []uuid.UUID) ([]OVPNClient, error) {
+	seen := map[string]bool{}
+	out := make([]OVPNClient, 0)
+	for _, mid := range memberIDs {
+		rows, err := s.q.ListActiveOVPNDevicesForNode(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if r.AssignedIp == nil || *r.AssignedIp == "" {
+				continue
+			}
+			cn := r.ID.String()
+			if seen[cn] {
+				continue
+			}
+			seen[cn] = true
+			out = append(out, OVPNClient{CommonName: cn, IP: *r.AssignedIp, FullTunnel: r.FullTunnel})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CommonName < out[j].CommonName })
+	return out, nil
+}
+
+// OVPNRemotes returns the .ovpn `remote` HOSTS for a device homed on nodeID (WF-OVPN-9 Part A) — the hub-set
+// members' endpoint hosts in PRIORITY ORDER, from activeHubMembers, the SAME authority widenedOVPNRoster
+// reads. So the profile's remote list and the gateways the widened roster hosts the CCD on are byte-identical
+// (one derivation, two consumers). A NON-hub-set node returns nil → the caller uses the node's own endpoint
+// (single remote; the zero-config golden — a device on a plain gateway sees no change).
+func (s *Service) OVPNRemotes(ctx context.Context, orgID, nodeID uuid.UUID) ([]string, error) {
+	topo, err := s.loadSiteTopology(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	members := activeHubMembers(topo, time.Now())
+	isMember := false
+	for i := range members {
+		if members[i].ID == nodeID {
+			isMember = true
+		}
+	}
+	if !isMember {
+		return nil, nil
+	}
+	hosts := make([]string, 0, len(members))
+	for i := range members {
+		if h := endpointHost(members[i].Endpoint); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts, nil
+}
+
+// endpointHost strips the port from a "host:port" gateway endpoint (the OVPN remote uses its own port 1194).
+func endpointHost(endpoint string) string {
+	if h, _, err := net.SplitHostPort(endpoint); err == nil {
+		return h
+	}
+	return endpoint
 }
 
 // siteTopology is the org's site-link input, loaded ONCE (loadSiteTopology) and consumed per-node by the
