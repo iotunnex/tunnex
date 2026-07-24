@@ -106,6 +106,7 @@ type Device struct {
 	FullTunnel    bool               `json:"full_tunnel"`
 	ApprovedBy    pgtype.UUID        `json:"approved_by"`
 	HealthBlocked bool               `json:"health_blocked"`
+	Transport     string             `json:"transport"`
 }
 
 type DeviceHealth struct {

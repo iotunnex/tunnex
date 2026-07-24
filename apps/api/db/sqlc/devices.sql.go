@@ -71,9 +71,9 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 }
 
 const createDevice = `-- name: CreateDevice :one
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport
 `
 
 type CreateDeviceParams struct {
@@ -86,6 +86,7 @@ type CreateDeviceParams struct {
 	AssignedIp *string   `json:"assigned_ip"`
 	FullTunnel bool      `json:"full_tunnel"`
 	Status     string    `json:"status"`
+	Transport  string    `json:"transport"`
 }
 
 // status is 'active' normally, or 'pending' when the org requires device approval
@@ -102,6 +103,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		arg.AssignedIp,
 		arg.FullTunnel,
 		arg.Status,
+		arg.Transport,
 	)
 	var i Device
 	err := row.Scan(
@@ -121,6 +123,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.FullTunnel,
 		&i.ApprovedBy,
 		&i.HealthBlocked,
+		&i.Transport,
 	)
 	return i, err
 }
@@ -138,7 +141,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -167,12 +170,13 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.FullTunnel,
 		&i.ApprovedBy,
 		&i.HealthBlocked,
+		&i.Transport,
 	)
 	return i, err
 }
 
 const getDeviceForUpdate = `-- name: GetDeviceForUpdate :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -206,6 +210,7 @@ func (q *Queries) GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdate
 		&i.FullTunnel,
 		&i.ApprovedBy,
 		&i.HealthBlocked,
+		&i.Transport,
 	)
 	return i, err
 }
@@ -361,6 +366,41 @@ func (q *Queries) ListActiveFullTunnelDevices(ctx context.Context, orgID uuid.UU
 	return items, nil
 }
 
+const listActiveOVPNDevicesForNode = `-- name: ListActiveOVPNDevicesForNode :many
+SELECT id, assigned_ip FROM devices
+WHERE node_id = $1 AND transport = 'openvpn' AND status = 'active'
+  AND assigned_ip IS NOT NULL AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListActiveOVPNDevicesForNodeRow struct {
+	ID         uuid.UUID `json:"id"`
+	AssignedIp *string   `json:"assigned_ip"`
+}
+
+// The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
+// homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
+// CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.
+func (q *Queries) ListActiveOVPNDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveOVPNDevicesForNodeRow, error) {
+	rows, err := q.db.Query(ctx, listActiveOVPNDevicesForNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveOVPNDevicesForNodeRow{}
+	for rows.Next() {
+		var i ListActiveOVPNDevicesForNodeRow
+		if err := rows.Scan(&i.ID, &i.AssignedIp); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivePeersForNode = `-- name: ListActivePeersForNode :many
 SELECT d.public_key, d.assigned_ip
 FROM devices d
@@ -411,7 +451,7 @@ func (q *Queries) ListActivePeersForNode(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -458,6 +498,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
 			&i.Device.HealthBlocked,
+			&i.Device.Transport,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -478,7 +519,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -530,6 +571,7 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
 			&i.Device.HealthBlocked,
+			&i.Device.Transport,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -578,7 +620,7 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 }
 
 const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -628,6 +670,7 @@ func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) 
 			&i.Device.FullTunnel,
 			&i.Device.ApprovedBy,
 			&i.Device.HealthBlocked,
+			&i.Device.Transport,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
