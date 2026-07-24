@@ -4,6 +4,7 @@ package helper
 
 import (
 	"fmt"
+	"log"
 	"net/netip"
 	"strings"
 	"sync"
@@ -301,6 +302,9 @@ func (b *windowsBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "gateway_peer_apply_failed", Msg: err.Error()}
 	}
+	// WF-A-obs-1: breadcrumb for a successful swap (pubkeys are public) — a succeeded vs a silently-looped
+	// re-home must be distinguishable in the logs.
+	log.Printf("gateway_peer_swapped: pubkey %s -> %s, endpoint -> %s, full_tunnel=%v (no bounce)", b.peerPubKey, newPubKey, ep, b.fullTunnel)
 	b.peerPubKey = newPubKey
 	return nil
 }

@@ -16,43 +16,56 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 )
 
-// TestZombieHubConjunction_WFC_L2 (D-WFC2-1a) — the zombie-hub kind is the CONJUNCTION of two existing
-// signals: this hub-set member's WIRE is fresh (b.memberWireFresh, from THE ONE liveness derivation) AND
-// its own agent is dead (last_seen stale). The founder's exact acceptance: agent-stale + wire-fresh → the
-// conflict kind; both-fresh → healthy; both-stale (nothing forwarding) → NOT this kind (ordinary offline).
-// DB-less via the `pre` SiteTopoBatch seam; open edition (the kind is edition-independent).
+// TestZombieHubConjunction_WFC_L2 (D-WFC2-1a + WF-C-L2-1 settle) — the zombie-hub kind fires only when this
+// hub-set member's wire is FRESH (spokes still handshake it) AND its agent has been silent a settle-window
+// (hubStaleWindow) LONGER than that last handshake. TRUE positive fires + persists; a CLEAN death (agent +
+// wire die together → ages track) NEVER flashes the kind (WF-C-L2-1's flicker fix); both-fresh → healthy;
+// stale wire → not the kind. DB-less via the `pre` SiteTopoBatch seam; open edition (edition-independent).
 func TestZombieHubConjunction_WFC_L2(t *testing.T) {
 	org, id, site := uuid.New(), uuid.New(), uuid.New()
 	now := time.Now()
 	open := &Service{policy: nil}
-	node := func(lastSeen time.Time, seenValid bool) sqlc.Node {
+	// node with the agent last seen `agentAge` ago (or never, seenValid=false).
+	node := func(agentAge time.Duration, seenValid bool) sqlc.Node {
+		ls := pgtype.Timestamptz{Valid: seenValid}
+		if seenValid {
+			ls.Time = now.Add(-agentAge)
+		}
 		return sqlc.Node{ID: id, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true},
-			LastSeenAt:   pgtype.Timestamptz{Time: lastSeen, Valid: seenValid},
-			Capabilities: capsJSON(map[string]any{})}
+			LastSeenAt: ls, Capabilities: capsJSON(map[string]any{})}
 	}
-	wireFresh := SiteTopoBatch{ok: true, hasHub: true, memberWireFresh: map[uuid.UUID]bool{id: true}} // hasHub avoids site_hub_down
-	wireStale := SiteTopoBatch{ok: true, hasHub: true, memberWireFresh: map[uuid.UUID]bool{id: false}}
+	// batch with this member's liveness verdict (Age = last-handshake age). hasHub avoids site_hub_down.
+	batch := func(ml MemberLiveness) SiteTopoBatch {
+		return SiteTopoBatch{ok: true, hasHub: true, memberLive: map[uuid.UUID]MemberLiveness{id: ml}}
+	}
+	fresh := func(age time.Duration) MemberLiveness { return MemberLiveness{Observed: true, Fresh: true, Age: age} }
 	kind := func(pre SiteTopoBatch, n sqlc.Node) (bool, PolicyDegradedKind) {
 		h := open.PolicyHealthForNodes(context.Background(), org, []sqlc.Node{n}, pre)[id]
 		return h.Degraded, h.Kind
 	}
 
-	// agent-stale + wire-fresh → the zombie kind (degraded).
-	if deg, k := kind(wireFresh, node(now.Add(-10*time.Minute), true)); !deg || k != KindHubForwardingNotReconciling {
-		t.Fatalf("agent-stale + wire-fresh must be hub_forwarding_not_reconciling, got deg=%v k=%q", deg, k)
+	// TRUE zombie: wire fresh (handshake 10s — spokes still hitting the live wg0) + agent long-dead (10m) →
+	// silent WAY longer than the last handshake → forwarding-but-not-reconciling.
+	if deg, k := kind(batch(fresh(10*time.Second)), node(10*time.Minute, true)); !deg || k != KindHubForwardingNotReconciling {
+		t.Fatalf("true zombie (wire fresh, agent long-dead) must be the kind, got deg=%v k=%q", deg, k)
 	}
-	// never-seen agent (NULL last_seen) + wire-fresh → also the zombie kind (dead is dead).
-	if _, k := kind(wireFresh, node(time.Time{}, false)); k != KindHubForwardingNotReconciling {
-		t.Fatalf("never-seen agent + wire-fresh must be the zombie kind, got %q", k)
+	// never-seen agent + fresh wire → also a zombie (agent never checked in, but the wire forwards).
+	if _, k := kind(batch(fresh(10*time.Second)), node(0, false)); k != KindHubForwardingNotReconciling {
+		t.Fatalf("never-seen agent + fresh wire must be the zombie kind, got %q", k)
+	}
+	// CLEAN DEATH (WF-C-L2-1 true-negative): agent + wire die together → ages track (both ~150s), the gap is
+	// within a report cycle → NEVER flashes the zombie kind before it settles to offline as the wire ages out.
+	// (The OLD code — agentStale ∧ wireFresh with no settle — would have flickered here.)
+	if _, k := kind(batch(fresh(150*time.Second)), node(150*time.Second, true)); k == KindHubForwardingNotReconciling {
+		t.Fatalf("clean death (ages track within a window) must NOT flash the zombie kind, got %q", k)
 	}
 	// both-fresh → healthy (never green-lies over a zombie, never zombie-lies over a healthy hub).
-	if deg, k := kind(wireFresh, node(now.Add(-5*time.Second), true)); deg || k != KindHealthy {
+	if deg, k := kind(batch(fresh(10*time.Second)), node(5*time.Second, true)); deg || k != KindHealthy {
 		t.Fatalf("agent-fresh + wire-fresh must be healthy, got deg=%v k=%q", deg, k)
 	}
-	// both-stale (wire dead too — nothing is forwarding) → NOT the zombie kind (ordinary offline is a
-	// separate last_seen surface, not this policy kind).
-	if _, k := kind(wireStale, node(now.Add(-10*time.Minute), true)); k == KindHubForwardingNotReconciling {
-		t.Fatalf("both-stale must NOT be the zombie kind (nothing forwards), got %q", k)
+	// stale wire (not fresh — nothing forwarding) → NOT the zombie kind, even with a long-dead agent.
+	if _, k := kind(batch(MemberLiveness{Observed: true, Fresh: false, Age: 300 * time.Second}), node(10*time.Minute, true)); k == KindHubForwardingNotReconciling {
+		t.Fatalf("stale wire must NOT be the zombie kind, got %q", k)
 	}
 }
 

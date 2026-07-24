@@ -1424,10 +1424,10 @@ type SiteTopoBatch struct {
 	// cannot name a peer or know demotion — D-WFB-1b).
 	siteLinkHeadlineDown bool      // the ACTIVE PRIMARY hub is stale → org site transit is genuinely dead (the headline)
 	demotedDeadPeer      uuid.UUID // a DEMOTED member is dead while the primary is fresh → subordinate named line (Nil = none)
-	// memberWireFresh (WF-C L2 D-WFC2-1a): per hub-set member, whether its spoke-observed handshake is FRESH
-	// (deriveMemberLiveness .Observed && .Fresh) — the wire half of the zombie-hub conjunction. Populated from
-	// THE ONE liveness derivation in fillSiteLinkVerdict; a non-member (or unobserved member) is absent/false.
-	memberWireFresh map[uuid.UUID]bool
+	// memberLive (WF-C L2): per hub-set member, its FULL liveness verdict from THE ONE derivation
+	// (deriveMemberLiveness — Observed/Fresh/Age). The zombie-hub kind reads .Observed/.Fresh (wire fresh)
+	// AND .Age (the last-handshake age) for the WF-C-L2-1 settle. A non-member is absent (zero value).
+	memberLive map[uuid.UUID]MemberLiveness
 }
 
 // LoadSiteTopoBatch loads the site topology once for a node list + elects the hub once (electSiteHub — the
@@ -1488,12 +1488,9 @@ func (s *Service) fillSiteLinkVerdict(ctx context.Context, orgID uuid.UUID, b *S
 	}
 	live := deriveMemberLiveness(members, pubkey, rows, demoted, now)
 	b.siteLinkHeadlineDown, b.demotedDeadPeer = siteLinkVerdictFrom(members, activePrimary, live)
-	// WF-C L2 (D-WFC2-1a): surface each member's WIRE freshness from THE SAME liveness map (no recompute) —
-	// the zombie-hub kind's wire half. Only observed-AND-fresh members are true; silence/staleness → false.
-	b.memberWireFresh = make(map[uuid.UUID]bool, len(live))
-	for id, ml := range live {
-		b.memberWireFresh[id] = ml.Observed && ml.Fresh
-	}
+	// WF-C L2: surface the FULL per-member liveness from THE SAME map (no recompute) — the zombie-hub kind
+	// reads wire freshness AND the handshake age (for the WF-C-L2-1 settle) from it.
+	b.memberLive = live
 }
 
 // siteLinkVerdictFrom is the PURE WF-B verdict (unit-pinnable, no DB): given the hub members, the active
@@ -1623,13 +1620,17 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// LOWEST-priority enforcement-hygiene degradation (revoked grants' flows may linger). Only fires in
 		// enterprise (an open gateway has no grants → no flush → never set).
 		conntrackFlushUnavailable := caps.ConntrackFlushUnavailable
-		// hub_forwarding_not_reconciling (WF-C L2 D-WFC2-1a): the zombie-hub CONJUNCTION — this hub-set
-		// member's wire is FRESH (b.memberWireFresh, from THE ONE liveness derivation) while its OWN agent is
-		// SILENT (last_seen stale, the SAME hubStaleWindow the hub ordering uses — no new freshness). A dead
-		// agent forwarding headless: stale-enforcement, edition-independent. A non-member is absent from the
-		// map → false, so this can only fire for a hub-set member. (last_seen absent = never-seen = dead too.)
-		agentDead := !(n.LastSeenAt.Valid && now.Sub(n.LastSeenAt.Time) < hubStaleWindow)
-		hubForwardingNotReconciling := b.memberWireFresh[n.ID] && agentDead
+		// hub_forwarding_not_reconciling (WF-C L2): the zombie hub — this member's wire is FRESH (spokes still
+		// handshake it) while its own agent has been SILENT a full hub-stale window LONGER than that last
+		// handshake. The SETTLE (WF-C-L2-1) is what makes it honest: on a CLEAN death the agent report AND the
+		// wire handshake stop TOGETHER, so their ages track within a report cycle and (agentAge − wireAge)
+		// never reaches the settle → no flicker to "still forwarding" before it settles to offline; a TRUE
+		// zombie's wire keeps refreshing while last_seen freezes, so the gap grows past the settle → asserts +
+		// persists. Stateless (two timestamps), no third clock — the settle IS the hub-stale liveness window,
+		// the same principle the failover window applied to the primary badge. A non-member is absent (zero
+		// value → !Observed → false), so this only fires for a hub-set member.
+		ml := b.memberLive[n.ID]
+		hubForwardingNotReconciling := ml.Observed && ml.Fresh && zombieAgentAge(now, n.LastSeenAt)-ml.Age >= hubStaleWindow
 		// A refused (unsupported-version) gateway is deny-all — definitively degraded,
 		// edition-independent (S8.1 D1). Terms (1)+(2) are the agent-reported apply faults.
 		deg := caps.PolicyError != "" || caps.PolicyFailingSince != "" || caps.PolicyRefusedVersion > 0 || siteHubDown || siteLinkDown || siteSubnetUnreachable || conntrackFlushUnavailable || hubForwardingNotReconciling
@@ -1704,6 +1705,17 @@ func tsTime(ts pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return ts.Time
+}
+
+// zombieAgentAge is how long since the node last CHECKED IN (last_seen_at) — the AGENT-liveness clock for
+// the WF-C L2 zombie settle (distinct from reportAge's policy_reported_at). A never-seen node → a large
+// sentinel (definitively stale). Compared against the wire handshake age to distinguish a clean death (ages
+// track) from a true zombie (agent frozen while the wire keeps refreshing).
+func zombieAgentAge(now time.Time, lastSeen pgtype.Timestamptz) time.Duration {
+	if !lastSeen.Valid {
+		return 1<<62 - 1 // never seen → forever stale
+	}
+	return now.Sub(lastSeen.Time)
 }
 
 // reportAge is how long since the node last REPORTED its applied policy (policy_reported_at,
