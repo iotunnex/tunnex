@@ -542,3 +542,60 @@ func TestResizePoolRefusesApprovedSiteOverlap(t *testing.T) {
 		t.Fatalf("a PENDING site subnet must NOT block a resize (only approved counts), got %v", err)
 	}
 }
+
+// TestCreateOVPNForkNoWGMaterialization (S9.1 Slice 4b-wiring, D-S9.4-MODEL) is the create-fork red:
+// an OVPN-transport create mints NO WG keypair and NO WG config (its credential is a cert issued by
+// the export path), yet the SHARED path still governs it — transport tagged, a pool /32 allocated,
+// and (verified below) its /32 reaches the compiler's device source exactly as a WG device's does
+// (B1's data half AT THE CREATE PATH). Two keyless OVPN devices coexist on one node (migration 0043).
+func TestCreateOVPNForkNoWGMaterialization(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "laptop-ovpn", Transport: "openvpn"})
+	if err != nil {
+		t.Fatalf("create ovpn: %v", err)
+	}
+	// NO WG materialization.
+	if res.Device.PublicKey != "" {
+		t.Fatalf("OVPN device must carry NO WG public key, got %q", res.Device.PublicKey)
+	}
+	if res.PrivateKeyOneTime != "" {
+		t.Fatal("OVPN create must not mint a WG private key")
+	}
+	if res.Config != "" {
+		t.Fatal("OVPN create must not assemble a WG config")
+	}
+	// SHARED governance held: transport tagged + pool /32 allocated.
+	if res.Device.Transport != "openvpn" {
+		t.Fatalf("transport = %q, want openvpn", res.Device.Transport)
+	}
+	if res.Device.AssignedIp == nil || *res.Device.AssignedIp == "" {
+		t.Fatal("OVPN device must hold a pool /32 (the shared allocator governs it)")
+	}
+	// B1 DATA HALF at the create path: the OVPN device is in the compiler's device source with its
+	// /32 — ListActiveDevicesForOrg filters by neither transport nor key, so its /32 is a policy
+	// subject exactly as a WG device's is.
+	devs, err := svc.q.ListActiveDevicesForOrg(ctx, org)
+	if err != nil {
+		t.Fatalf("list active devices: %v", err)
+	}
+	found := false
+	for _, d := range devs {
+		if d.ID == res.Device.ID && d.AssignedIp != nil && *d.AssignedIp == *res.Device.AssignedIp {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the OVPN device's /32 must reach the compiler snapshot (B1 data half at create)")
+	}
+	// TWO keyless OVPN devices on ONE node coexist — migration 0043 scopes the pubkey uniqueness to
+	// devices that HAVE a key, so '' never collides.
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "laptop-ovpn-2", Transport: "openvpn"}); err != nil {
+		t.Fatalf("a second keyless OVPN device on the same node must NOT collide: %v", err)
+	}
+	// a WG public key on an OVPN device is rejected (wrong credential kind).
+	if _, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "bad", Transport: "openvpn", PublicKey: "c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0="}); err == nil {
+		t.Fatal("a WG public key on an OVPN device must be rejected (wg_key_on_ovpn)")
+	}
+}
