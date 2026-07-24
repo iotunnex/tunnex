@@ -67,6 +67,12 @@ func TestZombieHubConjunction_WFC_L2(t *testing.T) {
 	if _, k := kind(batch(MemberLiveness{Observed: true, Fresh: false, Age: 300 * time.Second}), node(10*time.Minute, true)); k == KindHubForwardingNotReconciling {
 		t.Fatalf("stale wire must NOT be the zombie kind, got %q", k)
 	}
+	// F-Z1: a skewed agent clock (FUTURE handshake → negative Age) must NOT inflate the settle. Here agent
+	// stale 85s + wire "10s in the future": without the zero-clamp that's 85−(−10)=95 >= 90 → spurious fire;
+	// clamped to 0 it's 85 < 90 → no fire. Guards age-difference arithmetic on an agent-supplied timestamp.
+	if _, k := kind(batch(MemberLiveness{Observed: true, Fresh: true, Age: -10 * time.Second}), node(85*time.Second, true)); k == KindHubForwardingNotReconciling {
+		t.Fatalf("negative wire Age (clock skew) must NOT inflate the settle into a spurious zombie, got %q", k)
+	}
 }
 
 type fakeProvider struct {
