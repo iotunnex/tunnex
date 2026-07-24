@@ -121,9 +121,20 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	if in.Name == "" {
 		return CreateResult{}, apierr.BadRequest("name_required", "a device name is required")
 	}
-	// Key custody: use the client's key, or generate one server-side (returned once).
+	// THE OVPN-CREATE FORK — ONE SEAM (D-S9.4-MODEL): transport determines only the CREDENTIAL here.
+	// Everything address-and-identity below (cap, pool, row, audit, and the org-wide push that places
+	// the /32 into the compiled artifact) is transport-agnostic. WG mints a keypair; OpenVPN mints
+	// NOTHING here — its credential is a client cert issued by the export path, so public_key stays ''
+	// and it materializes NO WG peer (its "peer" is the CCD entry, Slice 3/4c). Downstream WG
+	// materialization (the desired-state peer list, the pubkey-unique index) keys on KEY-PRESENCE, not
+	// transport — so this switch is the sole place transport is examined in Create.
 	pub, oneTimePriv := in.PublicKey, ""
-	if pub == "" {
+	if in.Transport == "openvpn" {
+		if pub != "" {
+			return CreateResult{}, apierr.BadRequest("wg_key_on_ovpn", "an OpenVPN device does not take a WireGuard public key")
+		}
+		// pub stays "" — no keygen, no WG peer, no WG config (the oneTimePriv=="" gate below skips it).
+	} else if pub == "" {
 		priv, generated, gerr := wgkey.Generate()
 		if gerr != nil {
 			return CreateResult{}, gerr

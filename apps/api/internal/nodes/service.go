@@ -272,6 +272,13 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	}
 	peers := make([]Peer, 0, len(rows))
 	for _, r := range rows {
+		// A device with NO WireGuard public key is not a WireGuard peer (S9.1 D-S9.4-MODEL: an OpenVPN
+		// device carries a cert, not a WG key — it rides the OVPN roster, not this peer list). Keyed on
+		// KEY-PRESENCE, not transport: a WG device always has a key, so this never drops one — it only
+		// excludes keyless OVPN devices. Their /32 still enters the compiled artifact by assigned_ip.
+		if r.PublicKey == "" {
+			continue
+		}
 		p := Peer{PublicKey: r.PublicKey}
 		// AllowedIPs is the peer's assigned tunnel address (its /32). A device with
 		// no address yet (shouldn't happen post-S3.4 allocation) carries no routes.
