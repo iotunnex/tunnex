@@ -95,6 +95,8 @@ export default function Settings() {
               <p className="mt-1 text-xs text-slate-500">Org-wide MFA enforcement is a Tunnex Enterprise feature.</p>
             </Card>
           )}
+          {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
+          <OrgOVPNToggle org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
         </>
       )}
     </div>
@@ -163,6 +165,56 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
             {busy ? "Saving…" : enforce ? "Disable requirement" : "Require MFA for password sign-ins"}
           </Button>
         )}
+      </div>
+    </Card>
+  );
+}
+
+// OrgOVPNToggle is the OpenVPN opt-in (S9.1 D-S9.5-OPTIN) — OPEN edition, org:update-gated, OFF by
+// default. This is the operator's on-switch for the whole feature (unlock-then-opt-in): enabling makes
+// the OpenVPN capability available on the org's gateways + surfaces the OpenVPN device type in the
+// export ceremony. The initial state comes from the org (no separate GET); PUT flips it.
+function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onSaved: (o: Org) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enabled = org.ovpn_enabled === true;
+
+  async function toggle(next: boolean) {
+    setBusy(true);
+    setError(null);
+    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/ovpn-settings", {
+      params: { path: { orgId: org.id } },
+      body: { enabled: next },
+    });
+    setBusy(false);
+    if (error || !data) {
+      setError(apiErrorMessage(error, "Could not update OpenVPN."));
+      return;
+    }
+    onSaved({ ...org, ovpn_enabled: data.enabled });
+  }
+
+  return (
+    <Card className="mt-4">
+      <h2 className="text-sm font-semibold text-slate-300">OpenVPN</h2>
+      <p className="mt-1 text-xs text-slate-400">
+        OpenVPN is <span className="text-slate-300">off by default</span>. Enable it where you&rsquo;re migrating
+        an existing OpenVPN fleet — devices can then be exported as standard <code className="text-slate-300">.ovpn</code>{" "}
+        profiles for the official OpenVPN clients. WireGuard is unaffected.
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        Turning it off stops the OpenVPN servers on your gateways; issued client profiles are not revoked and
+        work again if you re-enable.
+      </p>
+      {error && (
+        <div className="mt-2">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+      <div className="mt-3">
+        <Button variant="ghost" disabled={busy || !canEdit} onClick={() => toggle(!enabled)}>
+          {busy ? "Saving…" : enabled ? "Disable OpenVPN" : "Enable OpenVPN"}
+        </Button>
       </div>
     </Card>
   );
