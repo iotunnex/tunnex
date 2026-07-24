@@ -15,10 +15,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/google/uuid"
 
 	"github.com/tunnexio/tunnex/apps/api/db"
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -158,6 +161,23 @@ func main() {
 	deviceSvc := devices.NewService(pool, pushHub, logger)
 	deviceSvc.SetDialResolver(nodeSvc.NodeDial) // WF-A D-WFA-6: a new device's config dials the active hub
 	siteSvc := sites.NewService(pool)
+	// S9.1 Part-2: the static-export enrichment source — the org's approved routed ranges (the SAME one
+	// truth the Tunnex client polls, sites.ListRoutedRanges) + whether it has cross-site DNS forwarding.
+	deviceSvc.SetExportEnrich(func(ctx context.Context, orgID uuid.UUID) ([]string, bool, error) {
+		ranges, err := siteSvc.ListRoutedRanges(ctx, orgID)
+		if err != nil {
+			return nil, false, err
+		}
+		fwds, ferr := sqlc.New(pool).ListSiteDNSForwardsForOrg(ctx, orgID)
+		hasDNS := false
+		for _, f := range fwds {
+			if s := strings.TrimSpace(string(f)); s != "" && s != "null" && s != "[]" {
+				hasDNS = true
+				break
+			}
+		}
+		return ranges, hasDNS, ferr
+	})
 	// OpenVPN control-plane service (S9.1, D-S9.1-6 open-edition). The client CA loads LAZILY
 	// (D-S9.5-OPTIN(a)): generated on the first export in an opted-in org, NEVER at boot — so a
 	// deployment that never uses OpenVPN has no OVPN CA row (the zero-config golden at the platform tier).
