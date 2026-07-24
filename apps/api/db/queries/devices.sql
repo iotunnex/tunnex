@@ -161,26 +161,29 @@ SELECT id, name, assigned_ip FROM devices
 WHERE org_id = $1 AND assigned_ip IS NOT NULL AND status IN ('active', 'pending') AND deleted_at IS NULL
 ORDER BY assigned_ip;
 
--- name: ListActivePeersForNode :many
--- lint:cross-org — keyed by node_id after mTLS cert authorization (the agent
--- fetches the peers for its own node). A peer is present only while its owning
--- user has an ACTIVE, CURRENT-MEMBER identity — a device credential is only valid
--- for its owning user's identity (the cross-cutting invariant). The users +
--- memberships joins + NOT health_blocked mirror the policy compiler
--- (ListActiveDevicesForOrg), the REFERENCE implementation of this invariant:
---   - u.status='active': deactivating a user drops their peers from every node
---     (reactivation restores them).
---   - memberships (was MISSING): REMOVING a member drops their peers from every
---     node's desired state — offboarding severs open-edition WG access, not only
---     the compiled policy. Without this, RemoveMember's org-wide push rebuilt a
---     query that still served the removed member (offboarding fail-to-sever).
---   - NOT health_blocked (S7.5.3): the ORTHOGONAL posture gate.
+-- name: ListActiveWireGuardPeersForNode :many
+-- fetches the peers for its own node). TWO invariants own this query (both load-bearing):
+--   IDENTITY-BINDING (main hotfix): a peer is present only while its owning user has an
+--   ACTIVE, CURRENT-MEMBER identity — the users + memberships joins + NOT health_blocked
+--   mirror the policy compiler (ListActiveDevicesForOrg, the reference impl). u.status='active'
+--   drops a deactivated user's peers; the memberships join drops a REMOVED member's (offboarding
+--   severs open-edition WG access, not only the compiled policy — without it RemoveMember's
+--   org-wide push rebuilt a query that still served the removed member); NOT health_blocked is
+--   the orthogonal posture gate.
+--   KEYLESS EXCLUSION (S9.1 D-S9.4-MODEL / WF-OVPN-10): public_key <> '' — a KEYLESS device (an
+--   OpenVPN client carries a cert, not a WG key) is NEVER a WireGuard peer. The query NAME + this
+--   WHERE are the SINGLE SOURCE, so every consumer (the per-node peer list AND the hub-set
+--   widenedDevicePeers) gets keyed, current-member devices only. A keyless row would render
+--   `PublicKey = ` and make `wg syncconf` reject the ENTIRE config (one OpenVPN client bricking
+--   the WG fleet on a hub member). The OVPN device's /32 reaches the data plane via the compiled
+--   artifact + the OVPN roster (which now shares the identity gate), never this list.
 SELECT d.public_key, d.assigned_ip
 FROM devices d
 JOIN users u ON u.id = d.user_id
 JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
 WHERE d.node_id = $1
   AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
+  AND d.public_key <> ''
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at;
 
@@ -224,7 +227,7 @@ SET last_handshake_at = EXCLUDED.last_handshake_at,
     updated_at = now();
 
 -- name: ListActiveOVPNDevicesForNode :many
--- lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActivePeersForNode.
+-- lint:cross-org — keyed by node_id after the agent's mTLS auth (its own node's roster), like ListActiveWireGuardPeersForNode.
 -- The OVPN roster for a gateway (S9.1 Slice 4c): active OpenVPN devices with an assigned pool /32,
 -- homed to this node. id doubles as the cert CommonName + the CCD filename; assigned_ip is the
 -- CP-assigned /32 pushed via CCD (the allocator stays authoritative). Feeds ovpnserver.SetDesired.

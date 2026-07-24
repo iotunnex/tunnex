@@ -222,7 +222,7 @@ func TestPendingExcludedFromPeersAndCompilerInput(t *testing.T) {
 
 	a := mkDevice(t, svc, org, owner, owner, node, "A") // pending
 
-	peers, err := q.ListActivePeersForNode(ctx, node)
+	peers, err := q.ListActiveWireGuardPeersForNode(ctx, node)
 	if err != nil {
 		t.Fatalf("peers: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestPendingExcludedFromPeersAndCompilerInput(t *testing.T) {
 	if err := svc.Approve(ctx, org, owner, a.Device.ID); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	peers, _ = q.ListActivePeersForNode(ctx, node)
+	peers, _ = q.ListActiveWireGuardPeersForNode(ctx, node)
 	inPeers := false
 	for _, p := range peers {
 		if p.PublicKey == a.Device.PublicKey {
