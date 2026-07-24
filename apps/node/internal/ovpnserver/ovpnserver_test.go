@@ -97,7 +97,7 @@ func TestFullTunnelPushesRedirectGateway(t *testing.T) {
 // / dh / keepalive. A config that asserts only what it omits proves neither runnability nor completeness.
 func TestServerModeComplete(t *testing.T) {
 	m, _ := newTestMgr(t)
-	cfg := m.serverConfig(nil, nil)
+	cfg := m.serverConfig("10.99.0.1", nil, nil)
 	for _, required := range []string{
 		"mode server", "tls-server", "proto udp", "port 1194",
 		"ifconfig " + transitServerIP + " " + transitMask, "dh none", "keepalive 10 60",
@@ -115,7 +115,7 @@ func TestServerModeComplete(t *testing.T) {
 // win by longest-prefix, added dynamically by the learn-address hook, never by a /24 claim here.
 func TestTunnelNeverClaimsPool(t *testing.T) {
 	m, _ := newTestMgr(t)
-	cfg := m.serverConfig([]string{"10.0.0.0/16"}, nil) // routes are PUSHED, never installed on tunnex-ovpn
+	cfg := m.serverConfig("10.99.0.1", []string{"10.0.0.0/16"}, nil) // routes are PUSHED, never installed on tunnex-ovpn
 	if !strings.Contains(cfg, "ifconfig "+transitServerIP) {
 		t.Fatalf("the tun must ifconfig the transit address, not the pool:\n%s", cfg)
 	}
@@ -233,7 +233,7 @@ func writeThrowawayServerMaterial(t *testing.T, dir string) {
 // OpenVPN can never mint one. `ccd-exclusive` additionally REFUSES a client with no CCD entry.
 func TestSelfAllocationDisabled(t *testing.T) {
 	m, _ := newTestMgr(t)
-	cfg := m.serverConfig(nil, nil)
+	cfg := m.serverConfig("10.99.0.1", nil, nil)
 	for _, forbidden := range []string{"\nserver ", "ifconfig-pool"} {
 		if strings.Contains(cfg, forbidden) {
 			t.Fatalf("server config must NOT self-allocate (found %q):\n%s", forbidden, cfg)
@@ -316,8 +316,8 @@ func TestIdleWhenNoPool(t *testing.T) {
 // TunName() reports (the value threaded to egress.SetOVPNTun). No second source.
 func TestTunNameIsOneTruth(t *testing.T) {
 	m, _ := newTestMgr(t)
-	if !strings.Contains(m.serverConfig(nil, nil), "dev "+m.TunName()) {
-		t.Fatalf("config `dev` must be TunName()=%q; config:\n%s", m.TunName(), m.serverConfig(nil, nil))
+	if !strings.Contains(m.serverConfig("10.99.0.1", nil, nil), "dev "+m.TunName()) {
+		t.Fatalf("config `dev` must be TunName()=%q; config:\n%s", m.TunName(), m.serverConfig("10.99.0.1", nil, nil))
 	}
 }
 
@@ -327,7 +327,7 @@ func TestTunNameIsOneTruth(t *testing.T) {
 // config). With no routes/DNS the config emits no push lines (byte-identical to pre-fold).
 func TestServerConfigPushesRoutesAndDNS(t *testing.T) {
 	m, _ := newTestMgr(t)
-	cfg := m.serverConfig([]string{"10.0.0.0/16", "172.31.0.0/16"}, []string{"10.0.0.2"})
+	cfg := m.serverConfig("10.99.0.1", []string{"10.0.0.0/16", "172.31.0.0/16"}, []string{"10.0.0.2"})
 	for _, want := range []string{
 		`push "route 10.0.0.0 255.255.0.0"`,
 		`push "route 172.31.0.0 255.255.0.0"`,
@@ -337,8 +337,26 @@ func TestServerConfigPushesRoutesAndDNS(t *testing.T) {
 			t.Fatalf("server config must push %q (Part-3: OVPN reaches site subnets server-side); got:\n%s", want, cfg)
 		}
 	}
-	if strings.Contains(m.serverConfig(nil, nil), "push ") {
-		t.Fatalf("with no routes/dns the config must emit NO push directives; got:\n%s", m.serverConfig(nil, nil))
+	// With no routes/DNS the config emits no ROUTE/DNS pushes (byte-identical to pre-fold for those). The
+	// topology + route-gateway pushes (WF-OVPN-7) are always present and are a separate concern.
+	bare := m.serverConfig("10.99.0.1", nil, nil)
+	if strings.Contains(bare, `push "route `) || strings.Contains(bare, `push "dhcp-option`) {
+		t.Fatalf("with no routes/dns the config must emit NO route/DNS pushes; got:\n%s", bare)
+	}
+}
+
+// TestServerPushesTopologyAndGateway is the WF-OVPN-7 red (4e-walk finding): because this server uses
+// manual `mode server` (not the `--server` helper), the topology is NOT auto-pushed — so it MUST push
+// `topology subnet` (else the client defaults to net30 and rejects the /24 ifconfig-push) and push the
+// IN-SUBNET pool gateway as route-gateway (the transit-tun address would be an invalid off-subnet gateway).
+func TestServerPushesTopologyAndGateway(t *testing.T) {
+	m, _ := newTestMgr(t)
+	cfg := m.serverConfig("10.99.0.1", nil, nil)
+	if !strings.Contains(cfg, `push "topology subnet"`) {
+		t.Fatalf("config must push topology subnet (client defaults to net30 otherwise):\n%s", cfg)
+	}
+	if !strings.Contains(cfg, `push "route-gateway 10.99.0.1"`) {
+		t.Fatalf("config must push the in-subnet pool gateway as route-gateway:\n%s", cfg)
 	}
 }
 

@@ -218,7 +218,7 @@ func ptr(s string) *string { return &s }
 // SELF-ALLOCATION STAYS DISABLED (the allocator tripwire): still NO `server` / `ifconfig-pool` directive
 // — every client's address comes from its per-client CCD ifconfig-push (the CP-assigned /32). The tun
 // name is pinned (dev TunName) so egress' tunnel-ingress set matches.
-func (m *Manager) serverConfig(routes, dns []string) string {
+func (m *Manager) serverConfig(gwIP string, routes, dns []string) string {
 	var b strings.Builder
 	// Server mode (WF-OVPN-1): make this a listening TLS server. Without mode server + tls-server,
 	// openvpn is a point-to-point peer and never serves — the rc1-walk finding.
@@ -260,6 +260,17 @@ func (m *Manager) serverConfig(routes, dns []string) string {
 	// makes openvpn refuse to start. Pre-Slice-5 there is no revocation channel, so its absence is correct.
 	if m.crlPresent() {
 		fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem"))
+	}
+	// PUSH the topology + gateway to the client (WF-OVPN-7, 4e-walk finding). Because this server uses
+	// manual `mode server` (not the `--server` helper), the topology is NOT auto-pushed — the client
+	// defaults to net30 and REJECTS the /24 ifconfig-push ("ifconfig addresses are not in the same /30
+	// subnet"). Push subnet topology; and push the POOL gateway as route-gateway — an IN-SUBNET address
+	// the client accepts — because the server tun sits on the OFF-pool transit /30 (WF-OVPN-2), so its own
+	// address would be an invalid off-subnet gateway for the client. On a p2p tun the client sends via this
+	// gateway into the tunnel; the gateway host owns it on wg0 and forwards.
+	b.WriteString("push \"topology subnet\"\n")
+	if gwIP != "" {
+		fmt.Fprintf(&b, "push \"route-gateway %s\"\n", gwIP)
 	}
 	b.WriteString("persist-tun\n")
 	// S9.1 Part-3 fold: PUSH the org's approved ranges + DNS. OpenVPN installs these on the client at
@@ -405,8 +416,14 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	if err := m.writeLearnAddressScript(); err != nil {
 		return err
 	}
+	// The pool gateway IP (the host part of PoolCIDR, e.g. "10.99.0.1") — pushed to OVPN clients as their
+	// in-subnet route-gateway (WF-OVPN-7). PoolCIDR carries the gateway CIDR ("10.99.0.1/24").
+	gwIP := ""
+	if p, perr := netip.ParsePrefix(d.PoolCIDR); perr == nil {
+		gwIP = p.Addr().String()
+	}
 	// Server config (idempotent write).
-	if err := m.writeFile(filepath.Join(m.cfgDir, "server.conf"), []byte(m.serverConfig(d.Routes, d.DNS))); err != nil {
+	if err := m.writeFile(filepath.Join(m.cfgDir, "server.conf"), []byte(m.serverConfig(gwIP, d.Routes, d.DNS))); err != nil {
 		return err
 	}
 	// CCD: desired set, keyed by common name.
