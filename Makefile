@@ -155,8 +155,10 @@ test-editions: ## Run the suite in BOTH editions against the live DB
 
 .PHONY: test-node
 test-node: ## Run the node-agent data-plane tests (reconcile idempotence, no DB)
+	# openvpn: the ovpnserver WF-OVPN-1 acceptance red runs the real binary against the generated
+	# server.conf (--dev null) — so the config is proven to be one openvpn ACCEPTS, not just key-present.
 	docker run --rm -v "$(PWD)/apps/node":/src -w /src -e GOFLAGS=-mod=readonly \
-	  $(GO_IMAGE) sh -c "apk add --no-cache git && go test ./..."
+	  $(GO_IMAGE) sh -c "apk add --no-cache git openvpn && go test ./..."
 
 .PHONY: test-helper
 test-helper: ## Vet + test the privilege-helper core (S6.3; x/sys dep for caller-path)

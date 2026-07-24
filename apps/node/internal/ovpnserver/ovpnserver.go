@@ -33,6 +33,27 @@ import (
 // the egress tunnel-ingress set (egress.SetOVPNTun(TunName)). Never re-derived or observed-then-adopted.
 const TunName = "tunnex-ovpn"
 
+// TransitCIDR is the OpenVPN server tun's OWN point-to-point subnet — deliberately NOT the device pool
+// (WF-OVPN-2, the iroute ruling). tunnex-ovpn holds an address on ONLY this /30, so it installs a
+// connected route for ONLY the transit range: wg0 stays the sole route for the pool /24, and each
+// connected OVPN client's pool /32 is delivered via CCD (ifconfig-push + iroute) and routed to the tun
+// by the learn-address hook — winning over wg0's /24 by longest-prefix ONLY while that client is
+// connected. This is what lets an OVPN client SOURCE from its pool /32 (indistinguishable-/32, B1)
+// without tunnex-ovpn and wg0 fighting over the /24 (the rc1-walk WF-OVPN-2 conflict).
+//
+// The range is RFC 6598 shared address space (100.64.0.0/10) — carrier-grade-NAT space intended for
+// provider-internal use, never a customer-routable LAN — and is NEVER advertised: not a policy subject,
+// not in any AllowedIPs, not pushed to any client. It is purely the local tun endpoint. THAT is why it
+// is EXEMPT from the cross-org / cross-gateway disjointness validator (two gateways sharing it is
+// harmless — neither ever sees the other's tun). The agent still GUARDS it LOCALLY every reconcile
+// (transitConflicts: refuse with HealthTransitConflict if the pool or a pushed route overlaps it), so
+// "an address nobody validated" is false — it is re-checked against the ranges THIS gateway routes.
+const (
+	TransitCIDR     = "100.127.255.0/30"
+	transitServerIP = "100.127.255.1"
+	transitMask     = "255.255.255.252"
+)
+
 // Client is one OpenVPN client's desired binding: its cert common name (device identity) and the
 // CP-ASSIGNED pool /32 (the allocator is authoritative; this package never allocates).
 type Client struct {
@@ -59,9 +80,10 @@ type Desired struct {
 // surface, and the gateway keeps doing everything else correctly (the conntrack_flush_unavailable /
 // D4 precedent). "" = healthy.
 const (
-	HealthOK           = ""
-	HealthCertsAbsent  = "ovpn_certs_absent"  // enabled + roster, but ca/server cert/key not placed
-	HealthBinaryAbsent = "ovpn_binary_absent" // enabled, but the openvpn binary is not on PATH
+	HealthOK              = ""
+	HealthCertsAbsent     = "ovpn_certs_absent"     // enabled + roster, but ca/server cert/key not placed
+	HealthBinaryAbsent    = "ovpn_binary_absent"    // enabled, but the openvpn binary is not on PATH
+	HealthTransitConflict = "ovpn_transit_conflict" // the server tun transit range overlaps the pool or a pushed route
 )
 
 // Manager owns the openvpn process + its config/CCD. Process control + filesystem are injectable so
@@ -175,25 +197,57 @@ func (m *Manager) Health() string {
 
 func ptr(s string) *string { return &s }
 
-// serverConfig renders the openvpn server.conf. SELF-ALLOCATION IS DISABLED (the allocator tripwire):
-// there is deliberately NO `server` or `ifconfig-pool` directive — every client's address comes from
-// its per-client CCD ifconfig-push (the CP-assigned /32). `topology subnet` + `client-config-dir` make
-// the CCD authoritative. The tun name is pinned (dev TunName) so egress' tunnel-ingress set matches.
+// serverConfig renders the openvpn server.conf. Two invariants ride here:
+//
+//	WF-OVPN-1 (server-mode completeness): the config is a COMPLETE, RUNNABLE TLS server — `mode server`
+//	+ `tls-server` + proto/port + `ifconfig` + `dh none` + `keepalive`. The rc1 walk found the prior
+//	config omitted ALL of these, so openvpn started in point-to-point mode and never brought up the tun.
+//
+//	WF-OVPN-2 (no pool-/24 claim): the tun's own address is on the TRANSIT /30 (ifconfig transitServerIP),
+//	NEVER the pool — so tunnex-ovpn and wg0 never fight over the pool /24. Client /32s arrive via the CCD
+//	(ifconfig-push + iroute) and are routed to the tun per-client by the learn-address hook.
+//
+// SELF-ALLOCATION STAYS DISABLED (the allocator tripwire): still NO `server` / `ifconfig-pool` directive
+// — every client's address comes from its per-client CCD ifconfig-push (the CP-assigned /32). The tun
+// name is pinned (dev TunName) so egress' tunnel-ingress set matches.
 func (m *Manager) serverConfig(routes, dns []string) string {
 	var b strings.Builder
+	// Server mode (WF-OVPN-1): make this a listening TLS server. Without mode server + tls-server,
+	// openvpn is a point-to-point peer and never serves — the rc1-walk finding.
+	b.WriteString("mode server\n")
+	b.WriteString("tls-server\n")
+	b.WriteString("proto udp\n")
+	b.WriteString("port 1194\n")
 	fmt.Fprintf(&b, "dev %s\n", TunName)
 	b.WriteString("dev-type tun\n")
 	b.WriteString("topology subnet\n")
-	// NO `server`/`ifconfig-pool`: self-allocation disabled — addresses come ONLY from the CCD.
+	// The tun's OWN address is on the TRANSIT /30, NEVER the pool (WF-OVPN-2): tunnex-ovpn installs a
+	// connected route for ONLY the transit range, so wg0 remains the sole route for the pool /24. NO
+	// `server`/`ifconfig-pool` and NO `route <pool>`: self-allocation stays off (CP allocator is sole),
+	// and the pool /24 is never claimed here — connected clients' /32s win by longest-prefix instead.
+	fmt.Fprintf(&b, "ifconfig %s %s\n", transitServerIP, transitMask)
+	b.WriteString("dh none\n") // ECDHE-RSA (the server cert is RSA) needs no DH params file
+	b.WriteString("data-ciphers AES-256-GCM\n")
+	b.WriteString("cipher AES-256-GCM\n") // matches the client profile's pinned cipher
+	b.WriteString("auth SHA256\n")
+	b.WriteString("keepalive 10 60\n")
 	fmt.Fprintf(&b, "client-config-dir %s\n", m.ccdDir)
 	b.WriteString("ccd-exclusive\n") // a client with NO CCD entry is REFUSED — belt-and-suspenders on the single-authority rule
+	// learn-address hook (WF-OVPN-2): openvpn calls it as it learns/forgets each client's iroute'd /32,
+	// so the kernel gets a per-client /32 route to the tun (and drops it on disconnect). This is the
+	// mechanism that keeps tunnex-ovpn off the pool /24 while still delivering replies to connected clients.
+	b.WriteString("script-security 2\n")
+	fmt.Fprintf(&b, "learn-address %s\n", filepath.Join(m.cfgDir, "learn-address.sh"))
 	// Trust material (placed by the enrollment/export path; referenced by fixed name here).
 	fmt.Fprintf(&b, "ca %s\n", filepath.Join(m.cfgDir, "ca.crt"))
 	fmt.Fprintf(&b, "cert %s\n", filepath.Join(m.cfgDir, "server.crt"))
 	fmt.Fprintf(&b, "key %s\n", filepath.Join(m.cfgDir, "server.key"))
-	fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem")) // S9.1 Slice 5 revocation rides this
+	// crl-verify ONLY when a CRL is present (S9.1 Slice 5 delivers it): referencing a missing crl.pem
+	// makes openvpn refuse to start. Pre-Slice-5 there is no revocation channel, so its absence is correct.
+	if m.crlPresent() {
+		fmt.Fprintf(&b, "crl-verify %s\n", filepath.Join(m.cfgDir, "crl.pem"))
+	}
 	b.WriteString("persist-tun\n")
-	b.WriteString("persist-key\n")
 	// S9.1 Part-3 fold: PUSH the org's approved ranges + DNS. OpenVPN installs these on the client at
 	// connect (dynamic, server-side) — so a standard OpenVPN client reaches site subnets + resolves
 	// cross-site names WITHOUT the client-side edit a static WireGuard config would need. Ranges are
@@ -224,10 +278,63 @@ func routeNetMask(cidr string) (net, mask string, ok bool) {
 	return p.Masked().Addr().String(), m, true
 }
 
-// ccdEntry renders one client's CCD file: a fixed ifconfig-push from the CP-assigned /32 (never an
-// allocated address). mask is the pool subnet's dotted mask (topology subnet needs ip + mask).
+// ccdEntry renders one client's CCD file (WF-OVPN-2, iroute model):
+//
+//	ifconfig-push <ip> <pool-mask> — the client's tun IP is its CP-assigned pool /32 with the POOL mask,
+//	    so the client treats the whole pool /24 as on-link (reaches other devices) and SOURCES from its
+//	    pool /32 — the indistinguishable-/32 that makes B1 free (never an allocated address).
+//	iroute <ip> /32 — the server-side demux that makes an address OUTSIDE the tun's transit subnet
+//	    routable to THIS client. Paired with the learn-address kernel /32 route, it lets the client hold a
+//	    pool /32 while tunnex-ovpn owns only the transit /30 (so wg0 keeps the pool /24, no route fight).
 func ccdEntry(ip, mask string) string {
-	return fmt.Sprintf("ifconfig-push %s %s\n", ip, mask)
+	return fmt.Sprintf("ifconfig-push %s %s\niroute %s 255.255.255.255\n", ip, mask, ip)
+}
+
+// crlPresent reports whether a CRL has been delivered (S9.1 Slice 5). serverConfig emits crl-verify
+// only when true — pointing at a missing crl.pem would make openvpn refuse to start.
+func (m *Manager) crlPresent() bool {
+	_, err := os.Stat(filepath.Join(m.cfgDir, "crl.pem"))
+	return err == nil
+}
+
+// transitConflicts is the LOCAL disjointness guard for the exempt transit range (see TransitCIDR): the
+// transit /30 is never advertised, so it is exempt from the CP validator — but the agent still refuses
+// to serve if the pool or any pushed route overlaps it on THIS gateway, so the tun address is never
+// "validated by nobody".
+func transitConflicts(pool string, routes []string) bool {
+	tp, err := netip.ParsePrefix(TransitCIDR)
+	if err != nil {
+		return false
+	}
+	for _, c := range append([]string{pool}, routes...) {
+		if c == "" {
+			continue
+		}
+		if p, err := netip.ParsePrefix(c); err == nil && p.Overlaps(tp) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeLearnAddressScript writes the learn-address hook (WF-OVPN-2) — root-owned, 0700. $2 (the
+// address) is the CP-assigned roster /32, not attacker input; it is validated as IPv4 in the script
+// before it touches `ip route` (defense-in-depth on the one-time-secret/injection hygiene law).
+func (m *Manager) writeLearnAddressScript() error {
+	script := fmt.Sprintf(`#!/bin/sh
+# OpenVPN learn-address hook (WF-OVPN-2, iroute model): keep a /32 kernel route to the OVPN tun for each
+# connected client's CP-assigned pool address, so replies reach the right tunnel WITHOUT tunnex-ovpn
+# claiming the pool /24 (wg0 keeps the /24; these /32s win by longest-prefix only while connected).
+# Args from openvpn: $1=op(add|update|delete) $2=address $3=common_name. $2 is the roster /32 (not
+# attacker input); validated as IPv4 here for defense-in-depth before it touches ip route.
+op="$1"; addr="$2"
+case "$addr" in ""|*[!0-9.]*) exit 0 ;; esac
+case "$op" in
+  add|update) exec ip route replace "$addr/32" dev %s ;;
+  delete) ip route del "$addr/32" dev %s 2>/dev/null; exit 0 ;;
+esac
+`, TunName, TunName)
+	return os.WriteFile(filepath.Join(m.cfgDir, "learn-address.sh"), []byte(script), 0o700)
 }
 
 // Reconcile converges the openvpn server toward desired state: writes the server config, reconciles
@@ -255,12 +362,23 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		m.serving.Store(false)
 		return nil
 	}
+	// LOCAL transit guard (WF-OVPN-2): refuse-loudly if the exempt transit /30 overlaps the pool or a
+	// pushed route on THIS gateway — the tun address is never validated-by-nobody.
+	if transitConflicts(d.PoolCIDR, d.Routes) {
+		m.health.Store(ptr(HealthTransitConflict))
+		m.serving.Store(false)
+		return nil
+	}
 	m.health.Store(ptr(HealthOK)) // preconditions met — clears any prior refusal on recovery
 	mask, err := poolMask(d.PoolCIDR)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(m.ccdDir, 0o700); err != nil {
+		return err
+	}
+	// learn-address hook (WF-OVPN-2): written before the config references it, root-owned 0700.
+	if err := m.writeLearnAddressScript(); err != nil {
 		return err
 	}
 	// Server config (idempotent write).

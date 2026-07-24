@@ -215,8 +215,12 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
               {/* S9.1 4d: OpenVPN refuse-loudly surfaced (a different axis from policy health) — an
                   OVPN-enabled gateway missing its material/binary shows WHY, and keeps serving WireGuard. */}
               {n.ovpn_health && (
-                <span className="ml-2 text-xs text-amber-400" title="This gateway has OpenVPN enabled but isn't serving it — resolves on its own once the material/binary is present.">
-                  {n.ovpn_health === "ovpn_binary_absent" ? "OpenVPN: binary missing" : "OpenVPN: certs missing"}
+                <span className="ml-2 text-xs text-amber-400" title="This gateway has OpenVPN enabled but isn't serving it — resolves on its own once the material/binary/config is corrected.">
+                  {n.ovpn_health === "ovpn_binary_absent"
+                    ? "OpenVPN: binary missing"
+                    : n.ovpn_health === "ovpn_transit_conflict"
+                      ? "OpenVPN: address conflict"
+                      : "OpenVPN: certs missing"}
                 </span>
               )}
             </div>
