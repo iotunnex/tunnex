@@ -606,3 +606,50 @@ func TestReconcileFailStaticKeepsStandby(t *testing.T) {
 		}
 	}
 }
+
+// TestOVPNPushRoutesUnion is the WF-OVPN-11 red: the OVPN push route-set is Routes ∪ LocalSubnets — the
+// same reachable set a WG client assembles from routed-ranges (one truth, two delivery mechanisms). It
+// pins the parity half (LocalSubnets ARE pushed, so an OVPN client reaches the LAN behind its own gateway)
+// and the zero-config golden (no local subnets → identical to remote-Routes-only; nil policy → nothing).
+func TestOVPNPushRoutesUnion(t *testing.T) {
+	// Routes (remote sites) ∪ LocalSubnets (this gateway's own LAN) — both present.
+	p := &nodepolicy.Compiled{
+		Routes:       []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}},
+		LocalSubnets: []string{"172.31.0.0/16"},
+	}
+	got := OVPNPushRoutes(p)
+	has := func(c string) bool {
+		for _, r := range got {
+			if r == c {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("10.0.0.0/16") {
+		t.Fatalf("remote Route must be pushed; got %v", got)
+	}
+	if !has("172.31.0.0/16") {
+		t.Fatalf("WF-OVPN-11: this gateway's LocalSubnet must be pushed (reach the LAN behind your own gateway); got %v", got)
+	}
+
+	// Zero-config golden: a gateway with NO local subnets pushes exactly its remote Routes — identical to
+	// pre-fold (no behavior change where there is no local LAN to advertise).
+	remoteOnly := OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}})
+	if len(remoteOnly) != 1 || remoteOnly[0] != "10.0.0.0/16" {
+		t.Fatalf("no-local-subnet gateway must push only its remote Routes (zero-config golden); got %v", remoteOnly)
+	}
+
+	// nil policy → nil (no push lines).
+	if OVPNPushRoutes(nil) != nil {
+		t.Fatalf("nil policy must push nothing; got %v", OVPNPushRoutes(nil))
+	}
+
+	// Parity assertion (the cheaply-expressible half): the pushed set is EXACTLY Routes ∪ LocalSubnets,
+	// which by construction equals the org's approved site subnets a WG client receives via routed-ranges
+	// (sites.ListRoutedRanges) for the same gateway. The cross-mechanism wire equality is walk-proven (WG
+	// reached 172.31.x; OVPN reaches it once this ships).
+	if len(got) != len(p.Routes)+len(p.LocalSubnets) {
+		t.Fatalf("pushed set must be exactly Routes ∪ LocalSubnets (no drops, no dupes); got %v", got)
+	}
+}

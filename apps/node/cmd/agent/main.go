@@ -213,11 +213,12 @@ func main() {
 				clients = append(clients, ovpnserver.Client{CommonName: c.CommonName, IP: c.IP, FullTunnel: c.FullTunnel})
 			}
 			// The ranges + DNS to PUSH ride the compiled Policy the agent already holds (Part-3 fold).
-			var routes, dns []string
+			// Routes ∪ LocalSubnets (WF-OVPN-11) — the SAME set a WG client gets from routed-ranges, via
+			// the ONE named union (reconcile.OVPNPushRoutes), so an OVPN client reaches remote sites AND
+			// the LAN behind its own gateway.
+			routes := reconcile.OVPNPushRoutes(ds.Policy)
+			var dns []string
 			if ds.Policy != nil {
-				for _, rt := range ds.Policy.Routes {
-					routes = append(routes, rt.DstCIDR)
-				}
 				for _, d := range ds.Policy.DNSForwards {
 					dns = append(dns, d.ResolverIP)
 				}

@@ -58,6 +58,26 @@ type DesiredState struct {
 	OVPNServer *OVPNServerMaterial `json:"ovpn_server,omitempty"`
 }
 
+// OVPNPushRoutes is the range set an OpenVPN server PUSHES to its clients: the UNION of the org's remote
+// site Routes AND this gateway's OWN LocalSubnets — i.e. `Routes ∪ LocalSubnets`. This is EXACTLY the same
+// reachable set a WireGuard client assembles from the routed-ranges poll (sites.ListRoutedRanges): ONE
+// truth — the org's approved site subnets — delivered TWO ways (WG polls the control plane; OVPN pushes at
+// connect). WF-OVPN-11 (WF-4-local's OpenVPN twin): without LocalSubnets an OVPN client reaches REMOTE
+// sites but NOT the LAN behind its OWN gateway — the primary VPN use case ("dial in, reach the office file
+// server"), never peripheral. nil policy → nil (the zero-config golden: a gateway with no ranges pushes
+// nothing, byte-identical to pre-fold).
+func OVPNPushRoutes(p *nodepolicy.Compiled) []string {
+	if p == nil {
+		return nil
+	}
+	out := make([]string, 0, len(p.Routes)+len(p.LocalSubnets))
+	for _, rt := range p.Routes {
+		out = append(out, rt.DstCIDR) // remote site subnets (reached over the site links)
+	}
+	out = append(out, p.LocalSubnets...) // this gateway's own approved LAN (the WF-OVPN-11 half)
+	return out
+}
+
 // OVPNClient is one OpenVPN client's wire binding (mirror of the CP's nodes.OVPNClient).
 type OVPNClient struct {
 	CommonName string `json:"cn"`
