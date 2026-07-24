@@ -29,6 +29,23 @@ func newFakeNft() *fakeNft {
 	return &fakeNft{rules: map[string]string{}, orient: map[string]string{}, nextHandle: 10}
 }
 
+// fakeFirstIface extracts the first interface NAME from insert-arg orientation tokens (skipping a `!=`),
+// so the fake keys a rule by dir:iface:addr the way per-interface rules coexist under real nft.
+func fakeFirstIface(orient []string) string {
+	for i, t := range orient {
+		if t == "iifname" || t == "oifname" {
+			if i+1 < len(orient) {
+				n := orient[i+1]
+				if n == "!=" && i+2 < len(orient) {
+					n = orient[i+2]
+				}
+				return n
+			}
+		}
+	}
+	return ""
+}
+
 // renderOrient turns insert-arg orientation tokens (before "ip") into the nft-printed form, quoting the
 // interface names so the reconcile's regex + orientSig read them back the way real nft would.
 func renderOrient(toks []string) string {
@@ -62,9 +79,10 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 		}
 		var b strings.Builder
 		b.WriteString("table ip filter {\n  chain DOCKER-USER {\n")
-		for key, h := range f.rules { // key = "d:addr" (forward) or "s:addr" (return)
-			addr, dir := key[2:], "daddr"
-			if key[0] == 's' {
+		for key, h := range f.rules { // key = "dir:iface:addr" (per-interface, S9.1) — models real nft (handle-unique)
+			parts := strings.SplitN(key, ":", 3)
+			dir, addr := "daddr", parts[2]
+			if parts[0] == "s" {
 				dir = "saddr"
 			}
 			fmt.Fprintf(&b, "    %s ip %s %s counter accept comment \"%s\" # handle %s\n", f.orient[key], dir, addr, dockerUserComment, h)
@@ -91,7 +109,9 @@ func (f *fakeNft) run(_ context.Context, args ...string) (string, error) {
 			}
 		}
 		addr = strings.TrimSuffix(addr, "/32") // model nft: a host addr is stored/printed BARE
-		key := dir + ":" + addr
+		// Key by dir:iface:addr so multiple rules at the SAME addr with DIFFERENT interfaces (the S9.1
+		// per-interface pool class) coexist — real nft keys by handle; this models that faithfully.
+		key := dir + ":" + fakeFirstIface(orient) + ":" + addr
 		f.nextHandle++
 		f.rules[key] = fmt.Sprint(f.nextHandle)
 		f.orient[key] = renderOrient(orient)
@@ -126,7 +146,7 @@ func TestDockerForwardScopedInsert(t *testing.T) {
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil, "")
 	// TWO Route-scoped accepts per route: forward (d:) + return (s:) — the return path is why the re-walk
 	// forward-ping passed but the reply dropped.
-	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
+	for _, k := range []string{"d:wg0:10.0.0.0/24", "s:wg0:10.0.0.0/24", "d:wg0:172.31.0.0/16", "s:wg0:172.31.0.0/16"} {
 		if f.rules[k] == "" {
 			t.Fatalf("missing scoped accept %s; got %v", k, f.rules)
 		}
@@ -157,12 +177,12 @@ func TestDockerForwardFullSweep(t *testing.T) {
 	m := mgrWithNft(f)
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24", "172.31.0.0/16"}, nil, "")
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "") // 172.31 withdrawn
-	for _, k := range []string{"d:172.31.0.0/16", "s:172.31.0.0/16"} {
+	for _, k := range []string{"d:wg0:172.31.0.0/16", "s:wg0:172.31.0.0/16"} {
 		if _, still := f.rules[k]; still {
 			t.Fatalf("a withdrawn route's rule %s must be swept, still present: %v", k, f.rules)
 		}
 	}
-	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24"} {
+	for _, k := range []string{"d:wg0:10.0.0.0/24", "s:wg0:10.0.0.0/24"} {
 		if _, kept := f.rules[k]; !kept {
 			t.Fatalf("the surviving route's rule %s must stay, got %v", k, f.rules)
 		}
@@ -286,7 +306,7 @@ func TestDockerForwardLocalSubnetMirrored(t *testing.T) {
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "")
 
 	// Both get fwd (d:) + ret (s:) accepts — 4 rules, disjoint addrs, no key collision across orientations.
-	for _, k := range []string{"d:10.0.0.0/24", "s:10.0.0.0/24", "d:172.31.0.0/16", "s:172.31.0.0/16"} {
+	for _, k := range []string{"d:wg0:10.0.0.0/24", "s:wg0:10.0.0.0/24", "d:wg0:172.31.0.0/16", "s:wg0:172.31.0.0/16"} {
 		if f.rules[k] == "" {
 			t.Fatalf("missing accept %s; got %v", k, f.rules)
 		}
@@ -323,8 +343,8 @@ func TestDockerForwardLocalSubnetMirrored(t *testing.T) {
 func TestDockerForwardTransitionConverges(t *testing.T) {
 	f := newFakeNft()
 	// seed the OLD orientation-predicated route rules a pre-S8.6b agent placed, under the same keys.
-	f.rules["d:10.0.0.0/24"], f.orient["d:10.0.0.0/24"] = "77", `iifname != "wg0" oifname "wg0"`
-	f.rules["s:10.0.0.0/24"], f.orient["s:10.0.0.0/24"] = "78", `iifname "wg0" oifname != "wg0"`
+	f.rules["d:wg0:10.0.0.0/24"], f.orient["d:wg0:10.0.0.0/24"] = "77", `iifname != "wg0" oifname "wg0"`
+	f.rules["s:wg0:10.0.0.0/24"], f.orient["s:wg0:10.0.0.0/24"] = "78", `iifname "wg0" oifname != "wg0"`
 	m := mgrWithNft(f)
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, nil, "")
 
@@ -366,7 +386,8 @@ func TestDockerForwardSpokeIsolation(t *testing.T) {
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "")
 	allowed := map[string]bool{"10.0.0.0/24": true, "172.31.0.0/16": true}
 	for key := range f.rules {
-		addr := key[2:]
+		parts := strings.SplitN(key, ":", 3) // dir:iface:addr
+		addr := parts[2]
 		if strings.HasPrefix(addr, "10.99.") {
 			t.Fatalf("spoke-isolation: NO accept may reference the device pool, got %s", key)
 		}
@@ -430,7 +451,7 @@ func TestDockerForwardPoolClassRelaxed(t *testing.T) {
 	m := mgrWithNft(f)
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "10.99.0.0/24")
 
-	for _, k := range []string{"d:10.99.0.0/24", "s:10.99.0.0/24"} {
+	for _, k := range []string{"d:wg0:10.99.0.0/24", "s:wg0:10.99.0.0/24"} {
 		if f.rules[k] == "" {
 			t.Fatalf("missing pool accept %s; got %v", k, f.rules)
 		}
@@ -454,9 +475,9 @@ func TestDockerForwardKeySpaceCensus(t *testing.T) {
 	m.reconcileDockerForward(context.Background(), []string{"10.0.0.0/24"}, []string{"172.31.0.0/16"}, "10.99.0.0/24")
 
 	want := map[string]bool{
-		"d:10.0.0.0/24": true, "s:10.0.0.0/24": true, // route class (S8.2c WF-4, relaxed S8.6b)
-		"d:172.31.0.0/16": true, "s:172.31.0.0/16": true, // local-subnet class (S8.5 WF-4-local)
-		"d:10.99.0.0/24": true, "s:10.99.0.0/24": true, // pool class (A3b v6)
+		"d:wg0:10.0.0.0/24": true, "s:wg0:10.0.0.0/24": true, // route class (S8.2c WF-4, relaxed S8.6b)
+		"d:wg0:172.31.0.0/16": true, "s:wg0:172.31.0.0/16": true, // local-subnet class (S8.5 WF-4-local)
+		"d:wg0:10.99.0.0/24": true, "s:wg0:10.99.0.0/24": true, // pool class (A3b v6)
 	}
 	if len(f.rules) != len(want) {
 		t.Fatalf("key-space census: want exactly %d keys (route+local+pool × d/s), got %v", len(want), f.rules)
@@ -484,5 +505,74 @@ func TestDockerForwardPoolCollisionGuard(t *testing.T) {
 	}
 	if len(f.inserts) != 2 {
 		t.Fatalf("collision guard: no duplicate inserts on collision, got %v", f.inserts)
+	}
+}
+
+// TestDockerPoolPerInterfaceIdempotent (S9.1 Slice 3, D-S9.3-DOCKER (a), guard-red i): with TWO
+// tunnel interfaces present (wg0 + the co-terminated OVPN tun), the pool class emits a per-interface
+// accept pair for EACH, and a second reconcile tick inserts NOTHING — the widened dir:iface:addr key
+// space is idempotent (no thrash against Docker, the reason the drift engine exists).
+func TestDockerPoolPerInterfaceIdempotent(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.SetOVPNTun("tunnex-ovpn")
+	pool := "10.99.0.0/24"
+	m.reconcileDockerForward(context.Background(), nil, nil, pool)
+	for _, k := range []string{
+		"d:wg0:10.99.0.0/24", "s:wg0:10.99.0.0/24",
+		"d:tunnex-ovpn:10.99.0.0/24", "s:tunnex-ovpn:10.99.0.0/24",
+	} {
+		if f.rules[k] == "" {
+			t.Fatalf("missing per-interface pool rule %s; got %v", k, f.rules)
+		}
+	}
+	n := len(f.inserts)
+	m.reconcileDockerForward(context.Background(), nil, nil, pool) // second tick
+	if len(f.inserts) != n {
+		t.Fatalf("second reconcile with two tunnel interfaces must insert nothing (no thrash); %d -> %d", n, len(f.inserts))
+	}
+}
+
+// TestDockerPoolSweepsDepartedTun (S9.1 Slice 3, guard-red ii): when the OVPN server is removed (the
+// tun departs from tunnelIfaces()), the tun's pool rules are FULL-SWEPT — no orphans — while wg0's
+// pool rules survive. The per-interface key is what lets the sweep target exactly the departed iface.
+func TestDockerPoolSweepsDepartedTun(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f)
+	m.SetOVPNTun("tunnex-ovpn")
+	pool := "10.99.0.0/24"
+	m.reconcileDockerForward(context.Background(), nil, nil, pool) // wg0 + tun rules
+	m.SetOVPNTun("")                                               // OVPN server removed → tun departs
+	m.reconcileDockerForward(context.Background(), nil, nil, pool)
+	for _, k := range []string{"d:tunnex-ovpn:10.99.0.0/24", "s:tunnex-ovpn:10.99.0.0/24"} {
+		if _, still := f.rules[k]; still {
+			t.Fatalf("a departed tunnel's pool rule %s must be swept (no orphan), got %v", k, f.rules)
+		}
+	}
+	for _, k := range []string{"d:wg0:10.99.0.0/24", "s:wg0:10.99.0.0/24"} {
+		if f.rules[k] == "" {
+			t.Fatalf("wg0's pool rule %s must survive the tun departure, got %v", k, f.rules)
+		}
+	}
+}
+
+// TestDockerPoolZeroConfigByteIdentical (S9.1 Slice 3, guard-red iii): a WireGuard-only deployment
+// (no OVPN tun) emits EXACTLY the two legacy pool rules, wg0-oriented, byte-identical to pre-OVPN —
+// the internal dir:iface:addr key is invisible to nft, so the rendered DOCKER-USER rule is unchanged.
+func TestDockerPoolZeroConfigByteIdentical(t *testing.T) {
+	f := newFakeNft()
+	m := mgrWithNft(f) // no SetOVPNTun
+	m.reconcileDockerForward(context.Background(), nil, nil, "10.99.0.0/24")
+	if len(f.rules) != 2 {
+		t.Fatalf("WireGuard-only must emit exactly the 2 legacy pool rules, got %v", f.rules)
+	}
+	if f.rules["d:wg0:10.99.0.0/24"] == "" || f.rules["s:wg0:10.99.0.0/24"] == "" {
+		t.Fatalf("zero-config pool rules missing; got %v", f.rules)
+	}
+	if o := f.orient["d:wg0:10.99.0.0/24"]; o != `oifname "wg0"` {
+		t.Fatalf("zero-config pool forward orient must be bare `oifname \"wg0\"`, got %q", o)
+	}
+	if o := f.orient["s:wg0:10.99.0.0/24"]; o != `iifname "wg0"` {
+		t.Fatalf("zero-config pool return orient must be bare `iifname \"wg0\"`, got %q", o)
 	}
 }
