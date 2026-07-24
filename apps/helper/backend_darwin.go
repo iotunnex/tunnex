@@ -5,6 +5,7 @@ package helper
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -328,6 +329,10 @@ func (b *darwinBackend) SetGatewayPeer(newPubKey, newEndpoint string) error {
 	if err := b.dev.IpcSet(uapi); err != nil {
 		return &ProtocolError{Code: "gateway_peer_apply_failed", Msg: err.Error()}
 	}
+	// WF-A-obs-1: log the successful swap (pubkeys are public; no secrets). Without this a re-home that
+	// SUCCEEDS and one that silently loops (the WF-A-FT-1 class) look identical in the logs — this line is
+	// the breadcrumb that turns the next such diagnosis into a log-read instead of a source-trace.
+	log.Printf("gateway_peer_swapped: pubkey %s -> %s, endpoint -> %s, full_tunnel=%v (no bounce)", b.peerPubKey, newPubKey, ep, b.fullTunnel)
 	b.peerPubKey = newPubKey // the new peer is now current; a later re-home swaps IT out
 
 	if b.fullTunnel {
