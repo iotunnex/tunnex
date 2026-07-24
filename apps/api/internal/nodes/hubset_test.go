@@ -966,3 +966,98 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 		t.Fatal("pending: a non-active device's dial must be refused, got nil error")
 	}
 }
+
+// TestOVPNWidenAndRemotesParityAcrossHubSet is the WF-OVPN-9 red: the OVPN roster is WIDENED across all
+// hub-set members (a device homed on g1 has its CCD on g2 too — warm), and OVPNRemotes lists the SAME
+// members in priority order — one hub-set authority, two consumers. Parity: the profile's remote node set
+// equals the set of members whose widened roster hosts the device. A non-hub-set node gets nil (single remote).
+func TestOVPNWidenAndRemotesParityAcrossHubSet(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "ow-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, "DELETE FROM devices WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM memberships WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM users WHERE id IN (SELECT user_id FROM memberships WHERE org_id=$1)", org)
+		_, _ = pool.Exec(bg, "DELETE FROM nodes WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM sites WHERE org_id=$1", org)
+		_, _ = pool.Exec(bg, "DELETE FROM organizations WHERE id=$1", org)
+	})
+	site := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')", site, org); e != nil {
+		t.Fatalf("seed site: %v", e)
+	}
+	g1, g2 := uuid.New(), uuid.New()
+	mk := func(id uuid.UUID, name, host string, prio int) {
+		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+			id, org, name, "cs-"+id.String()[:8], site, "K"+name, host, prio); e != nil {
+			t.Fatalf("seed %s: %v", name, e)
+		}
+	}
+	mk(g1, "g1", "h1.example:51820", 1) // active primary
+	mk(g2, "g2", "h2.example:51820", 2) // standby
+	usr, dev := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
+		t.Fatalf("seed user: %v", e)
+	}
+	if _, e := pool.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, usr); e != nil {
+		t.Fatalf("seed membership: %v", e)
+	}
+	// The OVPN device is homed on g1.
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,transport) VALUES ($1,$2,$3,$4,'ov',''::text,'10.99.0.6','openvpn')",
+		dev, org, usr, g1); e != nil {
+		t.Fatalf("seed ovpn device: %v", e)
+	}
+
+	svc := NewService(pool, nil, nil)
+	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
+		t.Fatalf("reconcile hub set: %v", e)
+	}
+
+	rosterHas := func(nodeID uuid.UUID) bool {
+		ds, e := svc.DesiredState(ctx, sqlc.Node{ID: nodeID, OrgID: org, SiteID: pgtype.UUID{Bytes: site, Valid: true}})
+		if e != nil {
+			t.Fatalf("DesiredState: %v", e)
+		}
+		for _, c := range ds.OVPNClients {
+			if c.CommonName == dev.String() {
+				return true
+			}
+		}
+		return false
+	}
+
+	// WIDENED: the device's CCD is on BOTH g1 (home) and g2 (widened warm) — so a multi-remote failover to g2 accepts.
+	if !rosterHas(g1) {
+		t.Fatal("g1 (home) must host the OVPN device in its roster")
+	}
+	if !rosterHas(g2) {
+		t.Fatal("WF-OVPN-9: g2 (hub-set member) must host the device's CCD too (widened) — else failover refuses")
+	}
+
+	// REMOTES: OVPNRemotes(g1) lists BOTH members' hosts in priority order — the SAME set the roster widened to.
+	remotes, e := svc.OVPNRemotes(ctx, org, g1)
+	if e != nil {
+		t.Fatalf("OVPNRemotes: %v", e)
+	}
+	if len(remotes) != 2 || remotes[0] != "h1.example" || remotes[1] != "h2.example" {
+		t.Fatalf("remotes must be both members in priority order [h1,h2]; got %v", remotes)
+	}
+
+	// NON-hub-set node → nil remotes (single remote; zero-config golden).
+	if r, _ := svc.OVPNRemotes(ctx, org, uuid.New()); r != nil {
+		t.Fatalf("a non-hub-set node must get nil remotes (single remote); got %v", r)
+	}
+}

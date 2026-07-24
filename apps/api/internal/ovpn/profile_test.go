@@ -15,7 +15,7 @@ func TestBuildProfileInlineAndServerPinned(t *testing.T) {
 		CertPEM:       "-----BEGIN CERTIFICATE-----\nCLIENTCERT\n-----END CERTIFICATE-----\n",
 		PrivateKeyPEM: "-----BEGIN RSA PRIVATE KEY-----\nCLIENTKEY\n-----END RSA PRIVATE KEY-----\n",
 	}
-	out := BuildProfile("-----BEGIN CERTIFICATE-----\nCACERT\n-----END CERTIFICATE-----\n", p, "gw.example.com", 1194)
+	out := BuildProfile("-----BEGIN CERTIFICATE-----\nCACERT\n-----END CERTIFICATE-----\n", p, []string{"gw.example.com"}, 1194)
 
 	for _, want := range []string{
 		"client\n", "remote gw.example.com 1194\n", "remote-cert-tls server\n",
@@ -30,5 +30,17 @@ func TestBuildProfileInlineAndServerPinned(t *testing.T) {
 	// the inline material must be the ACTUAL key/cert (the one-time-delivered secret), not a placeholder.
 	if !strings.Contains(out, "CLIENTKEY") {
 		t.Fatal("the client private key must be inlined (delivered once)")
+	}
+}
+
+// TestBuildProfileMultiRemote is the WF-OVPN-9 Part-A red: a hub-set device's profile lists EVERY member as
+// a `remote` in the given PRIORITY ORDER (OpenVPN's native client-side failover), each on the OVPN port.
+func TestBuildProfileMultiRemote(t *testing.T) {
+	p := ovpnca.Profile{CertPEM: "c", PrivateKeyPEM: "k"}
+	out := BuildProfile("ca", p, []string{"hub1.example", "hub2.example", "hub3.example"}, 1194)
+	// all three, in order, on the OVPN port.
+	want := "remote hub1.example 1194\nremote hub2.example 1194\nremote hub3.example 1194\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("multi-remote profile must list every member in priority order:\n%s", out)
 	}
 }
