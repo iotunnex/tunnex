@@ -53,3 +53,22 @@ func (s *Service) Issue(ctx context.Context, orgID, deviceID uuid.UUID, commonNa
 	}
 	return p, nil
 }
+
+// ExportProfile mints a client cert for an already-created OVPN device (the caller runs the
+// devices.Service.Create fork first) and assembles the one-time `.ovpn` profile. It returns the
+// profile text (carrying the EPHEMERAL private key, delivered ONCE per the S3.4/D2 ceremony) and a
+// FINGERPRINT — the cert serial — which is what the caller records in the audit row: never the
+// material, only its keyed identity. The device id is the cert CommonName (and the CCD filename,
+// Slice 3), so the roster, the cert record, and the compiled /32 all agree on one identity.
+//
+// host/port are the gateway's OpenVPN remote (resolved by the caller from the device's node). A lost
+// profile is NOT re-fetchable — the key is never stored — so recovery is revoke + re-issue (an
+// ordinary revoke, Slice 5), never a re-download.
+func (s *Service) ExportProfile(ctx context.Context, orgID, deviceID uuid.UUID, host string, port int) (profile, fingerprint string, err error) {
+	p, err := s.Issue(ctx, orgID, deviceID, deviceID.String())
+	if err != nil {
+		return "", "", err
+	}
+	profile = BuildProfile(string(s.ca.CertPEM()), p, host, port)
+	return profile, p.Serial, nil
+}
