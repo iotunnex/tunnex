@@ -246,7 +246,7 @@ func (s *MembershipService) ChangeMemberRole(ctx context.Context, actor *uuid.UU
 // flip + org-wide push). This method retains the ORG-WIDE PushOrgNodes below so that
 // IF a hard-remove endpoint is ever added, it inherits the Zero Trust <5s push
 // targeting. A removed member's /32 then leaves EVERY node's ruleset — the compiled
-// enterprise policy AND the open-edition mesh WG peer set (ListActivePeersForNode),
+// enterprise policy AND the open-edition mesh WG peer set (ListActiveWireGuardPeersForNode),
 // BOTH of which gate on current membership (the identity-binding invariant). Until the
 // membership join was added to the peer query, this push rebuilt a query that still
 // served the removed member in open-edition mesh — the guarantee this comment claims
