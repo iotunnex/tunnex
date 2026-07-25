@@ -90,6 +90,14 @@ type Manager struct {
 	// nodepolicy.MaxSupportedVersion). A field, not the const directly, so the interlock red can pin
 	// an OLD-max agent (S8.1 Slice 3) and feed it the current-version artifact.
 	maxPolicyVersion int
+	// S10.3 Slice 4b — the K8s VIP DNAT. resolver resolves <service>.<namespace> -> ClusterIP (injectable
+	// for the classifier reds); resolvedVIPs is the LAST-RESOLVED VIP->ClusterIP map the pure render reads
+	// (decoupled from the apply path so resolver latency never stalls an nft apply); dnsUnreachable is the
+	// k8s_cluster_dns_unreachable preflight; refusedK8sVIPs holds the fail-closed refusals for surfacing.
+	resolver       Resolver
+	resolvedVIPs   atomic.Pointer[[]resolvedVIP]
+	refusedK8sVIPs atomic.Pointer[[]refusedVIP]
+	dnsUnreachable atomic.Bool
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
@@ -152,7 +160,7 @@ type Manager struct {
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager {
-	m := &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
+	m := &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion, resolver: clusterDNSResolver{}}
 	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
@@ -394,7 +402,7 @@ func (m *Manager) rulesetWith(subnet string, pol *nodepolicy.Compiled) string {
 	return fmt.Sprintf(`add table ip tunnex
 flush table ip tunnex
 table ip tunnex {
-  chain postrouting {
+%[5]s  chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
 %[1]s  }
   chain forward {
@@ -411,7 +419,7 @@ table ip6 tunnex {
     ct state established,related accept
 %[3]s  }
 }
-`, masq, v4fwd, v6fwd, mssClamp)
+`, masq, v4fwd, v6fwd, mssClamp, m.preroutingDNAT())
 }
 
 // forwardRules renders the forward-chain accept lines (after the base policy-drop +

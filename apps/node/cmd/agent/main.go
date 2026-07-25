@@ -425,6 +425,10 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 // host) sets egress_nat=false and logs, never crashing the agent.
 func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool, every time.Duration, kick <-chan struct{}, logger *slog.Logger) {
 	apply := func() {
+		// S10.3: resolve exposed-Service ClusterIPs (bounded per-lookup) BEFORE the reconcile. Resolution
+		// stores the resolved VIP->ClusterIP map; Reconcile's render reads it and does NO DNS I/O (pure) —
+		// so a slow resolver is bounded, never an unbounded stall of the nft apply.
+		mgr.ResolveK8sVIPs(ctx)
 		ok, err := mgr.Reconcile(ctx)
 		egressNAT.Store(ok)
 		if err != nil {
