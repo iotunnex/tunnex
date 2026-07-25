@@ -55,6 +55,12 @@ type refusedVIP struct {
 // Service CIDR. Structured so a future edit cannot reorder a guard into a fail-open — the success is the
 // last line, gated by everything above it.
 func classify(m nodepolicy.VIPMapping, ips []netip.Addr, resolveErr error) (clusterIP string, ok bool, reason string) {
+	// Defense-in-depth (review fold): the VIP is a raw string from the CP; NEVER interpolate an
+	// unvalidated value into the nft ruleset (the wgIface/ruleID regex-guard convention). A malformed VIP
+	// fails CLOSED here, before any render can see it — the classifier is the one place inputs are trusted.
+	if _, e := netip.ParseAddr(m.VIP); e != nil {
+		return "", false, "invalid_vip"
+	}
 	switch {
 	case errors.Is(resolveErr, ErrDNSUnreachable):
 		return "", false, "dns_unreachable"

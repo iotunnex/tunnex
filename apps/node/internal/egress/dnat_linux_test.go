@@ -70,6 +70,12 @@ func TestClassifyFailsClosedExceptOneInsideCIDR(t *testing.T) {
 	if _, ok, r := classify(bad, []netip.Addr{a("10.96.1.5")}, nil); ok || r != "no_service_cidr" {
 		t.Fatalf("a bad Service CIDR must fail closed, got ok=%v reason=%q", ok, r)
 	}
+	// A malformed VIP from the CP fails closed — never interpolated into nft (review fold), even with a
+	// valid ClusterIP resolution.
+	badVIP := nodepolicy.VIPMapping{VIP: "100.64.0.5; drop", Namespace: "p", Service: "s", ServiceCIDR: "10.96.0.0/12"}
+	if _, ok, r := classify(badVIP, []netip.Addr{a("10.96.1.5")}, nil); ok || r != "invalid_vip" {
+		t.Fatalf("a malformed VIP must fail closed, got ok=%v reason=%q", ok, r)
+	}
 }
 
 // The VIP->ClusterIP DNAT renders in OUR prerouting chain at priority -101 (before kube-proxy); a removed
