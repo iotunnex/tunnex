@@ -1,0 +1,69 @@
+{{- if .Values.preflight.enabled }}
+{{- include "tunnex-gateway.ackGuard" . -}}
+# F7: the guard-before-exec gate. A pre-install,pre-upgrade HOOK Job that requests the
+# SAME privileged context the gateway needs (hostNetwork + NET_ADMIN + /dev/net/tun +
+# ClusterFirstWithHostNet) and self-asserts. On a cluster whose PodSecurity/admission
+# BLOCKS that context, THIS pod is admission-rejected — so `helm install --wait` fails
+# HERE, at the hook, before the real Deployment starts a crash-loop. The assertion also
+# closes the hostNetwork DNS trap: it proves cluster DNS resolves from the gateway's
+# exact DNS posture (without ClusterFirstWithHostNet the *.svc probe fails and the gateway
+# could never turn a Service name into a ClusterIP). NOTES mandates `--wait`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "tunnex-gateway.fullname" . }}-preflight
+  labels:
+    {{- include "tunnex-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: preflight
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "tunnex-gateway.labels" . | nindent 8 }}
+        app.kubernetes.io/component: preflight
+    spec:
+      restartPolicy: Never
+      # Request the gateway's real posture so a blocking admission controller rejects
+      # THIS pod (fail at the hook, not in a crash-loop).
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: preflight
+          image: {{ .Values.image.preflight | quote }}
+          securityContext:
+            runAsNonRoot: false
+            capabilities:
+              add: ["NET_ADMIN"]
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "preflight: checking /dev/net/tun ..."
+              if [ ! -c /dev/net/tun ]; then
+                echo "FATAL: /dev/net/tun is not present — the node lacks the tun device the gateway's WireGuard datapath needs. Load the kernel module (modprobe tun) on the node, or schedule onto a node that has it."
+                exit 1
+              fi
+              echo "preflight: resolving cluster DNS ({{ .Values.preflight.dnsProbe }}) from the gateway's DNS posture ..."
+              if ! nslookup {{ .Values.preflight.dnsProbe }} >/dev/null 2>&1; then
+                echo "FATAL: could not resolve {{ .Values.preflight.dnsProbe }}. A hostNetwork pod inherits the NODE resolv.conf; without dnsPolicy ClusterFirstWithHostNet the gateway cannot turn a Service name into its ClusterIP. This is the hostNetwork DNS trap — refuse rather than install a gateway that silently can't resolve Services."
+                exit 1
+              fi
+              echo "preflight: OK — privileged context admitted, /dev/net/tun present, cluster DNS resolves."
+          volumeMounts:
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+      volumes:
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+{{- end }}
