@@ -15,6 +15,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
+	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/ovpn"
@@ -97,6 +98,7 @@ type apiServer struct {
 	devices   *devices.Service
 	ovpn      *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export; nil in a stripped build
 	sites     *sites.Service
+	k8s       *k8s.Service // OPEN (all editions, S10.3): K8s cluster/Service connectivity; governance is enterprise
 	sessions  *session.Store
 	mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	sso       ssoPort       // nil in the open build

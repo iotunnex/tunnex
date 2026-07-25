@@ -24,6 +24,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
+	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
@@ -48,6 +49,7 @@ type Deps struct {
 	Devices   *devices.Service
 	Ovpn      *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export. CA loads lazily (D-S9.5-OPTIN a)
 	Sites     *sites.Service
+	K8s       *k8s.Service // OPEN (all editions, S10.3): K8s cluster/Service connectivity
 	Sessions  *session.Store
 	Mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	SSO       ssoPort       // nil => open build (SSO endpoints return edition_required)
@@ -184,7 +186,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, k8s: d.K8s, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
 	// Default-deny MFA-enrollment gate (S7.5.5 D8, enterprise): runs after auth attaches the
 	// principal; a gated user is restricted to enrollment. Registered before the routes so it
 	// wraps every operation (self-arming — a new endpoint is gated by construction).

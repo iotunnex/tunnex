@@ -2,6 +2,7 @@
   "admin": [
     "device:approve",
     "device_health:manage",
+    "k8s:manage",
     "member:invite",
     "member:list",
     "member:manage",
@@ -19,6 +20,7 @@
   "owner": [
     "device:approve",
     "device_health:manage",
+    "k8s:manage",
     "member:invite",
     "member:list",
     "member:manage",

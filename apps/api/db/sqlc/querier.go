@@ -155,7 +155,8 @@ type Querier interface {
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
 	// S7.5.4: src_kind ∈ {group,user}; S8.2: +site; S8.7: +cidr (exactly one of src_group_id/src_user_id/
 	// src_site_id/src_cidr, CHECK-enforced). expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind
-	// ∈ {resource,group,site} (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
+	// ∈ {resource,group,site}; S10.3: +k8s_service (exactly one of dst_resource_id/dst_group_id/dst_site_id/
+	// dst_k8s_service_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)

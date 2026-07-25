@@ -2119,6 +2119,101 @@ paths:
         "204": { description: Unbound. }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/k8s/clusters:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listK8sClusters
+      summary: List the org's Kubernetes clusters (S10.3; org:view)
+      tags: [k8s]
+      responses:
+        "200":
+          description: Clusters.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/K8sCluster" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: registerK8sCluster
+      summary: Register a Kubernetes cluster + its synthetic VIP range (S10.3; k8s:manage)
+      description: >-
+        Registers a cluster fronted by a site gateway. The VIP range must be DISJOINT from the device pool,
+        every site subnet, and other clusters' VIP ranges (409 vip_range_overlap). The name is a DNS label and
+        dns_zone a domain — together they form each exposed Service's hostname &lt;service&gt;.&lt;namespace&gt;.svc.&lt;name&gt;.&lt;zone&gt;.
+        A DNS VIP is reserved from the range automatically (never handed to a Service).
+      tags: [k8s]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RegisterK8sClusterRequest" } } }
+      responses:
+        "201":
+          description: Registered.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/K8sCluster" } } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/k8s/clusters/{clusterId}:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deregisterK8sCluster
+      summary: Deregister a cluster — full-sweep of its Services + rules (S10.3; k8s:manage)
+      description: >-
+        Removes the cluster; ON DELETE CASCADE removes its exposed Services and any policy rule reaching one,
+        and frees the whole VIP range (incl the reserved DNS VIP) + the DNS zone for reuse.
+      tags: [k8s]
+      responses:
+        "204": { description: Deregistered. }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/k8s/clusters/{clusterId}/services:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listK8sServices
+      summary: List a cluster's exposed Services (S10.3; org:view)
+      tags: [k8s]
+      responses:
+        "200":
+          description: The cluster's exposed Services.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/K8sService" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: exposeK8sService
+      summary: Expose an in-cluster Service to the fabric — allocates a VIP (S10.3; k8s:manage)
+      description: >-
+        Allocates a /32 VIP from the cluster's range and records the Service (a stable identity). Clients reach
+        the VIP; the gateway DNATs it to the Service's real ClusterIP. 409 vip_range_exhausted when the range is
+        full, 409 service_exists when that namespace/name is already exposed.
+      tags: [k8s]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ExposeK8sServiceRequest" } } }
+      responses:
+        "201":
+          description: Exposed.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/K8sService" } } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/k8s/services/{serviceId}:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: unexposeK8sService
+      summary: Unexpose a Service — full-sweep withdraws its VIP + DNS answer (S10.3; k8s:manage)
+      description: >-
+        Soft-deletes the Service; it vanishes from the LIVE resolution so its VIP + DNS answer drop from every
+        gateway on the next compile, and any grant that reached it compiles to nothing (shown as vanished). The
+        freed VIP is immediately reusable.
+      tags: [k8s]
+      responses:
+        "204": { description: Unexposed. }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/site-subnets/pending:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2354,7 +2449,7 @@ components:
 
     PolicyRule:
       type: object
-      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges, enabled]
+      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges, dst_k8s_service_vanished, enabled]
       additionalProperties: false
       properties:
         # F3: true = the rule contributes its allow; false = DISABLED (permission withdrawn, compiled to
@@ -2371,10 +2466,13 @@ components:
         src_cidr: { type: string, nullable: true, description: "Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise)." }
         # S8.7 warn-not-refuse: true when src_cidr is not inside any current org range (site subnet / routed range / device pool) — a rule matching nothing (a silent no-op wearing a rule's face). DERIVED at read time from CURRENT ranges, so it sheds once the range lands. false for non-cidr sources.
         cidr_outside_org_ranges: { type: boolean }
-        dst_kind: { type: string, enum: [resource, group, site] }
+        dst_kind: { type: string, enum: [resource, group, site, k8s_service] }
         dst_resource_id: { type: string, format: uuid, nullable: true }
         dst_group_id: { type: string, format: uuid, nullable: true }
         dst_site_id: { type: string, format: uuid, nullable: true }
+        dst_k8s_service_id: { type: string, format: uuid, nullable: true, description: "Set when dst_kind=k8s_service (S10.3): the exposed Service the grant reaches; the compiler resolves it to the Service's CURRENT VIP." }
+        # S10.3 warn-not-refuse: true when dst_kind=k8s_service but the Service is gone (unexposed/cluster deregistered) — the grant compiles to nothing (a silent no-op wearing a rule's face). DERIVED at read time from the LIVE Services, so it sheds if the Service returns. false otherwise.
+        dst_k8s_service_vanished: { type: boolean }
         # S7.5.4: null = permanent; set = a temporary grant that lapses at this instant.
         expires_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
@@ -2390,10 +2488,11 @@ components:
         src_user_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=user (a current org member). }
         src_site_id: { type: string, format: uuid, nullable: true, description: "Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source)." }
         src_cidr: { type: string, nullable: true, description: "Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse)." }
-        dst_kind: { type: string, enum: [resource, group, site] }
+        dst_kind: { type: string, enum: [resource, group, site, k8s_service] }
         dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
         dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }
         dst_site_id: { type: string, format: uuid, nullable: true, description: "Required when dst_kind=site (S8.1); the compiler resolves it to the site's approved subnet CIDRs." }
+        dst_k8s_service_id: { type: string, format: uuid, nullable: true, description: "Required when dst_kind=k8s_service (S10.3); the compiler resolves it to the exposed Service's CURRENT VIP." }
         expires_at: { type: string, format: date-time, nullable: true, description: "Set = a temporary grant that expires at this time (must be future); omit for a permanent grant." }
 
     # ── S8.1 site-to-site ──
@@ -2414,6 +2513,55 @@ components:
       properties:
         domain: { type: string, description: "The forwarded zone (e.g. corp.local)." }
         resolver_ip: { type: string, description: "The site's internal resolver — must be inside one of the site's approved subnets (S8.4)." }
+
+    # ── S10.3 Kubernetes ──
+    K8sCluster:
+      type: object
+      required: [id, site_id, name, vip_range, service_cidr, dns_zone]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid, description: "The site whose gateway fronts this cluster." }
+        name: { type: string, description: "A DNS label; a hostname component of every exposed Service." }
+        vip_range: { type: string, description: "The cluster's synthetic VIP range (CIDR), disjoint from all other org ranges." }
+        service_cidr: { type: string, description: "The cluster's real Kubernetes Service CIDR (where ClusterIPs live)." }
+        dns_zone: { type: string, description: "The customer's DNS zone suffix for exposed-Service hostnames." }
+        dns_vip: { type: string, nullable: true, description: "The reserved DNS VIP (the gateway answers DNS here); never handed to a Service." }
+        created_at: { type: string, format: date-time }
+    K8sService:
+      type: object
+      required: [id, cluster_id, name, namespace, protocol, vip, fqdn]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        name: { type: string }
+        namespace: { type: string }
+        protocol: { type: string, enum: [tcp, udp, any] }
+        port_low: { type: integer, nullable: true }
+        port_high: { type: integer, nullable: true }
+        vip: { type: string, description: "The synthetic /32 clients reach; DNAT'd to the ClusterIP at the gateway." }
+        fqdn: { type: string, description: "The in-tunnel hostname clients use: <service>.<namespace>.svc.<cluster>.<zone> (copy, don't construct)." }
+    RegisterK8sClusterRequest:
+      type: object
+      required: [site_id, name, vip_range, service_cidr, dns_zone]
+      additionalProperties: false
+      properties:
+        site_id: { type: string, format: uuid, description: "The site gateway that fronts this cluster (one gateway = one site)." }
+        name: { type: string, maxLength: 63, description: "A DNS label (lowercase a-z0-9 + hyphens)." }
+        vip_range: { type: string, description: "The synthetic VIP range (CIDR), disjoint from pool/sites/other clusters." }
+        service_cidr: { type: string, description: "The cluster's Kubernetes Service CIDR (e.g. 10.96.0.0/12)." }
+        dns_zone: { type: string, description: "The customer's DNS zone (e.g. k8s.acme.com); need not be publicly registered." }
+    ExposeK8sServiceRequest:
+      type: object
+      required: [name, namespace]
+      additionalProperties: false
+      properties:
+        name: { type: string, description: "The Kubernetes Service name." }
+        namespace: { type: string, description: "The Service's namespace." }
+        protocol: { type: string, enum: [tcp, udp, any], description: "Protocol scope; omit for any." }
+        port_low: { type: integer, nullable: true, description: "Low port of the exposed range; omit for all ports." }
+        port_high: { type: integer, nullable: true, description: "High port; omit for a single port or all." }
 
     RoutedRanges:
       # CHANNEL CONTRACT (WF-A D-WFA-6 condition 1): this response may carry NETWORK-TOPOLOGY facts

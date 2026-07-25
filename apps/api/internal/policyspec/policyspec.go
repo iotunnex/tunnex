@@ -36,16 +36,17 @@ type ResourceInput struct {
 // SrcUserID); ExpiresAt set makes it a temporary grant (nil = permanent). SrcKind
 // blank is treated as "group" (back-compat with pre-S7.5.4 callers).
 type RuleInput struct {
-	SrcKind       string // "" | group | user | site (S8.2) | cidr (S8.7)
-	SrcGroupID    uuid.UUID
-	SrcUserID     *uuid.UUID
-	SrcSiteID     *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
-	SrcCIDR       *string    // S8.7: set iff SrcKind=="cidr" — a literal source CIDR (/32-precise grants)
-	DstKind       string     // resource | group | site (S8.1)
-	DstResourceID *uuid.UUID
-	DstGroupID    *uuid.UUID
-	DstSiteID     *uuid.UUID // S8.1: set iff DstKind=="site"
-	ExpiresAt     *time.Time // nil = permanent; set = temporary grant
+	SrcKind         string // "" | group | user | site (S8.2) | cidr (S8.7)
+	SrcGroupID      uuid.UUID
+	SrcUserID       *uuid.UUID
+	SrcSiteID       *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
+	SrcCIDR         *string    // S8.7: set iff SrcKind=="cidr" — a literal source CIDR (/32-precise grants)
+	DstKind         string     // resource | group | site (S8.1) | k8s_service (S10.3)
+	DstResourceID   *uuid.UUID
+	DstGroupID      *uuid.UUID
+	DstSiteID       *uuid.UUID // S8.1: set iff DstKind=="site"
+	DstK8sServiceID *uuid.UUID // S10.3: set iff DstKind=="k8s_service"
+	ExpiresAt       *time.Time // nil = permanent; set = temporary grant
 }
 
 // AffectedDevice is a full-tunnel device whose internet egress becomes policy-

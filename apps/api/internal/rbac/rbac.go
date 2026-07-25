@@ -49,6 +49,12 @@ const (
 	// approval is an admin checkpoint). Named per feature (site governance is its own axis).
 	// Owner/admin grain (site routing + advertisement approval are network-shaping powers).
 	PermSiteManage Permission = "site:manage"
+	// PermK8sManage governs KUBERNETES cluster registration + Service exposure (S10.3, EPIC 10): the
+	// CONNECTIVITY layer — registering a cluster's synthetic VIP range and exposing an in-cluster Service
+	// to the fabric. Named per feature (K8s connectivity is its own axis; NOT a site/policy reuse).
+	// CORE (all editions, like site:manage) — GOVERNANCE of a grant reaching a Service is the separate
+	// enterprise gate. Owner/admin grain (VIP-range + exposure are network-shaping powers).
+	PermK8sManage Permission = "k8s:manage"
 )
 
 // Roles.
@@ -84,6 +90,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,
+		PermK8sManage:          true,
 	},
 	RoleOwner: {
 		PermOrgView:       true,
@@ -98,6 +105,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,
+		PermK8sManage:          true,
 	},
 }
 

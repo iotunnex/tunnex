@@ -34,6 +34,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
+	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
@@ -210,6 +211,7 @@ func main() {
 	deviceSvc.SetApprovalEnforced(apphttp.NewDeviceApprovalEdition())
 	deviceSvc.SetDialResolver(nodeSvc.NodeDial) // WF-A D-WFA-6: a new device's config dials the active hub
 	siteSvc := sites.NewService(pool)
+	k8sSvc := k8s.NewService(pool)
 	// S9.1 Part-2: the static-export enrichment source — the org's approved routed ranges (the SAME one
 	// truth the Tunnex client polls, sites.ListRoutedRanges) + whether it has cross-site DNS forwarding.
 	deviceSvc.SetExportEnrich(func(ctx context.Context, orgID uuid.UUID) ([]string, bool, error) {
@@ -263,6 +265,7 @@ func main() {
 		Devices:               deviceSvc,
 		Ovpn:                  ovpnSvc,
 		Sites:                 siteSvc,
+		K8s:                   k8sSvc,
 		Sessions:              sessions,
 		Mfa:                   mfaSvc,
 		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),

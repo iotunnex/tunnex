@@ -37,29 +37,31 @@ func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) 
 }
 
 const createPolicyRule = `-- name: CreatePolicyRule :one
-INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id
 `
 
 type CreatePolicyRuleParams struct {
-	OrgID         uuid.UUID          `json:"org_id"`
-	SrcKind       string             `json:"src_kind"`
-	SrcGroupID    pgtype.UUID        `json:"src_group_id"`
-	SrcUserID     pgtype.UUID        `json:"src_user_id"`
-	SrcSiteID     pgtype.UUID        `json:"src_site_id"`
-	SrcCidr       *string            `json:"src_cidr"`
-	DstKind       string             `json:"dst_kind"`
-	DstResourceID pgtype.UUID        `json:"dst_resource_id"`
-	DstGroupID    pgtype.UUID        `json:"dst_group_id"`
-	DstSiteID     pgtype.UUID        `json:"dst_site_id"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	OrgID           uuid.UUID          `json:"org_id"`
+	SrcKind         string             `json:"src_kind"`
+	SrcGroupID      pgtype.UUID        `json:"src_group_id"`
+	SrcUserID       pgtype.UUID        `json:"src_user_id"`
+	SrcSiteID       pgtype.UUID        `json:"src_site_id"`
+	SrcCidr         *string            `json:"src_cidr"`
+	DstKind         string             `json:"dst_kind"`
+	DstResourceID   pgtype.UUID        `json:"dst_resource_id"`
+	DstGroupID      pgtype.UUID        `json:"dst_group_id"`
+	DstSiteID       pgtype.UUID        `json:"dst_site_id"`
+	DstK8sServiceID pgtype.UUID        `json:"dst_k8s_service_id"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 }
 
 // ── policy_rules (allow grants) ─────────────────────────────────────────────────
 // S7.5.4: src_kind ∈ {group,user}; S8.2: +site; S8.7: +cidr (exactly one of src_group_id/src_user_id/
 // src_site_id/src_cidr, CHECK-enforced). expires_at NULL = permanent, set = a temporary grant. S8.1: dst_kind
-// ∈ {resource,group,site} (exactly one of dst_resource_id/dst_group_id/dst_site_id, CHECK-enforced).
+// ∈ {resource,group,site}; S10.3: +k8s_service (exactly one of dst_resource_id/dst_group_id/dst_site_id/
+// dst_k8s_service_id, CHECK-enforced).
 func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error) {
 	row := q.db.QueryRow(ctx, createPolicyRule,
 		arg.OrgID,
@@ -72,6 +74,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		arg.DstResourceID,
 		arg.DstGroupID,
 		arg.DstSiteID,
+		arg.DstK8sServiceID,
 		arg.ExpiresAt,
 	)
 	var i PolicyRule

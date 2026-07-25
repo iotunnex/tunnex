@@ -257,9 +257,13 @@ func (s apiServer) ListPolicyRules(ctx context.Context, req api.ListPolicyRulesR
 	if err != nil {
 		return nil, err
 	}
+	vanished, err := s.k8sVanishedMap(ctx, req.OrgId, rs) // S10.3 read-time vanished-Service warn
+	if err != nil {
+		return nil, err
+	}
 	out := make([]api.PolicyRule, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, toAPIRule(r, warn[r.ID]))
+		out = append(out, toAPIRule(r, warn[r.ID], vanished[r.ID]))
 	}
 	return api.ListPolicyRules200JSONResponse{Body: out, Headers: api.ListPolicyRules200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
@@ -275,14 +279,15 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	in := policyspec.RuleInput{
-		SrcUserID:     req.Body.SrcUserId,
-		SrcSiteID:     req.Body.SrcSiteId, // S8.2: src_kind=site
-		SrcCIDR:       req.Body.SrcCidr,   // S8.7: src_kind=cidr
-		DstKind:       string(req.Body.DstKind),
-		DstResourceID: req.Body.DstResourceId,
-		DstGroupID:    req.Body.DstGroupId,
-		DstSiteID:     req.Body.DstSiteId, // S8.1: dst_kind=site
-		ExpiresAt:     req.Body.ExpiresAt,
+		SrcUserID:       req.Body.SrcUserId,
+		SrcSiteID:       req.Body.SrcSiteId, // S8.2: src_kind=site
+		SrcCIDR:         req.Body.SrcCidr,   // S8.7: src_kind=cidr
+		DstKind:         string(req.Body.DstKind),
+		DstResourceID:   req.Body.DstResourceId,
+		DstGroupID:      req.Body.DstGroupId,
+		DstSiteID:       req.Body.DstSiteId,       // S8.1: dst_kind=site
+		DstK8sServiceID: req.Body.DstK8sServiceId, // S10.3: dst_kind=k8s_service
+		ExpiresAt:       req.Body.ExpiresAt,
 	}
 	if req.Body.SrcKind != nil {
 		in.SrcKind = string(*req.Body.SrcKind)
@@ -298,7 +303,11 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if err != nil {
 		return nil, err
 	}
-	return api.CreatePolicyRule201JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.CreatePolicyRule201ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+	van, err := s.k8sVanishedMap(ctx, req.OrgId, []sqlc.PolicyRule{r})
+	if err != nil {
+		return nil, err
+	}
+	return api.CreatePolicyRule201JSONResponse{Body: toAPIRule(r, warn[r.ID], van[r.ID]), Headers: api.CreatePolicyRule201ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 func (s apiServer) DeletePolicyRule(ctx context.Context, req api.DeletePolicyRuleRequestObject) (api.DeletePolicyRuleResponseObject, error) {
@@ -333,7 +342,11 @@ func (s apiServer) ExtendGrant(ctx context.Context, req api.ExtendGrantRequestOb
 	if err != nil {
 		return nil, err
 	}
-	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+	van, err := s.k8sVanishedMap(ctx, req.OrgId, []sqlc.PolicyRule{r})
+	if err != nil {
+		return nil, err
+	}
+	return api.ExtendGrant200JSONResponse{Body: toAPIRule(r, warn[r.ID], van[r.ID]), Headers: api.ExtendGrant200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 // SetPolicyRuleEnabled (F3) — enable/disable a rule without deleting it. policy:manage, enterprise-gated;
@@ -356,7 +369,11 @@ func (s apiServer) SetPolicyRuleEnabled(ctx context.Context, req api.SetPolicyRu
 	if err != nil {
 		return nil, err
 	}
-	return api.SetPolicyRuleEnabled200JSONResponse{Body: toAPIRule(r, warn[r.ID]), Headers: api.SetPolicyRuleEnabled200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+	van, err := s.k8sVanishedMap(ctx, req.OrgId, []sqlc.PolicyRule{r})
+	if err != nil {
+		return nil, err
+	}
+	return api.SetPolicyRuleEnabled200JSONResponse{Body: toAPIRule(r, warn[r.ID], van[r.ID]), Headers: api.SetPolicyRuleEnabled200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
 // ── enforcement mode ──────────────────────────────────────────────────────────
@@ -433,12 +450,40 @@ func toAPIResource(r sqlc.Resource) api.Resource {
 	return out
 }
 
-func toAPIRule(r sqlc.PolicyRule, cidrOutside bool) api.PolicyRule {
+// k8sVanishedMap returns which of the given rules point at a now-absent (unexposed / cluster-deregistered)
+// K8s Service — the read-time vanished-Service warn (S10.3 warn-not-refuse). A rule with a live dst, or a
+// non-k8s_service dst, is absent from the map (false). Skips the DB read entirely when no rule is k8s-dst.
+func (s apiServer) k8sVanishedMap(ctx context.Context, orgID uuid.UUID, rules []sqlc.PolicyRule) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	any := false
+	for _, r := range rules {
+		if r.DstKind == "k8s_service" {
+			any = true
+			break
+		}
+	}
+	if !any || s.k8s == nil {
+		return out, nil
+	}
+	live, err := s.k8s.LiveServiceIDs(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rules {
+		if r.DstKind == "k8s_service" && r.DstK8sServiceID.Valid && !live[uuid.UUID(r.DstK8sServiceID.Bytes)] {
+			out[r.ID] = true
+		}
+	}
+	return out, nil
+}
+
+func toAPIRule(r sqlc.PolicyRule, cidrOutside, k8sVanished bool) api.PolicyRule {
 	out := api.PolicyRule{
 		Id: r.ID, OrgId: r.OrgID, SrcKind: api.PolicyRuleSrcKind(r.SrcKind),
 		DstKind: api.PolicyRuleDstKind(r.DstKind), CreatedAt: r.CreatedAt,
-		CidrOutsideOrgRanges: cidrOutside,  // S8.7 warn-not-refuse (D1); always false for non-cidr sources
-		Enabled:              !r.Disabled, // F3: positive framing — a rule is enabled unless disabled
+		CidrOutsideOrgRanges:  cidrOutside, // S8.7 warn-not-refuse (D1); always false for non-cidr sources
+		DstK8sServiceVanished: k8sVanished, // S10.3 warn-not-refuse; the dst Service is gone (grant compiles to nothing)
+		Enabled:               !r.Disabled, // F3: positive framing — a rule is enabled unless disabled
 	}
 	if r.SrcGroupID.Valid {
 		u := uuid.UUID(r.SrcGroupID.Bytes)
@@ -466,6 +511,10 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside bool) api.PolicyRule {
 	if r.DstSiteID.Valid { // S8.1 (response mapping completed in S8.2): dst_kind=site
 		u := uuid.UUID(r.DstSiteID.Bytes)
 		out.DstSiteId = &u
+	}
+	if r.DstK8sServiceID.Valid { // S10.3: dst_kind=k8s_service
+		u := uuid.UUID(r.DstK8sServiceID.Bytes)
+		out.DstK8sServiceId = &u
 	}
 	if r.ExpiresAt.Valid {
 		t := r.ExpiresAt.Time

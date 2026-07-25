@@ -1652,6 +1652,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/k8s/clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List the org's Kubernetes clusters (S10.3; org:view) */
+        get: operations["listK8sClusters"];
+        put?: never;
+        /**
+         * Register a Kubernetes cluster + its synthetic VIP range (S10.3; k8s:manage)
+         * @description Registers a cluster fronted by a site gateway. The VIP range must be DISJOINT from the device pool, every site subnet, and other clusters' VIP ranges (409 vip_range_overlap). The name is a DNS label and dns_zone a domain — together they form each exposed Service's hostname &lt;service&gt;.&lt;namespace&gt;.svc.&lt;name&gt;.&lt;zone&gt;. A DNS VIP is reserved from the range automatically (never handed to a Service).
+         */
+        post: operations["registerK8sCluster"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/k8s/clusters/{clusterId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deregister a cluster — full-sweep of its Services + rules (S10.3; k8s:manage)
+         * @description Removes the cluster; ON DELETE CASCADE removes its exposed Services and any policy rule reaching one, and frees the whole VIP range (incl the reserved DNS VIP) + the DNS zone for reuse.
+         */
+        delete: operations["deregisterK8sCluster"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/k8s/clusters/{clusterId}/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** List a cluster's exposed Services (S10.3; org:view) */
+        get: operations["listK8sServices"];
+        put?: never;
+        /**
+         * Expose an in-cluster Service to the fabric — allocates a VIP (S10.3; k8s:manage)
+         * @description Allocates a /32 VIP from the cluster's range and records the Service (a stable identity). Clients reach the VIP; the gateway DNATs it to the Service's real ClusterIP. 409 vip_range_exhausted when the range is full, 409 service_exists when that namespace/name is already exposed.
+         */
+        post: operations["exposeK8sService"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/k8s/services/{serviceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unexpose a Service — full-sweep withdraws its VIP + DNS answer (S10.3; k8s:manage)
+         * @description Soft-deletes the Service; it vanishes from the LIVE resolution so its VIP + DNS answer drop from every gateway on the next compile, and any grant that reached it compiles to nothing (shown as vanished). The freed VIP is immediately reusable.
+         */
+        delete: operations["unexposeK8sService"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/site-subnets/pending": {
         parameters: {
             query?: never;
@@ -1865,13 +1958,19 @@ export interface components {
             src_cidr?: string | null;
             cidr_outside_org_ranges: boolean;
             /** @enum {string} */
-            dst_kind: "resource" | "group" | "site";
+            dst_kind: "resource" | "group" | "site" | "k8s_service";
             /** Format: uuid */
             dst_resource_id?: string | null;
             /** Format: uuid */
             dst_group_id?: string | null;
             /** Format: uuid */
             dst_site_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Set when dst_kind=k8s_service (S10.3): the exposed Service the grant reaches; the compiler resolves it to the Service's CURRENT VIP.
+             */
+            dst_k8s_service_id?: string | null;
+            dst_k8s_service_vanished: boolean;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: date-time */
@@ -1898,7 +1997,7 @@ export interface components {
             /** @description Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse). */
             src_cidr?: string | null;
             /** @enum {string} */
-            dst_kind: "resource" | "group" | "site";
+            dst_kind: "resource" | "group" | "site" | "k8s_service";
             /**
              * Format: uuid
              * @description Required when dst_kind=resource.
@@ -1914,6 +2013,11 @@ export interface components {
              * @description Required when dst_kind=site (S8.1); the compiler resolves it to the site's approved subnet CIDRs.
              */
             dst_site_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Required when dst_kind=k8s_service (S10.3); the compiler resolves it to the exposed Service's CURRENT VIP.
+             */
+            dst_k8s_service_id?: string | null;
             /**
              * Format: date-time
              * @description Set = a temporary grant that expires at this time (must be future); omit for a permanent grant.
@@ -1938,6 +2042,73 @@ export interface components {
             domain: string;
             /** @description The site's internal resolver — must be inside one of the site's approved subnets (S8.4). */
             resolver_ip: string;
+        };
+        K8sCluster: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The site whose gateway fronts this cluster.
+             */
+            site_id: string;
+            /** @description A DNS label; a hostname component of every exposed Service. */
+            name: string;
+            /** @description The cluster's synthetic VIP range (CIDR), disjoint from all other org ranges. */
+            vip_range: string;
+            /** @description The cluster's real Kubernetes Service CIDR (where ClusterIPs live). */
+            service_cidr: string;
+            /** @description The customer's DNS zone suffix for exposed-Service hostnames. */
+            dns_zone: string;
+            /** @description The reserved DNS VIP (the gateway answers DNS here); never handed to a Service. */
+            dns_vip?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        K8sService: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            name: string;
+            namespace: string;
+            /** @enum {string} */
+            protocol: "tcp" | "udp" | "any";
+            port_low?: number | null;
+            port_high?: number | null;
+            /** @description The synthetic /32 clients reach; DNAT'd to the ClusterIP at the gateway. */
+            vip: string;
+            /** @description The in-tunnel hostname clients use: <service>.<namespace>.svc.<cluster>.<zone> (copy, don't construct). */
+            fqdn: string;
+        };
+        RegisterK8sClusterRequest: {
+            /**
+             * Format: uuid
+             * @description The site gateway that fronts this cluster (one gateway = one site).
+             */
+            site_id: string;
+            /** @description A DNS label (lowercase a-z0-9 + hyphens). */
+            name: string;
+            /** @description The synthetic VIP range (CIDR), disjoint from pool/sites/other clusters. */
+            vip_range: string;
+            /** @description The cluster's Kubernetes Service CIDR (e.g. 10.96.0.0/12). */
+            service_cidr: string;
+            /** @description The customer's DNS zone (e.g. k8s.acme.com); need not be publicly registered. */
+            dns_zone: string;
+        };
+        ExposeK8sServiceRequest: {
+            /** @description The Kubernetes Service name. */
+            name: string;
+            /** @description The Service's namespace. */
+            namespace: string;
+            /**
+             * @description Protocol scope; omit for any.
+             * @enum {string}
+             */
+            protocol?: "tcp" | "udp" | "any";
+            /** @description Low port of the exposed range; omit for all ports. */
+            port_low?: number | null;
+            /** @description High port; omit for a single port or all. */
+            port_high?: number | null;
         };
         RoutedRanges: {
             /** @description Approved site-subnet CIDRs (canonical masked form, sorted) pushed to split-tunnel device AllowedIPs (S8.5). Ranges only — no identity material. Empty when none declared. */
@@ -5251,6 +5422,156 @@ export interface operations {
         };
         responses: {
             /** @description Unbound. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listK8sClusters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Clusters. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sCluster"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    registerK8sCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterK8sClusterRequest"];
+            };
+        };
+        responses: {
+            /** @description Registered. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sCluster"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deregisterK8sCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deregistered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listK8sServices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cluster's exposed Services. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sService"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    exposeK8sService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExposeK8sServiceRequest"];
+            };
+        };
+        responses: {
+            /** @description Exposed. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sService"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    unexposeK8sService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unexposed. */
             204: {
                 headers: {
                     [name: string]: unknown;

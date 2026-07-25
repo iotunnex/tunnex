@@ -356,11 +356,15 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=group requires dst_group_id (and no dst_resource_id/dst_site_id)")
 		}
 	case "site":
-		if in.DstSiteID == nil || in.DstResourceID != nil || in.DstGroupID != nil {
-			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=site requires dst_site_id (and no dst_resource_id/dst_group_id)")
+		if in.DstSiteID == nil || in.DstResourceID != nil || in.DstGroupID != nil || in.DstK8sServiceID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=site requires dst_site_id (and no dst_resource_id/dst_group_id/dst_k8s_service_id)")
+		}
+	case "k8s_service": // S10.3: a grant reaching an exposed K8s Service (governance is enterprise)
+		if in.DstK8sServiceID == nil || in.DstResourceID != nil || in.DstGroupID != nil || in.DstSiteID != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind=k8s_service requires dst_k8s_service_id (and no dst_resource_id/dst_group_id/dst_site_id)")
 		}
 	default:
-		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource, group, or site")
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource, group, site, or k8s_service")
 	}
 	// A temporary grant must expire in the FUTURE (a past expiry is a no-op grant —
 	// reject it rather than silently create a rule that never compiles).
@@ -422,12 +426,22 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 				return e
 			}
 		}
+		if in.DstK8sServiceID != nil { // S10.3: the dst Service must exist in THIS org and be LIVE (not
+			// unexposed). A vanished Service is a creation-time refusal here; an EXISTING rule whose Service
+			// later vanishes is the read-time warn surface (warn-not-refuse), not this gate.
+			if _, e := q.GetK8sService(ctx, sqlc.GetK8sServiceParams{ID: *in.DstK8sServiceID, OrgID: orgID}); e != nil {
+				if errors.Is(e, pgx.ErrNoRows) {
+					return apierr.BadRequest("k8s_service_not_found", "dst Kubernetes Service not found or no longer exposed")
+				}
+				return e
+			}
+		}
 		var e error
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
 			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
 			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
-			DstSiteID: toPgUUID(in.DstSiteID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
+			DstSiteID: toPgUUID(in.DstSiteID), DstK8sServiceID: toPgUUID(in.DstK8sServiceID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 		})
 		if e != nil {
 			return conflictIfDup(e, "an identical rule already exists")

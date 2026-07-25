@@ -192,6 +192,77 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 	return out, err
 }
 
+// FQDN is the in-tunnel hostname for an exposed Service: <service>.<namespace>.svc.<cluster>.<zone>
+// (S10.3 (B2), always-explicit). The ONE place the name is constructed — the compiler's loadSiteTopology
+// builds the identical string; keep them in agreement.
+func FQDN(service, namespace, cluster, zone string) string {
+	return service + "." + namespace + ".svc." + cluster + "." + zone
+}
+
+// ServiceView is an exposed Service joined with its cluster's naming (the resolvable FQDN), for the read APIs.
+type ServiceView struct {
+	Svc     sqlc.K8sService
+	FQDN    string
+	Cluster string
+	Zone    string
+}
+
+// GetCluster returns one cluster (org-scoped) — the read for building a Service's FQDN + the config UI.
+func (s *Service) GetCluster(ctx context.Context, orgID, clusterID uuid.UUID) (sqlc.K8sCluster, error) {
+	c, err := s.q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID})
+	if err != nil {
+		return sqlc.K8sCluster{}, apierr.NotFound("cluster_not_found", "no such cluster in this organization")
+	}
+	return c, nil
+}
+
+// LiveServiceIDs returns the set of LIVE (not unexposed) Service IDs in the org — the read-time input for
+// the vanished-Service warn (a grant whose dst Service is absent from this set compiles to nothing, S10.3).
+func (s *Service) LiveServiceIDs(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
+	rows, err := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]bool, len(rows))
+	for _, r := range rows {
+		out[r.ID] = true
+	}
+	return out, nil
+}
+
+// ListClusters returns the org's clusters (config UI + list API).
+func (s *Service) ListClusters(ctx context.Context, orgID uuid.UUID) ([]sqlc.K8sCluster, error) {
+	return s.q.ListK8sClustersForOrg(ctx, orgID)
+}
+
+// ListServicesForCluster returns a cluster's LIVE exposed Services with their resolvable FQDNs. It filters
+// the org-wide LIVE resolution (which already carries the cluster name + zone) to the one cluster.
+func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]ServiceView, error) {
+	if _, err := s.GetCluster(ctx, orgID, clusterID); err != nil {
+		return nil, err
+	}
+	rows, err := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	var out []ServiceView
+	for _, r := range rows {
+		if r.ClusterID != clusterID {
+			continue
+		}
+		vip, _ := netip.ParseAddr(r.Vip)
+		out = append(out, ServiceView{
+			Svc: sqlc.K8sService{
+				ID: r.ID, ClusterID: r.ClusterID, OrgID: orgID, Name: r.Name, Namespace: r.Namespace,
+				Protocol: r.Protocol, PortLow: r.PortLow, PortHigh: r.PortHigh, Vip: vip,
+			},
+			FQDN:    FQDN(r.Name, r.Namespace, r.ClusterName, r.DnsZone),
+			Cluster: r.ClusterName, Zone: r.DnsZone,
+		})
+	}
+	return out, nil
+}
+
 // UnexposeService soft-deletes an exposed Service (S10.3 sweep). Full-sweep by construction: the LIVE-only
 // resolution (ListActiveK8sServicesForOrg) drops it on the next compile, so the VIP vanishes from every
 // gateway's VIP map AND its DNS answer, and any grant that referenced it compiles to nothing (the honest

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -332,6 +333,50 @@ func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
 	}
 	if srcGroupID != nil {
 		t.Fatalf("M6: a site-source audit must NOT record a src_group_id, got %q", *srcGroupID)
+	}
+}
+
+// TestK8sServiceRuleCreation — S10.3: a grant with dst_kind=k8s_service resolves against a LIVE exposed
+// Service (created); a bogus/absent Service is refused (k8s_service_not_found). The EXISTING rule whose
+// Service later vanishes is the read-time warn, not this creation gate.
+func TestK8sServiceRuleCreation(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org, site, cluster, svc, grp := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	ex := func(q string, a ...any) {
+		if _, e := pool.Exec(ctx, q, a...); e != nil {
+			t.Fatalf("seed %q: %v", q, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug) VALUES ($1,'K8s',$2)`, org, "k8s-"+org.String()[:8])
+	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org)
+	ex(`INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,dns_zone) VALUES ($1,$2,$3,'prod','100.64.0.0/16','k8s.acme.com')`, cluster, org, site)
+	ex(`INSERT INTO k8s_services (id,org_id,cluster_id,name,namespace,protocol,vip) VALUES ($1,$2,$3,'api','prod','tcp','100.64.0.5')`, svc, org, cluster)
+	ex(`INSERT INTO user_groups (id,org_id,name) VALUES ($1,$2,'admins')`, grp, org)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	s := policy.NewService(pool)
+	s.SetNotifier(&fakeNotifier{})
+	// A grant reaching the LIVE Service is accepted.
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &svc}); err != nil {
+		t.Fatalf("a k8s_service grant to a live Service must be accepted, got %v", err)
+	}
+	// A grant to an absent Service is refused with the typed error.
+	bogus := uuid.New()
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &bogus}); err == nil || !strings.Contains(err.Error(), "k8s_service_not_found") {
+		t.Fatalf("a k8s_service grant to an absent Service must refuse (k8s_service_not_found), got %v", err)
+	}
+	// dst_kind=k8s_service with NO dst_k8s_service_id is a shape error.
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service"}); err == nil || !strings.Contains(err.Error(), "dst_k8s_service_id") {
+		t.Fatalf("dst_kind=k8s_service without an id must refuse, got %v", err)
 	}
 }
 
