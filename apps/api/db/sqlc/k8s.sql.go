@@ -236,6 +236,37 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 	return items, nil
 }
 
+const listK8sClusterZonesForOrg = `-- name: ListK8sClusterZonesForOrg :many
+SELECT name, dns_zone FROM k8s_clusters WHERE org_id = $1
+`
+
+type ListK8sClusterZonesForOrgRow struct {
+	Name    string `json:"name"`
+	DnsZone string `json:"dns_zone"`
+}
+
+// ListK8sClusterZonesForOrg feeds cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
+// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa.
+func (q *Queries) ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sClusterZonesForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listK8sClusterZonesForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListK8sClusterZonesForOrgRow{}
+	for rows.Next() {
+		var i ListK8sClusterZonesForOrgRow
+		if err := rows.Scan(&i.Name, &i.DnsZone); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listK8sClustersForOrg = `-- name: ListK8sClustersForOrg :many
 SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip FROM k8s_clusters WHERE org_id = $1 ORDER BY name
 `

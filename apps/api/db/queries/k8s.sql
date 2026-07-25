@@ -20,6 +20,11 @@ DELETE FROM k8s_clusters WHERE org_id = $1 AND id = $2;
 -- name: ListVIPRangesForOrg :many
 SELECT vip_range::text AS vip_range FROM k8s_clusters WHERE org_id = $1;
 
+-- ListK8sClusterZonesForOrg feeds cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
+-- dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa.
+-- name: ListK8sClusterZonesForOrg :many
+SELECT name, dns_zone FROM k8s_clusters WHERE org_id = $1;
+
 -- name: CreateK8sService :one
 INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

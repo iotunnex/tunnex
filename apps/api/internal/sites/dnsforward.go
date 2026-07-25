@@ -76,6 +76,21 @@ func (s *Service) SetDNSForward(ctx context.Context, actor, orgID, siteID uuid.U
 		if DNSDomainConflict(others, domain) {
 			return apierr.Conflict("dns_domain_conflict", nd+" is already forwarded by another site; a domain forwards to one resolver")
 		}
+		// Cross-mechanism (S10.3 (A)): the forwarded domain must not collide with a K8s cluster's DNS zone
+		// (<cluster>.<dns_zone>) — one zone, one resolver, across BOTH the site-forward and cluster paths.
+		czones, e := q.ListK8sClusterZonesForOrg(ctx, orgID)
+		if e != nil {
+			return e
+		}
+		var k8sZones []string
+		for _, z := range czones {
+			if z.DnsZone != "" {
+				k8sZones = append(k8sZones, z.Name+"."+z.DnsZone)
+			}
+		}
+		if DNSDomainConflict(k8sZones, domain) {
+			return apierr.Conflict("dns_domain_conflict", nd+" collides with a Kubernetes cluster DNS zone; a domain resolves one way")
+		}
 		// Add or update on THIS site.
 		mine := decodeDNS(site.DnsForwarding)
 		found := false
@@ -178,6 +193,23 @@ func DNSDomainConflict(existing []string, candidate string) bool {
 		}
 	}
 	return false
+}
+
+// ForwardedDomainsForOrg returns every normalized forwarded domain across the org's sites (union). It is the
+// K8s cluster registrar's input for cross-mechanism one-zone-one-resolver (S10.3 (A)): a new cluster zone
+// must not collide with an already-forwarded domain. Takes a caller's tx Queries so it runs in the same tx.
+func ForwardedDomainsForOrg(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID) ([]string, error) {
+	all, err := q.ListSitesByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, s := range all {
+		for _, en := range decodeDNS(s.DnsForwarding) {
+			out = append(out, en.Domain)
+		}
+	}
+	return out, nil
 }
 
 // ListDNSForwards returns a site's forwarded zones (org-checked) for the config UI.

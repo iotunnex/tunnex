@@ -427,6 +427,37 @@ func TestDNSForwardCRUD(t *testing.T) {
 	}
 }
 
+// TestSetDNSForwardRejectsK8sZoneCollision — S10.3 (A) cross-mechanism one-zone-one-resolver: a site cannot
+// forward a domain that collides with a registered K8s cluster's DNS zone (<cluster>.<dns_zone>). The
+// resolver is inside an approved subnet so the check reached is the zone-collision one, not the subnet gate.
+func TestSetDNSForwardRejectsK8sZoneCollision(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, actor := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'S',$2,'10.99.0.0/24')`, org, "kz-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO users (id,email) VALUES ($1,$2)`, actor, "a-"+actor.String()[:8]+"@ex.com"); e != nil {
+		t.Fatalf("seed actor: %v", e)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, actor)
+	})
+	site, _ := svc.RegisterSite(ctx, org, "hq")
+	sub, _ := svc.AddSubnet(ctx, org, site.ID, netip.MustParsePrefix("10.20.0.0/24"))
+	_ = svc.ApproveSubnet(ctx, actor, org, sub.ID)
+	// A K8s cluster owns zone prod.k8s.acme.com.
+	if _, e := pool.Exec(ctx, `INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,dns_zone) VALUES ($1,$2,$3,'prod','100.64.0.0/16','k8s.acme.com')`, uuid.New(), org, site.ID); e != nil {
+		t.Fatalf("seed cluster: %v", e)
+	}
+	// Forwarding that exact zone (resolver IN the approved subnet, so it clears the subnet gate) → refused.
+	if err := svc.SetDNSForward(ctx, actor, org, site.ID, "prod.k8s.acme.com", "10.20.0.53"); err == nil || !strings.Contains(err.Error(), "dns_domain_conflict") {
+		t.Fatalf("forwarding a domain that collides with a K8s cluster zone must refuse, got %v", err)
+	}
+}
+
 // TestRemoveSubnet — WF-5: a mis-advertised subnet is removable without deleting the whole site; the
 // removal is audited, and it is org-scoped (a foreign org can't remove it).
 func TestRemoveSubnet(t *testing.T) {

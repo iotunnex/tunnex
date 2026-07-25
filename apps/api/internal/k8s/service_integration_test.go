@@ -83,6 +83,24 @@ func TestRegisterClusterRejectsBadName(t *testing.T) {
 	}
 }
 
+// TestRegisterClusterRejectsZoneCollidingForwardedDomain — S10.3 (A) cross-mechanism one-zone-one-resolver:
+// a cluster whose DNS zone <cluster>.<dns_zone> collides with a domain already forwarded by a site is refused
+// (the mirror of the check in sites.SetDNSForward).
+func TestRegisterClusterRejectsZoneCollidingForwardedDomain(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+	// The site already forwards prod.k8s.acme.com.
+	if _, e := pool.Exec(ctx, `UPDATE sites SET dns_forwarding=$2 WHERE id=$1`, site, `[{"domain":"prod.k8s.acme.com","resolver_ip":"10.20.0.53"}]`); e != nil {
+		t.Fatal(e)
+	}
+	// Registering cluster "prod" in zone "k8s.acme.com" would claim that exact zone → refused.
+	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "dns_domain_conflict") {
+		t.Fatalf("a cluster zone colliding with a forwarded domain must refuse, got %v", err)
+	}
+}
+
 // TestRegisterClusterReservesDNSVIP: the DNS VIP is the range's first allocatable (.2), reserved at
 // registration so a Service can NEVER be handed it (the gateway answers DNS on it). A range too small to
 // fit the DNS VIP PLUS one Service VIP is refused honestly.

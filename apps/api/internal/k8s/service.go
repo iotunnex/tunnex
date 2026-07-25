@@ -21,6 +21,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
+	"github.com/tunnexio/tunnex/apps/api/internal/sites"
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetsrc"
 )
@@ -82,6 +83,15 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 		// The cluster must be fronted by a real site in THIS org (one gateway = one site, D1).
 		if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: siteID, OrgID: orgID}); e != nil {
 			return apierr.NotFound("site_not_found", "no such site in this organization")
+		}
+		// Cross-mechanism one-zone-one-resolver (S10.3 (A)): the cluster's DNS zone <cluster>.<dns_zone> must
+		// not collide with a domain already forwarded by a site (the mirror of the check in sites.SetDNSForward).
+		fwd, e := sites.ForwardedDomainsForOrg(ctx, q, orgID)
+		if e != nil {
+			return e
+		}
+		if sites.DNSDomainConflict(fwd, name+"."+dnsZone) {
+			return apierr.Conflict("dns_domain_conflict", name+"."+dnsZone+" collides with a domain already forwarded by a site; a domain resolves one way")
 		}
 		ranges, e := subnetguard.Collect(ctx, subnetsrc.Source{Q: q}, orgID)
 		if e != nil {

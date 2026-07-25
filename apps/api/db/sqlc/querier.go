@@ -471,6 +471,9 @@ type Querier interface {
 	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.
 	ListIdpSyncGroups(ctx context.Context, arg ListIdpSyncGroupsParams) ([]ListIdpSyncGroupsRow, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
+	// ListK8sClusterZonesForOrg feeds cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
+	// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa.
+	ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sClusterZonesForOrgRow, error)
 	ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
