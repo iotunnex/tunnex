@@ -1,10 +1,45 @@
 package policyspec_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 )
+
+// S10.3 v7: a VIP map triggers RequiredVersion=7 (an old agent has no DNAT/DNS-rewrite render — dead-while-
+// green — so it must REFUSE), but the map is HASH-BLIND (out of the enforcement projection), so a re-
+// allocated VIP never churns the policy hash. And WITHOUT a map, RequiredVersion is NOT bumped.
+func TestRequiredVersionVIPTriggerV7AndHashBlind(t *testing.T) {
+	base := policyspec.Compiled{Version: 4, NodeID: "n", Mode: "enforcing", Mesh: false}
+	withVIP := base
+	withVIP.Version = 7
+	withVIP.VIPMappings = []policyspec.VIPMapping{{VIP: "100.64.0.5", Namespace: "prod", Service: "api"}}
+	if v := policyspec.RequiredVersion(withVIP); v != 7 {
+		t.Fatalf("a VIP map must trigger RequiredVersion=7, got %d", v)
+	}
+	if v := policyspec.RequiredVersion(base); v == 7 {
+		t.Fatalf("no VIP map must NOT trigger v7 (zero-config golden), got %d", v)
+	}
+	other := withVIP
+	other.VIPMappings = []policyspec.VIPMapping{{VIP: "100.64.0.9", Namespace: "prod", Service: "web"}}
+	if policyspec.CanonicalHash(withVIP) != policyspec.CanonicalHash(other) {
+		t.Fatal("the VIP map must be OUT of the hash — its contents changed the policy hash")
+	}
+}
+
+// The zero-config golden's serialization half: a non-cluster gateway's artifact omits vip_mappings entirely
+// (omitempty), so an empty map never serializes as {} / [] and its bytes are unchanged by S10.3.
+func TestVIPMapOmitemptyElidesForNonCluster(t *testing.T) {
+	b, err := json.Marshal(policyspec.Compiled{Version: 4, NodeID: "n", Mode: "enforcing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "vip_mappings") {
+		t.Fatalf("a non-cluster artifact must not serialize vip_mappings (golden broken): %s", b)
+	}
+}
 
 // CROSS-MODULE GOLDEN: apps/node/internal/nodepolicy has the IDENTICAL fixtures and
 // expected hex (its own golden test). apps/api and apps/node are separate modules, so

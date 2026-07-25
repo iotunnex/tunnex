@@ -593,6 +593,29 @@ func TestInterlockV4AgentRefusesV5(t *testing.T) {
 	}
 }
 
+// S10.3 v7 interlock (F3 condition 2a): an agent pinned at the pre-S10.3 max (6) REFUSES a v7 artifact
+// carrying a VIP map, keeping DENY-ALL (fail-static) rather than mis-serving an exposed Service it has no
+// DNAT/DNS-rewrite render for. The CP surfacing half (unsupported_ver) is the agent-reported RefusedVersion
+// flowing to policyhealth's KindUnsupportedPolicyVersion — version-agnostic, so v7 rides the existing path.
+func TestInterlockV6AgentRefusesV7VIPMap(t *testing.T) {
+	const preK8sMax = 6
+	if nodepolicy.MaxSupportedVersion <= preK8sMax {
+		t.Fatalf("NON-BUMP: S10.3 must bump MaxSupportedVersion above %d (got %d)", preK8sMax, nodepolicy.MaxSupportedVersion)
+	}
+	m := New("wg0")
+	m.maxPolicyVersion = preK8sMax // pin the pre-S10.3 gated agent
+	m.SetPolicy(&nodepolicy.Compiled{
+		Version: 7, Mode: "enforcing", Mesh: false,
+		VIPMappings: []nodepolicy.VIPMapping{{VIP: "100.64.0.5", Namespace: "prod", Service: "api"}},
+	})
+	if m.RefusedVersion() != 7 {
+		t.Fatalf("a v6-max agent must REFUSE a v7 VIP-map artifact; RefusedVersion=%d", m.RefusedVersion())
+	}
+	if rs := m.ruleset("10.99.0.1/24"); strings.Contains(rs, "ip daddr") {
+		t.Fatal("a refused v7 artifact must render DENY-ALL (fail-static, no accepts)")
+	}
+}
+
 // Finding #1: a half-set / inverted port range fails CLOSED (rule skipped), never
 // widening to all-ports.
 func TestRenderAllowHalfSetPortRangeFailsClosed(t *testing.T) {

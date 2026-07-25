@@ -31,7 +31,9 @@ const (
 // v6 (A3b, S8.6): this agent renders PoolCIDR (the device pool's relaxed DOCKER-USER accepts), so it
 // applies v6; an agent still at 5 refuses a pool-carrying artifact rather than silently stranding
 // device transit on Docker hosts (the D1 interlock again).
-const MaxSupportedVersion = 6
+// v7 (S10.3): this agent renders the VIP map (VIP->ClusterIP DNAT + DNS-rewrite), so it applies v7; an
+// agent still at 6 refuses a VIP-map-carrying artifact rather than leaving the exposed Service dead-while-green.
+const MaxSupportedVersion = 7
 
 // AllowEntry is one compiled default-deny grant: SrcIP (a device /32 host) may reach
 // DstCIDR on Protocol within [PortLow,PortHigh]. PortLow==0 means all ports.
@@ -83,6 +85,21 @@ type Compiled struct {
 	// (D-transit-3, uniform). Out-of-hash PLUMBING; presence triggers RequiredVersion=6 CP-side. Mirror
 	// of policyspec.Compiled.PoolCIDR (field order + tag must match — hash is marshal-order-sensitive).
 	PoolCIDR string `json:"pool_cidr,omitempty"`
+	// VIPMappings (v7, S10.3) — this gateway's exposed-Service table; the agent DNATs each VIP -> the
+	// Service's ClusterIP and rewrites its DNS answer to the VIP. Out-of-hash PLUMBING; presence triggers
+	// RequiredVersion=7 CP-side. Mirror of policyspec.Compiled.VIPMappings (field order + tags must match).
+	VIPMappings []VIPMapping `json:"vip_mappings,omitempty"`
+}
+
+// VIPMapping mirrors policyspec.VIPMapping — one exposed K8s Service (VIP -> Service identity the agent
+// DNATs + DNS-rewrites). Fields/tags match the CP shape exactly (marshal parity).
+type VIPMapping struct {
+	VIP       string `json:"vip"`
+	Namespace string `json:"namespace"`
+	Service   string `json:"service"`
+	Protocol  string `json:"protocol,omitempty"`
+	PortLow   int    `json:"port_low,omitempty"`
+	PortHigh  int    `json:"port_high,omitempty"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site

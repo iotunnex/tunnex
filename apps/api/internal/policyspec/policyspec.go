@@ -90,7 +90,12 @@ type AffectedDevice struct {
 // adjudicates, D-transit-3 applied uniformly). An old agent would silently ignore the field and leave
 // device traffic structurally dropped on Docker hosts while reporting green — the Routes precedent —
 // so PoolCIDR presence triggers RequiredVersion=6 and an old gated agent refuses loudly (D1).
-const ProtocolVersion = 6
+// v7 (S10.3): the artifact carries a VIP MAP (exposed K8s Service VIP -> Service identity). An old agent
+// has no DNAT/DNS-rewrite render for it, so it would leave the exposed Service unreachable while reporting
+// green (the PoolCIDR/Routes dead-while-green class) — so a non-empty VIP map triggers RequiredVersion=7
+// and an old gated agent refuses loudly rather than mis-serving. Content-derived: an org with NO cluster
+// emits no map, requires no bump, and its agents never see v7 (the zero-config golden).
+const ProtocolVersion = 7
 
 // RequiredVersion is the MINIMUM agent version required to correctly render this artifact (S8.2 D1b,
 // content-derived version). It returns the OLDEST protocol version whose shape fully covers the
@@ -109,6 +114,11 @@ const ProtocolVersion = 6
 // leaves this function untouched is a silent-accept bug — the artifact would carry new content at an old
 // version and old agents would accept it. The D2 checklist asks "RequiredVersion updated? y/n".
 func RequiredVersion(c Compiled) int {
+	//	v7 trigger (S10.3): a non-empty VIP map — an old agent has no VIP->ClusterIP DNAT / DNS-rewrite
+	//	render, so it would leave the exposed K8s Service unreachable while green (dead-while-green). REFUSE.
+	if len(c.VIPMappings) > 0 {
+		return 7
+	}
 	//	v6 trigger (A3b, S8.6): a non-empty PoolCIDR — an old agent has no pool-class DOCKER-USER
 	//	render, so it would silently leave device transit structurally dropped on Docker hosts
 	//	(dead-while-green, the Routes class). It must REFUSE the whole artifact.
@@ -224,6 +234,25 @@ type Compiled struct {
 	// with the site-gateway artifact (finalizeArtifact, the ONE source); non-site gateways keep Docker-
 	// dark device↔device — REGISTERED PD-3 residual, trigger = first non-site device↔device walk.
 	PoolCIDR string `json:"pool_cidr,omitempty"`
+	// VIPMappings (v7, S10.3) is this gateway's exposed-Service table: each synthetic VIP -> the Service
+	// identity (namespace + name) the agent DNATs it to (VIP -> ClusterIP, resolved in-cluster) and rewrites
+	// DNS answers to. Reachability PLUMBING, so OUT of CanonicalHash (projectForHash omits it — changing the
+	// map's CONTENTS at the same version never churns the policy hash); but PRESENCE triggers
+	// RequiredVersion=7 (an old agent with no DNAT/DNS-rewrite would leave the Service dead-while-green, so it
+	// must REFUSE — the PoolCIDR precedent). omitempty so a non-cluster gateway's artifact is byte-identical.
+	VIPMappings []VIPMapping `json:"vip_mappings,omitempty"`
+}
+
+// VIPMapping is one exposed K8s Service: clients reach VIP (a /32 in the cluster's synthetic range); the
+// gateway DNATs it to the Service's real ClusterIP (resolved from <Service>.<Namespace> in-cluster) and
+// rewrites the Service's DNS A-answer to VIP. Protocol/ports scope the exposure (empty = any).
+type VIPMapping struct {
+	VIP       string `json:"vip"`
+	Namespace string `json:"namespace"`
+	Service   string `json:"service"`
+	Protocol  string `json:"protocol,omitempty"`
+	PortLow   int    `json:"port_low,omitempty"`
+	PortHigh  int    `json:"port_high,omitempty"`
 }
 
 // DNSForward is one forwarded zone: queries for Domain go to ResolverIP (an address inside the declaring
