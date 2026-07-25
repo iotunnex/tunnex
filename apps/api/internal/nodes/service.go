@@ -1432,6 +1432,9 @@ type AppliedPolicy struct {
 	// failing (no CAP_NET_ADMIN / netlink fault) — revoked grants' flows may linger. Surfaced as
 	// conntrack_flush_unavailable.
 	ConntrackFlushUnavailable bool `json:"conntrack_flush_unavailable"`
+	// K8sClusterDNSUnreachable (S10.3) — the agent can't reach cluster DNS, so exposed Services can't be
+	// DNAT-programmed (fail-closed). Drives the k8s_cluster_dns_unreachable health kind.
+	K8sClusterDNSUnreachable bool `json:"k8s_cluster_dns_unreachable"`
 	// MaxSupportedVersion (S8.3 CW) is the highest artifact Version the agent can apply. Observability
 	// (outside the hash); stored so the UI can warn which gateways would deny-all on a version bump.
 	MaxSupportedVersion int `json:"max_policy_version"`
@@ -1483,8 +1486,9 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_refused_version":      applied.RefusedVersion,
 		"site_link_stale":             applied.SiteLinkStale, // VESTIGIAL (WF-B D-WFB-1b): still reported+persisted for backward-compat, but NO LONGER CONSUMED — the CP derives site-link health from the ONE liveness derivation (fillSiteLinkVerdict). Retire or re-adopt deliberately in an agent-vN; do not silently resurrect.
 		"site_subnet_unreachable":     applied.SiteSubnetUnreachable,
-		"conntrack_flush_unavailable": applied.ConntrackFlushUnavailable,
-		"max_policy_version":          applied.MaxSupportedVersion,
+		"conntrack_flush_unavailable":  applied.ConntrackFlushUnavailable,
+		"k8s_cluster_dns_unreachable":  applied.K8sClusterDNSUnreachable,
+		"max_policy_version":           applied.MaxSupportedVersion,
 		"ovpn_health":                 applied.OVPNHealth, // S9.1 4d
 	})
 	if err != nil {
@@ -1581,6 +1585,9 @@ type NodeCapabilities struct {
 	// ConntrackFlushUnavailable (S8.7 Slice 2) — agent-reported: the expired-grant conntrack flush is
 	// failing. Drives the `conntrack_flush_unavailable` health kind (lowest priority).
 	ConntrackFlushUnavailable bool `json:"conntrack_flush_unavailable"`
+	// K8sClusterDNSUnreachable (S10.3) — agent-reported: cluster DNS unreachable → exposed-Service DNAT
+	// unprogrammed (fail-closed). Drives the k8s_cluster_dns_unreachable health kind.
+	K8sClusterDNSUnreachable bool `json:"k8s_cluster_dns_unreachable"`
 	// MaxPolicyVersion (S8.3 CW) — the agent's reported max-supported policy version. 0 = never reported
 	// (a pre-CW/pre-upgrade agent): read as BELOW the ceiling, never unknown-treated-as-ready (S7.5.3
 	// absence-is-not-compliance). Surfaced on the Node API for the cross-site upgrade warning.
@@ -1863,6 +1870,9 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// LOWEST-priority enforcement-hygiene degradation (revoked grants' flows may linger). Only fires in
 		// enterprise (an open gateway has no grants → no flush → never set).
 		conntrackFlushUnavailable := caps.ConntrackFlushUnavailable
+		// k8s_cluster_dns_unreachable (S10.3): the agent can't reach cluster DNS → exposed-Service DNAT
+		// unprogrammed (fail-closed). Edition-independent (the DNAT is open connectivity).
+		k8sDNSUnreachable := caps.K8sClusterDNSUnreachable
 		// hub_forwarding_not_reconciling (WF-C L2): the zombie hub — this member's wire is FRESH (spokes still
 		// handshake it) while its own agent has been SILENT a full hub-stale window LONGER than that last
 		// handshake. The SETTLE (WF-C-L2-1) is what makes it honest: on a CLEAN death the agent report AND the
@@ -1913,6 +1923,10 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 			kind = KindApplyFailing
 		case !enterprise && caps.PolicyError != "":
 			kind = KindStuckEnforcing
+		case !enterprise && k8sDNSUnreachable:
+			// S10.3 — edition-independent (the VIP DNAT is OPEN connectivity). Ranked above the conntrack
+			// hygiene label; below the apply/link faults so a louder failure is never masked.
+			kind = KindK8sClusterDNSUnreachable
 		case !enterprise && conntrackFlushUnavailable:
 			// [3] LOWEST priority — ranked AFTER the apply faults so a louder failure is never masked by the
 			// hygiene label (structural agreement; open never sets it — no grants).
@@ -1932,6 +1946,7 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				SiteLinkDown:                siteLinkDown,                  // S8.2 H5
 				SiteSubnetUnreachable:       siteSubnetUnreachable,         // S8.2c D3
 				ConntrackFlushUnavailable:   conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
+				K8sClusterDNSUnreachable:    k8sDNSUnreachable,             // S10.3 (above conntrack, below apply/link)
 				HubForwardingNotReconciling: hubForwardingNotReconciling,   // WF-C L2 D-WFC2-1a (zombie hub)
 			})
 		}

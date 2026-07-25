@@ -374,7 +374,7 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		if hp := ovpnHealth.Load(); hp != nil {
 			ovpnH = *hp
 		}
-		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), ConntrackFlushUnavailable: egressMgr.ConntrackFlushFailing(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion, OVPNHealth: ovpnH}
+		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), ConntrackFlushUnavailable: egressMgr.ConntrackFlushFailing(), K8sClusterDNSUnreachable: egressMgr.DNSUnreachable(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion, OVPNHealth: ovpnH}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
 			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)

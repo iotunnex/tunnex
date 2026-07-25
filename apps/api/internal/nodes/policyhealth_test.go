@@ -27,6 +27,11 @@ func TestDegradedKind(t *testing.T) {
 		{"conntrack_flush_unavailable — synced but flush failing", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now, ConntrackFlushUnavailable: true}, KindConntrackFlushUnavailable},
 		// MASKED: a louder desync outranks it — flush-unavailable is the quietest signal, never the headline.
 		{"masked — desync outranks flush-unavailable", KindInput{PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second), ConntrackFlushUnavailable: true}, KindSilentDesync},
+		// S10.3 k8s_cluster_dns_unreachable — both directions + ranking.
+		{"k8s_cluster_dns_unreachable — synced but cluster DNS unreachable", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now, K8sClusterDNSUnreachable: true}, KindK8sClusterDNSUnreachable},
+		{"k8s dns RECOVERS — synced, flag clear → healthy", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now, K8sClusterDNSUnreachable: false}, KindHealthy},
+		{"k8s dns outranks conntrack (louder exposed-Service surface)", KindInput{PushKnown: true, PushedHash: "h", AppliedHash: "h", ReportAge: fresh, Now: now, K8sClusterDNSUnreachable: true, ConntrackFlushUnavailable: true}, KindK8sClusterDNSUnreachable},
+		{"masked — desync outranks k8s dns", KindInput{PushKnown: true, PushedHash: "new", AppliedHash: "old", ReportAge: fresh, Now: now, DesyncSince: now.Add(-90 * time.Second), K8sClusterDNSUnreachable: true}, KindSilentDesync},
 		{"apply_failing — error + failing_since", KindInput{PolicyError: "boom", PolicyFailingSince: "t0", ReportAge: fresh, Now: now}, KindApplyFailing},
 		{"stuck_enforcing — error + NO failing_since", KindInput{PolicyError: "boom", ReportAge: fresh, Now: now}, KindStuckEnforcing},
 		// [fold 3] TERM-2: failing_since set with NO error must be apply_failing, NEVER the benign

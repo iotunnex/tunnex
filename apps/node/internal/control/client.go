@@ -169,6 +169,9 @@ type PolicyStatus struct {
 	// CAP_NET_ADMIN / netlink fault): revoked grants' established flows may linger. Surfaced as
 	// conntrack_flush_unavailable so the degradation lives on the health plane, never just a log line.
 	ConntrackFlushUnavailable bool
+	// K8sClusterDNSUnreachable (S10.3) — this gateway can't reach cluster DNS, so exposed Services can't be
+	// DNAT-programmed (fail-closed). Surfaced as k8s_cluster_dns_unreachable so the operator sees WHY.
+	K8sClusterDNSUnreachable bool
 	// MaxSupportedVersion (S8.3 CW) is the highest compiled-artifact Version this agent can APPLY
 	// (nodepolicy.MaxSupportedVersion). Observability — a reported fact, OUTSIDE the compile hash, no
 	// version bump. The control plane uses it to warn, BEFORE an org goes multi-site, which gateways
@@ -191,7 +194,7 @@ func (c *Client) ReportInfo(ctx context.Context, publicKey, endpoint string, egr
 		"policy_version": ps.Version, "policy_hash": ps.Hash, "policy_error": ps.Error,
 		"policy_failing_since": ps.FailingSince, "policy_refused_version": ps.RefusedVersion,
 		"site_link_stale": ps.SiteLinkStale, "site_subnet_unreachable": ps.SiteSubnetUnreachable,
-		"conntrack_flush_unavailable": ps.ConntrackFlushUnavailable, "max_policy_version": ps.MaxSupportedVersion,
+		"conntrack_flush_unavailable": ps.ConntrackFlushUnavailable, "k8s_cluster_dns_unreachable": ps.K8sClusterDNSUnreachable, "max_policy_version": ps.MaxSupportedVersion,
 		"ovpn_health": ps.OVPNHealth,
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/agent/report", bytes.NewReader(body))
