@@ -210,3 +210,86 @@ First EPIC-10 commit adds a new Go module (`apps/operator` + controller-runtime/
 ## Slice cut — DEFERRED until D3-ingress is ruled
 S10.1 → S10.3 → S10.2 is set, but the S10.3 gateway design hinges on the ingress ruling (VIP-DNAT vs the
 alternatives). Slices are cut after this paper is ruled. Nothing built until then.
+
+---
+
+## Fork rulings (founder, 2026-07-25) — D3-ingress + Fork 2 + the DNS sub-item
+
+### D3-ingress — RULED (I) VIP-DNAT
+The ruling is settled by **(II)'s impossibility, not (I)'s elegance**: `--service-cluster-ip-range` is
+immutable on a running cluster, so renumber-as-default means "works only on clusters you build for us."
+(III) gateway-IP:port stays the DOCUMENTED SHORTCUT for a handful of Services. Four conditions, each borrowed
+from a precedent this codebase already has:
+
+1. **VIP range is allocator-known + `subnetguard`-validated** — same treatment as the OVPN transit subnet
+   (D-S9.5): disjoint from the pool, every site subnet, AND other clusters' VIP ranges. Never a hardcoded
+   default that collides in eighteen months.
+2. **VIP↔ClusterIP mapping is DESIRED STATE** — CP-owned, agent reconciles, re-asserted every tick, swept on
+   removal. No side channel (the D-S9.6 pattern).
+3. **VIP stability is an INVARIANT, not a convenience** — a VIP is bound to a Service identity for its
+   lifetime; a deleted Service's VIP must not be immediately re-allocated to a different Service while grants
+   referencing it may still exist (the reassignment trap — Feature 5's red + the pool-address re-allocation
+   watched live in the EPIC-8 walk). **RULED: identity-resolution at compile** (founder's prior, agreed):
+   an exposed Service is a **resource with a stable ID** (a DESTINATION, not a source principal — does NOT
+   touch D4(a)/the identity-binding invariant); a grant references the Service's stable ID; the compiler
+   resolves ID → CURRENT VIP at compile time. A deleted+recreated Service gets a new VIP and grants
+   auto-follow the identity — no quarantine timer, matching how the device-source ruling (Feature 5) handles
+   the same hazard. Quarantine-freed-VIPs is the rejected alternative (timer complexity for no gain once
+   grants track identity).
+4. **Service removal is a FULL SWEEP** — VIP freed, DNAT rule gone, and any grant referencing it compiles to
+   nothing with the HONEST surface, not a silent no-op (the `cidr_outside_org_ranges` precedent — surface a
+   typed "service no longer exposed" state).
+
+**DNS sub-item (name it before slicing) — RULED into S10.3.** Service-name→VIP reuses the S8.4 cross-site DNS
+forwarding rail as a gateway DNS-REWRITE: a `dns_forwarding` entry points the cluster zone at the gateway's
+own resolver IP; the gateway forwards to in-cluster CoreDNS and rewrites the ClusterIP answer → the Service's
+VIP, from the same desired-state VIP map that drives DNAT. CoreDNS stays authoritative for names; only exposed
+Services (with a VIP) rewrite to a routable answer (self-gates on exposure, honestly). Incremental on the
+existing forwarder + the VIP map → an S10.3 SUB-SLICE, not its own story. The one new mechanism is the
+response-rewrite mode; if it grows during build, halt-and-surface.
+
+### Fork 2 — RULED: accept GKE-Autopilot-unsupported at v1, documented honestly
+Reasons: (a) the requirements are INHERENT — a kernel-datapath VPN gateway needs NET_ADMIN + /dev/net/tun;
+the userspace alternative (wireguard-go + userspace networking) is a SECOND data-plane engine in the
+most-verified component = the rejected tier by standing ruling; (b) buyer-fit INVERTS — Tunnex's wedge is
+sovereignty/self-hosting; Autopilot users deliberately outsourced their infra layer to Google, the opposite
+posture; (c) the honest-limitation precedent (S8.6b Windows full-tunnel) is exactly this shape and it worked.
+Conditions:
+- The chart PREFLIGHTS and FAILS LOUD at install with a specific message naming the missing capability —
+  never a pod that crash-loops (the refuse-loudly law at the PACKAGING tier).
+- The unsupported set is documented UP FRONT alongside the NAT-traversal honesty, not in a footnote.
+- Trigger registered: a real prospect on Autopilot OR a PSS-restricted mandate. If it fires, it reopens as its
+  own story with the userspace-datapath question properly papered.
+
+---
+
+## Slice cut — S10.1 → S10.3 → S10.2 (gateway before operator)
+
+**S10.1 — Helm chart + the three externalizations (the real content; "chart" is the small part).**
+- Slice 1: **master-key externalization** — file-mounted secret PREFERRED (projected Secret volume, the shape
+  `secrets.LoadOrInit(dir)` already expects), `TUNNEX_MASTER_KEY` env as documented fallback (env leaks via
+  process listing / crash dump / `kubectl describe`). Posture stated in chart + paper.
+- Slice 2: **external-store wiring** — `TUNNEX_DATABASE_URL`/`TUNNEX_REDIS_URL` URL-wins + validate-never-
+  generate (fail-loud on unreachable); bundled pg/redis move behind a compose profile when URLs are set.
+- Slice 3: **programmatic join-token delivery** — Helm value → K8s Secret → consumed once via `IssueJoinToken`.
+- Slice 4: **the chart itself** — CP Deployment (api/web/nginx) + values (secrets/ingress/storage), sharing the
+  install.sh env contract verbatim (no divergence, `docs/S6.6-decisions.md:157`). Preflight for the CP tier.
+
+**S10.3 — in-cluster gateway (on existing rails).**
+- Gateway Deployment (privileged: NET_ADMIN + /dev/net/tun + hostNetwork + ip_forward init) with the
+  chart PREFLIGHT (Fork-2 fail-loud); Autopilot/PSS-restricted = honest UNSUPPORTED refusal.
+- `BindNode` the in-cluster agent to a site; VIP range allocator-known + `subnetguard`-validated.
+- VIP↔ClusterIP map as desired state; per-Service /32 VIP DNAT; exposed-Service-as-resource (stable ID,
+  identity-resolution at compile); full-sweep on removal.
+- DNS-rewrite sub-slice (Service-name→VIP via the S8.4 forwarder + VIP map).
+- PD-4 K8s fabric section (privileged namespace, external endpoint LB/NodePort for WG:51820, VIP range).
+
+**S10.2 — operator + CRDs (enterprise; the most net-new).**
+- New Go module `apps/operator` (controller-runtime/client-go; module-path + `-mod=readonly` + both-editions
+  guards apply).
+- CRDs `TunnexPeer`/`TunnexRoute`; a K8s-resource `ControlClient` reusing the S3.1 reconcile DESIGN
+  (dual push+ticker, full-resync, never-touch-dataplane-on-CP-error).
+- A grant-bearing CRD gates `edition_required` at parity with the API (D5).
+
+Build proceeds S10.1 Slice 1 first. Sha-first gates, halt-and-surface, tail-of-turn review on the
+privileged/security-adjacent surfaces (master-key handling, the gateway securityContext, the preflight).
