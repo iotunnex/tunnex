@@ -144,6 +144,9 @@ type Querier interface {
 	CreateIdpSyncGroup(ctx context.Context, arg CreateIdpSyncGroupParams) (UserGroup, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
+	// S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
+	CreateK8sCluster(ctx context.Context, arg CreateK8sClusterParams) (K8sCluster, error)
+	CreateK8sService(ctx context.Context, arg CreateK8sServiceParams) (K8sService, error)
 	// ── mfa_challenges (the login second-step token — NOT a session) ───────────────────
 	// lint:cross-org — user-scoped login challenge (pre-session, no org context).
 	CreateMfaChallenge(ctx context.Context, arg CreateMfaChallengeParams) error
@@ -179,6 +182,7 @@ type Querier interface {
 	DeleteExpiredMfaChallenges(ctx context.Context) error
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
+	DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterParams) error
 	// lint:cross-org — user-scoped login challenge.
 	// Burn — on SUCCESS or on cap exhaustion (a token never survives its own resolution).
 	DeleteMfaChallenge(ctx context.Context, id uuid.UUID) error
@@ -262,6 +266,8 @@ type Querier interface {
 	// lint:cross-org — the token hash IS the authorization key; lookup is by token,
 	// not org. Callers must still check expires_at/accepted_at/revoked_at (single-use).
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
+	GetK8sCluster(ctx context.Context, arg GetK8sClusterParams) (K8sCluster, error)
+	GetK8sService(ctx context.Context, arg GetK8sServiceParams) (K8sService, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
 	// lint:cross-org — user-scoped login challenge; the token itself is the credential.
 	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
@@ -388,6 +394,9 @@ type Querier interface {
 	// so the warn-and-confirm shows real blast radius. Owner must be a CURRENT org member
 	// (the F1 convention: policy-input queries re-verify membership, not just status).
 	ListActiveFullTunnelDevices(ctx context.Context, orgID uuid.UUID) ([]ListActiveFullTunnelDevicesRow, error)
+	// ListActiveK8sServicesForOrg is the compiler's resolution source: id -> current VIP (+ proto/ports), LIVE
+	// only. A soft-deleted Service is absent, so a grant referencing it compiles to nothing (honest, not silent).
+	ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListActiveK8sServicesForOrgRow, error)
 	// S7.2 push targeting: every active gateway in the org. A policy change is org-wide,
 	// and member-removal can orphan a device whose node would drop out of a device-join
 	// query — so the push set is ALL active nodes (an unaffected node's re-fetch recompiles
@@ -462,6 +471,7 @@ type Querier interface {
 	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.
 	ListIdpSyncGroups(ctx context.Context, arg ListIdpSyncGroupsParams) ([]ListIdpSyncGroupsRow, error)
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
+	ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
@@ -534,7 +544,13 @@ type Querier interface {
 	// S9.1 Part-2 stale-profile surface: every static-provisioned device + its baked ranges snapshot. The
 	// caller diffs each snapshot against the org's CURRENT routed ranges to flag "re-export needed".
 	ListStaticDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListStaticDevicesForOrgRow, error)
+	// ListUsedVIPsInCluster returns the LIVE VIPs in a cluster (the used-set ipalloc allocates around).
+	ListUsedVIPsInCluster(ctx context.Context, clusterID uuid.UUID) ([]string, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
+	// ListVIPRangesForOrg feeds the subnetguard collector: EVERY disjointness check (cluster-VIP creation,
+	// pool resize, site-subnet approval) must include the org's VIP ranges so disjointness stays bidirectional
+	// (the validator-input-filtering law). Returns the raw cidr text.
+	ListVIPRangesForOrg(ctx context.Context, orgID uuid.UUID) ([]string, error)
 	// lint:cross-org — a transaction-scoped advisory lock on an arbitrary key (a
 	// user id or org id, passed as text). Create takes BOTH (in sorted order, so no
 	// deadlock) to make the per-user cap check AND the org-wide IP allocation atomic
@@ -642,6 +658,7 @@ type Querier interface {
 	SetTOTPLastTimestep(ctx context.Context, arg SetTOTPLastTimestepParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
+	SoftDeleteK8sService(ctx context.Context, arg SoftDeleteK8sServiceParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
 	// S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
 	// the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a

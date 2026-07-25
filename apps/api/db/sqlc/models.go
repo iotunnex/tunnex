@@ -180,6 +180,31 @@ type Invitation struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
+type K8sCluster struct {
+	ID        uuid.UUID    `json:"id"`
+	OrgID     uuid.UUID    `json:"org_id"`
+	SiteID    uuid.UUID    `json:"site_id"`
+	Name      string       `json:"name"`
+	VipRange  netip.Prefix `json:"vip_range"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+type K8sService struct {
+	ID        uuid.UUID          `json:"id"`
+	OrgID     uuid.UUID          `json:"org_id"`
+	ClusterID uuid.UUID          `json:"cluster_id"`
+	Name      string             `json:"name"`
+	Namespace string             `json:"namespace"`
+	Protocol  string             `json:"protocol"`
+	PortLow   *int32             `json:"port_low"`
+	PortHigh  *int32             `json:"port_high"`
+	Vip       netip.Addr         `json:"vip"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
 type Membership struct {
 	ID        uuid.UUID `json:"id"`
 	OrgID     uuid.UUID `json:"org_id"`
