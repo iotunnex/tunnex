@@ -181,13 +181,14 @@ type Invitation struct {
 }
 
 type K8sCluster struct {
-	ID        uuid.UUID    `json:"id"`
-	OrgID     uuid.UUID    `json:"org_id"`
-	SiteID    uuid.UUID    `json:"site_id"`
-	Name      string       `json:"name"`
-	VipRange  netip.Prefix `json:"vip_range"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	ID          uuid.UUID    `json:"id"`
+	OrgID       uuid.UUID    `json:"org_id"`
+	SiteID      uuid.UUID    `json:"site_id"`
+	Name        string       `json:"name"`
+	VipRange    netip.Prefix `json:"vip_range"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	ServiceCidr netip.Prefix `json:"service_cidr"`
 }
 
 type K8sService struct {

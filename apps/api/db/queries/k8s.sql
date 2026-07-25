@@ -1,8 +1,8 @@
 -- S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 
 -- name: CreateK8sCluster :one
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range)
-VALUES ($1, $2, $3, $4)
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetK8sCluster :one
@@ -36,7 +36,7 @@ SELECT host(vip) AS vip FROM k8s_services WHERE cluster_id = $1 AND deleted_at I
 -- only. A soft-deleted Service is absent, so a grant referencing it compiles to nothing (honest, not silent).
 -- name: ListActiveK8sServicesForOrg :many
 SELECT s.id, s.cluster_id, s.name, s.namespace, s.protocol, s.port_low, s.port_high,
-       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range
+       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr
 FROM k8s_services s
 JOIN k8s_clusters c ON c.id = s.cluster_id
 WHERE s.org_id = $1 AND s.deleted_at IS NULL

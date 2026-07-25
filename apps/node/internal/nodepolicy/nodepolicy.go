@@ -97,9 +97,12 @@ type VIPMapping struct {
 	VIP       string `json:"vip"`
 	Namespace string `json:"namespace"`
 	Service   string `json:"service"`
-	Protocol  string `json:"protocol,omitempty"`
-	PortLow   int    `json:"port_low,omitempty"`
-	PortHigh  int    `json:"port_high,omitempty"`
+	// ServiceCIDR — the cluster's K8s Service CIDR; the agent classifies a resolved address with it
+	// (inside = ClusterIP -> DNAT; outside = pod IP = headless, refused). Mirror of policyspec.VIPMapping.
+	ServiceCIDR string `json:"service_cidr"`
+	Protocol    string `json:"protocol,omitempty"`
+	PortLow     int    `json:"port_low,omitempty"`
+	PortHigh    int    `json:"port_high,omitempty"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site

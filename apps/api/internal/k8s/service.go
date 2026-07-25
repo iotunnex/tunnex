@@ -47,9 +47,16 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 // every allocatable class in the org — the device pool, every site subnet, AND other clusters' VIP
 // ranges — assembled by the ONE shared collector (F2). A collision is the forbidden outcome (ambiguous
 // routing), refused with a typed, teaching error naming the class and what to do.
-func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange netip.Prefix) (sqlc.K8sCluster, error) {
+// serviceCIDR is the cluster's real Kubernetes Service CIDR (where ClusterIPs live). It is NOT
+// disjointness-validated — it is the very range that collides with the pool/sites (that is WHY exposed
+// Services get synthetic VIPs). It is captured only so the gateway can classify a resolved address (in the
+// Service CIDR = a ClusterIP to DNAT; outside = a pod IP = a headless Service, refused) without the K8s API.
+func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix) (sqlc.K8sCluster, error) {
 	var out sqlc.K8sCluster
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		if !serviceCIDR.IsValid() {
+			return apierr.BadRequest("invalid_service_cidr", "the cluster's Kubernetes Service CIDR is required (e.g. 10.96.0.0/12) — the gateway uses it to tell a ClusterIP from a pod IP")
+		}
 		// The cluster must be fronted by a real site in THIS org (one gateway = one site, D1).
 		if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: siteID, OrgID: orgID}); e != nil {
 			return apierr.NotFound("site_not_found", "no such site in this organization")
@@ -64,7 +71,7 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 					"; choose a range disjoint from your device pool, your site subnets, and other clusters' VIP ranges")
 		}
 		c, e := q.CreateK8sCluster(ctx, sqlc.CreateK8sClusterParams{
-			OrgID: orgID, SiteID: siteID, Name: name, VipRange: vipRange.Masked(),
+			OrgID: orgID, SiteID: siteID, Name: name, VipRange: vipRange.Masked(), ServiceCidr: serviceCIDR.Masked(),
 		})
 		if pgerr.IsUnique(e) {
 			return apierr.Conflict("cluster_exists", "a cluster with that name or VIP range already exists in this organization")

@@ -743,7 +743,7 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 			ph = int(*e.PortHigh)
 		}
 		vipMappings[e.SiteID] = append(vipMappings[e.SiteID], policyspec.VIPMapping{
-			VIP: e.Vip, Namespace: e.Namespace, Service: e.Name,
+			VIP: e.Vip, Namespace: e.Namespace, Service: e.Name, ServiceCIDR: e.ServiceCidr,
 			Protocol: e.Protocol, PortLow: pl, PortHigh: ph,
 		})
 	}

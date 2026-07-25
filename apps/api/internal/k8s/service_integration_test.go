@@ -55,15 +55,15 @@ func TestRegisterClusterRejectsOverlap(t *testing.T) {
 	}
 
 	// Overlaps the device pool.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25")); err == nil || !strings.Contains(err.Error(), "pool") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "pool") {
 		t.Fatalf("want a pool-class overlap refusal, got %v", err)
 	}
 	// Overlaps the approved site subnet.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25")); err == nil || !strings.Contains(err.Error(), "site_subnet") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "site_subnet") {
 		t.Fatalf("want a site_subnet-class overlap refusal, got %v", err)
 	}
 	// A disjoint range is accepted.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16")); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16"), pfx("10.96.0.0/12")); err != nil {
 		t.Fatalf("a disjoint VIP range must be accepted, got %v", err)
 	}
 }
@@ -76,10 +76,10 @@ func TestSecondClusterCannotOverlapFirst(t *testing.T) {
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
 
-	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16")); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16"), pfx("10.96.0.0/12")); err != nil {
 		t.Fatalf("first cluster: %v", err)
 	}
-	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24")); err == nil || !strings.Contains(err.Error(), "vip_range") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "vip_range") {
 		t.Fatalf("a second cluster overlapping the first's VIP range must be refused (vip_range class), got %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/30")) // 1 usable host (.2)
+	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/30"), pfx("10.96.0.0/12")) // 1 usable host (.2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,11 +114,11 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"))
+	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"))
+	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"), pfx("10.96.0.0/12"))
 	if err != nil {
 		t.Fatal(err)
 	}

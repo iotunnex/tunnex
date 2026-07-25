@@ -14,16 +14,17 @@ import (
 
 const createK8sCluster = `-- name: CreateK8sCluster :one
 
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range)
-VALUES ($1, $2, $3, $4)
-RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr
 `
 
 type CreateK8sClusterParams struct {
-	OrgID    uuid.UUID    `json:"org_id"`
-	SiteID   uuid.UUID    `json:"site_id"`
-	Name     string       `json:"name"`
-	VipRange netip.Prefix `json:"vip_range"`
+	OrgID       uuid.UUID    `json:"org_id"`
+	SiteID      uuid.UUID    `json:"site_id"`
+	Name        string       `json:"name"`
+	VipRange    netip.Prefix `json:"vip_range"`
+	ServiceCidr netip.Prefix `json:"service_cidr"`
 }
 
 // S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
@@ -33,6 +34,7 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		arg.SiteID,
 		arg.Name,
 		arg.VipRange,
+		arg.ServiceCidr,
 	)
 	var i K8sCluster
 	err := row.Scan(
@@ -43,6 +45,7 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		&i.VipRange,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServiceCidr,
 	)
 	return i, err
 }
@@ -108,7 +111,7 @@ func (q *Queries) DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterPara
 }
 
 const getK8sCluster = `-- name: GetK8sCluster :one
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at FROM k8s_clusters WHERE org_id = $1 AND id = $2
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr FROM k8s_clusters WHERE org_id = $1 AND id = $2
 `
 
 type GetK8sClusterParams struct {
@@ -127,6 +130,7 @@ func (q *Queries) GetK8sCluster(ctx context.Context, arg GetK8sClusterParams) (K
 		&i.VipRange,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServiceCidr,
 	)
 	return i, err
 }
@@ -162,7 +166,7 @@ func (q *Queries) GetK8sService(ctx context.Context, arg GetK8sServiceParams) (K
 
 const listActiveK8sServicesForOrg = `-- name: ListActiveK8sServicesForOrg :many
 SELECT s.id, s.cluster_id, s.name, s.namespace, s.protocol, s.port_low, s.port_high,
-       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range
+       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr
 FROM k8s_services s
 JOIN k8s_clusters c ON c.id = s.cluster_id
 WHERE s.org_id = $1 AND s.deleted_at IS NULL
@@ -170,16 +174,17 @@ ORDER BY s.id
 `
 
 type ListActiveK8sServicesForOrgRow struct {
-	ID        uuid.UUID `json:"id"`
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Name      string    `json:"name"`
-	Namespace string    `json:"namespace"`
-	Protocol  string    `json:"protocol"`
-	PortLow   *int32    `json:"port_low"`
-	PortHigh  *int32    `json:"port_high"`
-	Vip       string    `json:"vip"`
-	SiteID    uuid.UUID `json:"site_id"`
-	VipRange  string    `json:"vip_range"`
+	ID          uuid.UUID `json:"id"`
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	Protocol    string    `json:"protocol"`
+	PortLow     *int32    `json:"port_low"`
+	PortHigh    *int32    `json:"port_high"`
+	Vip         string    `json:"vip"`
+	SiteID      uuid.UUID `json:"site_id"`
+	VipRange    string    `json:"vip_range"`
+	ServiceCidr string    `json:"service_cidr"`
 }
 
 // ListActiveK8sServicesForOrg is the compiler's resolution source: id -> current VIP (+ proto/ports), LIVE
@@ -204,6 +209,7 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 			&i.Vip,
 			&i.SiteID,
 			&i.VipRange,
+			&i.ServiceCidr,
 		); err != nil {
 			return nil, err
 		}
@@ -216,7 +222,7 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 }
 
 const listK8sClustersForOrg = `-- name: ListK8sClustersForOrg :many
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at FROM k8s_clusters WHERE org_id = $1 ORDER BY name
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr FROM k8s_clusters WHERE org_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error) {
@@ -236,6 +242,7 @@ func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([
 			&i.VipRange,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ServiceCidr,
 		); err != nil {
 			return nil, err
 		}

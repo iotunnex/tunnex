@@ -250,9 +250,13 @@ type VIPMapping struct {
 	VIP       string `json:"vip"`
 	Namespace string `json:"namespace"`
 	Service   string `json:"service"`
-	Protocol  string `json:"protocol,omitempty"`
-	PortLow   int    `json:"port_low,omitempty"`
-	PortHigh  int    `json:"port_high,omitempty"`
+	// ServiceCIDR is the cluster's Kubernetes Service CIDR — the agent classifies a resolved address with
+	// it (inside = a ClusterIP to DNAT; outside = a pod IP = a headless Service with no stable VIP, refused)
+	// WITHOUT the K8s API (the (A) no-API boundary). Carried per-mapping (a gateway may front >1 cluster).
+	ServiceCIDR string `json:"service_cidr"`
+	Protocol    string `json:"protocol,omitempty"`
+	PortLow     int    `json:"port_low,omitempty"`
+	PortHigh    int    `json:"port_high,omitempty"`
 }
 
 // DNSForward is one forwarded zone: queries for Domain go to ResolverIP (an address inside the declaring
