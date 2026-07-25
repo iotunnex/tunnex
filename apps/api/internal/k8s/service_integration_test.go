@@ -55,16 +55,60 @@ func TestRegisterClusterRejectsOverlap(t *testing.T) {
 	}
 
 	// Overlaps the device pool.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "pool") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "pool") {
 		t.Fatalf("want a pool-class overlap refusal, got %v", err)
 	}
 	// Overlaps the approved site subnet.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "site_subnet") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "site_subnet") {
 		t.Fatalf("want a site_subnet-class overlap refusal, got %v", err)
 	}
 	// A disjoint range is accepted.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16"), pfx("10.96.0.0/12")); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
 		t.Fatalf("a disjoint VIP range must be accepted, got %v", err)
+	}
+}
+
+// TestRegisterClusterRejectsBadName: the cluster name is a DNS label and the zone a DNS domain (they build
+// the exposed-Service hostname); malformed values are refused with typed teaching errors, never reach the wire.
+func TestRegisterClusterRejectsBadName(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+	if _, err := svc.RegisterCluster(ctx, org, site, "Prod Cluster", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "invalid_cluster_name") {
+		t.Fatalf("want invalid_cluster_name for a non-label name, got %v", err)
+	}
+	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "not a domain"); err == nil || !strings.Contains(err.Error(), "invalid_dns_zone") {
+		t.Fatalf("want invalid_dns_zone for a malformed zone, got %v", err)
+	}
+}
+
+// TestRegisterClusterReservesDNSVIP: the DNS VIP is the range's first allocatable (.2), reserved at
+// registration so a Service can NEVER be handed it (the gateway answers DNS on it). A range too small to
+// fit the DNS VIP PLUS one Service VIP is refused honestly.
+func TestRegisterClusterReservesDNSVIP(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+	// /30 has exactly ONE allocatable (.2) — it would be all DNS, no Service room: refused.
+	if _, err := svc.RegisterCluster(ctx, org, site, "tiny", pfx("100.66.0.0/30"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "vip_range_too_small") {
+		t.Fatalf("a range with no room past the DNS VIP must refuse (too_small), got %v", err)
+	}
+	c, err := svc.RegisterCluster(ctx, org, site, "dnsr", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DnsVip == nil || c.DnsVip.String() != "100.66.0.2" {
+		t.Fatalf("DNS VIP must be reserved at .2, got %v", c.DnsVip)
+	}
+	// The first exposed Service gets .3 — proof .2 is reserved and never handed out.
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	if err != nil {
+		t.Fatalf("first expose: %v", err)
+	}
+	if s1.Vip.String() != "100.66.0.3" {
+		t.Fatalf("first Service VIP must skip the reserved .2, got %s", s1.Vip)
 	}
 }
 
@@ -76,22 +120,22 @@ func TestSecondClusterCannotOverlapFirst(t *testing.T) {
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
 
-	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16"), pfx("10.96.0.0/12")); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
 		t.Fatalf("first cluster: %v", err)
 	}
-	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12")); err == nil || !strings.Contains(err.Error(), "vip_range") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "vip_range") {
 		t.Fatalf("a second cluster overlapping the first's VIP range must be refused (vip_range class), got %v", err)
 	}
 }
 
-// TestExposeAllocatesThenExhausts: a /30 range yields exactly one usable VIP; the second expose is refused
-// HONESTLY (vip_range_exhausted), never silently reusing an address.
+// TestExposeAllocatesThenExhausts: a /29 range yields the DNS VIP (.2, reserved) plus four Service VIPs;
+// the fifth expose is refused HONESTLY (vip_range_exhausted), never silently reusing an address.
 func TestExposeAllocatesThenExhausts(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/30"), pfx("10.96.0.0/12")) // 1 usable host (.2)
+	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com") // .2 DNS + .3-.6 Services
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,10 +143,16 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first expose: %v", err)
 	}
-	if svc1.Vip.String() != "100.66.0.2" {
-		t.Fatalf("VIP allocated from the range low end, got %s", svc1.Vip)
+	if svc1.Vip.String() != "100.66.0.3" {
+		t.Fatalf("first Service VIP skips the reserved DNS .2, got %s", svc1.Vip)
 	}
-	if _, err := svc.ExposeService(ctx, org, c.ID, "web", "prod", "tcp", nil, nil); err == nil || !strings.Contains(err.Error(), "exhausted") {
+	// Consume the remaining three Service VIPs (.4, .5, .6).
+	for i, n := range []string{"web", "cache", "queue"} {
+		if _, err := svc.ExposeService(ctx, org, c.ID, n, "prod", "tcp", nil, nil); err != nil {
+			t.Fatalf("expose %d (%s): %v", i, n, err)
+		}
+	}
+	if _, err := svc.ExposeService(ctx, org, c.ID, "extra", "prod", "tcp", nil, nil); err == nil || !strings.Contains(err.Error(), "exhausted") {
 		t.Fatalf("exposing past the range must refuse honestly (exhausted), got %v", err)
 	}
 }
@@ -114,11 +164,11 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"))
+	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"), pfx("10.96.0.0/12"))
+	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +180,8 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Each got the low VIP of its OWN range — proof the used-set is per-cluster.
-	if sa.Vip.String() != "100.64.0.2" || sb.Vip.String() != "100.65.0.2" {
-		t.Fatalf("cluster-scoped allocation expected 100.64.0.2 / 100.65.0.2, got %s / %s", sa.Vip, sb.Vip)
+	// Each got the low Service VIP of its OWN range (.3, past the reserved DNS .2) — used-set is per-cluster.
+	if sa.Vip.String() != "100.64.0.3" || sb.Vip.String() != "100.65.0.3" {
+		t.Fatalf("cluster-scoped allocation expected 100.64.0.3 / 100.65.0.3, got %s / %s", sa.Vip, sb.Vip)
 	}
 }

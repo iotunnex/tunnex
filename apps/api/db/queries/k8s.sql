@@ -1,8 +1,8 @@
 -- S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 
 -- name: CreateK8sCluster :one
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetK8sCluster :one
@@ -29,14 +29,16 @@ RETURNING *;
 SELECT * FROM k8s_services WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- ListUsedVIPsInCluster returns the LIVE VIPs in a cluster (the used-set ipalloc allocates around).
+-- org_id-scoped for tenant isolation (defence-in-depth; the caller already authorized the cluster).
 -- name: ListUsedVIPsInCluster :many
-SELECT host(vip) AS vip FROM k8s_services WHERE cluster_id = $1 AND deleted_at IS NULL;
+SELECT host(vip) AS vip FROM k8s_services WHERE org_id = $1 AND cluster_id = $2 AND deleted_at IS NULL;
 
 -- ListActiveK8sServicesForOrg is the compiler's resolution source: id -> current VIP (+ proto/ports), LIVE
 -- only. A soft-deleted Service is absent, so a grant referencing it compiles to nothing (honest, not silent).
 -- name: ListActiveK8sServicesForOrg :many
 SELECT s.id, s.cluster_id, s.name, s.namespace, s.protocol, s.port_low, s.port_high,
-       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr
+       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr,
+       c.name AS cluster_name, c.dns_zone, COALESCE(host(c.dns_vip), '')::text AS dns_vip
 FROM k8s_services s
 JOIN k8s_clusters c ON c.id = s.cluster_id
 WHERE s.org_id = $1 AND s.deleted_at IS NULL

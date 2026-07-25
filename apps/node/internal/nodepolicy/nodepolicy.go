@@ -89,6 +89,9 @@ type Compiled struct {
 	// Service's ClusterIP and rewrites its DNS answer to the VIP. Out-of-hash PLUMBING; presence triggers
 	// RequiredVersion=7 CP-side. Mirror of policyspec.Compiled.VIPMappings (field order + tags must match).
 	VIPMappings []VIPMapping `json:"vip_mappings,omitempty"`
+	// K8sDNSZones (v7, S10.3) — DNS-listen table: bind :53 on each ListenVIP and serve that cluster's zone
+	// (direct-answer from the VIP map, NXDOMAIN in-zone-but-unexposed). Mirror of policyspec.Compiled.K8sDNSZones.
+	K8sDNSZones []K8sDNSZone `json:"k8s_dns_zones,omitempty"`
 }
 
 // VIPMapping mirrors policyspec.VIPMapping — one exposed K8s Service (VIP -> Service identity the agent
@@ -103,6 +106,15 @@ type VIPMapping struct {
 	Protocol    string `json:"protocol,omitempty"`
 	PortLow     int    `json:"port_low,omitempty"`
 	PortHigh    int    `json:"port_high,omitempty"`
+	// DNSName — the FQDN <service>.<namespace>.svc.<cluster>.<zone> the gateway answers with VIP.
+	// Mirror of policyspec.VIPMapping.DNSName.
+	DNSName string `json:"dns_name,omitempty"`
+}
+
+// K8sDNSZone mirrors policyspec.K8sDNSZone — answer DNS on ListenVIP authoritatively for Zone.
+type K8sDNSZone struct {
+	ListenVIP string `json:"listen_vip"`
+	Zone      string `json:"zone"`
 }
 
 // Route is one kernel-route intent (v5, S8.2): route DstCIDR via the tunnel interface so a remote site

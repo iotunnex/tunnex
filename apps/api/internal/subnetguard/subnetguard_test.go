@@ -120,7 +120,8 @@ func TestCollectIncludesEveryClass(t *testing.T) {
 // empty set waved through Check. Grep the api tree; the only allowed hits are this package's own files.
 func TestCensusNoHandBuiltOrgRanges(t *testing.T) {
 	// cwd = this package dir; ../.. = apps/api. grep exits 1 with no matches (fine), >1 on error.
-	out, err := exec.Command("grep", "-rn", "--include=*.go", "OrgRanges{", "../..").CombinedOutput()
+	// No --include (BusyBox grep in the test container lacks it) — filter to .go paths in Go instead.
+	out, err := exec.Command("grep", "-rn", "OrgRanges{", "../..").CombinedOutput()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return // no matches at all — trivially clean
@@ -130,6 +131,10 @@ func TestCensusNoHandBuiltOrgRanges(t *testing.T) {
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
+		}
+		path, _, _ := strings.Cut(line, ":")
+		if !strings.HasSuffix(path, ".go") {
+			continue // only Go source is in scope for the law
 		}
 		if strings.Contains(line, "internal/subnetguard/") {
 			continue // this package IS the constructor's home

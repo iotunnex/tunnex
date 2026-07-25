@@ -189,6 +189,8 @@ type K8sCluster struct {
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 	ServiceCidr netip.Prefix `json:"service_cidr"`
+	DnsZone     string       `json:"dns_zone"`
+	DnsVip      *netip.Addr  `json:"dns_vip"`
 }
 
 type K8sService struct {

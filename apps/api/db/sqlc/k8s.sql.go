@@ -14,9 +14,9 @@ import (
 
 const createK8sCluster = `-- name: CreateK8sCluster :one
 
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip
 `
 
 type CreateK8sClusterParams struct {
@@ -25,6 +25,8 @@ type CreateK8sClusterParams struct {
 	Name        string       `json:"name"`
 	VipRange    netip.Prefix `json:"vip_range"`
 	ServiceCidr netip.Prefix `json:"service_cidr"`
+	DnsZone     string       `json:"dns_zone"`
+	DnsVip      *netip.Addr  `json:"dns_vip"`
 }
 
 // S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
@@ -35,6 +37,8 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		arg.Name,
 		arg.VipRange,
 		arg.ServiceCidr,
+		arg.DnsZone,
+		arg.DnsVip,
 	)
 	var i K8sCluster
 	err := row.Scan(
@@ -46,6 +50,8 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ServiceCidr,
+		&i.DnsZone,
+		&i.DnsVip,
 	)
 	return i, err
 }
@@ -111,7 +117,7 @@ func (q *Queries) DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterPara
 }
 
 const getK8sCluster = `-- name: GetK8sCluster :one
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr FROM k8s_clusters WHERE org_id = $1 AND id = $2
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip FROM k8s_clusters WHERE org_id = $1 AND id = $2
 `
 
 type GetK8sClusterParams struct {
@@ -131,6 +137,8 @@ func (q *Queries) GetK8sCluster(ctx context.Context, arg GetK8sClusterParams) (K
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ServiceCidr,
+		&i.DnsZone,
+		&i.DnsVip,
 	)
 	return i, err
 }
@@ -166,7 +174,8 @@ func (q *Queries) GetK8sService(ctx context.Context, arg GetK8sServiceParams) (K
 
 const listActiveK8sServicesForOrg = `-- name: ListActiveK8sServicesForOrg :many
 SELECT s.id, s.cluster_id, s.name, s.namespace, s.protocol, s.port_low, s.port_high,
-       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr
+       host(s.vip) AS vip, c.site_id, host(c.vip_range) AS vip_range, c.service_cidr::text AS service_cidr,
+       c.name AS cluster_name, c.dns_zone, COALESCE(host(c.dns_vip), '')::text AS dns_vip
 FROM k8s_services s
 JOIN k8s_clusters c ON c.id = s.cluster_id
 WHERE s.org_id = $1 AND s.deleted_at IS NULL
@@ -185,6 +194,9 @@ type ListActiveK8sServicesForOrgRow struct {
 	SiteID      uuid.UUID `json:"site_id"`
 	VipRange    string    `json:"vip_range"`
 	ServiceCidr string    `json:"service_cidr"`
+	ClusterName string    `json:"cluster_name"`
+	DnsZone     string    `json:"dns_zone"`
+	DnsVip      string    `json:"dns_vip"`
 }
 
 // ListActiveK8sServicesForOrg is the compiler's resolution source: id -> current VIP (+ proto/ports), LIVE
@@ -210,6 +222,9 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 			&i.SiteID,
 			&i.VipRange,
 			&i.ServiceCidr,
+			&i.ClusterName,
+			&i.DnsZone,
+			&i.DnsVip,
 		); err != nil {
 			return nil, err
 		}
@@ -222,7 +237,7 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 }
 
 const listK8sClustersForOrg = `-- name: ListK8sClustersForOrg :many
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr FROM k8s_clusters WHERE org_id = $1 ORDER BY name
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip FROM k8s_clusters WHERE org_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error) {
@@ -243,6 +258,8 @@ func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ServiceCidr,
+			&i.DnsZone,
+			&i.DnsVip,
 		); err != nil {
 			return nil, err
 		}
@@ -255,12 +272,18 @@ func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([
 }
 
 const listUsedVIPsInCluster = `-- name: ListUsedVIPsInCluster :many
-SELECT host(vip) AS vip FROM k8s_services WHERE cluster_id = $1 AND deleted_at IS NULL
+SELECT host(vip) AS vip FROM k8s_services WHERE org_id = $1 AND cluster_id = $2 AND deleted_at IS NULL
 `
 
+type ListUsedVIPsInClusterParams struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
 // ListUsedVIPsInCluster returns the LIVE VIPs in a cluster (the used-set ipalloc allocates around).
-func (q *Queries) ListUsedVIPsInCluster(ctx context.Context, clusterID uuid.UUID) ([]string, error) {
-	rows, err := q.db.Query(ctx, listUsedVIPsInCluster, clusterID)
+// org_id-scoped for tenant isolation (defence-in-depth; the caller already authorized the cluster).
+func (q *Queries) ListUsedVIPsInCluster(ctx context.Context, arg ListUsedVIPsInClusterParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listUsedVIPsInCluster, arg.OrgID, arg.ClusterID)
 	if err != nil {
 		return nil, err
 	}

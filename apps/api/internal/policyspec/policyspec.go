@@ -116,7 +116,7 @@ const ProtocolVersion = 7
 func RequiredVersion(c Compiled) int {
 	//	v7 trigger (S10.3): a non-empty VIP map — an old agent has no VIP->ClusterIP DNAT / DNS-rewrite
 	//	render, so it would leave the exposed K8s Service unreachable while green (dead-while-green). REFUSE.
-	if len(c.VIPMappings) > 0 {
+	if len(c.VIPMappings) > 0 || len(c.K8sDNSZones) > 0 {
 		return 7
 	}
 	//	v6 trigger (A3b, S8.6): a non-empty PoolCIDR — an old agent has no pool-class DOCKER-USER
@@ -241,6 +241,10 @@ type Compiled struct {
 	// RequiredVersion=7 (an old agent with no DNAT/DNS-rewrite would leave the Service dead-while-green, so it
 	// must REFUSE — the PoolCIDR precedent). omitempty so a non-cluster gateway's artifact is byte-identical.
 	VIPMappings []VIPMapping `json:"vip_mappings,omitempty"`
+	// K8sDNSZones (v7, S10.3 (A1)) is the DNS-listen table for the clusters this gateway fronts: each entry
+	// binds :53 on a reserved DNS VIP and serves that cluster's zone (direct-answer from the VIP map above,
+	// NXDOMAIN for in-zone-but-unexposed). Same out-of-hash / v7-trigger treatment as VIPMappings.
+	K8sDNSZones []K8sDNSZone `json:"k8s_dns_zones,omitempty"`
 }
 
 // VIPMapping is one exposed K8s Service: clients reach VIP (a /32 in the cluster's synthetic range); the
@@ -257,6 +261,20 @@ type VIPMapping struct {
 	Protocol    string `json:"protocol,omitempty"`
 	PortLow     int    `json:"port_low,omitempty"`
 	PortHigh    int    `json:"port_high,omitempty"`
+	// DNSName is the fully-qualified in-tunnel hostname clients use to reach this Service:
+	// <service>.<namespace>.svc.<cluster>.<zone> (S10.3 (B2), always-explicit — a collapsed form
+	// silently breaks on a second cluster). The gateway answers this name with VIP (A record); a name
+	// inside the cluster's zone that is NOT any DNSName is NXDOMAIN, never a silent timeout.
+	DNSName string `json:"dns_name,omitempty"`
+}
+
+// K8sDNSZone tells a site gateway to answer DNS on ListenVIP (the cluster's reserved DNS VIP) authoritatively
+// for Zone (<cluster>.<customer-zone>). A query matching a VIPMapping.DNSName resolves to its VIP; any other
+// name inside Zone is NXDOMAIN (never a silent timeout); the bind is fail-closed (S10.3 (A1)/(i)). One entry
+// per cluster this gateway fronts (D1: normally exactly one).
+type K8sDNSZone struct {
+	ListenVIP string `json:"listen_vip"`
+	Zone      string `json:"zone"`
 }
 
 // DNSForward is one forwarded zone: queries for Domain go to ResolverIP (an address inside the declaring

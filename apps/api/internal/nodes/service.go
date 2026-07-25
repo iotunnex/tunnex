@@ -658,6 +658,10 @@ type siteTopology struct {
 	// cluster's — the per-gateway isolation red). Present only for orgs with a registered cluster + an
 	// exposed Service, so a non-cluster org's artifact stays byte-identical (the v7 zero-config golden).
 	vipMappings map[uuid.UUID][]policyspec.VIPMapping
+	// k8sDNS (S10.3 (A1)) is site_id -> the DNS-listen zones for the cluster(s) that site's gateway fronts:
+	// bind :53 on the reserved DNS VIP, serve <cluster>.<zone> direct-answer. Deduped per cluster. Same
+	// presence/golden treatment as vipMappings.
+	k8sDNS map[uuid.UUID][]policyspec.K8sDNSZone
 }
 
 // loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
@@ -730,6 +734,8 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 	// atomic on error (a silently-empty map would strand an exposed Service dead-while-green). Empty for a
 	// non-cluster org (map stays nil → finalizeArtifact staples nothing → byte-identical golden).
 	vipMappings := map[uuid.UUID][]policyspec.VIPMapping{}
+	k8sDNS := map[uuid.UUID][]policyspec.K8sDNSZone{}
+	dnsSeen := map[uuid.UUID]map[string]bool{} // site_id -> zone -> present (dedup one listen entry per cluster)
 	exposed, kerr := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
 	if kerr != nil {
 		return siteTopology{}, kerr
@@ -742,12 +748,28 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 		if e.PortHigh != nil {
 			ph = int(*e.PortHigh)
 		}
+		// The FQDN is always-explicit (S10.3 (B2)): <service>.<namespace>.svc.<cluster>.<zone>. A collapsed
+		// form silently breaks the moment a second cluster shares the zone — correctness beats brevity.
+		zone := e.ClusterName + "." + e.DnsZone
+		dnsName := e.Name + "." + e.Namespace + ".svc." + zone
 		vipMappings[e.SiteID] = append(vipMappings[e.SiteID], policyspec.VIPMapping{
 			VIP: e.Vip, Namespace: e.Namespace, Service: e.Name, ServiceCIDR: e.ServiceCidr,
-			Protocol: e.Protocol, PortLow: pl, PortHigh: ph,
+			Protocol: e.Protocol, PortLow: pl, PortHigh: ph, DNSName: dnsName,
 		})
+		// One DNS-listen entry per cluster (keyed by zone within the site) — the gateway binds :53 on the
+		// cluster's reserved DNS VIP and serves that zone. Skipped if the cluster has no reserved VIP (older
+		// row) — the DNS answer degrades to unavailable rather than binding a bad address.
+		if e.DnsVip != "" {
+			if dnsSeen[e.SiteID] == nil {
+				dnsSeen[e.SiteID] = map[string]bool{}
+			}
+			if !dnsSeen[e.SiteID][zone] {
+				dnsSeen[e.SiteID][zone] = true
+				k8sDNS[e.SiteID] = append(k8sDNS[e.SiteID], policyspec.K8sDNSZone{ListenVIP: e.DnsVip, Zone: zone})
+			}
+		}
 	}
-	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers, poolCIDR: poolCIDR, vipMappings: vipMappings}, nil
+	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers, poolCIDR: poolCIDR, vipMappings: vipMappings, k8sDNS: k8sDNS}, nil
 }
 
 // deriveActive is THE shared hub-order derivation (S8.6 REDUCE) — the ONE function every consumer reads
@@ -1261,7 +1283,8 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	// isolation). Rides independent of site routes: a single-site cluster gateway has no site-to-site route
 	// but still fronts a cluster.
 	vips := topo.vipMappings[siteID]
-	if len(routes) == 0 && len(vips) == 0 {
+	dnsZones := topo.k8sDNS[siteID]
+	if len(routes) == 0 && len(vips) == 0 && len(dnsZones) == 0 {
 		return pol
 	}
 	// D2: attach THIS gateway's own approved site subnets (the authoritative local-subnet answer) so the
@@ -1286,11 +1309,12 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 			pol.DNSForwards = dns
 			pol.PoolCIDR = topo.poolCIDR
 		}
-		pol.VIPMappings = vips // S10.3 (triggers RequiredVersion=7 when present)
+		pol.VIPMappings = vips     // S10.3 (triggers RequiredVersion=7 when present)
+		pol.K8sDNSZones = dnsZones // S10.3 (A1) — DNS-listen table, same v7 trigger
 		pol.Version = policyspec.RequiredVersion(*pol)
 		return pol
 	}
-	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, VIPMappings: vips}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, VIPMappings: vips, K8sDNSZones: dnsZones}
 	if len(routes) > 0 {
 		c.Routes = routes
 		c.LocalSubnets = local

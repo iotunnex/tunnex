@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"regexp"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +24,17 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetsrc"
 )
+
+// DNS naming validators (RFC 1123). A cluster name is ONE label; a zone is a dotted sequence of labels.
+// Both feed the exposed-Service hostname <service>.<namespace>.svc.<cluster>.<zone>, so they are validated
+// at RegisterCluster with typed teaching errors — a bad name never reaches the wire (S10.3 (B2)).
+var (
+	dnsLabelRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	dnsNameRE  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+)
+
+func validDNSLabel(s string) bool { return len(s) >= 1 && len(s) <= 63 && dnsLabelRE.MatchString(s) }
+func validDNSName(s string) bool  { return len(s) >= 1 && len(s) <= 253 && dnsNameRE.MatchString(s) }
 
 type Service struct {
 	pool *pgxpool.Pool
@@ -51,9 +63,19 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 // disjointness-validated — it is the very range that collides with the pool/sites (that is WHY exposed
 // Services get synthetic VIPs). It is captured only so the gateway can classify a resolved address (in the
 // Service CIDR = a ClusterIP to DNAT; outside = a pod IP = a headless Service, refused) without the K8s API.
-func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix) (sqlc.K8sCluster, error) {
+func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix, dnsZone string) (sqlc.K8sCluster, error) {
 	var out sqlc.K8sCluster
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		// The cluster name becomes a hostname label (<service>.<namespace>.svc.<name>.<zone>), so it must be
+		// a DNS label; the zone is the customer's domain suffix. Typed teaching errors (S10.3 (B2)).
+		if !validDNSLabel(name) {
+			return apierr.BadRequest("invalid_cluster_name",
+				"the cluster name must be a DNS label (lowercase a-z0-9 + hyphens, <=63 chars) — it becomes part of every exposed Service's hostname: <service>.<namespace>.svc."+name+"."+dnsZone)
+		}
+		if !validDNSName(dnsZone) {
+			return apierr.BadRequest("invalid_dns_zone",
+				"the cluster DNS zone must be a valid domain (e.g. k8s.acme.com) — the suffix of every exposed Service's hostname; it need not be publicly registered (names resolve only inside the tunnel)")
+		}
 		if !serviceCIDR.IsValid() {
 			return apierr.BadRequest("invalid_service_cidr", "the cluster's Kubernetes Service CIDR is required (e.g. 10.96.0.0/12) — the gateway uses it to tell a ClusterIP from a pod IP")
 		}
@@ -70,8 +92,27 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 				"the VIP range "+vipRange.String()+" overlaps "+string(ov.Class)+" "+ov.With.String()+
 					"; choose a range disjoint from your device pool, your site subnets, and other clusters' VIP ranges")
 		}
+		// Reserve the DNS VIP (the range's first allocatable, .2 — .1 is conventionally a gateway) so a
+		// Service can never be handed it; the gateway answers DNS on it (fail-closed on the wire). The range
+		// must fit the DNS VIP PLUS at least one Service VIP, else it is refused honestly (not left DNS-only).
+		rangeStr := vipRange.Masked().String()
+		dnsVIPStr, e := ipalloc.Allocate(rangeStr, nil)
+		if errors.Is(e, ipalloc.ErrPoolExhausted) {
+			return apierr.BadRequest("vip_range_too_small", "the VIP range must fit a reserved DNS address plus at least one Service VIP")
+		}
+		if e != nil {
+			return e
+		}
+		if _, e := ipalloc.Allocate(rangeStr, []string{dnsVIPStr}); errors.Is(e, ipalloc.ErrPoolExhausted) {
+			return apierr.BadRequest("vip_range_too_small", "the VIP range must fit a reserved DNS address plus at least one Service VIP")
+		}
+		dnsVIP, e := netip.ParseAddr(dnsVIPStr)
+		if e != nil {
+			return e
+		}
 		c, e := q.CreateK8sCluster(ctx, sqlc.CreateK8sClusterParams{
 			OrgID: orgID, SiteID: siteID, Name: name, VipRange: vipRange.Masked(), ServiceCidr: serviceCIDR.Masked(),
+			DnsZone: dnsZone, DnsVip: &dnsVIP,
 		})
 		if pgerr.IsUnique(e) {
 			return apierr.Conflict("cluster_exists", "a cluster with that name or VIP range already exists in this organization")
@@ -104,9 +145,14 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 		if e != nil {
 			return apierr.NotFound("cluster_not_found", "no such cluster in this organization")
 		}
-		used, e := q.ListUsedVIPsInCluster(ctx, clusterID)
+		used, e := q.ListUsedVIPsInCluster(ctx, sqlc.ListUsedVIPsInClusterParams{OrgID: orgID, ClusterID: clusterID})
 		if e != nil {
 			return e
+		}
+		// The reserved DNS VIP is NOT a live Service, so it is absent from the used-set — add it explicitly
+		// so a Service can NEVER be handed the gateway's DNS address (the .2 reservation is inviolable).
+		if cluster.DnsVip != nil {
+			used = append(used, cluster.DnsVip.String())
 		}
 		vipStr, e := ipalloc.Allocate(cluster.VipRange.String(), used)
 		if errors.Is(e, ipalloc.ErrPoolExhausted) {

@@ -545,7 +545,8 @@ type Querier interface {
 	// caller diffs each snapshot against the org's CURRENT routed ranges to flag "re-export needed".
 	ListStaticDevicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListStaticDevicesForOrgRow, error)
 	// ListUsedVIPsInCluster returns the LIVE VIPs in a cluster (the used-set ipalloc allocates around).
-	ListUsedVIPsInCluster(ctx context.Context, clusterID uuid.UUID) ([]string, error)
+	// org_id-scoped for tenant isolation (defence-in-depth; the caller already authorized the cluster).
+	ListUsedVIPsInCluster(ctx context.Context, arg ListUsedVIPsInClusterParams) ([]string, error)
 	ListUserGroupsByOrg(ctx context.Context, orgID uuid.UUID) ([]UserGroup, error)
 	// ListVIPRangesForOrg feeds the subnetguard collector: EVERY disjointness check (cluster-VIP creation,
 	// pool resize, site-subnet approval) must include the org's VIP ranges so disjointness stays bidirectional
