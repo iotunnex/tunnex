@@ -373,6 +373,74 @@ func TestFinalizeAttachesPoolV6(t *testing.T) {
 	}
 }
 
+// TestFinalizeAttachesVIPMapPerGatewayOnly (S10.3): finalizeArtifact staples THIS gateway's OWN cluster's
+// VIP map (never another cluster's — per-gateway isolation), triggers v7, and rides independent of site
+// routes (a single-site cluster gateway with no route still gets its map). A gateway whose site fronts no
+// cluster is UNCHANGED (no map, no bump — the zero-config golden).
+func TestFinalizeAttachesVIPMapPerGatewayOnly(t *testing.T) {
+	siteA, siteB, siteC := uuid.New(), uuid.New(), uuid.New()
+	topo := siteTopology{
+		vipMappings: map[uuid.UUID][]policyspec.VIPMapping{
+			siteA: {{VIP: "100.64.0.5", Namespace: "prod", Service: "api"}},
+			siteB: {{VIP: "100.65.0.5", Namespace: "prod", Service: "web"}},
+		},
+	}
+	svc := &Service{}
+	nodeA := sqlc.Node{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteA, Valid: true}}
+	got := svc.finalizeArtifact(topo, nodeA, &policyspec.Compiled{NodeID: "a", Mode: "enforcing"})
+	if got == nil || len(got.VIPMappings) != 1 || got.VIPMappings[0].VIP != "100.64.0.5" {
+		t.Fatalf("gateway on site A must carry ONLY its own cluster's VIP map, got %+v", got)
+	}
+	if got.Version != 7 {
+		t.Fatalf("a VIP-map artifact must derive v7 (content-derived), got %d", got.Version)
+	}
+	if got.PoolCIDR != "" {
+		t.Fatalf("a route-less cluster gateway must NOT carry the pool (route-gated), got %q", got.PoolCIDR)
+	}
+	// Zero-config golden: a gateway whose site fronts NO cluster is returned UNCHANGED.
+	base := &policyspec.Compiled{NodeID: "c", Mode: "enforcing", Version: 4}
+	nodeC := sqlc.Node{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteC, Valid: true}}
+	if out := svc.finalizeArtifact(topo, nodeC, base); out != base || len(out.VIPMappings) != 0 || out.Version != 4 {
+		t.Fatalf("a non-cluster gateway must be byte-identical (no map, no bump), got %+v", out)
+	}
+}
+
+// TestLoadSiteTopologyGroupsVIPMapBySite (S10.3, DB): loadSiteTopology groups exposed Services under the
+// SITE whose gateway fronts each cluster.
+func TestLoadSiteTopologyGroupsVIPMapBySite(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	org, site, cluster := uuid.New(), uuid.New(), uuid.New()
+	ex := func(q string, a ...any) {
+		if _, e := pool.Exec(ctx, q, a...); e != nil {
+			t.Fatalf("seed %q: %v", q, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'K',$2,'10.99.0.0/24')`, org, "kt-"+org.String()[:8])
+	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org)
+	ex(`INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range) VALUES ($1,$2,$3,'c','100.64.0.0/16')`, cluster, org, site)
+	ex(`INSERT INTO k8s_services (id,org_id,cluster_id,name,namespace,protocol,vip) VALUES ($1,$2,$3,'api','prod','tcp','100.64.0.5')`, uuid.New(), org, cluster)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	svc := &Service{pool: pool, q: sqlc.New(pool)}
+	topo, e := svc.loadSiteTopology(ctx, org)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m := topo.vipMappings[site]
+	if len(m) != 1 || m[0].VIP != "100.64.0.5" || m[0].Service != "api" || m[0].Namespace != "prod" {
+		t.Fatalf("loadSiteTopology must group the exposed Service under its cluster's site, got %+v", m)
+	}
+}
+
 // TestActiveHubDialFromWF_A — WF-A D-WFA-5 (C): a device whose assigned node is a hub-set member DIALS the
 // active primary (endpoint follows promotions); a device on a non-member gateway is NOT derived (keeps its
 // own endpoint — the deferred spoke-device case). Identity (node_id) is untouched either way.

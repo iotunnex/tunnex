@@ -653,6 +653,11 @@ type siteTopology struct {
 	// on the hub's spoke peers = the churn class D-A3b-1 rejected). Empty when the org row is gone
 	// (soft-deleted org — its gateways are converging to teardown anyway).
 	poolCIDR string
+	// vipMappings (S10.3) is site_id -> the exposed-Service VIP map of the cluster THAT site's gateway
+	// fronts. finalizeArtifact staples this gateway's OWN site's mappings onto its artifact (never another
+	// cluster's — the per-gateway isolation red). Present only for orgs with a registered cluster + an
+	// exposed Service, so a non-cluster org's artifact stays byte-identical (the v7 zero-config golden).
+	vipMappings map[uuid.UUID][]policyspec.VIPMapping
 }
 
 // loadSiteTopology runs the two org-wide site queries once. Full-sweep by construction: an unbound/
@@ -721,7 +726,28 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 	} else if oerr != pgx.ErrNoRows {
 		return siteTopology{}, oerr
 	}
-	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers, poolCIDR: poolCIDR}, nil
+	// S10.3: the org's exposed K8s Services, grouped by the SITE whose gateway fronts each cluster. A DesiredState
+	// atomic on error (a silently-empty map would strand an exposed Service dead-while-green). Empty for a
+	// non-cluster org (map stays nil → finalizeArtifact staples nothing → byte-identical golden).
+	vipMappings := map[uuid.UUID][]policyspec.VIPMapping{}
+	exposed, kerr := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
+	if kerr != nil {
+		return siteTopology{}, kerr
+	}
+	for _, e := range exposed {
+		pl, ph := 0, 0
+		if e.PortLow != nil {
+			pl = int(*e.PortLow)
+		}
+		if e.PortHigh != nil {
+			ph = int(*e.PortHigh)
+		}
+		vipMappings[e.SiteID] = append(vipMappings[e.SiteID], policyspec.VIPMapping{
+			VIP: e.Vip, Namespace: e.Namespace, Service: e.Name,
+			Protocol: e.Protocol, PortLow: pl, PortHigh: ph,
+		})
+	}
+	return siteTopology{gws: gws, subnets: sub, dnsForwards: fwds, hubMembers: hubMembers, poolCIDR: poolCIDR, vipMappings: vipMappings}, nil
 }
 
 // deriveActive is THE shared hub-order derivation (S8.6 REDUCE) — the ONE function every consumer reads
@@ -1229,8 +1255,13 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	if !node.SiteID.Valid {
 		return pol
 	}
+	siteID := uuid.UUID(node.SiteID.Bytes)
 	_, routes := siteLinkGraphFrom(topo, node)
-	if len(routes) == 0 {
+	// S10.3: this gateway's OWN cluster's exposed-Service VIP map (never another cluster's — per-gateway
+	// isolation). Rides independent of site routes: a single-site cluster gateway has no site-to-site route
+	// but still fronts a cluster.
+	vips := topo.vipMappings[siteID]
+	if len(routes) == 0 && len(vips) == 0 {
 		return pol
 	}
 	// D2: attach THIS gateway's own approved site subnets (the authoritative local-subnet answer) so the
@@ -1247,14 +1278,25 @@ func (s *Service) finalizeArtifact(topo siteTopology, node sqlc.Node, pol *polic
 	// single-site org keeps its pre-v6 artifact byte-identical (and its Docker-dark device↔device is the
 	// REGISTERED PD-3 residual, with non-site gateways).
 	if pol != nil {
-		pol.Routes = routes
-		pol.LocalSubnets = local
-		pol.DNSForwards = dns
-		pol.PoolCIDR = topo.poolCIDR
+		// Route-gated (multi-site) plumbing rides ONLY with site routes — a single-site cluster gateway
+		// (routes==0) gets the VIP map but NOT pool/local/dns (PoolCIDR's v6 route-gating stays intact).
+		if len(routes) > 0 {
+			pol.Routes = routes
+			pol.LocalSubnets = local
+			pol.DNSForwards = dns
+			pol.PoolCIDR = topo.poolCIDR
+		}
+		pol.VIPMappings = vips // S10.3 (triggers RequiredVersion=7 when present)
 		pol.Version = policyspec.RequiredVersion(*pol)
 		return pol
 	}
-	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, Routes: routes, LocalSubnets: local, DNSForwards: dns, PoolCIDR: topo.poolCIDR}
+	c := policyspec.Compiled{NodeID: node.ID.String(), Mode: "off", Mesh: true, VIPMappings: vips}
+	if len(routes) > 0 {
+		c.Routes = routes
+		c.LocalSubnets = local
+		c.DNSForwards = dns
+		c.PoolCIDR = topo.poolCIDR
+	}
 	c.Version = policyspec.RequiredVersion(c)
 	return &c
 }
