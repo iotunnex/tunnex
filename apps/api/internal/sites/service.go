@@ -19,6 +19,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
+	"github.com/tunnexio/tunnex/apps/api/internal/subnetsrc"
 )
 
 type Service struct {
@@ -301,20 +302,14 @@ func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid
 		// since site_subnets uniqueness is per-SITE, not per-org, so two sites CAN advertise the same
 		// CIDR. Its stated purpose — exclude the candidate from its own list — was already satisfied
 		// structurally. See the validator-input-filtering law in docs/S8.1-decisions.md.)
-		approved, e := q.ListSiteSubnetsForOrg(ctx, orgID) // approved-only
+		// The whole input set (approved subnets + pool + the org's cluster VIP ranges) is assembled by the
+		// shared collector — S10.3 F2: a new range class joins EVERY seam, and no caller can silently omit
+		// one. The candidate is PENDING, so it is not in the approved-only list (no self-collision needed).
+		ranges, e := subnetguard.Collect(ctx, subnetsrc.Source{Q: q}, orgID)
 		if e != nil {
 			return e
 		}
-		others := make([]netip.Prefix, 0, len(approved))
-		for _, a := range approved {
-			others = append(others, a.Cidr)
-		}
-		org, e := q.GetOrganizationByID(ctx, orgID)
-		if e != nil {
-			return e
-		}
-		pool, _ := netip.ParsePrefix(org.PoolCidr) // invalid → skipped by the validator
-		if ov, ok := subnetguard.Check(sub.Cidr, others, pool, nil); !ok {
+		if ov, ok := subnetguard.Check(sub.Cidr, ranges); !ok {
 			refusal = &ov // signal refusal; the tx COMMITS as a no-op, the audit + error happen OUTSIDE
 			return nil
 		}
