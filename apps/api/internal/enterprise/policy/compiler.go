@@ -79,10 +79,11 @@ type Rule struct {
 	SrcUserID     uuid.UUID
 	SrcSiteID     uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
 	SrcCIDR       string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
-	DstKind       string
-	DstResourceID uuid.UUID
-	DstGroupID    uuid.UUID
-	DstSiteID     uuid.UUID // S8.1: dst_kind='site' — resolved to the site's subnet CIDRs
+	DstKind         string
+	DstResourceID   uuid.UUID
+	DstGroupID      uuid.UUID
+	DstSiteID       uuid.UUID // S8.1: dst_kind='site' — resolved to the site's subnet CIDRs
+	DstK8sServiceID uuid.UUID // S10.3: dst_kind='k8s_service' — resolved to the Service's CURRENT VIP/32
 	Disabled      bool      // F3: a disabled rule compiles to ZERO AllowEntries (the skip below) — its allow is
 	//                        withdrawn, so under default-deny it's "as if the rule weren't there". Not a deny.
 }
@@ -114,6 +115,19 @@ type Resource struct {
 	PortHigh int    // 0 => unset
 }
 
+// ExposedService (S10.3) is a Kubernetes Service exposed to the fabric: a STABLE identity resolved to its
+// CURRENT VIP at compile time. SiteID is the cluster's site — the gateway that performs the VIP->ClusterIP
+// DNAT, so the grant is placed there too (both-enforce, D-S9.1-2: the DNAT-performing gateway must be
+// entitled to the flow, not only the device's own gateway).
+type ExposedService struct {
+	ID       uuid.UUID
+	VIP      string // the /32 host (without mask)
+	Protocol string
+	PortLow  int
+	PortHigh int
+	SiteID   uuid.UUID // the cluster's site — where the DNAT happens; the grant lands here + the device node
+}
+
 // Membership is one (group, user) pair.
 type Membership struct {
 	GroupID uuid.UUID
@@ -133,10 +147,11 @@ type Device struct {
 
 // Snapshot is the full org policy state the compiler consumes.
 type Snapshot struct {
-	Mode        string
-	Rules       []Rule
-	Resources   []Resource
-	Memberships []Membership
+	Mode            string
+	Rules           []Rule
+	Resources       []Resource
+	ExposedServices []ExposedService // S10.3: dst_kind='k8s_service' resolution (id → current VIP)
+	Memberships     []Membership
 	Devices     []Device
 	SiteSubnets []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
 	SiteNodes   []SiteNode   // S8.2: (site_id, node_id) bindings for src_kind='site' node placement
@@ -223,6 +238,12 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 	resourceByID := make(map[uuid.UUID]Resource, len(s.Resources))
 	for _, r := range s.Resources {
 		resourceByID[r.ID] = r
+	}
+	// S10.3: exposed Services keyed by their STABLE id — a grant resolves to the CURRENT VIP here, never a
+	// snapshotted address, so a re-allocated VIP follows the identity and a vanished Service resolves to nothing.
+	serviceByID := make(map[uuid.UUID]ExposedService, len(s.ExposedServices))
+	for _, es := range s.ExposedServices {
+		serviceByID[es.ID] = es
 	}
 
 	// site -> sorted, de-duplicated subnet CIDRs (destination resolution for dst_kind='site', S8.1).
@@ -430,6 +451,27 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 						})
 					}
 				}
+			case "k8s_service":
+				// S10.3: resolve the Service's STABLE id -> its CURRENT VIP (never a snapshotted address).
+				// An absent/deleted Service compiles to NOTHING — the honest "rule points at a vanished
+				// Service" surface is the API/web slice. Placement mirrors site-dst: devGrantNodes(node,
+				// svc.SiteID) lands the grant on BOTH the device's gateway AND the cluster's gateway — the
+				// latter performs the VIP->ClusterIP DNAT and must be entitled to the flow (both-enforce, D-S9.1-2).
+				svc, ok := serviceByID[r.DstK8sServiceID]
+				if !ok || svc.VIP == "" {
+					continue
+				}
+				for _, node := range devGrantNodes(d.NodeID, svc.SiteID) {
+					add(node, policyspec.AllowEntry{
+						SrcIP:       d.AssignedIP,
+						DstCIDR:     svc.VIP + "/32",
+						Protocol:    normProto(svc.Protocol),
+						PortLow:     svc.PortLow,
+						PortHigh:    svc.PortHigh,
+						RuleID:      r.ID.String(),
+						SrcDeviceID: d.ID.String(),
+					})
+				}
 			}
 		}
 	}
@@ -509,6 +551,15 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 		case "site":
 			for _, cidr := range siteCIDRs[r.DstSiteID] {
 				dsts = append(dsts, policyspec.AllowEntry{DstCIDR: cidr, Protocol: policyspec.ProtoAny})
+			}
+		case "k8s_service":
+			// S10.3: resolve id -> CURRENT VIP; an absent Service yields nothing (compile-to-nothing). The
+			// cluster gateway performs the DNAT, so entitle it too (both-enforce) alongside the source nodes.
+			if svc, ok := serviceByID[r.DstK8sServiceID]; ok && svc.VIP != "" {
+				dsts = append(dsts, policyspec.AllowEntry{DstCIDR: svc.VIP + "/32", Protocol: normProto(svc.Protocol), PortLow: svc.PortLow, PortHigh: svc.PortHigh})
+				if n := siteNode[svc.SiteID]; n != uuid.Nil {
+					enforceNodes[n] = true
+				}
 			}
 		}
 		for node := range enforceNodes {

@@ -744,8 +744,9 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 			SrcCIDR:       derefString(r.SrcCidr),  // S8.7: src_kind='cidr' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
-			DstSiteID: fromPgUUID(r.DstSiteID),
-			Disabled:  r.Disabled, // F3: carried to the compiler, which OWNS the skip (compiler-skip choice)
+			DstSiteID:       fromPgUUID(r.DstSiteID),
+			DstK8sServiceID: fromPgUUID(r.DstK8sServiceID), // S10.3: dst_kind='k8s_service' resolution
+			Disabled:        r.Disabled,                    // F3: carried to the compiler, which OWNS the skip
 		})
 	}
 	for _, ss := range siteSubnets {
@@ -762,6 +763,18 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		snap.Resources = append(snap.Resources, Resource{
 			ID: r.ID, CIDR: r.Cidr, Protocol: r.Protocol,
 			PortLow: derefI32(r.PortLow), PortHigh: derefI32(r.PortHigh),
+		})
+	}
+	// S10.3: exposed K8s Services (id -> current VIP) for dst_kind='k8s_service' resolution. LIVE only, so a
+	// soft-deleted Service is absent -> its grant compiles to nothing.
+	exposed, err := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, e := range exposed {
+		snap.ExposedServices = append(snap.ExposedServices, ExposedService{
+			ID: e.ID, VIP: e.Vip, Protocol: e.Protocol,
+			PortLow: derefI32(e.PortLow), PortHigh: derefI32(e.PortHigh), SiteID: e.SiteID,
 		})
 	}
 	for _, m := range members {
