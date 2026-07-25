@@ -293,3 +293,31 @@ Conditions:
 
 Build proceeds S10.1 Slice 1 first. Sha-first gates, halt-and-surface, tail-of-turn review on the
 privileged/security-adjacent surfaces (master-key handling, the gateway securityContext, the preflight).
+
+---
+
+## S10.1 build record
+
+- **Slice 1 (master-key externalization)** — DONE (`958d2ed`), both editions + security-reviewed clean.
+- **Slice 2 (external-store URL-wins + fail-loud validation)** — DONE (`d4bbeeb`).
+- **Slice 3 (join-token delivery) — RELOCATED to S10.3. Recorded as TWO facts (not re-openable):**
+  (a) programmatic join-token issuance ALREADY EXISTS — `IssueJoinToken` (`node_handlers.go:90`) is a
+  `POST …/nodes/join-token` returning a single-use token, machine-callable via session or `tnx_` bearer.
+  The externalization the paper flagged is SATISFIED, not deferred. (b) The token is a GATEWAY input, so
+  its chart-side plumbing (Helm value → Secret → env) belongs to the tunnex-gateway chart (S10.3). **S10.1's
+  Go content is therefore complete at Slice 2.**
+- **Slice 4 (CP Helm chart)** — DONE. `deploy/helm/tunnex-cp/` (control plane only; the gateway is the
+  separate tunnex-gateway chart, S10.3). Five conditions encoded:
+  1. Agent mTLS port 8443 = a raw L4 Service (LoadBalancer/NodePort), NEVER a terminating Ingress —
+     cert-pinning + SNI=tunnex-control would break; NOTES names it the most likely misconfig.
+  2. Master key REQUIRED, NEVER generated — `required` fails install with a named message; projected
+     read-only Secret volume (file, not env); comment/NOTES the orphan-on-upgrade reasoning.
+  3. Migrations = a pre-install,pre-upgrade HOOK Job (cmd/migrate), once, never raced; api pods run
+     TUNNEX_AUTO_MIGRATE=false; api Deployment strategy=Recreate so schedulers never overlap.
+  4. api.replicas=1 DELIBERATE (in-process schedulers); HA registered — trigger = HA-CP customer, real fix
+     = leader election for the scheduler loops.
+  5. **SUBSTITUTE (≠ SATISFIES):** `helm lint` + `helm template` render are the local gates (both green);
+     a real `helm install` on a live cluster is the OWED wire proof — trigger = the EPIC-10 walk.
+
+**Chart boundary (shapes S10.3):** `tunnex-cp` = control plane; `tunnex-gateway` = the in-cluster
+gateway + join token. Two charts, one repo, shared values conventions.
