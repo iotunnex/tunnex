@@ -42,6 +42,13 @@ type Config struct {
 	NodeAgentImage string
 	// RedisURL is the session store DSN (S2.2).
 	RedisURL string
+	// ExternalDatabase / ExternalRedis are true when TUNNEX_DATABASE_URL /
+	// TUNNEX_REDIS_URL were supplied (S10.1 / S6.6 URL-WINS). An external store is
+	// validated at boot (fail-loud on unreachable) and never credential-generated;
+	// the bundled pg/redis are not started (compose profile). The shared env seam
+	// with the Helm chart — compose and K8s must not diverge (docs/S6.6-decisions.md).
+	ExternalDatabase bool
+	ExternalRedis    bool
 	// CookieSecure sets the Secure flag on the session cookie. MUST be true in
 	// production; a false value is logged loudly at boot.
 	CookieSecure bool
@@ -99,11 +106,13 @@ func Load() Config {
 		MasterKey:          getenv("TUNNEX_MASTER_KEY", ""),
 		SessionSecretFile:  getenv("TUNNEX_SESSION_SECRET_FILE", ""),
 		SessionSecret:      getenv("TUNNEX_SESSION_SECRET", ""),
-		DatabaseURL:        getenv("DATABASE_URL", ""),
+		DatabaseURL:        firstNonEmpty(getenv("TUNNEX_DATABASE_URL", ""), getenv("DATABASE_URL", "")),
+		ExternalDatabase:   getenv("TUNNEX_DATABASE_URL", "") != "",
+		ExternalRedis:      getenv("TUNNEX_REDIS_URL", "") != "",
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
 		NodeAgentImage:     getenv("TUNNEX_NODE_AGENT_IMAGE", "ghcr.io/iotunnex/tunnex-node-agent:latest"),
-		RedisURL:           getenv("REDIS_URL", "redis://redis:6379/0"),
+		RedisURL:           firstNonEmpty(getenv("TUNNEX_REDIS_URL", ""), getenv("REDIS_URL", "redis://redis:6379/0")),
 		CookieSecure:       getbool("TUNNEX_COOKIE_SECURE", false),
 		SessionIdleTTL:     getdur("TUNNEX_SESSION_IDLE_TTL", 24*time.Hour),
 		SessionAbsoluteTTL: getdur("TUNNEX_SESSION_ABSOLUTE_TTL", 720*time.Hour),
@@ -127,6 +136,15 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// firstNonEmpty returns a if set, else b (URL-WINS: a TUNNEX_-prefixed external
+// URL pre-empts the bundled default).
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func getenv(key, fallback string) string {

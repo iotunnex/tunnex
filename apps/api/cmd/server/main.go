@@ -130,12 +130,45 @@ func main() {
 	}
 	defer pool.Close()
 
+	// S10.1/S6.6 validate-never-generate: pgxpool.New is LAZY, so an unreachable
+	// EXTERNAL store would otherwise fail only on first query. Ping at boot so a bad
+	// TUNNEX_DATABASE_URL fails LOUD here, not later under a user request.
+	{
+		pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := pool.Ping(pingCtx); err != nil {
+			cancel()
+			logger.Error("db_unreachable",
+				slog.Bool("external", cfg.ExternalDatabase),
+				slog.String("error", err.Error()),
+			)
+			os.Exit(1)
+		}
+		cancel()
+	}
+
 	// Session store (Redis) + session-backed authentication.
 	sessions, err := session.New(cfg.RedisURL, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL)
 	if err != nil {
 		logger.Error("session_store_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	// redis.NewClient is also lazy — ping so an unreachable external Redis fails loud at boot.
+	{
+		pingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := sessions.Client().Ping(pingCtx).Err(); err != nil {
+			cancel()
+			logger.Error("redis_unreachable",
+				slog.Bool("external", cfg.ExternalRedis),
+				slog.String("error", err.Error()),
+			)
+			os.Exit(1)
+		}
+		cancel()
+	}
+	logger.Info("store_ready",
+		slog.Bool("db_external", cfg.ExternalDatabase),
+		slog.Bool("redis_external", cfg.ExternalRedis),
+	)
 	if !cfg.CookieSecure {
 		logger.Warn("cookie_insecure",
 			slog.String("warning", "session cookie Secure flag is OFF — development only; set TUNNEX_COOKIE_SECURE=true in production"))

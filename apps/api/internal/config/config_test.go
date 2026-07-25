@@ -38,3 +38,36 @@ func TestShippedDefaultTripsLocalWarning(t *testing.T) {
 		t.Fatalf("shipped APP_BASE_URL default (%q) must trip the local-URL warning", Load().AppBaseURL)
 	}
 }
+
+// S10.1/S6.6 URL-WINS: TUNNEX_DATABASE_URL / TUNNEX_REDIS_URL pre-empt the bundled
+// defaults and flag the store external (validated at boot, never credential-generated).
+func TestExternalStoreURLWins(t *testing.T) {
+	t.Setenv("TUNNEX_DATABASE_URL", "postgres://ext-db/app")
+	t.Setenv("DATABASE_URL", "postgres://bundled/app")
+	t.Setenv("TUNNEX_REDIS_URL", "redis://ext-redis:6379/0")
+	t.Setenv("REDIS_URL", "redis://bundled:6379/0")
+	c := Load()
+	if c.DatabaseURL != "postgres://ext-db/app" || !c.ExternalDatabase {
+		t.Fatalf("external DB URL must win + flag external; got %q external=%v", c.DatabaseURL, c.ExternalDatabase)
+	}
+	if c.RedisURL != "redis://ext-redis:6379/0" || !c.ExternalRedis {
+		t.Fatalf("external Redis URL must win + flag external; got %q external=%v", c.RedisURL, c.ExternalRedis)
+	}
+}
+
+func TestBundledStoreWhenNoExternal(t *testing.T) {
+	t.Setenv("TUNNEX_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "postgres://bundled/app")
+	t.Setenv("TUNNEX_REDIS_URL", "")
+	t.Setenv("REDIS_URL", "")
+	c := Load()
+	if c.DatabaseURL != "postgres://bundled/app" || c.ExternalDatabase {
+		t.Fatalf("bundled DB URL used, not external; got %q external=%v", c.DatabaseURL, c.ExternalDatabase)
+	}
+	if c.ExternalRedis {
+		t.Fatal("ExternalRedis must be false with no TUNNEX_REDIS_URL")
+	}
+	if c.RedisURL != "redis://redis:6379/0" {
+		t.Fatalf("redis bundled default expected; got %q", c.RedisURL)
+	}
+}
