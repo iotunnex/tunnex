@@ -54,7 +54,19 @@ func main() {
 	slog.SetDefault(logger)
 
 	// --- S0.3: bootstrap roots of trust (fail loudly, never regenerate) ---
-	sec, err := secrets.LoadOrInit(cfg.SecretsDir)
+	// S10.1: an operator-provided master/session source pre-empts the volume (an
+	// ephemeral K8s pod has no writable secrets volume). File-mount is preferred;
+	// env is a weaker fallback — warn on it so the posture is visible in the log.
+	ext := secrets.ExternalSecrets{
+		Master:  secrets.ExternalSource{File: cfg.MasterKeyFile, Value: cfg.MasterKey},
+		Session: secrets.ExternalSource{File: cfg.SessionSecretFile, Value: cfg.SessionSecret},
+	}
+	if cfg.MasterKey != "" && cfg.MasterKeyFile == "" {
+		logger.Warn("master_key_from_env",
+			slog.String("advice", "prefer TUNNEX_MASTER_KEY_FILE (a mounted secret) — env leaks via process listing, crash dumps, and kubectl describe"),
+		)
+	}
+	sec, err := secrets.LoadOrInitExt(cfg.SecretsDir, ext)
 	if err != nil {
 		logger.Error("secrets_bootstrap_failed",
 			slog.String("secrets_dir", cfg.SecretsDir),

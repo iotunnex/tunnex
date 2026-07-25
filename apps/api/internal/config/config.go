@@ -19,6 +19,15 @@ type Config struct {
 	LogLevel string
 	// SecretsDir is the dedicated volume holding the roots of trust (S0.3).
 	SecretsDir string
+	// External roots of trust (S10.1): an operator-provided master/session key
+	// that PRE-EMPTS the volume file — for an ephemeral K8s pod with no writable
+	// secrets volume. *File (a mounted secret path) is PREFERRED; * (inline
+	// base64 via env) is the documented fallback (env leaks via process listing /
+	// crash dump / kubectl describe). Empty = use the volume (self-hosted default).
+	MasterKeyFile     string
+	MasterKey         string
+	SessionSecretFile string
+	SessionSecret     string
 	// DatabaseURL is the postgres DSN (S0.4).
 	DatabaseURL string
 	// AutoMigrate runs pending migrations on boot so `docker compose up`
@@ -86,6 +95,10 @@ func Load() Config {
 		Env:                getenv("TUNNEX_ENV", "development"),
 		LogLevel:           strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
 		SecretsDir:         getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),
+		MasterKeyFile:      getenv("TUNNEX_MASTER_KEY_FILE", ""),
+		MasterKey:          getenv("TUNNEX_MASTER_KEY", ""),
+		SessionSecretFile:  getenv("TUNNEX_SESSION_SECRET_FILE", ""),
+		SessionSecret:      getenv("TUNNEX_SESSION_SECRET", ""),
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
