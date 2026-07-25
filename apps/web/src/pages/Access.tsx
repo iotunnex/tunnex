@@ -388,7 +388,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
       {view.showContent && (
         <>
           {groups.length === 0 && sites.length === 0 && loaded.groupsLoaded && (
-            <p className="mt-2 text-xs text-slate-500">Create a group (device/user source) or register a site (site-to-site source) to add a rule.</p>
+            <p className="mt-2 text-xs text-slate-500">Create a group of users or register a site (site-to-site source) to add a rule.</p>
           )}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
@@ -881,7 +881,10 @@ function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId
       <ErrorText>{err}</ErrorText>
       <div className="mt-3 grid gap-4 sm:grid-cols-2">
         <div>
-          <p className="text-xs font-medium text-slate-400">Groups (rule sources / device-to-device targets)</p>
+          {/* WF-OVPN-walk-2: "Groups of users" makes membership honest — a group holds USERS, not
+              devices (a device inherits access from its owning user via a group/user rule). The old
+              "Groups (… device-to-device targets)" label read as "add devices here", which has no path. */}
+          <p className="text-xs font-medium text-slate-400">Groups of users (rule sources / device-to-device targets)</p>
           {groupsError ? (
             <LoadRetry error={groupsError} onRetry={load} />
           ) : (
@@ -1185,6 +1188,16 @@ function PostureChecksSection({ orgId, canManage }: { orgId: string; canManage: 
                   11.0. Enter the build (e.g. <span className="font-mono text-slate-400">10.0.22631</span> for 23H2); run{" "}
                   <span className="font-mono text-slate-400">winver</span> to check a device.
                 </p>
+              </div>
+            )}
+            {/* WF-OVPN-walk-3: "Off" hid the min-version inputs AND the Save button, so the setting
+                could not be persisted from the UI (a dead-end). Off has nothing to configure, but it
+                still needs its own Save affordance — saveOsVersion() already handles the off case. */}
+            {osMode === "off" && canManage && (
+              <div className="mt-3">
+                <Button disabled={busy} onClick={saveOsVersion}>
+                  Save
+                </Button>
               </div>
             )}
             {/* THE coverage indicator (ratified rider): every reporting platform is named —

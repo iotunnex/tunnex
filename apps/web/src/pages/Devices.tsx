@@ -12,8 +12,16 @@ import { exportCeremony, shouldRenderQR, type ExportKind } from "../lib/deviceex
 // lastSeen renders honest recency ("last seen 42s ago"), never a faked live claim
 // — WireGuard only knows the last handshake time (online is derived from it). The
 // recency math is shared with the dashboard via relativeAge.
-function lastSeen(at?: string): string {
-  if (!at) return "never connected";
+export function lastSeen(at?: string, hasWgKey = true): string {
+  if (!at) {
+    // WF-OVPN-walk-1: an OpenVPN device is NOT a WireGuard peer (WF-OVPN-10) — it carries no WG
+    // public key and so has no handshake-telemetry analog; its last_handshake_at is ALWAYS null.
+    // Rendering "never connected" for a device that may hold a live OVPN session is a dead-while-green
+    // health-surface lie (the green-while-dead law, inverted). Render honest-unknown instead — absence
+    // of a signal is NOT a negative claim (the desync_unknown honest-state law). Real OVPN last-seen
+    // (a status/management telemetry channel) is a deferred story, not a second liveness plane built here.
+    return hasWgKey ? "never connected" : "liveness not reported";
+  }
   return `last seen ${relativeAge(at)}`;
 }
 
@@ -266,7 +274,7 @@ export default function Devices() {
               ) : (
                 <span className="ml-2 inline-flex items-center gap-1 text-xs text-slate-400">
                   <StatusDot tone={d.online ? "on" : "off"} />
-                  {lastSeen(d.last_handshake_at)}
+                  {lastSeen(d.last_handshake_at, !!d.public_key)}
                 </span>
               )}
               {/* S7.5.3 posture badge — present only when the org has posture checks
