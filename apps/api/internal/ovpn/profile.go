@@ -28,6 +28,15 @@ func BuildProfile(caPEM string, p ovpnca.Profile, remotes []string, port int) st
 	for _, r := range remotes {
 		fmt.Fprintf(&b, "remote %s %d\n", r, port)
 	}
+	// WF-OVPN-walk-4 (RTO): bound client-side failover. OpenVPN re-homes by WALKING its `remote`
+	// list, and the default connect-timeout is 120s — so a dead PRIMARY strands the client for
+	// minutes (the enterprise batch walk measured ~5 min) before it advances to the standby. That is
+	// a bad number to ship beside WireGuard's seconds-scale, CP-driven peer-swap re-home. These are
+	// dial attempts against a KNOWN gateway, not a flaky WAN: 10s is generous for a live gateway's
+	// UDP+TLS handshake even cross-region (~420ms RTT = a few round-trips), while abandoning a DEAD
+	// remote fast. Re-home is then bounded by connect-timeout x dead-remote count (~10-12s for a
+	// 2-hub set — comparable to WireGuard). See docs/S9.1-decisions.md for the honest re-home note.
+	b.WriteString("connect-timeout 10\n")
 	b.WriteString("resolv-retry infinite\n")
 	b.WriteString("nobind\n")
 	b.WriteString("remote-cert-tls server\n") // verify the gateway presents a SERVER-auth cert (Slice 4a)

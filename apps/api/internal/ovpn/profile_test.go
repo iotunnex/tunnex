@@ -19,6 +19,9 @@ func TestBuildProfileInlineAndServerPinned(t *testing.T) {
 
 	for _, want := range []string{
 		"client\n", "remote gw.example.com 1194\n", "remote-cert-tls server\n",
+		// WF-OVPN-walk-4: the minted profile MUST carry the low connect-timeout so a dead primary
+		// is abandoned in seconds, not the 120s default (bounds client-side failover re-home).
+		"connect-timeout 10\n",
 		"<ca>\n", "CACERT", "</ca>\n",
 		"<cert>\n", "CLIENTCERT", "</cert>\n",
 		"<key>\n", "CLIENTKEY", "</key>\n",
