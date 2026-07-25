@@ -38,6 +38,9 @@ export type HealthCheck = components["schemas"]["HealthCheck"];
 export type Site = components["schemas"]["Site"];
 export type SiteSubnet = components["schemas"]["SiteSubnet"];
 export type SiteReferences = components["schemas"]["SiteReferences"];
+// S10.3 — Kubernetes cluster/Service connectivity.
+export type K8sCluster = components["schemas"]["K8sCluster"];
+export type K8sService = components["schemas"]["K8sService"];
 
 // apiErrorMessage pulls the human message out of the standard error envelope.
 export function apiErrorMessage(error: unknown, fallback: string): string {

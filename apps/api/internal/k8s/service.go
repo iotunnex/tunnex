@@ -235,21 +235,15 @@ func (s *Service) ListClusters(ctx context.Context, orgID uuid.UUID) ([]sqlc.K8s
 	return s.q.ListK8sClustersForOrg(ctx, orgID)
 }
 
-// ListServicesForCluster returns a cluster's LIVE exposed Services with their resolvable FQDNs. It filters
-// the org-wide LIVE resolution (which already carries the cluster name + zone) to the one cluster.
-func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]ServiceView, error) {
-	if _, err := s.GetCluster(ctx, orgID, clusterID); err != nil {
-		return nil, err
-	}
+// ListServicesForOrg returns EVERY LIVE exposed Service in the org with its resolvable FQDN (the grant-
+// destination picker + K8s overview). One query; the caller groups by cluster if needed.
+func (s *Service) ListServicesForOrg(ctx context.Context, orgID uuid.UUID) ([]ServiceView, error) {
 	rows, err := s.q.ListActiveK8sServicesForOrg(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	var out []ServiceView
+	out := make([]ServiceView, 0, len(rows))
 	for _, r := range rows {
-		if r.ClusterID != clusterID {
-			continue
-		}
 		vip, _ := netip.ParseAddr(r.Vip)
 		out = append(out, ServiceView{
 			Svc: sqlc.K8sService{
@@ -259,6 +253,24 @@ func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID u
 			FQDN:    FQDN(r.Name, r.Namespace, r.ClusterName, r.DnsZone),
 			Cluster: r.ClusterName, Zone: r.DnsZone,
 		})
+	}
+	return out, nil
+}
+
+// ListServicesForCluster returns a cluster's LIVE exposed Services with their resolvable FQDNs.
+func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]ServiceView, error) {
+	if _, err := s.GetCluster(ctx, orgID, clusterID); err != nil {
+		return nil, err
+	}
+	all, err := s.ListServicesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServiceView, 0, len(all))
+	for _, v := range all {
+		if v.Svc.ClusterID == clusterID {
+			out = append(out, v)
+		}
 	}
 	return out, nil
 }

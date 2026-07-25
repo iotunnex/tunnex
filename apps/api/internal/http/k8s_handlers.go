@@ -117,6 +117,21 @@ func (s apiServer) ListK8sServices(ctx context.Context, req api.ListK8sServicesR
 	return api.ListK8sServices200JSONResponse{Body: out, Headers: api.ListK8sServices200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
+func (s apiServer) ListK8sServicesForOrg(ctx context.Context, req api.ListK8sServicesForOrgRequestObject) (api.ListK8sServicesForOrgResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	views, err := s.k8s.ListServicesForOrg(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.K8sService, len(views))
+	for i, v := range views {
+		out[i] = toAPIK8sService(v.Svc, v.FQDN)
+	}
+	return api.ListK8sServicesForOrg200JSONResponse{Body: out, Headers: api.ListK8sServicesForOrg200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 func (s apiServer) ExposeK8sService(ctx context.Context, req api.ExposeK8sServiceRequestObject) (api.ExposeK8sServiceResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermK8sManage); err != nil {
 		return nil, err

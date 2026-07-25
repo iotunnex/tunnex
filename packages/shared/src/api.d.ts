@@ -1722,6 +1722,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/k8s/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List ALL exposed Services in the org — the grant destination picker + K8s overview (S10.3; org:view) */
+        get: operations["listK8sServicesForOrg"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/k8s/services/{serviceId}": {
         parameters: {
             query?: never;
@@ -5554,6 +5573,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["K8sService"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listK8sServicesForOrg: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every exposed Service across the org's clusters (with resolvable fqdn + cluster_id). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sService"][];
                 };
             };
             default: components["responses"]["Error"];

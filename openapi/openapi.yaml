@@ -2198,6 +2198,20 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/K8sService" } } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/k8s/services:
+    parameters:
+      - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listK8sServicesForOrg
+      summary: List ALL exposed Services in the org — the grant destination picker + K8s overview (S10.3; org:view)
+      tags: [k8s]
+      responses:
+        "200":
+          description: Every exposed Service across the org's clusters (with resolvable fqdn + cluster_id).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/K8sService" } } } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/k8s/services/{serviceId}:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }

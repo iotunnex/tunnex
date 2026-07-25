@@ -1969,6 +1969,9 @@ type ClientInterface interface {
 
 	ExposeK8sService(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, body ExposeK8sServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListK8sServicesForOrg request
+	ListK8sServicesForOrg(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UnexposeK8sService request
 	UnexposeK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3314,6 +3317,18 @@ func (c *Client) ExposeK8sServiceWithBody(ctx context.Context, orgId openapi_typ
 
 func (c *Client) ExposeK8sService(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, body ExposeK8sServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewExposeK8sServiceRequest(c.Server, orgId, clusterId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListK8sServicesForOrg(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListK8sServicesForOrgRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -7019,6 +7034,40 @@ func NewExposeK8sServiceRequestWithBody(server string, orgId openapi_types.UUID,
 	return req, nil
 }
 
+// NewListK8sServicesForOrgRequest generates requests for ListK8sServicesForOrg
+func NewListK8sServicesForOrgRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/k8s/services", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewUnexposeK8sServiceRequest generates requests for UnexposeK8sService
 func NewUnexposeK8sServiceRequest(server string, orgId openapi_types.UUID, serviceId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -9346,6 +9395,9 @@ type ClientWithResponsesInterface interface {
 
 	ExposeK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, body ExposeK8sServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ExposeK8sServiceResponse, error)
 
+	// ListK8sServicesForOrgWithResponse request
+	ListK8sServicesForOrgWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListK8sServicesForOrgResponse, error)
+
 	// UnexposeK8sServiceWithResponse request
 	UnexposeK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnexposeK8sServiceResponse, error)
 
@@ -11045,6 +11097,29 @@ func (r ExposeK8sServiceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ExposeK8sServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListK8sServicesForOrgResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]K8sService
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListK8sServicesForOrgResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListK8sServicesForOrgResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -12942,6 +13017,15 @@ func (c *ClientWithResponses) ExposeK8sServiceWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseExposeK8sServiceResponse(rsp)
+}
+
+// ListK8sServicesForOrgWithResponse request returning *ListK8sServicesForOrgResponse
+func (c *ClientWithResponses) ListK8sServicesForOrgWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListK8sServicesForOrgResponse, error) {
+	rsp, err := c.ListK8sServicesForOrg(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListK8sServicesForOrgResponse(rsp)
 }
 
 // UnexposeK8sServiceWithResponse request returning *UnexposeK8sServiceResponse
@@ -15611,6 +15695,39 @@ func ParseExposeK8sServiceResponse(rsp *http.Response) (*ExposeK8sServiceRespons
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListK8sServicesForOrgResponse parses an HTTP response from a ListK8sServicesForOrgWithResponse call
+func ParseListK8sServicesForOrgResponse(rsp *http.Response) (*ListK8sServicesForOrgResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListK8sServicesForOrgResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []K8sService
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

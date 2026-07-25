@@ -12,6 +12,7 @@ import {
   type UserGroup,
   type Resource,
   type Site,
+  type K8sService,
   type PolicyRule,
   type ZeroTrustMode,
   type AffectedDevice,
@@ -274,6 +275,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
   const [resources, setResources] = useState<Resource[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [sites, setSites] = useState<Site[]>([]); // S8.2c D5: site rule subjects
+  const [services, setServices] = useState<K8sService[]>([]); // S10.3: k8s_service dst subjects
   const [loaded, setLoaded] = useState<LoadState>({ groupsLoaded: false, resourcesLoaded: false, membersLoaded: false });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -292,13 +294,14 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
-    const [rr, gr, resr, mr, mo, sr] = await Promise.all([
+    const [rr, gr, resr, mr, mo, sr, ksr] = await Promise.all([
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/policies", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/groups", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/resources", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", { params: { path: { orgId } } })),
       loadOne(() => api.GET("/api/v1/organizations/{orgId}/sites", { params: { path: { orgId } } })), // S8.2c D5: site rule subjects
+      loadOne(() => api.GET("/api/v1/organizations/{orgId}/k8s/services", { params: { path: { orgId } } })), // S10.3: k8s_service dst subjects
     ]);
     // Summary inputs — set from the SAME results (a rules-load failure → summary shows "failed", never 0).
     setRulesResult(rr.ok ? { ok: true, data: (rr.data as PolicyRule[]).length } : rr);
@@ -314,10 +317,11 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
     setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
     setMembers((mr.ok ? (mr.data as Member[]) : []) as Member[]);
     setSites((sr.ok ? (sr.data as Site[]) : []) as Site[]); // D5
+    setServices((ksr.ok ? (ksr.data as K8sService[]) : []) as K8sService[]); // S10.3: k8s_service dst subjects
     // D-a6 loaded flags come from the SAME source: a set that FAILED to load → its refs are
     // "unresolved", not "deleted".
-    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok, sitesLoaded: sr.ok }); // sitesLoaded → WF-8 name resolution
-    setErr(gr.ok && resr.ok && mr.ok && sr.ok ? null : "Some groups/resources/members/sites failed to load — names may show as unresolved. Refresh."); // sr.ok: WF-8 review — a sites-load failure must raise the banner too
+    setLoaded({ groupsLoaded: gr.ok, resourcesLoaded: resr.ok, membersLoaded: mr.ok, sitesLoaded: sr.ok, k8sServicesLoaded: ksr.ok }); // sitesLoaded → WF-8; k8sServicesLoaded → S10.3
+    setErr(gr.ok && resr.ok && mr.ok && sr.ok && ksr.ok ? null : "Some groups/resources/members/sites/services failed to load — names may show as unresolved. Refresh."); // ksr.ok: a services-load failure must raise the banner too
     // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
     // longer present, keep the rest (B).
     setStaleRuleIds((prev) => pruneStaleRuleIds(prev, true, freshRules));
@@ -392,7 +396,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
           )}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
-              const row = ruleRow(r, groups, resources, members, sites, loaded);
+              const row = ruleRow(r, groups, resources, members, sites, loaded, services);
               const exp = grantExpiry(r, Date.now());
               return (
                 <li key={r.id} className={`flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm ${r.enabled ? "" : "opacity-50"}`}>
@@ -406,6 +410,13 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                     {row.cidrOutsideRanges && (
                       <span className="ml-2 text-xs text-amber-400" title="This CIDR is inside no current site subnet — the rule matches nothing until the range is declared.">
                         ⚠ outside org ranges
+                      </span>
+                    )}
+                    {/* S10.3 warn-not-refuse: the SERVER's read-time judgment — the dst Service was unexposed
+                        or its cluster deregistered, so the grant compiles to nothing. Self-clears if it returns. */}
+                    {row.k8sServiceVanished && (
+                      <span className="ml-2 text-xs text-amber-400" title="The Kubernetes Service this rule reaches is no longer exposed — the grant matches nothing until it is re-exposed.">
+                        ⚠ service removed
                       </span>
                     )}
                     {/* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant
@@ -458,6 +469,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
           resources={resources}
           members={activeMembers(members)}
           sites={sites}
+          services={services}
           editing={editing}
           onClose={() => {
             setCreating(false);
@@ -594,6 +606,7 @@ function RuleFormModal({
   resources,
   members,
   sites,
+  services,
   editing,
   onClose,
   onDone,
@@ -603,6 +616,7 @@ function RuleFormModal({
   resources: Resource[];
   members: Member[];
   sites: Site[];
+  services: K8sService[];
   editing: PolicyRule | null;
   onClose: () => void;
   onDone: (staleRuleId?: string) => void;
@@ -623,17 +637,20 @@ function RuleFormModal({
   const [srcCidr, setSrcCidr] = useState(editing?.src_cidr ?? ""); // S8.7: literal source CIDR (free-text)
   // Default to the first dst kind that HAS options (re-review #4: the src-side fix left the dst side able to
   // dead-end — a no-groups org with resources/sites opened on "group" with an empty select, un-submittable).
-  const [dstKind, setDstKind] = useState<"group" | "resource" | "site">(
-    defaultDstKind({
-      editingKind: editing?.dst_kind === "resource" ? "resource" : editing?.dst_kind === "site" ? "site" : undefined,
-      hasGroups,
-      hasResources: resources.length > 0,
-      hasSites: sites.length > 0,
-    }),
+  const [dstKind, setDstKind] = useState<"group" | "resource" | "site" | "k8s_service">(
+    editing?.dst_kind === "k8s_service"
+      ? "k8s_service"
+      : defaultDstKind({
+          editingKind: editing?.dst_kind === "resource" ? "resource" : editing?.dst_kind === "site" ? "site" : undefined,
+          hasGroups,
+          hasResources: resources.length > 0,
+          hasSites: sites.length > 0,
+        }),
   );
   const [dstGroup, setDstGroup] = useState(editing?.dst_group_id ?? groups[0]?.id ?? "");
   const [dstResource, setDstResource] = useState(editing?.dst_resource_id ?? resources[0]?.id ?? "");
   const [dstSite, setDstSite] = useState(editing?.dst_site_id ?? sites[0]?.id ?? "");
+  const [dstK8sService, setDstK8sService] = useState(editing?.dst_k8s_service_id ?? services[0]?.id ?? ""); // S10.3
   // Temporary grant: an optional expiry (datetime-local). Empty = permanent.
   // Expiry is a CREATE-only field ([2]/[3] fix): editing a rule is create-then-delete, and a
   // same-(src,dst) edit carrying an expiry collides on the unique index (or resubmits a past
@@ -643,7 +660,7 @@ function RuleFormModal({
   const [err, setErr] = useState<string | null>(null);
 
   function bodyFor(): CreatePolicyRuleRequest {
-    return ruleBody({ srcKind, dstKind, src, srcUser, srcSite, srcCidr, dstGroup, dstResource, dstSite, expiresAt, editing: !!editing });
+    return ruleBody({ srcKind, dstKind, src, srcUser, srcSite, srcCidr, dstGroup, dstResource, dstSite, dstK8sService, expiresAt, editing: !!editing });
   }
 
   async function submit() {
@@ -690,7 +707,7 @@ function RuleFormModal({
             disabled={
               busy ||
               (srcKind === "group" ? !src : srcKind === "user" ? !srcUser : srcKind === "cidr" ? !srcCidr.trim() : !srcSite) ||
-              (dstKind === "group" ? !dstGroup : dstKind === "resource" ? !dstResource : !dstSite)
+              (dstKind === "group" ? !dstGroup : dstKind === "resource" ? !dstResource : dstKind === "k8s_service" ? !dstK8sService : !dstSite)
             }
             onClick={submit}
           >
@@ -758,10 +775,11 @@ function RuleFormModal({
         <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
           <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">Destination</legend>
           <Field label="Destination type">
-            <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource" | "site")}>
+            <Select value={dstKind} onChange={(e) => setDstKind(e.target.value as "group" | "resource" | "site" | "k8s_service")}>
               <option value="group">Group (device-to-device)</option>
               <option value="resource">Resource (CIDR / port)</option>
               {sites.length > 0 && <option value="site">Site (a LAN behind a gateway)</option>}
+              {services.length > 0 && <option value="k8s_service">Kubernetes Service (in-cluster)</option>}
             </Select>
           </Field>
           {dstKind === "group" ? (
@@ -780,6 +798,16 @@ function RuleFormModal({
                 {resources.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : dstKind === "k8s_service" ? (
+            <Field label="Destination Kubernetes Service">
+              <Select value={dstK8sService} onChange={(e) => setDstK8sService(e.target.value)}>
+                {services.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.fqdn}
                   </option>
                 ))}
               </Select>

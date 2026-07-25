@@ -14,6 +14,9 @@ const NAV = [
   // Sites (S8.3): enterprise site-to-site. Shown for everyone; the page owns the edition upsell (the
   // Access precedent — D5), so a non-enterprise org sees the nav entry and a clear upsell, not a dead link.
   { to: "/sites", label: "Sites", enabled: true },
+  // Kubernetes (S10.3): in-cluster Service connectivity. CORE (all editions) — the page gates its own
+  // mutations on k8s:manage; a member sees the read-only surface.
+  { to: "/kubernetes", label: "Kubernetes", enabled: true },
   { to: "/access", label: "Access", enabled: true },
   { to: "/users", label: "Users", enabled: true },
   { to: "/settings", label: "Settings", enabled: true },

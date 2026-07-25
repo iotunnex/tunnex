@@ -3,7 +3,7 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest, Site } from "./api";
+import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest, Site, K8sService } from "./api";
 
 // roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
 // members load must NOT read as "no role" — that silently downgrades an admin to the
@@ -168,6 +168,13 @@ export interface RuleRow {
    * VALID rule that warns, not a broken reference.
    */
   cidrOutsideRanges: boolean;
+  /**
+   * S10.3 warn-not-refuse: the SERVER's read-time judgment that a dst_kind='k8s_service' rule's Service is
+   * GONE (unexposed / cluster deregistered) — the grant compiles to nothing (a rule pointing at a vanished
+   * Service). Rendered VERBATIM from `dst_k8s_service_vanished`; the UI never re-derives it. Self-clears when
+   * the Service returns. Distinct from `broken` — a valid rule that warns.
+   */
+  k8sServiceVanished: boolean;
 }
 
 // loaded flags say whether each referent SET loaded successfully. When a set failed to
@@ -177,6 +184,7 @@ export interface LoadState {
   resourcesLoaded: boolean;
   membersLoaded?: boolean; // S7.5.4: for resolving a per-user subject to a member name
   sitesLoaded?: boolean; // S8.2c WF-8: for resolving a site subject to its NAME (not the raw UUID)
+  k8sServicesLoaded?: boolean; // S10.3: for resolving a k8s_service dst to its FQDN
 }
 
 function short(id: string): string {
@@ -217,6 +225,16 @@ function resolveSite(id: string, sites: Site[], loaded: boolean): RefLabel {
   return { id, label: `deleted site ${short(id)}`, state: "deleted" };
 }
 
+// resolveK8sService (S10.3): render a k8s_service dst by its resolvable FQDN (server-supplied, never
+// constructed). A Service absent from the LIVE set is "deleted" (the vanished-Service warn); an unavailable
+// set (fetch failed) is "unresolved". Mirrors the group/resource/site honesty.
+function resolveK8sService(id: string, services: K8sService[], loaded: boolean): RefLabel {
+  const s = services.find((x) => x.id === id);
+  if (s) return { id, label: s.fqdn, state: "ok" };
+  if (!loaded) return { id, label: `service ${short(id)} — refresh`, state: "unresolved" };
+  return { id, label: `removed service ${short(id)}`, state: "deleted" };
+}
+
 export function ruleRow(
   rule: PolicyRule,
   groups: UserGroup[],
@@ -224,6 +242,7 @@ export function ruleRow(
   members: Member[],
   sites: Site[],
   loaded: LoadState,
+  services: K8sService[] = [],
 ): RuleRow {
   // S7.5.4: a rule's source is a group OR a single user (S8.2: OR a site) — resolve each to a NAME,
   // honestly (a removed-user / deleted-group / deleted-site ref shows distinctly, never mislabeled).
@@ -243,9 +262,18 @@ export function ruleRow(
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
       : rule.dst_kind === "site"
         ? resolveSite(rule.dst_site_id ?? "", sites, loaded.sitesLoaded ?? false)
-        : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
-  // S8.7: the warn is the SERVER's read-time field, rendered verbatim (no client-side org-range re-check).
-  return { id: rule.id, src, dst, broken: src.state !== "ok" || dst.state !== "ok", cidrOutsideRanges: rule.cidr_outside_org_ranges };
+        : rule.dst_kind === "k8s_service" // S10.3: resolve to the Service FQDN, never the resource branch
+          ? resolveK8sService(rule.dst_k8s_service_id ?? "", services, loaded.k8sServicesLoaded ?? false)
+          : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
+  // The warns are the SERVER's read-time fields, rendered verbatim (no client-side re-derivation).
+  return {
+    id: rule.id,
+    src,
+    dst,
+    broken: src.state !== "ok" || dst.state !== "ok",
+    cidrOutsideRanges: rule.cidr_outside_org_ranges,
+    k8sServiceVanished: rule.dst_k8s_service_vanished,
+  };
 }
 
 // ── S7.5.4 temporary-grant expiry (the linger model — expired grants stay VISIBLE) ────
@@ -334,7 +362,7 @@ export function defaultSrcKind(i: {
 
 export interface RuleBodyInput {
   srcKind: "group" | "user" | "site" | "cidr";
-  dstKind: "group" | "resource" | "site";
+  dstKind: "group" | "resource" | "site" | "k8s_service";
   src: string; // group id
   srcUser: string;
   srcSite: string;
@@ -342,6 +370,7 @@ export interface RuleBodyInput {
   dstGroup: string;
   dstResource: string;
   dstSite: string;
+  dstK8sService: string; // S10.3: exposed-Service id (dst_kind='k8s_service')
   expiresAt: string; // datetime-local, "" = permanent
   editing: boolean; // expiry is create-only
 }
@@ -360,7 +389,9 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
       ? { dst_kind: "group" as const, dst_group_id: i.dstGroup }
       : i.dstKind === "site"
         ? { dst_kind: "site" as const, dst_site_id: i.dstSite }
-        : { dst_kind: "resource" as const, dst_resource_id: i.dstResource };
+        : i.dstKind === "k8s_service" // S10.3: a grant reaching an exposed K8s Service
+          ? { dst_kind: "k8s_service" as const, dst_k8s_service_id: i.dstK8sService }
+          : { dst_kind: "resource" as const, dst_resource_id: i.dstResource };
   const expiry = !i.editing && i.expiresAt ? { expires_at: new Date(i.expiresAt).toISOString() } : {};
   return { ...srcPart, ...dstPart, ...expiry };
 }

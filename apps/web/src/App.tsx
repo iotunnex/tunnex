@@ -20,6 +20,7 @@ import CliDevice from "./pages/CliDevice";
 import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 import Sites from "./pages/Sites";
+import Kubernetes from "./pages/Kubernetes";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
             <Route path="/sites" element={<Sites />} />
+            <Route path="/kubernetes" element={<Kubernetes />} />
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />

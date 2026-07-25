@@ -148,6 +148,34 @@ describe("S8.7 ruleRow — cidr source: literal label + read-time warn badge (se
   });
 });
 
+describe("S10.3 ruleRow — k8s_service dst: FQDN label + vanished warn badge (served verbatim)", () => {
+  const grp = [G("g1", "Eng")];
+  const svc = [{ id: "k1", cluster_id: "c1", name: "api", namespace: "prod", protocol: "tcp", vip: "100.64.0.5", fqdn: "api.prod.svc.prod.k8s.acme.com" }] as never[];
+  const k8sRule = (vanished: boolean): PolicyRule =>
+    ({ id: "ks1", src_group_id: "g1", dst_kind: "k8s_service", dst_k8s_service_id: "k1", dst_k8s_service_vanished: vanished } as PolicyRule);
+  const L: LoadState = { groupsLoaded: true, resourcesLoaded: true, k8sServicesLoaded: true };
+  it("dst renders the server FQDN (copy-not-construct), state ok", () => {
+    const row = ruleRow(k8sRule(false), grp, [], [], [], L, svc);
+    expect(row.dst.label).toBe("api.prod.svc.prod.k8s.acme.com");
+    expect(row.dst.state).toBe("ok");
+    expect(row.broken).toBe(false);
+  });
+  it("the vanished badge is the SERVED field verbatim, both directions", () => {
+    expect(ruleRow(k8sRule(true), grp, [], [], [], L, svc).k8sServiceVanished).toBe(true);
+    expect(ruleRow(k8sRule(false), grp, [], [], [], L, svc).k8sServiceVanished).toBe(false);
+  });
+  it("a Service absent from the LIVE set resolves as removed (deleted), still not a load failure", () => {
+    const row = ruleRow(k8sRule(true), grp, [], [], [], L, []);
+    expect(row.dst.state).toBe("deleted");
+    expect(row.dst.label).toMatch(/removed service/i);
+  });
+  it("services set failed to load → dst unresolved, not deleted", () => {
+    const row = ruleRow(k8sRule(false), grp, [], [], [], { groupsLoaded: true, resourcesLoaded: true, k8sServicesLoaded: false }, []);
+    expect(row.dst.state).toBe("unresolved");
+    expect(row.dst.label).toMatch(/refresh/i);
+  });
+});
+
 describe("loadOne — the class armed-guard: a failure NEVER reads as absence", () => {
   it("non-2xx (error present, data undefined) → NOT ok (never a reassuring empty)", async () => {
     const r = await loadOne(async () => ({ data: undefined, error: { error: { message: "boom" } } }));
@@ -209,7 +237,7 @@ describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (faile
 });
 
 describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rules (via the API, not a DB insert)", () => {
-  const base = { src: "g1", srcUser: "u1", srcSite: "s1", srcCidr: "172.31.17.64/32", dstGroup: "g2", dstResource: "r1", dstSite: "s2", expiresAt: "", editing: false };
+  const base = { src: "g1", srcUser: "u1", srcSite: "s1", srcCidr: "172.31.17.64/32", dstGroup: "g2", dstResource: "r1", dstSite: "s2", dstK8sService: "k1", expiresAt: "", editing: false };
   it("site → site sets ONLY the site ids (the demo's DB-insert path, now first-class in the UI)", () => {
     const b = ruleBody({ ...base, srcKind: "site", dstKind: "site" });
     expect(b).toMatchObject({ src_kind: "site", src_site_id: "s1", dst_kind: "site", dst_site_id: "s2" });
@@ -232,6 +260,12 @@ describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rule
   it("expiry is create-only", () => {
     expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: false })).toBe(true);
     expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: true })).toBe(false);
+  });
+  it("S10.3 group → k8s_service sets ONLY the Service id (never a resource/site id)", () => {
+    const b = ruleBody({ ...base, srcKind: "group", dstKind: "k8s_service" });
+    expect(b).toMatchObject({ src_kind: "group", src_group_id: "g1", dst_kind: "k8s_service", dst_k8s_service_id: "k1" });
+    expect("dst_resource_id" in b).toBe(false);
+    expect("dst_site_id" in b).toBe(false);
   });
 });
 
