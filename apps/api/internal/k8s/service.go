@@ -191,3 +191,30 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 	})
 	return out, err
 }
+
+// UnexposeService soft-deletes an exposed Service (S10.3 sweep). Full-sweep by construction: the LIVE-only
+// resolution (ListActiveK8sServicesForOrg) drops it on the next compile, so the VIP vanishes from every
+// gateway's VIP map AND its DNS answer, and any grant that referenced it compiles to nothing (the honest
+// vanished-Service surface, rendered in API/web). The freed VIP is immediately reusable — SAFE because a
+// re-expose mints a NEW identity and the compiler resolves id -> CURRENT VIP, never a snapshot (Slice 2).
+func (s *Service) UnexposeService(ctx context.Context, orgID, serviceID uuid.UUID) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if _, e := q.GetK8sService(ctx, sqlc.GetK8sServiceParams{OrgID: orgID, ID: serviceID}); e != nil {
+			return apierr.NotFound("service_not_found", "no such exposed Service in this organization")
+		}
+		return q.SoftDeleteK8sService(ctx, sqlc.SoftDeleteK8sServiceParams{OrgID: orgID, ID: serviceID})
+	})
+}
+
+// DeregisterCluster removes a cluster (S10.3 sweep). Full-sweep: the FK CASCADE deletes its exposed Services
+// AND every policy_rule that pointed at one (0049 dst_k8s_service_id ON DELETE CASCADE), and the row's removal
+// frees the whole VIP range (incl the reserved DNS VIP) and the cluster's DNS zone for reuse — all in ONE
+// atomic delete. The next compile recompiles every affected gateway without the vanished cluster.
+func (s *Service) DeregisterCluster(ctx context.Context, orgID, clusterID uuid.UUID) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if _, e := q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID}); e != nil {
+			return apierr.NotFound("cluster_not_found", "no such cluster in this organization")
+		}
+		return q.DeleteK8sCluster(ctx, sqlc.DeleteK8sClusterParams{OrgID: orgID, ID: clusterID})
+	})
+}

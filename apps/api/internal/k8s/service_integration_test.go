@@ -175,6 +175,83 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	}
 }
 
+// TestUnexposeServiceSweeps — S10.3 sweep: soft-deleting a Service removes it from the LIVE resolution
+// (VIP map recompiles without it) AND frees its VIP for immediate reuse (used-set is live-only). A re-expose
+// mints a fresh identity; VIP reuse is safe because the compiler resolves id -> CURRENT VIP.
+func TestUnexposeServiceSweeps(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+	c, err := svc.RegisterCluster(ctx, org, site, "sweep", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1.Vip.String() != "100.64.0.3" {
+		t.Fatalf("first Service VIP, got %s", s1.Vip)
+	}
+	// Present in the LIVE resolution.
+	live, _ := svc.q.ListActiveK8sServicesForOrg(ctx, org)
+	if len(live) != 1 {
+		t.Fatalf("exposed Service must be in the live resolution, got %d", len(live))
+	}
+	// Unexpose → gone from the resolution.
+	if err := svc.UnexposeService(ctx, org, s1.ID); err != nil {
+		t.Fatalf("unexpose: %v", err)
+	}
+	live, _ = svc.q.ListActiveK8sServicesForOrg(ctx, org)
+	if len(live) != 0 {
+		t.Fatalf("unexposed Service must vanish from the resolution, got %d", len(live))
+	}
+	// The freed VIP is reusable — a re-expose gets .3 again (not skipped, not exhausted-around).
+	s2, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	if err != nil {
+		t.Fatalf("re-expose: %v", err)
+	}
+	if s2.Vip.String() != "100.64.0.3" {
+		t.Fatalf("the freed VIP must be reusable (.3), got %s", s2.Vip)
+	}
+	if s2.ID == s1.ID {
+		t.Fatal("a re-expose must mint a NEW identity, not resurrect the soft-deleted one")
+	}
+}
+
+// TestDeregisterClusterSweeps — S10.3 sweep: deregistering a cluster CASCADE-removes its Services and frees
+// the whole VIP range + DNS zone for reuse in ONE atomic delete. A new cluster may then claim the same range.
+func TestDeregisterClusterSweeps(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+	c, err := svc.RegisterCluster(ctx, org, site, "gone", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A same-range/same-zone re-register is refused WHILE the cluster lives (overlap + would-collide).
+	if _, err := svc.RegisterCluster(ctx, org, site, "gone2", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "other.acme.com"); err == nil {
+		t.Fatal("a live cluster's VIP range must block a second claim")
+	}
+	// Deregister → services gone, range + zone freed.
+	if err := svc.DeregisterCluster(ctx, org, c.ID); err != nil {
+		t.Fatalf("deregister: %v", err)
+	}
+	live, _ := svc.q.ListActiveK8sServicesForOrg(ctx, org)
+	if len(live) != 0 {
+		t.Fatalf("deregister must CASCADE-remove exposed Services, got %d", len(live))
+	}
+	// The freed range is now reclaimable, AND the freed zone no longer conflicts.
+	if _, err := svc.RegisterCluster(ctx, org, site, "reborn", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
+		t.Fatalf("the freed VIP range + zone must be reclaimable after deregister, got %v", err)
+	}
+}
+
 // TestVIPAllocationClusterScoped: two clusters allocate from their OWN ranges (independent used-sets) —
 // exposing in cluster A does not consume cluster B's addresses.
 func TestVIPAllocationClusterScoped(t *testing.T) {
