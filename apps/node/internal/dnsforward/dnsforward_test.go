@@ -358,3 +358,71 @@ func TestWgBindAddrsAbsenceIsEnumerated(t *testing.T) {
 		t.Fatalf("an enumerated-but-absent interface must return errWGIfaceNotFound, got %v", err)
 	}
 }
+
+// aRecordOf extracts the single A-record address from a response, or fails.
+func aRecordOf(t *testing.T, resp []byte) netip.Addr {
+	t.Helper()
+	var p dnsmessage.Parser
+	if _, err := p.Start(resp); err != nil {
+		t.Fatalf("unparseable response: %v", err)
+	}
+	if _, err := p.Question(); err != nil {
+		t.Fatalf("question: %v", err)
+	}
+	if err := p.SkipAllQuestions(); err != nil {
+		t.Fatalf("skip questions: %v", err)
+	}
+	ah, err := p.AnswerHeader()
+	if err != nil {
+		t.Fatalf("no answer record: %v", err)
+	}
+	if ah.Type != dnsmessage.TypeA {
+		t.Fatalf("answer type = %v, want A", ah.Type)
+	}
+	r, err := p.AResource()
+	if err != nil {
+		t.Fatalf("A resource: %v", err)
+	}
+	return netip.AddrFrom4(r.A)
+}
+
+// TestK8sDirectAnswer — S10.3 A1, THE capability red (the one that would have caught the dead-while-green
+// gap: the CP carried DNSName+VIP + the agent mirrored the struct, but NO agent code answered). An agent
+// given a K8s VIP map answers an exposed FQDN's A query with its VIP; an in-zone-but-unexposed name is
+// authoritative NXDOMAIN; an empty/stale map answers NOTHING for cluster names (fail-closed); the ONLY
+// address ever returned is an exposed Service's own VIP.
+func TestK8sDirectAnswer(t *testing.T) {
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { t.Fatal("a cluster-zone query must NEVER relay upstream"); return nil, nil })
+	f.SetK8sAnswers(
+		[]K8sEntry{{FQDN: "api.prod.svc.prod.k8s.acme.com", VIP: "100.64.0.5"}},
+		[]string{"prod.k8s.acme.com"},
+	)
+
+	// Exposed FQDN → its VIP (A answer, NOERROR).
+	resp := f.handle(mkQuery("api.prod.svc.prod.k8s.acme.com."), netip.MustParseAddr("100.64.0.9"))
+	if resp == nil || rcodeOf(t, resp) != dnsmessage.RCodeSuccess {
+		t.Fatalf("exposed FQDN must NOERROR, got %v", resp)
+	}
+	if got := aRecordOf(t, resp); got.String() != "100.64.0.5" {
+		t.Fatalf("exposed FQDN must answer its VIP 100.64.0.5, got %s", got)
+	}
+
+	// In-zone but UNEXPOSED → authoritative NXDOMAIN (the name we own the zone for does not exist).
+	resp = f.handle(mkQuery("web.prod.svc.prod.k8s.acme.com."), netip.MustParseAddr("100.64.0.9"))
+	if resp == nil || rcodeOf(t, resp) != dnsmessage.RCodeNameError {
+		t.Fatalf("in-zone unexposed name must NXDOMAIN, got %v (rcode %v)", resp, rcodeOf(t, resp))
+	}
+
+	// Out of every owned zone → falls through to the S8.4 table (empty here) → REFUSED, never a K8s answer.
+	resp = f.handle(mkQuery("host.corp.local."), netip.MustParseAddr("100.64.0.9"))
+	if resp == nil || rcodeOf(t, resp) != dnsmessage.RCodeRefused {
+		t.Fatalf("out-of-zone name must fall through to REFUSED, got rcode %v", rcodeOf(t, resp))
+	}
+
+	// Empty/stale map → answers NOTHING for a former cluster name (fail-closed: no fabricated address).
+	f.SetK8sAnswers(nil, nil)
+	resp = f.handle(mkQuery("api.prod.svc.prod.k8s.acme.com."), netip.MustParseAddr("100.64.0.9"))
+	if resp == nil || rcodeOf(t, resp) != dnsmessage.RCodeRefused {
+		t.Fatalf("an emptied map must answer no cluster name (fall through to REFUSED), got rcode %v", rcodeOf(t, resp))
+	}
+}

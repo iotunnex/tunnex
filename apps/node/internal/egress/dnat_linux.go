@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -119,6 +120,62 @@ func (m *Manager) ResolveK8sVIPs(ctx context.Context) {
 	m.dnsUnreachable.Store(unreachable > 0 && reachable == 0)
 	m.resolvedVIPs.Store(&resolved)
 	m.refusedK8sVIPs.Store(&refused)
+}
+
+// runIP is the real `ip` runner (a single command, discarded output — errors carry the exit status).
+func runIP(ctx context.Context, args ...string) error {
+	return exec.CommandContext(ctx, "ip", args...).Run()
+}
+
+// ReconcileDNSVIPs drives the wg interface's assigned DNS VIPs to match the policy's K8sDNSZones (S10.3 A1).
+// Each cluster's reserved DNS VIP must be OWNED locally as a /32 so (a) a client's DNS query to it is
+// delivered locally (not forwarded) and (b) the dnsforward bind-reconcile binds :53 on it (it enumerates
+// the wg interface's addresses). Idempotent: `ip addr replace` adds/refreshes; a VIP that left the policy is
+// `ip addr del`'d. FAIL-CLOSED by construction — if an assign fails (no CAP_NET_ADMIN / netlink fault) the
+// address never becomes local, the forwarder never binds :53 on it, and the gateway answers NOTHING there
+// (a departed-half-bind is impossible). Decoupled from the nft apply (its own step in the egress loop).
+func (m *Manager) ReconcileDNSVIPs(ctx context.Context) error {
+	if !ifaceRE.MatchString(m.wgIface) {
+		return fmt.Errorf("invalid wg interface name %q", m.wgIface) // never interpolate an unvalidated name into a privileged command
+	}
+	p := m.policy.Load()
+	want := map[string]struct{}{}
+	if p != nil {
+		for _, z := range p.K8sDNSZones {
+			// Validate the CP-supplied VIP before it reaches `ip` — the same never-interpolate-an-unvalidated-
+			// CP-string discipline the DNAT classifier applies (Slice 4b fold).
+			if a, err := netip.ParseAddr(z.ListenVIP); err == nil && a.Is4() {
+				want[a.String()] = struct{}{}
+			}
+		}
+	}
+	var prev []string
+	if pv := m.dnsVIPs.Load(); pv != nil {
+		prev = *pv
+	}
+	var errs []error
+	// Remove VIPs no longer wanted (a deregistered/emptied cluster) — no stale local address, no stale :53 bind.
+	for _, v := range prev {
+		if _, ok := want[v]; !ok {
+			if err := m.runIP(ctx, "addr", "del", v+"/32", "dev", m.wgIface); err != nil {
+				errs = append(errs, fmt.Errorf("unassign %s: %w", v, err))
+			}
+		}
+	}
+	// Add/refresh wanted VIPs (idempotent replace). FAIL-CLOSED: a VIP whose assign fails is NOT recorded as
+	// applied, so a later reconcile retries; the address stays non-local, the forwarder never binds :53 on it,
+	// and the gateway answers nothing there — never a half-owned VIP.
+	applied := make([]string, 0, len(want))
+	for v := range want {
+		if err := m.runIP(ctx, "addr", "replace", v+"/32", "dev", m.wgIface); err != nil {
+			errs = append(errs, fmt.Errorf("assign %s: %w", v, err))
+			continue
+		}
+		applied = append(applied, v)
+	}
+	sort.Strings(applied)
+	m.dnsVIPs.Store(&applied)
+	return errors.Join(errs...)
 }
 
 // preroutingDNAT renders the VIP->ClusterIP DNAT chain from the LAST-RESOLVED map (PURE — no I/O). Priority

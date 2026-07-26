@@ -62,6 +62,58 @@ type Entry struct {
 	ResolverIP string
 }
 
+// K8sEntry is one exposed K8s Service the gateway answers DIRECTLY (S10.3 A1): the FQDN
+// <service>.<namespace>.svc.<cluster>.<zone> resolves to VIP (an A answer the client then hits, DNATed to the
+// ClusterIP). The reconcile loop maps the compiled VIPMappings' DNSName+VIP in.
+type K8sEntry struct {
+	FQDN string // <service>.<namespace>.svc.<cluster>.<zone>
+	VIP  string // the synthetic /32 the gateway DNATs to the ClusterIP
+}
+
+// k8sAnswers is the immutable compiled direct-answer set — swapped atomically on each SetK8sAnswers. `names`
+// maps a normalized FQDN (trailing dot, lower) to its VIP; `zones` is the set of normalized cluster-zone
+// suffixes. The zone set is what makes an in-zone-but-unexposed name authoritative NXDOMAIN rather than a
+// fall-through — a name we OWN the zone for but did not expose does not exist (fail-closed: we never guess).
+type k8sAnswers struct {
+	names map[string]netip.Addr // fqdn. → VIP
+	zones []string              // normalized zone suffixes (trailing dot)
+}
+
+// inZone reports whether qname (fqdn, lowercased, trailing dot) falls inside a cluster zone we answer for.
+func (a *k8sAnswers) inZone(q string) bool {
+	for _, z := range a.zones {
+		if q == z || strings.HasSuffix(q, "."+z) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildK8sAnswers compiles entries + zones, SKIP-DEGRADED like buildTable: a malformed FQDN or VIP is skipped
+// + logged, the rest compile. An empty result answers NOTHING (fail-closed — an empty/stale map never
+// fabricates an address).
+func buildK8sAnswers(entries []K8sEntry, zones []string, log *slog.Logger) *k8sAnswers {
+	names := map[string]netip.Addr{}
+	for _, e := range entries {
+		fqdn := normalizeDomain(e.FQDN)
+		vip, err := netip.ParseAddr(e.VIP)
+		if fqdn == "" || err != nil || !vip.IsValid() {
+			if log != nil {
+				log.Warn("dns_k8s_answer_skipped", "fqdn", e.FQDN, "vip", e.VIP)
+			}
+			continue
+		}
+		names[fqdn] = vip
+	}
+	var zs []string
+	for _, z := range zones {
+		if nz := normalizeDomain(z); nz != "" {
+			zs = append(zs, nz)
+		}
+	}
+	return &k8sAnswers{names: names, zones: zs}
+}
+
 // buildTable compiles entries, SKIP-DEGRADED: a malformed domain or resolver IP is skipped + logged, the
 // rest compile (D2 — one typo must not blank every zone). Dedup is a WRITE-time concern (D1 overlap
 // refusal); here we keep the last for a repeated domain, deterministically.
@@ -109,6 +161,7 @@ type exchangeFn func(resolver netip.Addr, query []byte) ([]byte, error)
 // Forwarder holds the atomic table + a per-source rate limiter. Serve() (real UDP) is thin over handle().
 type Forwarder struct {
 	tbl      atomic.Pointer[table]
+	k8s      atomic.Pointer[k8sAnswers] // S10.3 A1: direct-answer set (FQDN → VIP + owned zones)
 	exchange exchangeFn
 	log      *slog.Logger
 
@@ -133,12 +186,20 @@ func New(log *slog.Logger, exchange exchangeFn) *Forwarder {
 	}
 	f := &Forwarder{exchange: exchange, log: log, buckets: map[netip.Addr]*bucket{}}
 	f.tbl.Store(&table{})
+	f.k8s.Store(&k8sAnswers{})
 	return f
 }
 
 // SetTable recompiles + atomically swaps the forwarding table (called each reconcile tick). fail-static: a
 // swap NEVER errors — a bad entry was already dropped by buildTable, so the last-good rest stays serving.
 func (f *Forwarder) SetTable(entries []Entry) { f.tbl.Store(buildTable(entries, f.log)) }
+
+// SetK8sAnswers recompiles + atomically swaps the K8s direct-answer set (S10.3 A1, called each reconcile
+// tick). An empty entries+zones set clears it → the gateway answers no cluster names (fail-closed, the
+// dead-while-green refusal: a stale map never fabricates an address).
+func (f *Forwarder) SetK8sAnswers(entries []K8sEntry, zones []string) {
+	f.k8s.Store(buildK8sAnswers(entries, zones, f.log))
+}
 
 // handle answers one query from src. Not-in-table -> REFUSED (scoped). In-table -> relay to the resolver;
 // resolver error -> SERVFAIL (fail-static, tunnel untouched). Over the rate limit -> dropped (nil, no reply).
@@ -155,6 +216,14 @@ func (f *Forwarder) handle(query []byte, src netip.Addr) []byte {
 	if err != nil {
 		return refuse(hdr.ID, query)
 	}
+	// S10.3 A1 — K8s direct-answer, BEFORE the S8.4 forwarding match (a cluster zone is authoritative here,
+	// never relayed upstream). An EXPOSED FQDN → its VIP (A). An in-zone-but-UNEXPOSED name → NXDOMAIN (the
+	// name does not exist; we own the zone, so we answer authoritatively rather than guessing or leaking the
+	// query upstream). Out of every cluster zone → fall through to the S8.4 table. Empty map → no zones → no
+	// K8s branch taken → fall through (fail-closed: a stale/empty map fabricates nothing).
+	if k8sResp, handled := f.answerK8s(hdr.ID, query, q); handled {
+		return k8sResp
+	}
 	res, ok := f.tbl.Load().match(q.Name.String())
 	if !ok {
 		return refuse(hdr.ID, query) // out of scope — split-horizon: the host's own resolver handles it
@@ -167,6 +236,90 @@ func (f *Forwarder) handle(query []byte, src netip.Addr) []byte {
 		return servfail(hdr.ID, query) // resolver unreachable -> SERVFAIL; tunnel + last-good table untouched
 	}
 	return resp
+}
+
+// answerK8s handles a query authoritatively IFF it falls inside a cluster zone this gateway owns (S10.3 A1).
+// Returns handled=false when the name is outside every owned zone (the caller falls through to S8.4). When
+// handled: an exposed A query → an A answer with the VIP; an exposed non-A query → NODATA (the name exists
+// but has no record of that type — NOERROR, no answers, so a client does NOT retry it as NXDOMAIN); an
+// in-zone-but-unexposed name → NXDOMAIN. Fail-closed: the ONLY address ever returned is an exposed Service's
+// own VIP — never a wildcard, guess, or upstream relay.
+func (f *Forwarder) answerK8s(id uint16, query []byte, q dnsmessage.Question) ([]byte, bool) {
+	a := f.k8s.Load()
+	name := strings.ToLower(q.Name.String())
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+	if !a.inZone(name) {
+		return nil, false // not our zone → fall through to the S8.4 forwarding table
+	}
+	vip, exposed := a.names[name]
+	if !exposed {
+		return nxdomain(id, query), true // in a zone we own but not exposed → authoritative NXDOMAIN
+	}
+	if q.Type != dnsmessage.TypeA {
+		return noData(id, query), true // exposed, but no record of this type (e.g. AAAA — VIPs are v4)
+	}
+	return answerA(id, query, q, vip), true
+}
+
+// answerA builds a NOERROR response carrying one A record (q → vip). Best-effort: on a pack error, no reply.
+func answerA(id uint16, query []byte, q dnsmessage.Question, vip netip.Addr) []byte {
+	if !vip.Is4() {
+		return noData(id, query) // a non-v4 VIP has no A record — NODATA rather than a malformed answer
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, Authoritative: true, RCode: dnsmessage.RCodeSuccess})
+	b.EnableCompression()
+	if err := b.StartQuestions(); err != nil {
+		return nil
+	}
+	if err := b.Question(q); err != nil {
+		return nil
+	}
+	if err := b.StartAnswers(); err != nil {
+		return nil
+	}
+	if err := b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 30}, dnsmessage.AResource{A: vip.As4()}); err != nil {
+		return nil
+	}
+	out, err := b.Finish()
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// nxdomain / noData build authoritative empty responses (NXDOMAIN = the name does not exist; NODATA = the
+// name exists but has no record of the asked type — NOERROR with zero answers).
+func nxdomain(id uint16, query []byte) []byte {
+	return respondAuthoritative(id, query, dnsmessage.RCodeNameError)
+}
+func noData(id uint16, query []byte) []byte {
+	return respondAuthoritative(id, query, dnsmessage.RCodeSuccess)
+}
+
+func respondAuthoritative(id uint16, query []byte, rcode dnsmessage.RCode) []byte {
+	var p dnsmessage.Parser
+	if _, err := p.Start(query); err != nil {
+		return nil
+	}
+	q, err := p.Question()
+	if err != nil {
+		return nil
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, Authoritative: true, RCode: rcode})
+	b.EnableCompression()
+	if err := b.StartQuestions(); err != nil {
+		return nil
+	}
+	if err := b.Question(q); err != nil {
+		return nil
+	}
+	out, err := b.Finish()
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // refuse / servfail build a minimal response echoing the query's question with the given RCode, so a client

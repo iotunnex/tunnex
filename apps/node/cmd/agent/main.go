@@ -181,7 +181,8 @@ func main() {
 	// mesh) to the egress manager and kicks an immediate forward-chain re-apply.
 	r.OnPolicy(func(p *nodepolicy.Compiled) {
 		egressMgr.SetPolicy(p)
-		dnsFwd.SetTable(dnsEntriesFrom(p)) // S8.4: reprogram the forwarding table (nil policy → empty → serves nothing)
+		dnsFwd.SetTable(dnsEntriesFrom(p))      // S8.4: reprogram the forwarding table (nil policy → empty → serves nothing)
+		dnsFwd.SetK8sAnswers(k8sAnswersFrom(p)) // S10.3 A1: reprogram the K8s direct-answer set (nil policy → empty → answers nothing)
 		select {
 		case policyKick <- struct{}{}:
 		default: // a kick is already pending — the apply reads the latest policy anyway
@@ -429,6 +430,12 @@ func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool
 		// stores the resolved VIP->ClusterIP map; Reconcile's render reads it and does NO DNS I/O (pure) —
 		// so a slow resolver is bounded, never an unbounded stall of the nft apply.
 		mgr.ResolveK8sVIPs(ctx)
+		// S10.3 A1: own each cluster's reserved DNS VIP as a /32 on wg0 so the client's DNS query is delivered
+		// locally and the forwarder binds :53 on it. Fail-closed (a failed assign → no local addr → no answer);
+		// logged, never fatal — DNS-VIP-down is never tunnel-down.
+		if err := mgr.ReconcileDNSVIPs(ctx); err != nil {
+			logger.Warn("dns_vip_reconcile_degraded", slog.String("error", err.Error()))
+		}
 		ok, err := mgr.Reconcile(ctx)
 		egressNAT.Store(ok)
 		if err != nil {
@@ -536,6 +543,27 @@ func dnsEntriesFrom(p *nodepolicy.Compiled) []dnsforward.Entry {
 		out = append(out, dnsforward.Entry{Domain: d.Domain, ResolverIP: d.ResolverIP})
 	}
 	return out
+}
+
+// k8sAnswersFrom maps a compiled artifact's K8s VIP map + DNS-listen zones to the forwarder's direct-answer
+// input (S10.3 A1). The entries are the exposed FQDN→VIP pairs (from VIPMappings.DNSName); the zones are the
+// cluster zones this gateway owns (from K8sDNSZones.Zone) — an in-zone-but-unexposed name answers NXDOMAIN.
+// A nil policy (mesh/off/cold-start) yields nothing → the forwarder answers no cluster names (fail-closed).
+func k8sAnswersFrom(p *nodepolicy.Compiled) ([]dnsforward.K8sEntry, []string) {
+	if p == nil {
+		return nil, nil
+	}
+	entries := make([]dnsforward.K8sEntry, 0, len(p.VIPMappings))
+	for _, vm := range p.VIPMappings {
+		if vm.DNSName != "" {
+			entries = append(entries, dnsforward.K8sEntry{FQDN: vm.DNSName, VIP: vm.VIP})
+		}
+	}
+	zones := make([]string, 0, len(p.K8sDNSZones))
+	for _, z := range p.K8sDNSZones {
+		zones = append(zones, z.Zone)
+	}
+	return entries, zones
 }
 
 func getdur(k string, def time.Duration) time.Duration {

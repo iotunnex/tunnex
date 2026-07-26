@@ -62,6 +62,13 @@ type Manager struct {
 	// Every sibling mutable field is atomic for the same reason.
 	ovpnTun atomic.Pointer[string]
 	policy  atomic.Pointer[nodepolicy.Compiled]
+	// dnsVIPs is the SET of cluster DNS VIPs currently assigned as /32 on the wg interface (S10.3 A1). The
+	// gateway must OWN each reserved DNS VIP locally so (a) the client's DNS query to it is delivered locally
+	// (not forwarded) and (b) the dnsforward bind-reconcile binds :53 on it (it enumerates wg0's addresses).
+	// ReconcileDNSVIPs drives this to match the policy's K8sDNSZones; the last-applied set here lets it remove
+	// a departed VIP. runIP is the injectable `ip` runner (nil → the real exec) for the reconcile red.
+	dnsVIPs atomic.Pointer[[]string]
+	runIP   func(ctx context.Context, args ...string) error
 	// deviceByIP is the src /32 -> device_id map (S7.5.4 v3), rebuilt atomically on each
 	// SetPolicy from the applied Allow set. It is the AUTHORITATIVE /32->device mapping
 	// the CP compiled (the same snapshot that assigned the /32) — the flow-log stamper
@@ -164,6 +171,7 @@ func New(wgIface string) *Manager {
 	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
+	m.runIP = runIP // S10.3 A1: the real `ip addr` runner; injectable for the DNS-VIP reconcile red
 	return m
 }
 

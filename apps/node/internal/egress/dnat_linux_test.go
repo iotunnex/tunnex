@@ -152,3 +152,61 @@ func TestDNSUnreachablePreflight(t *testing.T) {
 		t.Fatal("NXDOMAIN means the DNS server IS reachable -> preflight must be false")
 	}
 }
+
+// TestReconcileDNSVIPsAssignsAndSweeps — S10.3 A1: each cluster's reserved DNS VIP is assigned as a /32 on
+// wg0 (so the client's query is delivered locally and the forwarder binds :53 on it), and a VIP that leaves
+// the policy is removed. Fail-closed: an assign that errors is NOT recorded (retried next tick), and an
+// invalid CP-supplied VIP never reaches `ip`.
+func TestReconcileDNSVIPsAssignsAndSweeps(t *testing.T) {
+	m := New("wg0")
+	var cmds []string
+	fail := map[string]bool{}
+	m.runIP = func(_ context.Context, args ...string) error {
+		key := strings.Join(args, " ")
+		cmds = append(cmds, key)
+		if fail[key] {
+			return errors.New("RTNETLINK: operation not permitted")
+		}
+		return nil
+	}
+
+	// Two clusters, one with a bogus VIP that must never reach `ip`.
+	m.SetPolicy(&nodepolicy.Compiled{Version: 7, K8sDNSZones: []nodepolicy.K8sDNSZone{
+		{ListenVIP: "100.64.0.2", Zone: "prod.k8s.acme.com"},
+		{ListenVIP: "not-an-ip", Zone: "bad.k8s.acme.com"},
+	}})
+	if err := m.ReconcileDNSVIPs(context.Background()); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	joined := strings.Join(cmds, "\n")
+	if !strings.Contains(joined, "addr replace 100.64.0.2/32 dev wg0") {
+		t.Fatalf("the valid DNS VIP must be assigned, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "not-an-ip") {
+		t.Fatalf("an invalid CP-supplied VIP must NEVER reach ip, got:\n%s", joined)
+	}
+
+	// The cluster leaves the policy → its DNS VIP is removed (no stale local address / :53 bind).
+	cmds = nil
+	m.SetPolicy(&nodepolicy.Compiled{Version: 7})
+	if err := m.ReconcileDNSVIPs(context.Background()); err != nil {
+		t.Fatalf("sweep reconcile: %v", err)
+	}
+	if !strings.Contains(strings.Join(cmds, "\n"), "addr del 100.64.0.2/32 dev wg0") {
+		t.Fatalf("a departed DNS VIP must be unassigned, got:\n%s", strings.Join(cmds, "\n"))
+	}
+
+	// Fail-closed: an assign that errors is not recorded as applied → the NEXT reconcile retries it.
+	cmds = nil
+	fail["addr replace 100.64.0.2/32 dev wg0"] = true
+	m.SetPolicy(&nodepolicy.Compiled{Version: 7, K8sDNSZones: []nodepolicy.K8sDNSZone{{ListenVIP: "100.64.0.2", Zone: "prod.k8s.acme.com"}}})
+	if err := m.ReconcileDNSVIPs(context.Background()); err == nil {
+		t.Fatal("an assign failure must surface an error")
+	}
+	cmds = nil
+	fail["addr replace 100.64.0.2/32 dev wg0"] = false
+	_ = m.ReconcileDNSVIPs(context.Background())
+	if !strings.Contains(strings.Join(cmds, "\n"), "addr replace 100.64.0.2/32 dev wg0") {
+		t.Fatalf("a previously-FAILED assign must be retried (never recorded as applied), got:\n%s", strings.Join(cmds, "\n"))
+	}
+}
