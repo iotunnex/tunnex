@@ -332,6 +332,44 @@ func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([
 	return items, nil
 }
 
+const listK8sServedZonesForOrg = `-- name: ListK8sServedZonesForOrg :many
+SELECT DISTINCT c.name, c.dns_zone, COALESCE(host(c.dns_vip), '')::text AS dns_vip
+FROM k8s_clusters c
+JOIN k8s_services s ON s.cluster_id = c.id AND s.deleted_at IS NULL
+WHERE c.org_id = $1
+`
+
+type ListK8sServedZonesForOrgRow struct {
+	Name    string `json:"name"`
+	DnsZone string `json:"dns_zone"`
+	DnsVip  string `json:"dns_vip"`
+}
+
+// ListK8sServedZonesForOrg is the zones a gateway ACTUALLY answers: a cluster with >=1 LIVE exposed Service.
+// This is the SAME live-service set the agent's K8sDNSZones is built from (loadSiteTopology →
+// ListActiveK8sServicesForOrg), so the client resolver push (routedranges) and the gateway's own answer set
+// agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
+// as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
+func (q *Queries) ListK8sServedZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sServedZonesForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listK8sServedZonesForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListK8sServedZonesForOrgRow{}
+	for rows.Next() {
+		var i ListK8sServedZonesForOrgRow
+		if err := rows.Scan(&i.Name, &i.DnsZone, &i.DnsVip); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsedVIPsInCluster = `-- name: ListUsedVIPsInCluster :many
 SELECT host(vip) AS vip FROM k8s_services WHERE org_id = $1 AND cluster_id = $2 AND deleted_at IS NULL
 `

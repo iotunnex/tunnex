@@ -111,7 +111,11 @@ func (s *Service) ListRoutedForwards(ctx context.Context, orgID uuid.UUID, range
 	// which the gateway answers (H1). The SAME reachability gate applies: the DNS VIP must fall inside a routed
 	// range — it does, because ListRoutedRanges now returns the VIP range that contains it (computed by
 	// construction, never assumed).
-	czones, err := s.q.ListK8sClusterZonesForOrg(ctx, orgID)
+	// L2: only zones the gateway ACTUALLY answers — a cluster with >=1 LIVE exposed Service. This is the SAME
+	// live-service set the agent's K8sDNSZones is built from, so the client resolver and the gateway's answer
+	// set agree by construction (never install a client resolver for a zone the gateway would REFUSE because no
+	// Service is exposed yet — the consumer-without-producer inverse of this epic's earlier findings).
+	czones, err := s.q.ListK8sServedZonesForOrg(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}

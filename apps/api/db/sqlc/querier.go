@@ -483,6 +483,12 @@ type Querier interface {
 	// routed-forwards channel hands split-tunnel/OVPN clients so they resolve exposed Service names.
 	ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sClusterZonesForOrgRow, error)
 	ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error)
+	// ListK8sServedZonesForOrg is the zones a gateway ACTUALLY answers: a cluster with >=1 LIVE exposed Service.
+	// This is the SAME live-service set the agent's K8sDNSZones is built from (loadSiteTopology →
+	// ListActiveK8sServicesForOrg), so the client resolver push (routedranges) and the gateway's own answer set
+	// agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
+	// as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
+	ListK8sServedZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sServedZonesForOrgRow, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).

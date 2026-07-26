@@ -36,6 +36,17 @@ SELECT vip_range::text AS vip_range FROM k8s_clusters WHERE org_id = $1;
 -- name: ListK8sClusterZonesForOrg :many
 SELECT name, dns_zone, COALESCE(host(dns_vip), '')::text AS dns_vip FROM k8s_clusters WHERE org_id = $1;
 
+-- ListK8sServedZonesForOrg is the zones a gateway ACTUALLY answers: a cluster with >=1 LIVE exposed Service.
+-- This is the SAME live-service set the agent's K8sDNSZones is built from (loadSiteTopology →
+-- ListActiveK8sServicesForOrg), so the client resolver push (routedranges) and the gateway's own answer set
+-- agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
+-- as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
+-- name: ListK8sServedZonesForOrg :many
+SELECT DISTINCT c.name, c.dns_zone, COALESCE(host(c.dns_vip), '')::text AS dns_vip
+FROM k8s_clusters c
+JOIN k8s_services s ON s.cluster_id = c.id AND s.deleted_at IS NULL
+WHERE c.org_id = $1;
+
 -- name: CreateK8sService :one
 INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

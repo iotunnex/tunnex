@@ -721,12 +721,14 @@ func TestRoutedChannelIncludesK8s(t *testing.T) {
 		t.Fatal(e)
 	}
 	// A registered cluster with a VIP range + reserved DNS VIP (.2, inside the range).
-	if _, e := pool.Exec(ctx, `INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,service_cidr,dns_zone,dns_vip) VALUES ($1,$2,$3,'prod','100.64.0.0/16','10.96.0.0/12','k8s.acme.com','100.64.0.2')`, uuid.New(), org, site); e != nil {
+	clusterID := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,service_cidr,dns_zone,dns_vip) VALUES ($1,$2,$3,'prod','100.64.0.0/16','10.96.0.0/12','k8s.acme.com','100.64.0.2')`, clusterID, org, site); e != nil {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
 
-	// (1) the VIP range is in the device's routed set (WireGuard AllowedIPs).
+	// (1) the VIP range is in the device's routed set (WireGuard AllowedIPs) — as soon as the cluster exists
+	// (routing the range is independent of whether a Service is exposed yet).
 	ranges, err := svc.ListRoutedRanges(ctx, org)
 	if err != nil {
 		t.Fatal(err)
@@ -740,6 +742,21 @@ func TestRoutedChannelIncludesK8s(t *testing.T) {
 	if !found {
 		t.Fatalf("the K8s VIP range must be in the device's routed set, got %v", ranges)
 	}
+	// (L2) a cluster with ZERO exposed Services emits NO zone forward — the gateway would REFUSE it (no
+	// K8sDNSZone), so the client must not install a resolver for it (consumer/producer agree by construction).
+	pre, err := svc.ListRoutedForwards(ctx, org, ranges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range pre {
+		if f.Domain == "prod.k8s.acme.com" {
+			t.Fatalf("a cluster with no exposed Service must emit NO zone forward, got %v", pre)
+		}
+	}
+	// Expose a Service → the gateway now serves the zone → the forward APPEARS.
+	if _, e := pool.Exec(ctx, `INSERT INTO k8s_services (id,org_id,cluster_id,name,namespace,protocol,vip) VALUES ($1,$2,$3,'api','prod','tcp','100.64.0.3')`, uuid.New(), org, clusterID); e != nil {
+		t.Fatal(e)
+	}
 	// (2) the cluster-zone → DNS-VIP resolver rides the routed-forwards channel, reachable via that range.
 	fwds, err := svc.ListRoutedForwards(ctx, org, ranges)
 	if err != nil {
@@ -752,7 +769,7 @@ func TestRoutedChannelIncludesK8s(t *testing.T) {
 		}
 	}
 	if !gotZone {
-		t.Fatalf("the cluster zone must forward to its reserved DNS VIP, got %v", fwds)
+		t.Fatalf("once a Service is exposed the cluster zone must forward to its reserved DNS VIP, got %v", fwds)
 	}
 	// (3) GATE by construction: if the VIP range is NOT routed, the DNS-VIP resolver is unreachable → dropped.
 	gated, err := svc.ListRoutedForwards(ctx, org, []string{"10.20.0.0/24"})
