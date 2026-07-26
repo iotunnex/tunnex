@@ -25,6 +25,10 @@ spec:
         app.kubernetes.io/component: gateway
     spec:
       serviceAccountName: {{ include "tunnex-gateway.serviceAccountName" . }}
+      # L10: the gateway holds NO Kubernetes API credential BY CONSTRUCTION — it resolves ClusterIPs via
+      # in-cluster CoreDNS (ruling A: no K8s API), and talks to the CP over mTLS. So the auto-mounted SA token
+      # is an unused credential on a root+hostNetwork pod — refuse it.
+      automountServiceAccountToken: false
       # F4: hostNetwork puts the agent's prerouting DNAT in the NODE netns, ahead of
       # kube-proxy's ClusterIP→pod DNAT (which also lives there), and gives the real
       # WG datapath + the node's ip_forward.
@@ -55,11 +59,20 @@ spec:
           image: {{ include "tunnex-gateway.agentImage" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
-            # F4: NET_ADMIN to program WireGuard + nftables; /dev/net/tun for the WG
-            # datapath. runAsNonRoot is FALSE — the agent must write the node netns
-            # firewall. The privileged posture is acknowledged (F7b).
+            # F4: NET_ADMIN to program WireGuard + nftables; /dev/net/tun for the WG datapath. runAsNonRoot
+            # is FALSE — the agent must write the node netns firewall. The privileged posture is acknowledged
+            # (F7b). M7 — least-privilege on a root+hostNetwork pod: drop the ENTIRE default capability set and
+            # add back ONLY NET_ADMIN ("we added exactly one capability and dropped the rest"), forbid
+            # privilege escalation, and pin the RuntimeDefault seccomp profile. NOT `privileged: true` —
+            # NET_ADMIN is sufficient. readOnlyRootFilesystem is left OFF: the agent writes its enrolled
+            # cert/keys under the mounted state volume, but also touches paths under / at runtime; a
+            # read-only root would need an explicit writable-mount audit — registered, not silently claimed.
             runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
+              drop: ["ALL"]
               add: ["NET_ADMIN"]
           ports:
             - name: wireguard

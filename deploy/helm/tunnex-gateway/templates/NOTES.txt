@@ -13,6 +13,14 @@ This gateway is PRIVILEGED: hostNetwork, NET_ADMIN, /dev/net/tun (F4). It places
 VIP→ClusterIP DNAT in the node netns ahead of kube-proxy — it cannot be an ordinary
 pod. You acknowledged this with acknowledgePrivileged=true.
 
+Security posture (for your security team's review):
+  - Capabilities: the pod drops the ENTIRE default set and adds back ONLY NET_ADMIN
+    (not privileged:true; allowPrivilegeEscalation:false; seccompProfile RuntimeDefault).
+  - NO Kubernetes API credential, BY CONSTRUCTION: the gateway resolves ClusterIPs via
+    in-cluster CoreDNS and talks to the control plane over mTLS — it never calls the K8s
+    API, so the ServiceAccount token is NOT mounted (automountServiceAccountToken:false)
+    and the ServiceAccount holds no Role/ClusterRole.
+
 1. FABRIC ENDPOINT (F6). Peers dial `{{ .Values.endpoint }}` to reach this gateway.
    It must be the PUBLIC address of the WG Service:
      kubectl get svc {{ include "tunnex-gateway.fullname" . }}-wg

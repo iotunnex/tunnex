@@ -29,6 +29,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
+	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
@@ -185,7 +186,9 @@ func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, 
 }
 
 // SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) for the node-revoke path — ovpn.Service.RebuildCRL.
-func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) { s.rebuildCRL = fn }
+func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) {
+	s.rebuildCRL = fn
+}
 
 // SetOVPNCRLProvider wires the org CRL delivery (Slice 5) — ovpn.Service.GetCRL.
 func (s *Service) SetOVPNCRLProvider(fn func(ctx context.Context, orgID uuid.UUID) (string, error)) {
@@ -751,7 +754,7 @@ func (s *Service) loadSiteTopology(ctx context.Context, orgID uuid.UUID) (siteTo
 		// The FQDN is always-explicit (S10.3 (B2)): <service>.<namespace>.svc.<cluster>.<zone>. A collapsed
 		// form silently breaks the moment a second cluster shares the zone — correctness beats brevity.
 		zone := e.ClusterName + "." + e.DnsZone
-		dnsName := e.Name + "." + e.Namespace + ".svc." + zone
+		dnsName := k8s.FQDN(e.Name, e.Namespace, e.ClusterName, e.DnsZone) // L8: the ONE FQDN constructor, never a second copy
 		vipMappings[e.SiteID] = append(vipMappings[e.SiteID], policyspec.VIPMapping{
 			VIP: e.Vip, Namespace: e.Namespace, Service: e.Name, ServiceCIDR: e.ServiceCidr,
 			Protocol: e.Protocol, PortLow: pl, PortHigh: ph, DNSName: dnsName,
@@ -1510,9 +1513,9 @@ func (s *Service) ReportWGInfo(ctx context.Context, node sqlc.Node, publicKey, e
 		"policy_refused_version":      applied.RefusedVersion,
 		"site_link_stale":             applied.SiteLinkStale, // VESTIGIAL (WF-B D-WFB-1b): still reported+persisted for backward-compat, but NO LONGER CONSUMED — the CP derives site-link health from the ONE liveness derivation (fillSiteLinkVerdict). Retire or re-adopt deliberately in an agent-vN; do not silently resurrect.
 		"site_subnet_unreachable":     applied.SiteSubnetUnreachable,
-		"conntrack_flush_unavailable":  applied.ConntrackFlushUnavailable,
-		"k8s_cluster_dns_unreachable":  applied.K8sClusterDNSUnreachable,
-		"max_policy_version":           applied.MaxSupportedVersion,
+		"conntrack_flush_unavailable": applied.ConntrackFlushUnavailable,
+		"k8s_cluster_dns_unreachable": applied.K8sClusterDNSUnreachable,
+		"max_policy_version":          applied.MaxSupportedVersion,
 		"ovpn_health":                 applied.OVPNHealth, // S9.1 4d
 	})
 	if err != nil {

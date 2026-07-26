@@ -1,13 +1,14 @@
 {{- if .Values.preflight.enabled }}
 {{- include "tunnex-gateway.ackGuard" . -}}
-# F7: the guard-before-exec gate. A pre-install,pre-upgrade HOOK Job that requests the
-# SAME privileged context the gateway needs (hostNetwork + NET_ADMIN + /dev/net/tun +
-# ClusterFirstWithHostNet) and self-asserts. On a cluster whose PodSecurity/admission
-# BLOCKS that context, THIS pod is admission-rejected — so `helm install --wait` fails
-# HERE, at the hook, before the real Deployment starts a crash-loop. The assertion also
-# closes the hostNetwork DNS trap: it proves cluster DNS resolves from the gateway's
-# exact DNS posture (without ClusterFirstWithHostNet the *.svc probe fails and the gateway
-# could never turn a Service name into a ClusterIP). NOTES mandates `--wait`.
+# F7: the guard-before-exec gate. A pre-install,pre-upgrade HOOK Job that requests the SAME privileged
+# context the gateway needs (hostNetwork + NET_ADMIN + /dev/net/tun + hostPort + ClusterFirstWithHostNet) and
+# self-asserts. On a cluster whose PodSecurity/admission BLOCKS that context, THIS pod is admission-rejected —
+# so `helm install --wait` fails HERE, at the hook, before the real Deployment starts a crash-loop. The
+# assertions ALSO close two silent-degrade traps the story-end review found: it proves the tun device is
+# present (M4 — via a non-blocking /dev DIRECTORY mount, so the script actually RUNS on a tun-less node and
+# fails LOUD, instead of the CharDevice mount FailedMount-hanging to helm's timeout) and proves cluster DNS
+# resolves by ANSWER CONTENT (M3 — never the busybox nslookup exit code, which historically returns 0 on
+# failure; the image is pinned for the same reason). NOTES mandates `--wait`.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,10 +29,12 @@ spec:
         app.kubernetes.io/component: preflight
     spec:
       restartPolicy: Never
-      # Request the gateway's real posture so a blocking admission controller rejects
-      # THIS pod (fail at the hook, not in a crash-loop).
+      # Request the gateway's real posture so a blocking admission controller rejects THIS pod (fail at the
+      # hook, not in a crash-loop). L9: the hostPort is declared here too so the admission proxy is not weaker
+      # than the Deployment (a policy keying on hostPort would otherwise admit the probe but block the real pod).
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -41,29 +44,52 @@ spec:
           image: {{ .Values.image.preflight | quote }}
           securityContext:
             runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
+              drop: ["ALL"]
               add: ["NET_ADMIN"]
+          ports:
+            - name: wireguard
+              containerPort: {{ .Values.wireguard.port }}
+              hostPort: {{ .Values.wireguard.port }}
+              protocol: UDP
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -e
-              echo "preflight: checking /dev/net/tun ..."
-              if [ ! -c /dev/net/tun ]; then
-                echo "FATAL: /dev/net/tun is not present — the node lacks the tun device the gateway's WireGuard datapath needs. Load the kernel module (modprobe tun) on the node, or schedule onto a node that has it."
+              set -eu
+              # M4: check the tun device via a NON-blocking /dev directory mount (see volumes) — this script
+              # runs even when tun is absent, so a tun-less node fails LOUD here instead of the container
+              # FailedMount-hanging to helm's timeout with a generic error.
+              echo "preflight: checking /host-dev/net/tun ..."
+              if [ ! -c /host-dev/net/tun ]; then
+                echo "FATAL: /dev/net/tun is not present on this node — the gateway's WireGuard datapath needs it. Load the kernel module (modprobe tun) on the node, or schedule onto a node that has it."
                 exit 1
               fi
+              # M3: prove cluster DNS resolves by ANSWER CONTENT, never the exit code. busybox nslookup has
+              # historically returned 0 even on failure, so a "reassuring-green" gate could pass while the very
+              # trap it guards (missing ClusterFirstWithHostNet) is active. Require an Address line UNDER the
+              # answer's "Name:" section — absent on a resolution failure.
               echo "preflight: resolving cluster DNS ({{ .Values.preflight.dnsProbe }}) from the gateway's DNS posture ..."
-              if ! nslookup {{ .Values.preflight.dnsProbe }} >/dev/null 2>&1; then
-                echo "FATAL: could not resolve {{ .Values.preflight.dnsProbe }}. A hostNetwork pod inherits the NODE resolv.conf; without dnsPolicy ClusterFirstWithHostNet the gateway cannot turn a Service name into its ClusterIP. This is the hostNetwork DNS trap — refuse rather than install a gateway that silently can't resolve Services."
+              out=$(nslookup {{ .Values.preflight.dnsProbe }} 2>&1 || true)
+              echo "$out"
+              if ! printf '%s\n' "$out" | grep -A50 '^Name:' | grep -q '^Address'; then
+                echo "FATAL: could not resolve {{ .Values.preflight.dnsProbe }} to an address. A hostNetwork pod inherits the NODE resolv.conf; without dnsPolicy ClusterFirstWithHostNet the gateway cannot turn a Service name into its ClusterIP. This is the hostNetwork DNS trap — refuse rather than install a gateway that silently can't resolve Services."
                 exit 1
               fi
-              echo "preflight: OK — privileged context admitted, /dev/net/tun present, cluster DNS resolves."
+              echo "preflight: OK — privileged context admitted, /dev/net/tun present, cluster DNS answers."
           volumeMounts:
-            - name: dev-net-tun
-              mountPath: /dev/net/tun
+            # M4: mount the host /dev as a DIRECTORY (always present) rather than a CharDevice file. A
+            # CharDevice mount is validated by kubelet BEFORE the container starts, so a missing /dev/net/tun
+            # would FailedMount-hang the probe instead of letting the script report it — the exact dead-code
+            # the review found. A directory mount always starts; the script tests the path itself.
+            - name: host-dev
+              mountPath: /host-dev
+              readOnly: true
       volumes:
-        - name: dev-net-tun
+        - name: host-dev
           hostPath:
-            path: /dev/net/tun
-            type: CharDevice
+            path: /dev
+            type: Directory
 {{- end }}

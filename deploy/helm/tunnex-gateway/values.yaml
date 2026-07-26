@@ -14,8 +14,11 @@ image:
   tag: "0.2.0"
   pullPolicy: IfNotPresent
   pullSecrets: []
-  # The preflight hook image (needs a shell + nslookup + test — busybox suffices).
-  preflight: "busybox:stable"
+  # The preflight hook image (needs a shell + nslookup + test — busybox suffices). PINNED to a specific
+  # version (M3): the preflight's DNS gate must not depend on a floating tag whose nslookup applet might
+  # regress to exit-0-on-failure. The gate reads answer CONTENT, not the exit code, but a pinned image keeps
+  # the whole probe reproducible. Override with your own mirror if egress to Docker Hub is blocked.
+  preflight: "busybox:1.37.0"
 
 # ─── CONTROL-PLANE CONNECTION ────────────────────────────────────────────────────
 # Where the agent enrolls + fetches desired state. Point at the tunnex-cp release's
