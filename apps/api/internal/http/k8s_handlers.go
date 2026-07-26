@@ -7,6 +7,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	k8ssvc "github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
@@ -96,7 +97,8 @@ func (s apiServer) DeregisterK8sCluster(ctx context.Context, req api.DeregisterK
 	if _, err := authorize(ctx, req.OrgId, rbac.PermK8sManage); err != nil {
 		return nil, err
 	}
-	if err := s.k8s.DeregisterCluster(ctx, req.OrgId, req.ClusterId); err != nil {
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.k8s.DeregisterCluster(ctx, p.UserID, req.OrgId, req.ClusterId); err != nil {
 		return nil, err
 	}
 	return api.DeregisterK8sCluster204Response{}, nil
@@ -161,7 +163,8 @@ func (s apiServer) UnexposeK8sService(ctx context.Context, req api.UnexposeK8sSe
 	if _, err := authorize(ctx, req.OrgId, rbac.PermK8sManage); err != nil {
 		return nil, err
 	}
-	if err := s.k8s.UnexposeService(ctx, req.OrgId, req.ServiceId); err != nil {
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.k8s.UnexposeService(ctx, p.UserID, req.OrgId, req.ServiceId); err != nil {
 		return nil, err
 	}
 	return api.UnexposeK8sService204Response{}, nil

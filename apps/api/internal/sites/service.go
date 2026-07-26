@@ -295,6 +295,13 @@ func (s *Service) ApproveSubnet(ctx context.Context, actor, orgID, subnetID uuid
 		if sub.Status == "approved" {
 			return nil // idempotent no-op
 		}
+		// M6: serialize the disjointness read against every other range-writing seam (ResizePool +
+		// k8s.RegisterCluster) with the SAME org advisory lock. Without it, a subnet-approval racing a
+		// cluster registration (or a pool resize) could both pass the READ-COMMITTED check on a set that
+		// excludes the other's uncommitted range, committing an overlap the unique index can't catch.
+		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
+			return e
+		}
 		// The candidate must be disjoint from the org's approved subnets + the pool. The candidate is
 		// PENDING, so it is NOT in the approved-only list — pass the WHOLE approved set to the validator.
 		// (A prior `a.Cidr != sub.Cidr` filter here was a BYPASS wearing a convenience costume: it

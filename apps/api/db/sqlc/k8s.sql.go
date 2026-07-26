@@ -12,6 +12,33 @@ import (
 	"github.com/google/uuid"
 )
 
+const countClusterCascade = `-- name: CountClusterCascade :one
+SELECT
+  (SELECT count(*) FROM k8s_services s WHERE s.cluster_id = $2 AND s.org_id = $1 AND s.deleted_at IS NULL) AS service_count,
+  (SELECT count(*) FROM policy_rules r WHERE r.org_id = $1 AND r.dst_k8s_service_id IN (SELECT s2.id FROM k8s_services s2 WHERE s2.cluster_id = $2)) AS grant_count
+`
+
+type CountClusterCascadeParams struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
+type CountClusterCascadeRow struct {
+	ServiceCount int64 `json:"service_count"`
+	GrantCount   int64 `json:"grant_count"`
+}
+
+// CountClusterCascade returns what a DeregisterCluster will destroy, for the audit trail (H2): the number of
+// LIVE exposed Services in the cluster, and the number of policy grants (rules) that reference ANY Service in
+// it. Both are FK ON DELETE CASCADE'd when the cluster row is deleted, so the audit must capture them BEFORE
+// the delete — a governance cascade must never vanish untraceably.
+func (q *Queries) CountClusterCascade(ctx context.Context, arg CountClusterCascadeParams) (CountClusterCascadeRow, error) {
+	row := q.db.QueryRow(ctx, countClusterCascade, arg.OrgID, arg.ClusterID)
+	var i CountClusterCascadeRow
+	err := row.Scan(&i.ServiceCount, &i.GrantCount)
+	return i, err
+}
+
 const createK8sCluster = `-- name: CreateK8sCluster :one
 
 INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip)

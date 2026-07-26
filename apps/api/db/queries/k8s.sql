@@ -14,6 +14,15 @@ SELECT * FROM k8s_clusters WHERE org_id = $1 ORDER BY name;
 -- name: DeleteK8sCluster :exec
 DELETE FROM k8s_clusters WHERE org_id = $1 AND id = $2;
 
+-- CountClusterCascade returns what a DeregisterCluster will destroy, for the audit trail (H2): the number of
+-- LIVE exposed Services in the cluster, and the number of policy grants (rules) that reference ANY Service in
+-- it. Both are FK ON DELETE CASCADE'd when the cluster row is deleted, so the audit must capture them BEFORE
+-- the delete — a governance cascade must never vanish untraceably.
+-- name: CountClusterCascade :one
+SELECT
+  (SELECT count(*) FROM k8s_services s WHERE s.cluster_id = $2 AND s.org_id = $1 AND s.deleted_at IS NULL) AS service_count,
+  (SELECT count(*) FROM policy_rules r WHERE r.org_id = $1 AND r.dst_k8s_service_id IN (SELECT s2.id FROM k8s_services s2 WHERE s2.cluster_id = $2)) AS grant_count;
+
 -- ListVIPRangesForOrg feeds the subnetguard collector: EVERY disjointness check (cluster-VIP creation,
 -- pool resize, site-subnet approval) must include the org's VIP ranges so disjointness stays bidirectional
 -- (the validator-input-filtering law). Returns the raw cidr text.

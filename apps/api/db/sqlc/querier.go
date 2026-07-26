@@ -99,6 +99,11 @@ type Querier interface {
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
 	CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// CountClusterCascade returns what a DeregisterCluster will destroy, for the audit trail (H2): the number of
+	// LIVE exposed Services in the cluster, and the number of policy grants (rules) that reference ANY Service in
+	// it. Both are FK ON DELETE CASCADE'd when the cluster row is deleted, so the audit must capture them BEFORE
+	// the delete — a governance cascade must never vanish untraceably.
+	CountClusterCascade(ctx context.Context, arg CountClusterCascadeParams) (CountClusterCascadeRow, error)
 	// The per-user device cap counts ACTIVE + PENDING (S7.3 finding #1): a pending device
 	// reserves a real pool /32 and is a real enrollment, so excluding it let a user create
 	// unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending

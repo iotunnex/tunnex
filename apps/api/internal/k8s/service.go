@@ -10,11 +10,13 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/netip"
 	"regexp"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -38,11 +40,35 @@ func validDNSLabel(s string) bool { return len(s) >= 1 && len(s) <= 63 && dnsLab
 func validDNSName(s string) bool  { return len(s) >= 1 && len(s) <= 253 && dnsNameRE.MatchString(s) }
 
 type Service struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	pool   *pgxpool.Pool
+	q      *sqlc.Queries
+	notify Notifier // nil => no push (tests / provider-only); wired in main.go to the nodepush hub
 }
 
+// Notifier signals gateways to re-fetch desired state (the <5s push path, S7.2). The nodepush hub satisfies
+// it. A K8s sweep is enterprise-grant-affecting (a deregister cascade-deletes grants), so it MUST ride the
+// push path rather than wait ~25s for the agent long-poll (M5) — stale enforcement of a deleted grant is the
+// gap the <5s revocation promise exists to close.
+type Notifier interface{ NotifyMany(nodeIDs []uuid.UUID) }
+
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool, q: sqlc.New(pool)} }
+
+// SetNotifier wires the push hub (M5). Call at construction in main.go; nil leaves the ~25s long-poll as the
+// only propagation (acceptable for tests, not for a grant-cascading production sweep).
+func (s *Service) SetNotifier(n Notifier) { s.notify = n }
+
+// pushOrg notifies the org's active gateways to re-fetch after a sweep (M5). Best-effort: a push failure is
+// never fatal (the ~25s long-poll remains the backstop), and no notifier (tests) is a silent no-op.
+func (s *Service) pushOrg(ctx context.Context, orgID uuid.UUID) {
+	if s.notify == nil {
+		return
+	}
+	ids, err := s.q.ListActiveNodeIDsForOrg(ctx, orgID)
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	s.notify.NotifyMany(ids)
+}
 
 func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
 	tx, err := s.pool.Begin(ctx)
@@ -54,6 +80,24 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// audit writes one append-only audit row in the caller's tx (H2 — the swallowed-audit law: a K8s mutation
+// must leave an actor-attributed trail, especially DeregisterCluster, which FK-cascade-deletes enterprise
+// grants). RETURNS its error (never swallows — a swallowed InsertAuditLog poisons the tx). Mirrors
+// sites.auditTarget.
+func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actor uuid.UUID, targetType, targetID, action string, meta map[string]any) error {
+	b, _ := json.Marshal(meta)
+	tt, ti := targetType, targetID
+	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
+		Action:      action,
+		TargetType:  &tt,
+		TargetID:    &ti,
+		Metadata:    b,
+	})
+	return err
 }
 
 // RegisterCluster creates a K8s cluster and its synthetic VIP range. The range must be DISJOINT from
@@ -79,6 +123,17 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 		}
 		if !serviceCIDR.IsValid() {
 			return apierr.BadRequest("invalid_service_cidr", "the cluster's Kubernetes Service CIDR is required (e.g. 10.96.0.0/12) — the gateway uses it to tell a ClusterIP from a pod IP")
+		}
+		// M6: take the org's tx-scoped advisory lock BEFORE the disjointness read, the SAME key ResizePool +
+		// ApproveSubnet take. The Collect/Check is a read-then-write; under READ COMMITTED two concurrent
+		// range writes (two RegisterClusters, or a RegisterCluster racing a pool-resize / subnet-approval)
+		// would each snapshot a set excluding the other's uncommitted row and both pass, committing two
+		// OVERLAPPING ranges the unique index can't catch (it only refuses IDENTICAL CIDRs). The lock
+		// serializes all range-writing seams so the check reflects committed state. (Lock is the form because
+		// the forbidden overlap spans THREE tables — pool, site subnets, cluster VIP ranges — which no single
+		// per-table EXCLUDE constraint can represent; within-table EXCLUDE is a registered defense-in-depth.)
+		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
+			return e
 		}
 		// The cluster must be fronted by a real site in THIS org (one gateway = one site, D1).
 		if _, e := q.GetSite(ctx, sqlc.GetSiteParams{ID: siteID, OrgID: orgID}); e != nil {
@@ -280,24 +335,50 @@ func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID u
 // gateway's VIP map AND its DNS answer, and any grant that referenced it compiles to nothing (the honest
 // vanished-Service surface, rendered in API/web). The freed VIP is immediately reusable — SAFE because a
 // re-expose mints a NEW identity and the compiler resolves id -> CURRENT VIP, never a snapshot (Slice 2).
-func (s *Service) UnexposeService(ctx context.Context, orgID, serviceID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
-		if _, e := q.GetK8sService(ctx, sqlc.GetK8sServiceParams{OrgID: orgID, ID: serviceID}); e != nil {
+func (s *Service) UnexposeService(ctx context.Context, actor, orgID, serviceID uuid.UUID) error {
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		svc, e := q.GetK8sService(ctx, sqlc.GetK8sServiceParams{OrgID: orgID, ID: serviceID})
+		if e != nil {
 			return apierr.NotFound("service_not_found", "no such exposed Service in this organization")
 		}
-		return q.SoftDeleteK8sService(ctx, sqlc.SoftDeleteK8sServiceParams{OrgID: orgID, ID: serviceID})
+		if e := q.SoftDeleteK8sService(ctx, sqlc.SoftDeleteK8sServiceParams{OrgID: orgID, ID: serviceID}); e != nil {
+			return e
+		}
+		// H2: audit the unexpose (a network-exposed Service leaving the fabric) — the RemoveSubnet analogue.
+		return s.audit(ctx, q, orgID, actor, "k8s_service", serviceID.String(), "k8s.service_unexposed",
+			map[string]any{"namespace": svc.Namespace, "name": svc.Name, "vip": svc.Vip.String()})
 	})
+	if err == nil {
+		s.pushOrg(ctx, orgID) // M5: propagate at push speed, not the ~25s long-poll
+	}
+	return err
 }
 
 // DeregisterCluster removes a cluster (S10.3 sweep). Full-sweep: the FK CASCADE deletes its exposed Services
 // AND every policy_rule that pointed at one (0049 dst_k8s_service_id ON DELETE CASCADE), and the row's removal
 // frees the whole VIP range (incl the reserved DNS VIP) and the cluster's DNS zone for reuse — all in ONE
 // atomic delete. The next compile recompiles every affected gateway without the vanished cluster.
-func (s *Service) DeregisterCluster(ctx context.Context, orgID, clusterID uuid.UUID) error {
-	return s.withTx(ctx, func(q *sqlc.Queries) error {
-		if _, e := q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID}); e != nil {
+func (s *Service) DeregisterCluster(ctx context.Context, actor, orgID, clusterID uuid.UUID) error {
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		cluster, e := q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID})
+		if e != nil {
 			return apierr.NotFound("cluster_not_found", "no such cluster in this organization")
 		}
-		return q.DeleteK8sCluster(ctx, sqlc.DeleteK8sClusterParams{OrgID: orgID, ID: clusterID})
+		// H2: capture the cascade counts BEFORE the delete — the FK cascade hard-deletes the cluster's Services
+		// AND every enterprise grant referencing one, so the audit must name what vanished (the DeleteSite
+		// analogue, which records rules_deleted/subnets_released). A governance cascade must never be untraceable.
+		casc, e := q.CountClusterCascade(ctx, sqlc.CountClusterCascadeParams{OrgID: orgID, ClusterID: clusterID})
+		if e != nil {
+			return e
+		}
+		if e := q.DeleteK8sCluster(ctx, sqlc.DeleteK8sClusterParams{OrgID: orgID, ID: clusterID}); e != nil {
+			return e
+		}
+		return s.audit(ctx, q, orgID, actor, "k8s_cluster", clusterID.String(), "k8s.cluster_deregistered",
+			map[string]any{"name": cluster.Name, "services_deleted": casc.ServiceCount, "grants_deleted": casc.GrantCount})
 	})
+	if err == nil {
+		s.pushOrg(ctx, orgID) // M5: a deregister cascade-deletes grants — propagate at push speed, not ~25s
+	}
+	return err
 }

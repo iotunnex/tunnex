@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,9 +28,15 @@ func testPool(t *testing.T) *pgxpool.Pool {
 
 // seedOrgSite makes an org (device pool 10.99.0.0/24) + a site; returns their ids.
 func seedOrgSite(t *testing.T, pool *pgxpool.Pool) (org, site uuid.UUID) {
+	org, site, _ = seedOrgSiteActor(t, pool)
+	return org, site
+}
+
+// seedOrgSiteActor also seeds a user (the audit actor — actor_user_id FKs users) and returns it.
+func seedOrgSiteActor(t *testing.T, pool *pgxpool.Pool) (org, site, actor uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	org, site = uuid.New(), uuid.New()
+	org, site, actor = uuid.New(), uuid.New(), uuid.New()
 	ex := func(sql string, args ...any) {
 		if _, e := pool.Exec(ctx, sql, args...); e != nil {
 			t.Fatalf("seed %q: %v", sql, e)
@@ -37,7 +44,8 @@ func seedOrgSite(t *testing.T, pool *pgxpool.Pool) (org, site uuid.UUID) {
 	}
 	ex(`INSERT INTO organizations (id, name, slug, pool_cidr) VALUES ($1,'K',$2,'10.99.0.0/24')`, org, "k8s-"+org.String()[:8])
 	ex(`INSERT INTO sites (id, org_id, name) VALUES ($1,$2,'site')`, site, org)
-	return org, site
+	ex(`INSERT INTO users (id, email) VALUES ($1,$2)`, actor, "k8s-"+actor.String()[:8]+"@ex.com")
+	return org, site, actor
 }
 
 func pfx(s string) netip.Prefix { return netip.MustParsePrefix(s) }
@@ -182,7 +190,7 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
 	ctx := context.Background()
-	org, site := seedOrgSite(t, pool)
+	org, site, actor := seedOrgSiteActor(t, pool)
 	c, err := svc.RegisterCluster(ctx, org, site, "sweep", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
 	if err != nil {
 		t.Fatal(err)
@@ -200,8 +208,14 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 		t.Fatalf("exposed Service must be in the live resolution, got %d", len(live))
 	}
 	// Unexpose → gone from the resolution.
-	if err := svc.UnexposeService(ctx, org, s1.ID); err != nil {
+	if err := svc.UnexposeService(ctx, actor, org, s1.ID); err != nil {
 		t.Fatalf("unexpose: %v", err)
+	}
+	// H2: the unexpose is audited.
+	var unexposed int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='k8s.service_unexposed'`, org).Scan(&unexposed)
+	if unexposed != 1 {
+		t.Fatalf("unexpose must be audited once, got %d", unexposed)
 	}
 	live, _ = svc.q.ListActiveK8sServicesForOrg(ctx, org)
 	if len(live) != 0 {
@@ -226,25 +240,54 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 	pool := testPool(t)
 	svc := NewService(pool)
 	ctx := context.Background()
-	org, site := seedOrgSite(t, pool)
+	org, site, actor := seedOrgSiteActor(t, pool)
 	c, err := svc.RegisterCluster(ctx, org, site, "gone", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil); err != nil {
+	exposed, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	// Seed a Zero-Trust grant reaching that Service — the FK cascade must hard-delete it on deregister, and
+	// the audit must record it (grants_deleted). A group source satisfies the exactly-one-src CHECK.
+	grp := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO user_groups (id,org_id,name) VALUES ($1,$2,'g')`, grp, org); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO policy_rules (id,org_id,src_kind,src_group_id,dst_kind,dst_k8s_service_id) VALUES ($1,$2,'group',$3,'k8s_service',$4)`, uuid.New(), org, grp, exposed.ID); e != nil {
+		t.Fatal(e)
 	}
 	// A same-range/same-zone re-register is refused WHILE the cluster lives (overlap + would-collide).
 	if _, err := svc.RegisterCluster(ctx, org, site, "gone2", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "other.acme.com"); err == nil {
 		t.Fatal("a live cluster's VIP range must block a second claim")
 	}
 	// Deregister → services gone, range + zone freed.
-	if err := svc.DeregisterCluster(ctx, org, c.ID); err != nil {
+	if err := svc.DeregisterCluster(ctx, actor, org, c.ID); err != nil {
 		t.Fatalf("deregister: %v", err)
 	}
 	live, _ := svc.q.ListActiveK8sServicesForOrg(ctx, org)
 	if len(live) != 0 {
 		t.Fatalf("deregister must CASCADE-remove exposed Services, got %d", len(live))
+	}
+	// H2: the deregister is audited WITH the cascade counts (1 exposed Service was destroyed).
+	var svcDeleted *int
+	if err := pool.QueryRow(ctx, `SELECT (metadata->>'services_deleted')::int FROM audit_logs WHERE org_id=$1 AND action='k8s.cluster_deregistered'`, org).Scan(&svcDeleted); err != nil {
+		t.Fatalf("deregister must be audited with cascade counts: %v", err)
+	}
+	if svcDeleted == nil || *svcDeleted != 1 {
+		t.Fatalf("the deregister audit must record services_deleted=1, got %v", svcDeleted)
+	}
+	var grantsDeleted *int
+	_ = pool.QueryRow(ctx, `SELECT (metadata->>'grants_deleted')::int FROM audit_logs WHERE org_id=$1 AND action='k8s.cluster_deregistered'`, org).Scan(&grantsDeleted)
+	if grantsDeleted == nil || *grantsDeleted != 1 {
+		t.Fatalf("the deregister audit must record grants_deleted=1 (the cascaded grant), got %v", grantsDeleted)
+	}
+	// And the grant is actually gone (the FK cascade fired, not just counted).
+	var rulesLeft int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM policy_rules WHERE org_id=$1`, org).Scan(&rulesLeft)
+	if rulesLeft != 0 {
+		t.Fatalf("the cascaded grant must be hard-deleted, got %d rules left", rulesLeft)
 	}
 	// The freed range is now reclaimable, AND the freed zone no longer conflicts.
 	if _, err := svc.RegisterCluster(ctx, org, site, "reborn", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
@@ -278,5 +321,79 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	// Each got the low Service VIP of its OWN range (.3, past the reserved DNS .2) — used-set is per-cluster.
 	if sa.Vip.String() != "100.64.0.3" || sb.Vip.String() != "100.65.0.3" {
 		t.Fatalf("cluster-scoped allocation expected 100.64.0.3 / 100.65.0.3, got %s / %s", sa.Vip, sb.Vip)
+	}
+}
+
+// TestRegisterClusterSerializesDisjointness — M6: RegisterCluster takes the org advisory lock BEFORE its
+// disjointness read, so a concurrent range write cannot slip an OVERLAPPING range past the READ-COMMITTED
+// check. Deterministic: a holder tx takes the SAME lock, commits an overlapping cluster range, and only THEN
+// releases — the blocked RegisterCluster must wake, SEE the committed range, and refuse with the typed class.
+// RED (remove the LockDeviceKey in RegisterCluster): both commit → two overlapping ranges persist.
+func TestRegisterClusterSerializesDisjointness(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	mkPool := func() *pgxpool.Pool {
+		cfg, _ := pgxpool.ParseConfig(dsn)
+		cfg.MaxConns = 1 // a dedicated conn per party so the advisory lock genuinely contends
+		p, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatalf("pool: %v", err)
+		}
+		return p
+	}
+	poolHold, poolReg := mkPool(), mkPool()
+	t.Cleanup(poolHold.Close)
+	t.Cleanup(poolReg.Close)
+
+	org, site := uuid.New(), uuid.New()
+	if _, e := poolHold.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'K',$2,'10.99.0.0/24')`, org, "m6-"+org.String()[:8]); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := poolHold.Exec(ctx, `INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')`, site, org); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _, _ = poolHold.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	// Holder: take the org advisory lock, commit an overlapping cluster range, then release — but hold the
+	// window open until the registrar is proven blocked.
+	tx, err := poolHold.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, org.String()); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := tx.Exec(ctx, `INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,service_cidr,dns_zone) VALUES ($1,$2,$3,'held','100.64.0.0/16','10.96.0.0/12','k8s.acme.com')`, uuid.New(), org, site); e != nil {
+		t.Fatal(e)
+	}
+
+	regErr := make(chan error, 1)
+	go func() {
+		svc := NewService(poolReg)
+		_, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "other.acme.com")
+		regErr <- err
+	}()
+
+	// The registrar must be BLOCKED on the lock — it has not returned.
+	select {
+	case e := <-regErr:
+		t.Fatalf("RegisterCluster must BLOCK on the org lock, but returned early: %v", e)
+	case <-time.After(400 * time.Millisecond):
+	}
+
+	// Release: commit the holder's overlapping range. The registrar wakes, sees it, and refuses.
+	if e := tx.Commit(ctx); e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case e := <-regErr:
+		if e == nil || !strings.Contains(e.Error(), "vip_range") {
+			t.Fatalf("the unblocked RegisterCluster must refuse the overlap (vip_range class), got %v", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RegisterCluster did not return after the lock released")
 	}
 }
