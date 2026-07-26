@@ -70,11 +70,27 @@ func OVPNPushRoutes(p *nodepolicy.Compiled) []string {
 	if p == nil {
 		return nil
 	}
-	out := make([]string, 0, len(p.Routes)+len(p.LocalSubnets))
+	out := make([]string, 0, len(p.Routes)+len(p.LocalSubnets)+len(p.VIPMappings)+len(p.K8sDNSZones))
 	for _, rt := range p.Routes {
 		out = append(out, rt.DstCIDR) // remote site subnets (reached over the site links)
 	}
 	out = append(out, p.LocalSubnets...) // this gateway's own approved LAN (the WF-OVPN-11 half)
+	// S10.3 fork-1 — the K8s half of the SAME asymmetry WF-OVPN-11 fixed for site LANs: an OVPN client must
+	// reach the exposed Services of the cluster THIS gateway fronts, else OpenVPN inherits the client gap the
+	// moment WireGuard's is closed. Push each exposed Service VIP + the reserved DNS VIP as a /32 route — the
+	// SAME artifact data the DNAT + DNS answer already use (reuse rails, no new field). /32-per-exposed-VIP is
+	// functionally complete (an unexposed VIP has no DNAT, so routing the whole range would add only dead
+	// space) and tighter than routing the range. The DNS VIP push (dhcp-option DNS) is the serverConfig half.
+	for _, vm := range p.VIPMappings {
+		if vm.VIP != "" {
+			out = append(out, vm.VIP+"/32")
+		}
+	}
+	for _, z := range p.K8sDNSZones {
+		if z.ListenVIP != "" {
+			out = append(out, z.ListenVIP+"/32") // route the DNS VIP so the client can reach the resolver
+		}
+	}
 	return out
 }
 

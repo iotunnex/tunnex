@@ -34,6 +34,24 @@ func (s *Service) ListRoutedRanges(ctx context.Context, orgID uuid.UUID) ([]stri
 			out = append(out, c)
 		}
 	}
+	// S10.3 fork-1: the org's K8s VIP ranges join the device's routed set — the CLIENT half of the exposed-
+	// Service feature. A synthetic VIP range is just another CIDR class in AllowedIPs: routing it delivers
+	// both the Service VIPs (DNAT'd at the gateway) AND the reserved DNS VIP (a /32 inside the range). Without
+	// this the gateway DNATs a VIP no client ever routes to it (the producer-without-consumer gap fork-1
+	// closed). Empty for a non-cluster org → the routed set is byte-identical (the zero-config golden).
+	vipRanges, err := s.q.ListVIPRangesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, vr := range vipRanges {
+		if p, e := netip.ParsePrefix(vr); e == nil {
+			c := p.Masked().String()
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
 	sort.Strings(out)
 	return out, nil
 }
@@ -86,6 +104,41 @@ func (s *Service) ListRoutedForwards(ctx context.Context, orgID uuid.UUID, range
 			seen[nd] = true
 			out = append(out, DNSForward{Domain: nd, ResolverIP: ip.String()})
 		}
+	}
+	// S10.3 fork-1: the K8s cluster-zone → reserved-DNS-VIP resolver mapping rides THIS SAME channel (one
+	// delivery path, one cadence, one fail-static impl — no third client channel, the D-WFA-6 principle). A
+	// client resolves <service>.<namespace>.svc.<cluster>.<zone> by sending the query to the cluster's DNS VIP,
+	// which the gateway answers (H1). The SAME reachability gate applies: the DNS VIP must fall inside a routed
+	// range — it does, because ListRoutedRanges now returns the VIP range that contains it (computed by
+	// construction, never assumed).
+	czones, err := s.q.ListK8sClusterZonesForOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, z := range czones {
+		if z.DnsVip == "" {
+			continue // no reserved DNS VIP (older cluster row) → no resolver to hand over
+		}
+		ip, err := netip.ParseAddr(z.DnsVip)
+		if err != nil {
+			continue
+		}
+		reachable := false
+		for _, p := range prefixes {
+			if p.Contains(ip) {
+				reachable = true
+				break
+			}
+		}
+		if !reachable {
+			continue // GATE: a DNS VIP the device does not route to is never handed over
+		}
+		nd, ok := NormalizeDomain(z.Name + "." + z.DnsZone)
+		if !ok || seen[nd] {
+			continue
+		}
+		seen[nd] = true
+		out = append(out, DNSForward{Domain: nd, ResolverIP: ip.String()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
 	return out, nil

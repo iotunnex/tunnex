@@ -704,6 +704,68 @@ func TestListRoutedForwardsGating(t *testing.T) {
 	}
 }
 
+// TestRoutedChannelIncludesK8s — S10.3 fork-1 (the CLIENT half of the exposed-Service feature): the org's
+// K8s VIP range joins the device's routed set, and the cluster-zone → reserved-DNS-VIP mapping rides the
+// routed-FORWARDS channel (so a split-tunnel/OVPN client both ROUTES the VIP range and RESOLVES the zone).
+// The reachability gate holds by construction (the DNS VIP is inside the routed VIP range). Zero-config is
+// covered by the existing TestListRoutedRanges passing unchanged for non-cluster orgs.
+func TestRoutedChannelIncludesK8s(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := uuid.New(), uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'K',$2,'10.99.0.0/24')`, org, "k8srr-"+org.String()[:8]); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := pool.Exec(ctx, `INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'s')`, site, org); e != nil {
+		t.Fatal(e)
+	}
+	// A registered cluster with a VIP range + reserved DNS VIP (.2, inside the range).
+	if _, e := pool.Exec(ctx, `INSERT INTO k8s_clusters (id,org_id,site_id,name,vip_range,service_cidr,dns_zone,dns_vip) VALUES ($1,$2,$3,'prod','100.64.0.0/16','10.96.0.0/12','k8s.acme.com','100.64.0.2')`, uuid.New(), org, site); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+
+	// (1) the VIP range is in the device's routed set (WireGuard AllowedIPs).
+	ranges, err := svc.ListRoutedRanges(ctx, org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range ranges {
+		if r == "100.64.0.0/16" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the K8s VIP range must be in the device's routed set, got %v", ranges)
+	}
+	// (2) the cluster-zone → DNS-VIP resolver rides the routed-forwards channel, reachable via that range.
+	fwds, err := svc.ListRoutedForwards(ctx, org, ranges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotZone := false
+	for _, f := range fwds {
+		if f.Domain == "prod.k8s.acme.com" && f.ResolverIP == "100.64.0.2" {
+			gotZone = true
+		}
+	}
+	if !gotZone {
+		t.Fatalf("the cluster zone must forward to its reserved DNS VIP, got %v", fwds)
+	}
+	// (3) GATE by construction: if the VIP range is NOT routed, the DNS-VIP resolver is unreachable → dropped.
+	gated, err := svc.ListRoutedForwards(ctx, org, []string{"10.20.0.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range gated {
+		if f.ResolverIP == "100.64.0.2" {
+			t.Fatalf("an unroutable DNS VIP must NOT be handed over, got %v", gated)
+		}
+	}
+}
+
 // TestRouteLANByteIdentical (S8.5 Slice 2d, D1) — the one-screen RouteLAN produces DB state + an audit
 // trail BYTE-IDENTICAL to the four-step long ceremony. Same code composed, so the short path is exactly
 // as auditable as the long one (four constituent events, never a composite).

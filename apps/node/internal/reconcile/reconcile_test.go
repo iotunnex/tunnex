@@ -650,6 +650,39 @@ func TestOVPNPushRoutesUnion(t *testing.T) {
 	// (sites.ListRoutedRanges) for the same gateway. The cross-mechanism wire equality is walk-proven (WG
 	// reached 172.31.x; OVPN reaches it once this ships).
 	if len(got) != len(p.Routes)+len(p.LocalSubnets) {
-		t.Fatalf("pushed set must be exactly Routes ∪ LocalSubnets (no drops, no dupes); got %v", got)
+		t.Fatalf("pushed set must be exactly Routes ∪ LocalSubnets (no drops, no dupes) when no K8s VIPs; got %v", got)
+	}
+}
+
+// TestOVPNPushRoutesK8s — S10.3 fork-1 (WF-OVPN-11's K8s twin): an OVPN client must reach the exposed
+// Services of the cluster this gateway fronts, else OpenVPN inherits the client gap the moment WireGuard's is
+// closed. The push includes each exposed Service VIP /32 AND the reserved DNS VIP /32 (the SAME artifact data
+// the DNAT + DNS answer use). Zero-config: a non-cluster gateway pushes nothing K8s.
+func TestOVPNPushRoutesK8s(t *testing.T) {
+	p := &nodepolicy.Compiled{
+		VIPMappings: []nodepolicy.VIPMapping{{VIP: "100.64.0.5", DNSName: "api.prod.svc.prod.k8s.acme.com"}},
+		K8sDNSZones: []nodepolicy.K8sDNSZone{{ListenVIP: "100.64.0.2", Zone: "prod.k8s.acme.com"}},
+	}
+	got := OVPNPushRoutes(p)
+	has := func(c string) bool {
+		for _, r := range got {
+			if r == c {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("100.64.0.5/32") {
+		t.Fatalf("the exposed Service VIP must be pushed as a /32 route; got %v", got)
+	}
+	if !has("100.64.0.2/32") {
+		t.Fatalf("the reserved DNS VIP must be pushed as a /32 route (so the client reaches the resolver); got %v", got)
+	}
+	// Zero-config golden: a non-cluster gateway (no VIP map, no DNS zones) pushes NOTHING K8s.
+	if OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}}) [0] != "10.0.0.0/16" {
+		t.Fatal("a non-cluster gateway's push must be byte-identical to pre-fork")
+	}
+	if len(OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}})) != 1 {
+		t.Fatal("a non-cluster gateway pushes only its site routes, no K8s /32s")
 	}
 }

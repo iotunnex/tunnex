@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -220,15 +219,16 @@ func main() {
 		if err != nil {
 			return nil, false, err
 		}
-		fwds, ferr := sqlc.New(pool).ListSiteDNSForwardsForOrg(ctx, orgID)
-		hasDNS := false
-		for _, f := range fwds {
-			if s := strings.TrimSpace(string(f)); s != "" && s != "null" && s != "[]" {
-				hasDNS = true
-				break
-			}
+		// hasDNS = "is there a REACHABLE resolver to bake into a static profile?" — derived from the SAME
+		// routed-forwards the dynamic client gets (one truth), so it covers BOTH site DNS forwards AND the
+		// S10.3 K8s cluster-zone → DNS-VIP resolvers. `ranges` now includes the K8s VIP ranges, so the K8s
+		// resolver passes the reachability gate. (This also makes needs_reexport fire on a VIP-range change:
+		// staticRanges is baked from `ranges`, which now carries the VIP ranges.)
+		fwds, ferr := siteSvc.ListRoutedForwards(ctx, orgID, ranges)
+		if ferr != nil {
+			return nil, false, ferr
 		}
-		return ranges, hasDNS, ferr
+		return ranges, len(fwds) > 0, nil
 	})
 	// OpenVPN control-plane service (S9.1, D-S9.1-6 open-edition). The client CA loads LAZILY
 	// (D-S9.5-OPTIN(a)): generated on the first export in an opted-in org, NEVER at boot — so a

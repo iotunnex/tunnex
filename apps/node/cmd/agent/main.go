@@ -223,6 +223,14 @@ func main() {
 				for _, d := range ds.Policy.DNSForwards {
 					dns = append(dns, d.ResolverIP)
 				}
+				// S10.3 fork-1: push the cluster's reserved DNS VIP as a resolver too, so an OVPN client resolves
+				// exposed-Service names (the routed VIP /32 above makes it reachable). Same push shape as the S8.4
+				// site resolvers — WF-OVPN-11's twin for the K8s zone.
+				for _, z := range ds.Policy.K8sDNSZones {
+					if z.ListenVIP != "" {
+						dns = append(dns, z.ListenVIP)
+					}
+				}
 			}
 			// InterfaceAddress ("10.99.0.1/24") carries the pool prefix — the CCD ifconfig-push mask.
 			ovpnMgr.SetDesired(ovpnserver.Desired{PoolCIDR: ds.InterfaceAddress, Clients: clients, Routes: routes, DNS: dns})

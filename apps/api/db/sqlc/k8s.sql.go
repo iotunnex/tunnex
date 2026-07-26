@@ -264,16 +264,19 @@ func (q *Queries) ListActiveK8sServicesForOrg(ctx context.Context, orgID uuid.UU
 }
 
 const listK8sClusterZonesForOrg = `-- name: ListK8sClusterZonesForOrg :many
-SELECT name, dns_zone FROM k8s_clusters WHERE org_id = $1
+SELECT name, dns_zone, COALESCE(host(dns_vip), '')::text AS dns_vip FROM k8s_clusters WHERE org_id = $1
 `
 
 type ListK8sClusterZonesForOrgRow struct {
 	Name    string `json:"name"`
 	DnsZone string `json:"dns_zone"`
+	DnsVip  string `json:"dns_vip"`
 }
 
-// ListK8sClusterZonesForOrg feeds cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
-// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa.
+// ListK8sClusterZonesForOrg feeds (a) cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
+// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa;
+// and (b) the client-side resolver push (fork-1): the {<cluster>.<dns_zone> -> reserved DNS VIP} mapping the
+// routed-forwards channel hands split-tunnel/OVPN clients so they resolve exposed Service names.
 func (q *Queries) ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sClusterZonesForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listK8sClusterZonesForOrg, orgID)
 	if err != nil {
@@ -283,7 +286,7 @@ func (q *Queries) ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID
 	items := []ListK8sClusterZonesForOrgRow{}
 	for rows.Next() {
 		var i ListK8sClusterZonesForOrgRow
-		if err := rows.Scan(&i.Name, &i.DnsZone); err != nil {
+		if err := rows.Scan(&i.Name, &i.DnsZone, &i.DnsVip); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
