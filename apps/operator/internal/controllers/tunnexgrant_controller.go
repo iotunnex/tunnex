@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tunnexv1 "github.com/tunnexio/tunnex/apps/operator/api/v1alpha1"
 	"github.com/tunnexio/tunnex/apps/operator/internal/cp"
@@ -34,8 +35,10 @@ func (r *TunnexGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if labels, changed := ensureManagedLabel(cr.Labels); changed {
-		cr.Labels = labels
+	if !cr.DeletionTimestamp.IsZero() {
+		return r.finalize(ctx, &cr) // delete the grant CP-side (revocation on the wire, audited, CR as cause)
+	}
+	if ensureMeta(&cr) {
 		if err := r.Update(ctx, &cr); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -131,6 +134,22 @@ func (r *TunnexGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	cr.Status.RuleID = rule.ID
 	setReady(&cr.Status.Conditions, metav1.ConditionTrue, "Accepted", "control plane created the grant", gen)
 	return ctrl.Result{}, r.Status().Update(ctx, &cr)
+}
+
+// finalize deletes the grant CP-side through the AUDITED policy verb — revocation on the wire (the flow that
+// was allowed dies), CR as cause — then releases the finalizer.
+func (r *TunnexGrantReconciler) finalize(ctx context.Context, cr *tunnexv1.TunnexGrant) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(cr, finalizerName) {
+		return ctrl.Result{}, nil
+	}
+	if cr.Status.RuleID != "" {
+		cause := crRef("tunnexgrant", cr.Namespace, cr.Name)
+		if err := ignoreCPNotFound(r.CP.DeleteGrant(ctx, cr.Status.RuleID, cause)); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	controllerutil.RemoveFinalizer(cr, finalizerName)
+	return ctrl.Result{}, r.Update(ctx, cr)
 }
 
 // rejectSubject writes an HONEST subject_not_found status and requeues slowly (the subject may appear later).

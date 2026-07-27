@@ -79,8 +79,9 @@ func (c *Client) orgPath(suffix string) string {
 }
 
 // do sends a request with the machine bearer; decodes `out` on 2xx; returns *APIError on 4xx; a plain
-// (retryable) error on transport failure or 5xx.
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+// (retryable) error on transport failure or 5xx. A non-empty cause is sent as X-Tunnex-Cause so an audited
+// mutation names the CR that drove it (D2 cond 2) instead of just the credential.
+func (c *Client) do(ctx context.Context, method, path, cause string, body, out any) error {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -95,6 +96,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+	if cause != "" {
+		req.Header.Set("X-Tunnex-Cause", cause)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -199,47 +203,47 @@ type CreateGrantRequest struct {
 // ListClusters returns the org's registered clusters (for idempotent reconcile: find-by-name before create).
 func (c *Client) ListClusters(ctx context.Context) ([]Cluster, error) {
 	var out []Cluster
-	return out, c.do(ctx, http.MethodGet, c.orgPath("/k8s/clusters"), nil, &out)
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/k8s/clusters"), "", nil, &out)
 }
 
 // RegisterCluster registers a cluster (Collect/OrgRanges disjointness is enforced CP-side).
 func (c *Client) RegisterCluster(ctx context.Context, r RegisterClusterRequest) (Cluster, error) {
 	var out Cluster
-	return out, c.do(ctx, http.MethodPost, c.orgPath("/k8s/clusters"), r, &out)
+	return out, c.do(ctx, http.MethodPost, c.orgPath("/k8s/clusters"), "", r, &out)
 }
 
-// DeregisterCluster removes a cluster (full-sweep cascade, audited CP-side).
-func (c *Client) DeregisterCluster(ctx context.Context, clusterID string) error {
-	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/clusters/"+clusterID), nil, nil)
+// DeregisterCluster removes a cluster (full-sweep cascade, audited CP-side; cause names the CR).
+func (c *Client) DeregisterCluster(ctx context.Context, clusterID, cause string) error {
+	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/clusters/"+clusterID), cause, nil, nil)
 }
 
 // ListServices returns every exposed Service in the org (find-by-name for idempotent reconcile).
 func (c *Client) ListServices(ctx context.Context) ([]Service, error) {
 	var out []Service
-	return out, c.do(ctx, http.MethodGet, c.orgPath("/k8s/services"), nil, &out)
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/k8s/services"), "", nil, &out)
 }
 
 // ExposeService exposes a Service in a cluster (M8/M9: a single specific port; the CP refuses all-ports).
 func (c *Client) ExposeService(ctx context.Context, clusterID string, r ExposeServiceRequest) (Service, error) {
 	var out Service
-	return out, c.do(ctx, http.MethodPost, c.orgPath("/k8s/clusters/"+clusterID+"/services"), r, &out)
+	return out, c.do(ctx, http.MethodPost, c.orgPath("/k8s/clusters/"+clusterID+"/services"), "", r, &out)
 }
 
-// UnexposeService withdraws a Service (audited CP-side).
-func (c *Client) UnexposeService(ctx context.Context, serviceID string) error {
-	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/services/"+serviceID), nil, nil)
+// UnexposeService withdraws a Service (audited CP-side; cause names the CR).
+func (c *Client) UnexposeService(ctx context.Context, serviceID, cause string) error {
+	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/services/"+serviceID), cause, nil, nil)
 }
 
 // CreateGrant creates a policy rule reaching an exposed Service (ENTERPRISE — a 403 edition_required in the
 // open build comes back as an *APIError the reconciler surfaces verbatim).
 func (c *Client) CreateGrant(ctx context.Context, r CreateGrantRequest) (Rule, error) {
 	var out Rule
-	return out, c.do(ctx, http.MethodPost, c.orgPath("/policies"), r, &out)
+	return out, c.do(ctx, http.MethodPost, c.orgPath("/policies"), "", r, &out)
 }
 
-// DeleteGrant deletes a policy rule.
-func (c *Client) DeleteGrant(ctx context.Context, ruleID string) error {
-	return c.do(ctx, http.MethodDelete, c.orgPath("/policies/"+ruleID), nil, nil)
+// DeleteGrant deletes a policy rule (audited CP-side; cause names the CR).
+func (c *Client) DeleteGrant(ctx context.Context, ruleID, cause string) error {
+	return c.do(ctx, http.MethodDelete, c.orgPath("/policies/"+ruleID), cause, nil, nil)
 }
 
 // ── read-only lookups (resolve a friendly CR subject/site name to the CP's UUID) ────────────────────────────
@@ -247,17 +251,17 @@ func (c *Client) DeleteGrant(ctx context.Context, ruleID string) error {
 // ListSites resolves spec.Site (cluster) / a site-kind grant subject: name -> id.
 func (c *Client) ListSites(ctx context.Context) ([]Site, error) {
 	var out []Site
-	return out, c.do(ctx, http.MethodGet, c.orgPath("/sites"), nil, &out)
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/sites"), "", nil, &out)
 }
 
 // ListMembers resolves a user-kind grant subject: email -> user id.
 func (c *Client) ListMembers(ctx context.Context) ([]Member, error) {
 	var out []Member
-	return out, c.do(ctx, http.MethodGet, c.orgPath("/members"), nil, &out)
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/members"), "", nil, &out)
 }
 
 // ListGroups resolves a group-kind grant subject: name -> group id.
 func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	var out []Group
-	return out, c.do(ctx, http.MethodGet, c.orgPath("/groups"), nil, &out)
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/groups"), "", nil, &out)
 }

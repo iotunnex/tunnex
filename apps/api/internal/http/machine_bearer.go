@@ -44,6 +44,9 @@ func MachineAuth(q *sqlc.Queries) BearerAuthFunc {
 			MachineName: cred.Name,
 			AuthMethod:  authctx.AuthMachine, // exempt from the MFA-enrollment gate by construction
 			Roles:       map[uuid.UUID]string{cred.OrgID: cred.Role},
+			// D2 (Slice 4): the operator may name the CR that drove this change as the audit cause. Honored
+			// ONLY here (a machine principal); a human's principal never carries it. Sanitized at the seam.
+			Cause: authctx.SanitizeCause(r.Header.Get("X-Tunnex-Cause")),
 		}, nil
 	}
 }

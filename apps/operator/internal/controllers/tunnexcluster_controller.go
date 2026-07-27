@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tunnexv1 "github.com/tunnexio/tunnex/apps/operator/api/v1alpha1"
 	"github.com/tunnexio/tunnex/apps/operator/internal/cp"
@@ -28,14 +29,16 @@ type TunnexClusterReconciler struct {
 func (r *TunnexClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var cr tunnexv1.TunnexCluster
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err) // delete is the finalizer's job (Slice 4)
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if labels, changed := ensureManagedLabel(cr.Labels); changed {
-		cr.Labels = labels
+	if !cr.DeletionTimestamp.IsZero() {
+		return r.finalize(ctx, &cr) // deregister CP-side (audited, CR as cause) then release the finalizer
+	}
+	if ensureMeta(&cr) {
 		if err := r.Update(ctx, &cr); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil // next pass runs against the labeled object
+		return ctrl.Result{Requeue: true}, nil // next pass runs against the labeled+finalized object
 	}
 	gen := cr.Generation
 
@@ -65,6 +68,9 @@ func (r *TunnexClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			break
 		}
 	}
+	// DRIFT: we believed the cluster existed (status.ClusterID set) but the CP no longer has it — deleted
+	// out-of-band. The CR is the one truth about intent, so we recreate below and surface the correction.
+	drift := reg == nil && cr.Status.ClusterID != ""
 	if reg == nil {
 		c, err := r.CP.RegisterCluster(ctx, cp.RegisterClusterRequest{
 			SiteID: siteID, Name: cr.Spec.Name, VipRange: cr.Spec.VIPRange,
@@ -84,8 +90,30 @@ func (r *TunnexClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Accepted — mirror the CP's DERIVED truth into status.
 	cr.Status.ClusterID = reg.ID
 	cr.Status.DNSVIP = reg.DnsVip
+	if drift {
+		setDrift(&cr.Status.Conditions, true, "control-plane cluster was absent; recreated from the CR", gen)
+	} else {
+		setDrift(&cr.Status.Conditions, false, "in sync with the control plane", gen)
+	}
 	setReady(&cr.Status.Conditions, metav1.ConditionTrue, "Accepted", "control plane registered the cluster", gen)
 	return ctrl.Result{}, r.Status().Update(ctx, &cr)
+}
+
+// finalize deregisters the cluster CP-side through the AUDITED verb (cascade counts + the CR as cause), then
+// releases the finalizer so k8s can remove the CR. A CP 404 is success (already gone). A transient failure
+// keeps the finalizer — the object is held until teardown actually lands (never a dangling CP object).
+func (r *TunnexClusterReconciler) finalize(ctx context.Context, cr *tunnexv1.TunnexCluster) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(cr, finalizerName) {
+		return ctrl.Result{}, nil
+	}
+	if cr.Status.ClusterID != "" {
+		cause := crRef("tunnexcluster", cr.Namespace, cr.Name)
+		if err := ignoreCPNotFound(r.CP.DeregisterCluster(ctx, cr.Status.ClusterID, cause)); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	controllerutil.RemoveFinalizer(cr, finalizerName)
+	return ctrl.Result{}, r.Update(ctx, cr)
 }
 
 func (r *TunnexClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {

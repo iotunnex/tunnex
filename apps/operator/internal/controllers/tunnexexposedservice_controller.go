@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tunnexv1 "github.com/tunnexio/tunnex/apps/operator/api/v1alpha1"
 	"github.com/tunnexio/tunnex/apps/operator/internal/cp"
@@ -31,8 +32,10 @@ func (r *TunnexExposedServiceReconciler) Reconcile(ctx context.Context, req ctrl
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if labels, changed := ensureManagedLabel(cr.Labels); changed {
-		cr.Labels = labels
+	if !cr.DeletionTimestamp.IsZero() {
+		return r.finalize(ctx, &cr)
+	}
+	if ensureMeta(&cr) {
 		if err := r.Update(ctx, &cr); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -76,6 +79,7 @@ func (r *TunnexExposedServiceReconciler) Reconcile(ctx context.Context, req ctrl
 			break
 		}
 	}
+	drift := exp == nil && cr.Status.ServiceID != "" // was exposed, now gone CP-side → recreate
 	if exp == nil {
 		s, err := r.CP.ExposeService(ctx, clusterID, cp.ExposeServiceRequest{
 			Name: cr.Spec.Service, Namespace: cr.Spec.Namespace, Protocol: cr.Spec.Protocol,
@@ -95,8 +99,28 @@ func (r *TunnexExposedServiceReconciler) Reconcile(ctx context.Context, req ctrl
 	cr.Status.ServiceID = exp.ID
 	cr.Status.VIP = exp.Vip
 	cr.Status.FQDN = exp.Fqdn // DERIVED, copied from the CP — never assembled (S10.3 copy-don't-construct)
+	if drift {
+		setDrift(&cr.Status.Conditions, true, "control-plane service was absent; recreated from the CR", gen)
+	} else {
+		setDrift(&cr.Status.Conditions, false, "in sync with the control plane", gen)
+	}
 	setReady(&cr.Status.Conditions, metav1.ConditionTrue, "Accepted", "control plane exposed the service", gen)
 	return ctrl.Result{}, r.Status().Update(ctx, &cr)
+}
+
+// finalize unexposes the service CP-side through the AUDITED verb (CR as cause), then releases the finalizer.
+func (r *TunnexExposedServiceReconciler) finalize(ctx context.Context, cr *tunnexv1.TunnexExposedService) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(cr, finalizerName) {
+		return ctrl.Result{}, nil
+	}
+	if cr.Status.ServiceID != "" {
+		cause := crRef("tunnexexposedservice", cr.Namespace, cr.Name)
+		if err := ignoreCPNotFound(r.CP.UnexposeService(ctx, cr.Status.ServiceID, cause)); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	controllerutil.RemoveFinalizer(cr, finalizerName)
+	return ctrl.Result{}, r.Update(ctx, cr)
 }
 
 func (r *TunnexExposedServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {

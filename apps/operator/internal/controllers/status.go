@@ -22,6 +22,11 @@ import (
 
 const (
 	condReady = "Ready"
+	// condDrift surfaces drift in CR STATUS, not just logs (D2 cond 3): True the pass the operator found its
+	// CP object ABSENT (deleted out-of-band in the dashboard) and recreated it from the CR — the CR is the one
+	// truth about INTENT for objects it owns. False when the CP matches. Grants can't be drift-checked (policy
+	// rules are unnamed, no list-find — R-3b-1), so only cluster/service carry it.
+	condDrift = "Drift"
 
 	// managedByLabel marks a CR the Tunnex operator reconciles (k8s-side visibility for kubectl + the
 	// dashboard ownership surface, Slice 4). The AUTHORITATIVE ownership record is CP-side: managed_by_machine,
@@ -43,6 +48,17 @@ const (
 func setReady(conds *[]metav1.Condition, status metav1.ConditionStatus, reason, msg string, gen int64) {
 	meta.SetStatusCondition(conds, metav1.Condition{
 		Type: condReady, Status: status, Reason: reason, Message: msg, ObservedGeneration: gen,
+	})
+}
+
+// setDrift records whether this pass had to heal drift (a CP object that went missing out-of-band).
+func setDrift(conds *[]metav1.Condition, drifted bool, msg string, gen int64) {
+	st, reason := metav1.ConditionFalse, "InSync"
+	if drifted {
+		st, reason = metav1.ConditionTrue, "RecreatedFromCR"
+	}
+	meta.SetStatusCondition(conds, metav1.Condition{
+		Type: condDrift, Status: st, Reason: reason, Message: msg, ObservedGeneration: gen,
 	})
 }
 

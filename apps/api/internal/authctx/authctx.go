@@ -10,6 +10,7 @@ package authctx
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -45,6 +46,11 @@ type Principal struct {
 	// operator-chosen credential label surfaced in audit as the system actor "operator:<name>".
 	MachineID   uuid.UUID
 	MachineName string
+	// Cause (S10.2 Slice 4, D2) — a machine-only, per-request OVERRIDE for the audit cause: the CR that drove
+	// the change (e.g. "tunnexcluster:default/prod"). Set ONLY from the X-Tunnex-Cause header on a machine
+	// principal (a human's principal never carries it), sanitized. Empty → AuditActor falls back to the
+	// credential identity. This is what makes a cascade delete name the CR, not just the operator (D2 cond 2).
+	Cause string
 }
 
 // IsMachine reports whether this is a non-user machine principal (S10.2).
@@ -54,13 +60,35 @@ func (p *Principal) IsMachine() bool { return p != nil && p.MachineID != uuid.Ni
 // actor_user_id-attributed (system + cause empty). For a MACHINE: (uuid.Nil, "operator:<name>",
 // "machine_credential:<id>") → a SYSTEM-actor row (actor_system, migration 0027) whose cause names the
 // machine credential. This is the ONE seam that keeps a GitOps change from masquerading as a human (D3 — a
-// falsely-attributed row is worse than absent). (A future slice lets the operator OVERRIDE the cause with
-// the CR that drove the change, D2; the credential identity is the honest default until then.)
+// falsely-attributed row is worse than absent). If the machine set a per-request Cause (the CR that drove the
+// change, via X-Tunnex-Cause, D2 Slice 4), that names the WHY; the credential identity is the honest default.
 func (p *Principal) AuditActor() (actorUserID uuid.UUID, actorSystem, cause string) {
 	if p.IsMachine() {
-		return uuid.Nil, "operator:" + p.MachineName, "machine_credential:" + p.MachineID.String()
+		cause = "machine_credential:" + p.MachineID.String()
+		if p.Cause != "" {
+			cause = p.Cause // the CR the operator names as the cause (D2 cond 2)
+		}
+		return uuid.Nil, "operator:" + p.MachineName, cause
 	}
 	return p.UserID, "", ""
+}
+
+// SanitizeCause bounds an operator-supplied audit cause (X-Tunnex-Cause): control characters stripped (no
+// audit-log injection / newline forgery) and length capped. Untrusted machine input lands in the audit cause
+// column, so it is cleaned at the seam, never trusted raw.
+func SanitizeCause(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f { // drop control chars incl CR/LF/TAB
+			continue
+		}
+		b.WriteRune(r)
+		if b.Len() >= 200 {
+			break
+		}
+	}
+	return b.String()
 }
 
 // RoleIn returns the principal's role in orgID and whether they are a member.
