@@ -26,6 +26,12 @@ import (
 
 var scheme = runtime.NewScheme()
 
+// version is the git sha the binary was built from — stamped at build time via
+// -ldflags "-X main.version=$(git rev-parse --short HEAD)". Logged at startup so a walk can CONFIRM the
+// running operator is the branch build (a stale image reproduces the C1 email_not_verified symptom — the
+// build-provenance census in docs/S10.2-boxwalk.md Leg 0). "dev" means an un-stamped local build.
+var version = "dev"
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(tunnexv1.AddToScheme(scheme))
@@ -45,6 +51,7 @@ func mustEnv(key string) string {
 func main() {
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("setup")
+	log.Info("tunnex-operator starting", "version", version) // build provenance — confirm this matches the branch tip
 
 	// The operator's identity to the CP: its machine credential + the org it manages (D3). THE HARD RULE —
 	// this bearer client is the ONLY channel to Tunnex; no DB handle is constructed anywhere in this binary.
