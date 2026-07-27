@@ -1,7 +1,7 @@
 {{- if .Values.preflight.enabled }}
 {{- include "tunnex-gateway.ackGuard" . -}}
 # F7: the guard-before-exec gate. A pre-install,pre-upgrade HOOK Job that requests the SAME privileged
-# context the gateway needs (hostNetwork + NET_ADMIN + /dev/net/tun + hostPort + ClusterFirstWithHostNet) and
+# context the gateway needs (hostNetwork + NET_ADMIN + /dev/net/tun + ClusterFirstWithHostNet) and
 # self-asserts. On a cluster whose PodSecurity/admission BLOCKS that context, THIS pod is admission-rejected —
 # so `helm install --wait` fails HERE, at the hook, before the real Deployment starts a crash-loop. The
 # assertions ALSO close two silent-degrade traps the story-end review found: it proves the tun device is
@@ -30,8 +30,7 @@ spec:
     spec:
       restartPolicy: Never
       # Request the gateway's real posture so a blocking admission controller rejects THIS pod (fail at the
-      # hook, not in a crash-loop). L9: the hostPort is declared here too so the admission proxy is not weaker
-      # than the Deployment (a policy keying on hostPort would otherwise admit the probe but block the real pod).
+      # hook, not in a crash-loop).
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       automountServiceAccountToken: false
@@ -49,12 +48,12 @@ spec:
               type: RuntimeDefault
             capabilities:
               drop: ["ALL"]
-              add: ["NET_ADMIN"]
-          ports:
-            - name: wireguard
-              containerPort: {{ .Values.wireguard.port }}
-              hostPort: {{ .Values.wireguard.port }}
-              protocol: UDP
+              add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+          # WF-K-CHART-3: NO hostPort here. It was added (L9) to mirror the gateway's admission posture, but on
+          # `helm upgrade` the LIVE gateway pod already holds hostPort 51820 on the node, so a preflight also
+          # claiming it is unschedulable → the pre-upgrade hook deadlocks → upgrade fails. The preflight remains
+          # a valid guard-before-exec via hostNetwork + NET_ADMIN + the /dev hostPath + the cap set; the
+          # hostPort match is the one attribute not worth an upgrade deadlock (the L9 gap is re-accepted).
           command: ["/bin/sh", "-c"]
           args:
             - |
