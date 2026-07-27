@@ -138,10 +138,29 @@ type Cluster struct {
 
 type Service struct {
 	ID        string `json:"id"`
+	ClusterID string `json:"cluster_id"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Vip       string `json:"vip"`
 	Fqdn      string `json:"fqdn"`
+}
+
+// Member / Group / Site are the READ-ONLY lookup shapes the grant + cluster reconcilers use to resolve a
+// human-friendly CR subject (an email / group name / site name) to the UUID the CP mutation verbs want. They
+// hit existing GET endpoints — the operator stays an API CLIENT, no new CP surface (THE HARD RULE).
+type Member struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+}
+
+type Group struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Site struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type Rule struct {
@@ -221,4 +240,24 @@ func (c *Client) CreateGrant(ctx context.Context, r CreateGrantRequest) (Rule, e
 // DeleteGrant deletes a policy rule.
 func (c *Client) DeleteGrant(ctx context.Context, ruleID string) error {
 	return c.do(ctx, http.MethodDelete, c.orgPath("/policies/"+ruleID), nil, nil)
+}
+
+// ── read-only lookups (resolve a friendly CR subject/site name to the CP's UUID) ────────────────────────────
+
+// ListSites resolves spec.Site (cluster) / a site-kind grant subject: name -> id.
+func (c *Client) ListSites(ctx context.Context) ([]Site, error) {
+	var out []Site
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/sites"), nil, &out)
+}
+
+// ListMembers resolves a user-kind grant subject: email -> user id.
+func (c *Client) ListMembers(ctx context.Context) ([]Member, error) {
+	var out []Member
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/members"), nil, &out)
+}
+
+// ListGroups resolves a group-kind grant subject: name -> group id.
+func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
+	var out []Group
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/groups"), nil, &out)
 }
