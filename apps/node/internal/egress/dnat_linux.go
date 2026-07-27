@@ -224,7 +224,13 @@ func (m *Manager) DNSUnreachable() bool { return m.dnsUnreachable.Load() }
 type clusterDNSResolver struct{}
 
 func (clusterDNSResolver) Resolve(ctx context.Context, namespace, service string) ([]netip.Addr, error) {
-	fqdn := service + "." + namespace + ".svc.cluster.local"
+	// WF-K-AGENT-1: the name is ABSOLUTE (trailing dot). Without it, a hostNetwork pod's resolv.conf
+	// (ndots:5) makes Go's pure resolver walk the SEARCH LIST first — appending default.svc.cluster.local /
+	// svc.cluster.local / cluster.local to an already-qualified name — and a permuted lookup can surface a
+	// non-NXDOMAIN error that Go returns BEFORE trying the real absolute name, misclassified as
+	// dns_unreachable → the Service is refused despite resolving fine. The trailing dot forces a single direct
+	// query (what `nslookup <fqdn>` does), skipping the search dance entirely.
+	fqdn := service + "." + namespace + ".svc.cluster.local."
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", fqdn)
 	if err != nil {
 		var de *net.DNSError
