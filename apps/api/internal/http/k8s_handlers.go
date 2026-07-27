@@ -98,7 +98,8 @@ func (s apiServer) DeregisterK8sCluster(ctx context.Context, req api.DeregisterK
 		return nil, err
 	}
 	p, _ := authctx.PrincipalFrom(ctx)
-	if err := s.k8s.DeregisterCluster(ctx, p.UserID, req.OrgId, req.ClusterId); err != nil {
+	uid, sys, cause := p.AuditActor() // machine → actor_system + cause; human → actor_user_id
+	if err := s.k8s.DeregisterCluster(ctx, uid, sys, cause, req.OrgId, req.ClusterId); err != nil {
 		return nil, err
 	}
 	return api.DeregisterK8sCluster204Response{}, nil
@@ -164,7 +165,8 @@ func (s apiServer) UnexposeK8sService(ctx context.Context, req api.UnexposeK8sSe
 		return nil, err
 	}
 	p, _ := authctx.PrincipalFrom(ctx)
-	if err := s.k8s.UnexposeService(ctx, p.UserID, req.OrgId, req.ServiceId); err != nil {
+	uid, sys, cause := p.AuditActor() // machine → actor_system + cause; human → actor_user_id
+	if err := s.k8s.UnexposeService(ctx, uid, sys, cause, req.OrgId, req.ServiceId); err != nil {
 		return nil, err
 	}
 	return api.UnexposeK8sService204Response{}, nil

@@ -1352,6 +1352,60 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/machine-credentials:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listMachineCredentials
+      summary: List machine credentials — the GitOps operator's org identity (S10.2; machine:manage). Fingerprint only, never the secret.
+      tags: [machine]
+      responses:
+        "200":
+          description: Active machine credentials (metadata only).
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/MachineCredential" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: mintMachineCredential
+      summary: Mint a machine credential — the token is shown ONCE (S10.2; machine:manage, owner-only). One-time-secret ceremony.
+      tags: [machine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MintMachineCredentialRequest" }
+      responses:
+        "201":
+          description: Minted. The token is returned ONCE and never re-displayed — save it, or revoke + re-mint.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MintMachineCredentialResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/organizations/{orgId}/machine-credentials/{credentialId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: credentialId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: revokeMachineCredential
+      summary: Revoke a machine credential — severs on its next request (S10.2; machine:manage).
+      tags: [machine]
+      responses:
+        "204": { description: Revoked. }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/resources:
     parameters:
       - name: orgId
@@ -2434,6 +2488,34 @@ components:
       additionalProperties: false
       properties:
         user_id: { type: string, format: uuid }
+
+    MachineCredential:
+      type: object
+      required: [id, name, fingerprint, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        fingerprint: { type: string, description: "Keyed proof-of-secret — a stable display id, NEVER the token." }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+
+    MintMachineCredentialRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, description: "A label for the credential; appears in audit as operator:<name>." }
+
+    MintMachineCredentialResponse:
+      type: object
+      required: [id, name, fingerprint, token]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        fingerprint: { type: string }
+        token: { type: string, description: "The bearer secret (tnxm_...), shown ONCE. Save it — never re-displayed; revoke + re-mint if lost." }
 
     Resource:
       type: object

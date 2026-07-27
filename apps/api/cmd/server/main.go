@@ -35,6 +35,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
+	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
@@ -247,6 +248,7 @@ func main() {
 	nodeSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
 	nodeSvc.SetOVPNCRLProvider(ovpnSvc.GetCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
+	machineAuthSvc := machineauth.NewService(pool, sealer) // S10.2: machine credentials (GitOps operator)
 	mfaSvc := mfa.NewService(pool, sealer, mailer, logger)
 
 	// S7.5.1 access-log health is SHARED: the flow-event Ingester (mTLS channel) records
@@ -259,6 +261,7 @@ func main() {
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Orgs:                  tenancy.NewService(pool),
 		CliAuth:               cliAuthSvc,
+		Machine:               machineAuthSvc,
 		Auth:                  authSvc,
 		Members:               membersSvc,
 		Invites:               invites.NewService(pool, mailer, cfg.AppBaseURL, logger),
@@ -282,6 +285,7 @@ func main() {
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
 		AuthFn:                apphttp.SessionAuth(sessions, sqlc.New(pool)),
 		BearerFn:              apphttp.BearerAuth(sqlc.New(pool)),
+		MachineFn:             apphttp.MachineAuth(sqlc.New(pool)), // S10.2: `tnxm_` machine credential (GitOps operator)
 	})
 	if err != nil {
 		logger.Error("router_init_failed", slog.String("error", err.Error()))

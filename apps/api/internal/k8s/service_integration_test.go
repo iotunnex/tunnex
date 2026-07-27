@@ -211,7 +211,7 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 		t.Fatalf("exposed Service must be in the live resolution, got %d", len(live))
 	}
 	// Unexpose → gone from the resolution.
-	if err := svc.UnexposeService(ctx, actor, org, s1.ID); err != nil {
+	if err := svc.UnexposeService(ctx, actor, "", "", org, s1.ID); err != nil {
 		t.Fatalf("unexpose: %v", err)
 	}
 	// H2: the unexpose is audited.
@@ -266,7 +266,7 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 		t.Fatal("a live cluster's VIP range must block a second claim")
 	}
 	// Deregister → services gone, range + zone freed.
-	if err := svc.DeregisterCluster(ctx, actor, org, c.ID); err != nil {
+	if err := svc.DeregisterCluster(ctx, actor, "", "", org, c.ID); err != nil {
 		t.Fatalf("deregister: %v", err)
 	}
 	live, _ := svc.q.ListActiveK8sServicesForOrg(ctx, org)
@@ -398,5 +398,63 @@ func TestRegisterClusterSerializesDisjointness(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("RegisterCluster did not return after the lock released")
+	}
+}
+
+// TestMachineActorAuditsSystemNotUser — S10.2 D3: a MACHINE-driven mutation attributes to a SYSTEM actor
+// (actor_system, with a cause), NEVER a user id. The NEGATIVE (actor_user_id NULL) is asserted alongside
+// the positive AND the human inverse is asserted too — so a future refactor cannot quietly re-attribute
+// operator changes to a person (the confidently-wrong-attribution failure D3 exists to prevent).
+func TestMachineActorAuditsSystemNotUser(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site, actor := seedOrgSiteActor(t, pool)
+
+	// MACHINE deregister: actorUserID == uuid.Nil, actorSystem set, cause set.
+	cm, err := svc.RegisterCluster(ctx, org, site, "m", pfx("100.70.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeregisterCluster(ctx, uuid.Nil, "operator:gitops", "machine_credential:abc", org, cm.ID); err != nil {
+		t.Fatal(err)
+	}
+	var sys, usr, cause *string
+	if err := pool.QueryRow(ctx,
+		`SELECT actor_system, actor_user_id::text, metadata->>'cause' FROM audit_logs
+		   WHERE org_id=$1 AND action='k8s.cluster_deregistered' AND target_id=$2`, org, cm.ID.String()).
+		Scan(&sys, &usr, &cause); err != nil {
+		t.Fatal(err)
+	}
+	if sys == nil || *sys != "operator:gitops" {
+		t.Fatalf("machine mutation must attribute actor_system=operator:gitops, got %v", sys)
+	}
+	if usr != nil { // THE NEGATIVE — never a user id for a machine change
+		t.Fatalf("machine mutation must have actor_user_id NULL, got %v", *usr)
+	}
+	if cause == nil || *cause != "machine_credential:abc" {
+		t.Fatalf("machine mutation must record the cause, got %v", cause)
+	}
+
+	// HUMAN deregister: the inverse — actor_user_id set, actor_system NULL.
+	ch, err := svc.RegisterCluster(ctx, org, site, "h", pfx("100.71.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeregisterCluster(ctx, actor, "", "", org, ch.ID); err != nil {
+		t.Fatal(err)
+	}
+	var sys2, usr2 *string
+	if err := pool.QueryRow(ctx,
+		`SELECT actor_system, actor_user_id::text FROM audit_logs
+		   WHERE org_id=$1 AND action='k8s.cluster_deregistered' AND target_id=$2`, org, ch.ID.String()).
+		Scan(&sys2, &usr2); err != nil {
+		t.Fatal(err)
+	}
+	if sys2 != nil {
+		t.Fatalf("human mutation must have actor_system NULL, got %v", *sys2)
+	}
+	if usr2 == nil {
+		t.Fatal("human mutation must set actor_user_id")
 	}
 }

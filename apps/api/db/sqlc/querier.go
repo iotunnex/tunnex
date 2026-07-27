@@ -152,6 +152,10 @@ type Querier interface {
 	// S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 	CreateK8sCluster(ctx context.Context, arg CreateK8sClusterParams) (K8sCluster, error)
 	CreateK8sService(ctx context.Context, arg CreateK8sServiceParams) (K8sService, error)
+	// Machine credentials (S10.2): an org-scoped, NON-USER principal for the GitOps operator. Mirror of the
+	// cli_credentials pattern — sha256 hash storage, fingerprint-only display, revoke-severs-on-next-request.
+	// The raw token NEVER reaches SQL. Revoke is org-scoped (a caller can only revoke its own org's creds).
+	CreateMachineCredential(ctx context.Context, arg CreateMachineCredentialParams) (MachineCredential, error)
 	// ── mfa_challenges (the login second-step token — NOT a session) ───────────────────
 	// lint:cross-org — user-scoped login challenge (pre-session, no org context).
 	CreateMfaChallenge(ctx context.Context, arg CreateMfaChallengeParams) error
@@ -274,6 +278,10 @@ type Querier interface {
 	GetInvitationByTokenHash(ctx context.Context, tokenHash []byte) (Invitation, error)
 	GetK8sCluster(ctx context.Context, arg GetK8sClusterParams) (K8sCluster, error)
 	GetK8sService(ctx context.Context, arg GetK8sServiceParams) (K8sService, error)
+	// lint:cross-org — an auth lookup by the secret HASH; the row resolves the org (the hash IS the credential).
+	// Returns the row regardless of revoked state — the auth path applies the NO-ORACLE check (revoked /
+	// unknown are indistinguishable at the wire), exactly like the CLI credential path.
+	GetMachineCredentialByHash(ctx context.Context, tokenHash []byte) (MachineCredential, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
 	// lint:cross-org — user-scoped login challenge; the token itself is the credential.
 	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
@@ -489,6 +497,7 @@ type Querier interface {
 	// agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
 	// as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
 	ListK8sServedZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sServedZonesForOrgRow, error)
+	ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.UUID) ([]MachineCredential, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
@@ -624,6 +633,9 @@ type Querier interface {
 	// linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
+	// Org-scoped + idempotent (already-revoked returns 0 rows). Revocation severs on the very next request
+	// (the auth path re-reads the row every time — no session cache).
+	RevokeMachineCredential(ctx context.Context, arg RevokeMachineCredentialParams) (int64, error)
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	// The B2 sweep member: revoking a device revokes ALL its live OVPN certs, returning their serials
 	// so the caller pushes the updated CRL to the gateway (one sweep with address-release + status-clear).
@@ -699,6 +711,8 @@ type Querier interface {
 	SweepAccessEventsOverCap(ctx context.Context, arg SweepAccessEventsOverCapParams) (int64, error)
 	TouchCliCredentialUsed(ctx context.Context, id uuid.UUID) error
 	TouchDomainCheckedAt(ctx context.Context, arg TouchDomainCheckedAtParams) error
+	// lint:cross-org — best-effort telemetry keyed by the credential id resolved from the hash lookup above.
+	TouchMachineCredentialUsed(ctx context.Context, id uuid.UUID) error
 	// lint:cross-org — keyed by id after cert authorization.
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
 	// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.

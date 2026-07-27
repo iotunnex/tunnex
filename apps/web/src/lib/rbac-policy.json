@@ -17,10 +17,17 @@
     "member:list",
     "org:view"
   ],
+  "operator": [
+    "k8s:manage",
+    "org:view",
+    "policy:manage",
+    "policy:view"
+  ],
   "owner": [
     "device:approve",
     "device_health:manage",
     "k8s:manage",
+    "machine:manage",
     "member:invite",
     "member:list",
     "member:manage",

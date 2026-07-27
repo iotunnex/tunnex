@@ -27,6 +27,10 @@ const (
 	AuthLocalPassword = "local_password"
 	AuthSSO           = "sso"
 	AuthBearer        = "bearer"
+	// AuthMachine (S10.2) — a NON-USER machine credential (the GitOps operator). Exempt from the
+	// MFA-enrollment gate by construction (no human, no enrollment), like AuthBearer. A machine principal
+	// has UserID == uuid.Nil and MachineID/MachineName set; its mutations attribute to a SYSTEM actor.
+	AuthMachine = "machine"
 )
 
 type Principal struct {
@@ -34,8 +38,29 @@ type Principal struct {
 	SessionID     string // the session backing this principal (for logout)
 	Email         string
 	EmailVerified bool
-	AuthMethod    string // how this principal authenticated (AuthLocalPassword | AuthSSO | AuthBearer | "")
+	AuthMethod    string               // how this principal authenticated (AuthLocalPassword | AuthSSO | AuthBearer | AuthMachine | "")
 	Roles         map[uuid.UUID]string // orgID -> role
+	// MachineID / MachineName (S10.2) — set ONLY for a machine principal (AuthMachine); zero for a human.
+	// A machine has NO UserID (kept out of the identity-binding subject space, D4). MachineName is the
+	// operator-chosen credential label surfaced in audit as the system actor "operator:<name>".
+	MachineID   uuid.UUID
+	MachineName string
+}
+
+// IsMachine reports whether this is a non-user machine principal (S10.2).
+func (p *Principal) IsMachine() bool { return p != nil && p.MachineID != uuid.Nil }
+
+// AuditActor returns the attribution for an audited mutation. For a HUMAN: (userID, "", "") → the row is
+// actor_user_id-attributed (system + cause empty). For a MACHINE: (uuid.Nil, "operator:<name>",
+// "machine_credential:<id>") → a SYSTEM-actor row (actor_system, migration 0027) whose cause names the
+// machine credential. This is the ONE seam that keeps a GitOps change from masquerading as a human (D3 — a
+// falsely-attributed row is worse than absent). (A future slice lets the operator OVERRIDE the cause with
+// the CR that drove the change, D2; the credential identity is the honest default until then.)
+func (p *Principal) AuditActor() (actorUserID uuid.UUID, actorSystem, cause string) {
+	if p.IsMachine() {
+		return uuid.Nil, "operator:" + p.MachineName, "machine_credential:" + p.MachineID.String()
+	}
+	return p.UserID, "", ""
 }
 
 // RoleIn returns the principal's role in orgID and whether they are a member.

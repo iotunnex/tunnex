@@ -86,3 +86,28 @@ func TestSiteReadVsManageSplit(t *testing.T) {
 		t.Fatal("a member must NOT mutate sites (site:manage gates every mutation + the deletion preview)")
 	}
 }
+
+// TestOperatorRoleScope — S10.2 D3: the machine 'operator' role is scoped to EXACTLY the operator's verbs
+// (register cluster, expose Service, create grant, read org) and NOTHING else — never member/org
+// administration, never machine:manage (a machine can't mint more machines), never org:delete.
+func TestOperatorRoleScope(t *testing.T) {
+	has := []Permission{PermOrgView, PermK8sManage, PermPolicyManage, PermPolicyView}
+	for _, p := range has {
+		if !Can(RoleOperator, p) {
+			t.Fatalf("operator must hold %q", p)
+		}
+	}
+	hasNot := []Permission{PermMachineManage, PermMemberManage, PermMemberInvite, PermOrgUpdate, PermOrgDelete, PermMfaManage, PermSiteManage, PermDeviceApprove}
+	for _, p := range hasNot {
+		if Can(RoleOperator, p) {
+			t.Fatalf("operator must NOT hold %q (scope creep)", p)
+		}
+	}
+	// machine:manage is owner-only — never admin, never member, never operator.
+	if Can(RoleAdmin, PermMachineManage) || Can(RoleMember, PermMachineManage) || Can(RoleOperator, PermMachineManage) {
+		t.Fatal("machine:manage must be OWNER-ONLY")
+	}
+	if !Can(RoleOwner, PermMachineManage) {
+		t.Fatal("owner must hold machine:manage")
+	}
+}

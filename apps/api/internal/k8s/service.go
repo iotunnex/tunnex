@@ -86,12 +86,28 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 // must leave an actor-attributed trail, especially DeregisterCluster, which FK-cascade-deletes enterprise
 // grants). RETURNS its error (never swallows — a swallowed InsertAuditLog poisons the tx). Mirrors
 // sites.auditTarget.
-func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actor uuid.UUID, targetType, targetID, action string, meta map[string]any) error {
-	b, _ := json.Marshal(meta)
+// The actor is EITHER a human (actorUserID, actorSystem=="") OR a machine (actorSystem="operator:<name>",
+// actorUserID==Nil), never both — the 0027 XOR. A machine's mutation is a SYSTEM-actor row with the cause
+// in metadata, so a GitOps change can NEVER masquerade as a human (S10.2 D3). The caller passes
+// authctx.Principal.AuditActor().
+func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actorUserID uuid.UUID, actorSystem, cause string, targetType, targetID, action string, meta map[string]any) error {
 	tt, ti := targetType, targetID
+	if actorSystem != "" {
+		if cause != "" {
+			meta["cause"] = cause
+		}
+		b, _ := json.Marshal(meta)
+		as := actorSystem
+		_, err := q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+			OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, ActorSystem: &as,
+			Action: action, TargetType: &tt, TargetID: &ti, Metadata: b,
+		})
+		return err
+	}
+	b, _ := json.Marshal(meta)
 	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
 		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
-		ActorUserID: pgtype.UUID{Bytes: actor, Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: true},
 		Action:      action,
 		TargetType:  &tt,
 		TargetID:    &ti,
@@ -348,7 +364,7 @@ func (s *Service) ListServicesForCluster(ctx context.Context, orgID, clusterID u
 // gateway's VIP map AND its DNS answer, and any grant that referenced it compiles to nothing (the honest
 // vanished-Service surface, rendered in API/web). The freed VIP is immediately reusable — SAFE because a
 // re-expose mints a NEW identity and the compiler resolves id -> CURRENT VIP, never a snapshot (Slice 2).
-func (s *Service) UnexposeService(ctx context.Context, actor, orgID, serviceID uuid.UUID) error {
+func (s *Service) UnexposeService(ctx context.Context, actorUserID uuid.UUID, actorSystem, cause string, orgID, serviceID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		svc, e := q.GetK8sService(ctx, sqlc.GetK8sServiceParams{OrgID: orgID, ID: serviceID})
 		if e != nil {
@@ -358,7 +374,7 @@ func (s *Service) UnexposeService(ctx context.Context, actor, orgID, serviceID u
 			return e
 		}
 		// H2: audit the unexpose (a network-exposed Service leaving the fabric) — the RemoveSubnet analogue.
-		return s.audit(ctx, q, orgID, actor, "k8s_service", serviceID.String(), "k8s.service_unexposed",
+		return s.audit(ctx, q, orgID, actorUserID, actorSystem, cause, "k8s_service", serviceID.String(), "k8s.service_unexposed",
 			map[string]any{"namespace": svc.Namespace, "name": svc.Name, "vip": svc.Vip.String()})
 	})
 	if err == nil {
@@ -371,7 +387,7 @@ func (s *Service) UnexposeService(ctx context.Context, actor, orgID, serviceID u
 // AND every policy_rule that pointed at one (0049 dst_k8s_service_id ON DELETE CASCADE), and the row's removal
 // frees the whole VIP range (incl the reserved DNS VIP) and the cluster's DNS zone for reuse — all in ONE
 // atomic delete. The next compile recompiles every affected gateway without the vanished cluster.
-func (s *Service) DeregisterCluster(ctx context.Context, actor, orgID, clusterID uuid.UUID) error {
+func (s *Service) DeregisterCluster(ctx context.Context, actorUserID uuid.UUID, actorSystem, cause string, orgID, clusterID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		cluster, e := q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID})
 		if e != nil {
@@ -387,7 +403,7 @@ func (s *Service) DeregisterCluster(ctx context.Context, actor, orgID, clusterID
 		if e := q.DeleteK8sCluster(ctx, sqlc.DeleteK8sClusterParams{OrgID: orgID, ID: clusterID}); e != nil {
 			return e
 		}
-		return s.audit(ctx, q, orgID, actor, "k8s_cluster", clusterID.String(), "k8s.cluster_deregistered",
+		return s.audit(ctx, q, orgID, actorUserID, actorSystem, cause, "k8s_cluster", clusterID.String(), "k8s.cluster_deregistered",
 			map[string]any{"name": cluster.Name, "services_deleted": casc.ServiceCount, "grants_deleted": casc.GrantCount})
 	})
 	if err == nil {

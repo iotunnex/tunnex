@@ -55,6 +55,11 @@ const (
 	// CORE (all editions, like site:manage) — GOVERNANCE of a grant reaching a Service is the separate
 	// enterprise gate. Owner/admin grain (VIP-range + exposure are network-shaping powers).
 	PermK8sManage Permission = "k8s:manage"
+	// PermMachineManage governs MACHINE CREDENTIALS (S10.2, EPIC 10): minting/revoking a first-class
+	// NON-USER org principal (the GitOps operator's identity). OWNER-ONLY grain — a machine credential is
+	// a non-human caller that can register clusters, expose Services, and (enterprise) create grants, so
+	// creating one is org-delete-grade privilege. Named per feature; never a member/policy reuse.
+	PermMachineManage Permission = "machine:manage"
 )
 
 // Roles.
@@ -62,6 +67,12 @@ const (
 	RoleOwner  = "owner"
 	RoleAdmin  = "admin"
 	RoleMember = "member"
+	// RoleOperator (S10.2) is the fixed role a MACHINE credential holds — NOT user-assignable (the member
+	// role picker offers owner/admin/member only). Scoped to EXACTLY what the GitOps operator needs (D3):
+	// register a cluster, expose a Service, create a grant, and read the org — nothing else (no member
+	// management, no org delete, no MFA/site/machine administration). A machine principal's Roles map is
+	// {orgID: "operator"}.
+	RoleOperator = "operator"
 )
 
 // rolePermissions is the role -> permission grant table. This map IS the policy.
@@ -79,11 +90,11 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermMemberList: true,
 	},
 	RoleAdmin: {
-		PermOrgView:      true,
-		PermMemberList:   true,
-		PermOrgUpdate:    true,
-		PermMemberInvite: true,
-		PermMemberManage:  true,
+		PermOrgView:            true,
+		PermMemberList:         true,
+		PermOrgUpdate:          true,
+		PermMemberInvite:       true,
+		PermMemberManage:       true,
 		PermPolicyView:         true,
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
@@ -93,12 +104,12 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermK8sManage:          true,
 	},
 	RoleOwner: {
-		PermOrgView:       true,
-		PermMemberList:    true,
-		PermOrgUpdate:     true,
-		PermOrgDelete:     true,
-		PermMemberInvite:  true,
-		PermMemberManage:  true,
+		PermOrgView:            true,
+		PermMemberList:         true,
+		PermOrgUpdate:          true,
+		PermOrgDelete:          true,
+		PermMemberInvite:       true,
+		PermMemberManage:       true,
 		PermPolicyView:         true,
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
@@ -106,6 +117,17 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermMfaManage:          true,
 		PermSiteManage:         true,
 		PermK8sManage:          true,
+		PermMachineManage:      true, // owner-only: minting a non-human org principal is org-delete-grade
+	},
+	// RoleOperator (S10.2) — the machine credential's fixed role, scoped to exactly the operator's verbs
+	// (D3). NOT user-assignable. NO machine:manage (a machine can't mint more machines), NO member/org
+	// administration. PermPolicyManage is still enterprise-gated at the handler (a TunnexGrant → 403
+	// edition_required in the open build), so holding the perm here does not widen the edition surface.
+	RoleOperator: {
+		PermOrgView:      true,
+		PermK8sManage:    true,
+		PermPolicyView:   true,
+		PermPolicyManage: true,
 	},
 }
 

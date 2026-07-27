@@ -1107,6 +1107,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/machine-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /** List machine credentials — the GitOps operator's org identity (S10.2; machine:manage). Fingerprint only, never the secret. */
+        get: operations["listMachineCredentials"];
+        put?: never;
+        /** Mint a machine credential — the token is shown ONCE (S10.2; machine:manage, owner-only). One-time-secret ceremony. */
+        post: operations["mintMachineCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/machine-credentials/{credentialId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a machine credential — severs on its next request (S10.2; machine:manage). */
+        delete: operations["revokeMachineCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/resources": {
         parameters: {
             query?: never;
@@ -1933,6 +1973,29 @@ export interface components {
         AddGroupMemberRequest: {
             /** Format: uuid */
             user_id: string;
+        };
+        MachineCredential: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Keyed proof-of-secret — a stable display id, NEVER the token. */
+            fingerprint: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+        };
+        MintMachineCredentialRequest: {
+            /** @description A label for the credential; appears in audit as operator:<name>. */
+            name: string;
+        };
+        MintMachineCredentialResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            fingerprint: string;
+            /** @description The bearer secret (tnxm_...), shown ONCE. Save it — never re-displayed; revoke + re-mint if lost. */
+            token: string;
         };
         Resource: {
             /** Format: uuid */
@@ -4399,6 +4462,80 @@ export interface operations {
             204: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMachineCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active machine credentials (metadata only). */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineCredential"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mintMachineCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MintMachineCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Minted. The token is returned ONCE and never re-displayed — save it, or revoke + re-mint. */
+            201: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MintMachineCredentialResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeMachineCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            204: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content?: never;

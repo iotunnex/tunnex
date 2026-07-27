@@ -208,6 +208,18 @@ type K8sService struct {
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type MachineCredential struct {
+	ID          uuid.UUID          `json:"id"`
+	OrgID       uuid.UUID          `json:"org_id"`
+	Name        string             `json:"name"`
+	Role        string             `json:"role"`
+	TokenHash   []byte             `json:"token_hash"`
+	Fingerprint string             `json:"fingerprint"`
+	CreatedAt   time.Time          `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+}
+
 type Membership struct {
 	ID        uuid.UUID `json:"id"`
 	OrgID     uuid.UUID `json:"org_id"`

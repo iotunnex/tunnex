@@ -26,6 +26,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
+	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/ovpn"
@@ -49,7 +50,8 @@ type Deps struct {
 	Devices   *devices.Service
 	Ovpn      *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export. CA loads lazily (D-S9.5-OPTIN a)
 	Sites     *sites.Service
-	K8s       *k8s.Service // OPEN (all editions, S10.3): K8s cluster/Service connectivity
+	K8s       *k8s.Service         // OPEN (all editions, S10.3): K8s cluster/Service connectivity
+	Machine   *machineauth.Service // OPEN (S10.2): machine credentials (GitOps operator identity)
 	Sessions  *session.Store
 	Mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	SSO       ssoPort       // nil => open build (SSO endpoints return edition_required)
@@ -76,6 +78,10 @@ type Deps struct {
 	// session; any invalid bearer (unknown/revoked/expired) is one generic 401
 	// (no oracle) — the CLI recognizes expiry from its local expires_at.
 	BearerFn BearerAuthFunc
+	// MachineFn resolves a MACHINE credential (S10.2, `tnxm_`). Tried before the CLI bearer + cookie; a
+	// distinct prefix means no collision. Same no-oracle refusal. A machine principal has no UserID and
+	// attributes downstream mutations to a system actor.
+	MachineFn BearerAuthFunc
 }
 
 // NewRouter builds the API router with the standard middleware chain and mounts
@@ -123,9 +129,22 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	// bearer is therefore never a way to assume a cookie identity. The error
 	// return of BearerFn is retained for a future path that needs a distinct
 	// refusal; today it is always nil.
-	if d.AuthFn != nil || d.BearerFn != nil {
+	if d.AuthFn != nil || d.BearerFn != nil || d.MachineFn != nil {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				// A MACHINE credential (`tnxm_`) is tried first; its prefix can't collide with the CLI's
+				// `tnx_`, and an invalid one is (nil,nil) → falls through, never assumes a cookie identity.
+				if d.MachineFn != nil {
+					p, err := d.MachineFn(req)
+					if err != nil {
+						apierr.Write(w, req, err)
+						return
+					}
+					if p != nil {
+						next.ServeHTTP(w, req.WithContext(authctx.WithPrincipal(req.Context(), p)))
+						return
+					}
+				}
 				if d.BearerFn != nil {
 					p, err := d.BearerFn(req)
 					if err != nil {
@@ -186,7 +205,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, k8s: d.K8s, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
+	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, k8s: d.K8s, machine: d.Machine, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
 	// Default-deny MFA-enrollment gate (S7.5.5 D8, enterprise): runs after auth attaches the
 	// principal; a gated user is restricted to enrollment. Registered before the routes so it
 	// wraps every operation (self-arming — a new endpoint is gated by construction).

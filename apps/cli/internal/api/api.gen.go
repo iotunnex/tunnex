@@ -1021,6 +1021,17 @@ type LoginResult struct {
 	User        *AuthUser `json:"user,omitempty"`
 }
 
+// MachineCredential defines model for MachineCredential.
+type MachineCredential struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Fingerprint Keyed proof-of-secret — a stable display id, NEVER the token.
+	Fingerprint string             `json:"fingerprint"`
+	Id          openapi_types.UUID `json:"id"`
+	LastUsedAt  *time.Time         `json:"last_used_at"`
+	Name        string             `json:"name"`
+}
+
 // Member defines model for Member.
 type Member struct {
 	Email         openapi_types.Email `json:"email"`
@@ -1088,6 +1099,22 @@ type MfaRecoveryCodes struct {
 type MfaVerifyRequest struct {
 	Challenge string `json:"challenge"`
 	Code      string `json:"code"`
+}
+
+// MintMachineCredentialRequest defines model for MintMachineCredentialRequest.
+type MintMachineCredentialRequest struct {
+	// Name A label for the credential; appears in audit as operator:<name>.
+	Name string `json:"name"`
+}
+
+// MintMachineCredentialResponse defines model for MintMachineCredentialResponse.
+type MintMachineCredentialResponse struct {
+	Fingerprint string             `json:"fingerprint"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+
+	// Token The bearer secret (tnxm_...), shown ONCE. Save it — never re-displayed; revoke + re-mint if lost.
+	Token string `json:"token"`
 }
 
 // Node defines model for Node.
@@ -1573,6 +1600,9 @@ type RegisterK8sClusterJSONRequestBody = RegisterK8sClusterRequest
 // ExposeK8sServiceJSONRequestBody defines body for ExposeK8sService for application/json ContentType.
 type ExposeK8sServiceJSONRequestBody = ExposeK8sServiceRequest
 
+// MintMachineCredentialJSONRequestBody defines body for MintMachineCredential for application/json ContentType.
+type MintMachineCredentialJSONRequestBody = MintMachineCredentialRequest
+
 // ChangeMemberRoleJSONRequestBody defines body for ChangeMemberRole for application/json ContentType.
 type ChangeMemberRoleJSONRequestBody = ChangeRoleRequest
 
@@ -1974,6 +2004,17 @@ type ClientInterface interface {
 
 	// UnexposeK8sService request
 	UnexposeK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListMachineCredentials request
+	ListMachineCredentials(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MintMachineCredentialWithBody request with any body
+	MintMachineCredentialWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	MintMachineCredential(ctx context.Context, orgId openapi_types.UUID, body MintMachineCredentialJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RevokeMachineCredential request
+	RevokeMachineCredential(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListMembers request
 	ListMembers(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3341,6 +3382,54 @@ func (c *Client) ListK8sServicesForOrg(ctx context.Context, orgId openapi_types.
 
 func (c *Client) UnexposeK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUnexposeK8sServiceRequest(c.Server, orgId, serviceId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListMachineCredentials(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListMachineCredentialsRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MintMachineCredentialWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMintMachineCredentialRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) MintMachineCredential(ctx context.Context, orgId openapi_types.UUID, body MintMachineCredentialJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMintMachineCredentialRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RevokeMachineCredential(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokeMachineCredentialRequest(c.Server, orgId, credentialId)
 	if err != nil {
 		return nil, err
 	}
@@ -7109,6 +7198,128 @@ func NewUnexposeK8sServiceRequest(server string, orgId openapi_types.UUID, servi
 	return req, nil
 }
 
+// NewListMachineCredentialsRequest generates requests for ListMachineCredentials
+func NewListMachineCredentialsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/machine-credentials", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewMintMachineCredentialRequest calls the generic MintMachineCredential builder with application/json body
+func NewMintMachineCredentialRequest(server string, orgId openapi_types.UUID, body MintMachineCredentialJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewMintMachineCredentialRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewMintMachineCredentialRequestWithBody generates requests for MintMachineCredential with any type of body
+func NewMintMachineCredentialRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/machine-credentials", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRevokeMachineCredentialRequest generates requests for RevokeMachineCredential
+func NewRevokeMachineCredentialRequest(server string, orgId openapi_types.UUID, credentialId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "credentialId", runtime.ParamLocationPath, credentialId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/machine-credentials/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListMembersRequest generates requests for ListMembers
 func NewListMembersRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -9401,6 +9612,17 @@ type ClientWithResponsesInterface interface {
 	// UnexposeK8sServiceWithResponse request
 	UnexposeK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnexposeK8sServiceResponse, error)
 
+	// ListMachineCredentialsWithResponse request
+	ListMachineCredentialsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMachineCredentialsResponse, error)
+
+	// MintMachineCredentialWithBodyWithResponse request with any body
+	MintMachineCredentialWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MintMachineCredentialResponse, error)
+
+	MintMachineCredentialWithResponse(ctx context.Context, orgId openapi_types.UUID, body MintMachineCredentialJSONRequestBody, reqEditors ...RequestEditorFn) (*MintMachineCredentialResponse, error)
+
+	// RevokeMachineCredentialWithResponse request
+	RevokeMachineCredentialWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeMachineCredentialResponse, error)
+
 	// ListMembersWithResponse request
 	ListMembersWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMembersResponse, error)
 
@@ -11142,6 +11364,74 @@ func (r UnexposeK8sServiceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UnexposeK8sServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListMachineCredentialsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]MachineCredential
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListMachineCredentialsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListMachineCredentialsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type MintMachineCredentialResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *MintMachineCredentialResponse
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MintMachineCredentialResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MintMachineCredentialResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RevokeMachineCredentialResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokeMachineCredentialResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokeMachineCredentialResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13035,6 +13325,41 @@ func (c *ClientWithResponses) UnexposeK8sServiceWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseUnexposeK8sServiceResponse(rsp)
+}
+
+// ListMachineCredentialsWithResponse request returning *ListMachineCredentialsResponse
+func (c *ClientWithResponses) ListMachineCredentialsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMachineCredentialsResponse, error) {
+	rsp, err := c.ListMachineCredentials(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListMachineCredentialsResponse(rsp)
+}
+
+// MintMachineCredentialWithBodyWithResponse request with arbitrary body returning *MintMachineCredentialResponse
+func (c *ClientWithResponses) MintMachineCredentialWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MintMachineCredentialResponse, error) {
+	rsp, err := c.MintMachineCredentialWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMintMachineCredentialResponse(rsp)
+}
+
+func (c *ClientWithResponses) MintMachineCredentialWithResponse(ctx context.Context, orgId openapi_types.UUID, body MintMachineCredentialJSONRequestBody, reqEditors ...RequestEditorFn) (*MintMachineCredentialResponse, error) {
+	rsp, err := c.MintMachineCredential(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMintMachineCredentialResponse(rsp)
+}
+
+// RevokeMachineCredentialWithResponse request returning *RevokeMachineCredentialResponse
+func (c *ClientWithResponses) RevokeMachineCredentialWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeMachineCredentialResponse, error) {
+	rsp, err := c.RevokeMachineCredential(ctx, orgId, credentialId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokeMachineCredentialResponse(rsp)
 }
 
 // ListMembersWithResponse request returning *ListMembersResponse
@@ -15750,6 +16075,98 @@ func ParseUnexposeK8sServiceResponse(rsp *http.Response) (*UnexposeK8sServiceRes
 	}
 
 	response := &UnexposeK8sServiceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListMachineCredentialsResponse parses an HTTP response from a ListMachineCredentialsWithResponse call
+func ParseListMachineCredentialsResponse(rsp *http.Response) (*ListMachineCredentialsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListMachineCredentialsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []MachineCredential
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMintMachineCredentialResponse parses an HTTP response from a MintMachineCredentialWithResponse call
+func ParseMintMachineCredentialResponse(rsp *http.Response) (*MintMachineCredentialResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MintMachineCredentialResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest MintMachineCredentialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRevokeMachineCredentialResponse parses an HTTP response from a RevokeMachineCredentialWithResponse call
+func ParseRevokeMachineCredentialResponse(rsp *http.Response) (*RevokeMachineCredentialResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokeMachineCredentialResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
