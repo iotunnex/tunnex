@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { k8sGate, portLabel, assembleClusters, serviceFqdnById } from "../src/lib/k8sview";
+import { k8sGate, portLabel, assembleClusters, serviceFqdnById, objectControls } from "../src/lib/k8sview";
 import type { K8sCluster, K8sService } from "../src/lib/api";
 
 const CL = (id: string, name: string): K8sCluster =>
@@ -78,5 +78,12 @@ describe("managed-by-operator ownership surface (S10.2 D2 cond 1)", () => {
     expect(cards[0].managedByOperator).toBe(true);
     expect(cards[0].services.find((s) => s.id === "k1")!.managedByOperator).toBe(true);
     expect(cards[0].services.find((s) => s.id === "k2")!.managedByOperator).toBe(false);
+  });
+});
+
+describe("objectControls — the withhold decision (M3)", () => {
+  it("withholds the destructive control on a managed object, offers it otherwise", () => {
+    expect(objectControls(true).withheld).toBe(true);
+    expect(objectControls(false).withheld).toBe(false);
   });
 });

@@ -168,7 +168,15 @@ type Site struct {
 }
 
 type Rule struct {
-	ID string `json:"id"`
+	ID                string  `json:"id"`
+	SrcKind           string  `json:"src_kind"`
+	SrcUserID         *string `json:"src_user_id"`
+	SrcGroupID        *string `json:"src_group_id"`
+	SrcSiteID         *string `json:"src_site_id"`
+	SrcCidr           *string `json:"src_cidr"`
+	DstKind           string  `json:"dst_kind"`
+	DstK8sServiceID   *string `json:"dst_k8s_service_id"`
+	ManagedByOperator bool    `json:"managed_by_operator"`
 }
 
 type RegisterClusterRequest struct {
@@ -212,6 +220,34 @@ func (c *Client) RegisterCluster(ctx context.Context, r RegisterClusterRequest) 
 	return out, c.do(ctx, http.MethodPost, c.orgPath("/k8s/clusters"), "", r, &out)
 }
 
+// GetCluster fetches one cluster by id — the AUTHORITATIVE confirm-by-ID (S10.2 C2): found=false ONLY on a
+// CP 404 (truly gone); a transport/5xx failure returns an error (keep-last), never a false "gone" the way a
+// spuriously-empty LIST could. Used to gate a drift-recreate so a glitchy list can't spawn a duplicate.
+func (c *Client) GetCluster(ctx context.Context, id string) (Cluster, bool, error) {
+	var out Cluster
+	err := c.do(ctx, http.MethodGet, c.orgPath("/k8s/clusters/"+id), "", nil, &out)
+	if e := AsAPIError(err); e != nil && e.Status == http.StatusNotFound {
+		return Cluster{}, false, nil
+	}
+	if err != nil {
+		return Cluster{}, false, err
+	}
+	return out, true, nil
+}
+
+// GetService fetches one exposed Service by id — the confirm-by-ID analog for services (S10.2 C2).
+func (c *Client) GetService(ctx context.Context, id string) (Service, bool, error) {
+	var out Service
+	err := c.do(ctx, http.MethodGet, c.orgPath("/k8s/services/"+id), "", nil, &out)
+	if e := AsAPIError(err); e != nil && e.Status == http.StatusNotFound {
+		return Service{}, false, nil
+	}
+	if err != nil {
+		return Service{}, false, err
+	}
+	return out, true, nil
+}
+
 // DeregisterCluster removes a cluster (full-sweep cascade, audited CP-side; cause names the CR).
 func (c *Client) DeregisterCluster(ctx context.Context, clusterID, cause string) error {
 	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/clusters/"+clusterID), cause, nil, nil)
@@ -232,6 +268,14 @@ func (c *Client) ExposeService(ctx context.Context, clusterID string, r ExposeSe
 // UnexposeService withdraws a Service (audited CP-side; cause names the CR).
 func (c *Client) UnexposeService(ctx context.Context, serviceID, cause string) error {
 	return c.do(ctx, http.MethodDelete, c.orgPath("/k8s/services/"+serviceID), cause, nil, nil)
+}
+
+// ListPolicies returns the org's policy rules — for grant idempotence-by-identity (S10.2 M2): find an
+// existing MANAGED rule matching this grant before creating, so a status-write failure after a prior create
+// doesn't double-place an (unnamed) rule.
+func (c *Client) ListPolicies(ctx context.Context) ([]Rule, error) {
+	var out []Rule
+	return out, c.do(ctx, http.MethodGet, c.orgPath("/policies"), "", nil, &out)
 }
 
 // CreateGrant creates a policy rule reaching an exposed Service (ENTERPRISE — a 403 edition_required in the

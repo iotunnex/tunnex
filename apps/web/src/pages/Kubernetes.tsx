@@ -15,17 +15,8 @@ import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import { LoadRetry } from "../components/LoadRetry";
 import { roleFromMembers } from "../lib/policyview";
-import { assembleClusters, k8sGate, MANAGED_BADGE, managedEditWarning, type ClusterCard } from "../lib/k8sview";
-
-// ManagedBadge — S10.2 D2 cond 1: marks a cluster/Service the GitOps operator owns, so the console reads as
-// ONE product with the CR (same nouns) and the admin sees it's git-governed before reaching for an edit.
-function ManagedBadge() {
-  return (
-    <span className="ml-2 rounded-sm bg-sky-500/15 px-1.5 py-0.5 align-middle text-[10px] font-medium text-sky-300">
-      {MANAGED_BADGE}
-    </span>
-  );
-}
+import { assembleClusters, k8sGate, managedEditWarning, objectControls, type ClusterCard } from "../lib/k8sview";
+import { ManagedBadge } from "../components/ManagedBadge";
 
 // Kubernetes (S10.3): the in-cluster connectivity surface — register a cluster (a synthetic VIP range fronted
 // by a site gateway) and expose its Services to the fabric. CONNECTIVITY is CORE (all editions): this whole
@@ -147,10 +138,10 @@ function ClusterCardView({ orgId, card, canManage, onDone }: { orgId: string; ca
         {canManage && (
           <span className="flex gap-2">
             <Button onClick={() => setExposing(true)}>Expose Service</Button>
-            {card.managedByOperator ? (
+            {objectControls(card.managedByOperator).withheld ? (
               // D2 cond 1: refuse the destructive dashboard edit on a GitOps-managed cluster — warn, don't
-              // silently revert on the next reconcile.
-              <span className="self-center text-xs text-amber-400/90" title={managedEditWarning("cluster")}>
+              // silently revert on the next reconcile. aria-label carries the full guidance (L1).
+              <span className="self-center text-xs text-amber-400/90" title={managedEditWarning("cluster")} aria-label={managedEditWarning("cluster")}>
                 edit the CR
               </span>
             ) : (
@@ -178,8 +169,8 @@ function ClusterCardView({ orgId, card, canManage, onDone }: { orgId: string; ca
                 {s.managedByOperator && <ManagedBadge />}
               </span>
               {canManage &&
-                (s.managedByOperator ? (
-                  <span className="text-xs text-amber-400/90" title={managedEditWarning("Service")}>
+                (objectControls(s.managedByOperator).withheld ? (
+                  <span className="text-xs text-amber-400/90" title={managedEditWarning("Service")} aria-label={managedEditWarning("Service")}>
                     edit the CR
                   </span>
                 ) : (

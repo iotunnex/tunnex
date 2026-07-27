@@ -73,6 +73,33 @@ func (s apiServer) ListK8sClusters(ctx context.Context, req api.ListK8sClustersR
 	return api.ListK8sClusters200JSONResponse{Body: out, Headers: api.ListK8sClusters200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
 
+func (s apiServer) GetK8sCluster(ctx context.Context, req api.GetK8sClusterRequestObject) (api.GetK8sClusterResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	c, err := s.k8s.GetCluster(ctx, req.OrgId, req.ClusterId)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetK8sCluster200JSONResponse{Body: toAPIK8sCluster(c), Headers: api.GetK8sCluster200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
+func (s apiServer) GetK8sService(ctx context.Context, req api.GetK8sServiceRequestObject) (api.GetK8sServiceResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	svc, err := s.k8s.GetService(ctx, req.OrgId, req.ServiceId)
+	if err != nil {
+		return nil, err
+	}
+	cluster, err := s.k8s.GetCluster(ctx, req.OrgId, svc.ClusterID)
+	if err != nil {
+		return nil, err
+	}
+	fqdn := k8ssvc.FQDN(svc.Name, svc.Namespace, cluster.Name, cluster.DnsZone)
+	return api.GetK8sService200JSONResponse{Body: toAPIK8sService(svc, fqdn), Headers: api.GetK8sService200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 func (s apiServer) RegisterK8sCluster(ctx context.Context, req api.RegisterK8sClusterRequestObject) (api.RegisterK8sClusterResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermK8sManage); err != nil {
 		return nil, err
@@ -88,7 +115,8 @@ func (s apiServer) RegisterK8sCluster(ctx context.Context, req api.RegisterK8sCl
 	if err != nil {
 		return nil, apierr.BadRequest("invalid_service_cidr", "service_cidr must be a valid CIDR (e.g. 10.96.0.0/12)")
 	}
-	c, err := s.k8s.RegisterCluster(ctx, req.OrgId, req.Body.SiteId, req.Body.Name, vipRange, serviceCIDR, req.Body.DnsZone, machineID(ctx))
+	uid, sys, cause := auditActor(ctx)
+	c, err := s.k8s.RegisterCluster(ctx, req.OrgId, req.Body.SiteId, req.Body.Name, vipRange, serviceCIDR, req.Body.DnsZone, machineID(ctx), uid, sys, cause)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +176,8 @@ func (s apiServer) ExposeK8sService(ctx context.Context, req api.ExposeK8sServic
 	if req.Body.Protocol != nil {
 		proto = string(*req.Body.Protocol)
 	}
-	svc, err := s.k8s.ExposeService(ctx, req.OrgId, req.ClusterId, req.Body.Name, req.Body.Namespace, proto, ptrIntToInt32(req.Body.PortLow), ptrIntToInt32(req.Body.PortHigh), machineID(ctx))
+	uid, sys, cause := auditActor(ctx)
+	svc, err := s.k8s.ExposeService(ctx, req.OrgId, req.ClusterId, req.Body.Name, req.Body.Namespace, proto, ptrIntToInt32(req.Body.PortLow), ptrIntToInt32(req.Body.PortHigh), machineID(ctx), uid, sys, cause)
 	if err != nil {
 		return nil, err
 	}

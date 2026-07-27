@@ -44,6 +44,17 @@ func machineID(ctx context.Context) uuid.UUID {
 	return p.MachineID
 }
 
+// auditActor returns the (actorUserID, actorSystem, cause) attribution for the caller — machine → SYSTEM
+// actor + cause (the CR, via X-Tunnex-Cause), human → user id. The ONE seam create + delete audits share so
+// an operator-driven mutation never masquerades as a human (D3). Nil-safe (unauthenticated → zero human).
+func auditActor(ctx context.Context) (uuid.UUID, string, string) {
+	p, _ := authctx.PrincipalFrom(ctx)
+	if p == nil {
+		return uuid.Nil, "", ""
+	}
+	return p.AuditActor()
+}
+
 func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (context.Context, error) {
 	p, ok := authctx.PrincipalFrom(ctx)
 	if !ok {
@@ -56,8 +67,11 @@ func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (cont
 	if !rbac.Can(role, perm) {
 		return ctx, apierr.New(http.StatusForbidden, "forbidden", "you do not have permission to perform this action")
 	}
-	// Mutating actions require a verified email (S2.1 decision, enforced here).
-	if rbac.IsMutating(perm) && !p.EmailVerified {
+	// Mutating actions require a verified email (S2.1 decision, enforced here) — EXCEPT a machine principal
+	// (S10.2), which has no email to verify. Without this exemption every operator mutation 403s
+	// email_not_verified (a machine's EmailVerified is false by construction), bricking the operator on its
+	// first real call. Mirrors the MFA-enrollment gate, which already exempts AuthMachine by construction.
+	if rbac.IsMutating(perm) && !p.EmailVerified && !p.IsMachine() {
 		return ctx, apierr.New(http.StatusForbidden, "email_not_verified", "verify your email to perform this action")
 	}
 	return authctx.WithOrg(ctx, orgID), nil

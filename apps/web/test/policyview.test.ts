@@ -15,6 +15,7 @@ import {
   activeMembers,
   rulesSummary,
   ruleBody,
+  grantControls,
   type LoadState,
 } from "../src/lib/policyview";
 import { loadOne, type Loaded } from "../src/lib/api";
@@ -545,4 +546,11 @@ describe("resPortsValid (Feature 1 — resource port scope, client UX gate; serv
     expect(resPortsValid("1", "65536")).toBe(false);
   });
   it("non-integer invalid", () => expect(resPortsValid("80.5", "")).toBe(false));
+});
+
+describe("grantControls — the withhold decision (M3)", () => {
+  it("withholds every mutation on a managed grant, offers them otherwise", () => {
+    expect(grantControls({ managedByOperator: true }).withheld).toBe(true);
+    expect(grantControls({ managedByOperator: false }).withheld).toBe(false);
+  });
 });

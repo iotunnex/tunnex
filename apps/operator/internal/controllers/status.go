@@ -27,6 +27,10 @@ const (
 	// truth about INTENT for objects it owns. False when the CP matches. Grants can't be drift-checked (policy
 	// rules are unnamed, no list-find — R-3b-1), so only cluster/service carry it.
 	condDrift = "Drift"
+	// condTeardownBlocked (S10.2 H1) surfaces a stuck delete: True when the CP refused/failed teardown so the
+	// finalizer is HELD (fail-closed — never a dangling CP object). Silent-wedging is the honest-health law
+	// violated at the CR tier; this + an Event name WHY the CR won't disappear (the CP code/message).
+	condTeardownBlocked = "TeardownBlocked"
 
 	// managedByLabel marks a CR the Tunnex operator reconciles (k8s-side visibility for kubectl + the
 	// dashboard ownership surface, Slice 4). The AUTHORITATIVE ownership record is CP-side: managed_by_machine,
@@ -59,6 +63,19 @@ func setDrift(conds *[]metav1.Condition, drifted bool, msg string, gen int64) {
 	}
 	meta.SetStatusCondition(conds, metav1.Condition{
 		Type: condDrift, Status: st, Reason: reason, Message: msg, ObservedGeneration: gen,
+	})
+}
+
+// setTeardownBlocked records that a delete could not complete (the finalizer is held, fail-closed). Names the
+// CP's own code/message when it's a 4xx, else the transport error.
+func setTeardownBlocked(conds *[]metav1.Condition, err error, gen int64) {
+	reason, msg := "CPUnavailable", err.Error()
+	if e := cp.AsAPIError(err); e != nil {
+		reason, msg = reasonFor(e.Code), e.Message
+	}
+	meta.SetStatusCondition(conds, metav1.Condition{
+		Type: condTeardownBlocked, Status: metav1.ConditionTrue, Reason: reason,
+		Message: "teardown blocked, finalizer held: " + msg, ObservedGeneration: gen,
 	})
 }
 

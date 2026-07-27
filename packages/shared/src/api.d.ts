@@ -1725,7 +1725,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /** Fetch one cluster by id (S10.2; org:view) — the operator's confirm-by-ID before a drift-recreate */
+        get: operations["getK8sCluster"];
         put?: never;
         post?: never;
         /**
@@ -1791,7 +1792,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /** Fetch one exposed Service by id (S10.2; org:view) — the operator's confirm-by-ID before a drift-recreate */
+        get: operations["getK8sService"];
         put?: never;
         post?: never;
         /**
@@ -5642,6 +5644,31 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getK8sCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cluster. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sCluster"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     deregisterK8sCluster: {
         parameters: {
             query?: never;
@@ -5737,6 +5764,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["K8sService"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getK8sService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The exposed Service. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["K8sService"];
                 };
             };
             default: components["responses"]["Error"];

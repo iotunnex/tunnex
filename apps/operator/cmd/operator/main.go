@@ -60,15 +60,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controllers.TunnexClusterReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient}).SetupWithManager(mgr); err != nil {
+	rec := mgr.GetEventRecorderFor("tunnex-operator") // H1: Warning events for a blocked teardown
+	if err := (&controllers.TunnexClusterReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient, Recorder: rec}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to set up controller", "controller", "TunnexCluster")
 		os.Exit(1)
 	}
-	if err := (&controllers.TunnexExposedServiceReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient}).SetupWithManager(mgr); err != nil {
+	if err := (&controllers.TunnexExposedServiceReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient, Recorder: rec}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to set up controller", "controller", "TunnexExposedService")
 		os.Exit(1)
 	}
-	if err := (&controllers.TunnexGrantReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient}).SetupWithManager(mgr); err != nil {
+	if err := (&controllers.TunnexGrantReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CP: cpClient, Recorder: rec}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to set up controller", "controller", "TunnexGrant")
 		os.Exit(1)
 	}

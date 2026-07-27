@@ -62,7 +62,7 @@ var walkBodies = map[string]string{
 	// S10.3 Kubernetes gated ops (k8s:manage; each still 401s sessionless. deregister/unexpose have no body).
 	"registerk8scluster": `{"site_id":"00000000-0000-0000-0000-000000000000","name":"walk","vip_range":"100.64.0.0/16","service_cidr":"10.96.0.0/12","dns_zone":"k8s.example.com"}`,
 	"exposek8sservice":   `{"name":"api","namespace":"prod"}`,
-	"setdeviceapproval": `{"mode":"off"}`,
+	"setdeviceapproval":  `{"mode":"off"}`,
 	// S7.5.2 IdP-group sync gated ops (enterprise; each still 401s sessionless).
 	"putidpsyncconfig": `{"client_id":"x","client_secret":"y"}`,
 	"mapidpgroup":      `{"idp_group_id":"grp-walk"}`,

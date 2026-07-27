@@ -31,12 +31,12 @@ type policyPort interface {
 	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
 	DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
-	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine uuid.UUID) (sqlc.PolicyRule, error)
+	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine, actorUserID uuid.UUID, actorSystem, cause string) (sqlc.PolicyRule, error)
 	// PolicyRuleCidrWarnings returns per-rule-id the S8.7 cidr_outside_org_ranges warning (a src_kind='cidr'
 	// rule that places nowhere — no containing site with a bound gateway). Read-time derived; takes the
 	// already-fetched rules ([15] — no re-query of the rule set).
 	PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, rules []sqlc.PolicyRule) (map[uuid.UUID]bool, error)
-	DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error
+	DeletePolicyRule(ctx context.Context, orgID, ruleID, actorUserID uuid.UUID, actorSystem, cause string) error
 	ExtendGrant(ctx context.Context, orgID, ruleID uuid.UUID, newExpiresAt time.Time) (sqlc.PolicyRule, error)
 	// SetPolicyRuleEnabled toggles a rule's enabled state (F3); disabling withdraws its allow (in-hash push).
 	SetPolicyRuleEnabled(ctx context.Context, orgID, ruleID uuid.UUID, enabled bool) (sqlc.PolicyRule, error)
@@ -295,7 +295,8 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if req.Body.SrcGroupId != nil {
 		in.SrcGroupID = *req.Body.SrcGroupId
 	}
-	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, in, machineID(ctx))
+	uid, sys, cause := auditActor(ctx)
+	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, in, machineID(ctx), uid, sys, cause)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +318,8 @@ func (s apiServer) DeletePolicyRule(ctx context.Context, req api.DeletePolicyRul
 	if s.policy == nil {
 		return nil, policyEditionRequired()
 	}
-	if err := s.policy.DeletePolicyRule(ctx, req.OrgId, req.RuleId); err != nil {
+	uid, sys, cause := auditActor(ctx)
+	if err := s.policy.DeletePolicyRule(ctx, req.OrgId, req.RuleId, uid, sys, cause); err != nil {
 		return nil, err
 	}
 	return api.DeletePolicyRule204Response{Headers: api.DeletePolicyRule204ResponseHeaders{XRequestId: reqID(ctx)}}, nil
@@ -481,9 +483,9 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside, k8sVanished bool) api.PolicyRule 
 	out := api.PolicyRule{
 		Id: r.ID, OrgId: r.OrgID, SrcKind: api.PolicyRuleSrcKind(r.SrcKind),
 		DstKind: api.PolicyRuleDstKind(r.DstKind), CreatedAt: r.CreatedAt,
-		CidrOutsideOrgRanges:  cidrOutside, // S8.7 warn-not-refuse (D1); always false for non-cidr sources
-		DstK8sServiceVanished: k8sVanished, // S10.3 warn-not-refuse; the dst Service is gone (grant compiles to nothing)
-		Enabled:               !r.Disabled, // F3: positive framing — a rule is enabled unless disabled
+		CidrOutsideOrgRanges:  cidrOutside,              // S8.7 warn-not-refuse (D1); always false for non-cidr sources
+		DstK8sServiceVanished: k8sVanished,              // S10.3 warn-not-refuse; the dst Service is gone (grant compiles to nothing)
+		Enabled:               !r.Disabled,              // F3: positive framing — a rule is enabled unless disabled
 		ManagedByOperator:     r.ManagedByMachine.Valid, // S10.2 D2 cond 1: GitOps-managed → badge + warn-on-edit
 	}
 	if r.SrcGroupID.Valid {

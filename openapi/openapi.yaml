@@ -2209,6 +2209,16 @@ paths:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getK8sCluster
+      summary: Fetch one cluster by id (S10.2; org:view) — the operator's confirm-by-ID before a drift-recreate
+      tags: [k8s]
+      responses:
+        "200":
+          description: The cluster.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/K8sCluster" } } }
+        default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: deregisterK8sCluster
       summary: Deregister a cluster — full-sweep of its Services + rules (S10.3; k8s:manage)
@@ -2270,6 +2280,16 @@ paths:
     parameters:
       - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getK8sService
+      summary: Fetch one exposed Service by id (S10.2; org:view) — the operator's confirm-by-ID before a drift-recreate
+      tags: [k8s]
+      responses:
+        "200":
+          description: The exposed Service.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/K8sService" } } }
+        default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: unexposeK8sService
       summary: Unexpose a Service — full-sweep withdraws its VIP + DNS answer (S10.3; k8s:manage)

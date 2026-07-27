@@ -315,7 +315,7 @@ func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, r
 
 // managedByMachine (S10.2 Slice 3a): the operator's machine credential when a MACHINE principal creates the
 // grant (uuid.Nil for a human → NULL, inert) — the ownership marker the dashboard surfaces in Slice 4.
-func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine uuid.UUID) (sqlc.PolicyRule, error) {
+func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine, actorUserID uuid.UUID, actorSystem, cause string) (sqlc.PolicyRule, error) {
 	// SOURCE-subject shape (S7.5.4): "" defaults to "group" (back-compat). Exactly one
 	// of src_group_id / src_user_id, matching src_kind (the DB CHECK backstops it).
 	srcKind := in.SrcKind
@@ -461,12 +461,12 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		if in.ExpiresAt != nil {
 			meta["expires_at"] = in.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		return writeAudit(ctx, q, orgID, "policy.rule_created", "policy_rule", r.ID.String(), meta)
+		return writeAuditAs(ctx, q, orgID, actorUserID, actorSystem, cause, "policy.rule_created", "policy_rule", r.ID.String(), meta)
 	})
 	return r, err
 }
 
-func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID) error {
+func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID, actorUserID uuid.UUID, actorSystem, cause string) error {
 	return s.mutate(ctx, orgID, func(q *sqlc.Queries) error {
 		n, e := q.DeletePolicyRule(ctx, sqlc.DeletePolicyRuleParams{ID: ruleID, OrgID: orgID})
 		if e != nil {
@@ -475,7 +475,9 @@ func (s *Service) DeletePolicyRule(ctx context.Context, orgID, ruleID uuid.UUID)
 		if n == 0 {
 			return apierr.NotFound("rule_not_found", "rule not found")
 		}
-		return writeAudit(ctx, q, orgID, "policy.rule_deleted", "policy_rule", ruleID.String(), nil)
+		// M1b (S10.2): honor the caller's attribution — a machine (the operator revoking a grant) records
+		// actor_system=operator:<name> + the CR as cause, NOT a zero user-id. This is the walk's Leg 6 audit.
+		return writeAuditAs(ctx, q, orgID, actorUserID, actorSystem, cause, "policy.rule_deleted", "policy_rule", ruleID.String(), nil)
 	})
 }
 
@@ -924,6 +926,45 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 }
 
 // writeAudit records an actor-attributed, secret-free audit row in the same tx.
+// writeAuditAs (S10.2 M1b) audits a policy mutation with the CALLER'S attribution: a MACHINE → actor_system
+// (operator:<name>) with the cause (the CR) in metadata; a HUMAN → actor_user_id. It mirrors the k8s
+// service.audit() helper EXACTLY. Before this, the policy path had only writeAudit (actorPg → a machine's
+// UserID is uuid.Nil, stamped as a VALID ZERO user-id: the confidently-wrong attribution D3 exists to
+// prevent) and writeSystemAudit (hardcoded "policy-grants", no cause). M1b root = two audit helpers, one
+// taught the machine branch in Slice 1 and one not (guard-not-mirrored); the durable fix (one helper) is
+// registered in docs/S10.2-decisions.md.
+func writeAuditAs(ctx context.Context, q *sqlc.Queries, orgID, actorUserID uuid.UUID, actorSystem, cause, action, targetType, targetID string, meta map[string]any) error {
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	tt, tid := targetType, targetID
+	if actorSystem != "" {
+		if cause != "" {
+			meta["cause"] = cause
+		}
+		b, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		as := actorSystem
+		_, err = q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+			OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, ActorSystem: &as,
+			Action: action, TargetType: &tt, TargetID: &tid, Metadata: b,
+		})
+		return err
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
+		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
+		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: true},
+		Action:      action, TargetType: &tt, TargetID: &tid, Metadata: b,
+	})
+	return err
+}
+
 func writeAudit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, action, targetType, targetID string, meta map[string]any) error {
 	// metadata is NOT NULL — default a nil meta to an empty JSON object, never a nil
 	// []byte (which pgx sends as SQL NULL → 23502, silently 500ing every audited DELETE

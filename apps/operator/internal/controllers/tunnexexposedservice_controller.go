@@ -6,6 +6,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,8 +20,9 @@ import (
 // calling the CP — create-before-expose, expressed as a requeue, not an error.
 type TunnexExposedServiceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	CP     *cp.Client
+	Scheme   *runtime.Scheme
+	CP       *cp.Client
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=tunnex.io,resources=tunnexexposedservices,verbs=get;list;watch;update;patch
@@ -79,7 +81,21 @@ func (r *TunnexExposedServiceReconciler) Reconcile(ctx context.Context, req ctrl
 			break
 		}
 	}
-	drift := exp == nil && cr.Status.ServiceID != "" // was exposed, now gone CP-side → recreate
+	// DRIFT: find-by (cluster,ns,name) missed but we hold a ServiceID — C2 confirm-by-ID before recreating
+	// (a single-row GET can't be fooled by a spuriously-empty list). Still there → adopt (stale list, no
+	// drift, no duplicate VIP); authoritatively 404 → drift; transport failure → keep-last.
+	drift := false
+	if exp == nil && cr.Status.ServiceID != "" {
+		existing, found, err := r.CP.GetService(ctx, cr.Status.ServiceID)
+		if err != nil {
+			return ctrl.Result{}, err // keep-last
+		}
+		if found {
+			exp = &existing
+		} else {
+			drift = true
+		}
+	}
 	if exp == nil {
 		s, err := r.CP.ExposeService(ctx, clusterID, cp.ExposeServiceRequest{
 			Name: cr.Spec.Service, Namespace: cr.Spec.Namespace, Protocol: cr.Spec.Protocol,
@@ -116,7 +132,7 @@ func (r *TunnexExposedServiceReconciler) finalize(ctx context.Context, cr *tunne
 	if cr.Status.ServiceID != "" {
 		cause := crRef("tunnexexposedservice", cr.Namespace, cr.Name)
 		if err := ignoreCPNotFound(r.CP.UnexposeService(ctx, cr.Status.ServiceID, cause)); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, surfaceTeardown(ctx, r.Status(), r.Recorder, cr, &cr.Status.Conditions, err, cr.Generation)
 		}
 	}
 	controllerutil.RemoveFinalizer(cr, finalizerName)

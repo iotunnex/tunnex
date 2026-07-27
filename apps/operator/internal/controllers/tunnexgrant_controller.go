@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -22,8 +23,9 @@ import (
 // create-service-before-grant, expressed as a requeue.
 type TunnexGrantReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	CP     *cp.Client
+	Scheme   *runtime.Scheme
+	CP       *cp.Client
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=tunnex.io,resources=tunnexgrants,verbs=get;list;watch;update;patch
@@ -121,6 +123,26 @@ func (r *TunnexGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		greq.ExpiresAt = &s
 	}
 
+	// M2 idempotence-by-identity: policy rules are unnamed, so a status-write failure after a prior create
+	// would otherwise re-place a DUPLICATE grant (doubled access). Find an existing MANAGED rule matching this
+	// grant's (dst service, src subject) first; adopt it if present. Same instinct as everywhere else here.
+	rules, err := r.CP.ListPolicies(ctx)
+	if res, e, handled, persist := onCPError(&cr.Status.Conditions, err, gen); handled {
+		// A 4xx here (notably edition_required in the open build — policy list is enterprise too) is surfaced
+		// HONESTLY, same as the create path; a 5xx/transport failure keeps-last.
+		if persist {
+			if u := r.Status().Update(ctx, &cr); u != nil {
+				return ctrl.Result{}, u
+			}
+		}
+		return res, e
+	}
+	if id := matchGrant(rules, greq); id != "" {
+		cr.Status.RuleID = id
+		setReady(&cr.Status.Conditions, metav1.ConditionTrue, "Accepted", "grant placed (adopted existing)", gen)
+		return ctrl.Result{}, r.Status().Update(ctx, &cr)
+	}
+
 	rule, err := r.CP.CreateGrant(ctx, greq)
 	if res, e, handled, persist := onCPError(&cr.Status.Conditions, err, gen); handled {
 		if persist {
@@ -145,7 +167,7 @@ func (r *TunnexGrantReconciler) finalize(ctx context.Context, cr *tunnexv1.Tunne
 	if cr.Status.RuleID != "" {
 		cause := crRef("tunnexgrant", cr.Namespace, cr.Name)
 		if err := ignoreCPNotFound(r.CP.DeleteGrant(ctx, cr.Status.RuleID, cause)); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, surfaceTeardown(ctx, r.Status(), r.Recorder, cr, &cr.Status.Conditions, err, cr.Generation)
 		}
 	}
 	controllerutil.RemoveFinalizer(cr, finalizerName)

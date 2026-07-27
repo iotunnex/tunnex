@@ -150,7 +150,7 @@ func TestMutationsFirePush(t *testing.T) {
 		}
 		rid := res.ID
 		fired := len(n.calls)
-		if _, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, rid), uuid.Nil); err != nil {
+		if _, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, rid), uuid.Nil, uuid.Nil, "", ""); err != nil {
 			t.Fatal(err)
 		}
 		if len(n.calls) <= fired {
@@ -222,7 +222,7 @@ func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
 	// A PER-USER grant for bob (not a group).
 	if _, err := s.CreatePolicyRule(ctx, f.org, policyspec.RuleInput{
 		SrcKind: "user", SrcUserID: &bob, DstKind: "resource", DstResourceID: &rid,
-	}, uuid.Nil); err != nil {
+	}, uuid.Nil, uuid.Nil, "", ""); err != nil {
 		t.Fatalf("create per-user rule: %v", err)
 	}
 	if _, _, err := s.SetMode(ctx, f.org, policy.ModeEnforcing); err != nil {
@@ -321,7 +321,7 @@ func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
 
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}, uuid.Nil); err != nil {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}, uuid.Nil, uuid.Nil, "", ""); err != nil {
 		t.Fatalf("create site-src rule: %v", err)
 	}
 	var srcSiteID, srcGroupID *string
@@ -366,16 +366,16 @@ func TestK8sServiceRuleCreation(t *testing.T) {
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
 	// A grant reaching the LIVE Service is accepted.
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &svc}, uuid.Nil); err != nil {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &svc}, uuid.Nil, uuid.Nil, "", ""); err != nil {
 		t.Fatalf("a k8s_service grant to a live Service must be accepted, got %v", err)
 	}
 	// A grant to an absent Service is refused with the typed error.
 	bogus := uuid.New()
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &bogus}, uuid.Nil); err == nil || !strings.Contains(err.Error(), "k8s_service_not_found") {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &bogus}, uuid.Nil, uuid.Nil, "", ""); err == nil || !strings.Contains(err.Error(), "k8s_service_not_found") {
 		t.Fatalf("a k8s_service grant to an absent Service must refuse (k8s_service_not_found), got %v", err)
 	}
 	// dst_kind=k8s_service with NO dst_k8s_service_id is a shape error.
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service"}, uuid.Nil); err == nil || !strings.Contains(err.Error(), "dst_k8s_service_id") {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service"}, uuid.Nil, uuid.Nil, "", ""); err == nil || !strings.Contains(err.Error(), "dst_k8s_service_id") {
 		t.Fatalf("dst_kind=k8s_service without an id must refuse, got %v", err)
 	}
 }
@@ -522,7 +522,7 @@ func TestRegrantAfterLapseSucceeds(t *testing.T) {
 	past := time.Now().Add(time.Hour)
 	rid, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
 		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &past,
-	}, uuid.Nil)
+	}, uuid.Nil, uuid.Nil, "", "")
 	if err != nil {
 		t.Fatalf("create temp grant: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestRegrantAfterLapseSucceeds(t *testing.T) {
 	future := time.Now().Add(2 * time.Hour)
 	if _, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
 		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &future,
-	}, uuid.Nil); err != nil {
+	}, uuid.Nil, uuid.Nil, "", ""); err != nil {
 		t.Fatalf("re-grant after lapse must SUCCEED (delete-on-sweep, no linger dead-end), got %v", err)
 	}
 }
@@ -662,11 +662,11 @@ func TestAuditedDeletesPersistMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, r.ID), uuid.Nil)
+		rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, r.ID), uuid.Nil, uuid.Nil, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.DeletePolicyRule(f.ctx, f.org, rule.ID); err != nil {
+		if err := s.DeletePolicyRule(f.ctx, f.org, rule.ID, uuid.Nil, "", ""); err != nil {
 			t.Fatalf("audited delete errored (nil-meta NOT NULL bug): %v", err)
 		}
 		assertAudit(t, f, "policy.rule_deleted", rule.ID.String())
@@ -693,7 +693,7 @@ func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
 		t.Fatalf("resource: %v", e)
 	}
 	cidr := "172.31.17.64/32"
-	rule, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil)
+	rule, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil, uuid.Nil, "", "")
 	if e != nil {
 		t.Fatalf("cidr rule: %v", e)
 	}
@@ -745,7 +745,7 @@ func TestSetPolicyRuleEnabledNoOpNoPushNoAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resource: %v", err)
 	}
-	rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, res.ID), uuid.Nil)
+	rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, res.ID), uuid.Nil, uuid.Nil, "", "")
 	if err != nil {
 		t.Fatalf("rule: %v", err)
 	}
@@ -806,7 +806,7 @@ func TestGrantOwnershipMarker(t *testing.T) {
 	cidr := "172.31.17.64/32"
 
 	// MACHINE-created grant → marker set.
-	rm, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, mid)
+	rm, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, mid, uuid.Nil, "", "")
 	if e != nil {
 		t.Fatalf("machine rule: %v", e)
 	}
@@ -819,7 +819,7 @@ func TestGrantOwnershipMarker(t *testing.T) {
 	}
 
 	// HUMAN-created (uuid.Nil) → NULL.
-	rh, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil)
+	rh, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil, uuid.Nil, "", "")
 	if e != nil {
 		t.Fatalf("human rule: %v", e)
 	}
@@ -829,5 +829,61 @@ func TestGrantOwnershipMarker(t *testing.T) {
 	}
 	if mbh != nil {
 		t.Fatalf("human-created grant must have managed_by_machine NULL, got %v", *mbh)
+	}
+}
+
+// TestPolicyMachineAudits — S10.2 M1b: the policy audit path is now machine-aware (writeAuditAs). A machine's
+// grant create AND delete attribute actor_system=operator:<name> + cause, with actor_user_id NULL. The DELETE
+// half is the regression catch: before M1b, DeletePolicyRule audited via actorPg, which stamps a machine's
+// uuid.Nil UserID as a VALID ZERO user-id (actor_user_id NOT NULL) — the confidently-wrong attribution D3
+// exists to prevent, and the walk's Leg 6 audit row. This red asserts actor_user_id IS NULL, catching it.
+func TestPolicyMachineAudits(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	svc := policy.NewService(pool)
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')`, org, "aud-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	if e != nil {
+		t.Fatalf("resource: %v", e)
+	}
+	cidr := "172.31.9.0/32"
+
+	// MACHINE create.
+	rm, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID},
+		uuid.Nil, uuid.Nil, "operator:gitops", "tunnexgrant:default/g")
+	if e != nil {
+		t.Fatalf("machine create: %v", e)
+	}
+	var sys, usr, cause *string
+	if err := pool.QueryRow(ctx,
+		`SELECT actor_system, actor_user_id::text, metadata->>'cause' FROM audit_logs
+		   WHERE org_id=$1 AND action='policy.rule_created' AND target_id=$2`, org, rm.ID.String()).
+		Scan(&sys, &usr, &cause); err != nil {
+		t.Fatal(err)
+	}
+	if sys == nil || *sys != "operator:gitops" || usr != nil || cause == nil || *cause != "tunnexgrant:default/g" {
+		t.Fatalf("machine create must audit actor_system+cause, not a user; got sys=%v usr=%v cause=%v", sys, usr, cause)
+	}
+
+	// MACHINE delete — the regression catch: actor_user_id MUST be NULL (not a zero uuid).
+	if err := svc.DeletePolicyRule(ctx, org, rm.ID, uuid.Nil, "operator:gitops", "tunnexgrant:default/g"); err != nil {
+		t.Fatal(err)
+	}
+	var dsys, dusr *string
+	if err := pool.QueryRow(ctx,
+		`SELECT actor_system, actor_user_id::text FROM audit_logs
+		   WHERE org_id=$1 AND action='policy.rule_deleted' AND target_id=$2`, org, rm.ID.String()).
+		Scan(&dsys, &dusr); err != nil {
+		t.Fatal(err)
+	}
+	if dsys == nil || *dsys != "operator:gitops" {
+		t.Fatalf("machine grant-delete must attribute actor_system, got %v", dsys)
+	}
+	if dusr != nil { // THE NEGATIVE — a machine delete must NOT stamp a (zero) user id
+		t.Fatalf("machine grant-delete must have actor_user_id NULL, got %v (the M1b confidently-wrong attribution)", *dusr)
 	}
 }

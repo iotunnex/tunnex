@@ -17,6 +17,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tunnexv1 "github.com/tunnexio/tunnex/apps/operator/api/v1alpha1"
 	"github.com/tunnexio/tunnex/apps/operator/internal/cp"
@@ -333,6 +334,8 @@ func TestGrantResolvesUserSubjectAndCreates(t *testing.T) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/members"):
 			json.NewEncoder(w).Encode([]map[string]string{{"user_id": "u-1", "email": "alice@acme.com"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/policies"):
+			json.NewEncoder(w).Encode([]map[string]any{}) // M2 idempotence: no existing rule → create
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/policies"):
 			b, _ := io.ReadAll(r.Body)
 			json.Unmarshal(b, &body)
@@ -437,8 +440,11 @@ func TestClusterDriftRecreatesAndSurfaces(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/sites"):
 			json.NewEncoder(w).Encode([]map[string]string{{"id": "site-1", "name": "edge"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters/stale-1"):
+			w.WriteHeader(404) // C2 confirm-by-ID: authoritatively GONE → drift is real
+			w.Write([]byte(`{"error":{"code":"cluster_not_found","message":"gone"}}`))
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
-			json.NewEncoder(w).Encode([]map[string]string{}) // GONE — deleted out-of-band
+			json.NewEncoder(w).Encode([]map[string]string{}) // find-by-name misses
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
 			json.NewEncoder(w).Encode(map[string]string{"id": "clu-2", "dns_vip": "100.64.0.53"})
 		default:
@@ -463,5 +469,135 @@ func TestClusterDriftRecreatesAndSurfaces(t *testing.T) {
 	d := apimeta.FindStatusCondition(got.Status.Conditions, condDrift)
 	if d == nil || d.Status != metav1.ConditionTrue || d.Reason != "RecreatedFromCR" {
 		t.Fatalf("drift must SURFACE in status (D2 cond 3), got %+v", d)
+	}
+}
+
+// ── C2: confirm-by-ID stops a false drift-recreate (the duplicate the reviewer feared) ──────────────────
+
+func TestClusterDriftConfirmPreventsFalseRecreate(t *testing.T) {
+	var posted bool
+	cp := testCP(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sites"):
+			json.NewEncoder(w).Encode([]map[string]string{{"id": "site-1", "name": "edge"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters/live-1"):
+			json.NewEncoder(w).Encode(map[string]string{"id": "live-1", "dns_vip": "100.64.0.53"}) // STILL EXISTS
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
+			json.NewEncoder(w).Encode([]map[string]string{}) // spuriously/stale empty — find-by-name misses
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
+			posted = true
+			json.NewEncoder(w).Encode(map[string]string{"id": "DUP"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	cr := &tunnexv1.TunnexCluster{
+		ObjectMeta: managedMeta("ns", "c"),
+		Spec:       tunnexv1.TunnexClusterSpec{Site: "edge", Name: "prod", VIPRange: "100.64.0.0/16", ServiceCIDR: "10.96.0.0/12", DNSZone: "k8s.acme.com"},
+		Status:     tunnexv1.TunnexClusterStatus{ClusterID: "live-1"},
+	}
+	k := fakeK8s(t, cr)
+	r := &TunnexClusterReconciler{Client: k, CP: cp}
+	if _, err := r.Reconcile(context.Background(), req("ns", "c")); err != nil {
+		t.Fatal(err)
+	}
+	if posted {
+		t.Fatal("confirm-by-ID said the cluster still exists — the operator must NOT recreate a duplicate")
+	}
+	var got tunnexv1.TunnexCluster
+	k.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "c"}, &got)
+	if got.Status.ClusterID != "live-1" {
+		t.Fatalf("must adopt the live cluster, got %q", got.Status.ClusterID)
+	}
+	if d := apimeta.FindStatusCondition(got.Status.Conditions, condDrift); d == nil || d.Status != metav1.ConditionFalse {
+		t.Fatalf("a confirmed-live cluster is NOT drift, got %+v", d)
+	}
+}
+
+// ── H1: a blocked teardown surfaces (condition + held finalizer), never silently wedges ─────────────────
+
+func TestFinalizeTeardownBlockedSurfaces(t *testing.T) {
+	cp := testCP(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "db down", 500) // persistent failure on the delete
+	})
+	cr := &tunnexv1.TunnexCluster{ObjectMeta: managedMeta("ns", "c"), Status: tunnexv1.TunnexClusterStatus{ClusterID: "clu-1"}}
+	k := fakeK8s(t, cr)
+	if err := k.Delete(context.Background(), cr); err != nil {
+		t.Fatal(err)
+	}
+	r := &TunnexClusterReconciler{Client: k, CP: cp} // Recorder nil — surfaceTeardown must be nil-safe
+	_, err := r.Reconcile(context.Background(), req("ns", "c"))
+	if err == nil {
+		t.Fatal("a blocked teardown must return an error (finalizer retries)")
+	}
+	var got tunnexv1.TunnexCluster
+	if e := k.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "c"}, &got); e != nil {
+		t.Fatalf("CR must still exist (finalizer HELD, fail-closed), got %v", e)
+	}
+	if !controllerutil.ContainsFinalizer(&got, finalizerName) {
+		t.Fatal("the finalizer must be HELD when teardown is blocked (never a dangling CP object)")
+	}
+	if c := apimeta.FindStatusCondition(got.Status.Conditions, condTeardownBlocked); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("the blocked teardown must SURFACE in status, got %+v", c)
+	}
+}
+
+// ── M2: an existing managed rule is ADOPTED, not duplicated ─────────────────────────────────────────────
+
+func TestGrantAdoptsExistingRule(t *testing.T) {
+	svc := &tunnexv1.TunnexExposedService{
+		ObjectMeta: managedMeta("ns", "api"),
+		Status:     tunnexv1.TunnexExposedServiceStatus{ServiceID: "svc-1"},
+	}
+	grant := &tunnexv1.TunnexGrant{
+		ObjectMeta: managedMeta("ns", "g"),
+		Spec:       tunnexv1.TunnexGrantSpec{SubjectKind: "cidr", Subject: "10.0.0.0/24", Service: "api"},
+	}
+	var posted bool
+	cp := testCP(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/policies"):
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "rule-9", "managed_by_operator": true, "dst_kind": "k8s_service",
+				"dst_k8s_service_id": "svc-1", "src_kind": "cidr", "src_cidr": "10.0.0.0/24",
+			}})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/policies"):
+			posted = true
+			json.NewEncoder(w).Encode(map[string]string{"id": "DUP"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	k := fakeK8s(t, svc, grant)
+	r := &TunnexGrantReconciler{Client: k, CP: cp}
+	if _, err := r.Reconcile(context.Background(), req("ns", "g")); err != nil {
+		t.Fatal(err)
+	}
+	if posted {
+		t.Fatal("an identical managed rule exists — the operator must ADOPT it, not create a duplicate")
+	}
+	var got tunnexv1.TunnexGrant
+	k.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "g"}, &got)
+	if got.Status.RuleID != "rule-9" {
+		t.Fatalf("must adopt the existing rule id, got %q", got.Status.RuleID)
+	}
+}
+
+func TestMatchGrant(t *testing.T) {
+	svc, other := "svc-1", "svc-2"
+	cidr := "10.0.0.0/24"
+	rules := []cp.Rule{
+		{ID: "unmanaged", ManagedByOperator: false, DstKind: "k8s_service", DstK8sServiceID: &svc, SrcKind: "cidr", SrcCidr: &cidr},
+		{ID: "othersvc", ManagedByOperator: true, DstKind: "k8s_service", DstK8sServiceID: &other, SrcKind: "cidr", SrcCidr: &cidr},
+		{ID: "match", ManagedByOperator: true, DstKind: "k8s_service", DstK8sServiceID: &svc, SrcKind: "cidr", SrcCidr: &cidr},
+	}
+	greq := cp.CreateGrantRequest{SrcKind: "cidr", SrcCidr: &cidr, DstKind: "k8s_service", DstK8sServiceID: &svc}
+	if id := matchGrant(rules, greq); id != "match" {
+		t.Fatalf("must match only the managed same-identity rule, got %q", id)
+	}
+	// a different subject must NOT match (no accidental adopt)
+	otherCidr := "10.9.9.0/24"
+	if id := matchGrant(rules, cp.CreateGrantRequest{SrcKind: "cidr", SrcCidr: &otherCidr, DstKind: "k8s_service", DstK8sServiceID: &svc}); id != "" {
+		t.Fatalf("a different subject must not adopt, got %q", id)
 	}
 }

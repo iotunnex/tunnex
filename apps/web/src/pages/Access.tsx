@@ -45,10 +45,11 @@ import {
   resPortsValid,
   activeMembers,
   canEditRuleInModal,
-  MANAGED_BADGE,
+  grantControls,
   managedGrantWarning,
   type LoadState,
 } from "../lib/policyview";
+import { ManagedBadge } from "../components/ManagedBadge";
 import {
   POSTURE_HONESTY_LINE,
   buildOsVersionParam,
@@ -408,9 +409,7 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                     <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
                     <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
                     {/* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are withheld below. */}
-                    {row.managedByOperator && (
-                      <span className="ml-2 rounded-sm bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{MANAGED_BADGE}</span>
-                    )}
+                    {row.managedByOperator && <ManagedBadge />}
                     {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
                     {!r.enabled && <span className="ml-2 rounded bg-slate-600/50 px-1.5 py-0.5 text-xs text-slate-300">disabled</span>}
                     {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim — a CIDR
@@ -434,10 +433,10 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                     )}
                   </span>
                   {canManage &&
-                    (row.managedByOperator ? (
+                    (grantControls(row).withheld ? (
                       // D2 cond 1: withhold EVERY dashboard mutation (extend/edit/disable/delete) on a
                       // GitOps-managed grant — warn at the point of editing, never silently revert on reconcile.
-                      <span className="text-xs text-amber-400/90" title={managedGrantWarning()}>edit the CR</span>
+                      <span className="text-xs text-amber-400/90" title={managedGrantWarning()} aria-label={managedGrantWarning()}>edit the CR</span>
                     ) : (
                       <span className="flex gap-2">
                         {exp.extendable && (

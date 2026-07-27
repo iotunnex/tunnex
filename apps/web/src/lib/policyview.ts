@@ -483,6 +483,13 @@ export function managedGrantWarning(): string {
   return "This grant is managed by the GitOps operator — edit its TunnexGrant CR, not the dashboard.";
 }
 
+// grantControls (M3) is the PURE, unit-pinned withhold decision for a grant row: `withheld` true means every
+// dashboard mutation (extend/edit/disable/enable/delete) is withheld — edit the CR. Extracted from inline JSX
+// so re-exposing a mutation on a managed grant fails a test, not just review.
+export function grantControls(row: Pick<RuleRow, "managedByOperator">): { withheld: boolean } {
+  return { withheld: row.managedByOperator };
+}
+
 // canEditRuleInModal: the rule-EDIT (swap) modal only rewrites group/resource grants with a group/user
 // source (create-then-delete). A rule whose DST is a site (S8.1) OR whose SRC is a site (S8.2) must NOT be
 // editable there — editing would silently rewrite it into a group/resource rule, a policy MUTATION

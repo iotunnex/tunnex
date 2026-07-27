@@ -1994,6 +1994,9 @@ type ClientInterface interface {
 	// DeregisterK8sCluster request
 	DeregisterK8sCluster(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetK8sCluster request
+	GetK8sCluster(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListK8sServices request
 	ListK8sServices(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2007,6 +2010,9 @@ type ClientInterface interface {
 
 	// UnexposeK8sService request
 	UnexposeK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetK8sService request
+	GetK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListMachineCredentials request
 	ListMachineCredentials(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3335,6 +3341,18 @@ func (c *Client) DeregisterK8sCluster(ctx context.Context, orgId openapi_types.U
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetK8sCluster(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetK8sClusterRequest(c.Server, orgId, clusterId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListK8sServices(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListK8sServicesRequest(c.Server, orgId, clusterId)
 	if err != nil {
@@ -3385,6 +3403,18 @@ func (c *Client) ListK8sServicesForOrg(ctx context.Context, orgId openapi_types.
 
 func (c *Client) UnexposeK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUnexposeK8sServiceRequest(c.Server, orgId, serviceId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetK8sServiceRequest(c.Server, orgId, serviceId)
 	if err != nil {
 		return nil, err
 	}
@@ -7031,6 +7061,47 @@ func NewDeregisterK8sClusterRequest(server string, orgId openapi_types.UUID, clu
 	return req, nil
 }
 
+// NewGetK8sClusterRequest generates requests for GetK8sCluster
+func NewGetK8sClusterRequest(server string, orgId openapi_types.UUID, clusterId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "clusterId", runtime.ParamLocationPath, clusterId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/k8s/clusters/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListK8sServicesRequest generates requests for ListK8sServices
 func NewListK8sServicesRequest(server string, orgId openapi_types.UUID, clusterId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -7194,6 +7265,47 @@ func NewUnexposeK8sServiceRequest(server string, orgId openapi_types.UUID, servi
 	}
 
 	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetK8sServiceRequest generates requests for GetK8sService
+func NewGetK8sServiceRequest(server string, orgId openapi_types.UUID, serviceId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "serviceId", runtime.ParamLocationPath, serviceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/k8s/services/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9601,6 +9713,9 @@ type ClientWithResponsesInterface interface {
 	// DeregisterK8sClusterWithResponse request
 	DeregisterK8sClusterWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeregisterK8sClusterResponse, error)
 
+	// GetK8sClusterWithResponse request
+	GetK8sClusterWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetK8sClusterResponse, error)
+
 	// ListK8sServicesWithResponse request
 	ListK8sServicesWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListK8sServicesResponse, error)
 
@@ -9614,6 +9729,9 @@ type ClientWithResponsesInterface interface {
 
 	// UnexposeK8sServiceWithResponse request
 	UnexposeK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*UnexposeK8sServiceResponse, error)
+
+	// GetK8sServiceWithResponse request
+	GetK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetK8sServiceResponse, error)
 
 	// ListMachineCredentialsWithResponse request
 	ListMachineCredentialsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMachineCredentialsResponse, error)
@@ -11282,6 +11400,29 @@ func (r DeregisterK8sClusterResponse) StatusCode() int {
 	return 0
 }
 
+type GetK8sClusterResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *K8sCluster
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetK8sClusterResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetK8sClusterResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListK8sServicesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11367,6 +11508,29 @@ func (r UnexposeK8sServiceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UnexposeK8sServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetK8sServiceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *K8sService
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetK8sServiceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetK8sServiceResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13286,6 +13450,15 @@ func (c *ClientWithResponses) DeregisterK8sClusterWithResponse(ctx context.Conte
 	return ParseDeregisterK8sClusterResponse(rsp)
 }
 
+// GetK8sClusterWithResponse request returning *GetK8sClusterResponse
+func (c *ClientWithResponses) GetK8sClusterWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetK8sClusterResponse, error) {
+	rsp, err := c.GetK8sCluster(ctx, orgId, clusterId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetK8sClusterResponse(rsp)
+}
+
 // ListK8sServicesWithResponse request returning *ListK8sServicesResponse
 func (c *ClientWithResponses) ListK8sServicesWithResponse(ctx context.Context, orgId openapi_types.UUID, clusterId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListK8sServicesResponse, error) {
 	rsp, err := c.ListK8sServices(ctx, orgId, clusterId, reqEditors...)
@@ -13328,6 +13501,15 @@ func (c *ClientWithResponses) UnexposeK8sServiceWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseUnexposeK8sServiceResponse(rsp)
+}
+
+// GetK8sServiceWithResponse request returning *GetK8sServiceResponse
+func (c *ClientWithResponses) GetK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetK8sServiceResponse, error) {
+	rsp, err := c.GetK8sService(ctx, orgId, serviceId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetK8sServiceResponse(rsp)
 }
 
 // ListMachineCredentialsWithResponse request returning *ListMachineCredentialsResponse
@@ -15970,6 +16152,39 @@ func ParseDeregisterK8sClusterResponse(rsp *http.Response) (*DeregisterK8sCluste
 	return response, nil
 }
 
+// ParseGetK8sClusterResponse parses an HTTP response from a GetK8sClusterWithResponse call
+func ParseGetK8sClusterResponse(rsp *http.Response) (*GetK8sClusterResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetK8sClusterResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest K8sCluster
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListK8sServicesResponse parses an HTTP response from a ListK8sServicesWithResponse call
 func ParseListK8sServicesResponse(rsp *http.Response) (*ListK8sServicesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -16083,6 +16298,39 @@ func ParseUnexposeK8sServiceResponse(rsp *http.Response) (*UnexposeK8sServiceRes
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetK8sServiceResponse parses an HTTP response from a GetK8sServiceWithResponse call
+func ParseGetK8sServiceResponse(rsp *http.Response) (*GetK8sServiceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetK8sServiceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest K8sService
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

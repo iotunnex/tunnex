@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -28,6 +30,48 @@ func ignoreCPNotFound(err error) error {
 		return nil
 	}
 	return err
+}
+
+// surfaceTeardown (S10.2 H1) makes a blocked teardown VISIBLE instead of a silently-wedged CR: it records the
+// TeardownBlocked condition (naming the CP code/message) + a Warning Event, then RETURNS err so the finalizer
+// stays held and controller-runtime retries. Fail-closed is correct (never a dangling CP object); the defect
+// this fixes is only the silence — an admin staring at a CR that won't delete with no reason anywhere.
+func surfaceTeardown(ctx context.Context, sw client.StatusWriter, rec record.EventRecorder, obj client.Object, conds *[]metav1.Condition, err error, gen int64) error {
+	setTeardownBlocked(conds, err, gen)
+	if rec != nil {
+		rec.Event(obj, "Warning", "TeardownBlocked", err.Error())
+	}
+	_ = sw.Update(ctx, obj) // best-effort surface; the ORIGINAL err is returned so the finalizer retries
+	return err
+}
+
+// matchGrant (S10.2 M2) finds an existing MANAGED rule with the SAME identity as greq — same destination
+// service and same source subject — returning its id, else "". Idempotence-by-identity: a re-reconcile after
+// a status-write failure adopts the rule it already created instead of placing a duplicate. (Two CRs
+// declaring the identical grant would adopt the same rule — a genuine duplicate declaration; noted, not
+// prevented. Expiry is not part of the identity: a re-create carries the same greq, so src+dst suffices.)
+func matchGrant(rules []cp.Rule, greq cp.CreateGrantRequest) string {
+	for i := range rules {
+		r := &rules[i]
+		if !r.ManagedByOperator || r.DstKind != greq.DstKind || !ptrEq(r.DstK8sServiceID, greq.DstK8sServiceID) {
+			continue
+		}
+		if r.SrcKind != greq.SrcKind {
+			continue
+		}
+		if ptrEq(r.SrcUserID, greq.SrcUserID) && ptrEq(r.SrcGroupID, greq.SrcGroupID) &&
+			ptrEq(r.SrcSiteID, greq.SrcSiteID) && ptrEq(r.SrcCidr, greq.SrcCidr) {
+			return r.ID
+		}
+	}
+	return ""
+}
+
+func ptrEq(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // ensureMeta stamps the ownership label AND the finalizer, reporting whether either changed. Called only on a

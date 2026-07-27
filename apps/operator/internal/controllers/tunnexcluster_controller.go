@@ -5,6 +5,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,8 +20,9 @@ import (
 // requeueing until its dependency's status is populated (no topological sort).
 type TunnexClusterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	CP     *cp.Client
+	Scheme   *runtime.Scheme
+	CP       *cp.Client
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=tunnex.io,resources=tunnexclusters,verbs=get;list;watch;update;patch
@@ -68,9 +70,22 @@ func (r *TunnexClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			break
 		}
 	}
-	// DRIFT: we believed the cluster existed (status.ClusterID set) but the CP no longer has it — deleted
-	// out-of-band. The CR is the one truth about intent, so we recreate below and surface the correction.
-	drift := reg == nil && cr.Status.ClusterID != ""
+	// DRIFT: find-by-name missed but we hold a ClusterID. C2 confirm-by-ID before recreating — a single-row
+	// GET can't be fooled by a spuriously-empty LIST the way find-by-name can. If it's still there, the list
+	// was stale: adopt it, no drift, no duplicate. If authoritatively 404, it was deleted out-of-band → drift
+	// (recreate from the CR, the one truth about intent). A transport failure keeps-last (never a false gone).
+	drift := false
+	if reg == nil && cr.Status.ClusterID != "" {
+		existing, found, err := r.CP.GetCluster(ctx, cr.Status.ClusterID)
+		if err != nil {
+			return ctrl.Result{}, err // keep-last
+		}
+		if found {
+			reg = &existing
+		} else {
+			drift = true
+		}
+	}
 	if reg == nil {
 		c, err := r.CP.RegisterCluster(ctx, cp.RegisterClusterRequest{
 			SiteID: siteID, Name: cr.Spec.Name, VipRange: cr.Spec.VIPRange,
@@ -109,7 +124,7 @@ func (r *TunnexClusterReconciler) finalize(ctx context.Context, cr *tunnexv1.Tun
 	if cr.Status.ClusterID != "" {
 		cause := crRef("tunnexcluster", cr.Namespace, cr.Name)
 		if err := ignoreCPNotFound(r.CP.DeregisterCluster(ctx, cr.Status.ClusterID, cause)); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, surfaceTeardown(ctx, r.Status(), r.Recorder, cr, &cr.Status.Conditions, err, cr.Generation)
 		}
 	}
 	controllerutil.RemoveFinalizer(cr, finalizerName)

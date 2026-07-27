@@ -129,7 +129,7 @@ func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actorUserID
 // in Slice 4; recorded here so that surface never retrofits live rows. NOTE (finding, held): the create
 // path still does NOT write an audit row — the additive-creates-unaudited gap from the S10.3 review; the
 // marker is a data property, not an audit, and closing the audit gap is its own disposition.
-func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix, dnsZone string, managedByMachine uuid.UUID) (sqlc.K8sCluster, error) {
+func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix, dnsZone string, managedByMachine, actorUserID uuid.UUID, actorSystem, cause string) (sqlc.K8sCluster, error) {
 	var out sqlc.K8sCluster
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// The cluster name becomes a hostname label (<service>.<namespace>.svc.<name>.<zone>), so it must be
@@ -208,7 +208,10 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 			return e
 		}
 		out = c
-		return nil
+		// M1 (S10.2): audit the create — a network-reaching cluster ENTERING the fabric. Branches machine
+		// (actor_system=operator:<name> + cause=the CR) vs human (actor_user_id), the same seam as the delete.
+		return s.audit(ctx, q, orgID, actorUserID, actorSystem, cause, "k8s_cluster", c.ID.String(), "k8s.cluster_registered",
+			map[string]any{"name": name, "vip_range": vipRange.Masked().String(), "dns_zone": dnsZone})
 	})
 	return out, err
 }
@@ -222,7 +225,7 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 // a deleted Service vanishes from the resolution set (its grant compiles to nothing), and the reused VIP
 // belongs unambiguously to the NEW Service's identity. Identity-resolution is therefore sufficient — no
 // VIP quarantine is needed. (The reassignment-trap red lives in Slice 2, where the resolution is built.)
-func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID, name, namespace, protocol string, portLow, portHigh *int32, managedByMachine uuid.UUID) (sqlc.K8sService, error) {
+func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID, name, namespace, protocol string, portLow, portHigh *int32, managedByMachine, actorUserID uuid.UUID, actorSystem, cause string) (sqlc.K8sService, error) {
 	if protocol == "" {
 		protocol = "any"
 	}
@@ -278,7 +281,9 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 			return e
 		}
 		out = svc
-		return nil
+		// M1 (S10.2): audit the exposure — a Service ENTERING the fabric (the mirror of the unexpose audit).
+		return s.audit(ctx, q, orgID, actorUserID, actorSystem, cause, "k8s_service", svc.ID.String(), "k8s.service_exposed",
+			map[string]any{"namespace": namespace, "name": name, "vip": vip.String()})
 	})
 	return out, err
 }
@@ -305,6 +310,16 @@ func (s *Service) GetCluster(ctx context.Context, orgID, clusterID uuid.UUID) (s
 		return sqlc.K8sCluster{}, apierr.NotFound("cluster_not_found", "no such cluster in this organization")
 	}
 	return c, nil
+}
+
+// GetService fetches one exposed Service by id (S10.2 C2): the operator's AUTHORITATIVE confirm-by-ID before a
+// drift-recreate — a single-row lookup can't be fooled by a spurious empty LIST the way find-by-name can.
+func (s *Service) GetService(ctx context.Context, orgID, serviceID uuid.UUID) (sqlc.K8sService, error) {
+	svc, err := s.q.GetK8sService(ctx, sqlc.GetK8sServiceParams{OrgID: orgID, ID: serviceID})
+	if err != nil {
+		return sqlc.K8sService{}, apierr.NotFound("service_not_found", "no such exposed Service in this organization")
+	}
+	return svc, nil
 }
 
 // LiveServiceIDs returns the set of LIVE (not unexposed) Service IDs in the org — the read-time input for

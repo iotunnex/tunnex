@@ -55,6 +55,14 @@ export function managedEditWarning(kind: "cluster" | "Service"): string {
   return `This ${kind} is managed by the GitOps operator — edit its CR, not the dashboard.`;
 }
 
+// objectControls (M3) is the PURE, unit-pinned withhold decision for a cluster/Service: `withheld` true means
+// the dashboard MUST NOT offer the destructive control (Deregister/Unexpose) — edit the CR instead. Extracted
+// out of inline JSX so a refactor that re-exposes the control fails a test, not just review (the D2 ruling's
+// worst case: an admin's dashboard edit silently reverted on the next reconcile).
+export function objectControls(managedByOperator: boolean): { withheld: boolean } {
+  return { withheld: managedByOperator };
+}
+
 // portLabel projects the wire port_low/port_high onto a human range. null/absent both = "any".
 export function portLabel(portLow: number | null | undefined, portHigh: number | null | undefined): string {
   if (portLow == null && portHigh == null) return "any";
