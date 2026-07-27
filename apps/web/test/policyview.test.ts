@@ -524,3 +524,18 @@ describe("disableConfirmText (F3)", () => {
     expect(t).not.toMatch(/\{|\}|placeholder|undefined/); // never a generic/templated leftover
   });
 });
+
+import { resPortsValid } from "../src/lib/policyview";
+
+describe("resPortsValid (Feature 1 — resource port scope, client UX gate; server authoritative)", () => {
+  it("both blank = all ports (valid)", () => expect(resPortsValid("", "")).toBe(true));
+  it("a high without a low is invalid", () => expect(resPortsValid("", "80")).toBe(false));
+  it("a low alone = a single port (valid)", () => expect(resPortsValid("80", "")).toBe(true));
+  it("low <= high range is valid", () => expect(resPortsValid("8000", "8100")).toBe(true));
+  it("high < low is invalid", () => expect(resPortsValid("8100", "8000")).toBe(false));
+  it("out of range 0 / 65536 invalid", () => {
+    expect(resPortsValid("0", "")).toBe(false);
+    expect(resPortsValid("1", "65536")).toBe(false);
+  });
+  it("non-integer invalid", () => expect(resPortsValid("80.5", "")).toBe(false));
+});

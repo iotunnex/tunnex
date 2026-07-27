@@ -484,3 +484,19 @@ export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }
 export function disableConfirmText(srcLabel: string, dstLabel: string): string {
   return `Disable ${srcLabel} → ${dstLabel}? Traffic matching this rule stops immediately.`;
 }
+
+// resPortsValid (Feature 1 — port-scoped resources) — client-side UX gate for the resource form's OPTIONAL
+// port pair. The server (createResource) is the AUTHORITATIVE validator (both-or-neither, low<=high, range);
+// this mirrors it for immediate feedback ONLY (one-validator — never a second source of truth). Rules: both
+// empty = all ports (valid); a HIGH without a LOW is invalid; a LOW alone = a single port; both = a range
+// (low<=high). Each port must be an integer in 1..65535.
+export function resPortsValid(loStr: string, hiStr: string): boolean {
+  const lo = loStr.trim();
+  const hi = hiStr.trim();
+  if (lo === "") return hi === "";
+  const l = Number(lo);
+  if (!Number.isInteger(l) || l < 1 || l > 65535) return false;
+  if (hi === "") return true;
+  const h = Number(hi);
+  return Number.isInteger(h) && h >= 1 && h <= 65535 && h >= l;
+}

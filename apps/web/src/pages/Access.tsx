@@ -22,6 +22,7 @@ import {
   type CreatePolicyRuleRequest,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { portLabel } from "../lib/k8sview";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import { LoadRetry } from "../components/LoadRetry";
 import {
@@ -41,6 +42,7 @@ import {
   defaultSrcKind,
   defaultDstKind,
   extendErrorCopy,
+  resPortsValid,
   activeMembers,
   canEditRuleInModal,
   type LoadState,
@@ -846,7 +848,11 @@ function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId
   const [resourcesError, setResourcesError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [newGroup, setNewGroup] = useState("");
-  const [newRes, setNewRes] = useState({ name: "", cidr: "", protocol: "any" as "any" | "tcp" | "udp" });
+  // Feature 1 (port-scoped resources): the resource MODEL + compiler + API already carry protocol + ports
+  // end-to-end (resources.port_low/high, compiler.go:417-419); only this form omitted the port inputs — so a
+  // rule targeting a resource could only ever grant ALL ports. Ports are OPTIONAL (empty = all ports for the
+  // protocol); the server (createResource) is the authoritative validator (both-or-neither, low<=high).
+  const [newRes, setNewRes] = useState({ name: "", cidr: "", protocol: "any" as "any" | "tcp" | "udp", portLow: "", portHigh: "" });
 
   const load = useCallback(async () => {
     const [gr, resr] = await Promise.all([
@@ -884,13 +890,22 @@ function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId
     onSubjectsChanged();
   }
   async function addResource() {
-    if (!newRes.name.trim() || !newRes.cidr.trim()) return;
+    if (!newRes.name.trim() || !newRes.cidr.trim() || !resPortsValid(newRes.portLow, newRes.portHigh)) return;
+    // Both-or-neither: a low with no high is a SINGLE port (high := low); both empty = all ports (omit).
+    const loStr = newRes.portLow.trim();
+    const hiStr = newRes.portHigh.trim();
+    let port_low: number | undefined;
+    let port_high: number | undefined;
+    if (loStr !== "") {
+      port_low = Number(loStr);
+      port_high = hiStr === "" ? port_low : Number(hiStr);
+    }
     const { error } = await api.POST("/api/v1/organizations/{orgId}/resources", {
       params: { path: { orgId } },
-      body: { name: newRes.name.trim(), cidr: newRes.cidr.trim(), protocol: newRes.protocol },
+      body: { name: newRes.name.trim(), cidr: newRes.cidr.trim(), protocol: newRes.protocol, port_low, port_high },
     });
     if (error) return setErr(apiErrorMessage(error, "Could not create the resource."));
-    setNewRes({ name: "", cidr: "", protocol: "any" });
+    setNewRes({ name: "", cidr: "", protocol: "any", portLow: "", portHigh: "" });
     load();
     onSubjectsChanged(); // resources are rule destinations — keep RulesSection's copy fresh too
   }
@@ -949,7 +964,7 @@ function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId
                 {resources.map((r) => (
                   <li key={r.id} className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
                     <span>
-                      {r.name} <span className="text-slate-500">{r.cidr}</span>
+                      {r.name} <span className="text-slate-500">{r.cidr} · {r.protocol}/{portLabel(r.port_low, r.port_high)}</span>
                     </span>
                     {canManage && (
                       <Button variant="danger" onClick={() => delResource(r.id)}>
@@ -970,8 +985,17 @@ function GroupsResourcesSection({ orgId, canManage, onSubjectsChanged }: { orgId
                       <option value="tcp">tcp</option>
                       <option value="udp">udp</option>
                     </Select>
-                    <Button onClick={addResource}>Add</Button>
                   </div>
+                  {/* Feature 1: OPTIONAL port scope. Leave blank = all ports for the protocol; a low alone =
+                      a single port; low+high = a range. Server is authoritative (createResource validates). */}
+                  <div className="flex gap-2">
+                    <Input type="number" min={1} max={65535} placeholder="Port (optional)" value={newRes.portLow} onChange={(e) => setNewRes({ ...newRes, portLow: e.target.value })} />
+                    <Input type="number" min={1} max={65535} placeholder="to (range, optional)" value={newRes.portHigh} onChange={(e) => setNewRes({ ...newRes, portHigh: e.target.value })} />
+                    <Button onClick={addResource} disabled={!resPortsValid(newRes.portLow, newRes.portHigh)}>Add</Button>
+                  </div>
+                  {!resPortsValid(newRes.portLow, newRes.portHigh) && (
+                    <p className="text-xs text-amber-400">Ports must be 1–65535; leave both blank for all ports, or set a low ≤ high.</p>
+                  )}
                 </div>
               )}
             </>

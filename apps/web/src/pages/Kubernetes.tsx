@@ -239,16 +239,27 @@ function RegisterClusterModal({ orgId, sites, onClose, onDone }: { orgId: string
 function ExposeServiceModal({ orgId, clusterId, onClose, onDone }: { orgId: string; clusterId: string; onClose: () => void; onDone: () => void }) {
   const [name, setName] = useState("");
   const [namespace, setNamespace] = useState("default");
-  const [protocol, setProtocol] = useState<"any" | "tcp" | "udp">("any");
+  // WF-K5 M8/M9: an exposure needs a SINGLE specific port + a protocol — the gateway DNATs VIP:port ->
+  // podIP:targetPort, so all-ports/ranges are refused server-side. The form must offer the port the refusal
+  // teaches the user to supply (offering the refusal without the field would make the dashboard structurally
+  // unable to produce a valid exposure). Protocol is tcp/udp (no "any" — a ported DNAT needs an L4 proto).
+  const [port, setPort] = useState("");
+  const [protocol, setProtocol] = useState<"tcp" | "udp">("tcp");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Client-side UX validation ONLY — the server's ExposeService is the authoritative validator (one-validator):
+  // its typed refusals (service_port_required / service_port_range_unsupported) render verbatim via apiErrorMessage.
+  const portNum = Number(port);
+  const portValid = Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535;
 
   async function submit() {
     setBusy(true);
     setErr(null);
     const { error } = await api.POST("/api/v1/organizations/{orgId}/k8s/clusters/{clusterId}/services", {
       params: { path: { orgId, clusterId } },
-      body: { name, namespace, protocol },
+      // Single specific port: port_low == port_high (ranges are refused). Server stays authoritative.
+      body: { name, namespace, protocol, port_low: portNum, port_high: portNum },
     });
     setBusy(false);
     if (error) return setErr(apiErrorMessage(error, "Could not expose the Service."));
@@ -265,7 +276,7 @@ function ExposeServiceModal({ orgId, clusterId, onClose, onDone }: { orgId: stri
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy || name.trim() === "" || namespace.trim() === ""}>
+          <Button onClick={submit} disabled={busy || name.trim() === "" || namespace.trim() === "" || !portValid}>
             Expose
           </Button>
         </>
@@ -277,9 +288,19 @@ function ExposeServiceModal({ orgId, clusterId, onClose, onDone }: { orgId: stri
       <Field label="Namespace">
         <Input value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="e.g. prod" />
       </Field>
+      <Field label="Port">
+        <Input
+          type="number"
+          min={1}
+          max={65535}
+          value={port}
+          onChange={(e) => setPort(e.target.value)}
+          placeholder="the Service port clients dial, e.g. 80"
+        />
+        {port !== "" && !portValid && <p className="mt-1 text-xs text-amber-400">Enter a single port between 1 and 65535.</p>}
+      </Field>
       <Field label="Protocol">
-        <Select value={protocol} onChange={(e) => setProtocol(e.target.value as "any" | "tcp" | "udp")}>
-          <option value="any">any</option>
+        <Select value={protocol} onChange={(e) => setProtocol(e.target.value as "tcp" | "udp")}>
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
         </Select>
