@@ -73,7 +73,12 @@ spec:
               type: RuntimeDefault
             capabilities:
               drop: ["ALL"]
-              add: ["NET_ADMIN"]
+              # NET_ADMIN: WireGuard + nftables + `ip addr`. NET_BIND_SERVICE: the DNS forwarder binds :53 on
+              # the reserved DNS VIP (and the S8.4 wg0 resolver) — a privileged port. WF-K-CHART-2: dropping
+              # ALL caps removes CAP_NET_BIND_SERVICE even from root (uid 0 alone does NOT grant privileged-port
+              # bind once the cap is dropped), so :53 fails EACCES without this. This is the named coupling's
+              # documented escape hatch (docs/S10.3-decisions.md), proven on the wire on k3s/containerd.
+              add: ["NET_ADMIN", "NET_BIND_SERVICE"]
           ports:
             - name: wireguard
               containerPort: {{ .Values.wireguard.port }}
