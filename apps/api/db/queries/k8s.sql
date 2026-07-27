@@ -1,8 +1,8 @@
 -- S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 
 -- name: CreateK8sCluster :one
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip, managed_by_machine)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetK8sCluster :one
@@ -48,8 +48,8 @@ JOIN k8s_services s ON s.cluster_id = c.id AND s.deleted_at IS NULL
 WHERE c.org_id = $1;
 
 -- name: CreateK8sService :one
-INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, managed_by_machine)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetK8sService :one

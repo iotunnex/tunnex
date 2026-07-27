@@ -313,7 +313,9 @@ func (s *Service) PolicyRuleCidrWarnings(ctx context.Context, orgID uuid.UUID, r
 	return out, nil
 }
 
-func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error) {
+// managedByMachine (S10.2 Slice 3a): the operator's machine credential when a MACHINE principal creates the
+// grant (uuid.Nil for a human → NULL, inert) — the ownership marker the dashboard surfaces in Slice 4.
+func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine uuid.UUID) (sqlc.PolicyRule, error) {
 	// SOURCE-subject shape (S7.5.4): "" defaults to "group" (back-compat). Exactly one
 	// of src_group_id / src_user_id, matching src_kind (the DB CHECK backstops it).
 	srcKind := in.SrcKind
@@ -442,6 +444,7 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
 			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), DstK8sServiceID: toPgUUID(in.DstK8sServiceID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
+			ManagedByMachine: pgtype.UUID{Bytes: managedByMachine, Valid: managedByMachine != uuid.Nil},
 		})
 		if e != nil {
 			return conflictIfDup(e, "an identical rule already exists")

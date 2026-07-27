@@ -181,31 +181,33 @@ type Invitation struct {
 }
 
 type K8sCluster struct {
-	ID          uuid.UUID    `json:"id"`
-	OrgID       uuid.UUID    `json:"org_id"`
-	SiteID      uuid.UUID    `json:"site_id"`
-	Name        string       `json:"name"`
-	VipRange    netip.Prefix `json:"vip_range"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	ServiceCidr netip.Prefix `json:"service_cidr"`
-	DnsZone     string       `json:"dns_zone"`
-	DnsVip      *netip.Addr  `json:"dns_vip"`
+	ID               uuid.UUID    `json:"id"`
+	OrgID            uuid.UUID    `json:"org_id"`
+	SiteID           uuid.UUID    `json:"site_id"`
+	Name             string       `json:"name"`
+	VipRange         netip.Prefix `json:"vip_range"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
+	ServiceCidr      netip.Prefix `json:"service_cidr"`
+	DnsZone          string       `json:"dns_zone"`
+	DnsVip           *netip.Addr  `json:"dns_vip"`
+	ManagedByMachine pgtype.UUID  `json:"managed_by_machine"`
 }
 
 type K8sService struct {
-	ID        uuid.UUID          `json:"id"`
-	OrgID     uuid.UUID          `json:"org_id"`
-	ClusterID uuid.UUID          `json:"cluster_id"`
-	Name      string             `json:"name"`
-	Namespace string             `json:"namespace"`
-	Protocol  string             `json:"protocol"`
-	PortLow   *int32             `json:"port_low"`
-	PortHigh  *int32             `json:"port_high"`
-	Vip       netip.Addr         `json:"vip"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	ID               uuid.UUID          `json:"id"`
+	OrgID            uuid.UUID          `json:"org_id"`
+	ClusterID        uuid.UUID          `json:"cluster_id"`
+	Name             string             `json:"name"`
+	Namespace        string             `json:"namespace"`
+	Protocol         string             `json:"protocol"`
+	PortLow          *int32             `json:"port_low"`
+	PortHigh         *int32             `json:"port_high"`
+	Vip              netip.Addr         `json:"vip"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	ManagedByMachine pgtype.UUID        `json:"managed_by_machine"`
 }
 
 type MachineCredential struct {
@@ -355,21 +357,22 @@ type PlatformSecret struct {
 }
 
 type PolicyRule struct {
-	ID              uuid.UUID          `json:"id"`
-	OrgID           uuid.UUID          `json:"org_id"`
-	SrcGroupID      pgtype.UUID        `json:"src_group_id"`
-	DstKind         string             `json:"dst_kind"`
-	DstResourceID   pgtype.UUID        `json:"dst_resource_id"`
-	DstGroupID      pgtype.UUID        `json:"dst_group_id"`
-	CreatedAt       time.Time          `json:"created_at"`
-	SrcKind         string             `json:"src_kind"`
-	SrcUserID       pgtype.UUID        `json:"src_user_id"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
-	DstSiteID       pgtype.UUID        `json:"dst_site_id"`
-	SrcSiteID       pgtype.UUID        `json:"src_site_id"`
-	SrcCidr         *string            `json:"src_cidr"`
-	Disabled        bool               `json:"disabled"`
-	DstK8sServiceID pgtype.UUID        `json:"dst_k8s_service_id"`
+	ID               uuid.UUID          `json:"id"`
+	OrgID            uuid.UUID          `json:"org_id"`
+	SrcGroupID       pgtype.UUID        `json:"src_group_id"`
+	DstKind          string             `json:"dst_kind"`
+	DstResourceID    pgtype.UUID        `json:"dst_resource_id"`
+	DstGroupID       pgtype.UUID        `json:"dst_group_id"`
+	CreatedAt        time.Time          `json:"created_at"`
+	SrcKind          string             `json:"src_kind"`
+	SrcUserID        pgtype.UUID        `json:"src_user_id"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	DstSiteID        pgtype.UUID        `json:"dst_site_id"`
+	SrcSiteID        pgtype.UUID        `json:"src_site_id"`
+	SrcCidr          *string            `json:"src_cidr"`
+	Disabled         bool               `json:"disabled"`
+	DstK8sServiceID  pgtype.UUID        `json:"dst_k8s_service_id"`
+	ManagedByMachine pgtype.UUID        `json:"managed_by_machine"`
 }
 
 type Resource struct {

@@ -33,6 +33,17 @@ import (
 //
 // On success it returns the org-scoped context. Call sites pass a Permission,
 // never a role, so the policy stays in package rbac.
+// machineID returns the caller's machine-credential id (S10.2) when the principal is a MACHINE, else
+// uuid.Nil (a human → the ownership marker is NULL/inert). Used by the create handlers to record who
+// operator-created an object.
+func machineID(ctx context.Context) uuid.UUID {
+	p, _ := authctx.PrincipalFrom(ctx)
+	if p == nil {
+		return uuid.Nil
+	}
+	return p.MachineID
+}
+
 func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (context.Context, error) {
 	p, ok := authctx.PrincipalFrom(ctx)
 	if !ok {

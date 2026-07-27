@@ -37,24 +37,25 @@ func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) 
 }
 
 const createPolicyRule = `-- name: CreatePolicyRule :one
-INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id
+INSERT INTO policy_rules (org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, expires_at, managed_by_machine)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine
 `
 
 type CreatePolicyRuleParams struct {
-	OrgID           uuid.UUID          `json:"org_id"`
-	SrcKind         string             `json:"src_kind"`
-	SrcGroupID      pgtype.UUID        `json:"src_group_id"`
-	SrcUserID       pgtype.UUID        `json:"src_user_id"`
-	SrcSiteID       pgtype.UUID        `json:"src_site_id"`
-	SrcCidr         *string            `json:"src_cidr"`
-	DstKind         string             `json:"dst_kind"`
-	DstResourceID   pgtype.UUID        `json:"dst_resource_id"`
-	DstGroupID      pgtype.UUID        `json:"dst_group_id"`
-	DstSiteID       pgtype.UUID        `json:"dst_site_id"`
-	DstK8sServiceID pgtype.UUID        `json:"dst_k8s_service_id"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	OrgID            uuid.UUID          `json:"org_id"`
+	SrcKind          string             `json:"src_kind"`
+	SrcGroupID       pgtype.UUID        `json:"src_group_id"`
+	SrcUserID        pgtype.UUID        `json:"src_user_id"`
+	SrcSiteID        pgtype.UUID        `json:"src_site_id"`
+	SrcCidr          *string            `json:"src_cidr"`
+	DstKind          string             `json:"dst_kind"`
+	DstResourceID    pgtype.UUID        `json:"dst_resource_id"`
+	DstGroupID       pgtype.UUID        `json:"dst_group_id"`
+	DstSiteID        pgtype.UUID        `json:"dst_site_id"`
+	DstK8sServiceID  pgtype.UUID        `json:"dst_k8s_service_id"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	ManagedByMachine pgtype.UUID        `json:"managed_by_machine"`
 }
 
 // ── policy_rules (allow grants) ─────────────────────────────────────────────────
@@ -76,6 +77,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		arg.DstSiteID,
 		arg.DstK8sServiceID,
 		arg.ExpiresAt,
+		arg.ManagedByMachine,
 	)
 	var i PolicyRule
 	err := row.Scan(
@@ -94,6 +96,7 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 		&i.SrcCidr,
 		&i.Disabled,
 		&i.DstK8sServiceID,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
@@ -268,7 +271,7 @@ const extendPolicyRule = `-- name: ExtendPolicyRule :one
 UPDATE policy_rules
 SET expires_at = $3
 WHERE id = $1 AND org_id = $2 AND expires_at IS NOT NULL AND expires_at > now()
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine
 `
 
 type ExtendPolicyRuleParams struct {
@@ -302,12 +305,13 @@ func (q *Queries) ExtendPolicyRule(ctx context.Context, arg ExtendPolicyRulePara
 		&i.SrcCidr,
 		&i.Disabled,
 		&i.DstK8sServiceID,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
 
 const getPolicyRuleForOrg = `-- name: GetPolicyRuleForOrg :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id FROM policy_rules WHERE id = $1 AND org_id = $2
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine FROM policy_rules WHERE id = $1 AND org_id = $2
 `
 
 type GetPolicyRuleForOrgParams struct {
@@ -337,12 +341,13 @@ func (q *Queries) GetPolicyRuleForOrg(ctx context.Context, arg GetPolicyRuleForO
 		&i.SrcCidr,
 		&i.Disabled,
 		&i.DstK8sServiceID,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
 
 const getPolicyRuleForUpdate = `-- name: GetPolicyRuleForUpdate :one
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine FROM policy_rules WHERE id = $1 AND org_id = $2 FOR UPDATE
 `
 
 type GetPolicyRuleForUpdateParams struct {
@@ -373,6 +378,7 @@ func (q *Queries) GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleF
 		&i.SrcCidr,
 		&i.Disabled,
 		&i.DstK8sServiceID,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
@@ -483,7 +489,7 @@ func (q *Queries) ListActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) 
 }
 
 const listActivePolicyRulesForOrg = `-- name: ListActivePolicyRulesForOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine FROM policy_rules
 WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at
 `
@@ -516,6 +522,7 @@ func (q *Queries) ListActivePolicyRulesForOrg(ctx context.Context, orgID uuid.UU
 			&i.SrcCidr,
 			&i.Disabled,
 			&i.DstK8sServiceID,
+			&i.ManagedByMachine,
 		); err != nil {
 			return nil, err
 		}
@@ -605,7 +612,7 @@ func (q *Queries) ListGroupMembershipsByOrg(ctx context.Context, orgID uuid.UUID
 }
 
 const listPolicyRulesByOrg = `-- name: ListPolicyRulesByOrg :many
-SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id FROM policy_rules
+SELECT id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine FROM policy_rules
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -636,6 +643,7 @@ func (q *Queries) ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]
 			&i.SrcCidr,
 			&i.Disabled,
 			&i.DstK8sServiceID,
+			&i.ManagedByMachine,
 		); err != nil {
 			return nil, err
 		}
@@ -774,7 +782,7 @@ func (q *Queries) SetOrgZeroTrustMode(ctx context.Context, arg SetOrgZeroTrustMo
 const setPolicyRuleEnabled = `-- name: SetPolicyRuleEnabled :one
 UPDATE policy_rules SET disabled = $3
 WHERE id = $1 AND org_id = $2
-RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id
+RETURNING id, org_id, src_group_id, dst_kind, dst_resource_id, dst_group_id, created_at, src_kind, src_user_id, expires_at, dst_site_id, src_site_id, src_cidr, disabled, dst_k8s_service_id, managed_by_machine
 `
 
 type SetPolicyRuleEnabledParams struct {
@@ -804,6 +812,7 @@ func (q *Queries) SetPolicyRuleEnabled(ctx context.Context, arg SetPolicyRuleEna
 		&i.SrcCidr,
 		&i.Disabled,
 		&i.DstK8sServiceID,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }

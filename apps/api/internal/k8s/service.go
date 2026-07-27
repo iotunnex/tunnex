@@ -124,7 +124,12 @@ func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actorUserID
 // disjointness-validated — it is the very range that collides with the pool/sites (that is WHY exposed
 // Services get synthetic VIPs). It is captured only so the gateway can classify a resolved address (in the
 // Service CIDR = a ClusterIP to DNAT; outside = a pod IP = a headless Service, refused) without the K8s API.
-func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix, dnsZone string) (sqlc.K8sCluster, error) {
+// managedByMachine (S10.2 Slice 3a) records the operator's machine credential when a MACHINE principal
+// registers the cluster (uuid.Nil for a human → NULL, inert). The ownership marker the dashboard surfaces
+// in Slice 4; recorded here so that surface never retrofits live rows. NOTE (finding, held): the create
+// path still does NOT write an audit row — the additive-creates-unaudited gap from the S10.3 review; the
+// marker is a data property, not an audit, and closing the audit gap is its own disposition.
+func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, name string, vipRange, serviceCIDR netip.Prefix, dnsZone string, managedByMachine uuid.UUID) (sqlc.K8sCluster, error) {
 	var out sqlc.K8sCluster
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// The cluster name becomes a hostname label (<service>.<namespace>.svc.<name>.<zone>), so it must be
@@ -194,6 +199,7 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 		c, e := q.CreateK8sCluster(ctx, sqlc.CreateK8sClusterParams{
 			OrgID: orgID, SiteID: siteID, Name: name, VipRange: vipRange.Masked(), ServiceCidr: serviceCIDR.Masked(),
 			DnsZone: dnsZone, DnsVip: &dnsVIP,
+			ManagedByMachine: pgtype.UUID{Bytes: managedByMachine, Valid: managedByMachine != uuid.Nil},
 		})
 		if pgerr.IsUnique(e) {
 			return apierr.Conflict("cluster_exists", "a cluster with that name or VIP range already exists in this organization")
@@ -216,7 +222,7 @@ func (s *Service) RegisterCluster(ctx context.Context, orgID, siteID uuid.UUID, 
 // a deleted Service vanishes from the resolution set (its grant compiles to nothing), and the reused VIP
 // belongs unambiguously to the NEW Service's identity. Identity-resolution is therefore sufficient — no
 // VIP quarantine is needed. (The reassignment-trap red lives in Slice 2, where the resolution is built.)
-func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID, name, namespace, protocol string, portLow, portHigh *int32) (sqlc.K8sService, error) {
+func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID, name, namespace, protocol string, portLow, portHigh *int32, managedByMachine uuid.UUID) (sqlc.K8sService, error) {
 	if protocol == "" {
 		protocol = "any"
 	}
@@ -263,6 +269,7 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 		svc, e := q.CreateK8sService(ctx, sqlc.CreateK8sServiceParams{
 			OrgID: orgID, ClusterID: clusterID, Name: name, Namespace: namespace,
 			Protocol: protocol, PortLow: portLow, PortHigh: portHigh, Vip: vip,
+			ManagedByMachine: pgtype.UUID{Bytes: managedByMachine, Valid: managedByMachine != uuid.Nil},
 		})
 		if pgerr.IsUnique(e) {
 			return apierr.Conflict("service_exists", "that Service (namespace/name) is already exposed in this cluster")

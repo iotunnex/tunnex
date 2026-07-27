@@ -86,7 +86,7 @@ func (s apiServer) RegisterK8sCluster(ctx context.Context, req api.RegisterK8sCl
 	if err != nil {
 		return nil, apierr.BadRequest("invalid_service_cidr", "service_cidr must be a valid CIDR (e.g. 10.96.0.0/12)")
 	}
-	c, err := s.k8s.RegisterCluster(ctx, req.OrgId, req.Body.SiteId, req.Body.Name, vipRange, serviceCIDR, req.Body.DnsZone)
+	c, err := s.k8s.RegisterCluster(ctx, req.OrgId, req.Body.SiteId, req.Body.Name, vipRange, serviceCIDR, req.Body.DnsZone, machineID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (s apiServer) ExposeK8sService(ctx context.Context, req api.ExposeK8sServic
 	if req.Body.Protocol != nil {
 		proto = string(*req.Body.Protocol)
 	}
-	svc, err := s.k8s.ExposeService(ctx, req.OrgId, req.ClusterId, req.Body.Name, req.Body.Namespace, proto, ptrIntToInt32(req.Body.PortLow), ptrIntToInt32(req.Body.PortHigh))
+	svc, err := s.k8s.ExposeService(ctx, req.OrgId, req.ClusterId, req.Body.Name, req.Body.Namespace, proto, ptrIntToInt32(req.Body.PortLow), ptrIntToInt32(req.Body.PortHigh), machineID(ctx))
 	if err != nil {
 		return nil, err
 	}

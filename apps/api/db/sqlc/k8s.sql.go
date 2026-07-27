@@ -10,6 +10,7 @@ import (
 	"net/netip"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countClusterCascade = `-- name: CountClusterCascade :one
@@ -41,19 +42,20 @@ func (q *Queries) CountClusterCascade(ctx context.Context, arg CountClusterCasca
 
 const createK8sCluster = `-- name: CreateK8sCluster :one
 
-INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip
+INSERT INTO k8s_clusters (org_id, site_id, name, vip_range, service_cidr, dns_zone, dns_vip, managed_by_machine)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip, managed_by_machine
 `
 
 type CreateK8sClusterParams struct {
-	OrgID       uuid.UUID    `json:"org_id"`
-	SiteID      uuid.UUID    `json:"site_id"`
-	Name        string       `json:"name"`
-	VipRange    netip.Prefix `json:"vip_range"`
-	ServiceCidr netip.Prefix `json:"service_cidr"`
-	DnsZone     string       `json:"dns_zone"`
-	DnsVip      *netip.Addr  `json:"dns_vip"`
+	OrgID            uuid.UUID    `json:"org_id"`
+	SiteID           uuid.UUID    `json:"site_id"`
+	Name             string       `json:"name"`
+	VipRange         netip.Prefix `json:"vip_range"`
+	ServiceCidr      netip.Prefix `json:"service_cidr"`
+	DnsZone          string       `json:"dns_zone"`
+	DnsVip           *netip.Addr  `json:"dns_vip"`
+	ManagedByMachine pgtype.UUID  `json:"managed_by_machine"`
 }
 
 // S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
@@ -66,6 +68,7 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		arg.ServiceCidr,
 		arg.DnsZone,
 		arg.DnsVip,
+		arg.ManagedByMachine,
 	)
 	var i K8sCluster
 	err := row.Scan(
@@ -79,25 +82,27 @@ func (q *Queries) CreateK8sCluster(ctx context.Context, arg CreateK8sClusterPara
 		&i.ServiceCidr,
 		&i.DnsZone,
 		&i.DnsVip,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
 
 const createK8sService = `-- name: CreateK8sService :one
-INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, created_at, updated_at, deleted_at
+INSERT INTO k8s_services (org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, managed_by_machine)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, created_at, updated_at, deleted_at, managed_by_machine
 `
 
 type CreateK8sServiceParams struct {
-	OrgID     uuid.UUID  `json:"org_id"`
-	ClusterID uuid.UUID  `json:"cluster_id"`
-	Name      string     `json:"name"`
-	Namespace string     `json:"namespace"`
-	Protocol  string     `json:"protocol"`
-	PortLow   *int32     `json:"port_low"`
-	PortHigh  *int32     `json:"port_high"`
-	Vip       netip.Addr `json:"vip"`
+	OrgID            uuid.UUID   `json:"org_id"`
+	ClusterID        uuid.UUID   `json:"cluster_id"`
+	Name             string      `json:"name"`
+	Namespace        string      `json:"namespace"`
+	Protocol         string      `json:"protocol"`
+	PortLow          *int32      `json:"port_low"`
+	PortHigh         *int32      `json:"port_high"`
+	Vip              netip.Addr  `json:"vip"`
+	ManagedByMachine pgtype.UUID `json:"managed_by_machine"`
 }
 
 func (q *Queries) CreateK8sService(ctx context.Context, arg CreateK8sServiceParams) (K8sService, error) {
@@ -110,6 +115,7 @@ func (q *Queries) CreateK8sService(ctx context.Context, arg CreateK8sServicePara
 		arg.PortLow,
 		arg.PortHigh,
 		arg.Vip,
+		arg.ManagedByMachine,
 	)
 	var i K8sService
 	err := row.Scan(
@@ -125,6 +131,7 @@ func (q *Queries) CreateK8sService(ctx context.Context, arg CreateK8sServicePara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
@@ -144,7 +151,7 @@ func (q *Queries) DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterPara
 }
 
 const getK8sCluster = `-- name: GetK8sCluster :one
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip FROM k8s_clusters WHERE org_id = $1 AND id = $2
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip, managed_by_machine FROM k8s_clusters WHERE org_id = $1 AND id = $2
 `
 
 type GetK8sClusterParams struct {
@@ -166,12 +173,13 @@ func (q *Queries) GetK8sCluster(ctx context.Context, arg GetK8sClusterParams) (K
 		&i.ServiceCidr,
 		&i.DnsZone,
 		&i.DnsVip,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
 
 const getK8sService = `-- name: GetK8sService :one
-SELECT id, org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, created_at, updated_at, deleted_at FROM k8s_services WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+SELECT id, org_id, cluster_id, name, namespace, protocol, port_low, port_high, vip, created_at, updated_at, deleted_at, managed_by_machine FROM k8s_services WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type GetK8sServiceParams struct {
@@ -195,6 +203,7 @@ func (q *Queries) GetK8sService(ctx context.Context, arg GetK8sServiceParams) (K
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ManagedByMachine,
 	)
 	return i, err
 }
@@ -298,7 +307,7 @@ func (q *Queries) ListK8sClusterZonesForOrg(ctx context.Context, orgID uuid.UUID
 }
 
 const listK8sClustersForOrg = `-- name: ListK8sClustersForOrg :many
-SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip FROM k8s_clusters WHERE org_id = $1 ORDER BY name
+SELECT id, org_id, site_id, name, vip_range, created_at, updated_at, service_cidr, dns_zone, dns_vip, managed_by_machine FROM k8s_clusters WHERE org_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([]K8sCluster, error) {
@@ -321,6 +330,7 @@ func (q *Queries) ListK8sClustersForOrg(ctx context.Context, orgID uuid.UUID) ([
 			&i.ServiceCidr,
 			&i.DnsZone,
 			&i.DnsVip,
+			&i.ManagedByMachine,
 		); err != nil {
 			return nil, err
 		}

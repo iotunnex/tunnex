@@ -66,15 +66,15 @@ func TestRegisterClusterRejectsOverlap(t *testing.T) {
 	}
 
 	// Overlaps the device pool.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "pool") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-pool", pfx("10.99.0.0/25"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "pool") {
 		t.Fatalf("want a pool-class overlap refusal, got %v", err)
 	}
 	// Overlaps the approved site subnet.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "site_subnet") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-site", pfx("10.20.0.128/25"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "site_subnet") {
 		t.Fatalf("want a site_subnet-class overlap refusal, got %v", err)
 	}
 	// A disjoint range is accepted.
-	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "c-ok", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err != nil {
 		t.Fatalf("a disjoint VIP range must be accepted, got %v", err)
 	}
 }
@@ -86,10 +86,10 @@ func TestRegisterClusterRejectsBadName(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	if _, err := svc.RegisterCluster(ctx, org, site, "Prod Cluster", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "invalid_cluster_name") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "Prod Cluster", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "invalid_cluster_name") {
 		t.Fatalf("want invalid_cluster_name for a non-label name, got %v", err)
 	}
-	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "not a domain"); err == nil || !strings.Contains(err.Error(), "invalid_dns_zone") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "not a domain", uuid.Nil); err == nil || !strings.Contains(err.Error(), "invalid_dns_zone") {
 		t.Fatalf("want invalid_dns_zone for a malformed zone, got %v", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestRegisterClusterRejectsZoneCollidingForwardedDomain(t *testing.T) {
 		t.Fatal(e)
 	}
 	// Registering cluster "prod" in zone "k8s.acme.com" would claim that exact zone → refused.
-	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "dns_domain_conflict") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "prod", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "dns_domain_conflict") {
 		t.Fatalf("a cluster zone colliding with a forwarded domain must refuse, got %v", err)
 	}
 }
@@ -121,10 +121,10 @@ func TestRegisterClusterReservesDNSVIP(t *testing.T) {
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
 	// /30 has exactly ONE allocatable (.2) — it would be all DNS, no Service room: refused.
-	if _, err := svc.RegisterCluster(ctx, org, site, "tiny", pfx("100.66.0.0/30"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "vip_range_too_small") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "tiny", pfx("100.66.0.0/30"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "vip_range_too_small") {
 		t.Fatalf("a range with no room past the DNS VIP must refuse (too_small), got %v", err)
 	}
-	c, err := svc.RegisterCluster(ctx, org, site, "dnsr", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	c, err := svc.RegisterCluster(ctx, org, site, "dnsr", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestRegisterClusterReservesDNSVIP(t *testing.T) {
 		t.Fatalf("DNS VIP must be reserved at .2, got %v", c.DnsVip)
 	}
 	// The first exposed Service gets .3 — proof .2 is reserved and never handed out.
-	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatalf("first expose: %v", err)
 	}
@@ -149,10 +149,10 @@ func TestSecondClusterCannotOverlapFirst(t *testing.T) {
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
 
-	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "a", pfx("100.64.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err != nil {
 		t.Fatalf("first cluster: %v", err)
 	}
-	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com"); err == nil || !strings.Contains(err.Error(), "vip_range") {
+	if _, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err == nil || !strings.Contains(err.Error(), "vip_range") {
 		t.Fatalf("a second cluster overlapping the first's VIP range must be refused (vip_range class), got %v", err)
 	}
 }
@@ -164,11 +164,11 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com") // .2 DNS + .3-.6 Services
+	c, err := svc.RegisterCluster(ctx, org, site, "small", pfx("100.66.0.0/29"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil) // .2 DNS + .3-.6 Services
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
+	svc1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatalf("first expose: %v", err)
 	}
@@ -177,11 +177,11 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	}
 	// Consume the remaining three Service VIPs (.4, .5, .6).
 	for i, n := range []string{"web", "cache", "queue"} {
-		if _, err := svc.ExposeService(ctx, org, c.ID, n, "prod", "tcp", p32(80), p32(80)); err != nil {
+		if _, err := svc.ExposeService(ctx, org, c.ID, n, "prod", "tcp", p32(80), p32(80), uuid.Nil); err != nil {
 			t.Fatalf("expose %d (%s): %v", i, n, err)
 		}
 	}
-	if _, err := svc.ExposeService(ctx, org, c.ID, "extra", "prod", "tcp", p32(80), p32(80)); err == nil || !strings.Contains(err.Error(), "exhausted") {
+	if _, err := svc.ExposeService(ctx, org, c.ID, "extra", "prod", "tcp", p32(80), p32(80), uuid.Nil); err == nil || !strings.Contains(err.Error(), "exhausted") {
 		t.Fatalf("exposing past the range must refuse honestly (exhausted), got %v", err)
 	}
 }
@@ -194,11 +194,11 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site, actor := seedOrgSiteActor(t, pool)
-	c, err := svc.RegisterCluster(ctx, org, site, "sweep", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	c, err := svc.RegisterCluster(ctx, org, site, "sweep", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 		t.Fatalf("unexposed Service must vanish from the resolution, got %d", len(live))
 	}
 	// The freed VIP is reusable — a re-expose gets .3 again (not skipped, not exhausted-around).
-	s2, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
+	s2, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatalf("re-expose: %v", err)
 	}
@@ -244,11 +244,11 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site, actor := seedOrgSiteActor(t, pool)
-	c, err := svc.RegisterCluster(ctx, org, site, "gone", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	c, err := svc.RegisterCluster(ctx, org, site, "gone", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exposed, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
+	exposed, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 		t.Fatal(e)
 	}
 	// A same-range/same-zone re-register is refused WHILE the cluster lives (overlap + would-collide).
-	if _, err := svc.RegisterCluster(ctx, org, site, "gone2", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "other.acme.com"); err == nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "gone2", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "other.acme.com", uuid.Nil); err == nil {
 		t.Fatal("a live cluster's VIP range must block a second claim")
 	}
 	// Deregister → services gone, range + zone freed.
@@ -293,7 +293,7 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 		t.Fatalf("the cascaded grant must be hard-deleted, got %d rules left", rulesLeft)
 	}
 	// The freed range is now reclaimable, AND the freed zone no longer conflicts.
-	if _, err := svc.RegisterCluster(ctx, org, site, "reborn", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com"); err != nil {
+	if _, err := svc.RegisterCluster(ctx, org, site, "reborn", pfx("100.64.0.0/24"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil); err != nil {
 		t.Fatalf("the freed VIP range + zone must be reclaimable after deregister, got %v", err)
 	}
 }
@@ -305,19 +305,19 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	svc := NewService(pool)
 	ctx := context.Background()
 	org, site := seedOrgSite(t, pool)
-	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	a, err := svc.RegisterCluster(ctx, org, site, "ca", pfx("100.64.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	b, err := svc.RegisterCluster(ctx, org, site, "cb", pfx("100.65.0.0/28"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sa, err := svc.ExposeService(ctx, org, a.ID, "s", "ns", "any", p32(80), p32(80))
+	sa, err := svc.ExposeService(ctx, org, a.ID, "s", "ns", "any", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sb, err := svc.ExposeService(ctx, org, b.ID, "s", "ns", "any", p32(80), p32(80))
+	sb, err := svc.ExposeService(ctx, org, b.ID, "s", "ns", "any", p32(80), p32(80), uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestRegisterClusterSerializesDisjointness(t *testing.T) {
 	regErr := make(chan error, 1)
 	go func() {
 		svc := NewService(poolReg)
-		_, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "other.acme.com")
+		_, err := svc.RegisterCluster(ctx, org, site, "b", pfx("100.64.5.0/24"), pfx("10.96.0.0/12"), "other.acme.com", uuid.Nil)
 		regErr <- err
 	}()
 
@@ -412,7 +412,7 @@ func TestMachineActorAuditsSystemNotUser(t *testing.T) {
 	org, site, actor := seedOrgSiteActor(t, pool)
 
 	// MACHINE deregister: actorUserID == uuid.Nil, actorSystem set, cause set.
-	cm, err := svc.RegisterCluster(ctx, org, site, "m", pfx("100.70.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	cm, err := svc.RegisterCluster(ctx, org, site, "m", pfx("100.70.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestMachineActorAuditsSystemNotUser(t *testing.T) {
 	}
 
 	// HUMAN deregister: the inverse — actor_user_id set, actor_system NULL.
-	ch, err := svc.RegisterCluster(ctx, org, site, "h", pfx("100.71.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com")
+	ch, err := svc.RegisterCluster(ctx, org, site, "h", pfx("100.71.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,5 +456,62 @@ func TestMachineActorAuditsSystemNotUser(t *testing.T) {
 	}
 	if usr2 == nil {
 		t.Fatal("human mutation must set actor_user_id")
+	}
+}
+
+// TestOwnershipMarkerSetOnMachineCreate — S10.2 Slice 3a: a MACHINE-created cluster/service records
+// managed_by_machine (the operator's credential); a human-created one (uuid.Nil) leaves it NULL — inert,
+// no behavior change (the zero-config golden's ownership analog). The dashboard SURFACE is Slice 4; the
+// marker is recorded now so that surface never retrofits live rows.
+func TestOwnershipMarkerSetOnMachineCreate(t *testing.T) {
+	pool := testPool(t)
+	svc := NewService(pool)
+	ctx := context.Background()
+	org, site := seedOrgSite(t, pool)
+
+	// A machine credential (the FK target for managed_by_machine).
+	mid := uuid.New()
+	if _, e := pool.Exec(ctx,
+		`INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`,
+		mid, org, []byte("h")); e != nil {
+		t.Fatal(e)
+	}
+
+	// MACHINE-created cluster → marker set.
+	cm, err := svc.RegisterCluster(ctx, org, site, "own-m", pfx("100.72.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mb *string
+	if err := pool.QueryRow(ctx, `SELECT managed_by_machine::text FROM k8s_clusters WHERE id=$1`, cm.ID).Scan(&mb); err != nil {
+		t.Fatal(err)
+	}
+	if mb == nil || *mb != mid.String() {
+		t.Fatalf("machine-created cluster must record managed_by_machine=%s, got %v", mid, mb)
+	}
+
+	// MACHINE-created service → marker set.
+	sm, err := svc.ExposeService(ctx, org, cm.ID, "api", "prod", "tcp", p32(80), p32(80), mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT managed_by_machine::text FROM k8s_services WHERE id=$1`, sm.ID).Scan(&mb); err != nil {
+		t.Fatal(err)
+	}
+	if mb == nil || *mb != mid.String() {
+		t.Fatalf("machine-created service must record managed_by_machine, got %v", mb)
+	}
+
+	// HUMAN-created (uuid.Nil) → NULL, inert.
+	ch, err := svc.RegisterCluster(ctx, org, site, "own-h", pfx("100.73.0.0/16"), pfx("10.96.0.0/12"), "k8s.acme.com", uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mbh *string
+	if err := pool.QueryRow(ctx, `SELECT managed_by_machine::text FROM k8s_clusters WHERE id=$1`, ch.ID).Scan(&mbh); err != nil {
+		t.Fatal(err)
+	}
+	if mbh != nil {
+		t.Fatalf("human-created cluster must have managed_by_machine NULL, got %v", *mbh)
 	}
 }

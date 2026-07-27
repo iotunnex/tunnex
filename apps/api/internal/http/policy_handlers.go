@@ -31,7 +31,7 @@ type policyPort interface {
 	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
 	DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
-	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput) (sqlc.PolicyRule, error)
+	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine uuid.UUID) (sqlc.PolicyRule, error)
 	// PolicyRuleCidrWarnings returns per-rule-id the S8.7 cidr_outside_org_ranges warning (a src_kind='cidr'
 	// rule that places nowhere — no containing site with a bound gateway). Read-time derived; takes the
 	// already-fetched rules ([15] — no re-query of the rule set).
@@ -295,7 +295,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 	if req.Body.SrcGroupId != nil {
 		in.SrcGroupID = *req.Body.SrcGroupId
 	}
-	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, in)
+	r, err := s.policy.CreatePolicyRule(ctx, req.OrgId, in, machineID(ctx))
 	if err != nil {
 		return nil, err
 	}

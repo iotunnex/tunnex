@@ -150,7 +150,7 @@ func TestMutationsFirePush(t *testing.T) {
 		}
 		rid := res.ID
 		fired := len(n.calls)
-		if _, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, rid)); err != nil {
+		if _, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, rid), uuid.Nil); err != nil {
 			t.Fatal(err)
 		}
 		if len(n.calls) <= fired {
@@ -222,7 +222,7 @@ func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
 	// A PER-USER grant for bob (not a group).
 	if _, err := s.CreatePolicyRule(ctx, f.org, policyspec.RuleInput{
 		SrcKind: "user", SrcUserID: &bob, DstKind: "resource", DstResourceID: &rid,
-	}); err != nil {
+	}, uuid.Nil); err != nil {
 		t.Fatalf("create per-user rule: %v", err)
 	}
 	if _, _, err := s.SetMode(ctx, f.org, policy.ModeEnforcing); err != nil {
@@ -321,7 +321,7 @@ func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
 
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}); err != nil {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}, uuid.Nil); err != nil {
 		t.Fatalf("create site-src rule: %v", err)
 	}
 	var srcSiteID, srcGroupID *string
@@ -366,16 +366,16 @@ func TestK8sServiceRuleCreation(t *testing.T) {
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
 	// A grant reaching the LIVE Service is accepted.
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &svc}); err != nil {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &svc}, uuid.Nil); err != nil {
 		t.Fatalf("a k8s_service grant to a live Service must be accepted, got %v", err)
 	}
 	// A grant to an absent Service is refused with the typed error.
 	bogus := uuid.New()
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &bogus}); err == nil || !strings.Contains(err.Error(), "k8s_service_not_found") {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service", DstK8sServiceID: &bogus}, uuid.Nil); err == nil || !strings.Contains(err.Error(), "k8s_service_not_found") {
 		t.Fatalf("a k8s_service grant to an absent Service must refuse (k8s_service_not_found), got %v", err)
 	}
 	// dst_kind=k8s_service with NO dst_k8s_service_id is a shape error.
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service"}); err == nil || !strings.Contains(err.Error(), "dst_k8s_service_id") {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "group", SrcGroupID: grp, DstKind: "k8s_service"}, uuid.Nil); err == nil || !strings.Contains(err.Error(), "dst_k8s_service_id") {
 		t.Fatalf("dst_kind=k8s_service without an id must refuse, got %v", err)
 	}
 }
@@ -522,7 +522,7 @@ func TestRegrantAfterLapseSucceeds(t *testing.T) {
 	past := time.Now().Add(time.Hour)
 	rid, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
 		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &past,
-	})
+	}, uuid.Nil)
 	if err != nil {
 		t.Fatalf("create temp grant: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestRegrantAfterLapseSucceeds(t *testing.T) {
 	future := time.Now().Add(2 * time.Hour)
 	if _, err := s.CreatePolicyRule(f.ctx, f.org, policyspec.RuleInput{
 		SrcKind: "group", SrcGroupID: g.ID, DstKind: "resource", DstResourceID: &res.ID, ExpiresAt: &future,
-	}); err != nil {
+	}, uuid.Nil); err != nil {
 		t.Fatalf("re-grant after lapse must SUCCEED (delete-on-sweep, no linger dead-end), got %v", err)
 	}
 }
@@ -662,7 +662,7 @@ func TestAuditedDeletesPersistMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, r.ID))
+		rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, r.ID), uuid.Nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -693,7 +693,7 @@ func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
 		t.Fatalf("resource: %v", e)
 	}
 	cidr := "172.31.17.64/32"
-	rule, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID})
+	rule, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil)
 	if e != nil {
 		t.Fatalf("cidr rule: %v", e)
 	}
@@ -745,7 +745,7 @@ func TestSetPolicyRuleEnabledNoOpNoPushNoAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resource: %v", err)
 	}
-	rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, res.ID))
+	rule, err := s.CreatePolicyRule(f.ctx, f.org, ruleTo(g.ID, res.ID), uuid.Nil)
 	if err != nil {
 		t.Fatalf("rule: %v", err)
 	}
@@ -781,5 +781,53 @@ func TestSetPolicyRuleEnabledNoOpNoPushNoAudit(t *testing.T) {
 	}
 	if auditCount(t, pool, f.org, "policy.rule_enabled") != 1 {
 		t.Fatal("a real enable must audit policy.rule_enabled once")
+	}
+}
+
+// TestGrantOwnershipMarker — S10.2 Slice 3a: a MACHINE-created grant records managed_by_machine; a human
+// (uuid.Nil) leaves it NULL/inert. Same ownership seam as k8s cluster/service (the third create path).
+func TestGrantOwnershipMarker(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	svc := policy.NewService(pool)
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'O',$2,'10.99.0.0/24')`, org, "own-"+org.String()[:8]); e != nil {
+		t.Fatalf("org: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
+	mid := uuid.New()
+	if _, e := pool.Exec(ctx, `INSERT INTO machine_credentials (id,org_id,name,role,token_hash,fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`, mid, org, []byte("h")); e != nil {
+		t.Fatalf("machine: %v", e)
+	}
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	if e != nil {
+		t.Fatalf("resource: %v", e)
+	}
+	cidr := "172.31.17.64/32"
+
+	// MACHINE-created grant → marker set.
+	rm, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, mid)
+	if e != nil {
+		t.Fatalf("machine rule: %v", e)
+	}
+	var mb *string
+	if err := pool.QueryRow(ctx, `SELECT managed_by_machine::text FROM policy_rules WHERE id=$1`, rm.ID).Scan(&mb); err != nil {
+		t.Fatal(err)
+	}
+	if mb == nil || *mb != mid.String() {
+		t.Fatalf("machine-created grant must record managed_by_machine=%s, got %v", mid, mb)
+	}
+
+	// HUMAN-created (uuid.Nil) → NULL.
+	rh, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil)
+	if e != nil {
+		t.Fatalf("human rule: %v", e)
+	}
+	var mbh *string
+	if err := pool.QueryRow(ctx, `SELECT managed_by_machine::text FROM policy_rules WHERE id=$1`, rh.ID).Scan(&mbh); err != nil {
+		t.Fatal(err)
+	}
+	if mbh != nil {
+		t.Fatalf("human-created grant must have managed_by_machine NULL, got %v", *mbh)
 	}
 }
