@@ -82,6 +82,14 @@ spec:
           env:
             - name: TUNNEX_LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
+            {{- if .Values.nodeName }}
+            # WF-K-CHART-1: the CP pins a join token to a NODE NAME; the agent must enroll under EXACTLY that
+            # name or the CP refuses (node_name_mismatch). A hostNetwork pod's hostname() is the NODE's
+            # hostname (e.g. the VM name), which rarely matches the token's pinned name — so the operator MUST
+            # be able to set it. Set nodeName to the name the join token was minted for.
+            - name: TUNNEX_NODE_NAME
+              value: {{ .Values.nodeName | quote }}
+            {{- end }}
             - name: TUNNEX_API_URL
               value: {{ required "controlPlane.apiURL is required (the CP the gateway fetches desired state from)" .Values.controlPlane.apiURL | quote }}
             - name: TUNNEX_AGENT_URL

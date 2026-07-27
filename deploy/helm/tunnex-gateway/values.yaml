@@ -47,6 +47,12 @@ joinToken: ""
 # uses that here). This is a fabric promise the chart can't invent — REQUIRED.
 endpoint: ""             # e.g. 203.0.113.10:51820   (REQUIRED)
 
+# The node name the agent enrolls under. The CP pins each join token to a node name; the agent MUST present
+# exactly that name or enrollment is refused (node_name_mismatch). A hostNetwork pod otherwise defaults to the
+# NODE's hostname (the VM name), which usually differs from the token's pinned name — so set this to whatever
+# name the join token was minted for (shown in the enroll dialog). Empty = fall back to the pod hostname.
+nodeName: ""
+
 # The WireGuard listen port (must match the port in `endpoint`).
 wireguard:
   port: 51820
