@@ -88,6 +88,16 @@ func classify(m nodepolicy.VIPMapping, ips []netip.Addr, resolveErr error) (clus
 // stalls an nft apply; the render (preroutingDNAT) reads whatever this last stored.
 func (m *Manager) ResolveK8sVIPs(ctx context.Context) {
 	p := m.policy.Load()
+	nVIP, nDNS := 0, 0
+	if p != nil {
+		nVIP, nDNS = len(p.VIPMappings), len(p.K8sDNSZones)
+	}
+	// WF-K-OBS-1: log what the agent received + resolved. A silent refusal (no DNAT, no log) is un-debuggable;
+	// the DNS-unreachable health kind only fires when ALL VIPs fail to REACH the server, so per-VIP outcomes
+	// (headless / outside-CIDR / NXDOMAIN) were previously invisible.
+	if m.log != nil {
+		m.log.Info("k8s_resolve_begin", "vip_mappings", nVIP, "dns_zones", nDNS)
+	}
 	if p == nil || len(p.VIPMappings) == 0 {
 		m.resolvedVIPs.Store(&[]resolvedVIP{})
 		m.refusedK8sVIPs.Store(&[]refusedVIP{})
@@ -109,8 +119,14 @@ func (m *Manager) ResolveK8sVIPs(ctx context.Context) {
 		}
 		if ok {
 			resolved = append(resolved, resolvedVIP{vip: vm.VIP, clusterIP: cip})
+			if m.log != nil {
+				m.log.Info("k8s_vip_resolved", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "cluster_ip", cip)
+			}
 		} else {
 			refused = append(refused, refusedVIP{vip: vm.VIP, namespace: vm.Namespace, service: vm.Service, reason: reason})
+			if m.log != nil {
+				m.log.Warn("k8s_vip_refused", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "service_cidr", vm.ServiceCIDR, "reason", reason)
+			}
 		}
 	}
 	// Byte-stable order → a steady-state reconcile is a no-op (no thrash).

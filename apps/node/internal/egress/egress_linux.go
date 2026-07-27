@@ -69,6 +69,8 @@ type Manager struct {
 	// a departed VIP. runIP is the injectable `ip` runner (nil → the real exec) for the reconcile red.
 	dnsVIPs atomic.Pointer[[]string]
 	runIP   func(ctx context.Context, args ...string) error
+	// log surfaces K8s VIP resolution outcomes (WF-K-OBS-1). nil = silent (tests). Set via SetLogger.
+	log *slog.Logger
 	// deviceByIP is the src /32 -> device_id map (S7.5.4 v3), rebuilt atomically on each
 	// SetPolicy from the applied Allow set. It is the AUTHORITATIVE /32->device mapping
 	// the CP compiled (the same snapshot that assigned the /32) — the flow-log stamper
@@ -172,6 +174,7 @@ func New(wgIface string) *Manager {
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
 	m.runIP = runIP // S10.3 A1: the real `ip addr` runner; injectable for the DNS-VIP reconcile red
+	m.log = slog.Default()
 	return m
 }
 
