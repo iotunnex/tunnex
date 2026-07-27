@@ -15,7 +15,17 @@ import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
 import { LoadRetry } from "../components/LoadRetry";
 import { roleFromMembers } from "../lib/policyview";
-import { assembleClusters, k8sGate, type ClusterCard } from "../lib/k8sview";
+import { assembleClusters, k8sGate, MANAGED_BADGE, managedEditWarning, type ClusterCard } from "../lib/k8sview";
+
+// ManagedBadge — S10.2 D2 cond 1: marks a cluster/Service the GitOps operator owns, so the console reads as
+// ONE product with the CR (same nouns) and the admin sees it's git-governed before reaching for an edit.
+function ManagedBadge() {
+  return (
+    <span className="ml-2 rounded-sm bg-sky-500/15 px-1.5 py-0.5 align-middle text-[10px] font-medium text-sky-300">
+      {MANAGED_BADGE}
+    </span>
+  );
+}
 
 // Kubernetes (S10.3): the in-cluster connectivity surface — register a cluster (a synthetic VIP range fronted
 // by a site gateway) and expose its Services to the fabric. CONNECTIVITY is CORE (all editions): this whole
@@ -124,7 +134,10 @@ function ClusterCardView({ orgId, card, canManage, onDone }: { orgId: string; ca
     <Card>
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-200">{card.name}</h2>
+          <h2 className="text-sm font-semibold text-slate-200">
+            {card.name}
+            {card.managedByOperator && <ManagedBadge />}
+          </h2>
           <p className="mt-1 text-xs text-slate-500">
             zone <span className="text-slate-400">{card.dnsZone}</span> · VIP range <span className="text-slate-400">{card.vipRange}</span> · Service CIDR{" "}
             <span className="text-slate-400">{card.serviceCidr}</span>
@@ -134,9 +147,17 @@ function ClusterCardView({ orgId, card, canManage, onDone }: { orgId: string; ca
         {canManage && (
           <span className="flex gap-2">
             <Button onClick={() => setExposing(true)}>Expose Service</Button>
-            <Button variant="danger" onClick={() => setDeregistering(true)}>
-              Deregister
-            </Button>
+            {card.managedByOperator ? (
+              // D2 cond 1: refuse the destructive dashboard edit on a GitOps-managed cluster — warn, don't
+              // silently revert on the next reconcile.
+              <span className="self-center text-xs text-amber-400/90" title={managedEditWarning("cluster")}>
+                edit the CR
+              </span>
+            ) : (
+              <Button variant="danger" onClick={() => setDeregistering(true)}>
+                Deregister
+              </Button>
+            )}
           </span>
         )}
       </div>
@@ -154,12 +175,18 @@ function ClusterCardView({ orgId, card, canManage, onDone }: { orgId: string; ca
                 <span className="ml-2 text-slate-500">
                   {s.vip} · {s.protocol}/{s.ports}
                 </span>
+                {s.managedByOperator && <ManagedBadge />}
               </span>
-              {canManage && (
-                <Button variant="ghost" onClick={() => unexpose(s.id)}>
-                  Unexpose
-                </Button>
-              )}
+              {canManage &&
+                (s.managedByOperator ? (
+                  <span className="text-xs text-amber-400/90" title={managedEditWarning("Service")}>
+                    edit the CR
+                  </span>
+                ) : (
+                  <Button variant="ghost" onClick={() => unexpose(s.id)}>
+                    Unexpose
+                  </Button>
+                ))}
             </li>
           ))}
         </ul>

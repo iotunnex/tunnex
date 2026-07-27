@@ -484,6 +484,7 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside, k8sVanished bool) api.PolicyRule 
 		CidrOutsideOrgRanges:  cidrOutside, // S8.7 warn-not-refuse (D1); always false for non-cidr sources
 		DstK8sServiceVanished: k8sVanished, // S10.3 warn-not-refuse; the dst Service is gone (grant compiles to nothing)
 		Enabled:               !r.Disabled, // F3: positive framing — a rule is enabled unless disabled
+		ManagedByOperator:     r.ManagedByMachine.Valid, // S10.2 D2 cond 1: GitOps-managed → badge + warn-on-edit
 	}
 	if r.SrcGroupID.Valid {
 		u := uuid.UUID(r.SrcGroupID.Bytes)

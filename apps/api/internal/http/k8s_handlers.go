@@ -44,6 +44,7 @@ func toAPIK8sCluster(c sqlc.K8sCluster) api.K8sCluster {
 		Id: c.ID, SiteId: c.SiteID, Name: c.Name,
 		VipRange: c.VipRange.String(), ServiceCidr: c.ServiceCidr.String(),
 		DnsZone: c.DnsZone, DnsVip: dnsVIP, CreatedAt: &created,
+		ManagedByOperator: c.ManagedByMachine.Valid, // D2 cond 1: badge + warn-on-edit surface
 	}
 }
 
@@ -53,6 +54,7 @@ func toAPIK8sService(svc sqlc.K8sService, fqdn string) api.K8sService {
 		Protocol: api.K8sServiceProtocol(svc.Protocol),
 		PortLow:  ptrInt32ToInt(svc.PortLow), PortHigh: ptrInt32ToInt(svc.PortHigh),
 		Vip: svc.Vip.String(), Fqdn: fqdn,
+		ManagedByOperator: svc.ManagedByMachine.Valid, // D2 cond 1
 	}
 }
 

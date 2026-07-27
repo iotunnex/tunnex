@@ -89,6 +89,13 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
     expect(ruleRow(g2r, groups, resources, [], [], LOADED).dst.label).toBe("10.0.5.0/24");
   });
 
+  it("carries managed_by_operator onto the row (S10.2 D2 cond 1 — badge + withhold-edit source)", () => {
+    const managed = { id: "m", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db", managed_by_operator: true } as PolicyRule;
+    const human = { id: "h", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
+    expect(ruleRow(managed, groups, resources, [], [], LOADED).managedByOperator).toBe(true);
+    expect(ruleRow(human, groups, resources, [], [], LOADED).managedByOperator).toBeFalsy();
+  });
+
   it("WF-8: site rules resolve to NAMES, and two UUIDv7-prefix-sharing sites render distinguishably", () => {
     // UUIDv7 (time-ordered) — created seconds apart, so they SHARE the first 8 chars (the demo bug).
     const azure = { id: "019f762b-b62b-7aa8-9362-249ecf231395", name: "azure-site" } as any;

@@ -68,3 +68,15 @@ describe("serviceFqdnById — the grant-picker label source", () => {
     expect(serviceFqdnById(svc, "gone")).toBeNull();
   });
 });
+
+describe("managed-by-operator ownership surface (S10.2 D2 cond 1)", () => {
+  it("carries managed_by_operator from the wire onto clusters and services", () => {
+    const cl = { ...CL("c1", "prod"), managed_by_operator: true } as K8sCluster;
+    const managed = { ...SVC("k1", "c1", "api", "api.prod.svc.prod.k8s.acme.com"), managed_by_operator: true } as K8sService;
+    const human = { ...SVC("k2", "c1", "web", "web.prod.svc.prod.k8s.acme.com"), managed_by_operator: false } as K8sService;
+    const cards = assembleClusters([cl], [managed, human]);
+    expect(cards[0].managedByOperator).toBe(true);
+    expect(cards[0].services.find((s) => s.id === "k1")!.managedByOperator).toBe(true);
+    expect(cards[0].services.find((s) => s.id === "k2")!.managedByOperator).toBe(false);
+  });
+});

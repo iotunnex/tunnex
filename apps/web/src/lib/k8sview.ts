@@ -31,6 +31,7 @@ export interface ServiceRow {
   ports: string; // "any" | "80" | "8000–8100" — a display projection of the wire port_low/port_high
   vip: string;
   fqdn: string; // READ from the server (never constructed here)
+  managedByOperator: boolean; // S10.2 D2 cond 1: GitOps-managed → badge + warn (edit the CR, not here)
 }
 
 export interface ClusterCard {
@@ -42,6 +43,16 @@ export interface ClusterCard {
   dnsZone: string;
   dnsVip: string | null;
   services: ServiceRow[]; // the cluster's LIVE exposed Services
+  managedByOperator: boolean; // S10.2 D2 cond 1: GitOps-managed → badge + warn
+}
+
+// S10.2 D2 cond 1 — the ownership surface strings (kept here so they're covered by the pure view-model
+// tests). A managed object shows MANAGED_BADGE and its destructive dashboard control is withheld, replaced by
+// managedEditWarning — surfacing the ownership AT THE POINT OF EDITING rather than silently reverting the edit
+// on the next reconcile (the worst UX the ruling calls out).
+export const MANAGED_BADGE = "Managed by GitOps";
+export function managedEditWarning(kind: "cluster" | "Service"): string {
+  return `This ${kind} is managed by the GitOps operator — edit its CR, not the dashboard.`;
 }
 
 // portLabel projects the wire port_low/port_high onto a human range. null/absent both = "any".
@@ -61,6 +72,7 @@ function serviceRow(s: K8sService): ServiceRow {
     ports: portLabel(s.port_low, s.port_high),
     vip: s.vip,
     fqdn: s.fqdn,
+    managedByOperator: s.managed_by_operator,
   };
 }
 
@@ -80,6 +92,7 @@ export function assembleClusters(clusters: K8sCluster[], services: K8sService[])
     dnsZone: c.dns_zone,
     dnsVip: c.dns_vip ?? null,
     services: byCluster[c.id] ?? [],
+    managedByOperator: c.managed_by_operator,
   }));
 }
 

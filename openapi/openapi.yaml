@@ -2545,9 +2545,14 @@ components:
 
     PolicyRule:
       type: object
-      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges, dst_k8s_service_vanished, enabled]
+      required: [id, org_id, src_kind, dst_kind, created_at, cidr_outside_org_ranges, dst_k8s_service_vanished, enabled, managed_by_operator]
       additionalProperties: false
       properties:
+        # S10.2 D2 cond 1: true = created/managed by the GitOps operator (a machine credential); the dashboard
+        # shows it managed and WARNS on a manual edit ("edit the CR, not here") rather than silently reverting
+        # it on the next reconcile. false = dashboard-created (unmanaged, freely editable). DERIVED from the
+        # managed_by_machine ownership marker (S10.2 Slice 3a).
+        managed_by_operator: { type: boolean }
         # F3: true = the rule contributes its allow; false = DISABLED (permission withdrawn, compiled to
         # nothing — "as if the rule weren't there" under default-deny). Toggled via PATCH; a disabled rule
         # is shown distinctly (dimmed), never hidden, so the list can't lie about what's enforcing.
@@ -2613,9 +2618,11 @@ components:
     # ── S10.3 Kubernetes ──
     K8sCluster:
       type: object
-      required: [id, site_id, name, vip_range, service_cidr, dns_zone]
+      required: [id, site_id, name, vip_range, service_cidr, dns_zone, managed_by_operator]
       additionalProperties: false
       properties:
+        # S10.2 D2 cond 1: true = GitOps-operator-managed; the dashboard badges it and warns on manual edit.
+        managed_by_operator: { type: boolean }
         id: { type: string, format: uuid }
         site_id: { type: string, format: uuid, description: "The site whose gateway fronts this cluster." }
         name: { type: string, description: "A DNS label; a hostname component of every exposed Service." }
@@ -2626,9 +2633,11 @@ components:
         created_at: { type: string, format: date-time }
     K8sService:
       type: object
-      required: [id, cluster_id, name, namespace, protocol, vip, fqdn]
+      required: [id, cluster_id, name, namespace, protocol, vip, fqdn, managed_by_operator]
       additionalProperties: false
       properties:
+        # S10.2 D2 cond 1: true = GitOps-operator-managed; the dashboard badges it and warns on manual edit.
+        managed_by_operator: { type: boolean }
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
         name: { type: string }

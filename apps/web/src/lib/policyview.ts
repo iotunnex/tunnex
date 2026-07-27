@@ -175,6 +175,13 @@ export interface RuleRow {
    * the Service returns. Distinct from `broken` — a valid rule that warns.
    */
   k8sServiceVanished: boolean;
+  /**
+   * S10.2 D2 cond 1: this grant is managed by the GitOps operator (created via a TunnexGrant CR, a machine
+   * credential). Rendered VERBATIM from the served `managed_by_operator`. The row badges it and the edit/
+   * delete affordance WARNS ("managed by GitOps — edit the CR, not here") rather than letting a dashboard edit
+   * be silently reverted on the next reconcile (the render-floor discipline applied to authority).
+   */
+  managedByOperator: boolean;
 }
 
 // loaded flags say whether each referent SET loaded successfully. When a set failed to
@@ -273,6 +280,7 @@ export function ruleRow(
     broken: src.state !== "ok" || dst.state !== "ok",
     cidrOutsideRanges: rule.cidr_outside_org_ranges,
     k8sServiceVanished: rule.dst_k8s_service_vanished,
+    managedByOperator: rule.managed_by_operator,
   };
 }
 
@@ -465,6 +473,14 @@ export async function swapRule(
 
 export function swapPartialMessage(oldIdShort: string): string {
   return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
+}
+
+// S10.2 D2 cond 1 — the grant ownership surface. A GitOps-managed grant is badged and its dashboard edit/
+// delete is withheld (the warn), so an admin sees ownership at the point of editing instead of having a
+// dashboard change silently reverted on the next reconcile.
+export const MANAGED_BADGE = "Managed by GitOps";
+export function managedGrantWarning(): string {
+  return "This grant is managed by the GitOps operator — edit its TunnexGrant CR, not the dashboard.";
 }
 
 // canEditRuleInModal: the rule-EDIT (swap) modal only rewrites group/resource grants with a group/user

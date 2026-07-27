@@ -963,8 +963,9 @@ type K8sCluster struct {
 	DnsVip *string `json:"dns_vip"`
 
 	// DnsZone The customer's DNS zone suffix for exposed-Service hostnames.
-	DnsZone string             `json:"dns_zone"`
-	Id      openapi_types.UUID `json:"id"`
+	DnsZone           string             `json:"dns_zone"`
+	Id                openapi_types.UUID `json:"id"`
+	ManagedByOperator bool               `json:"managed_by_operator"`
 
 	// Name A DNS label; a hostname component of every exposed Service.
 	Name string `json:"name"`
@@ -984,13 +985,14 @@ type K8sService struct {
 	ClusterId openapi_types.UUID `json:"cluster_id"`
 
 	// Fqdn The in-tunnel hostname clients use: <service>.<namespace>.svc.<cluster>.<zone> (copy, don't construct).
-	Fqdn      string             `json:"fqdn"`
-	Id        openapi_types.UUID `json:"id"`
-	Name      string             `json:"name"`
-	Namespace string             `json:"namespace"`
-	PortHigh  *int               `json:"port_high"`
-	PortLow   *int               `json:"port_low"`
-	Protocol  K8sServiceProtocol `json:"protocol"`
+	Fqdn              string             `json:"fqdn"`
+	Id                openapi_types.UUID `json:"id"`
+	ManagedByOperator bool               `json:"managed_by_operator"`
+	Name              string             `json:"name"`
+	Namespace         string             `json:"namespace"`
+	PortHigh          *int               `json:"port_high"`
+	PortLow           *int               `json:"port_low"`
+	Protocol          K8sServiceProtocol `json:"protocol"`
 
 	// Vip The synthetic /32 clients reach; DNAT'd to the ClusterIP at the gateway.
 	Vip string `json:"vip"`
@@ -1227,6 +1229,7 @@ type PolicyRule struct {
 	Enabled               bool                `json:"enabled"`
 	ExpiresAt             *time.Time          `json:"expires_at"`
 	Id                    openapi_types.UUID  `json:"id"`
+	ManagedByOperator     bool                `json:"managed_by_operator"`
 	OrgId                 openapi_types.UUID  `json:"org_id"`
 
 	// SrcCidr Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise).

@@ -2023,6 +2023,7 @@ export interface components {
             port_high?: number | null;
         };
         PolicyRule: {
+            managed_by_operator: boolean;
             enabled: boolean;
             /** Format: uuid */
             id: string;
@@ -2126,6 +2127,7 @@ export interface components {
             resolver_ip: string;
         };
         K8sCluster: {
+            managed_by_operator: boolean;
             /** Format: uuid */
             id: string;
             /**
@@ -2147,6 +2149,7 @@ export interface components {
             created_at?: string;
         };
         K8sService: {
+            managed_by_operator: boolean;
             /** Format: uuid */
             id: string;
             /** Format: uuid */

@@ -45,6 +45,8 @@ import {
   resPortsValid,
   activeMembers,
   canEditRuleInModal,
+  MANAGED_BADGE,
+  managedGrantWarning,
   type LoadState,
 } from "../lib/policyview";
 import {
@@ -405,6 +407,10 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                   <span className="text-slate-200">
                     <RefText label={row.src.label} broken={row.src.state !== "ok"} /> <span className="text-slate-500">→</span>{" "}
                     <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />
+                    {/* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are withheld below. */}
+                    {row.managedByOperator && (
+                      <span className="ml-2 rounded-sm bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{MANAGED_BADGE}</span>
+                    )}
                     {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
                     {!r.enabled && <span className="ml-2 rounded bg-slate-600/50 px-1.5 py-0.5 text-xs text-slate-300">disabled</span>}
                     {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim — a CIDR
@@ -427,33 +433,38 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
                       <span className={`ml-2 text-xs ${exp.state === "expired" ? "text-rose-400" : "text-amber-300"}`}>· {exp.label}</span>
                     )}
                   </span>
-                  {canManage && (
-                    <span className="flex gap-2">
-                      {exp.extendable && (
-                        <Button variant="ghost" onClick={() => setExtendingGrant(r)}>
-                          Extend
+                  {canManage &&
+                    (row.managedByOperator ? (
+                      // D2 cond 1: withhold EVERY dashboard mutation (extend/edit/disable/delete) on a
+                      // GitOps-managed grant — warn at the point of editing, never silently revert on reconcile.
+                      <span className="text-xs text-amber-400/90" title={managedGrantWarning()}>edit the CR</span>
+                    ) : (
+                      <span className="flex gap-2">
+                        {exp.extendable && (
+                          <Button variant="ghost" onClick={() => setExtendingGrant(r)}>
+                            Extend
+                          </Button>
+                        )}
+                        {canEditRuleInModal(r) && (
+                          <Button variant="ghost" onClick={() => setEditing(r)}>
+                            Edit
+                          </Button>
+                        )}
+                        {/* F3: enable = one click (additive); disable = confirm (revokes live access instantly). */}
+                        {r.enabled ? (
+                          <Button variant="ghost" onClick={() => setDisablingRule(r)}>
+                            Disable
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" onClick={() => setEnabled(r.id, true)}>
+                            Enable
+                          </Button>
+                        )}
+                        <Button variant="danger" onClick={() => del(r.id)}>
+                          Delete
                         </Button>
-                      )}
-                      {canEditRuleInModal(r) && (
-                        <Button variant="ghost" onClick={() => setEditing(r)}>
-                          Edit
-                        </Button>
-                      )}
-                      {/* F3: enable = one click (additive); disable = confirm (revokes live access instantly). */}
-                      {r.enabled ? (
-                        <Button variant="ghost" onClick={() => setDisablingRule(r)}>
-                          Disable
-                        </Button>
-                      ) : (
-                        <Button variant="ghost" onClick={() => setEnabled(r.id, true)}>
-                          Enable
-                        </Button>
-                      )}
-                      <Button variant="danger" onClick={() => del(r.id)}>
-                        Delete
-                      </Button>
-                    </span>
-                  )}
+                      </span>
+                    ))}
                 </li>
               );
             })}
