@@ -42,6 +42,9 @@ jobs:
       - name: Node agent — data-plane tests (reconcile idempotence)
         run: make test-node
 
+      - name: GitOps operator — build + no-DB-import census (S10.2)
+        run: make test-operator
+
       - name: Privilege-helper core — vet + test (S6.3)
         run: make test-helper
 

@@ -163,6 +163,12 @@ test-node: ## Run the node-agent data-plane tests (reconcile idempotence, no DB)
 	docker run --rm --cap-add=NET_ADMIN -v "$(PWD)/apps/node":/src -w /src -e GOFLAGS=-mod=readonly \
 	  $(GO_IMAGE) sh -c "apk add --no-cache git openvpn nftables && go test ./..."
 
+.PHONY: test-operator
+test-operator: ## Build the GitOps operator + run the no-DB-import census (S10.2). Edition-agnostic (one build; the operator is open deployment tooling, no enterprise tag).
+	# THE HARD RULE red: `go test` runs the no-DB-import census (hardrule_test.go) over the full dep graph.
+	docker run --rm -v "$(PWD)/apps/operator":/src -w /src -e GOFLAGS=-mod=readonly \
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go build ./... && go test ./..."
+
 .PHONY: test-helper
 test-helper: ## Vet + test the privilege-helper core (S6.3; x/sys dep for caller-path)
 	docker run --rm -v "$(PWD)/apps/helper":/src -w /src -e GOFLAGS=-mod=readonly \
