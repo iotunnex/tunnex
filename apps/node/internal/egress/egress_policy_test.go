@@ -126,10 +126,10 @@ func TestRulesetEnforcingDefaultDenyNoBlanket(t *testing.T) {
 	if !strings.Contains(rs, "policy drop") {
 		t.Fatal("enforcing must keep the forward policy drop base")
 	}
-	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ct original ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
 		t.Fatalf("missing the resource allow; got:\n%s", rs)
 	}
-	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.99.0.20/32 counter accept") {
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ct original ip daddr 10.99.0.20/32 counter accept") {
 		t.Fatalf("missing the device-to-device allow; got:\n%s", rs)
 	}
 	// The masquerade still NATs allowed egress.
@@ -184,10 +184,11 @@ func TestRulesetDeterministic(t *testing.T) {
 // inject nft statements, and skips what it can't safely render.
 // rule_id (v2, S7.5.1) is OBSERVABILITY metadata. SPLIT assertion (the A-1 law at FULL
 // strength on the packet-fate part, NOT a loosening):
-//   (i)  the ENFORCEMENT clause (match + counter + verdict) is BYTE-IDENTICAL with and
-//        without rule_id — the part that decides accept/drop never depends on rule_id;
-//   (ii) rule_id appears ONLY inside the log clause, which is the SOLE delta of the logged
-//        variant and is NON-TERMINAL (the accept verdict is unchanged).
+//
+//	(i)  the ENFORCEMENT clause (match + counter + verdict) is BYTE-IDENTICAL with and
+//	     without rule_id — the part that decides accept/drop never depends on rule_id;
+//	(ii) rule_id appears ONLY inside the log clause, which is the SOLE delta of the logged
+//	     variant and is NON-TERMINAL (the accept verdict is unchanged).
 func TestRenderAllowRuleIDOnlyInLogClause(t *testing.T) {
 	base := nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "10.0.5.0/24", Protocol: "tcp", PortLow: 5432, PortHigh: 5432}
 	withID := base
@@ -262,7 +263,7 @@ func TestForwardRulesFlowLogGrouping(t *testing.T) {
 		t.Fatalf("deny verdict must precede the trailing comment (valid nft): %q", v4on)
 	}
 	// The enforcement match is present with and without logging (packet fate unchanged).
-	const match = "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24"
+	const match = "ip saddr 10.99.0.10 ct original ip daddr 10.0.5.0/24"
 	if !strings.Contains(v4off, match) || !strings.Contains(v4on, match) {
 		t.Fatalf("the enforcement match must be present regardless of logging:\n off=%q\n on=%q", v4off, v4on)
 	}
@@ -350,7 +351,7 @@ func TestRenderAllowSanitizesAndSkips(t *testing.T) {
 	}
 	// Valid any-proto egress grant.
 	line, ok := renderAllow(nodepolicy.AllowEntry{SrcIP: "10.99.0.7", DstCIDR: "0.0.0.0/0", Protocol: "any"})
-	if !ok || !strings.Contains(line, "ip saddr 10.99.0.7 ip daddr 0.0.0.0/0 counter accept") {
+	if !ok || !strings.Contains(line, "ip saddr 10.99.0.7 ct original ip daddr 0.0.0.0/0 counter accept") {
 		t.Fatalf("valid egress grant mis-rendered: %q", line)
 	}
 	// Host bits in dst are masked (defense-in-depth; the service already canonicalizes).
@@ -529,7 +530,7 @@ func TestSiteSourceCIDRRendersAndRoutedButDropped(t *testing.T) {
 		Version: 5, Mode: nodepolicy.ModeEnforcing, Mesh: false,
 		Allow: []nodepolicy.AllowEntry{{SrcIP: "10.1.0.0/24", DstCIDR: "10.2.0.0/24", Protocol: "any"}},
 	})
-	if rs := m.ruleset("10.99.0.1/24"); !strings.Contains(rs, "ip saddr 10.1.0.0/24 ip daddr 10.2.0.0/24 counter accept") {
+	if rs := m.ruleset("10.99.0.1/24"); !strings.Contains(rs, "ip saddr 10.1.0.0/24 ct original ip daddr 10.2.0.0/24 counter accept") {
 		t.Fatalf("a v5 site→site (CIDR source) grant must render a LAN-source accept; got:\n%s", rs)
 	}
 	// Routed-but-DROPPED: the same enforcing gateway WITHOUT the grant → no accept for that subnet.
@@ -738,7 +739,7 @@ func TestB1EnforcingGrantHasNoInterfacePredicate(t *testing.T) {
 	rs := m.ruleset("10.99.0.1/24")
 
 	// the grant is present, address-keyed.
-	if !strings.Contains(rs, "ip saddr 10.99.0.10 ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
+	if !strings.Contains(rs, "ip saddr 10.99.0.10 ct original ip daddr 10.0.5.0/24 tcp dport 5432 counter accept") {
 		t.Fatalf("enforcing grant must be address-keyed; got:\n%s", rs)
 	}
 	// no line carrying this grant's source may be scoped by an interface predicate.

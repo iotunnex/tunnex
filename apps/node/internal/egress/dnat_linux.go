@@ -10,38 +10,29 @@ import (
 	"net/netip"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 )
 
-// S10.3 Slice 4b — the K8s VIP DNAT (highest-privilege surface). A client reaches an exposed Service at its
-// synthetic VIP; this gateway DNATs VIP -> the Service's real ClusterIP, and kube-proxy then DNATs
-// ClusterIP -> a pod. The ClusterIP is resolved from <service>.<namespace> via in-cluster CoreDNS (ruling
-// (A): no K8s API). FAIL-CLOSED at every branch: the ONLY input that programs a DNAT is exactly ONE
-// resolved address INSIDE the registered Service CIDR (a ClusterIP). Resolution is bounded + decoupled from
-// the apply path; the render is pure.
+// S10.3 WF-K5 — the K8s VIP DNAT (highest-privilege surface), REBUILT after the box-walk proved the original
+// VIP->ClusterIP DNAT can not complete (netfilter applies one dst-NAT per prerouting pass, so kube-proxy's
+// ClusterIP->pod DNAT is a silent no-op — see docs/S10.3-decisions.md "WF-K5"). A client reaches an exposed
+// Service at its synthetic VIP; this gateway now DNATs VIP -> a READY pod ENDPOINT directly (single DNAT,
+// VIP->pod), so traffic stays FORWARDED and the ip-tunnex grant chain + S8.7 conntrack-flush both keep
+// working unchanged. Ready endpoints come from a read-only EndpointSlice+Service watch (endpointSource,
+// k8swatch_linux.go), NOT CoreDNS. FAIL-CLOSED at every branch: the ONLY input that programs a DNAT is a
+// Service with >=1 READY endpoint and a valid VIP; resolution is decoupled from the apply path (the render
+// reads the last-resolved map, does no I/O); the render is pure.
 
-// resolveTimeout bounds ONE Service lookup so a slow/hanging cluster DNS never stalls the resolve loop
-// (which is itself decoupled from Reconcile/apply — the render reads the last-resolved map).
-const resolveTimeout = 2 * time.Second
-
-// ErrDNSUnreachable: the cluster DNS SERVER could not be reached (vs NXDOMAIN = server up, name absent).
-// Drives the k8s_cluster_dns_unreachable preflight. Both are fail-closed (no DNAT programmed).
-var ErrDNSUnreachable = errors.New("cluster dns unreachable")
-
-// Resolver resolves <service>.<namespace> to its address(es) via in-cluster DNS. Injectable so every
-// fail-closed branch of classify is unit-tested without a live CoreDNS. Contract: err==ErrDNSUnreachable =>
-// server unreachable; (nil, nil) => NXDOMAIN; ([]addr, nil) => the A records.
-type Resolver interface {
-	Resolve(ctx context.Context, namespace, service string) ([]netip.Addr, error)
-}
-
-// resolvedVIP is a VIP the agent WILL DNAT — produced ONLY by classify's single success branch.
+// resolvedVIP is a VIP the agent WILL DNAT — produced ONLY by classify's single success branch. targets are
+// the ready podIP:port destinations (port 0 = address-only DNAT, preserving the client's destination port).
 type resolvedVIP struct {
-	vip       string
-	clusterIP string
+	vip     string
+	proto   string // tcp | udp (allowlisted; never interpolated raw)
+	svcPort int    // the exposed service port the client dials at the VIP (0 = any → address-only)
+	targets []k8sTarget
 }
 
 // refusedVIP is a mapping that did NOT program a DNAT, with the reason (surfaced for the operator).
@@ -49,91 +40,138 @@ type refusedVIP struct {
 	vip, namespace, service, reason string
 }
 
-// classify is THE decision — one function, one success. ok=true is reachable at EXACTLY ONE return: a
-// resolution of EXACTLY ONE address that is INSIDE the registered Service CIDR (a ClusterIP). Every other
-// outcome fails closed (ok=false, no DNAT): a resolver error, DNS unreachable, NXDOMAIN, more than one
-// address (headless/N pods), an address outside the Service CIDR (a pod IP = headless), or a missing/bad
-// Service CIDR. Structured so a future edit cannot reorder a guard into a fail-open — the success is the
-// last line, gated by everything above it.
-func classify(m nodepolicy.VIPMapping, ips []netip.Addr, resolveErr error) (clusterIP string, ok bool, reason string) {
-	// Defense-in-depth (review fold): the VIP is a raw string from the CP; NEVER interpolate an
-	// unvalidated value into the nft ruleset (the wgIface/ruleID regex-guard convention). A malformed VIP
-	// fails CLOSED here, before any render can see it — the classifier is the one place inputs are trusted.
-	if _, e := netip.ParseAddr(m.VIP); e != nil {
-		return "", false, "invalid_vip"
+// classify is THE decision — one function, one success. ok=true is reachable at EXACTLY ONE return: a valid
+// IPv4 VIP, a single specific exposed port, and >=1 READY non-local endpoint. Every other outcome fails
+// closed (ok=false, no DNAT). Structured so a future edit cannot reorder a guard into a fail-open — the
+// success is the last line, gated by everything above it. isLocal reports whether an address is one of THIS
+// gateway's own addresses (M6): a hostNetwork endpoint equal to the gateway IP would DNAT->local->INPUT,
+// bypassing the forward grant chain (the option-5 hazard) — such a target is dropped.
+func classify(m nodepolicy.VIPMapping, targets []k8sTarget, sourceOK bool, isLocal func(netip.Addr) bool) (out []k8sTarget, ok bool, reason string) {
+	// Defense-in-depth (WF-K5): the VIP is a raw string from the CP; NEVER interpolate an unvalidated value
+	// into the nft ruleset. H4 — the render is IPv4-only (`ip daddr`/`dnat to`); a v6 or malformed VIP fails
+	// CLOSED here, mirroring the DNS-VIP path's Is4() guard, so it can never reach `nft -f` and reject the
+	// WHOLE atomic `table ip tunnex` (grant chain + kill-switch + conntrack).
+	if a, e := netip.ParseAddr(m.VIP); e != nil || !a.Is4() {
+		return nil, false, "invalid_vip"
 	}
-	switch {
-	case errors.Is(resolveErr, ErrDNSUnreachable):
-		return "", false, "dns_unreachable"
-	case resolveErr != nil:
-		return "", false, "resolve_error"
-	case len(ips) == 0:
-		return "", false, "nxdomain" // Service absent (deleted in-cluster, or DNS not yet propagated)
-	case len(ips) > 1:
-		return "", false, "headless_multi" // N pod IPs — a headless Service has no stable VIP to map
+	// M8/M9: the exposure must be a SINGLE specific port. All-ports (PortLow==0) can't remap svcPort->
+	// targetPort (address-only DNAT would silently hit the wrong pod port); a range (PortHigh>PortLow) DNATs
+	// only PortLow and blackholes the rest. Both are silently-wrong, worse than unsupported — refuse with a
+	// typed reason. The CP also rejects them at expose time (the teaching error); this is the enforcement-
+	// point backstop. M5: bound the port so an out-of-range value can't render invalid nft.
+	if m.PortLow == 0 {
+		return nil, false, "all_ports_unsupported"
 	}
-	svcCIDR, err := netip.ParsePrefix(m.ServiceCIDR)
-	if err != nil {
-		return "", false, "no_service_cidr" // without the classifier input we cannot tell ClusterIP from pod IP
+	if m.PortHigh != 0 && m.PortHigh != m.PortLow {
+		return nil, false, "port_range_unsupported"
 	}
-	if !svcCIDR.Contains(ips[0]) {
-		return "", false, "headless_pod_ip" // a single address OUTSIDE the Service CIDR = a pod IP = headless
+	if m.PortLow < 1 || m.PortLow > 65535 {
+		return nil, false, "invalid_port"
 	}
-	// THE ONLY SUCCESS: exactly one address, inside the registered Service CIDR = a ClusterIP. Program it.
-	return ips[0].String(), true, ""
+	if !sourceOK {
+		// The watcher has no live view — API unreachable, a watch fault that cleared the cache, or not yet
+		// listed. NEVER a stale/guessed pod IP.
+		return nil, false, "endpoints_unavailable"
+	}
+	// Validate + dedup the endpoint targets (from the K8s API — validated anyway, the never-interpolate rule).
+	seen := map[string]struct{}{}
+	for _, t := range targets {
+		a, e := netip.ParseAddr(t.ip)
+		if e != nil || !a.Is4() {
+			continue // H4: a malformed / non-IPv4 endpoint is dropped, never rendered into the v4 ruleset
+		}
+		if t.port < 1 || t.port > 65535 {
+			continue // M5: an out-of-range target port would render invalid nft — drop it
+		}
+		if isLocal != nil && isLocal(a) {
+			continue // M6: a gateway-local endpoint would DNAT to a local addr → INPUT → grant-chain bypass
+		}
+		key := a.String() + ":" + strconv.Itoa(t.port)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, k8sTarget{ip: a.String(), port: t.port})
+	}
+	if len(out) == 0 {
+		return nil, false, "no_ready_endpoints" // Service exists but no ready, valid, non-local pod backs it
+	}
+	// THE ONLY SUCCESS: a valid v4 VIP, a single specific port, >=1 ready non-local endpoint. Program it.
+	return out, true, ""
 }
 
-// ResolveK8sVIPs resolves every VIP mapping in the current policy and stores the resolved map + refusals +
-// the DNS-preflight flag. DECOUPLED from Reconcile/apply (its own loop, main.go) so a slow resolver never
-// stalls an nft apply; the render (preroutingDNAT) reads whatever this last stored.
+// normProto restricts the CP-supplied protocol to an nft-safe allowlist (never interpolate raw). Empty/any
+// defaults to tcp — Services default to TCP and a port-DNAT needs an L4 context.
+func normProto(p string) string {
+	if strings.EqualFold(p, "udp") {
+		return "udp"
+	}
+	return "tcp"
+}
+
+// ResolveK8sVIPs reads the ready endpoints for every VIP mapping in the current policy (from the watch cache
+// — PURE, no network I/O here) and stores the resolved map + refusals + the endpoints-unavailable flag.
+// DECOUPLED from the nft apply; the render (preroutingDNAT) reads whatever this last stored. It runs on the
+// egress reconcile, which the watcher KICKS on every endpoint change (watch-driven, not a slow poll).
 func (m *Manager) ResolveK8sVIPs(ctx context.Context) {
 	p := m.policy.Load()
 	nVIP, nDNS := 0, 0
 	if p != nil {
 		nVIP, nDNS = len(p.VIPMappings), len(p.K8sDNSZones)
 	}
-	// WF-K-OBS-1: log what the agent received + resolved. A silent refusal (no DNAT, no log) is un-debuggable;
-	// the DNS-unreachable health kind only fires when ALL VIPs fail to REACH the server, so per-VIP outcomes
-	// (headless / outside-CIDR / NXDOMAIN) were previously invisible.
+	// WF-K-OBS-1: log what the agent received + resolved. A silent refusal (no DNAT, no log) is un-debuggable.
 	if m.log != nil {
 		m.log.Info("k8s_resolve_begin", "vip_mappings", nVIP, "dns_zones", nDNS)
 	}
 	if p == nil || len(p.VIPMappings) == 0 {
 		m.resolvedVIPs.Store(&[]resolvedVIP{})
 		m.refusedK8sVIPs.Store(&[]refusedVIP{})
-		m.dnsUnreachable.Store(false)
+		m.k8sUnavailable.Store(false)
 		return
 	}
+	src := m.source
+	// M6: snapshot THIS gateway's own addresses once per reconcile so classify can refuse an endpoint equal
+	// to a gateway-local IP (a hostNetwork pod on this node) — such a DNAT target would divert to INPUT and
+	// bypass the forward grant chain.
+	var local map[netip.Addr]struct{}
+	if m.localIPs != nil {
+		local = m.localIPs()
+	}
+	isLocal := func(a netip.Addr) bool { _, ok := local[a.Unmap()]; return ok }
 	var resolved []resolvedVIP
 	var refused []refusedVIP
-	reachable, unreachable := 0, 0
+	haveView, noView := 0, 0
 	for _, vm := range p.VIPMappings {
-		cctx, cancel := context.WithTimeout(ctx, resolveTimeout)
-		ips, err := m.resolver.Resolve(cctx, vm.Namespace, vm.Service)
-		cancel()
-		cip, ok, reason := classify(vm, ips, err)
-		if reason == "dns_unreachable" {
-			unreachable++
-		} else {
-			reachable++
+		var targets []k8sTarget
+		var sourceOK bool
+		if src != nil {
+			targets, sourceOK = src.Targets(vm.Namespace, vm.Service, vm.PortLow)
 		}
+		if sourceOK {
+			haveView++
+		} else {
+			noView++
+		}
+		out, ok, reason := classify(vm, targets, sourceOK, isLocal)
 		if ok {
-			resolved = append(resolved, resolvedVIP{vip: vm.VIP, clusterIP: cip})
+			resolved = append(resolved, resolvedVIP{vip: vm.VIP, proto: normProto(vm.Protocol), svcPort: vm.PortLow, targets: out})
 			if m.log != nil {
-				m.log.Info("k8s_vip_resolved", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "cluster_ip", cip)
+				m.log.Info("k8s_vip_resolved", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "ready_endpoints", len(out))
 			}
 		} else {
 			refused = append(refused, refusedVIP{vip: vm.VIP, namespace: vm.Namespace, service: vm.Service, reason: reason})
 			if m.log != nil {
-				m.log.Warn("k8s_vip_refused", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "service_cidr", vm.ServiceCIDR, "reason", reason)
+				m.log.Warn("k8s_vip_refused", "vip", vm.VIP, "service", vm.Namespace+"/"+vm.Service, "reason", reason)
 			}
 		}
 	}
-	// Byte-stable order → a steady-state reconcile is a no-op (no thrash).
+	// Byte-stable order → a steady-state reconcile is a no-op (no thrash). Targets are sorted in the render.
 	sort.Slice(resolved, func(i, j int) bool { return resolved[i].vip < resolved[j].vip })
-	// Preflight: the DNS SERVER is unreachable only if EVERY lookup failed to reach it (a single NXDOMAIN
-	// means the server is up). Fail-closed + surfaced loud (k8s_cluster_dns_unreachable), never a silent no-map.
-	m.dnsUnreachable.Store(unreachable > 0 && reachable == 0)
+	// Health: the endpoint source is UNAVAILABLE only if EVERY exposed Service has no successful view (the
+	// API is unreachable / the watch has not synced). A single reachable Service means the API is up (a
+	// per-Service zero-ready is a different, quieter refusal, not an API-down signal). Fail-closed + surfaced
+	// loud (k8s_endpoints_unavailable), never a silent no-map.
+	m.k8sUnavailable.Store(noView > 0 && haveView == 0)
 	m.resolvedVIPs.Store(&resolved)
 	m.refusedK8sVIPs.Store(&refused)
 }
@@ -143,6 +181,25 @@ func runIP(ctx context.Context, args ...string) error {
 	return exec.CommandContext(ctx, "ip", args...).Run()
 }
 
+// defaultLocalIPs is the real gateway-local address set (M6): every IP assigned to a host interface. A DNAT
+// target in this set is a hostNetwork endpoint on THIS node — DNAT-ing to it would divert the flow to INPUT
+// and bypass the forward grant chain, so classify drops it. Injectable via Manager.localIPs for tests.
+func defaultLocalIPs() map[netip.Addr]struct{} {
+	out := map[netip.Addr]struct{}{}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok {
+			if ad, ok := netip.AddrFromSlice(ipn.IP); ok {
+				out[ad.Unmap()] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
 // ReconcileDNSVIPs drives the wg interface's assigned DNS VIPs to match the policy's K8sDNSZones (S10.3 A1).
 // Each cluster's reserved DNS VIP must be OWNED locally as a /32 so (a) a client's DNS query to it is
 // delivered locally (not forwarded) and (b) the dnsforward bind-reconcile binds :53 on it (it enumerates
@@ -150,6 +207,7 @@ func runIP(ctx context.Context, args ...string) error {
 // `ip addr del`'d. FAIL-CLOSED by construction — if an assign fails (no CAP_NET_ADMIN / netlink fault) the
 // address never becomes local, the forwarder never binds :53 on it, and the gateway answers NOTHING there
 // (a departed-half-bind is impossible). Decoupled from the nft apply (its own step in the egress loop).
+// UNCHANGED by WF-K5: this is the DNS-answer half (ruling A DNS clause intact).
 func (m *Manager) ReconcileDNSVIPs(ctx context.Context) error {
 	if !ifaceRE.MatchString(m.wgIface) {
 		return fmt.Errorf("invalid wg interface name %q", m.wgIface) // never interpolate an unvalidated name into a privileged command
@@ -159,7 +217,7 @@ func (m *Manager) ReconcileDNSVIPs(ctx context.Context) error {
 	if p != nil {
 		for _, z := range p.K8sDNSZones {
 			// Validate the CP-supplied VIP before it reaches `ip` — the same never-interpolate-an-unvalidated-
-			// CP-string discipline the DNAT classifier applies (Slice 4b fold).
+			// CP-string discipline the DNAT classifier applies.
 			if a, err := netip.ParseAddr(z.ListenVIP); err == nil && a.Is4() {
 				want[a.String()] = struct{}{}
 			}
@@ -194,11 +252,11 @@ func (m *Manager) ReconcileDNSVIPs(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// preroutingDNAT renders the VIP->ClusterIP DNAT chain from the LAST-RESOLVED map (PURE — no I/O). Priority
-// -101 (below dstnat's -100) so our chain runs BEFORE kube-proxy's ClusterIP DNAT in the shared node netns
-// (hostNetwork): VIP->ClusterIP here, then kube-proxy ClusterIP->pod. It lives in OUR `table ip tunnex`
-// (atomic add;flush;table replace) — a removed Service's rule is swept for free, never interleaved into
-// kube-proxy's chains. Empty (no chain at all) for a non-cluster gateway — the zero-config golden.
+// preroutingDNAT renders the VIP->endpoint DNAT chain from the LAST-RESOLVED map (PURE — no I/O). Priority
+// -101; harmless now that we DNAT straight to a pod IP (kube-proxy's ClusterIP rules never match a pod IP,
+// so there is no chained-DNAT interaction — the WF-K5 defect is structurally gone). It lives in OUR
+// `table ip tunnex` (atomic add;flush;table replace) — a removed Service's rule is swept for free. Empty (no
+// chain at all) for a non-cluster gateway — the zero-config golden.
 func (m *Manager) preroutingDNAT() string {
 	rs := m.resolvedVIPs.Load()
 	if rs == nil || len(*rs) == 0 {
@@ -206,38 +264,46 @@ func (m *Manager) preroutingDNAT() string {
 	}
 	var b strings.Builder
 	b.WriteString("  chain prerouting {\n")
-	b.WriteString("    type nat hook prerouting priority -101; policy accept;\n") // -101 < dstnat(-100): before kube-proxy
+	b.WriteString("    type nat hook prerouting priority -101; policy accept;\n")
 	for _, r := range *rs {
-		fmt.Fprintf(&b, "    ip daddr %s dnat to %s comment \"tunnex_k8s_vip\"\n", r.vip, r.clusterIP)
+		b.WriteString("    " + dnatRule(r) + "\n")
 	}
 	b.WriteString("  }\n")
 	return b.String()
 }
 
-// DNSUnreachable reports the k8s_cluster_dns_unreachable preflight (every exposed-Service lookup failed to
-// reach the cluster DNS server). Reported to the CP so an operator sees WHY no Service is reachable.
-func (m *Manager) DNSUnreachable() bool { return m.dnsUnreachable.Load() }
-
-// clusterDNSResolver is the real Resolver — an in-cluster CoreDNS lookup of the standard Service FQDN. Uses
-// the pod's resolv.conf (the chart sets dnsPolicy: ClusterFirstWithHostNet so a hostNetwork pod still points
-// at cluster DNS). Any non-NotFound error is treated as unreachable (fail-closed, conservative).
-type clusterDNSResolver struct{}
-
-func (clusterDNSResolver) Resolve(ctx context.Context, namespace, service string) ([]netip.Addr, error) {
-	// WF-K-AGENT-1: the name is ABSOLUTE (trailing dot). Without it, a hostNetwork pod's resolv.conf
-	// (ndots:5) makes Go's pure resolver walk the SEARCH LIST first — appending default.svc.cluster.local /
-	// svc.cluster.local / cluster.local to an already-qualified name — and a permuted lookup can surface a
-	// non-NXDOMAIN error that Go returns BEFORE trying the real absolute name, misclassified as
-	// dns_unreachable → the Service is refused despite resolving fine. The trailing dot forces a single direct
-	// query (what `nslookup <fqdn>` does), skipping the search dance entirely.
-	fqdn := service + "." + namespace + ".svc.cluster.local."
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", fqdn)
-	if err != nil {
-		var de *net.DNSError
-		if errors.As(err, &de) && de.IsNotFound {
-			return nil, nil // NXDOMAIN — server up, name absent (Service deleted / not yet created)
+// dnatRule renders ONE VIP's DNAT. Single ready endpoint → a plain `dnat to ip[:port]`. N ready endpoints →
+// nft-native per-flow load balancing (`jhash ip saddr . ip daddr mod N map {...}`) — sticky per src/dst
+// pair, no userspace round-robin, no state (WF-K5 condition 4). Port remap: the client dials VIP:svcPort;
+// we DNAT to podIP:targetPort (targetPort from the EndpointSlice — kube-proxy's servicePort→targetPort remap
+// is gone once we bypass the ClusterIP). svcPort==0 (an "any" exposure) → address-only DNAT (dport preserved).
+func dnatRule(r resolvedVIP) string {
+	// Byte-stable target order → a steady-state reconcile is a no-op (no nft thrash).
+	ts := append([]k8sTarget(nil), r.targets...)
+	sort.Slice(ts, func(i, j int) bool {
+		if ts[i].ip != ts[j].ip {
+			return ts[i].ip < ts[j].ip
 		}
-		return nil, ErrDNSUnreachable // timeout / connection refused / no server → unreachable (fail-closed)
+		return ts[i].port < ts[j].port
+	})
+	// classify guarantees a single specific svcPort (1..65535) and every target port in range, so the DNAT
+	// ALWAYS remaps VIP:svcPort -> podIP:targetPort (all-ports / range exposures are refused upstream).
+	match := fmt.Sprintf("ip daddr %s %s dport %d", r.vip, r.proto, r.svcPort)
+	if len(ts) == 1 {
+		return fmt.Sprintf("%s dnat to %s:%d comment \"tunnex_k8s_vip\"", match, ts[0].ip, ts[0].port)
 	}
-	return addrs, nil
+	// N ready endpoints → nft-native per-flow load balancing: jhash over the src/dst pair (sticky per flow,
+	// no userspace round-robin, no state). Map values are the addr+port concatenation `ip . port`.
+	var parts []string
+	for i, t := range ts {
+		parts = append(parts, fmt.Sprintf("%d : %s . %d", i, t.ip, t.port))
+	}
+	return fmt.Sprintf("%s dnat to jhash ip saddr . ip daddr mod %d map { %s } comment \"tunnex_k8s_vip\"",
+		match, len(ts), strings.Join(parts, ", "))
 }
+
+// EndpointsUnavailable reports the k8s_endpoints_unavailable health kind (this gateway fronts exposed
+// Services but has NO successful endpoint view from the K8s API, so no VIP can be DNAT-programmed —
+// fail-closed). Reported to the CP so an operator sees WHY no Service is reachable. (Renamed from the CoreDNS-
+// era DNSUnreachable — WF-K5 moved target resolution from CoreDNS to the API watch.)
+func (m *Manager) EndpointsUnavailable() bool { return m.k8sUnavailable.Load() }

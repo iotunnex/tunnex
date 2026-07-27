@@ -69,12 +69,16 @@ spec:
               # M3: prove cluster DNS resolves by ANSWER CONTENT, never the exit code. busybox nslookup has
               # historically returned 0 even on failure, so a "reassuring-green" gate could pass while the very
               # trap it guards (missing ClusterFirstWithHostNet) is active. Require an Address line UNDER the
-              # answer's "Name:" section — absent on a resolution failure.
+              # answer's "Name:" section — absent on a resolution failure. WF-K5 NARROWED the reason: the gateway
+              # no longer resolves a Service's ClusterIP via DNS (endpoint DNAT reads ready pods from the K8s API
+              # by ClusterIP env). Cluster DNS is still needed when controlPlane.apiURL/agentURL are IN-CLUSTER
+              # FQDNs (the tunnex-cp-in-cluster deploy) — this proves ClusterFirstWithHostNet is in force so the
+              # agent can resolve the CP's address. (For an external CP it is belt-and-suspenders.)
               echo "preflight: resolving cluster DNS ({{ .Values.preflight.dnsProbe }}) from the gateway's DNS posture ..."
               out=$(nslookup {{ .Values.preflight.dnsProbe }} 2>&1 || true)
               echo "$out"
               if ! printf '%s\n' "$out" | grep -A50 '^Name:' | grep -q '^Address'; then
-                echo "FATAL: could not resolve {{ .Values.preflight.dnsProbe }} to an address. A hostNetwork pod inherits the NODE resolv.conf; without dnsPolicy ClusterFirstWithHostNet the gateway cannot turn a Service name into its ClusterIP. This is the hostNetwork DNS trap — refuse rather than install a gateway that silently can't resolve Services."
+                echo "FATAL: could not resolve {{ .Values.preflight.dnsProbe }} to an address. A hostNetwork pod inherits the NODE resolv.conf; without dnsPolicy ClusterFirstWithHostNet cluster DNS is dead. This blocks resolving an IN-CLUSTER control-plane address (controlPlane.apiURL/agentURL as *.svc.cluster.local). Refuse rather than install a gateway that silently can't reach its control plane."
                 exit 1
               fi
               echo "preflight: OK — privileged context admitted, /dev/net/tun present, cluster DNS answers."

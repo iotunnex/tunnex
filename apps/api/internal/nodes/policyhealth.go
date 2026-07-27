@@ -50,10 +50,13 @@ const (
 	// CAP_NET_ADMIN to the gateway). Never silent — it lives on the same health plane as every other
 	// degradation, not just a log line.
 	KindConntrackFlushUnavailable PolicyDegradedKind = "conntrack_flush_unavailable"
-	// KindK8sClusterDNSUnreachable (S10.3): a K8s gateway can't reach cluster DNS, so it can't resolve any
-	// exposed Service's ClusterIP and programs NO VIP DNAT (fail-closed) — those Services are unreachable
-	// while everything else works. Reachability fault, remedy operator-side (cluster DNS / dnsPolicy).
-	KindK8sClusterDNSUnreachable PolicyDegradedKind = "k8s_cluster_dns_unreachable"
+	// KindK8sEndpointsUnavailable (S10.3 WF-K5): a K8s gateway has NO successful endpoint view from the K8s
+	// API (unreachable / RBAC-denied / watch not synced), so it can't learn any exposed Service's READY pods
+	// and programs NO VIP DNAT (fail-closed) — those Services are unreachable while everything else works.
+	// Reachability fault, remedy operator-side (gateway's API reachability + the read-only services/
+	// endpointslices RBAC). (Renamed from the CoreDNS-era cluster-dns kind — WF-K5 moved target resolution
+	// from CoreDNS to a read-only EndpointSlice+Service watch.)
+	KindK8sEndpointsUnavailable PolicyDegradedKind = "k8s_endpoints_unavailable"
 	// KindHubForwardingNotReconciling (WF-C Layer 2, D-WFC2-1a): a HUB-SET MEMBER whose spoke-observed
 	// handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — the
 	// agent crashed/OOM'd but the interface it created in the host netns survives). A "zombie hub": the wire
@@ -118,9 +121,10 @@ type KindInput struct {
 	// CAP_NET_ADMIN / netlink fault). Lowest-priority degradation — surfaced only when policy is otherwise
 	// healthy.
 	ConntrackFlushUnavailable bool
-	// K8sClusterDNSUnreachable (S10.3): agent-reported — the gateway can't reach cluster DNS, so exposed
-	// Services can't be DNAT-programmed (fail-closed). Low-priority reachability degradation.
-	K8sClusterDNSUnreachable bool
+	// K8sEndpointsUnavailable (S10.3 WF-K5): agent-reported — the gateway has no successful K8s endpoint view
+	// (API unreachable / RBAC-denied / watch not synced), so exposed Services can't be DNAT-programmed
+	// (fail-closed). Low-priority reachability degradation.
+	K8sEndpointsUnavailable bool
 	// HubForwardingNotReconciling (WF-C L2 D-WFC2-1a): the zombie-hub conjunction, computed by the CALLER
 	// (wire-fresh via deriveMemberLiveness ⋂ agent last_seen stale) — passed in as ONE precomputed bool so
 	// degradedKind stays pure and no freshness is recomputed here. Ranked above the apply/desync kinds: a
@@ -149,7 +153,7 @@ var transitionTable = []TransitionRule{
 	{KindSilentDesync, "term-3 (pushed!=applied), reports fresh, age >= T"},
 	{KindDesyncUnknown, "pushed-hash UNAVAILABLE, OR (stamped AND reports stale) — cannot determine"},
 	{KindConntrackFlushUnavailable, "policy in sync but the expired-grant conntrack flush is failing (ConntrackFlushUnavailable) — lowest priority; remedy = restore CAP_NET_ADMIN"},
-	{KindK8sClusterDNSUnreachable, "K8s gateway can't reach cluster DNS (K8sClusterDNSUnreachable) — exposed-Service DNAT unprogrammed, fail-closed; remedy = fix cluster DNS / dnsPolicy ClusterFirstWithHostNet"},
+	{KindK8sEndpointsUnavailable, "K8s gateway has no endpoint view from the API (K8sEndpointsUnavailable) — exposed-Service DNAT unprogrammed, fail-closed; remedy = check the gateway's K8s API reachability + its read-only services/endpointslices RBAC"},
 }
 
 // degradedKind projects the advisory kind (pure — mirrors transitionTable). Order matters:
@@ -206,12 +210,12 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 		// S8.7 Slice 2 — LOWEST priority: policy is in sync, but the expired-grant conntrack flush is
 		// failing (revoked grants' flows may linger). Ranked here so any louder fault (version/apply/desync/
 		// link) masks it; only an otherwise-healthy gateway surfaces conntrack_flush_unavailable.
-		// S10.3 — a K8s gateway that can't reach cluster DNS: exposed-Service DNAT can't be programmed
-		// (fail-closed), so those Services are unreachable while everything else works. Ranked in the
+		// S10.3 WF-K5 — a K8s gateway with no endpoint view from the API: exposed-Service DNAT can't be
+		// programmed (fail-closed), so those Services are unreachable while everything else works. Ranked in the
 		// otherwise-healthy block, above the conntrack hygiene label (a dead exposed-Service surface is more
 		// user-visible than lingering revoked flows).
-		if in.K8sClusterDNSUnreachable {
-			return KindK8sClusterDNSUnreachable
+		if in.K8sEndpointsUnavailable {
+			return KindK8sEndpointsUnavailable
 		}
 		if in.ConntrackFlushUnavailable {
 			return KindConntrackFlushUnavailable

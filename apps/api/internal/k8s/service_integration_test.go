@@ -50,6 +50,9 @@ func seedOrgSiteActor(t *testing.T, pool *pgxpool.Pool) (org, site, actor uuid.U
 
 func pfx(s string) netip.Prefix { return netip.MustParsePrefix(s) }
 
+// p32 is a *int32 for a specific exposed Service port (WF-K5 M8/M9: ExposeService now requires one).
+func p32(v int32) *int32 { return &v }
+
 // TestRegisterClusterRejectsOverlap: a VIP range overlapping the device pool OR an approved site subnet
 // is refused with the TYPED class in the teaching message (never silently accepted — ambiguous routing).
 func TestRegisterClusterRejectsOverlap(t *testing.T) {
@@ -129,7 +132,7 @@ func TestRegisterClusterReservesDNSVIP(t *testing.T) {
 		t.Fatalf("DNS VIP must be reserved at .2, got %v", c.DnsVip)
 	}
 	// The first exposed Service gets .3 — proof .2 is reserved and never handed out.
-	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
 	if err != nil {
 		t.Fatalf("first expose: %v", err)
 	}
@@ -165,7 +168,7 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	svc1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
 	if err != nil {
 		t.Fatalf("first expose: %v", err)
 	}
@@ -174,11 +177,11 @@ func TestExposeAllocatesThenExhausts(t *testing.T) {
 	}
 	// Consume the remaining three Service VIPs (.4, .5, .6).
 	for i, n := range []string{"web", "cache", "queue"} {
-		if _, err := svc.ExposeService(ctx, org, c.ID, n, "prod", "tcp", nil, nil); err != nil {
+		if _, err := svc.ExposeService(ctx, org, c.ID, n, "prod", "tcp", p32(80), p32(80)); err != nil {
 			t.Fatalf("expose %d (%s): %v", i, n, err)
 		}
 	}
-	if _, err := svc.ExposeService(ctx, org, c.ID, "extra", "prod", "tcp", nil, nil); err == nil || !strings.Contains(err.Error(), "exhausted") {
+	if _, err := svc.ExposeService(ctx, org, c.ID, "extra", "prod", "tcp", p32(80), p32(80)); err == nil || !strings.Contains(err.Error(), "exhausted") {
 		t.Fatalf("exposing past the range must refuse honestly (exhausted), got %v", err)
 	}
 }
@@ -195,7 +198,7 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	s1, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +225,7 @@ func TestUnexposeServiceSweeps(t *testing.T) {
 		t.Fatalf("unexposed Service must vanish from the resolution, got %d", len(live))
 	}
 	// The freed VIP is reusable — a re-expose gets .3 again (not skipped, not exhausted-around).
-	s2, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	s2, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
 	if err != nil {
 		t.Fatalf("re-expose: %v", err)
 	}
@@ -245,7 +248,7 @@ func TestDeregisterClusterSweeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exposed, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", nil, nil)
+	exposed, err := svc.ExposeService(ctx, org, c.ID, "api", "prod", "tcp", p32(80), p32(80))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,11 +313,11 @@ func TestVIPAllocationClusterScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sa, err := svc.ExposeService(ctx, org, a.ID, "s", "ns", "any", nil, nil)
+	sa, err := svc.ExposeService(ctx, org, a.ID, "s", "ns", "any", p32(80), p32(80))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sb, err := svc.ExposeService(ctx, org, b.ID, "s", "ns", "any", nil, nil)
+	sb, err := svc.ExposeService(ctx, org, b.ID, "s", "ns", "any", p32(80), p32(80))
 	if err != nil {
 		t.Fatal(err)
 	}

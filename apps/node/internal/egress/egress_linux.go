@@ -99,14 +99,20 @@ type Manager struct {
 	// nodepolicy.MaxSupportedVersion). A field, not the const directly, so the interlock red can pin
 	// an OLD-max agent (S8.1 Slice 3) and feed it the current-version artifact.
 	maxPolicyVersion int
-	// S10.3 Slice 4b — the K8s VIP DNAT. resolver resolves <service>.<namespace> -> ClusterIP (injectable
-	// for the classifier reds); resolvedVIPs is the LAST-RESOLVED VIP->ClusterIP map the pure render reads
-	// (decoupled from the apply path so resolver latency never stalls an nft apply); dnsUnreachable is the
-	// k8s_cluster_dns_unreachable preflight; refusedK8sVIPs holds the fail-closed refusals for surfacing.
-	resolver       Resolver
+	// S10.3 WF-K5 — the K8s VIP DNAT (endpoint DNAT). source reads READY pod endpoints for a Service from a
+	// read-only EndpointSlice+Service watch (injectable for the classifier reds; nil on a non-cluster gateway
+	// or when the in-cluster watcher failed to build — both fail closed: no view → no DNAT). resolvedVIPs is
+	// the LAST-RESOLVED VIP->endpoints map the pure render reads (decoupled from the apply path so the watch
+	// never stalls an nft apply); k8sUnavailable is the k8s_endpoints_unavailable health kind; refusedK8sVIPs
+	// holds the fail-closed refusals for surfacing.
+	source         endpointSource
 	resolvedVIPs   atomic.Pointer[[]resolvedVIP]
 	refusedK8sVIPs atomic.Pointer[[]refusedVIP]
-	dnsUnreachable atomic.Bool
+	k8sUnavailable atomic.Bool
+	// localIPs (WF-K5 M6) returns THIS gateway's own addresses; classify refuses a DNAT target in this set (a
+	// hostNetwork endpoint on this node would DNAT->local->INPUT, bypassing the forward grant chain).
+	// Injectable so the M6 red drives the refusal without real host interfaces.
+	localIPs func() map[netip.Addr]struct{}
 	// apply performs the atomic nft transaction; injectable so the fail-closed +
 	// staleness behavior is unit-testable without a real nft/kernel.
 	apply func(context.Context, string) error
@@ -169,14 +175,24 @@ type Manager struct {
 
 // New builds a Manager for the given WireGuard interface (e.g. wg0).
 func New(wgIface string) *Manager {
-	m := &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion, resolver: clusterDNSResolver{}}
+	m := &Manager{wgIface: wgIface, apply: nftApply, nftRun: nftRun, now: time.Now, maxPolicyVersion: nodepolicy.MaxSupportedVersion}
 	// The real conntrack flusher (S8.7 Slice 2); injectable so the scoped-flush wiring is unit-testable
 	// without a live conntrack table (the innocent-neighbor red).
 	m.ctFlush = flushTuples
-	m.runIP = runIP // S10.3 A1: the real `ip addr` runner; injectable for the DNS-VIP reconcile red
+	m.runIP = runIP              // S10.3 A1: the real `ip addr` runner; injectable for the DNS-VIP reconcile red
+	m.localIPs = defaultLocalIPs // WF-K5 M6: the real gateway-local address set; injectable for the local-endpoint refusal red
 	m.log = slog.Default()
+	// source is left nil here (WF-K5): a non-cluster gateway has no K8s endpoint watch, and a K8s gateway
+	// injects the real in-cluster watcher via SetEndpointSource once it is built. nil source → every VIP
+	// classify sees sourceOK=false → no DNAT (fail-closed), which is exactly right for a gateway that can't
+	// read endpoints.
 	return m
 }
+
+// SetEndpointSource injects the K8s ready-endpoint view (WF-K5). Called once at wiring time by a K8s gateway
+// after the in-cluster watcher is built; a non-cluster gateway never calls it (source stays nil → no VIP
+// DNAT). Injectable so the classifier/render reds drive every fail-closed branch with a fake source.
+func (m *Manager) SetEndpointSource(s endpointSource) { m.source = s }
 
 // SetOVPNTun records the co-terminated OpenVPN server's tun interface name (S9.1 Slice 3). Called
 // once at wiring time from the OVPN server lifecycle's config (the ONE truth). Setting it adds that
@@ -419,6 +435,7 @@ table ip tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
+    ct state invalid counter drop comment "tunnex_ct_invalid_drop"
 %[4]s
 %[2]s  }
 }
@@ -428,6 +445,7 @@ table ip6 tunnex {
   chain forward {
     type filter hook forward priority filter; policy drop;
     ct state established,related accept
+    ct state invalid counter drop comment "tunnex_ct_invalid_drop"
 %[3]s  }
 }
 `, masq, v4fwd, v6fwd, mssClamp, m.preroutingDNAT())
@@ -598,7 +616,17 @@ func allowMatch(e nodepolicy.AllowEntry) (string, bool) {
 		// (finding #6).
 		return "", false
 	}
-	return fmt.Sprintf("    ip saddr %s ip daddr %s%s counter", srcMatch, dst.Masked().String(), clause), true
+	// WF-K5 C1: match the CONNTRACK ORIGINAL destination, not the current packet dst. The K8s VIP DNAT
+	// (prerouting nat, priority -101) rewrites dst VIP->podIP BEFORE this filter-forward chain (priority 0)
+	// runs — conntrack (priority -200) already recorded the ORIGINAL tuple (pre-DNAT dst = the VIP), so
+	// `ct original ip daddr <VIP>` matches the address the client actually dialed. For NON-DNAT'd grants
+	// (device/site) the original dst == the current dst, so this is a semantic no-op off the DNAT path. This
+	// makes enforcement key on the SAME tuple space as the S8.7 conntrack flush (which keys on ct-original
+	// src): a flow is adjudicated and torn down on one tuple, never two that can disagree (the one-truth law).
+	// An UNTRACKED packet has no ct entry so `ct original` cannot match → it falls to policy-drop (fail-closed);
+	// `ct state invalid` is dropped explicitly ahead of the grants (rulesetWith) so an invalid packet carrying
+	// a stale ct entry can never be adjudicated by this match.
+	return fmt.Sprintf("    ip saddr %s ct original ip daddr %s%s counter", srcMatch, dst.Masked().String(), clause), true
 }
 
 // renderAllow is the ENFORCEMENT-ONLY accept line (no observation). rule_id-INDEPENDENT.

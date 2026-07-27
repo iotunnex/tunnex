@@ -204,6 +204,19 @@ func (s *Service) ExposeService(ctx context.Context, orgID, clusterID uuid.UUID,
 	if protocol == "" {
 		protocol = "any"
 	}
+	// WF-K5 M8/M9: an exposed Service must name a SINGLE specific port. The gateway DNATs VIP:svcPort ->
+	// podIP:targetPort; an all-ports exposure (nil port) can't remap and would silently hit the wrong pod
+	// port, and a port RANGE would DNAT only the low port and blackhole the rest — both silently wrong, worse
+	// than unsupported. Refuse with a teaching error (K8s Service ports are discrete). Range support is a
+	// registered follow-up (trigger: a customer need).
+	if portLow == nil || *portLow < 1 || *portLow > 65535 {
+		return sqlc.K8sService{}, apierr.BadRequest("service_port_required",
+			"expose a specific port (1-65535): the gateway maps the VIP's port to the Service's pod port, so it needs one — all-ports exposure isn't supported")
+	}
+	if portHigh != nil && *portHigh != *portLow {
+		return sqlc.K8sService{}, apierr.BadRequest("service_port_range_unsupported",
+			"expose a single specific port, not a range: the gateway DNATs one port per exposed Service (Kubernetes Service ports are discrete)")
+	}
 	var out sqlc.K8sService
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		cluster, e := q.GetK8sCluster(ctx, sqlc.GetK8sClusterParams{OrgID: orgID, ID: clusterID})

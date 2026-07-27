@@ -25,18 +25,24 @@ spec:
         app.kubernetes.io/component: gateway
     spec:
       serviceAccountName: {{ include "tunnex-gateway.serviceAccountName" . }}
-      # L10: the gateway holds NO Kubernetes API credential BY CONSTRUCTION — it resolves ClusterIPs via
-      # in-cluster CoreDNS (ruling A: no K8s API), and talks to the CP over mTLS. So the auto-mounted SA token
-      # is an unused credential on a root+hostNetwork pod — refuse it.
-      automountServiceAccountToken: false
+      # L10 RE-AMENDED (WF-K5): the gateway now DNATs each VIP straight to a READY pod endpoint (VIP->ClusterIP
+      # can't complete — kube-proxy's second DNAT is a no-op), so it must LEARN ready pod IPs from a read-only
+      # Services + EndpointSlices watch (see rbac.yaml). The SA token is therefore MOUNTED and USED — the
+      # credential for exactly one narrow capability. Posture for the security team: the gateway reads Service
+      # endpoints; it cannot read Secrets, cannot write, cannot escalate.
+      automountServiceAccountToken: true
       # F4: hostNetwork puts the agent's prerouting DNAT in the NODE netns, ahead of
       # kube-proxy's ClusterIP→pod DNAT (which also lives there), and gives the real
       # WG datapath + the node's ip_forward.
       hostNetwork: true
-      # THE hostNetwork DNS TRAP (the silent-install-killer): a hostNetwork pod
-      # otherwise inherits the NODE resolv.conf, so *.svc.cluster.local never
-      # resolves and the gateway can't turn a Service name into its ClusterIP.
-      # ClusterFirstWithHostNet restores cluster DNS. DO NOT REMOVE.
+      # THE hostNetwork DNS TRAP (the silent-install-killer): a hostNetwork pod otherwise inherits the NODE
+      # resolv.conf, so *.svc.cluster.local never resolves. ClusterFirstWithHostNet restores cluster DNS
+      # (falling back to node upstream for external names). WF-K5 NARROWED why this is needed: the gateway no
+      # longer resolves a Service's ClusterIP via DNS (endpoint DNAT reads ready pods from the K8s API, reached
+      # by the KUBERNETES_SERVICE_HOST ClusterIP env — no DNS — and the DNS-answer half serves from the CP-
+      # supplied map). It IS still load-bearing when controlPlane.apiURL/agentURL are IN-CLUSTER FQDNs
+      # (<svc>.<ns>.svc.cluster.local — the tunnex-cp-in-cluster deploy): the agent must resolve the CP's
+      # address. Harmless (and belt-and-suspenders) when the CP is external. DO NOT REMOVE.
       dnsPolicy: ClusterFirstWithHostNet
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets:

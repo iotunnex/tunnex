@@ -151,7 +151,29 @@ func main() {
 	// egress interval. Buffered(1) + non-blocking send: coalesces bursts, never stalls
 	// the reconcile loop.
 	policyKick := make(chan struct{}, 1)
+
+	// S10.3 WF-K5: a K8s gateway reads READY pod endpoints from a read-only in-cluster EndpointSlice+Service
+	// watch and DNATs each exposed VIP straight to a ready pod (VIP->ClusterIP can NOT complete — netfilter
+	// applies one dst-NAT per prerouting pass, so kube-proxy's second DNAT is a no-op; the box-walk finding).
+	// The watch KICKS the egress reconcile on every endpoint change (watch-driven, not polled), so a pod
+	// restart re-renders the DNAT within the watch latency. A non-cluster gateway gets (nil,nil) → no source
+	// → no VIP DNAT (fail-closed, and it has no VIP mappings anyway). SetEndpointSource runs BEFORE egressLoop
+	// starts (source is set-once-before-use — egressLoop is the only reader, via ResolveK8sVIPs — so no race).
+	epw, epwErr := egress.NewInClusterWatcher(logger, func() {
+		select {
+		case policyKick <- struct{}{}:
+		default: // a kick is already pending — the reconcile reads the latest endpoint view anyway
+		}
+	})
+	if epwErr != nil {
+		logger.Warn("k8s_endpoint_watch_unavailable", slog.String("error", epwErr.Error())) // in-cluster but mis-wired → fail-closed (no DNAT), surfaced loud
+	} else if epw != nil {
+		egressMgr.SetEndpointSource(epw)
+	}
 	go egressLoop(ctx, egressMgr, &egressNAT, getdur("TUNNEX_AGENT_EGRESS_INTERVAL", 30*time.Second), policyKick, logger)
+	if epw != nil {
+		go epw.Run(ctx)
+	}
 
 	reportEvery := getdur("TUNNEX_AGENT_REPORT_INTERVAL", 30*time.Second)
 	// H5: the reconciler writes site-link staleness here each tick; the report loop reads it. Shared
@@ -383,7 +405,7 @@ func reportKeyLoop(ctx context.Context, client *control.Client, pubKey, endpoint
 		if hp := ovpnHealth.Load(); hp != nil {
 			ovpnH = *hp
 		}
-		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), ConntrackFlushUnavailable: egressMgr.ConntrackFlushFailing(), K8sClusterDNSUnreachable: egressMgr.DNSUnreachable(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion, OVPNHealth: ovpnH}
+		ps := control.PolicyStatus{Version: v, Hash: h, RefusedVersion: egressMgr.RefusedVersion(), SiteLinkStale: siteLinkStale.Load(), SiteSubnetUnreachable: siteSubnetUnreachable.Load(), ConntrackFlushUnavailable: egressMgr.ConntrackFlushFailing(), K8sEndpointsUnavailable: egressMgr.EndpointsUnavailable(), MaxSupportedVersion: nodepolicy.MaxSupportedVersion, OVPNHealth: ovpnH}
 		if applyErr != nil {
 			ps.Error = applyErr.Error()
 			if len(ps.Error) > 300 { // bound so a verbose nft error can't overflow the report body (finding #4)
