@@ -63,3 +63,7 @@ S.conf
 
 # stray go-build binary (cmd/walk-bootstrap dev tool)
 /apps/api/walk-bootstrap
+
+# S10.2 GitOps walk scratch (CR manifests + any pasted machine token) — evidence goes in walk-artifacts/
+/walk/
+/walk-leg4/
