@@ -199,7 +199,7 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   await expect(pre).toContainText(`-e TUNNEX_JOIN_TOKEN=${TOKEN}`);
   await expect(pre).toContainText(`-e TUNNEX_NODE_NAME="walk-gw"`);
   await expect(pre).not.toContainText("docker compose");
-  await expect(page.getByText(/pinned to the name/)).toBeVisible();
+  await expect(page.getByText(/Pinned to the name/)).toBeVisible();
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   // Dismissed → the token is gone from the page (never re-served).
   await expect(page.getByText(new RegExp(TOKEN))).toHaveCount(0);
@@ -214,7 +214,7 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   await expect(pre).toContainText(`-e TUNNEX_JOIN_TOKEN=${TOKEN}`);
   await expect(pre).not.toContainText("TUNNEX_NODE_NAME");
   await expect(pre).not.toContainText("docker compose");
-  await expect(page.getByText(/pinned to the name/)).toHaveCount(0);
+  await expect(page.getByText(/Pinned to the name/)).toHaveCount(0);
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   expect(issued).toBe(2);
 });
