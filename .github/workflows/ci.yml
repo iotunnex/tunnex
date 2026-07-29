@@ -45,7 +45,7 @@ jobs:
       - name: GitOps operator — build + no-DB-import census (S10.2)
         run: make test-operator
 
-      - name: tunnex CLI — build + vet + test (S11-2: previously covered by NO job)
+      - name: "tunnex CLI — build + vet + test (S11-2: previously covered by NO job)"
         run: make test-cli
 
       - name: Privilege-helper core — vet + test (S6.3)

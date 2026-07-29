@@ -117,6 +117,14 @@ jobs:
           for m in apps/api apps/node apps/helper apps/cli apps/operator; do
             echo "── vet $m"; (cd "$m" && go vet ./...)
           done
+      # actionlint: a malformed workflow does not fail a JOB — it fails the whole RUN before any job
+      # starts, which reads as an infrastructure blip rather than a broken commit. (An unquoted colon in a
+      # step NAME cost a full CI round-trip in this very slice.) Linting the workflows is the gate for the
+      # files that ARE the gates.
+      - name: actionlint (workflow syntax — the gates' own gate)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color
 
   # ── ADVISORY: base-image CVEs we don't control ─────────────────────────────────────────────────────
   trivy:
