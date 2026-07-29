@@ -6,6 +6,7 @@ package apierr
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -55,11 +56,19 @@ type envelope struct {
 // Write serializes err as the standard envelope. Any non-*Error becomes a
 // generic 500 so internal details are never exposed.
 func Write(w http.ResponseWriter, r *http.Request, err error) {
+	reqID := middleware.GetReqID(r.Context())
+
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {
+		// S11 D3.4 — DIAGNOSIS-FROM-LOGS, NOT FROM A REPRO. An unmapped error becomes a generic 500 whose
+		// body deliberately carries no internal detail, so unless the WRAPPED CAUSE is logged here it is
+		// destroyed at this line and the only record is `status:500`. That is exactly how the audit-nil
+		// defect (a NOT NULL violation 500ing every audited DELETE) stayed invisible until it was
+		// reproduced against the DB directly. The request_id ties the log line to the client's response.
+		slog.ErrorContext(r.Context(), "internal_error",
+			"request_id", reqID, "method", r.Method, "path", r.URL.Path, "cause", err)
 		apiErr = Internal()
 	}
-	reqID := middleware.GetReqID(r.Context())
 
 	var body envelope
 	body.Error.Code = apiErr.Code

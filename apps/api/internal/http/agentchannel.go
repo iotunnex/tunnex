@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -102,7 +101,7 @@ func (a *AgentChannel) flowEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.ingest.IngestBatch(r.Context(), node.OrgID, node.ID, body.Events, body.Dropped); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		apierr.Write(w, r, err) // S11-5: route through the ONE seam — logs the cause + request_id
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -143,7 +142,7 @@ func (a *AgentChannel) status(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := a.svc.ReportStatus(r.Context(), node, stats); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		apierr.Write(w, r, err) // S11-5: route through the ONE seam — logs the cause + request_id
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -187,12 +186,10 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 	}
 	applied := nodes.AppliedPolicy{Version: body.PolicyVersion, Hash: body.PolicyHash, Error: body.PolicyError, FailingSince: body.PolicyFailing, RefusedVersion: body.PolicyRefusedVersion, SiteLinkStale: body.SiteLinkStale, SiteSubnetUnreachable: body.SiteSubnetUnreachable, MaxSupportedVersion: body.MaxPolicyVersion, OVPNHealth: body.OVPNHealth}
 	if err := a.svc.ReportWGInfo(r.Context(), node, body.PublicKey, body.Endpoint, body.EgressNAT, applied); err != nil {
-		var ae *apierr.Error
-		if errors.As(err, &ae) {
-			http.Error(w, ae.Message, ae.Status)
-			return
-		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		// ONE seam for BOTH cases (S11-5): apierr.Write renders a typed *apierr.Error with its own
+		// status+code and turns an unmapped error into a logged 500 — so the hand-rolled errors.As branch
+		// that used to answer typed errors as bare text (no envelope, no request_id) is gone.
+		apierr.Write(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -218,7 +215,7 @@ func (a *AgentChannel) desiredState(w http.ResponseWriter, r *http.Request) {
 	}
 	ds, err := a.svc.DesiredState(r.Context(), node)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		apierr.Write(w, r, err) // S11-5: route through the ONE seam — logs the cause + request_id
 		return
 	}
 	ds.Version = version
