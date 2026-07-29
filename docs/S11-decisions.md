@@ -120,6 +120,34 @@ pattern. Conditions:
    Last, largest, needs 1–4's surfaces.
 6. **Docs & install/upgrade guide** — folds the hostNetwork + NAT-traversal deploy notes + the quickstart.
 
+## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
+
+EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
+deliberate exception — merged on its own** — on two grounds, recorded so the pattern is not later misread as
+drift:
+- **(a) It carries real security fixes.** A reachable `crypto/tls` flaw (`GO-2026-5856`) in the toolchain that
+  builds *every* binary we ship, plus five more across `chi` (2), `pgx` (1) and `x/net` (2). Holding those on
+  a branch means `main` stays known-vulnerable while the fix exists — the one case where batching costs more
+  than it saves.
+- **(b) It has no walk-shaped debt.** Slice 1's proof is CI green, not a wire leg; there is nothing for the
+  epic's box-walk to discharge on its behalf. A slice whose evidence is complete at merge time does not need
+  to wait for one that isn't.
+
+Slices 2–6 rebase onto it and ride the batch as normal.
+
+## ASSERT-PRODUCED-RESULTS — the general pattern (S11 O-1, proven on the way out)
+
+`continue-on-error` on a JOB is almost always wrong. It suppresses *setup* failures as well as findings, so a
+job that never ran is indistinguishable from one that passed clean. Two instances of the same action pin
+proved it inside one slice: `trivy-action@0.28.0` (nonexistent) failed in 3s and reported **green**; after
+moving `continue-on-error` to the findings **step** and adding a `test -s *.sarif` assertion, the *corrected*
+pin `0.36.0` — still wrong, the tag is `v0.36.0` — failed **visibly** in 4s. **The guard caught the very next
+instance of the bug it was built for.**
+
+**The pattern:** advisory means *its findings don't block*, never *the job needn't run*. Put
+`continue-on-error` on the findings-producing step only, and make every scanner assert it actually emitted
+results. A scan that emits nothing must never read as a scan that found nothing.
+
 ## Box-walk teeth (beta-readiness, not "it renders")
 
 - **D2:** restore a CP from backup → an existing agent still connects, unchanged (fleet not orphaned).
