@@ -164,7 +164,9 @@ func (m *Manager) SetDesired(d Desired) { m.desired.Store(&d) }
 
 // SetEnsureProc wires the real process supervisor (Supervisor.Ensure) — called only once preconditions
 // pass, so the supervisor is structurally unable to crash-loop. Default is a no-op stub (tests).
-func (m *Manager) SetEnsureProc(fn func(ctx context.Context, confPath string) error) { m.ensureProc = fn }
+func (m *Manager) SetEnsureProc(fn func(ctx context.Context, confPath string) error) {
+	m.ensureProc = fn
+}
 
 // WriteServerMaterial writes the CP-delivered CA + server cert + server KEY + CRL to cfgDir (D-S9.6 +
 // Slice 5). The key is 0600; the certs + CRL 0644 (public). The CRL is a valid signed CRL, possibly EMPTY

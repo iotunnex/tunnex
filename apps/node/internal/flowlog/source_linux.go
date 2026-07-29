@@ -82,5 +82,5 @@ func NewNflogSource(ctx context.Context, group, sockBuf int) (*NflogSource, erro
 }
 
 func (s *NflogSource) Records() <-chan Record { return s.ch }
-func (s *NflogSource) Overruns() int64         { return s.overrun.Load() }
-func (s *NflogSource) Close() error            { return s.nf.Close() }
+func (s *NflogSource) Overruns() int64        { return s.overrun.Load() }
+func (s *NflogSource) Close() error           { return s.nf.Close() }

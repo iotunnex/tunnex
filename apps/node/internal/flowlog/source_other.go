@@ -20,5 +20,5 @@ func NewNflogSource(_ context.Context, _, _ int) (*NflogSource, error) {
 }
 
 func (s *NflogSource) Records() <-chan Record { return nil }
-func (s *NflogSource) Overruns() int64         { return 0 }
-func (s *NflogSource) Close() error            { return nil }
+func (s *NflogSource) Overruns() int64        { return 0 }
+func (s *NflogSource) Close() error           { return nil }

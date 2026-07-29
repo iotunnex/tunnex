@@ -24,9 +24,9 @@ import (
 
 // globalTables are legitimately NOT org-scoped (see migrations/README).
 var globalTables = map[string]bool{
-	"organizations": true, // the tenant root; scoped by id/slug
-	"users":         true, // global — email-first login, org resolved after
-	"auth_tokens":   true, // global — user-scoped auth tokens, predate org context
+	"organizations":    true, // the tenant root; scoped by id/slug
+	"users":            true, // global — email-first login, org resolved after
+	"auth_tokens":      true, // global — user-scoped auth tokens, predate org context
 	"platform_secrets": true, // global — platform-wide sealed material (agent CA)
 	"cli_credentials":  true, // global — user-scoped CLI credentials span orgs (S5.1)
 	"cli_auth_codes":   true, // global — user-scoped one-time mint codes (S5.1)

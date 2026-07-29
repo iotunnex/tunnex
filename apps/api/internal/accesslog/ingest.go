@@ -259,7 +259,7 @@ func (c *deviceCache) resolve(ctx context.Context, orgID, deviceID uuid.UUID) (*
 // aggregate enriches each wire event (grant-only) and collapses per-source deny floods.
 func (i *Ingester) aggregate(ctx context.Context, orgID, nodeID uuid.UUID, wire []WireEvent) []Event {
 	out := make([]Event, 0, len(wire))
-	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}}     // one grant lookup per distinct rule_id per batch
+	gc := &grantCache{r: i.grants, seen: map[uuid.UUID]grantHit{}}    // one grant lookup per distinct rule_id per batch
 	dc := &deviceCache{r: i.devices, seen: map[uuid.UUID]deviceHit{}} // one device→user lookup per distinct device per batch
 	denyBySrc := map[string][]WireEvent{}
 	for _, w := range wire {

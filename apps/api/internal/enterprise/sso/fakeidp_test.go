@@ -114,8 +114,8 @@ func signJWT(kid string, key *rsa.PrivateKey, claims map[string]any) string {
 	return signingInput + "." + b64(sig)
 }
 
-func b64(b []byte) string          { return base64.RawURLEncoding.EncodeToString(b) }
-func mustJSON(v any) []byte        { b, _ := json.Marshal(v); return b }
+func b64(b []byte) string   { return base64.RawURLEncoding.EncodeToString(b) }
+func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)

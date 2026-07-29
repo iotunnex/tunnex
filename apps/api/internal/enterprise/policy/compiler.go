@@ -73,18 +73,18 @@ const (
 // artifact stays IP-only, no wire-version bump. Expired temporary rules are
 // filtered OUT of the Snapshot before Compile (the pure compiler is clockless).
 type Rule struct {
-	ID            uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
-	SrcKind       string    // "group" | "user" | "site" (S8.2) | "cidr" (S8.7) ("" treated as group for legacy rows)
-	SrcGroupID    uuid.UUID
-	SrcUserID     uuid.UUID
-	SrcSiteID     uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
-	SrcCIDR       string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
+	ID              uuid.UUID // the CP policy_rules.uuid — stamped onto each produced AllowEntry as rule_id (S7.5.1)
+	SrcKind         string    // "group" | "user" | "site" (S8.2) | "cidr" (S8.7) ("" treated as group for legacy rows)
+	SrcGroupID      uuid.UUID
+	SrcUserID       uuid.UUID
+	SrcSiteID       uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
+	SrcCIDR         string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
 	DstKind         string
 	DstResourceID   uuid.UUID
 	DstGroupID      uuid.UUID
 	DstSiteID       uuid.UUID // S8.1: dst_kind='site' — resolved to the site's subnet CIDRs
 	DstK8sServiceID uuid.UUID // S10.3: dst_kind='k8s_service' — resolved to the Service's CURRENT VIP/32
-	Disabled      bool      // F3: a disabled rule compiles to ZERO AllowEntries (the skip below) — its allow is
+	Disabled        bool      // F3: a disabled rule compiles to ZERO AllowEntries (the skip below) — its allow is
 	//                        withdrawn, so under default-deny it's "as if the rule weren't there". Not a deny.
 }
 
@@ -152,9 +152,9 @@ type Snapshot struct {
 	Resources       []Resource
 	ExposedServices []ExposedService // S10.3: dst_kind='k8s_service' resolution (id → current VIP)
 	Memberships     []Membership
-	Devices     []Device
-	SiteSubnets []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
-	SiteNodes   []SiteNode   // S8.2: (site_id, node_id) bindings for src_kind='site' node placement
+	Devices         []Device
+	SiteSubnets     []SiteSubnet // S8.1: (site_id, cidr) rows for dst_kind='site' resolution
+	SiteNodes       []SiteNode   // S8.2: (site_id, node_id) bindings for src_kind='site' node placement
 	// ActiveHub is the DERIVED active transit hub (S8.6 REDUCE #1), THREADED IN by the caller from the ONE
 	// shared derivation (nodes.deriveActive) — the SAME per-compile value that feeds the data-plane graph.
 	// The compiler does NOT elect: the site→site transit grant lands on THIS node. uuid.Nil = no hub (no

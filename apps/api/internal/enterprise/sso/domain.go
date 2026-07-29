@@ -34,7 +34,9 @@ var publicDomains = map[string]bool{
 }
 
 // IsPublicDomain reports whether a domain is a known consumer email provider.
-func IsPublicDomain(domain string) bool { return publicDomains[strings.ToLower(strings.TrimSpace(domain))] }
+func IsPublicDomain(domain string) bool {
+	return publicDomains[strings.ToLower(strings.TrimSpace(domain))]
+}
 
 // DNSResolver looks up TXT records (injectable for tests).
 type DNSResolver interface {

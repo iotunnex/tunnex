@@ -104,8 +104,8 @@ func TestTrackDesync(t *testing.T) {
 
 	t.Run("clear on reconvergence (applied == pushed)", func(t *testing.T) {
 		n := seedNode(t, pool)
-		svc(enfArt("h")).trackDesync(ctx, n, "old")               // stamp
-		svc(enfArt("h")).trackDesync(ctx, n, canon(enfArt("h")))  // applied caught up → CLEAR
+		svc(enfArt("h")).trackDesync(ctx, n, "old")              // stamp
+		svc(enfArt("h")).trackDesync(ctx, n, canon(enfArt("h"))) // applied caught up → CLEAR
 		if desyncSince(t, pool, n.ID).Valid {
 			t.Fatal("reconvergence must CLEAR the stamp")
 		}

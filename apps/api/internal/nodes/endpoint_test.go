@@ -10,13 +10,13 @@ func TestValidEndpoint(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"",                              // empty
-		"1.2.3.4",                       // no port
-		"1.2.3.4:0",                     // port out of range
-		"1.2.3.4:99999",                 // port out of range
-		"host :51820",                   // whitespace
+		"",                                      // empty
+		"1.2.3.4",                               // no port
+		"1.2.3.4:0",                             // port out of range
+		"1.2.3.4:99999",                         // port out of range
+		"host :51820",                           // whitespace
 		"1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0", // newline injection
-		"1.2.3.4:51820\t",               // trailing tab
+		"1.2.3.4:51820\t",                       // trailing tab
 	}
 	for _, s := range bad {
 		if validEndpoint(s) {

@@ -24,7 +24,7 @@ func TestCheck(t *testing.T) {
 	ranges := mk(
 		[]netip.Prefix{p("10.20.0.0/24"), p("10.21.0.0/24")},
 		p("10.99.0.0/24"),
-		[]netip.Prefix{p("100.64.0.0/16")},   // a cluster VIP range
+		[]netip.Prefix{p("100.64.0.0/16")}, // a cluster VIP range
 		[]netip.Prefix{p("192.168.255.0/24")},
 	)
 	cases := []struct {

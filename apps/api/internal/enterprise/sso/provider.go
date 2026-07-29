@@ -45,10 +45,10 @@ type Normalizer func(RawClaims) (Identity, error)
 
 // oidcProvider is the generic OIDC implementation used by every provider.
 type oidcProvider struct {
-	name       string
-	oauth2     *oauth2.Config
-	verifier   *oidc.IDTokenVerifier
-	normalize  Normalizer
+	name      string
+	oauth2    *oauth2.Config
+	verifier  *oidc.IDTokenVerifier
+	normalize Normalizer
 }
 
 // NewOIDCProvider discovers the issuer (fetching JWKS) and builds a provider

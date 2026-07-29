@@ -74,7 +74,9 @@ type Service struct {
 func (s *Service) SetApprovalEnforced(v bool) { s.approvalEnforced = v }
 
 // SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) — ovpn.Service.RebuildCRL. nil → no-op.
-func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) { s.rebuildCRL = fn }
+func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) {
+	s.rebuildCRL = fn
+}
 
 // SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
 func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {

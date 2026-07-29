@@ -15,9 +15,9 @@ func TestAppBaseURLLooksLocal(t *testing.T) {
 		{"http://localhost", true},
 		{"http://localhost:8080", true},
 		{"http://127.0.0.1", true},
-		{"http://0.0.0.0", true},   // bind-any, unreachable as a public link
+		{"http://0.0.0.0", true}, // bind-any, unreachable as a public link
 		{"http://0.0.0.0:8080", true},
-		{"", true},                 // unset — no reachable URL
+		{"", true}, // unset — no reachable URL
 		{"https://tunnex.example.com", false},
 		{"http://40.65.63.141", false}, // a real remote IP — not local
 	}

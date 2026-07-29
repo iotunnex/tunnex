@@ -27,7 +27,7 @@ func TestRangesStale(t *testing.T) {
 	// S10.3 fork-1: a K8s VIP range added to the org's routed set AFTER a static export must fire the
 	// stale-profile badge. RangesStale is range-CLASS-agnostic — it compares whatever ListRoutedRanges
 	// returns, which now carries VIP ranges — so this holds by construction, verified here explicitly.
-	baked := []byte(`["10.20.0.0/24"]`) // exported when the org had only a site subnet
+	baked := []byte(`["10.20.0.0/24"]`)                       // exported when the org had only a site subnet
 	afterCluster := []string{"10.20.0.0/24", "100.64.0.0/16"} // a cluster was registered → its VIP range joined
 	if !RangesStale(baked, afterCluster) {
 		t.Fatal("a K8s VIP range added after a static export must mark the profile stale (needs_reexport)")

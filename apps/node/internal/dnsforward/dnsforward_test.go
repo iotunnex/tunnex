@@ -392,7 +392,10 @@ func aRecordOf(t *testing.T, resp []byte) netip.Addr {
 // authoritative NXDOMAIN; an empty/stale map answers NOTHING for cluster names (fail-closed); the ONLY
 // address ever returned is an exposed Service's own VIP.
 func TestK8sDirectAnswer(t *testing.T) {
-	f := New(nil, func(netip.Addr, []byte) ([]byte, error) { t.Fatal("a cluster-zone query must NEVER relay upstream"); return nil, nil })
+	f := New(nil, func(netip.Addr, []byte) ([]byte, error) {
+		t.Fatal("a cluster-zone query must NEVER relay upstream")
+		return nil, nil
+	})
 	f.SetK8sAnswers(
 		[]K8sEntry{{FQDN: "api.prod.svc.prod.k8s.acme.com", VIP: "100.64.0.5"}},
 		[]string{"prod.k8s.acme.com"},

@@ -109,6 +109,7 @@ func allowedIPsUAPI(peerPubKeyB64 string, allowedIPs []string) (string, error) {
 //     the same allowed_ips the old peer carried, so routing coverage is preserved across the swap;
 //  2. remove the OLD peer (public_key=old, remove=true) — WG would have stolen its allowed_ips to the new
 //     peer anyway (a single crypto-routing trie), but we drop it explicitly so no inert peer lingers.
+//
 // It carries NO private_key and NO replace_peers, so the DEVICE IDENTITY (its own key), the interface
 // address, and the kill-switch are ALL untouched — the session survives, no re-enrollment. The OS routes
 // point at the INTERFACE, not the peer, so a split-tunnel swap needs no route reconcile (the endpoint

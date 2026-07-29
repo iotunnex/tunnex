@@ -54,10 +54,10 @@ type Event struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	Seq           int64      `json:"seq"`
 	OrgID         uuid.UUID  `json:"org_id"`
-	NodeID        *uuid.UUID `json:"node_id,omitempty"`     // observing gateway
-	OccurredAt    time.Time  `json:"occurred_at"`           // agent clock (flow observation)
+	NodeID        *uuid.UUID `json:"node_id,omitempty"` // observing gateway
+	OccurredAt    time.Time  `json:"occurred_at"`       // agent clock (flow observation)
 	Decision      Decision   `json:"decision"`
-	RuleID        *uuid.UUID `json:"rule_id,omitempty"`     // the grant (nil = default-deny / no match)
+	RuleID        *uuid.UUID `json:"rule_id,omitempty"` // the grant (nil = default-deny / no match)
 	SrcDeviceID   *uuid.UUID `json:"src_device_id,omitempty"`
 	SrcUserID     *uuid.UUID `json:"src_user_id,omitempty"`
 	SrcIP         string     `json:"src_ip"`

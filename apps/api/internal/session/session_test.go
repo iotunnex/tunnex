@@ -87,7 +87,7 @@ func TestAbsoluteExpiry(t *testing.T) {
 	store.now = func() time.Time { return cur } // controllable clock
 
 	s, _ := store.Create(ctx, uuid.New(), "") // ExpiresAt = cur + 30m
-	cur = cur.Add(31 * time.Minute)       // advance past the absolute lifetime
+	cur = cur.Add(31 * time.Minute)           // advance past the absolute lifetime
 	if _, err := store.Get(ctx, s.ID); err != ErrNotFound {
 		t.Fatalf("expired session: want ErrNotFound, got %v", err)
 	}

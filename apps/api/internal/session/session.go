@@ -69,8 +69,8 @@ func NewWithClient(rdb *redis.Client, idle, absolute time.Duration) *Store {
 // Client exposes the underlying Redis client (reused by the SSO flow store).
 func (s *Store) Client() *redis.Client { return s.rdb }
 
-func sessKey(id string) string          { return "sess:" + id }
-func userKey(u uuid.UUID) string        { return "usess:" + u.String() }
+func sessKey(id string) string   { return "sess:" + id }
+func userKey(u uuid.UUID) string { return "usess:" + u.String() }
 
 // Create mints a brand-new session for userID (fresh id => fixation-safe). authMethod records HOW
 // the user authenticated (authctx.AuthLocalPassword | AuthSSO) — stamped once, immutable thereafter.

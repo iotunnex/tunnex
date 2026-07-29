@@ -79,12 +79,12 @@ func TestLoopbackRedirectAllowlist(t *testing.T) {
 	bad := []string{
 		"http://localhost:8123/callback", // hostname — DNS-spoofable
 		"https://127.0.0.1:8123/callback",
-		"http://127.0.0.1/callback",              // no explicit port
-		"http://127.0.0.1:8123/other",            // wrong path
-		"http://127.0.0.1:8123/callback?x=1",     // query
-		"http://evil.example:80/callback",        // non-loopback
-		"http://user@127.0.0.1:8123/callback",    // userinfo
-		"http://127.0.0.2:8123/callback",         // not EXACTLY 127.0.0.1
+		"http://127.0.0.1/callback",               // no explicit port
+		"http://127.0.0.1:8123/other",             // wrong path
+		"http://127.0.0.1:8123/callback?x=1",      // query
+		"http://evil.example:80/callback",         // non-loopback
+		"http://user@127.0.0.1:8123/callback",     // userinfo
+		"http://127.0.0.2:8123/callback",          // not EXACTLY 127.0.0.1
 		"http://127.0.0.1:8123/callback#fragment", // fragment
 	}
 	for _, u := range bad {

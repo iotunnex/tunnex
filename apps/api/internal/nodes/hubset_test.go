@@ -778,7 +778,7 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 // device homed to a hub-set member must NEVER appear as a WireGuard peer on ANY member's DesiredState —
 // an empty PublicKey renders `PublicKey = ` and makes `wg syncconf` reject the ENTIRE config, bricking
 // the member's whole WG reconcile (one OpenVPN client bricking the WireGuard fleet). The guard now lives
-// at the SOURCE (ListActiveWireGuardPeersForNode's `public_key <> ''`), consumed by both the per-node path
+// at the SOURCE (ListActiveWireGuardPeersForNode's `public_key <> ”`), consumed by both the per-node path
 // and widenedDevicePeers. The red pins BOTH halves: (a) no empty-pubkey peer anywhere, AND (b) the OVPN
 // device's /32 is still delivered — via the OVPN roster (assigned_ip) — so the B1 data half is unaffected.
 func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {

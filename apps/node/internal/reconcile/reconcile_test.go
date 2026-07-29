@@ -679,7 +679,7 @@ func TestOVPNPushRoutesK8s(t *testing.T) {
 		t.Fatalf("the reserved DNS VIP must be pushed as a /32 route (so the client reaches the resolver); got %v", got)
 	}
 	// Zero-config golden: a non-cluster gateway (no VIP map, no DNS zones) pushes NOTHING K8s.
-	if OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}}) [0] != "10.0.0.0/16" {
+	if OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}})[0] != "10.0.0.0/16" {
 		t.Fatal("a non-cluster gateway's push must be byte-identical to pre-fork")
 	}
 	if len(OVPNPushRoutes(&nodepolicy.Compiled{Routes: []nodepolicy.Route{{DstCIDR: "10.0.0.0/16"}}})) != 1 {

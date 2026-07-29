@@ -35,7 +35,6 @@ func main() {
 		return
 	}
 
-
 	// Under the Windows SCM the process must speak the service control protocol
 	// (svc.Run), not just run as a console program — else `sc start` times out (1053).
 	// isWindowsService is false on macOS (LaunchDaemon runs the plain executable) and

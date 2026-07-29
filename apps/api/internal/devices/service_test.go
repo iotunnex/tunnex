@@ -2,10 +2,10 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
-	"encoding/json"
 	"strings"
 	"testing"
 

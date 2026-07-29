@@ -98,8 +98,8 @@ func TestApplyRoutesSrcHint(t *testing.T) {
 // but NO host address is inside it (bridge-trapped / misconfig, INDEPENDENT of link state → catches the
 // reassuring-green shape).
 func TestSiteRouteSrc(t *testing.T) {
-	siteHost := netip.MustParseAddr("172.31.24.206")           // inside the local site subnet
-	overlay := netip.MustParseAddr("10.99.0.1")               // wg0 overlay — must NOT be chosen
+	siteHost := netip.MustParseAddr("172.31.24.206") // inside the local site subnet
+	overlay := netip.MustParseAddr("10.99.0.1")      // wg0 overlay — must NOT be chosen
 	both := []netip.Addr{overlay, siteHost}
 
 	// match → the local-subnet host addr, never the overlay.

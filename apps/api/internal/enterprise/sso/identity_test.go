@@ -8,9 +8,9 @@ import "testing"
 // every combination of (local exists, local verified, IdP verified).
 func TestDecideLinkMatrix(t *testing.T) {
 	cases := []struct {
-		name                                  string
-		localExists, localVerified, idpVerif  bool
-		want                                  LinkAction
+		name                                 string
+		localExists, localVerified, idpVerif bool
+		want                                 LinkAction
 	}{
 		{"idp unverified always rejects (no local)", false, false, false, LinkReject},
 		{"idp unverified always rejects (local verified)", true, true, false, LinkReject},
