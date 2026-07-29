@@ -120,6 +120,47 @@ pattern. Conditions:
    Last, largest, needs 1–4's surfaces.
 6. **Docs & install/upgrade guide** — folds the hostNetwork + NAT-traversal deploy notes + the quickstart.
 
+## Slice 2 — observability floor: verify pass + D3.1–D3.5 RULED
+
+**Verify pass (the delta from the roadmap's one-line "S11.1 Metrics"):** the node-agent ALREADY serves
+`/healthz` + `/readyz` (`apps/node/cmd/agent/main.go:325,328`) — the **CP is the laggard**, with neither
+`/readyz` nor any metrics. Neither side has `/metrics`. The `internal_error` seam
+(`apierr/apierr.go:42`) returns a generic envelope and logs **no wrapped cause anywhere**. Audit actions are
+**18 bare string literals**, no typed registry, no drift guard.
+
+**The count that shaped the rulings:** the advisor named 6 health kinds from memory; the enum has **13**
+(`nodes/policyhealth.go`) — the 13th, `k8s_endpoints_unavailable`, was missed even by the assistant's own
+first regex and caught only by re-reading completely. That is the NEVER-TRIAGE-FROM-A-TRUNCATED-READ probe
+firing on both sides in one sitting, and it is the argument for D3.1: **a hand-maintained metric list drifts
+the first time kind #14 lands.**
+
+- **D3.1 — ONE gauge with a `kind` label, DERIVED from the enum, plus a drift RED. RULED.** Gauge-per-kind
+  means 13 names to maintain and a 14th that silently never appears — the producer-without-consumer trap at
+  the metrics tier. The enum is the SOURCE (the metric ranges over it, so omission is impossible by
+  construction), and **the red is the ruling's substance: adding a health kind without a metric path must
+  FAIL THE BUILD.** Census red: every value in the kind enum appears in the metric output.
+- **D3.2 — separate port, unauthenticated, operator-network-only. RULED.** The Prometheus convention; keeps
+  operational data off the public router entirely; composes with k8s (a Service you don't expose) and VMs
+  (bind the private interface). **Conditions: the port is configurable and DEFAULTS to localhost/private,
+  never `0.0.0.0`** — a metrics endpoint accidentally public on a VM gateway is an information-disclosure
+  finding, and the default must make that impossible rather than merely documented against. The exposure
+  model is stated in the security-posture doc alongside the gateway's.
+- **D3.3 — fleet-level counts by kind only; NO org/node labels in v1. RULED.** Unbounded cardinality is how
+  monitoring stacks fall over, and per-node detail already lives in the API + dashboard (one truth, two
+  renderings). **Honest limit, stated: the metric answers "how many gateways are apply_failing", not "which
+  ones" — the dashboard answers which.** Per-node metrics REGISTERED with trigger = a customer running their
+  own Prometheus who asks for it.
+- **D3.4 — log at the ONE seam, not eighteen call sites. RULED.** Where an unmapped error becomes
+  `internal_error`, log the wrapped cause WITH the request_id. **Condition: verify there is exactly ONE such
+  seam and CITE it — if unmapped errors can become 500s by more than one path, that is the finding, and it is
+  the guard-not-mirrored class again.**
+- **D3.5 — the audit-action registry RIDES Slice 2. RULED.** An audit trail with inconsistent action names is
+  an observability defect, so it belongs here. The typed newtype + `var` block over the 18 is mechanical; the
+  **drift red (every action string used in code appears in the registry) is what makes it durable** and is the
+  part worth the care. Root already recorded (M1b, two audit helpers of different shapes — guard-not-mirrored).
+  **If the refactor touches more than the call sites — e.g. any audit path that builds an action string
+  DYNAMICALLY — surface it rather than absorbing it.**
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
