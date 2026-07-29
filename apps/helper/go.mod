@@ -12,7 +12,7 @@ module github.com/tunnexio/tunnex/apps/helper
 // wireguard-nt) arrive later in build-tagged files. CI cross-compiles CGO_ENABLED=0,
 // so any cgo file (e.g. macOS libproc) carries a no-cgo stub sibling.
 
-go 1.25.0
+go 1.25.12
 
 require golang.org/x/sys v0.43.0
 

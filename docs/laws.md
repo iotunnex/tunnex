@@ -45,3 +45,24 @@ The writer-ownership law (a persisted authority with multiple writers must PARTI
 
 ## KILL-SWITCH-NO-UNBOUNDED-I/O law (founder-ratified 2026-07-23, WF-A slice-3 review finding #1) — the fail-closed enforcement path must never queue behind latency an attacker or a bad network can set
 **No network call, no filesystem stall, nothing whose latency is not locally bounded, may hold a lock that the fail-closed (kill-switch) enforcement path needs to acquire.** The failure this closes: the helper's `SetGatewayPeer` resolved a re-home endpoint (a DNS lookup) *while holding `b.mu`* — the same mutex the dead-man's `FailClosed` takes via the Supervisor. A slow/timing-out resolve would then delay kill-switch enforcement, and it does so during a FAILOVER — precisely the moment a device re-homes AND precisely the moment the kill-switch matters most. Fix (trivial): resolve BEFORE taking the lock; the lock guards only local state mutation. This is the **RR2 lesson** (bounded route syscalls / FS I/O must run OUTSIDE the Supervisor lock — S8.5 crash-sweep) recurring at the DNS tier: same law, new I/O class. Stating it as a rule means the next helper feature that adds a privileged verb meets it at design time, not at review. **REGISTERED companion:** `darwinBackend.Up` / `windowsBackend.Up` resolve the WG endpoint (and now the CP endpoint) under `b.mu` too — the same stall applies, but on a path WF-A did not create; TRIGGER to fix = *the next helper session touching Up's endpoint-resolve path* (out of WF-A scope, not a silent drop).
+
+## NEVER-TRIAGE-FROM-A-TRUNCATED-READ probe (founder-ratified 2026-07-29, EPIC 11 slice 1) — cite the complete output, or state that it is partial
+
+Reading a FRAGMENT and reporting it as the WHOLE. Three instances, all self-caught, all in the same fortnight:
+
+1. **S10.2 merge-time e2e claim.** The e2e job failed in 2m22s on the first run and again later; the DURATION
+   matched, so it was reported as "the same pre-existing failure" — without reading the log. It was neither
+   pre-existing nor the same: it was a regression that S10.2 itself introduced. A signal that RESEMBLES a
+   known state is not evidence of that state.
+2. **The S11 govulncheck triage.** CI logs were grepped with `head -8`, which cut the output after the first
+   vulnerability per module. "One dependency, two modules" was reported; the complete scan showed **five**
+   vulnerabilities across chi, pgx and x/net — three core-dependency bumps that had been invisible.
+3. **The gofmt count** (caught before it mattered): an UNPINNED host toolchain flagged ~120 files; the pinned
+   one flagged 31. Reporting the first number would have described a defect that did not exist.
+
+**THE PROBE:** never triage from a truncated read. Cite the COMPLETE output, or state explicitly that the read
+is partial and what was cut. `head`, `tail`, `grep -m`, and a scrolled terminal all truncate — and a truncated
+read of a scanner, a log, or a test run yields a confident, specific, wrong conclusion. The corollary, from
+instance 1: **an attribution to a pre-existing cause must cite a GREEN RUN AT A SPECIFIC SHA**, not a
+resemblance. (Companion to the census law, which says the same thing about artifacts: only reading it proves
+it.)

@@ -5,7 +5,7 @@ module github.com/tunnexio/tunnex/apps/node
 // nonexistent repo and fail on fresh clones/CI). Keep readonly until the vanity rename
 // (tunnex.io/…) on domain purchase. See PLAN.md "OPEN DECISIONS (b)".
 
-go 1.25
+go 1.25.12
 
 toolchain go1.25.11
 

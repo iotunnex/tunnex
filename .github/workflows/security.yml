@@ -7,8 +7,10 @@ name: Security
 #   BLOCKING  — govulncheck (our dependency choices), CodeQL high/critical (our code), SBOM + cosign
 #               publish on release (a release without provenance is a release you can't attest).
 #   ADVISORY  — Trivy image findings (base-image CVEs we don't control), OpenSSF Scorecard.
-# An advisory job is `continue-on-error`; a blocking job is not. Nothing here is advisory by accident —
-# S11-1 is the cautionary tale (a job configured not to matter let a regression merge, then excused it).
+# ADVISORY = "its FINDINGS don't block" — NOT "the job needn't run". `continue-on-error` therefore sits on
+# the findings-producing STEP, never on the job, and every advisory job asserts it actually produced results.
+# S11-1/O-1 are the cautionary tales: a job configured not to matter let a regression merge and then excused
+# it, and a bad action pin made a 3-second no-op report the same green as a real scan.
 
 on:
   push:
@@ -121,16 +123,23 @@ jobs:
       # starts, which reads as an infrastructure blip rather than a broken commit. (An unquoted colon in a
       # step NAME cost a full CI round-trip in this very slice.) Linting the workflows is the gate for the
       # files that ARE the gates.
+      - name: Go toolchain pin agreement (one pin, every site — S11 Cluster A)
+        run: ./scripts/check-toolchain-pin.sh
       - name: actionlint (workflow syntax — the gates' own gate)
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color
 
   # ── ADVISORY: base-image CVEs we don't control ─────────────────────────────────────────────────────
+  # ADVISORY MEANS "FINDINGS DON'T BLOCK", NOT "THE JOB NEEDN'T RUN" (S11 O-1). `continue-on-error` sits on
+  # the FINDINGS step only — never on the job. A job-level flag also swallows setup failures, so an
+  # unresolvable action or a broken build looks identical to a clean pass; this job failed in 3s on a bad
+  # action pin and reported the same green as a real scan. That is the S11-1 class in miniature, found
+  # inside the slice that repaid it. The produced-results assertion below closes the other half: a scan
+  # that emits nothing must not read as a scan that found nothing.
   trivy:
-    name: Trivy image scan (advisory)
+    name: Trivy image scan (advisory findings, blocking setup)
     runs-on: ubuntu-latest
-    continue-on-error: true # ADVISORY BY RULING — inherited base-image CVEs, not ours to fix
     permissions:
       contents: read
       security-events: write
@@ -138,23 +147,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the API image (the customer-facing artifact)
         run: docker build -f deploy/docker/api.Dockerfile -t tunnex-api:scan .
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true # ADVISORY: inherited base-image CVEs are not ours to fix
         with:
           image-ref: tunnex-api:scan
           format: sarif
           output: trivy.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true # a CVE with no upstream fix is not actionable
+      - name: Assert the scan actually produced results (a silent no-op is not a pass)
+        run: test -s trivy.sarif || { echo "::error::trivy produced no SARIF — the scan did not run"; exit 1; }
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with: { sarif_file: trivy.sarif, category: trivy }
 
   # ── ADVISORY: supply-chain posture score ───────────────────────────────────────────────────────────
   scorecard:
-    name: OpenSSF Scorecard (advisory)
+    name: OpenSSF Scorecard (advisory findings, blocking setup)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    continue-on-error: true # ADVISORY BY RULING
     permissions:
       security-events: write
       id-token: write
@@ -163,9 +173,11 @@ jobs:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
       - uses: ossf/scorecard-action@v2.4.0
+        continue-on-error: true # ADVISORY: the SCORE doesn't block; the job still has to run (O-1)
         with: { results_file: scorecard.sarif, results_format: sarif, publish_results: false }
+      - name: Assert the scan actually produced results
+        run: test -s scorecard.sarif || { echo "::error::scorecard produced no SARIF — the scan did not run"; exit 1; }
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with: { sarif_file: scorecard.sarif, category: scorecard }
 
   # ── BLOCKING (on a release tag): provenance ────────────────────────────────────────────────────────
