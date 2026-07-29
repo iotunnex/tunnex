@@ -818,8 +818,10 @@ func TestGrantOwnershipMarker(t *testing.T) {
 		t.Fatalf("machine-created grant must record managed_by_machine=%s, got %v", mid, mb)
 	}
 
-	// HUMAN-created (uuid.Nil) → NULL.
-	rh, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil, uuid.Nil, "", "")
+	// HUMAN-created (uuid.Nil) → NULL. DISTINCT cidr — an identical (src,dst) would conflict with the machine
+	// rule above (the CP refuses a duplicate rule); this test is about the ownership marker, not dedup.
+	cidr2 := "172.31.17.65/32"
+	rh, e := svc.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "cidr", SrcCIDR: &cidr2, DstKind: "resource", DstResourceID: &res.ID}, uuid.Nil, uuid.Nil, "", "")
 	if e != nil {
 		t.Fatalf("human rule: %v", e)
 	}
