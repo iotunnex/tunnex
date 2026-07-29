@@ -7,15 +7,13 @@ module github.com/tunnexio/tunnex/apps/api
 // drop -mod=readonly until the planned vanity-import rename (tunnex.io/…) on domain
 // purchase. See PLAN.md "OPEN DECISIONS (b) Go module path".
 
-go 1.25.0
-
-toolchain go1.25.11
+go 1.25.12
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/getkin/kin-openapi v0.140.0
-	github.com/go-chi/chi/v5 v5.1.0
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/golang-migrate/migrate/v4 v4.18.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.5.4
@@ -44,7 +42,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 )
