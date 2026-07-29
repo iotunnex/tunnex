@@ -66,3 +66,24 @@ read of a scanner, a log, or a test run yields a confident, specific, wrong conc
 instance 1: **an attribution to a pre-existing cause must cite a GREEN RUN AT A SPECIFIC SHA**, not a
 resemblance. (Companion to the census law, which says the same thing about artifacts: only reading it proves
 it.)
+
+## CENSUS-THE-MIRROR-SURFACE law (founder-ratified 2026-07-29, S11-6) — on a guard-not-mirrored finding, measure the surface before fixing the instance
+
+**GUARD-NOT-MIRRORED** has now appeared five times across three epics: WF-OVPN-10's keyless peer · the
+identity-binding invariant across three consumers · the e2e fixture drift · M1b's two audit helpers ·
+S11-5's four unguarded 500 paths on the agent channel. Every instance was found by tripping over it.
+
+**S11-6 is the first time the width of a mirror surface was measured BEFORE it failed.** M1b was diagnosed as
+"two audit helpers, one taught the machine branch and one not"; a census run for an unrelated reason (D3.5's
+vocabulary question) found **fourteen**, across nine packages — a seven-fold sizing error in the ledger, and
+enough to change the item's disposition from a slice to its own story.
+
+**THE LAW: when a guard-not-mirrored instance is found, CENSUS THE MIRROR SURFACE — do not merely fix the
+site that failed.** The instance is one member of a set; the fix's real size is the SET'S COUNT, not the
+instance. A census costs minutes and answers three things a point-fix cannot: how many siblings exist,
+whether the correct fix is "mirror it" or "collapse them", and whether the work is a slice or a story.
+Sizing a mirrored-guard item from the instance systematically under-estimates it.
+
+**Corollary — the trigger gets specific.** A censused surface yields a NAMED trigger ("the next change to
+audit behaviour", because that change is what must be mirrored N times) rather than a vague one ("someday
+unify these"). The next person is forced into the work anyway; the ledger should say so.

@@ -161,6 +161,30 @@ the first time kind #14 lands.**
   **If the refactor touches more than the call sites — e.g. any audit path that builds an action string
   DYNAMICALLY — surface it rather than absorbing it.**
 
+## S11-6 — audit-helper unification RESIZED: own story, post-beta (ledger corrected)
+
+The D3.5 census answered its own question (vocabulary CLOSED — every action originates as a source literal;
+the dynamic-looking sites are branch-selected literal PAIRS, incidental, convertible to constants) and then
+found something larger. **M1b was diagnosed as "two audit helpers, one taught the machine branch and one
+not." There are FOURTEEN**, across nine packages: `policy` (`writeAudit`, `writeAuditAs`,
+`writeSystemAudit`), `tenancy` (2 + a bespoke `deactivate`), `mfa` (2), `sites` (2), `k8s`, `ovpn`,
+`invites`, `devices`.
+
+**The number is not the finding — the EXPOSURE is.** Any future change to audit behaviour (a new actor kind,
+a required field, a redaction rule, a retention constraint) must currently be mirrored **fourteen times**, and
+M1b is the proof that mirroring silently fails. That is not abstract debt: it is a demonstrated failure mode
+with a known instance.
+
+**RESIZED — its own story, post-beta unless the trigger fires.** A seven-fold sizing error changes the
+disposition: it touches nine packages' write paths, and though the refactor is mechanical it sits on the
+surface that answers *"who changed access, and when"* for a security product — so it earns a real review, not
+a slice's scoped verify. **Trigger, now SPECIFIC rather than vague: the next change to audit behaviour** —
+because that change is precisely what would have to be mirrored fourteen times, so whoever picks it up is
+forced into the unification anyway and is better off knowing going in.
+
+**Sequencing benefit:** D3.5's typed registry pins the VOCABULARY first, which makes the eventual unification
+strictly easier — one fewer moving part when the fourteen collapse.
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
