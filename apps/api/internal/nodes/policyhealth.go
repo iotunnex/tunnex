@@ -156,6 +156,19 @@ var transitionTable = []TransitionRule{
 	{KindK8sEndpointsUnavailable, "K8s gateway has no endpoint view from the API (K8sEndpointsUnavailable) — exposed-Service DNAT unprogrammed, fail-closed; remedy = check the gateway's K8s API reachability + its read-only services/endpointslices RBAC"},
 }
 
+// AllKinds returns every health kind, derived from transitionTable — the SOURCE the metrics layer ranges
+// over (S11 D3.1). Deriving beats a hand-maintained list: a 14th kind added to the const block without a
+// metric path would otherwise be a series that silently never appears (the producer-without-consumer trap at
+// the metrics tier). TestEveryHealthKindIsEnumerated parses the const block and fails the build if any kind
+// is missing here, so omission is impossible rather than merely discouraged.
+func AllKinds() []PolicyDegradedKind {
+	out := make([]PolicyDegradedKind, 0, len(transitionTable))
+	for _, r := range transitionTable {
+		out = append(out, r.Kind)
+	}
+	return out
+}
+
 // degradedKind projects the advisory kind (pure — mirrors transitionTable). Order matters:
 // a live apply error is self-evident from the agent's last report; the desync path needs a
 // FRESH applied hash (a server-side compare is meaningless on a stale one).
