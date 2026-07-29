@@ -87,3 +87,25 @@ Sizing a mirrored-guard item from the instance systematically under-estimates it
 **Corollary — the trigger gets specific.** A censused surface yields a NAMED trigger ("the next change to
 audit behaviour", because that change is what must be mirrored N times) rather than a vague one ("someday
 unify these"). The next person is forced into the work anyway; the ledger should say so.
+
+## PROVE-A-GUARD-REJECTS law (founder-ratified 2026-07-29, EPIC 11) — a new guard is not accepted until it has failed on a planted violation
+
+**A guard that has only ever passed is indistinguishable from a guard that does nothing.** Green is the state
+a correct guard and an inert guard share; only a REJECTION distinguishes them. So a new gate, census, red or
+scanner is not accepted on "it runs and passes" — it is accepted when it has been shown to FAIL on a
+deliberate violation, and then to pass again once the violation is removed.
+
+Instances that made the case, all in EPIC 11 slice 1–2:
+- **govulncheck** — its first honest run exited 3 on `GO-2026-5856`, a reachable `crypto/tls` flaw in the
+  pinned toolchain that builds every shipped binary. It rejected because REALITY demanded it, which is
+  stronger evidence than a planted vuln would have been.
+- **The advisory-job guard** — built after a 3-second Trivy no-op reported green, it then caught the very
+  next instance of its own bug (the corrected pin was still wrong) and failed VISIBLY.
+- **The toolchain-pin agreement check** — partial bump → exit 1, agreement → exit 0.
+- **The 500-path census** (S11-5) — a planted `http.Error(..., 500)` fails with its file:line; removed, passes.
+- **The health-kind census** (D3.1) — a planted 14th kind fails by name with the reason; reverted, passes.
+
+**THE LAW:** when you add a guard, plant the violation it exists to catch, watch it fail, then revert and
+watch it pass. Record both outcomes. The cost is a minute; the alternative is a green check that has never
+once done its job and will not do it the first time it matters. (Companion to ARTIFACT-EXISTS ≠
+ARTIFACT-WORKS: this is that law applied to the gates themselves.)
