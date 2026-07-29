@@ -105,6 +105,15 @@ Instances that made the case, all in EPIC 11 slice 1–2:
 - **The 500-path census** (S11-5) — a planted `http.Error(..., 500)` fails with its file:line; removed, passes.
 - **The health-kind census** (D3.1) — a planted 14th kind fails by name with the reason; reverted, passes.
 
+**COROLLARY (S11-7) — prove it rejects the HARDEST instance of what it claims to cover, not the easiest.**
+A guard that enforces a SUBSET of its own ruling is worse than no guard: it manufactures confidence in
+coverage that does not exist. The D3.5 audit census is the measurement. Version one inspected call ARGUMENTS
+and found 51 actions — and would have passed while **sixteen branch-selected literals** (`action :=
+"x.disabled"; if c { action = "x.enabled" }`) survived untouched, because those are assignments, not
+arguments. Extending it to assignments took the count to **68**. Had it shipped at version one, the registry
+would have looked complete, the red would have been green, and a quarter of the vocabulary would still have
+been bare literals. So: enumerate the SHAPES the defect can take, and plant the awkward one.
+
 **THE LAW:** when you add a guard, plant the violation it exists to catch, watch it fail, then revert and
 watch it pass. Record both outcomes. The cost is a minute; the alternative is a green check that has never
 once done its job and will not do it the first time it matters. (Companion to ARTIFACT-EXISTS ≠

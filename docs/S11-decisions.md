@@ -154,6 +154,18 @@ the first time kind #14 lands.**
   `internal_error`, log the wrapped cause WITH the request_id. **Condition: verify there is exactly ONE such
   seam and CITE it — if unmapped errors can become 500s by more than one path, that is the finding, and it is
   the guard-not-mirrored class again.**
+- **D3.5 — MOVED OUT OF SLICE 2 (S11-7), merged into the audit-surface unification story.** The ruling below
+  was made on wrong inputs — it sized the work against **18 actions and one helper shape**; the census found
+  **68 actions across 72 sites and fourteen helpers with heterogeneous signatures**. The conversion was
+  attempted and REVERTED mid-flight rather than committed half-applied (a half-converted audit path on the
+  surface that answers "who changed access, and when" is the worst trade available). **They are the same
+  refactor discovered twice:** the vocabulary can't be typed while the helpers are fourteen, and the helpers
+  can't be unified without touching every action string — so sequencing them does the same call sites twice
+  with a half-typed state in between, while doing them together means one signature makes typing free.
+  **Untyped constants + the census red were REFUSED** as the cheap path: they would ship the APPEARANCE of the
+  ruling (no bare literals) while the property actually ruled for (a type the compiler enforces) is absent,
+  and would need re-touching during the unification anyway — half a fix that must be redone is worse than a
+  clean deferral. Inputs preserved in `docs/audit-unification-story.md`. Original ruling, for the record:
 - **D3.5 — the audit-action registry RIDES Slice 2. RULED.** An audit trail with inconsistent action names is
   an observability defect, so it belongs here. The typed newtype + `var` block over the 18 is mechanical; the
   **drift red (every action string used in code appears in the registry) is what makes it durable** and is the
