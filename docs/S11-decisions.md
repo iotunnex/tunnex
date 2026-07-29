@@ -258,6 +258,55 @@ it as the restore red rather than inventing a fixture.**
 its own master key per run. **Trigger: Slice 4 (it needs the fixture anyway), or the next time it costs a
 session more than one reset.**
 
+## Slice 4 — backup/restore (BUILT; the wire proof rides the epic walk)
+
+**D2 artifact contents — RULED: DB dump + manifest only; the master key SEPARATE.** A backup carrying its own
+key is equivalent to no encryption at rest for whoever obtains the file, and backups are the most-copied,
+least-guarded artifact in a deployment. The whole purpose of sealing is that possessing the database is not
+enough. The manifest instead carries a **KEYED FINGERPRINT** of the master key (HMAC under a subkey derived
+from it — the shipped S4.5 proof-of-secret primitive, not a new invention), which converts "total loss on a
+lost key" from a silent discovery into a pre-flight answer.
+
+**ROADMAP CORRECTION (5th item struck on evidence).** S11.2 specified *"DB + master key + node-agent state
+(WG private keys on each gateway)"*. Those keys have never been CP-side, by deliberate design —
+`0009_node_wg`: *"the private key never leaves the node… the control plane stores pubkeys only"*;
+`0010_devices`: *"there is deliberately NO private_key column"*. A backup cannot carry what the CP never
+holds, and promising it would be a recovery claim the artifact could not honour. **Stated as the property it
+is, not as a limitation:** a CP restore recovers the control plane's state, not the fleet's secrets — and does
+not need to, because the fleet's secrets never left the fleet. A lost gateway or device simply re-enrols.
+
+**What the master key guards** (all unreadable under a wrong key): the **agent CA private key** — which agents
+PIN, so losing it ORPHANS THE FLEET — the OpenVPN CA and every issued profile key, MFA/TOTP secrets, and
+SSO/IdP-sync client secrets.
+
+**Fail-loud at the restore seam** (S10.1's set-but-broken-is-fatal law, applied): verification runs BEFORE
+anything is written and refuses on mismatch, naming both fingerprints and the consequence. **The catastrophic
+outcome is not a failed restore — it is a restore that SUCCEEDS under the wrong key**, producing a CP that
+starts, serves, and cannot read its own agent CA, so the fleet is silently orphaned and the operator learns
+it later, from the fleet, with the backup already written over the evidence.
+
+**Built:** `internal/backup` (manifest + `Verify`) and `cmd/backupctl` (`manifest` / `verify`), which loads the
+master key exactly as the server does — verifying against a differently-loaded key would prove nothing.
+`verify` exits **2** on mismatch so `backupctl verify && pg_restore` cannot proceed.
+
+**Reds:** wrong-key refusal (identifiable as `ErrKeyMismatch`, message must name the CA, "orphaned", and both
+fingerprints) · **the manifest contains no key material** in raw, hex or base64 form — so a future "helpful"
+change that adds the key for restore convenience fails the build rather than silently turning every
+historical backup into a full compromise · unverifiable-manifest refusal · round-trip. Guard proven to reject:
+disabling the comparison fails the red.
+
+**PROVEN END-TO-END** (not only in unit tests): manifest taken under key A → `verify` with A exits 0 with the
+fingerprint; `verify` with key B prints `REFUSING TO RESTORE`, names both fingerprints and the orphaning
+consequence, and exits 2.
+
+**Runbook: `docs/backup-restore.md`** — two artifacts, both required, and plainly what happens if either is
+lost (dump lost → restore an older one; **key lost → the sealed material is unrecoverable and the whole fleet
+must re-enrol**). That sentence is in the runbook, not only the paper, because it is what makes an operator
+actually store the key separately.
+
+**OWED — the wire proof** (the slice's acceptance): restore a CP from backup and prove an existing agent
+still connects, unchanged, with no re-enrolment. It rides the EPIC 11 box-walk, where a real gateway exists.
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
