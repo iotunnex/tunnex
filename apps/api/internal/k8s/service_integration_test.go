@@ -473,7 +473,7 @@ func TestOwnershipMarkerSetOnMachineCreate(t *testing.T) {
 	mid := uuid.New()
 	if _, e := pool.Exec(ctx,
 		`INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`,
-		mid, org, []byte("h")); e != nil {
+		mid, org, []byte(mid.String())); e != nil {
 		t.Fatal(e)
 	}
 

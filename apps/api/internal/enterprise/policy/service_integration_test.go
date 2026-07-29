@@ -796,7 +796,7 @@ func TestGrantOwnershipMarker(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
 	mid := uuid.New()
-	if _, e := pool.Exec(ctx, `INSERT INTO machine_credentials (id,org_id,name,role,token_hash,fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`, mid, org, []byte("h")); e != nil {
+	if _, e := pool.Exec(ctx, `INSERT INTO machine_credentials (id,org_id,name,role,token_hash,fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`, mid, org, []byte(mid.String())); e != nil {
 		t.Fatalf("machine: %v", e)
 	}
 	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
