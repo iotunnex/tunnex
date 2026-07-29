@@ -958,8 +958,10 @@ func writeAuditAs(ctx context.Context, q *sqlc.Queries, orgID, actorUserID uuid.
 		return err
 	}
 	_, err = q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
-		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
-		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: true},
+		OrgID: pgtype.UUID{Bytes: orgID, Valid: true},
+		// NULL (not a fake zero) when there is no human actor — see k8s service.audit(): the 0027 CHECK
+		// permits a neither-actor row, and a zero uuid would violate the actor_user_id FK.
+		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: actorUserID != uuid.Nil},
 		Action:      action, TargetType: &tt, TargetID: &tid, Metadata: b,
 	})
 	return err

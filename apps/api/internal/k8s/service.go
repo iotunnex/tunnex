@@ -106,8 +106,11 @@ func (s *Service) audit(ctx context.Context, q *sqlc.Queries, orgID, actorUserID
 	}
 	b, _ := json.Marshal(meta)
 	_, err := q.InsertAuditLog(ctx, sqlc.InsertAuditLogParams{
-		OrgID:       pgtype.UUID{Bytes: orgID, Valid: true},
-		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: true},
+		OrgID: pgtype.UUID{Bytes: orgID, Valid: true},
+		// NULL (not a fake zero) when there is no human actor — the schema allows a neither-actor row
+		// (0027 CHECK: legacy/unattributed), and a zero uuid would violate the actor_user_id FK to users.
+		// In production a human create always carries a real id; only a nil-actor path (tests) hits this.
+		ActorUserID: pgtype.UUID{Bytes: actorUserID, Valid: actorUserID != uuid.Nil},
 		Action:      action,
 		TargetType:  &tt,
 		TargetID:    &ti,
