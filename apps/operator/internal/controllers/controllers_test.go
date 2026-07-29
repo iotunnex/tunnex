@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -599,5 +600,76 @@ func TestMatchGrant(t *testing.T) {
 	otherCidr := "10.9.9.0/24"
 	if id := matchGrant(rules, cp.CreateGrantRequest{SrcKind: "cidr", SrcCidr: &otherCidr, DstKind: "k8s_service", DstK8sServiceID: &svc}); id != "" {
 		t.Fatalf("a different subject must not adopt, got %q", id)
+	}
+}
+
+// ── WF-OP-3: drift emits a durable Event, not just a self-clearing condition ────────────────────────────
+
+// TestDriftHealEmitsEvent proves the HARD case, not the easy one (the S11-7 corollary to
+// PROVE-A-GUARD-REJECTS): it is trivial to assert "the Drift condition is True on the healing pass" — that
+// is what the walk already showed, and it is exactly the assertion that would have missed WF-OP-3. The real
+// property is that the record SURVIVES the next reconcile, when the condition flips back to InSync. So this
+// runs TWO passes and asserts the Event is still there after the condition has cleared.
+func TestDriftHealEmitsEvent(t *testing.T) {
+	calls := 0
+	cp := testCP(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sites"):
+			json.NewEncoder(w).Encode([]map[string]string{{"id": "site-1", "name": "edge"}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters/stale-1"):
+			w.WriteHeader(404) // confirm-by-ID: authoritatively gone → real drift
+			w.Write([]byte(`{"error":{"code":"cluster_not_found","message":"gone"}}`))
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
+			if calls == 0 {
+				calls++
+				json.NewEncoder(w).Encode([]map[string]string{}) // pass 1: gone → heal
+				return
+			}
+			// pass 2: present again → the condition goes InSync, and the Event must outlive it
+			json.NewEncoder(w).Encode([]map[string]string{{"id": "clu-2", "name": "prod", "dns_vip": "100.64.0.53"}})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/k8s/clusters"):
+			json.NewEncoder(w).Encode(map[string]string{"id": "clu-2", "dns_vip": "100.64.0.53"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	cr := &tunnexv1.TunnexCluster{
+		ObjectMeta: managedMeta("ns", "c"),
+		Spec:       tunnexv1.TunnexClusterSpec{Site: "edge", Name: "prod", VIPRange: "100.64.0.0/16", ServiceCIDR: "10.96.0.0/12", DNSZone: "k8s.local"},
+		Status:     tunnexv1.TunnexClusterStatus{ClusterID: "stale-1"},
+	}
+	k := fakeK8s(t, cr)
+	rec := record.NewFakeRecorder(16)
+	r := &TunnexClusterReconciler{Client: k, CP: cp, Recorder: rec}
+
+	// Pass 1 — the heal.
+	if _, err := r.Reconcile(context.Background(), req("ns", "c")); err != nil {
+		t.Fatal(err)
+	}
+	// Pass 2 — the CP now agrees; the Drift condition clears.
+	if _, err := r.Reconcile(context.Background(), req("ns", "c")); err != nil {
+		t.Fatal(err)
+	}
+
+	var got tunnexv1.TunnexCluster
+	k.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "c"}, &got)
+	if d := apimeta.FindStatusCondition(got.Status.Conditions, condDrift); d == nil || d.Status != metav1.ConditionFalse {
+		t.Fatalf("precondition: after pass 2 the Drift condition must have cleared to InSync, got %+v", d)
+	}
+
+	// THE POINT: the Event still records that drift happened, though the condition no longer says so.
+	var found string
+	for len(rec.Events) > 0 {
+		e := <-rec.Events
+		if strings.Contains(e, "DriftHealed") {
+			found = e
+		}
+	}
+	if found == "" {
+		t.Fatal("drift was healed but NO DriftHealed Event was emitted — the condition self-clears, so with " +
+			"no Event a status snapshot cannot tell that drift ever occurred (WF-OP-3)")
+	}
+	if !strings.Contains(found, "Warning") || !strings.Contains(found, "recreated from the CR") {
+		t.Fatalf("the Event must name what happened, got %q", found)
 	}
 }

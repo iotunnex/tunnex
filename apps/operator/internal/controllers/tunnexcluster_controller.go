@@ -106,7 +106,10 @@ func (r *TunnexClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	cr.Status.ClusterID = reg.ID
 	cr.Status.DNSVIP = reg.DnsVip
 	if drift {
-		setDrift(&cr.Status.Conditions, true, "control-plane cluster was absent; recreated from the CR", gen)
+		const driftMsg = "control-plane cluster was absent; recreated from the CR"
+		setDrift(&cr.Status.Conditions, true, driftMsg, gen)
+		// WF-OP-3: the condition self-clears next pass; the Event is the durable record.
+		recordDriftHealed(r.Recorder, &cr, driftMsg)
 	} else {
 		setDrift(&cr.Status.Conditions, false, "in sync with the control plane", gen)
 	}

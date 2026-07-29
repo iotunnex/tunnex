@@ -116,7 +116,10 @@ func (r *TunnexExposedServiceReconciler) Reconcile(ctx context.Context, req ctrl
 	cr.Status.VIP = exp.Vip
 	cr.Status.FQDN = exp.Fqdn // DERIVED, copied from the CP — never assembled (S10.3 copy-don't-construct)
 	if drift {
-		setDrift(&cr.Status.Conditions, true, "control-plane service was absent; recreated from the CR", gen)
+		const driftMsg = "control-plane service was absent; recreated from the CR"
+		setDrift(&cr.Status.Conditions, true, driftMsg, gen)
+		// WF-OP-3: the condition self-clears next pass; the Event is the durable record.
+		recordDriftHealed(r.Recorder, &cr, driftMsg)
 	} else {
 		setDrift(&cr.Status.Conditions, false, "in sync with the control plane", gen)
 	}

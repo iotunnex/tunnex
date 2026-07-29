@@ -15,6 +15,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/tunnexio/tunnex/apps/operator/internal/cp"
@@ -53,6 +55,24 @@ func setReady(conds *[]metav1.Condition, status metav1.ConditionStatus, reason, 
 	meta.SetStatusCondition(conds, metav1.Condition{
 		Type: condReady, Status: status, Reason: reason, Message: msg, ObservedGeneration: gen,
 	})
+}
+
+// recordDriftHealed emits a Kubernetes EVENT when the operator rebuilt a CP object that had vanished
+// out-of-band (WF-OP-3).
+//
+// WHY AN EVENT AND NOT ONLY THE CONDITION. The Drift condition reflects the CURRENT reconcile pass, so
+// `Drift=RecreatedFromCR` self-clears on the very next pass (which finds the object present and sets
+// InSync). The walk proved the healing works — the recreated Service came back with a new serviceId — but a
+// status SNAPSHOT taken moments later shows InSync, so D2's condition 3 ("drift surfaces in status") held
+// only transiently and the healing was catchable solely via the id change or the logs. An Event persists
+// independently of reconcile timing, is what a platform engineer already watches (`kubectl describe`,
+// `kubectl get events`), and survives the condition flipping back. The condition still answers "is it
+// drifting NOW"; the Event answers "did it drift AT ALL", which is the question an operator actually asks.
+func recordDriftHealed(rec record.EventRecorder, obj runtime.Object, msg string) {
+	if rec == nil {
+		return
+	}
+	rec.Event(obj, "Warning", "DriftHealed", msg)
 }
 
 // setDrift records whether this pass had to heal drift (a CP object that went missing out-of-band).
