@@ -147,7 +147,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the API image (the customer-facing artifact)
         run: docker build -f deploy/docker/api.Dockerfile -t tunnex-api:scan .
-      - uses: aquasecurity/trivy-action@0.36.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true # ADVISORY: inherited base-image CVEs are not ours to fix
         with:
           image-ref: tunnex-api:scan
