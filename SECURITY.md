@@ -82,6 +82,35 @@ Not because these do not matter, but because a report will not lead to a fix her
 - **Automated scanner output with no demonstrated impact.** We read these, but a report with a reproduction
   moves far faster.
 
+## Exposure model — what listens, and to whom
+
+Every network surface Tunnex opens, and the default that governs it. Defaults are chosen so that the unsafe
+configuration requires a deliberate act, not so that the safe one requires reading documentation.
+
+| Surface | Default bind | Auth | Notes |
+|---|---|---|---|
+| Control-plane API | `:8080` (behind your TLS terminator) | session cookie or bearer; RBAC per org | The public surface. |
+| Agent control channel | `:8443` | **mutual TLS** — the client certificate identifies the node | Authorizes by certificate, never by anything in the request body. |
+| **Metrics + readiness** | **`127.0.0.1:9090`** | **none — the bind address is the control** | See below. |
+| Gateway (node agent) | WireGuard `:51820/udp`, OpenVPN if enabled | cryptographic peer identity | No management surface is exposed by the agent. |
+
+**Metrics (`/metrics`, `/readyz`) bind to loopback by default and are not authenticated.** This is the
+Prometheus convention, and the reasoning is worth stating: an authenticated public endpoint depends on the
+auth being right, whereas an endpoint that is not reachable cannot be wrong. On a VM, a metrics listener bound
+to `0.0.0.0` is internet-reachable the moment a security group is loose — so remote scraping is **opt-in by
+explicit configuration** (`TUNNEX_METRICS_ADDR`), pointed at a private interface, or at `0.0.0.0` inside a
+Kubernetes pod whose Service is deliberately not exposed. A wildcard bind is permitted but never silent: the
+control plane logs `metrics_listener_wildcard_bind` naming the exposure. The metric set is fleet-level counts
+by health kind — it answers *how many* gateways are degraded, never *which*, and carries no org, node, user
+or device labels.
+
+**The in-cluster gateway's Kubernetes RBAC** is the same principle on the other side: its ServiceAccount is
+granted read-only `get/list/watch` on `services` and `endpointslices` and nothing else — it reads Service
+endpoints to program its DNAT, and **cannot read Secrets, cannot write, and cannot escalate**. The GitOps
+operator is narrower still: it holds no data-plane privilege at all and reaches Tunnex only over HTTPS with a
+machine credential, so every invariant it depends on is enforced by the control-plane handlers rather than
+trusted to the operator.
+
 ## How we build
 
 Context for what a reporter can assume about the code, not a security claim in itself:

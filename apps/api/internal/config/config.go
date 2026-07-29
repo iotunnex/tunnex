@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/tunnexio/tunnex/apps/api/internal/metrics"
 )
 
 // Config holds the process configuration resolved at startup.
@@ -13,6 +15,12 @@ type Config struct {
 	Addr string
 	// AgentAddr is the host:port the mTLS agent control channel binds to (S3.1).
 	AgentAddr string
+	// MetricsAddr is the host:port the metrics + readiness listener binds to (S11 D3.2). It is a SEPARATE
+	// listener from the public API so operational data never rides the public router, and it defaults to
+	// LOOPBACK: on a VM, a 0.0.0.0 metrics endpoint is internet-reachable the moment a security group is
+	// loose, so remote scraping is opt-in by explicit configuration rather than a default to document
+	// against. Set it to a private interface (VM) or 0.0.0.0 (a k8s pod behind an unexposed Service).
+	MetricsAddr string
 	// Env is the deployment environment name (development, production).
 	Env string
 	// LogLevel controls the minimum slog level (debug, info, warn, error).
@@ -99,6 +107,7 @@ func Load() Config {
 	return Config{
 		Addr:               getenv("TUNNEX_API_ADDR", ":8080"),
 		AgentAddr:          getenv("TUNNEX_AGENT_ADDR", ":8443"),
+		MetricsAddr:        getenv("TUNNEX_METRICS_ADDR", metrics.DefaultAddr),
 		Env:                getenv("TUNNEX_ENV", "development"),
 		LogLevel:           strings.ToLower(getenv("TUNNEX_LOG_LEVEL", "info")),
 		SecretsDir:         getenv("TUNNEX_SECRETS_DIR", "/var/lib/tunnex/secrets"),

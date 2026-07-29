@@ -37,6 +37,7 @@ import (
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
+	"github.com/tunnexio/tunnex/apps/api/internal/metrics"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
@@ -415,6 +416,27 @@ func main() {
 		logger.Info("agent_channel_starting", slog.String("addr", cfg.AgentAddr))
 		if err := agentSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("agent_channel_failed", slog.String("error", err.Error()))
+		}
+	}()
+
+	// S11 D3.1-D3.3: the metrics + readiness listener, on its OWN port (never the public router) and
+	// bound to loopback unless explicitly configured otherwise — so operational fleet data cannot become
+	// internet-reachable by a default nobody revisited. FleetHealthCounts reads the SAME PolicyHealthForNodes
+	// the dashboard reads, so the metric and the console can never disagree about what a kind means.
+	metricsCtx, stopMetrics := context.WithCancel(context.Background())
+	defer stopMetrics()
+	go func() {
+		reg := metrics.NewRegistry(func() map[nodes.PolicyDegradedKind]int {
+			// Bound the scrape's DB work: a slow fleet walk must never hold the scraper open.
+			ctx, cancel := context.WithTimeout(metricsCtx, 10*time.Second)
+			defer cancel()
+			return nodeSvc.FleetHealthCounts(ctx)
+		})
+		// readiness = the DB answers. A CP that cannot reach postgres serves nothing useful, and naming the
+		// reason beats a bare 503 (diagnosis-from-logs at the readiness tier).
+		ready := func() error { return pool.Ping(metricsCtx) }
+		if err := metrics.Serve(metricsCtx, cfg.MetricsAddr, reg, ready, logger); err != nil {
+			logger.Error("metrics_listener_failed", slog.String("error", err.Error()))
 		}
 	}()
 
