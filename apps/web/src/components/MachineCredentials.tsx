@@ -64,7 +64,9 @@ export function MachineCredentials({ orgId, canManage }: { orgId: string; canMan
       {canManage && (
         <form onSubmit={mint} className="mt-3 flex items-end gap-2">
           <div className="flex-1">
-            <Field label="Name">
+            {/* "Credential name", NOT "Name" — the Settings page already has an org "Name" field, and two
+                controls sharing an accessible name are announced identically by a screen reader (S11-1). */}
+            <Field label="Credential name">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="gitops" />
             </Field>
           </div>

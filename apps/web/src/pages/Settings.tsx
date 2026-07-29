@@ -432,6 +432,9 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
     await load(() => false); // refresh to pick up the new fingerprint
   }
 
+  // Display name for the provider — also the label prefix that keeps each provider's fields uniquely named.
+  const providerName = provider === "microsoft" ? "Microsoft" : "Google";
+
   return (
     <form onSubmit={submit}>
       <Card>
@@ -444,14 +447,17 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
           )}
         </div>
         <div className="mt-3 space-y-3">
-          <Field label="Client ID">
+          {/* Labels are PROVIDER-SCOPED (S11-1 class): SsoProvider renders once per provider, so a bare
+              "Client ID" would put two controls with the SAME accessible name on the Settings page — a
+              screen reader announces them identically and a label-navigating user cannot tell them apart. */}
+          <Field label={`${providerName} client ID`}>
             <Input value={clientId} onChange={(e) => setClientId(e.target.value)} required disabled={!canEdit} />
           </Field>
           {/* WRITE-ONLY secret: the current secret is NEVER fetched or shown. We
               display only its keyed fingerprint as proof-of-storage, and the
               input is a "replace" affordance (blank = leave unchanged is not
               supported by the API, so a save requires re-entering it). */}
-          <Field label={configured ? "Client secret (enter to replace)" : "Client secret"}>
+          <Field label={configured ? `${providerName} client secret (enter to replace)` : `${providerName} client secret`}>
             <Input
               type="password"
               value={clientSecret}

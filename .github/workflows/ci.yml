@@ -45,6 +45,9 @@ jobs:
       - name: GitOps operator — build + no-DB-import census (S10.2)
         run: make test-operator
 
+      - name: tunnex CLI — build + vet + test (S11-2: previously covered by NO job)
+        run: make test-cli
+
       - name: Privilege-helper core — vet + test (S6.3)
         run: make test-helper
 
@@ -125,18 +128,16 @@ jobs:
             apps/client/release/SHA256SUMS
           if-no-files-found: error
 
-  # Full stack + Playwright. OPPORTUNISTIC: kept green when it can be, but if it
-  # resists (resource limits / flakiness) demote to nightly (PLAN ledger) rather
-  # than block merges on infra noise.
+  # Full stack + Playwright. BLOCKING as of EPIC 11 / S11-1 (was opportunistic).
+  #
+  # WHY THE PROMOTION: advisory status did the damage TWICE — it let an S10.2 regression merge (a
+  # machine-credential "Name" field collided with the org "Name" field, ambiguous accessible names →
+  # strict-mode violation), and then supplied the excuse for waving the red job away at merge time. A job
+  # configured not to matter is the debt this slice repays. Sequence honored: fix → green → promote.
+  # If e2e proves genuinely FLAKY under blocking status, that flakiness is its own FINDING with a
+  # disposition — NOT a quiet demotion back to continue-on-error.
   e2e:
     runs-on: ubuntu-latest
-    # OPPORTUNISTIC / NON-BLOCKING by design (S6.0b mandate: full e2e in CI is
-    # opportunistic). The gates + client jobs are the merge gates; this job spins
-    # the whole stack and is inherently heavier/flakier, so it never blocks merge.
-    # (The early-run build failures were the -mod=readonly root cause — a module
-    # graph re-resolution that git-ls-remote'd the mismatched module path — now
-    # fixed repo-wide, so this job is expected to pass.)
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Bring up the stack + seed
@@ -154,12 +155,11 @@ jobs:
   # S7.4c: the ENTERPRISE e2e — brings the stack up as the enterprise edition
   # (TUNNEX_BUILD_TAGS=enterprise) with seed-enterprise laid on top of seed, then
   # runs the REAL S4.5/S4.5b assertions (SSO no-secret payload + a live shrink that
-  # strands the seeded device → real 409 orphan render). OPPORTUNISTIC like `e2e`
-  # (the flake mandate applies to browser suites); the SECURITY half of S4.5 also
-  # gates BLOCKING in `gates` via TestGetSsoConfigPayloadCarriesNoSecret.
+  # strands the seeded device → real 409 orphan render). BLOCKING as of EPIC 11 alongside `e2e` —
+  # an advisory job on the ENTERPRISE path has the same blind spot as one on the open path (S11-1
+  # condition (b)). The SECURITY half of S4.5 also gates in `gates` via TestGetSsoConfigPayloadCarriesNoSecret.
   e2e-enterprise:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Bring up the ENTERPRISE stack + seed (base + enterprise fixtures)

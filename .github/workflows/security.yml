@@ -1,0 +1,194 @@
+name: Security
+
+# EPIC 11 / D5 — the supply-chain + code-scanning tier. Publishable, cheap, and gated on NOTHING
+# entity-side (no certificates, no legal entity) — it ships before beta and feeds the public trust page.
+#
+# THE RULING: BLOCK on what we can fix; ADVISE on what we inherit.
+#   BLOCKING  — govulncheck (our dependency choices), CodeQL high/critical (our code), SBOM + cosign
+#               publish on release (a release without provenance is a release you can't attest).
+#   ADVISORY  — Trivy image findings (base-image CVEs we don't control), OpenSSF Scorecard.
+# An advisory job is `continue-on-error`; a blocking job is not. Nothing here is advisory by accident —
+# S11-1 is the cautionary tale (a job configured not to matter let a regression merge, then excused it).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    # Weekly: a dependency becomes vulnerable without our code changing — the scan must run on a clock,
+    # not only on a push, or a quiet repo silently rots.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── BLOCKING: our dependency choices ────────────────────────────────────────────────────────────────
+  govulncheck:
+    name: govulncheck (blocking)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every independent Go module. A vuln in ANY of them is a vuln we ship.
+        module: [apps/api, apps/node, apps/helper, apps/cli, apps/operator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan ${{ matrix.module }}
+        working-directory: ${{ matrix.module }}
+        # govulncheck reports only vulns REACHABLE from our call graph — so a finding here is one we can
+        # actually fix (bump the dep) or must actually justify, never inherited noise.
+        run: govulncheck ./...
+
+  # ── BLOCKING: our code ─────────────────────────────────────────────────────────────────────────────
+  codeql:
+    name: CodeQL (blocking on high/critical)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+          output: codeql-results
+      - name: Fail on high/critical findings (blocking threshold)
+        run: |
+          set -euo pipefail
+          # CodeQL marks high/critical security alerts as SARIF level "error" (medium/low are "warning"/
+          # "note"). Counting error-level results is the documented, stable signal — more robust than
+          # re-deriving security-severity from the rule table, which lives in different SARIF locations
+          # depending on whether a query pack contributed it.
+          total=0
+          for f in codeql-results/*.sarif; do
+            n=$(jq '[.runs[].results[]? | select(.level == "error")] | length' "$f")
+            echo "  $(basename "$f"): $n error-level result(s)"
+            total=$((total + n))
+          done
+          echo "high/critical findings: $total"
+          if [ "$total" -ne 0 ]; then
+            echo "::error::CodeQL reported $total high/critical finding(s) — see the Security tab"
+            exit 1
+          fi
+
+  # ── BLOCKING: formatting / lint parity (the same checks a dev runs locally) ─────────────────────────
+  fmt-lint:
+    name: gofmt + vet parity (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache: false
+      - name: gofmt (all Go modules)
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l apps/api apps/node apps/helper apps/cli apps/operator)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would reformat these files:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet (per module, readonly like every other gate)
+        env: { GOFLAGS: -mod=readonly }
+        run: |
+          set -euo pipefail
+          for m in apps/api apps/node apps/helper apps/cli apps/operator; do
+            echo "── vet $m"; (cd "$m" && go vet ./...)
+          done
+
+  # ── ADVISORY: base-image CVEs we don't control ─────────────────────────────────────────────────────
+  trivy:
+    name: Trivy image scan (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true # ADVISORY BY RULING — inherited base-image CVEs, not ours to fix
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the API image (the customer-facing artifact)
+        run: docker build -f deploy/docker/api.Dockerfile -t tunnex-api:scan .
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: tunnex-api:scan
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true # a CVE with no upstream fix is not actionable
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: trivy.sarif, category: trivy }
+
+  # ── ADVISORY: supply-chain posture score ───────────────────────────────────────────────────────────
+  scorecard:
+    name: OpenSSF Scorecard (advisory)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    continue-on-error: true # ADVISORY BY RULING
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: ossf/scorecard-action@v2.4.0
+        with: { results_file: scorecard.sarif, results_format: sarif, publish_results: false }
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: scorecard.sarif, category: scorecard }
+
+  # ── BLOCKING (on a release tag): provenance ────────────────────────────────────────────────────────
+  # A release without provenance is a release you can't attest. On a v* tag this produces an SBOM per
+  # service image and a keyless cosign signature; both are attached to the tag's artifacts.
+  sbom-sign:
+    name: SBOM + cosign (blocking on release)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write # keyless signing (Fulcio/Rekor) — no key material to guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anchore/sbom-action/download-syft@v0
+      - uses: sigstore/cosign-installer@v3
+      - name: Generate SBOMs (SPDX) for the source tree + built images
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          syft dir:. -o spdx-json > sbom/tunnex-source.spdx.json
+          for svc in api node; do
+            docker build -f "deploy/docker/$svc.Dockerfile" -t "tunnex-$svc:${GITHUB_REF_NAME}" .
+            syft "tunnex-$svc:${GITHUB_REF_NAME}" -o spdx-json > "sbom/tunnex-$svc.spdx.json"
+          done
+      - name: Sign the SBOMs (keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: |
+          set -euo pipefail
+          for f in sbom/*.spdx.json; do cosign sign-blob --yes --output-signature "$f.sig" \
+            --output-certificate "$f.pem" "$f"; done
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-and-signatures, path: sbom/, if-no-files-found: error }

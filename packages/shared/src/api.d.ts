@@ -1991,7 +1991,7 @@ export interface components {
             /** @description A label for the credential; appears in audit as operator:<name>. */
             name: string;
         };
-        MintMachineCredentialResponse: {
+        MintedMachineCredential: {
             /** Format: uuid */
             id: string;
             name: string;
@@ -4520,7 +4520,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MintMachineCredentialResponse"];
+                    "application/json": components["schemas"]["MintedMachineCredential"];
                 };
             };
             default: components["responses"]["Error"];

@@ -1109,8 +1109,8 @@ type MintMachineCredentialRequest struct {
 	Name string `json:"name"`
 }
 
-// MintMachineCredentialResponse defines model for MintMachineCredentialResponse.
-type MintMachineCredentialResponse struct {
+// MintedMachineCredential defines model for MintedMachineCredential.
+type MintedMachineCredential struct {
 	Fingerprint string             `json:"fingerprint"`
 	Id          openapi_types.UUID `json:"id"`
 	Name        string             `json:"name"`
@@ -11563,7 +11563,7 @@ func (r ListMachineCredentialsResponse) StatusCode() int {
 type MintMachineCredentialResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON201      *MintMachineCredentialResponse
+	JSON201      *MintedMachineCredential
 	JSONDefault  *Error
 }
 
@@ -16391,7 +16391,7 @@ func ParseMintMachineCredentialResponse(rsp *http.Response) (*MintMachineCredent
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest MintMachineCredentialResponse
+		var dest MintedMachineCredential
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

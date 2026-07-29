@@ -31,7 +31,10 @@ test("a plain member cannot manage settings", async ({ page }) => {
 
 test("editing the org name saves (and is reverted to keep the shared seed clean)", async ({ page }) => {
   await login(page, OWNER);
-  const name = page.getByLabel("Name");
+  // exact: true — getByLabel is case-insensitive SUBSTRING by default, so a bare "Name" also matches the
+  // machine-credential panel's "Credential name" (S11-1). The accessible names are now distinct (the product
+  // fix); this makes the locator express its real intent — the ORG name field — and is STRICTER, not looser.
+  const name = page.getByLabel("Name", { exact: true });
   await expect(name).toHaveValue("Demo Organization");
   // Save is disabled until the name actually changes.
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();

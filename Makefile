@@ -70,7 +70,7 @@ sqlc: ## Regenerate typed query code from db/queries
 # path (which git-ls-remotes a nonexistent repo → fails on every fresh clone / CI).
 # Do NOT switch these back to -mod=mod until the vanity-import rename on domain
 # purchase (see PLAN.md "OPEN DECISIONS (b)" + the GUARD note in each go.mod).
-GO_IMAGE := golang:1.25.11-alpine
+GO_IMAGE := golang:1.25.12-alpine
 NODE_IMAGE := node:20-alpine
 PW_IMAGE := mcr.microsoft.com/playwright:v1.48.2-jammy
 OAPI_CODEGEN_VERSION := v2.4.1
@@ -168,6 +168,30 @@ test-operator: ## Build the GitOps operator + run the no-DB-import census (S10.2
 	# THE HARD RULE red: `go test` runs the no-DB-import census (hardrule_test.go) over the full dep graph.
 	docker run --rm -v "$(PWD)/apps/operator":/src -w /src -e GOFLAGS=-mod=readonly \
 	  $(GO_IMAGE) sh -c "apk add --no-cache git && go build ./... && go test ./..."
+
+.PHONY: web-gate
+web-gate: ## Run the FULL web gate (typecheck + test + build) in Node 20 — works on any host (S11 debt repayment)
+	# The standing web-gate-local-env debt: the repo requires node>=20, hosts are often on 18, so
+	# `pnpm --filter @tunnex/web typecheck` refused with ERR_PNPM_UNSUPPORTED_ENGINE and the web gate ran
+	# ONLY in CI — three stories shipped with a "gates green" claim that silently excluded web test+build.
+	# node_modules are CONTAINER-LOCAL named volumes (never the bind mount): pnpm links platform-specific
+	# binaries (esbuild/rollup/vitest), and sharing them with a macOS host yields wrong-arch failures.
+	docker run --rm -v "$(PWD)":/w -w /w \
+	  -v tunnex-nm:/w/node_modules \
+	  -v tunnex-web-nm:/w/apps/web/node_modules \
+	  -v tunnex-shared-nm:/w/packages/shared/node_modules \
+	  -e ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+	  node:20-alpine sh -c 'corepack enable && pnpm install --filter @tunnex/web... --no-frozen-lockfile && \
+	    pnpm --filter @tunnex/web typecheck && pnpm --filter @tunnex/web test && pnpm --filter @tunnex/web build'
+
+.PHONY: test-cli
+test-cli: ## Build + vet + test the tunnex CLI (S11-2: this module had NO gate coverage at all)
+	# S11-2: apps/cli was built by NO CI job — `generate-check` detects DRIFT in its generated client but
+	# never COMPILES it, so a generated-code defect (an openapi schema name colliding with an oapi-codegen
+	# response-wrapper type) shipped to main and sat there undetected. A shipped module with no gate is the
+	# extreme case of the degraded-signal class this epic repays; build+vet+test closes it.
+	docker run --rm -v "$(PWD)/apps/cli":/src -w /src -e GOFLAGS=-mod=readonly \
+	  $(GO_IMAGE) sh -c "apk add --no-cache git && go build ./... && go vet ./... && go test ./..."
 
 .PHONY: test-helper
 test-helper: ## Vet + test the privilege-helper core (S6.3; x/sys dep for caller-path)

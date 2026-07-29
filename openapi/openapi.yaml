@@ -1385,7 +1385,7 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/MintMachineCredentialResponse" }
+              schema: { $ref: "#/components/schemas/MintedMachineCredential" }
         default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/machine-credentials/{credentialId}:
@@ -2527,7 +2527,10 @@ components:
       properties:
         name: { type: string, description: "A label for the credential; appears in audit as operator:<name>." }
 
-    MintMachineCredentialResponse:
+    # NAME: NOT "MintMachineCredentialResponse" — oapi-codegen generates a response-wrapper type of exactly
+    # that name for the mintMachineCredential operation, so the schema and the wrapper collide and the Go
+    # client stops compiling (S11-2). A schema name is wire-INVISIBLE (the JSON body is unchanged).
+    MintedMachineCredential:
       type: object
       required: [id, name, fingerprint, token]
       additionalProperties: false

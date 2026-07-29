@@ -48,7 +48,7 @@ func (s apiServer) MintMachineCredential(ctx context.Context, req api.MintMachin
 	// The token rides the 201 body ONCE — the response is no-store (router), and no other endpoint re-serves
 	// it (List returns the fingerprint only). Loss path: revoke + re-mint.
 	return api.MintMachineCredential201JSONResponse{
-		Body:    api.MintMachineCredentialResponse{Id: cred.ID, Name: cred.Name, Fingerprint: cred.Fingerprint, Token: cred.Token},
+		Body:    api.MintedMachineCredential{Id: cred.ID, Name: cred.Name, Fingerprint: cred.Fingerprint, Token: cred.Token},
 		Headers: api.MintMachineCredential201ResponseHeaders{XRequestId: reqID(ctx)},
 	}, nil
 }
