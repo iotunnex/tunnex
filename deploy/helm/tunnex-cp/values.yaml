@@ -61,15 +61,31 @@ nodeAgentImage: ghcr.io/iotunnex/tunnex-node-agent:0.2.0
 corsAllowedOrigins: "app://tunnex"
 
 api:
-  # Replicas default to 1 DELIBERATELY. The control plane runs IN-PROCESS schedulers
-  # — the HA failover-controller tick, the CRL scheduled rebuild, the retention/flow-
-  # log sweep. N replicas = N controllers ticking: the atomic upserts make hub
-  # promotions CONVERGE rather than corrupt, but audit rows would multiply and the
-  # sweeps would duplicate. Horizontal scaling is REGISTERED with a trigger (a
-  # customer needing an HA control plane); the real fix is LEADER ELECTION for the
-  # scheduler loops — do not raise this above 1 until that lands.
+  # HORIZONTAL SCALING IS NOW SUPPORTED (S11 D4). The in-process schedulers — the HA
+  # failover tick, the CRL rebuild, the flow-log retention sweep — are LEADER-GATED by a
+  # Postgres session-scoped advisory lock, so N replicas all SERVE requests while exactly
+  # ONE ticks. The lock is released by Postgres itself when a leader's session ends, so a
+  # crashed or partitioned leader is handed over without a TTL or a clock comparison, and
+  # two simultaneous leaders are impossible by construction.
+  #
+  # Default stays 1 because most self-hosted deployments do not need a second replica and
+  # a single one is simpler to reason about — NOT because more is unsafe. Raise it freely.
+  # HONEST LIMIT: after a leader dies, takeover takes up to ~10s (the campaign retry) plus
+  # however long Postgres takes to notice the dead session — immediate on a clean process
+  # exit, but bounded by TCP keepalive on a hard network partition, which can be minutes.
+  # Nothing ticks during that window; running tunnels are entirely unaffected, because the
+  # schedulers are periodic reconcilers and never sit in the request or data path.
   replicas: 1
-  resources: {}
+  # Requests are sized for a small fleet and are deliberately conservative; limits leave
+  # headroom for a compile+push burst. Memory is the meaningful one — the CP holds compiled
+  # policy artifacts per org in flight. No CPU limit: throttling a control plane mid-compile
+  # turns a slow tick into a failed one, and the request already guarantees its share.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
   # secretsDir is a WRITABLE emptyDir for the session secret ONLY. The master key is
   # a separate READ-ONLY mount (masterKeyPath) so a read-only Secret mount never
   # collides with session init.
@@ -77,11 +93,23 @@ api:
   masterKeyPath: /etc/tunnex/master
 
 web:
+  # Static SPA assets — stateless, trivially horizontal.
   replicas: 2
-  resources: {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
 edge:
+  # nginx: TLS termination + routing. Sized for connection handling, not computation.
   replicas: 2
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 # ─── AGENT mTLS PORT (S10.1 condition 1 — NEVER TLS-TERMINATED) ───────────────────
 # Gateways dial https://<cp>:8443 with a PINNED cert and SNI=tunnex-control. The API

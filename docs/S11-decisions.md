@@ -197,6 +197,67 @@ forced into the unification anyway and is better off knowing going in.
 **Sequencing benefit:** D3.5's typed registry pins the VOCABULARY first, which makes the eventual unification
 strictly easier — one fewer moving part when the fourteen collapse.
 
+## Slice 3 — resource envelope + leader election (BUILT)
+
+**D4 mechanism — Postgres SESSION-SCOPED advisory lock (`pg_try_advisory_lock`), argued not assumed.**
+A *lease table* needs a TTL compared against wall clocks, so skew (or a leader that stalls past its TTL and
+resumes) can produce **two leaders** — a double failover promotion or two concurrent CRL rebuilds. *Kubernetes
+Leases* are unavailable by construction: the CP must also run on a VM pair. A session-scoped advisory lock is
+granted to exactly one session and **released by Postgres when that session ends** — SIGKILL, panic, dropped
+network alike. No TTL, no clock, no stale-lock reaper.
+
+**FAILURE DIRECTION (the property that decided it):** it fails toward **NO leader, never two**. A gap delays
+a periodic reconcile; two leaders double-write. The boundary is enforced by Postgres, not by our code being
+correct.
+
+**HONEST LIMIT (fourth in this paper):** after a leader dies, takeover takes up to ~10s (the campaign retry)
+plus however long Postgres takes to notice the dead session — immediate on a clean process exit, but bounded
+by TCP keepalive on a hard partition, which can be **minutes**. Nothing ticks in that window. That is safe
+rather than degraded: the schedulers are periodic reconcilers and never sit in the request or data path.
+
+**Scope:** only the three schedulers (failover tick, CRL rebuild, retention sweep) are gated. **Request
+serving runs on every replica.** `/readyz` **reports** the role (`ok leader` / `ok follower`) and never
+conflates it with health — a follower is READY because it serves, and reporting otherwise would evict healthy
+replicas from a load balancer, turning an HA feature into an outage.
+
+**Design consequence:** leadership holds a dedicated pooled connection, so **shutdown order is load-bearing** —
+cancel the elector before `pool.Close()`, which blocks on acquired connections. Found by a test that hung on
+exactly that.
+
+**PROVEN ON THE WIRE (not asserted):** `leader_acquired` in the CP log · `/readyz` → `ok leader` · with
+Postgres stopped: the container stays **running**, `/healthz` still `ok`, `/readyz` → **503 naming the
+reason**, and leadership is **released** (campaign retries, no stale claim) · when Postgres returns,
+leadership is **re-acquired without a restart** (`leader_acquired` ×2).
+
+**Failure envelope — the claim, and what evidences it.** *The control plane degrades; tunnels survive.* The
+CP half is the wire proof above. The data-plane half was **already red** — `TestReconcileFailStaticKeepsStandby`
+asserts that a `FetchDesired` error leaves the applied peers unchanged (fail-static, keep-last). Writing a
+second red for it would have been duplicate coverage dressed as new work; the honest action was to cite the
+existing one. **Redis** carries sessions only: its loss fails API authentication while tunnels and the agent
+channel (mTLS, no Redis) are untouched.
+
+**Helm resources:** requests/limits set for api / web / edge, **verified by rendering the chart** rather than
+by setting values and trusting the templates. No CPU limit on the api — throttling a control plane mid-compile
+turns a slow tick into a failed one, and the request already guarantees its share. `api.replicas` documentation
+rewritten: horizontal scaling is now SUPPORTED, the default stays 1 for simplicity rather than safety.
+
+### S11-8 (REGISTERED) — the integration suite and the compose stack share a database but not a master key
+
+Seen **three times** in this epic, each time diagnosed and re-verified from scratch: bringing the compose
+stack up (for a wire proof, a walk, or a demo) seals an agent CA with the STACK's master key, after which
+`make test-editions` fails in `agentca` and `nodes` with *"agent CA exists but is unusable; refusing to
+regenerate"* until the DB is reset. Both halves are behaving correctly — that refusal is D2's
+set-but-broken-is-fatal law, and it is the reason a mismatched key can never silently orphan a fleet — but the
+cost lands on every session that runs the stack and then the suite.
+
+**It is also free evidence for Slice 4:** this is the catastrophic backup/restore case (mismatched master key
+→ unreadable sealed material → orphaned fleet) reproducing itself locally at zero cost. **Slice 4 should use
+it as the restore red rather than inventing a fixture.**
+
+**Fix candidates (deferred, not slice-3 scope):** a separate test database, or a test harness that provisions
+its own master key per run. **Trigger: Slice 4 (it needs the fixture anyway), or the next time it costs a
+session more than one reset.**
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
