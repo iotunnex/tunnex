@@ -15,6 +15,7 @@ export type HubMember = components["schemas"]["HubMember"];
 export type Device = components["schemas"]["Device"];
 export type OrgOverview = components["schemas"]["OrgOverview"];
 export type Member = components["schemas"]["Member"];
+export type MachineCredential = components["schemas"]["MachineCredential"];
 export type Role = Member["role"];
 export type SsoConfigView = components["schemas"]["SsoConfigView"];
 export type ResizeConflict = components["schemas"]["ResizeConflict"];

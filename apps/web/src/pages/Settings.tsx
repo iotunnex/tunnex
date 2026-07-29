@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { DesktopSettings } from "../components/DesktopSettings";
 import { MfaSettings } from "../components/MfaSettings";
+import { MachineCredentials } from "../components/MachineCredentials";
 
 const PROVIDERS = ["google", "microsoft"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -49,6 +50,7 @@ export default function Settings() {
   }, [myId]);
 
   const isAdmin = can(myRole, "org:update");
+  const canMachines = can(myRole, "machine:manage"); // owner-only — the GitOps operator credential panel
 
   return (
     <div>
@@ -97,6 +99,12 @@ export default function Settings() {
           )}
           {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
           <OrgOVPNToggle org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
+          {/* GitOps operator credentials — owner-only (machine:manage). S10.2 registered follow-up. */}
+          {canMachines && (
+            <div className="mt-4">
+              <MachineCredentials orgId={org.id} canManage={canMachines} />
+            </div>
+          )}
         </>
       )}
     </div>
