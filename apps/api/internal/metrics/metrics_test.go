@@ -1,8 +1,13 @@
 package metrics
 
 import (
+	"context"
+	"io"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -125,5 +130,58 @@ func TestWildcardBindDetection(t *testing.T) {
 		if isWildcard(addr) {
 			t.Fatalf("%q is a specific interface but was flagged as a wildcard", addr)
 		}
+	}
+}
+
+// TestFollowerIsReady — D4's readiness ruling, enforced.
+//
+// A follower SERVES; it merely does not tick. Reporting it as not-ready would pull healthy replicas out of a
+// load balancer the moment leader election was enabled, turning an HA feature into an outage — the exact
+// conflation the ruling forbids. So: role is REPORTED in the body, and readiness is 200 for both roles.
+func TestFollowerIsReady(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		leader bool
+		want   string
+	}{
+		{"leader", true, "ok leader"},
+		{"follower", false, "ok follower"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			addr := ln.Addr().String()
+			_ = ln.Close()
+
+			go func() {
+				_ = Serve(ctx, addr, NewRegistry(nil), nil, nil, func() bool { return tc.leader })
+			}()
+
+			var resp *http.Response
+			for i := 0; i < 60; i++ {
+				resp, err = http.Get("http://" + addr + "/readyz")
+				if err == nil {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if err != nil {
+				t.Fatalf("readyz never came up: %v", err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s must be READY (200) — a follower serves; got %d. Reporting a follower "+
+					"not-ready evicts healthy replicas from the load balancer.", tc.name, resp.StatusCode)
+			}
+			if string(body) != tc.want {
+				t.Fatalf("readyz must REPORT the role: want %q, got %q", tc.want, string(body))
+			}
+		})
 	}
 }

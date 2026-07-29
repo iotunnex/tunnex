@@ -32,7 +32,11 @@ const DefaultAddr = "127.0.0.1:9090"
 //   - /readyz  — readiness. The CP previously had only /healthz (liveness); the node-agent already served
 //     both. This closes that gap, and D4's leader election will express "follower: serving, not ticking"
 //     here rather than inventing a second readiness vocabulary.
-func Serve(ctx context.Context, addr string, reg *prometheus.Registry, ready func() error, log *slog.Logger) error {
+//
+// Role reports whether this replica currently leads the schedulers. Optional; nil means "not applicable".
+type Role func() bool
+
+func Serve(ctx context.Context, addr string, reg *prometheus.Registry, ready func() error, log *slog.Logger, role Role) error {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -59,8 +63,20 @@ func Serve(ctx context.Context, addr string, reg *prometheus.Registry, ready fun
 				return
 			}
 		}
+		// ROLE IS REPORTED, NEVER CONFLATED WITH READINESS (S11 D4). A follower SERVES — it is a fully
+		// functional API replica that simply does not tick the schedulers — so it is READY. Reporting a
+		// follower as not-ready would pull healthy replicas out of a load balancer and turn an HA feature
+		// into an outage. The role is surfaced as information for an operator, not as a health verdict.
+		body := "ok"
+		if role != nil {
+			if role() {
+				body = "ok leader"
+			} else {
+				body = "ok follower"
+			}
+		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		_, _ = w.Write([]byte(body))
 	})
 
 	srv := &http.Server{

@@ -34,6 +34,7 @@ import (
 	apphttp "github.com/tunnexio/tunnex/apps/api/internal/http"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
+	"github.com/tunnexio/tunnex/apps/api/internal/leader"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
@@ -310,6 +311,19 @@ func main() {
 	// D3 retention sweep: without this loop access_events grows unbounded and exhausts the DB
 	// disk. Run it on an interval: delete by ingest age + trim each org to the row cap. Drop-count
 	// + failure land on flowHealth.
+	// S11 D4: scheduler leadership. N replicas all SERVE; exactly one TICKS. The election is a Postgres
+	// session-scoped advisory lock, so a dead leader's lock is released by the database itself — no TTL, no
+	// clock comparison, and two leaders are impossible by construction (the safe failure direction: a gap
+	// with nothing ticking, never a double failover promotion or a double CRL rebuild).
+	// The elector's context is cancelled at shutdown BEFORE pool.Close() (deferred at startup, so it runs
+	// last): leadership holds a dedicated connection for its whole duration, and pgxpool.Close blocks until
+	// every acquired connection is released. Cancel-then-close is therefore the required order, and getting
+	// it backwards deadlocks shutdown — found by a test that hung on exactly that.
+	electorCtx, stopElector := context.WithCancel(context.Background())
+	defer stopElector()
+	elector := &leader.Elector{}
+	go elector.Run(electorCtx, pool, logger)
+
 	go func() {
 		t := time.NewTicker(accesslog.RetentionSweepInterval)
 		defer t.Stop()
@@ -318,6 +332,9 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
+				if !elector.IsLeader() {
+					continue // D4: followers serve requests but never tick
+				}
 				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				orgs, err := fq.DistinctAccessEventOrgs(sctx)
 				if err == nil {
@@ -341,6 +358,9 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
+				if !elector.IsLeader() {
+					continue // D4: followers serve requests but never tick
+				}
 				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				if err := nodeSvc.RunFailoverTick(sctx); err != nil {
 					logger.Error("failover_tick_failed", slog.String("error", err.Error()))
@@ -360,6 +380,9 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
+				if !elector.IsLeader() {
+					continue // D4: followers serve requests but never tick
+				}
 				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				if orgs, err := sqlc.New(pool).ListOVPNEnabledOrgs(sctx); err != nil {
 					logger.Error("ovpn_crl_refresh_list_failed", slog.String("error", err.Error()))
@@ -435,7 +458,7 @@ func main() {
 		// readiness = the DB answers. A CP that cannot reach postgres serves nothing useful, and naming the
 		// reason beats a bare 503 (diagnosis-from-logs at the readiness tier).
 		ready := func() error { return pool.Ping(metricsCtx) }
-		if err := metrics.Serve(metricsCtx, cfg.MetricsAddr, reg, ready, logger); err != nil {
+		if err := metrics.Serve(metricsCtx, cfg.MetricsAddr, reg, ready, logger, elector.IsLeader); err != nil {
 			logger.Error("metrics_listener_failed", slog.String("error", err.Error()))
 		}
 	}()
@@ -466,6 +489,7 @@ func main() {
 	defer cancel()
 	_ = agentSrv.Shutdown(ctx)
 	pollCancel()         // stop the idp-sync poller
+	stopElector()        // release scheduler leadership (and its connection) before the pool closes
 	close(retentionStop) // stop the retention sweep loop
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("api_shutdown_error", slog.String("error", err.Error()))
