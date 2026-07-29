@@ -19,6 +19,7 @@
   ],
   "operator": [
     "k8s:manage",
+    "member:list",
     "org:view",
     "policy:manage",
     "policy:view"

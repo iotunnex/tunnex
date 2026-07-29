@@ -128,6 +128,11 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermK8sManage:    true,
 		PermPolicyView:   true,
 		PermPolicyManage: true,
+		// member:list is READ-ONLY (WF-OP-1) — the operator resolves a TunnexGrant's user subject
+		// (email -> id) via GET /members; it NEVER mutates membership (no member:invite / member:manage).
+		// The role was first scoped from the intended verbs, before the subject-resolution path existed;
+		// enumerate a principal's role from the CALL GRAPH it traverses, not the feature description.
+		PermMemberList: true,
 	},
 }
 

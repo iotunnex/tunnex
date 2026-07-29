@@ -91,7 +91,9 @@ func TestSiteReadVsManageSplit(t *testing.T) {
 // (register cluster, expose Service, create grant, read org) and NOTHING else — never member/org
 // administration, never machine:manage (a machine can't mint more machines), never org:delete.
 func TestOperatorRoleScope(t *testing.T) {
-	has := []Permission{PermOrgView, PermK8sManage, PermPolicyManage, PermPolicyView}
+	// member:list is READ-ONLY, added for user-subject resolution (WF-OP-1) — resolving a TunnexGrant's
+	// user subject email->id. It must NOT bring any membership-MUTATION perm (member:invite / member:manage).
+	has := []Permission{PermOrgView, PermK8sManage, PermPolicyManage, PermPolicyView, PermMemberList}
 	for _, p := range has {
 		if !Can(RoleOperator, p) {
 			t.Fatalf("operator must hold %q", p)
