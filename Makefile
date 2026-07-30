@@ -144,12 +144,18 @@ build-editions: ## Compile both open and enterprise builds (catches edition rot)
 # (the org limit is a GLOBAL count by product semantics).
 test-editions: ## Run the suite in BOTH editions against the live DB
 	$(COMPOSE) up -d --wait postgres
+	@# The REPO ROOT is mounted, not just apps/api (S11). Several guards deliberately read files OUTSIDE the
+	@# module — the api Dockerfile (TestEveryOperatorToolShipsInTheImage), openapi.yaml and the web health
+	@# renderer (TestEveryHealthKindReachesItsMirrorSurfaces) — because the drift they catch lives BETWEEN
+	@# surfaces, which is precisely what a module-scoped test cannot see. Mounting only apps/api made those
+	@# guards fail here while passing locally; the alternative, skipping when the file is absent, would have
+	@# made them pass here while checking nothing, which is the worse failure (see the witness-liveness law).
 	@echo ">> open edition tests"
-	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	docker run --rm --network $(NET) -v "$(PWD)":/repo -w /repo/apps/api -e GOFLAGS=-mod=readonly \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go test -p 1 ./...
 	@echo ">> enterprise edition tests (-tags enterprise)"
-	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	docker run --rm --network $(NET) -v "$(PWD)":/repo -w /repo/apps/api -e GOFLAGS=-mod=readonly \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go test -p 1 -tags enterprise ./...
 

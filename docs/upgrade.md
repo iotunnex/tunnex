@@ -42,7 +42,7 @@ a deploy log is a warning nobody reads. It checks:
 |---|---|
 | database reachable | an upgrade cannot be assessed, let alone performed |
 | migration state clean | a *dirty* state means a previous migration failed part-way: the schema is neither old nor new, and rolling onto it turns a recoverable state into an unrecoverable one |
-| agent version window | any gateway below N-1 will refuse its artifact after the upgrade and stop receiving policy updates — the remedy (upgrade those agents first) only exists *beforehand* |
+| agent version window | any gateway below N-1 will refuse its artifact after the upgrade and stop receiving policy updates — the remedy (upgrade those agents first) only exists *beforehand*. This check also **refuses when any gateway's certificate has expired**: such a gateway cannot reconnect at all, so its reported version says nothing about what it can apply, and a fleet containing one is not a fleet to roll onto without knowing. Re-enroll it first |
 | rollback plan | forward-only means your only rollback is a verified backup **plus** its master key |
 
 A check that cannot be evaluated is reported as **unknown and refuses** — "I could not tell" and "it is fine"

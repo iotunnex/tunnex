@@ -125,6 +125,7 @@ meet you.
 | **Windows full-tunnel re-home** | A Windows client in *full-tunnel* mode refuses to re-home to a new gateway (honestly, with a named error) rather than half-doing it. Split-tunnel re-homes normally. |
 | **Cross-site DNS to cluster zones** | Resolving another site's Kubernetes zone across a site link is not implemented; same-site resolution works. |
 | **Leader takeover window** | A leader that **stops or dies** — clean shutdown, crash, `kill -9`, container removal — releases the lock at once, and another replica takes over within ~10s (verified). A leader that is **network-partitioned** while still running is the slow case: its Postgres session stays open until TCP keepalive expires, so takeover can take minutes (**not verified — no partition test has been run**). Nothing ticks meanwhile; **running tunnels are unaffected** either way. |
+| **A gateway offline >48h must be re-enrolled** | Agent certificates last 48 hours and renew automatically **while the agent is running**. A gateway that is powered off or unreachable for longer than that cannot renew — the renewal endpoint requires the certificate that expired — so it will never reconnect on its own. The control plane reports it as `cert_expired_cannot_reconnect` and `preflight` refuses to call the fleet ready; the fix is to re-enroll it. **A durable re-enrollment path is planned before public beta.** |
 | **Posture checks are self-reported** | OS version, disk encryption and EDR checks are reported by the device. A compromised device can lie. Treat posture as defense-in-depth, never attestation. |
 | **No third-party security audit yet** | Stated in [SECURITY.md](../SECURITY.md), and it will say so until one has happened. |
 
@@ -152,10 +153,12 @@ vocabulary — the same states the dashboard shows:
 | `conntrack_flush_unavailable` | expired-grant flush failing | restore `CAP_NET_ADMIN` |
 | `k8s_endpoints_unavailable` | no endpoint view from the K8s API | check the gateway's API reachability + RBAC |
 | `hub_forwarding_not_reconciling` | wire fresh but the agent is stale (a zombie hub) | restart the agent |
+| `cert_expired_cannot_reconnect` | the agent's certificate expired while it was unreachable — it **cannot** get a new one | **re-enroll that gateway**; waiting will not fix it |
 
-**Alert on:** `unsupported_policy_version > 0` (an agent has stopped receiving updates), `apply_failing` or
-`silent_desync` sustained over minutes, and `desync_unknown` sustained — it means you cannot see the truth,
-which is its own problem. The metric answers *how many*; the dashboard answers *which*.
+**Alert on:** `cert_expired_cannot_reconnect > 0` **first** — that gateway is not coming back without you;
+`unsupported_policy_version > 0` (an agent has stopped receiving updates); `apply_failing` or `silent_desync`
+sustained over minutes; and `desync_unknown` sustained — it means you cannot see the truth, which is its own
+problem. The metric answers *how many*; the dashboard answers *which*.
 
 ### `/readyz`
 
