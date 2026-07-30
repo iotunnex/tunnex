@@ -446,6 +446,42 @@ walls in front of it, and solving them apart would produce three half-answers.
 | **expired cert** — renewal requires the certificate that expired, so a gateway offline >48h can never reconnect | WF-S11-6 (c) | to build |
 | **burned name** — `(org_id, name)` was unconditionally unique and there is no delete, so a revoked gateway held its name forever and re-enrolment answered 409 | WF-S11-8 (a) | **SHIPPED as the near-term unblock** (migration 0056) |
 | **lost identity** — a rebuilt gateway is a NEW node: new id, orphaned site binding, fresh metrics series, every runbook reference pointing at a dead row | WF-S11-8 (b) | to build — **the actual fix** |
+| **discarded token** — an agent handed a valid join token while holding an *unusable* identity prefers the unusable one, silently | WF-S11-11 | to build — **RULED (a)** |
+| **stale binding** — a revoked gateway keeps its `site_id` and still reaches the policy compiler as a site binding | WF-S11-14 | to build — **RULED (c)** |
+
+**The argument for the whole epic, in one line:** tonight, recovering a gateway that had merely been **switched
+off** cost four hand-run steps, a wrong host, a volume pinned by a container that exited six days earlier, and an
+undocumented deletion. `self-host.md` describes it as *"one pasted command."*
+
+### WF-S11-11 — RULED (a), with a condition
+
+Prefer the join token when the stored identity is **unusable**. The stored identity's purpose is preventing
+accidental re-enrolment of a *working* node; when it is provably unusable, deferring to it converts a safety
+feature into a deadlock.
+
+**Condition: "unusable" must be a DETERMINATION, not an assumption.** The agent must cite what makes it so —
+expired (`NotAfter` in the past), unreadable (parse failure), or mismatched (CN ≠ the requested node name) — and
+**fail toward the stored identity when uncertain**. An agent that guesses "probably dead" and re-enrols on a
+transient read error would turn a diagnostic into a self-inflicted identity change. Log the determination and its
+evidence, not just the outcome.
+
+Folds with **WF-S11-11b**: the reuse warning prints the *requested* name rather than the stored certificate's CN,
+so the diagnostic that exists to reveal which identity is kept names the one that is not. Read the CN, print
+both, escalate when they differ — a mismatch is itself the interesting signal (a reused VM image, or an enrolment
+aimed at the wrong host).
+
+### WF-S11-14 — RULED (c), both halves
+
+- **Filter the compiler input** — `ListSiteNodesForOrg` gains `status = 'active'`, matching its sibling at
+  `sites.sql:77` whose own comment says revocation must drop a gateway "no blackhole". This is the **shared-seam
+  fix**: the revoked node leaking into compiler input is the identity-binding invariant's *fourth* consumer
+  problem, and filtering at the input fixes every consumer at once.
+- **Unbind on revocation** — `site_id = NULL` joins the revocation sweep, stopping the stale binding at its
+  source and making both queries agree by construction.
+
+Both, not either: the filter protects against any future producer of a stale binding, the unbind removes the one
+that exists. Needs a fixture red proving a revoked gateway receives **no placement** and is **never designated
+hub**, plus a re-run of the site-transit legs.
 
 **(a) fixes the error; (b) fixes the problem.** (a) makes re-enrolment succeed, which is why it shipped now — but
 the gateway that comes back is not the gateway that left. Replace-in-place enrolment is what an operator expects:
@@ -489,6 +525,32 @@ surface any latent name-keyed lookup, and finding those by breakage is the wrong
 Kept as a guard (`TestNoAmbiguousNodeNameLookups`), because a by-name lookup is the natural thing to write, it
 works in every fixture with one node per name, and it fails only on a deployment that has rebuilt a gateway —
 exactly the shape that reaches production.
+
+## REGISTERED LEDGER ITEMS from the walk (both ruled in)
+
+### 1. No component-test tier for the web app — a MEASURED coverage gap
+
+**Four of fifteen walk findings lived in the UI** (WF-S11-1's a11y half, WF-S11-9 gateway revoke absent,
+WF-S11-10 + 10c revoked-row badges, and the same-name picker ambiguity). The UI is the surface with the **least**
+automated coverage: all nine web test files cover pure view-models (`*view.ts`), and `@testing-library` appears
+nowhere in the repo. Two folds this session — the S10.2 machine-credential panel and the gateway-revoke
+confirm — shipped with **no test possible at their tier**.
+
+This is a measurement, not a suspicion, and it is the same class as **`apps/cli` having had no CI job at all**
+(S11-2): a whole surface outside the gates, discovered by something other than the gates. Registered with the
+measurement attached so it is re-checked rather than re-argued.
+
+### 2. The kind-consumer census gap
+
+`TestEveryHealthKindReachesItsMirrorSurfaces` proves a health kind **reaches** the OpenAPI enum and the web
+renderer. It does **not** prove each consumer **decides correctly** about it — which is exactly what WF-S11-10
+(revoked rows badged), 10b (revoked rows counted in the fleet tally) and 10c (a second component still badging
+them) each were. Reaching a surface and being used correctly by that surface are different properties.
+
+A health kind with no consumer is the **producer-without-consumer trap at the observability tier**, and this epic
+minted the standing probe for exactly that. The probe needs its stronger form: for each new kind, name every
+consumer *and* state each consumer's decision for the edge cases (revoked, never-reported, unbound) — a census of
+decisions, not of presence.
 
 ## Status
 

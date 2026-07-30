@@ -149,3 +149,51 @@ never wrote to — each returns a confident, meaningless pass.
 The generalisation beyond witnesses: before believing any negative result — no gaps, no errors, no findings,
 zero rows — establish that the thing producing it was in a position to produce a positive one. "Nothing was
 observed" and "nothing happened" are different claims, and only one of them is evidence.
+
+---
+
+## COULD THIS CHECK HAVE FAILED? — the censuses need censusing
+
+*Minted: EPIC 11 box-walk. PROVE-A-GUARD-REJECTS generalized from guards to **evidence**.*
+
+**The epic that built five censuses also demonstrated that the censuses needed censusing.**
+
+Three checks in one session could not fail. Every one was green. Every one was vacuous:
+
+1. **A witness dead nine minutes before the leg it certified.** The `ping` log ended before the roll began, and
+   its `icmp_seq` gap detector returned **clean** — a spotless bill of health for a window it never observed.
+   Accepted, it would have recorded "no data-path loss across the roll" from evidence predating the roll.
+2. **A red asserting a tautology.** `degradedKind(KindInput{CertExpired: false})` does not return the
+   cert-expired kind — true by construction. The production fix was removed and **everything still passed**. The
+   decision under test was never the projection; it was *which rows count as expired*, and that lived in an
+   untestable inline expression.
+3. **A provenance census verifying the commit but not the product.** Leg 0 asserted the sha and the toolchain on
+   an **open-core** codebase and never the edition, so four rebuilds silently swapped the open image for the
+   enterprise one — `go build -tags ""` printed in every log, read every time, noticed never. The walk drew
+   conclusions from the wrong product for several legs.
+
+None was caught by running it again. Each was caught by one question:
+
+> **Could this check have failed?**
+
+Not *did it pass*. A check that cannot fail is worse than a missing one, because a missing check is visibly
+absent while a vacuous check is visibly **green** — and green is what people act on.
+
+**THE LAW:** before believing any negative or confirming result — no gaps, no errors, no findings, zero rows,
+"all N are fine" — establish that the thing producing it was in a position to produce the opposite. Concretely:
+
+- **Guards:** remove the fix, watch the guard fail, restore it. (PROVE-A-GUARD-REJECTS, and its S11-7 corollary:
+  plant the *hardest* instance, not the easiest.)
+- **Instruments:** prove the instrument was running across the window it reports on, with timestamp bounds
+  straddling the event. (A WITNESS MUST PROVE IT WAS ALIVE.)
+- **Censuses:** census the census. Ask what it enumerates over and name what it therefore cannot see. A census
+  of *lookups* said nothing about *pickers*. A census that a health kind **reaches** each surface said nothing
+  about whether each surface **decides correctly** about it. A pattern of `[a-z_]+` silently dropped
+  `k8s_endpoints_unavailable` because the name contains a digit — the same incomplete-pattern bug the census was
+  hunting, inside the census.
+- **Provenance:** name every dimension of "the thing under test", not just the convenient one. A commit is not a
+  build; a build is not an edition; an edition is not a configuration.
+
+**A check written in the same breath as its fix encodes the author's belief about the fix rather than the
+behaviour of the system.** Separating them costs a minute. Not separating them costs the first incident the
+check was supposed to prevent.
