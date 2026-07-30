@@ -982,3 +982,39 @@ story, which now removes **four** walls, not three.
 
 Five for five. And three of the five are the same *sentence* in `self-host.md` failing three different ways.
 That sentence has never been executed against a gateway that had previously existed.
+
+### WF-S11-11b — the reuse warning prints the REQUESTED name, not the stored one
+
+`nodeName := getenv("TUNNEX_NODE_NAME", hostname())` (`main.go:45`), and when credentials are loaded from the
+state volume `nodeName` is **never updated from the stored certificate's CN**. So `agent_reusing_stored_identity`
+reports the name the operator *asked for*, not the identity it actually kept.
+
+Observed live, and it cost real clarity: the enrollment command was run on the wrong host (azure-gw instead of
+aws-gw-1) with `TUNNEX_NODE_NAME=aws-gw-1`, and the warning printed `node_name: aws-gw-1` while reusing
+**azure-gw's** certificate. **The diagnostic that exists to reveal which identity is being kept prints the one
+that is not.** Printing both would have made the mistake obvious in a single line — and a *mismatch* between
+stored CN and requested name is itself the interesting signal: it means a VM image was reused, or an enrollment
+was aimed at the wrong host.
+
+Folds with WF-S11-11's disposition (same code path, same log line): read the CN from the stored certificate, print
+stored **and** requested, and escalate when they differ.
+
+### The workaround itself fails — a note on WF-S11-11's severity
+
+The undocumented remedy (wipe the state volume) failed on the first attempt:
+
+```
+Error response from daemon: remove tunnex_node_state: volume is in use - [922a80e00372...]
+```
+
+A **stopped** container still pinned the volume, so `docker volume rm` refused, the error scrolled past in a
+multi-command paste, and the agent then reused the dead identity a third time — logging the same WARN and looping
+on the same expired certificate.
+
+So the failure has **two layers of silence**: the agent does not say it discarded your token, and the manual fix
+does not reliably work either. An operator following the documented recovery would conclude the product is simply
+broken, and would be right.
+
+**Recorded as walk-procedure cost, not blame:** three attempts, a wrong host, a pinned volume, and an undocumented
+step — for the ordinary case of a gateway that was switched off. This is the operational reality behind ruling the
+**gateway recovery** story beta-blocking.
