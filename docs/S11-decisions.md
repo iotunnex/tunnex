@@ -307,6 +307,43 @@ actually store the key separately.
 **OWED — the wire proof** (the slice's acceptance): restore a CP from backup and prove an existing agent
 still connects, unchanged, with no re-enrolment. It rides the EPIC 11 box-walk, where a real gateway exists.
 
+## Slice 5 — the upgrade path (D1) BUILT
+
+**Contract: FORWARD-ONLY, with restore-from-backup as the rollback** — stated in adjacent sentences in
+`docs/upgrade.md`, because "forward-only" is only reasonable *because* restore is real, and restore is only
+real if the operator holds both artifacts (D2's separate master key). Downgrade rejected: every migration
+would need a tested reverse path and every artifact version a backward transform, forever, for a case
+operators resolve by restoring.
+
+**The rolling procedure's assumption was CENSUSED, then GUARDED (surfaced before designing around it).** "Old
+CP keeps working against the new schema" held by LUCK: 2 of 53 shipped migrations violate it (`0013` DROP
+COLUMN, `0038` RENAME COLUMN). Now build-enforced — six statement classes rejected in new migrations, the two
+historical ones grandfathered BY NAME so they stay visible. Remedy stated: expand/migrate/contract. Proven to
+reject a planted `DROP COLUMN`.
+
+**N/N-1 is a MECHANISM, not a promise, and now a red.** `RequiredVersion` is content-derived: an artifact
+carries the OLDEST version whose shape covers its content, so an org using no new features keeps receiving an
+old-version artifact its N-1 agents apply. `SupportedWindow = 2` moved from the test file into
+`policyspec.go` — it is a contract constant, not a fixture. Two reds:
+`TestNMinusOneAgentsCanStillApply` (the zero-config artifact must stamp ≤ the oldest supported version — fails
+if any change makes every artifact require the newest version, which would silently start a fleet-wide
+policy-update outage) and `TestNewContentRaisesRequiredVersion` (the inverse: N-1 support must never be bought
+by silence — new content must raise the version so an old agent REFUSES rather than mis-enforces). First
+proven to reject: stubbing `RequiredVersion` to always return `ProtocolVersion` fails it with the reasoning.
+
+**`cmd/preflight` — refuses loudly, changes nothing.** Four checks: database reachable · migration state clean
+(a DIRTY state means a migration failed part-way; rolling onto it turns a recoverable state into an
+unrecoverable one) · **agent version window** (any gateway below N-1 will refuse its artifact post-upgrade and
+stop receiving updates — the remedy exists only beforehand) · rollback plan (an explicit acknowledgement,
+since preflight cannot see an offsite backup). **A check that cannot be evaluated is UNKNOWN and refuses** —
+"I could not tell" and "it is fine" are different answers.
+
+**PROVEN ON A LIVE DATABASE:** preflight ran, reported protocol v7 supporting v6+v7, passed reachability and
+migration-state, and REFUSED — exit 1, nothing changed. Its honest-unknown path fired for real when the query
+first named a table that does not exist (it refused rather than passing), and again on 186 local nodes that
+have never reported a version. Both are the correct direction. The agent ceiling is read from
+`nodes.capabilities->>'max_policy_version'` — where it actually is, found by tracing rather than guessing.
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the

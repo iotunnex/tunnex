@@ -98,6 +98,17 @@ type AffectedDevice struct {
 // emits no map, requires no bump, and its agents never see v7 (the zero-config golden).
 const ProtocolVersion = 7
 
+// SupportedWindow is the AGENT-VERSION CONTRACT the upgrade path commits to (S11 D1): the current protocol
+// version and the one before it. An agent at either must be able to run against this control plane, which is
+// what makes a ROLLING upgrade possible — the operator rolls the control plane without first upgrading every
+// gateway.
+//
+// It is keepable because RequiredVersion is CONTENT-DERIVED: an org using no new-version features receives an
+// old-version artifact that an N-1 agent applies correctly. TestNMinusOneAgentsCanStillApply fails if that
+// ever stops being true, and `preflight` reads this constant to warn about gateways below the window BEFORE
+// an operator rolls.
+const SupportedWindow = 2
+
 // RequiredVersion is the MINIMUM agent version required to correctly render this artifact (S8.2 D1b,
 // content-derived version). It returns the OLDEST protocol version whose shape fully covers the
 // artifact's content, so a gateway serving only pre-v5 features keeps a pre-v5 artifact (and old gated
