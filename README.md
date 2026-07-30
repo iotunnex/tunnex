@@ -11,6 +11,10 @@ Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open al
 
 ## Deploy (self-host)
 
+> **New here? Read [docs/self-host.md](docs/self-host.md).** It is the end-to-end story — control plane,
+> first gateway, first device — plus the collected honest limits, what to monitor, and the two recovery
+> stories. Every procedure in it is marked with whether we have actually run it.
+
 **Prerequisite: any VPS with Docker Engine + the Compose v2 plugin and a public address** (a DNS name
 or public IP that users and gateways can reach). `install.sh` installs the *software* — it does not
 provision the server; a laptop with no public IP is not a deploy target.

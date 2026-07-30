@@ -344,6 +344,36 @@ first named a table that does not exist (it refused rather than passing), and ag
 have never reported a version. Both are the correct direction. The agent ceiling is read from
 `nodes.capabilities->>'max_policy_version'` — where it actually is, found by tracing rather than guessing.
 
+## Slice 6 — docs & install guide (BUILT) — the epic's last build slice
+
+**`docs/self-host.md`** is the self-host STORY, not a docs directory: control plane → first gateway → first
+device, then the collected honest limits, the operational runbook, and the security posture in one place. It
+is linked from the README's deploy section so a stranger lands on it.
+
+**Every procedure carries a verification mark** (✅ verified / 🔶 partially verified / ⚠️ untested), because a
+quickstart nobody executed is documentation that reads like a guarantee — artifact-exists ≠ artifact-works at
+the documentation tier. What that produced:
+- **Compose quickstart: ✅ verified from a CLEAN SLATE** (`make reset` first) — `up` → `migrate` → `seed` →
+  HTTP 200 + `protocol_version: 7`, run for this slice rather than recalled.
+- **Helm: 🔶 partially verified, and the boundary is stated inline** — the chart renders, all five
+  required-value refusals were walked, and it was installed to live k3s in the S10.1/S10.3 walks; *this exact
+  command sequence against managed Kubernetes + managed Postgres/Redis has not been run by us.* Marking it
+  honestly was the alternative to implying it.
+- Gateway/device enrolment, `preflight`, metrics/`readyz`, and degrade-not-die: ✅, each citing the run.
+
+**The honest-limits list is collected in one table** — no relay fleet · per-cloud fabric routes · OVPN
+revocation at renegotiation · OVPN failover bounded by connect-timeout × dead remotes · GKE Autopilot
+unsupported · revoked-while-agent-down flows persist until they end · Windows full-tunnel re-home ·
+cross-site DNS to cluster zones · leader takeover window · posture is self-reported · no third-party audit
+yet. **Each was verified against its source paper rather than recalled** (`EPIC10-decisions` for Autopilot and
+cross-site DNS, the WF-A runsheet for `rehome_full_tunnel_unsupported`, `S9.1-decisions` for `reneg-sec`) —
+a misstated limit is worse than an omitted one.
+
+**The runbook** names what to alert on and why (`unsupported_policy_version > 0` means an agent has stopped
+receiving updates; sustained `desync_unknown` means you cannot see the truth, which is its own problem),
+explains the three `/readyz` states including why a follower is ready ON PURPOSE, and keeps the two recovery
+stories separate: a CP restore recovers the control plane's state, a lost gateway or device simply re-enrols.
+
 ## MERGE MODEL — batch, with Slice 1 as a stated EXCEPTION
 
 EPIC 11 runs the **batch model**: build to walk-ready, one walk, then the merge train. **Slice 1 is the
