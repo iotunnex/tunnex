@@ -586,3 +586,72 @@ operator and unactionable to the agent.
 The N-1 witness cannot connect, so the N/N-1 contract cannot be proven until `aws-gw-1` is re-enrolled.
 Re-enrolment is a hand-run step, and it is recorded as **forced by WF-S11-6** — not as a defect in criterion 6's
 own procedure.
+
+---
+
+## Criterion 6 — the re-enrollment, and what WF-S11-6 costs an operator
+
+Recorded because this is the finding's operational price, and it is what a customer would face. `aws-gw-1` had
+to be **re-enrolled by hand** before the N/N-1 contract could be tested at all — not because criterion 6's
+procedure is defective, but because the gateway was unreachable.
+
+```bash
+# aws-gw-1 — the agent REFUSES to enroll over a stored identity (by design; that warning had been in its log
+# for five days). Recovery therefore means destroying the identity, which means knowing the volume's name.
+sudo docker rm -f tunnex-node
+sudo docker volume ls | grep -i tunnex        # -> tunnex_node_state
+sudo docker volume rm tunnex_node_state
+# then: mint a join token in the UI (Sites -> the site -> enroll a gateway) and run the printed command
+```
+
+**Four hand-run steps, a UI visit, and a destroyed volume — to recover from having switched a machine off.** No
+alert fired; nothing told the operator this was needed. That is the whole case for ruling (c) beta-blocking
+rather than merely registered: the mechanism works, and the experience is one a customer would reasonably call
+a fault.
+
+The volume name was confirmed with `docker volume ls` before deletion rather than assumed from a naming
+convention. On a live rig, deleting the wrong volume is an expensive way to learn a name.
+
+### Ruling (i) — the backfill, and the trap it avoids
+
+0054 made `cert_not_after` nullable, which was right (a new column must not retroactively brick every gateway).
+But a **running** agent renews within 24h and stamps a real value, while an **already-dormant** agent never
+renews and stays NULL forever — and dormant agents are exactly the ones that go bricked. The new kind was
+therefore **unfirable for precisely the population it was built to name**, on every deployment in existence.
+Dormant machinery in its purest form, and caught before shipping rather than when a customer's bricked gateway
+displayed "unknown".
+
+Migration **0055** (a new migration, not an edit to 0054 — azure-cp had already applied 54, and editing an
+applied migration is how a deployment breaks) backfills `last_seen_at + 48h` where `cert_not_after IS NULL AND
+last_seen_at IS NOT NULL`.
+
+**The value is a bound, not a measurement**, and the direction is the entire argument: the certificate was
+necessarily valid at the last report, so `issuance <= last_seen_at`, so
+`true_expiry = issuance + 48h <= last_seen_at + 48h = the bound`. A bound already in the past therefore proves a
+real expiry even further in the past — **the kind can never false-positive.** It can be up to 48h late, which is
+the safe direction to be wrong in.
+
+Three conditions, all red-enforced by `TestBackfill0055CannotFalsePositive`, which reads the migration's actual
+SQL rather than a description of it:
+
+| condition | enforcement |
+|---|---|
+| the value is stated as a bound, not a measurement | in the migration comment and the column `COMMENT` |
+| `last_seen_at IS NULL` stays NULL | red: dropping the clause fails, naming it as the false positive the ruling avoids |
+| a real stamp overwrites the bound cleanly | red on `queries/nodes.sql`: both `CreateNode` and `RenewNodeCert` must set the column unconditionally |
+
+**PROVE-A-GUARD-REJECTS, twice, at both plausible mistakes** — and they fail in opposite directions, which is
+why the red names both:
+
+```
+backfill0055_test.go:34: the backfill MUST exclude rows with last_seen_at IS NULL — ...
+backfill0055_test.go:50: the bound MUST be last_seen_at + CertTTL. ...
+```
+
+- `now() + TTL` is always in the future, so the kind **never fires** — a silent false negative.
+- `created_at + TTL` predates every renewal, so it can fire on a gateway whose cert is **still valid** — a false
+  positive.
+
+Only `last_seen_at` bounds it correctly. A first draft of that red's message claimed the substitution "can
+false-positive" for both cases, which was true of one and wrong about the other; corrected, because a test
+message is read at 3am by someone deciding whether to trust it.
