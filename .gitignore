@@ -67,3 +67,10 @@ S.conf
 # S10.2 GitOps walk scratch (CR manifests + any pasted machine token) — evidence goes in walk-artifacts/
 /walk/
 /walk-leg4/
+
+# S11 walk scratch key material — a deliberately-wrong master key for the negative restore leg.
+# Gitignored AT CREATION, per the walk's own condition: never commit key material, even wrong keys
+# (a committed 'wrong' key teaches the next reader that committing keys is normal).
+wrong-master.key
+*-master.key
+walk-artifacts/**/*.key
