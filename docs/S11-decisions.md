@@ -410,8 +410,35 @@ results. A scan that emits nothing must never read as a scan that found nothing.
 - **D1:** an N-1 agent's artifact still compiles against N (the compat-window red) + the rolling procedure on
   the wire, no flag-day.
 
+## The walk's findings, and the one that stings
+
+Full record: `walk-artifacts/S11/walk-record.md`. Five findings, one HIGH (WF-S11-1) folded mid-walk, four LOW
+folded on disposition. Both owed debts — trust-after-restore and HA-under-a-roll — discharged on the wire.
+
+**The embarrassing half of WF-S11-1 is worth its own line.** `docs/backup-restore.md` asserted that
+trust-after-restore "is verified on real hardware in the EPIC 11 box-walk" — written in Slice 4, before the walk
+existed, about a leg that had not run. It was true a few hours later, which is not the same as being true when
+written.
+
+That is precisely the overclaim the ✅/🔶/⚠️ verification marks were invented for **one slice later**, in
+`self-host.md`, whose whole premise is that "a quickstart nobody executed is documentation that looks like a
+guarantee." The marks were introduced in Slice 6 and the unmarked forward-claim was sitting in a neighbouring
+file the entire time — the convention was right and its coverage was assumed rather than swept. **The lesson is
+not "be more careful": it is that a new honesty convention needs a census of the surface it is supposed to
+cover, exactly like a new guard does** (CENSUS-THE-MIRROR-SURFACE, third instance this epic).
+
+Two more conventions came out of the walk itself:
+
+- **A witness must prove it was alive across the window it certifies** — minted as a law (`docs/laws.md`) and a
+  standing rule in the runsheet, after a dead ping log returned a clean gap check for a window it never saw.
+- **A procedure that can false-pass is a defect in the procedure.** Leg 5's original step used
+  `docker compose restart`, which lets the leader reclaim its own lock in ~400ms; the stated criterion ("the
+  surviving replica reports `ok leader`") was satisfied *by the restarted leader itself*. The runsheet now stops
+  the leader and requires the returning replica to come back a **follower**.
+
 ## Status
 
 D1–D5 RULED (this paper). Slice cut confirmed. Ledger triaged (hardening folds here; features carry
-trigger-gated; Feature-1 struck dead). **Awaiting sign-off before Slice 1. Nothing builds until the paper is
-signed.**
+trigger-gated; Feature-1 struck dead). Slices 1–6 BUILT. **Box-walk run: Legs 0–6, five findings folded;
+criterion 6 (N-1 agent on the wire) ruled Option A — power on one AWS gateway — and is the last outstanding
+item before gates and the merge train.**

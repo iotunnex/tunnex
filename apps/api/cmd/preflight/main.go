@@ -62,7 +62,12 @@ func main() {
 		fmt.Printf("  [%s] %-28s %s\n", mark, c.name, c.detail)
 	}
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "\nREFUSING: %d check(s) failed. Nothing was changed.\n"+
+		// STDOUT, deliberately (S11 walk WF-S11-5). The check table above is on stdout; writing the verdict to
+		// stderr let an unbuffered multiplexer — `docker compose exec`, CI log capture — print "REFUSING"
+		// ABOVE the table it summarizes, so an operator met the conclusion with no evidence over it. One
+		// stream means one guaranteed order. The machine-readable signal is the EXIT CODE, which is unchanged
+		// and is what a deploy script should branch on.
+		fmt.Printf("\nREFUSING: %d check(s) failed. Nothing was changed.\n"+
 			"Resolve the above before rolling. See docs/upgrade.md.\n", failed)
 		os.Exit(1)
 	}
@@ -106,13 +111,21 @@ func migrationsClean(ctx context.Context, pool *pgxpool.Pool) check {
 //
 // An agent reporting version 0 has never reported one (a pre-CW agent). That is UNKNOWN, not fine: it is
 // named as such rather than counted as a pass.
+//
+// THE VERSION IS LAST-KNOWN, NOT LIVE, AND THE OUTPUT SAYS SO (S11 walk WF-S11-2). The walk hit a fleet of
+// four where three agents had last reported FIVE DAYS earlier, and this check printed "all 4 gateway(s) at v6
+// or newer" — true, and read by an operator as "the fleet is fine". The staleness is conservative for the
+// check's actual purpose (a dead agent cannot have been silently downgraded, so last-known is a safe floor),
+// so the LOGIC is right and stays. The sentence was wrong. Reporting the age alongside the version makes the
+// claim exactly as strong as the data behind it — which is the whole job of a tool whose output an operator
+// uses to decide whether to proceed.
 func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 	oldest := policyspec.ProtocolVersion - policyspec.SupportedWindow + 1
 
 	// The agent's reported ceiling lives in nodes.capabilities (jsonb), written by ReportWGInfo — read it
 	// from there rather than from a status table, because that is where it actually is.
 	rows, err := pool.Query(ctx, `
-		SELECT name, COALESCE((capabilities->>'max_policy_version')::int, 0)
+		SELECT name, COALESCE((capabilities->>'max_policy_version')::int, 0), policy_reported_at
 		  FROM nodes
 		 WHERE revoked_at IS NULL`)
 	if err != nil {
@@ -122,12 +135,13 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 	}
 	defer rows.Close()
 
-	var tooOld, unknown []string
+	var tooOld, unknown, stale []string
 	total := 0
 	for rows.Next() {
 		var name string
 		var v int
-		if err := rows.Scan(&name, &v); err != nil {
+		var reportedAt *time.Time
+		if err := rows.Scan(&name, &v, &reportedAt); err != nil {
 			return check{"agent version window", false, "scan: " + err.Error()}
 		}
 		total++
@@ -135,7 +149,12 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 		case v == 0:
 			unknown = append(unknown, name)
 		case v < oldest:
-			tooOld = append(tooOld, fmt.Sprintf("%s (v%d)", name, v))
+			tooOld = append(tooOld, fmt.Sprintf("%s (v%d, %s)", name, v, since(reportedAt)))
+		}
+		// Tracked SEPARATELY from tooOld: a stale reporter is not a blocker — its last-known version is a
+		// conservative floor — but it must not hide inside a summary line that reads as a liveness claim.
+		if reportedAt == nil || time.Since(*reportedAt) > staleAfter {
+			stale = append(stale, fmt.Sprintf("%s (v%d, %s)", name, v, since(reportedAt)))
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -156,9 +175,39 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 			len(unknown), total, sample(unknown, 8))}
 	case total == 0:
 		return check{"agent version window", true, "no gateways enrolled"}
+	case len(stale) > 0:
+		// PASSES, and says exactly what it knows. These agents are within the window as last reported; the
+		// report is old. That is safe to roll onto (a silent downgrade is not a thing) but the operator is
+		// owed the distinction rather than a sentence that sounds like the fleet just answered.
+		return check{"agent version window", true, fmt.Sprintf(
+			"all %d gateway(s) LAST REPORTED v%d or newer; %d have not reported recently: %v — last-known "+
+				"versions are a safe floor for the roll, but these gateways are not confirmed live",
+			total, oldest, len(stale), sample(stale, 8))}
 	}
 	return check{"agent version window", true,
-		fmt.Sprintf("all %d gateway(s) at v%d or newer", total, oldest)}
+		fmt.Sprintf("all %d gateway(s) last reported v%d or newer, all within %s", total, oldest, staleAfter)}
+}
+
+// staleAfter is when "it reported v6" stops being a statement about now. Deliberately generous: agents report
+// on their reconcile interval, so an hour of silence is unusual without being alarming, and this threshold
+// changes WORDING only — never whether preflight passes.
+const staleAfter = time.Hour
+
+// since renders a human age, or names the absence. A nil report time is not "0s ago"; it is "never".
+func since(t *time.Time) string {
+	if t == nil {
+		return "never reported"
+	}
+	d := time.Since(*t)
+	switch {
+	case d < 2*time.Minute:
+		return "reported just now"
+	case d < time.Hour:
+		return fmt.Sprintf("last reported %dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("last reported %dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("last reported %dd ago", int(d.Hours()/24))
 }
 
 // backupExists is a REMINDER with teeth, and it is why D1 and D2 were ruled in this order.

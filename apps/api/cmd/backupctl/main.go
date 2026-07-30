@@ -58,7 +58,13 @@ func main() {
 	case "verify":
 		m, err := backup.Read(os.Stdin)
 		if err != nil {
-			fatal("%v", err)
+			// Name the FIX, not only the condition (S11 walk WF-S11-3). The bare `read manifest: EOF` this
+			// used to print is accurate and useless: it says what failed, not what to type. An operator meets
+			// it mid-restore, which is the worst moment to be guessing at argument syntax — the manifest
+			// arrives on STDIN, and forgetting the redirect is the overwhelmingly likely cause.
+			fatal("%v\n\nThe manifest is read from STDIN — redirect it in:\n"+
+				"    backupctl verify < backup.manifest.json\n"+
+				"(in a container: docker compose exec -T api backupctl verify < backup.manifest.json)", err)
 		}
 		if err := backup.Verify(m, sealer); err != nil {
 			// Loud, actionable, and non-zero — so `verify && pg_restore` cannot proceed.

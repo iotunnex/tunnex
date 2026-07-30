@@ -118,3 +118,34 @@ been bare literals. So: enumerate the SHAPES the defect can take, and plant the 
 watch it pass. Record both outcomes. The cost is a minute; the alternative is a green check that has never
 once done its job and will not do it the first time it matters. (Companion to ARTIFACT-EXISTS ≠
 ARTIFACT-WORKS: this is that law applied to the gates themselves.)
+
+---
+
+## A WITNESS MUST PROVE IT WAS ALIVE ACROSS THE WINDOW IT CERTIFIES
+
+*Minted: EPIC 11 box-walk, Leg 5. A corollary of PROVE-A-GUARD-REJECTS, pointed at evidence-gathering rather
+than at guards.*
+
+**A silent witness is indistinguishable from a clean witness, and it fails toward "pass."**
+
+The measurement: Leg 5's first attempt certified "no data-path loss across the roll" from a `ping` log whose
+last line was timestamped **nine minutes before the roll began**. The process had died. Its `icmp_seq` gap
+detector returned **clean** — a spotless bill of health for a window it never observed. The check could not have
+failed, so its passing carried no information at all.
+
+That is the same defect PROVE-A-GUARD-REJECTS exists to catch, one level up. There, the question is whether a
+guard can reject a violation. Here it is whether an *instrument* can register the event it is aimed at. A gap
+detector over a dead log, a metric scraped before its collector runs, an audit query over a table the code
+never wrote to — each returns a confident, meaningless pass.
+
+**THE LAW:** evidence of continuity requires evidence the instrument was running. Three checks, never fewer:
+
+1. **Before** the leg — confirm the witness is replying *now*, with fresh timestamps.
+2. **After** the leg — check its timestamp bounds against the leg's own start and end. `head -1` and `tail -1`
+   must straddle the window.
+3. **Then** the continuity check, grepping **the window explicitly** rather than trusting an aggregate over the
+   whole file.
+
+The generalisation beyond witnesses: before believing any negative result — no gaps, no errors, no findings,
+zero rows — establish that the thing producing it was in a position to produce a positive one. "Nothing was
+observed" and "nothing happened" are different claims, and only one of them is evidence.

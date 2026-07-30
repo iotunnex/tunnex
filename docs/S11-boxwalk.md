@@ -36,6 +36,26 @@ handshake counter advanced across the restore, and the agent's log shows no re-e
   `docs/upgrade.md` *as written*. If a step is wrong, missing, or in the wrong order, that is a documentation
   finding — and the most valuable kind, because a stranger cannot ask us for the missing step.
 
+### STANDING RULE — a witness must prove it was alive across the window it certifies
+
+**A silent witness is indistinguishable from a clean one, and it fails toward "pass."** This walk's Leg 5 first
+attempt shows the whole failure in one move: the ping had died nine minutes *before* the roll, and its
+`icmp_seq` gap check returned **clean** — a spotless bill of health for a log that did not cover the event. Had
+that been accepted, the leg would have recorded "no data-path loss across the roll" on evidence from before the
+roll existed.
+
+So, for every leg that certifies continuity, three checks and never fewer:
+
+1. **Before** the leg: confirm the witness is *replying now* (`tail` it and see fresh timestamps).
+2. **After** the leg: check its **timestamp bounds against the leg's own start and end** — `head -1` and
+   `tail -1` must straddle the window. A witness that stops mid-leg certifies only what it saw.
+3. **Then** the continuity check (sequence gaps, timeouts), and grep **the window explicitly** rather than
+   trusting an aggregate over the whole file.
+
+This is PROVE-A-GUARD-REJECTS pointed at evidence-gathering instead of at guards: the question is not "did the
+check pass" but "could this check have failed?" A gap detector over a dead log cannot fail, so its pass means
+nothing. Same standard, applied to the instrument rather than the subject.
+
 ---
 
 ## Prerequisites — what Pawan needs staged

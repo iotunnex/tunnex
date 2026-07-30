@@ -107,10 +107,18 @@ Request serving runs on **every** replica; only the periodic schedulers (hub fai
 retention) are leader-gated, via a Postgres advisory lock. A follower is fully **ready** — it serves API
 traffic and simply does not tick — so a rolling upgrade never removes capacity.
 
-Honest limit: after a leader stops, another takes over within about ten seconds on a clean shutdown. If a
-leader is *hard*-partitioned rather than stopped, takeover waits for Postgres to notice the dead session,
-which can take minutes. Nothing ticks in that window — no failover promotion, no CRL refresh — which is safe
-rather than degraded, because those are periodic reconcilers and never sit in the request or data path.
+Honest limit, and it is **two different limits** that are easy to merge into one wrong sentence:
+
+- **The leader stops or dies** — clean shutdown, crash, `kill -9`, container removal. Its Postgres connection
+  *closes*, so the session ends and the advisory lock frees immediately; another replica acquires within about
+  ten seconds. **Verified on a live deployment**, both for a graceful stop and for a SIGKILL. This is the case
+  a rolling upgrade actually produces.
+- **The leader is network-partitioned while still running.** Its session stays open from Postgres's point of
+  view until TCP keepalive expires, so the lock is not released and takeover can take minutes.
+  **Not verified — no partition test has been run.**
+
+Nothing ticks during either window — no failover promotion, no CRL refresh — which is safe rather than degraded,
+because those are periodic reconcilers and never sit in the request or data path.
 
 ## If an upgrade goes wrong
 

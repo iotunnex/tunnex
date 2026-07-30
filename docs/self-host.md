@@ -124,7 +124,7 @@ meet you.
 | **Revoked-while-agent-down** | If a gateway is offline when you revoke access, flows already established there persist until they end. New flows are blocked as soon as it reconciles. |
 | **Windows full-tunnel re-home** | A Windows client in *full-tunnel* mode refuses to re-home to a new gateway (honestly, with a named error) rather than half-doing it. Split-tunnel re-homes normally. |
 | **Cross-site DNS to cluster zones** | Resolving another site's Kubernetes zone across a site link is not implemented; same-site resolution works. |
-| **Leader takeover window** | If the control-plane leader stops cleanly, another takes over in ~10s. If it is *hard*-partitioned, takeover waits for Postgres to notice the dead session — potentially minutes. Nothing ticks meanwhile; **running tunnels are unaffected**. |
+| **Leader takeover window** | A leader that **stops or dies** — clean shutdown, crash, `kill -9`, container removal — releases the lock at once, and another replica takes over within ~10s (verified). A leader that is **network-partitioned** while still running is the slow case: its Postgres session stays open until TCP keepalive expires, so takeover can take minutes (**not verified — no partition test has been run**). Nothing ticks meanwhile; **running tunnels are unaffected** either way. |
 | **Posture checks are self-reported** | OS version, disk encryption and EDR checks are reported by the device. A compromised device can lie. Treat posture as defense-in-depth, never attestation. |
 | **No third-party security audit yet** | Stated in [SECURITY.md](../SECURITY.md), and it will say so until one has happened. |
 

@@ -464,3 +464,43 @@ legitimately dormant site, which is a policy decision about what an upgrade gate
   state?~~ **Honest state.** The kinds sum to exactly 4, reconciling against the `revoked_at IS NULL` row count,
   and `site_link_down` = 4 is corroborated on the wire by both site-link peers showing sent-but-never-received.
   No defect.
+
+---
+
+## Dispositions (founder, in session) and the folds
+
+| # | sev | disposition | fold |
+|---|---|---|---|
+| WF-S11-1 | HIGH | FOLD mid-walk | `5e0bac7` — ship all three binaries + `TestEveryOperatorToolShipsInTheImage` + both runbooks corrected + the pre-dated claim reworded |
+| WF-S11-2 | LOW | **FOLD** — "show the age alongside the version" | `agentCompatWindow` reads `policy_reported_at`; `since()` renders an age or names its absence; a stale-but-in-window fleet **passes** with the distinction stated. Option (b), refuse-on-stale, remains registered and unbuilt |
+| WF-S11-4 | LOW | **FOLD** — "a misstated limit is worse than an omitted one" | `self-host.md` + `upgrade.md` split into two limits: stop/crash/`kill -9`/container-removal ≤10 s **verified**; network partition minutes **marked not verified** |
+| WF-S11-5 | LOW | **FOLD** (trivial) | preflight's verdict moved to **stdout** — one stream, one guaranteed order; the exit code remains the machine-readable signal |
+| WF-S11-3 | LOW | **FOLD** — teaching-text convention | the stdin error now names the fix, with both the bare and the in-container invocation |
+| criterion 6 | — | **RULED: Option A** | power on one AWS gateway — a live N-1 agent across a roll, site links recovering, and a health-kind transition, for one console action |
+
+**Red for the WF-S11-2 fold, proven to reject** (`TestSinceNamesTheAgeOrItsAbsence`): with `since(nil)` returning
+`"0s ago"` instead of `"never reported"` —
+
+```
+main_test.go:17: a nil report time must be named, not rendered as an age: got "0s ago"
+```
+
+Clean before, rejects, clean after. That is the finding's own shape as a red: the defect was never a wrong
+number, it was a confident rendering of absent data.
+
+### Two conventions the walk produced
+
+- **A witness must prove it was alive across the window it certifies** — `docs/laws.md`, plus a standing rule in
+  the runsheet's "two bars" section. A dead ping log returned a clean gap check for a window it never observed;
+  the check could not have failed, so its pass carried no information. PROVE-A-GUARD-REJECTS applied to the
+  instrument rather than the subject.
+- **A procedure that can false-pass is a defect in the procedure**, not merely in its execution. Leg 5's original
+  step let the leader reclaim its own lock in ~400 ms while satisfying the stated criterion.
+
+### The finding worth remembering
+
+WF-S11-1's embarrassing half: `backup-restore.md` claimed trust-after-restore "is verified on real hardware in
+the EPIC 11 box-walk" — written in Slice 4, about a leg that had not run. It became true hours later, which is
+not the same as being true when written. The ✅/🔶/⚠️ marks invented **one slice later** in `self-host.md` exist
+for exactly this, and the unmarked forward-claim sat in a neighbouring file the whole time. A new honesty
+convention needs a census of the surface it covers, exactly like a new guard does.
