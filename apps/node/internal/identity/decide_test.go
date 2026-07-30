@@ -187,3 +187,58 @@ func TestExpiryBoundaryIsExclusive(t *testing.T) {
 		t.Errorf("one instant past NotAfter it is expired, got %v (%s)", v.Action, v.Reason)
 	}
 }
+
+// TestRekeyCannotBeTriggeredByConnectionFAILURE — the condition on the agent's re-key trigger, asserted
+// structurally rather than behaviourally, which is the stronger form.
+//
+// THE FAILURE MODE THIS FORBIDS: an agent that attempts re-key whenever it cannot reach the control plane would
+// hammer an UNAUTHENTICATED endpoint during every transient outage — a partition, a CP restart, a DNS blip — turning
+// an ordinary incident into a self-inflicted flood, and doing it hardest at the moment the CP is least able to cope.
+//
+// Decide is structurally incapable of it: it takes a stored certificate, a load error, a requested name, whether a
+// token exists, and a clock. THERE IS NO NETWORK ARGUMENT TO PASS. Its verdict comes from the agent's own clock
+// against its own stored certificate, so a handshake outcome cannot reach it even by mistake — the same shape as
+// RekeyAuthorized on the server having no liveness parameter.
+//
+// This test's real value is that it must be EDITED before that can change. A future author who adds a
+// "lastHandshakeFailed bool" to make the trigger "smarter" stops it compiling and has to come back to the reasoning.
+func TestRekeyCannotBeTriggeredByConnectionFAILURE(t *testing.T) {
+	// SIGNATURE assertion: exactly these inputs, none of them a network signal.
+	var decide func(certPEM []byte, loadErr error, requestedName string, haveToken bool, now time.Time) Verdict = Decide
+	if decide == nil {
+		t.Fatal("unreachable")
+	}
+
+	// VERDICT-SET assertion: the only reasons that may authorize a re-key attempt are the two locally-provable
+	// expiry verdicts. If a new reason is added, this list must be revisited deliberately — and in particular no
+	// reason derived from reachability may appear, because none can be: see the signature above.
+	rekeyable := map[string]bool{
+		"stored_identity_expired":          true,
+		"stored_identity_expired_no_token": true,
+	}
+	now := time.Now()
+	all := []Verdict{
+		Decide(nil, errors.New("missing"), "gw", false, now),                  // no_identity_no_token
+		Decide(nil, errors.New("missing"), "gw", true, now),                   // no_stored_identity
+		Decide([]byte("garbage"), nil, "gw", false, now),                      // unreadable_no_token
+		Decide([]byte("garbage"), nil, "gw", true, now),                       // unreadable
+		Decide(certFor(t, "gw", now.Add(time.Hour)), nil, "gw", true, now),    // valid
+		Decide(certFor(t, "gw", now.Add(time.Hour)), nil, "other", true, now), // name_mismatch
+		Decide(certFor(t, "gw", now.Add(-time.Hour)), nil, "gw", false, now),  // expired_no_token
+		Decide(certFor(t, "gw", now.Add(-time.Hour)), nil, "gw", true, now),   // expired (uses token)
+	}
+	for _, v := range all {
+		if rekeyable[v.Reason] {
+			// Every re-keyable verdict must be an EXPIRY determination — a fact about the certificate the agent
+			// holds, checkable without asking anyone.
+			if !strings.Contains(v.Reason, "expired") {
+				t.Errorf("verdict %q is treated as re-keyable but is not an expiry determination; a re-key trigger "+
+					"must rest on a locally-provable fact, never on whether the control plane answered", v.Reason)
+			}
+		}
+	}
+	// And the expired verdicts must actually be reachable, or the trigger is dead code and this test vacuous.
+	if v := Decide(certFor(t, "gw", now.Add(-time.Hour)), nil, "gw", false, now); !rekeyable[v.Reason] {
+		t.Fatalf("an expired certificate with no token must produce a re-keyable verdict, got %q", v.Reason)
+	}
+}

@@ -2451,7 +2451,7 @@ export interface components {
             /** @description Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
             cert_serial: string;
         };
-        RekeyChallengeResponse: {
+        RekeyNonce: {
             /** @description base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known. */
             nonce: string;
         };
@@ -5181,7 +5181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RekeyChallengeResponse"];
+                    "application/json": components["schemas"]["RekeyNonce"];
                 };
             };
             default: components["responses"]["Error"];

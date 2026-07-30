@@ -157,7 +157,7 @@ func (s apiServer) RekeyChallenge(ctx context.Context, req api.RekeyChallengeReq
 		return nil, err
 	}
 	return api.RekeyChallenge200JSONResponse{
-		Body:    api.RekeyChallengeResponse{Nonce: base64.StdEncoding.EncodeToString(nonce)},
+		Body:    api.RekeyNonce{Nonce: base64.StdEncoding.EncodeToString(nonce)},
 		Headers: api.RekeyChallenge200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

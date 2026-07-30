@@ -70,12 +70,30 @@ func main() {
 
 	switch verdict.Action {
 	case identity.Idle:
-		// Liveness stays up, readiness stays false. LOUD, and naming the remedy rather than the condition: this
-		// state never resolves on its own, so a warning an operator can act on is the entire value here.
+		// Liveness stays up, readiness stays false. LOUD, and naming the remedy rather than the condition.
 		logger.Error("agent_no_usable_identity",
 			slog.String("reason", verdict.Reason),
 			slog.String("remedy", verdict.Evidence),
 			slog.String("state_dir", certDir))
+
+		// S13.1: an EXPIRED certificate is the one idle reason that may be recoverable without an operator — the
+		// agent still holds the private key, and proving possession of it re-attests a grant the control plane
+		// already made. Anything else (no identity at all, an unreadable one) needs a join token, so it idles.
+		//
+		// THE TRIGGER IS LOCAL, and deliberately so: `identity.Decide` reached this verdict from the agent's own
+		// clock against its own stored certificate, with NO network call. A failed handshake, a partitioned
+		// control plane and a transient outage cannot reach here — which is what stops this from hammering an
+		// unauthenticated endpoint during any ordinary blip.
+		if verdict.Reason == "stored_identity_expired" || verdict.Reason == "stored_identity_expired_no_token" {
+			certPEM, keyPEM, caPEM = attemptRekey(ctx, logger, apiURL, certDir, certPEM, keyPEM, caPEM, nodeName)
+			if len(certPEM) == 0 {
+				<-ctx.Done()
+				return
+			}
+			nodeName = identity.EffectiveName(
+				identity.Decide(certPEM, nil, nodeName, false, time.Now()), nodeName)
+			break
+		}
 		<-ctx.Done()
 		return
 
@@ -528,17 +546,6 @@ func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool
 }
 
 // sleepCtx sleeps for d, returning false if ctx is cancelled first.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}
-
 // maxStatusPeers caps a status report so a gateway with thousands of peers can't
 // turn a heartbeat into a huge post. Excess is dropped (and logged) — the status
 // view is best-effort telemetry, not the source of truth.
@@ -685,3 +692,90 @@ func startFlowLog(ctx context.Context, group int, client *control.Client, egress
 
 func hostname() string { h, _ := os.Hostname(); return h }
 func version() string  { return getenv("TUNNEX_AGENT_VERSION", "0.1.0") }
+
+// Re-key retry pacing (S13.1). THE CEILING IS THE LOAD-BEARING NUMBER, not the floor.
+//
+// A gateway whose key the control plane never recorded — every node enrolled before migration 0057 and not since
+// renewed — will be refused FOREVER, and it cannot learn that from the response, because the refusal is uniform by
+// design (a live node, an unknown serial and a wrong key are indistinguishable, so the endpoint cannot be used as an
+// oracle). So the retry loop must assume it may be permanent.
+//
+// One attempt per hour, sustained, is two requests per hour per bricked gateway against an endpoint whose expensive
+// path already requires knowing a real serial for a genuinely expired node. That is negligible load and still
+// recovers within an hour of an operator fixing the underlying cause — which is the trade the ceiling exists to make.
+// The floor is short because the common case is a gateway rebooting after a weekend, where recovery in seconds is the
+// whole point.
+const (
+	rekeyBackoffFloor   = 30 * time.Second
+	rekeyBackoffCeiling = time.Hour
+)
+
+// attemptRekey recovers an expired identity by proof of possession, retrying with backoff. Returns empty slices if
+// the context ends first.
+//
+// WHAT IT LOGS, AND WHY THAT MATTERS. The control plane's refusal carries no reason. So the agent reports what it
+// knows LOCALLY — my certificate expired at T, I attempted re-key, it was refused, and the remedy is a join token.
+// Without that an operator finds an agent idling silently in exactly the situation they are trying to diagnose, and
+// the coverage limitation of proof-of-possession recovery (it only works for nodes whose key the CP recorded) becomes
+// invisible at the only place it is observable.
+func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir string, certPEM, keyPEM, caPEM []byte, nodeName string) ([]byte, []byte, []byte) {
+	serial := identity.StoredSerial(certPEM)
+	if serial == "" {
+		logger.Error("agent_rekey_impossible",
+			slog.String("reason", "the stored certificate has no readable serial, so there is nothing to re-key"),
+			slog.String("remedy", "re-enroll this gateway with a join token (TUNNEX_JOIN_TOKEN)"))
+		return nil, nil, nil
+	}
+
+	backoff := rekeyBackoffFloor
+	for attempt := 1; ; attempt++ {
+		newKey, newCert, newCA, err := control.Rekey(ctx, apiURL, serial, keyPEM, version(), nodeName)
+		if err == nil {
+			if serr := saveCreds(certDir, newCert, newKey, newCA); serr != nil {
+				logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
+				return nil, nil, nil
+			}
+			logger.Info("agent_rekeyed",
+				slog.String("old_cert_serial", serial),
+				slog.String("note", "recovered by proof of possession — same node, same identity, new key"))
+			return newCert, newKey, newCA
+		}
+
+		// The refusal says nothing, so say what we know locally rather than guessing at the server's reason.
+		logger.Error("agent_rekey_refused",
+			slog.Int("attempt", attempt),
+			slog.String("cert_serial", serial),
+			slog.String("local_finding", "this agent's certificate has expired; it cannot authenticate and cannot renew"),
+			slog.String("server_said", "refused, without a reason (the control plane's refusals are uniform by "+
+				"design so the endpoint cannot be probed)"),
+			slog.String("most_likely_cause", "this gateway was enrolled before the control plane recorded agent "+
+				"public keys, so proof-of-possession recovery is unavailable for it — or it was REVOKED, which "+
+				"re-key deliberately cannot undo"),
+			slog.String("remedy", "mint a join token in the control plane and restart this agent with "+
+				"TUNNEX_JOIN_TOKEN set"),
+			slog.String("retry_in", backoff.String()),
+			slog.String("error", err.Error()))
+
+		if !sleepCtx(ctx, backoff) {
+			return nil, nil, nil
+		}
+		if backoff < rekeyBackoffCeiling {
+			backoff *= 2
+			if backoff > rekeyBackoffCeiling {
+				backoff = rekeyBackoffCeiling
+			}
+		}
+	}
+}
+
+// sleepCtx waits d, or returns false if the context ends first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}

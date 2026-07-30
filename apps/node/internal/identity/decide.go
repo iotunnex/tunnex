@@ -15,6 +15,7 @@ package identity
 
 import (
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"time"
@@ -137,6 +138,18 @@ func EffectiveName(v Verdict, requestedName string) string {
 		return v.StoredCN
 	}
 	return requestedName
+}
+
+// StoredSerial returns the hex serial of the stored certificate — the identifier the re-key challenge is keyed on
+// (S13.1 D9, keyed on the serial rather than the node name because names are guessable and serials are not).
+//
+// Empty when there is no readable certificate, which is also when re-key is impossible, so callers get one check.
+func StoredSerial(certPEM []byte) string {
+	leaf, err := parseLeaf(certPEM)
+	if err != nil {
+		return ""
+	}
+	return hex.EncodeToString(leaf.SerialNumber.Bytes())
 }
 
 func parseLeaf(certPEM []byte) (*x509.Certificate, error) {

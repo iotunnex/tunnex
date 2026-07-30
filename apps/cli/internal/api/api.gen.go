@@ -1283,8 +1283,8 @@ type RekeyChallengeRequest struct {
 	CertSerial string `json:"cert_serial"`
 }
 
-// RekeyChallengeResponse defines model for RekeyChallengeResponse.
-type RekeyChallengeResponse struct {
+// RekeyNonce defines model for RekeyNonce.
+type RekeyNonce struct {
 	// Nonce base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known.
 	Nonce string `json:"nonce"`
 }
@@ -10160,7 +10160,7 @@ func (r RekeyAgentResponse) StatusCode() int {
 type RekeyChallengeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *RekeyChallengeResponse
+	JSON200      *RekeyNonce
 	JSONDefault  *Error
 }
 
@@ -14464,7 +14464,7 @@ func ParseRekeyChallengeResponse(rsp *http.Response) (*RekeyChallengeResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest RekeyChallengeResponse
+		var dest RekeyNonce
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

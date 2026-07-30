@@ -1861,7 +1861,7 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RekeyChallengeResponse" }
+              schema: { $ref: "#/components/schemas/RekeyNonce" }
         default: { $ref: "#/components/responses/Error" }
 
   /api/v1/agent/rekey:
@@ -3105,7 +3105,12 @@ components:
           maxLength: 100
           description: "Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9)."
 
-    RekeyChallengeResponse:
+    RekeyNonce:
+      # NAMED TO AVOID A GENERATOR COLLISION. oapi-codegen derives a response wrapper called
+      # <operationId>Response, so a schema named RekeyChallengeResponse collides with the wrapper for
+      # operationId rekeyChallenge and breaks the Go CLI client's compilation. Second instance of this
+      # class: S11-2 hit it with MintMachineCredentialResponse, and `make test-cli` was added THEN to
+      # catch exactly this — it did.
       type: object
       required: [nonce]
       additionalProperties: false
