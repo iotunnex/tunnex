@@ -90,8 +90,21 @@ export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: s
  * acknowledged to dismiss. The token is redeemed by the agent on its first
  * connect, at which point the node appears in this list.
  */
-export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
+export function Gateways({
+  org,
+  nodes,
+  onNodesChanged,
+}: {
+  org: Org;
+  nodes: Node[];
+  onNodesChanged?: () => void;
+}) {
   const [open, setOpen] = useState(false);
+  // WF-S11-9: which gateway is awaiting a revoke confirmation. Two-step rather than a window.confirm — the
+  // consequence needs naming in the UI, and a native dialog cannot say "every device homed here loses its
+  // tunnel". Mirrors the MfaSettings disable ceremony.
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [nodeName, setNodeName] = useState("");
   const [endpoint, setEndpoint] = useState(""); // D4a: admin-entered public ip:port (blank = NAT'd spoke)
   const [pinnedEndpoint, setPinnedEndpoint] = useState<string | null>(null);
@@ -156,6 +169,30 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
       setError("Could not reach the API.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // WF-S11-9: the API has always had POST /nodes/{nodeId}/revoke, and the UI never exposed it — so the
+  // documented gateway-recovery path (revoke, then re-enroll) was unreachable from the product. Revocation is
+  // the mechanism the whole security model rests on (short certs + refused renewal), which makes a
+  // revoke-you-cannot-reach worse than a missing convenience.
+  async function revoke(nodeId: string) {
+    setError(null);
+    setRevoking(nodeId);
+    try {
+      const { error: e } = await api.POST("/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke", {
+        params: { path: { orgId: org.id, nodeId } },
+      });
+      if (e) {
+        setError(apiErrorMessage(e, "Could not revoke the gateway."));
+        return;
+      }
+      setConfirmRevoke(null);
+      onNodesChanged?.();
+    } catch {
+      setError("Could not reach the API.");
+    } finally {
+      setRevoking(null);
     }
   }
 
@@ -224,9 +261,33 @@ export function Gateways({ org, nodes }: { org: Org; nodes: Node[] }) {
                 </span>
               )}
             </div>
-            <span className="text-xs text-slate-500">
-              {n.last_seen_at ? `last seen ${relativeAge(n.last_seen_at)}` : "never connected"}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500">
+                {n.last_seen_at ? `last seen ${relativeAge(n.last_seen_at)}` : "never connected"}
+              </span>
+              {/* WF-S11-9. Two-step, because this is irreversible AND wider than it looks: revoking a gateway
+                  refuses its cert renewal, so every device homed there loses its tunnel and any site transit
+                  through it stops. A one-click danger button next to a "last seen" label is a misclick away
+                  from an outage. */}
+              {n.status === "active" &&
+                (confirmRevoke === n.id ? (
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs text-rose-300">
+                      Revoke {n.name}? Devices homed here lose their tunnel. This cannot be undone.
+                    </span>
+                    <Button variant="danger" onClick={() => revoke(n.id)} disabled={revoking === n.id}>
+                      {revoking === n.id ? "Revoking…" : "Confirm revoke"}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirmRevoke(null)} disabled={revoking === n.id}>
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button variant="ghost" onClick={() => setConfirmRevoke(n.id)}>
+                    Revoke
+                  </Button>
+                ))}
+            </div>
           </li>
         ))}
         {nodes.length === 0 && (

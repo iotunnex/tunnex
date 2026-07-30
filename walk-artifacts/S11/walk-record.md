@@ -737,3 +737,74 @@ they are one subject, "how does a gateway come back", and solving them separatel
 
 The N-1 witness must be enrolled under a **new name** to proceed. Recorded as forced by WF-S11-8, not as a
 choice.
+
+---
+
+## WF-S11-9 — gateway revoke exists in the API and never existed in the UI
+
+**Severity: HIGH. Found while executing WF-S11-8(a)'s unblock — it was the wall standing directly in front of
+it.** Folded on the founder's direct instruction.
+
+### Evidence
+
+`POST /api/v1/organizations/{orgId}/nodes/{nodeId}/revoke` has existed since S3 (`revokeNode` in the spec,
+`RevokeNode` in `queries/nodes.sql`, called at `service.go:2068`). The **Devices** list renders a `Revoke` button
+per row. The **Gateways** list, immediately above it on the same page, rendered **no action at all** — name,
+version, health badge, last-seen, and nothing else.
+
+So the documented gateway-recovery path — revoke, then re-enrol — was **unreachable from the product**. Not
+merely inconvenient: revocation is the mechanism the entire security model rests on (short-lived certs plus a
+refused renewal), so a revoke an operator cannot reach is worse than a missing convenience. And it is why
+WF-S11-8(a) could not be exercised the moment it shipped: (a) frees a revoked gateway's name, and there was no
+way to revoke a gateway.
+
+### The fourth instance of the epic's pattern
+
+| finding | mechanism | procedure | doc |
+|---|---|---|---|
+| WF-S11-1 | tools compile, units pass | not shipped in the image | two runbooks named them |
+| WF-S11-6 | short certs + renewal work | renewal needs the cert that expired | docs implied auto-recovery |
+| WF-S11-8 | enroll works, revoke works | re-enrol under the same name impossible | "one pasted command" |
+| **WF-S11-9** | **revoke endpoint works** | **no way to call it** | recovery documented as routine |
+
+Four for four: a mechanism that works, a procedure around it that does not, documentation asserting the
+procedure. Also the **fourth producer-without-consumer of the epic** (after WF-S11-7's unrendered health kind),
+which makes the standing who-reads-this probe due for a stronger form — see below.
+
+### The fold
+
+`apps/web/src/components/Gateways.tsx` gains a per-row revoke with a **two-step confirm**, mirroring the
+`MfaSettings` disable ceremony rather than a native `window.confirm`, because the consequence needs stating in
+the UI and a native dialog cannot say it:
+
+> Revoke *name*? Devices homed here lose their tunnel. This cannot be undone.
+
+Two-step is not ceremony for its own sake. Revoking a gateway is *wider than it looks*: it refuses that agent's
+cert renewal, so every device homed there loses its tunnel and any site transit through it stops. A one-click
+danger button beside a "last seen" label is one misclick from an outage.
+
+`loadNodes` was hoisted in `pages/Devices.tsx` and passed down as `onNodesChanged`, because the parent owns the
+`nodes` array — a child mutation that did not propagate would leave a revoked gateway rendering as active until
+a manual reload, which is the stale-render class this project has already fixed twice.
+
+No RBAC gate was added locally: the page has none today and the device revoke beside it relies on the
+established reactive-403 cap. Adding one here alone would be an inconsistency pretending to be a hardening.
+
+### Stated gap — this fold has NO automated test
+
+This repository has **no component-test tier**: all nine web test files cover pure view-models (`*view.ts`), and
+there is no `@testing-library` anywhere. Introducing that infrastructure inside a walk fold is out of scope, so
+the honest position is that the confirm interaction is proven **only by being exercised in the next walk step**,
+not by a test.
+
+Registered as an observation rather than smoothed over: **the missing component-test tier is now a recurring
+gap** — this is the second UI fold this session (after the S10.2 machine-credential panel) whose behaviour no
+test can express. It belongs in the ledger.
+
+### What "delete" would need — NOT shipped
+
+The instruction mentioned deleting a gateway. There is **no delete endpoint** and none was added: `revoke` marks
+`status='revoked'` and deliberately preserves the row's audit trail, cert serial and telemetry history. A true
+delete is WF-S11-8 option (c), which was *not* ruled — and with (a) shipped, the name is already freed, which was
+the only practical reason to want one. If a delete is wanted for tidiness rather than recovery, that is a
+separate decision about discarding audit history.

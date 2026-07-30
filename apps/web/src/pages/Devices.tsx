@@ -131,6 +131,20 @@ export default function Devices() {
     await loadDevices(org.id);
   }
 
+  // Hoisted so the Gateways child can refresh the list after revoking one (WF-S11-9). The parent owns `nodes`,
+  // so a child mutation that did not propagate would leave a revoked gateway rendering as active until reload —
+  // the stale-render class this project has fixed twice.
+  async function loadNodes(orgId: string) {
+    const { data, error } = await api.GET("/api/v1/organizations/{orgId}/nodes", {
+      params: { path: { orgId } },
+    });
+    if (error) {
+      setError(apiErrorMessage(error, "Could not load gateway nodes."));
+      return;
+    }
+    setNodes(data ?? []);
+  }
+
   async function revoke(id: string) {
     if (!org) return;
     setError(null);
@@ -173,7 +187,7 @@ export default function Devices() {
 
       {org && (
         <div className="mt-6">
-          <Gateways org={org} nodes={nodes} />
+          <Gateways org={org} nodes={nodes} onNodesChanged={() => loadNodes(org.id)} />
         </div>
       )}
 
