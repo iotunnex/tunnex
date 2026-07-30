@@ -168,6 +168,13 @@ type Service struct {
 	// ovpnCRL (S9.1 Slice 5, optional) — the org's signed CRL PEM for delivery (crl-verify always-on).
 	// Wired to ovpn.Service.GetCRL (lazy-inits an empty CRL once). nil → no CRL delivered (pre-Slice-5).
 	ovpnCRL func(ctx context.Context, orgID uuid.UUID) (string, error)
+	// pushOrg (S13.1) fans a change out to every ACTIVE gateway in an org — the full-sweep reconciliation
+	// signal, wired to the nodepush hub exactly as devices.PushOrgNodes is. Called AFTER a re-key transaction
+	// commits, never inside it: a database transaction must not depend on a network call to a fleet, or a slow
+	// gateway holds a write lock on the node row and a failed push rolls back a re-key that already succeeded
+	// cryptographically. nil → no push (open build / tests); the recovering agent's own next reconcile still
+	// converges it.
+	pushOrg func(ctx context.Context, orgID uuid.UUID)
 }
 
 // NewService builds the node service.
@@ -189,6 +196,9 @@ func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, 
 func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) {
 	s.rebuildCRL = fn
 }
+
+// SetPushOrg wires the full-sweep reconciliation signal (S13.1). Called after a re-key commits.
+func (s *Service) SetPushOrg(fn func(ctx context.Context, orgID uuid.UUID)) { s.pushOrg = fn }
 
 // SetOVPNCRLProvider wires the org CRL delivery (Slice 5) — ovpn.Service.GetCRL.
 func (s *Service) SetOVPNCRLProvider(fn func(ctx context.Context, orgID uuid.UUID) (string, error)) {
