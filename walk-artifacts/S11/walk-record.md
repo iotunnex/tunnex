@@ -1231,3 +1231,108 @@ points at the cause, because the gateway rendering the problem is `revoked` and 
 
 Belongs with the **gateway recovery** story: "what happens when a gateway comes back" and "what is cleaned up when
 one goes away" are the same subject, and this is the going-away half.
+
+---
+
+## Criterion 6 — **PASS.** Leg 6 is 6 of 6. THE WALK IS COMPLETE.
+
+```
+   name   | max_ver | refused |   applied    |      policy_reported_at
+ aws-gw-1 |    6    |    0    | df87259122ac | 2026-07-30 05:57:45.110931+00
+```
+
+CP at **protocol version 7**; this agent's ceiling is **6**; it **applied** an artifact and **refused nothing**.
+That is the N/N-1 contract as a *mechanism* rather than a promise: `RequiredVersion` is content-derived, so an org
+using no v7-only features receives a v6 artifact its v6 agent applies correctly. `TestNMinusOneAgentsCanStillApply`
+asserts it in a unit; this is it on the wire, against a real agent from a real released image
+(`v0.3.0-rc4`) that was never built for this test.
+
+Confirmed independently in the product: the Sites page renders **`policy v6`** beside the AWS/Azure gateways and
+**`policy v7`** beside `k8s` — the version derivation is visible to an operator, not only in a hash column.
+
+Read twice, one reconcile interval apart, deliberately: the first read of this node showed `applied_hash NULL`
+and led to a wrong finding (below).
+
+---
+
+## WF-S11-12 — **WITHDRAWN.** Diagnosed twice from a single read of a reconciling system.
+
+The finding was recorded as "a gateway with no policy artifact renders `healthy`", from one point-in-time read
+where `applied_hash` was NULL. It is now `df87259122ac`: the agent simply had not yet reported its policy hash.
+The steady state is **legitimately healthy** — pushed == applied, artifact applied, `wg0` up. Health was telling
+the truth the whole time.
+
+Three positions on one finding in one session: raised, withdrawn for the wrong reason (the edition confound),
+reinstated on the same bad evidence, now withdrawn correctly. The narrow lesson, which is worth more than the
+finding was: **a desired-state system cannot be diagnosed from a single observation.** Two reads separated by a
+reconcile interval are the minimum before asserting anything about sync state — and this codebase's whole design
+premise is continuous reconciliation, so the instrument had to match the subject.
+
+The real defect it kept pointing at is **WF-S11-8(b)** — the orphaned site binding — already recorded. The
+gateway is healthy *and* orphaned; those are different facts, and only one of them is a health-reporting problem.
+
+---
+
+## Closing cluster — recorded, NOT chased (budget rule)
+
+The Sites page (`/sites`) shows three more instances of already-recorded classes. They are logged for the
+gateway-recovery paper and deliberately left unfixed: each would be a third consecutive change to health
+rendering, which is precisely what the budget rule forbids after WF-S11-10 and 10b.
+
+- **WF-S11-10c — the revoked-badge defect exists in a SECOND component.** `aws-site` renders
+  `aws-gw-1  revoked  offline  site link down`. WF-S11-10's fix was applied to `Gateways.tsx`; the Sites page has
+  its own renderer and still badges revoked rows. **This is the gap in my own census**:
+  `TestEveryHealthKindReachesItsMirrorSurfaces` verifies each *kind* has a case in `healthview.ts` — it does not
+  verify that every *call site* rendering health applies the revoked suppression. Reaching a surface and being
+  used correctly by that surface are different properties, which is the same distinction WF-S11-10b was about.
+- **WF-S11-14's UI face.** `aws-site` reads **"2 gateways"**, both dead — the revoked `aws-gw-1` and the
+  cert-expired `aws-gw-2` — while the live, healthy, artifact-applying `aws-gw-1` is absent because its binding
+  was orphaned. A site that has a working gateway renders as a site with two broken ones.
+- **Same-name ambiguity in the hub-pin list.** One `aws-gw-1` row appears with a `pin #4` control and no
+  indication of which of the two same-named rows it is. Migration 0056 made duplicate names possible and the
+  query census covered *lookups*; it did not cover **pickers**. A human choosing between two identical labels is
+  a surface the census never considered.
+
+---
+
+# WALK VERDICT
+
+**Legs 0–6 complete. Both owed debts discharged on the wire.**
+
+| leg | proves | verdict |
+|---|---|---|
+| 0 | provenance, 14 kinds, metrics port unreachable from the host | ✅ |
+| 1 | fleet baseline; corroborated the health gauge independently | ✅ |
+| 2 | backup per the runbook: fingerprint present, no key material | ✅ |
+| **3** | **trust after restore** — identical cert serials, no re-enrolment, counters advanced, **919 packets zero gaps** | ✅ **owed debt** |
+| 4 | wrong-key restore refused, exit 2, fleet unmutated | ✅ |
+| **5** | **HA under a roll** — leadership moved in 2.5s, **an observed instant with no leader**, never two, no data-path loss | ✅ **owed debt** |
+| 6 | preflight refuses then passes · migrate idempotent · CP rolls · gateway reconciles untouched · **N-1 agent applies a v6 artifact from a v7 CP, refusing nothing** | ✅ |
+
+**Findings: 15 (6 HIGH, 4 MEDIUM, 4 LOW, 1 walk-integrity), 1 withdrawn.**
+
+Nine folded with guards during the walk; WF-S11-6(c), -8(b), -11, -14 and the closing cluster carry into the
+**gateway recovery** story.
+
+## What this walk actually established
+
+**Every mechanism EPIC 11 built works. Five of the six HIGH findings are the same defect class** — a mechanism
+that works, a procedure around it that does not, and documentation asserting the procedure. Three of those five
+are *one sentence* in `self-host.md`:
+
+> *"A lost gateway: re-enrol it (one pasted command). Nothing needs restoring."*
+
+The cert has expired and cannot renew · the name is held forever · the agent discards your token. Tonight that
+sentence cost **four hand-run steps, a wrong host, a volume pinned by a container that exited six days earlier,
+and an undocumented deletion** — for a machine that had merely been switched off. That sentence has never been
+executed against a gateway that previously existed.
+
+**And three of tonight's checks could not fail.** A witness log that died nine minutes before the leg it
+certified and still returned clean. A red that asserted a tautology and passed with its own fix removed. A
+provenance census that verified the commit but not the edition, so the product silently changed under the walk
+for several legs. Each was caught by asking *"could this have failed?"* rather than *"did it pass?"*
+
+That is the walk's most valuable output, above any single finding: **the guards themselves needed guarding.**
+Two guards and one census — all green, all vacuous. The epic that built a security-CI tier, a metrics floor and
+five censuses also demonstrated that a check written in the same breath as its fix encodes the author's belief
+about the fix rather than the behaviour of the system.
