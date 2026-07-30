@@ -69,31 +69,46 @@ func main() {
 	nodeName = identity.EffectiveName(verdict, nodeName)
 
 	switch verdict.Action {
+	case identity.Recover:
+		// S13.1 (review #2): RE-KEY FIRST, token second. Proof of possession recovers this node IN PLACE — same id,
+		// same site binding, same devices — where a token enrolment creates a new node and discards all three. The
+		// trigger is local: identity.Decide reached this verdict from this agent's own clock against its own stored
+		// certificate, with no network call, so a transient outage cannot land here.
+		if c, k, ca := attemptRekey(ctx, logger, apiURL, certDir, certPEM, keyPEM, caPEM, nodeName); len(c) > 0 {
+			certPEM, keyPEM, caPEM = c, k, ca
+			nodeName = identity.EffectiveName(identity.Decide(certPEM, nil, nodeName, false, time.Now()), nodeName)
+			break
+		}
+		// Re-key exhausted (refused persistently, or the context ended). A token, if present, is the FALLBACK: it
+		// costs this node's identity, which is why it is not tried first.
+		if !verdict.HaveToken {
+			logger.Error("agent_unrecoverable",
+				slog.String("reason", "re-key was refused and no join token is available"),
+				slog.String("remedy", "mint a join token in the control plane and restart this agent with "+
+					"TUNNEX_JOIN_TOKEN set"))
+			<-ctx.Done()
+			return
+		}
+		logger.Warn("agent_falling_back_to_join_token",
+			slog.String("note", "re-key did not succeed; enrolling with the join token. This creates a NEW node: "+
+				"its site binding must be re-applied and devices homed on the old node need re-issuing"))
+		if c, k, ca, ok := enrollWithToken(ctx, logger, apiURL, certDir, joinToken, nodeName); ok {
+			certPEM, keyPEM, caPEM = c, k, ca
+		} else {
+			// DO NOT EXIT. An enrolment refusal (a name still held by this node's own expired row, a consumed
+			// token, a CP mid-restart) is a condition a control-plane change can resolve, and exiting forfeits the
+			// reconciliation that would have fixed it — turning a recoverable state into CrashLoopBackOff. Idle
+			// with liveness up and readiness false, which is what this agent did before S13.1 touched the path.
+			<-ctx.Done()
+			return
+		}
+
 	case identity.Idle:
 		// Liveness stays up, readiness stays false. LOUD, and naming the remedy rather than the condition.
 		logger.Error("agent_no_usable_identity",
 			slog.String("reason", verdict.Reason),
 			slog.String("remedy", verdict.Evidence),
 			slog.String("state_dir", certDir))
-
-		// S13.1: an EXPIRED certificate is the one idle reason that may be recoverable without an operator — the
-		// agent still holds the private key, and proving possession of it re-attests a grant the control plane
-		// already made. Anything else (no identity at all, an unreadable one) needs a join token, so it idles.
-		//
-		// THE TRIGGER IS LOCAL, and deliberately so: `identity.Decide` reached this verdict from the agent's own
-		// clock against its own stored certificate, with NO network call. A failed handshake, a partitioned
-		// control plane and a transient outage cannot reach here — which is what stops this from hammering an
-		// unauthenticated endpoint during any ordinary blip.
-		if verdict.Reason == "stored_identity_expired" || verdict.Reason == "stored_identity_expired_no_token" {
-			certPEM, keyPEM, caPEM = attemptRekey(ctx, logger, apiURL, certDir, certPEM, keyPEM, caPEM, nodeName)
-			if len(certPEM) == 0 {
-				<-ctx.Done()
-				return
-			}
-			nodeName = identity.EffectiveName(
-				identity.Decide(certPEM, nil, nodeName, false, time.Now()), nodeName)
-			break
-		}
 		<-ctx.Done()
 		return
 
@@ -103,28 +118,18 @@ func main() {
 			slog.String("reason", verdict.Reason),
 			slog.String("evidence", verdict.Evidence))
 		if verdict.StoredCN != "" {
-			// A REPLACEMENT, not a first enrolment — say so, and name what is being replaced.
 			logger.Warn("agent_replacing_unusable_identity",
 				slog.String("stored_cn", verdict.StoredCN),
 				slog.String("enrolling_as", nodeName),
 				slog.Bool("name_mismatch", verdict.NameMismatch))
 		}
-		key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
-		if gerr != nil {
-			logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
-			os.Exit(1)
+		c, k, ca, ok := enrollWithToken(ctx, logger, apiURL, certDir, joinToken, nodeName)
+		if !ok {
+			// Same reasoning as the Recover fallback: never exit on a condition the control plane can resolve.
+			<-ctx.Done()
+			return
 		}
-		res, eerr := control.Enroll(ctx, apiURL, joinToken, csr, nodeName, version(), protocolVersion)
-		if eerr != nil {
-			logger.Error("agent_enroll_failed", slog.String("error", eerr.Error()))
-			os.Exit(1)
-		}
-		certPEM, keyPEM, caPEM = []byte(res.CertPEM), key, []byte(res.CAPEM)
-		if serr := saveCreds(certDir, certPEM, keyPEM, caPEM); serr != nil {
-			logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
-			os.Exit(1)
-		}
-		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
+		certPEM, keyPEM, caPEM = c, k, ca
 
 	case identity.UseStored:
 		// WF-2 (S8.2c) protection, intact: a re-used VM keeps its OLD identity and org rather than silently
@@ -411,12 +416,34 @@ func loadCreds(dir string) (cert, key, ca []byte, err error) {
 	return cert, key, ca, nil
 }
 
+// saveCreds writes the credential set so that a crash leaves EITHER the old set or the new set, never a mixture
+// (review #3).
+//
+// The previous version wrote cert.pem, key.pem and ca.pem with three separate os.WriteFile calls, iterating a Go
+// map — so the order was randomised per run and a crash between two writes could persist a NEW certificate beside
+// an OLD key. That combination authenticates as nothing: the cert does not match the key, so the agent cannot use
+// the mTLS channel, and it cannot prove possession of the key the control plane recorded either. A gateway lands
+// in a state no recovery path covers, from an interruption that lasted milliseconds.
+//
+// Every file is written to a temp name and renamed. rename(2) within a directory is atomic, so each file is either
+// wholly old or wholly new; and the KEY is renamed LAST, because the key is what proves identity — if the sequence
+// is interrupted, the old key still matches the old certificate and the agent remains recoverable.
 func saveCreds(dir string, cert, key, ca []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for name, data := range map[string][]byte{"cert.pem": cert, "key.pem": key, "ca.pem": ca} {
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+	// Deterministic order, key last. A map range would randomise it, which is how the interrupted-write hazard
+	// became unpredictable rather than merely possible.
+	type f struct {
+		name string
+		data []byte
+	}
+	for _, w := range []f{{"ca.pem", ca}, {"cert.pem", cert}, {"key.pem", key}} {
+		tmp := filepath.Join(dir, w.name+".tmp")
+		if err := os.WriteFile(tmp, w.data, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, w.name)); err != nil {
 			return err
 		}
 	}
@@ -778,4 +805,38 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// enrollWithToken enrolls with a join token, returning ok=false rather than exiting on failure.
+//
+// NEVER os.Exit HERE (review finding #2). An enrolment refusal is frequently something a control-plane change
+// resolves: the node's name is still held by its own expired-but-not-revoked row (409), the token was already
+// consumed, the CP is mid-restart. Exiting forfeits the reconciliation that would have fixed it and converts a
+// recoverable condition into CrashLoopBackOff — which is strictly worse than idling with liveness up and readiness
+// false, the behaviour this agent had before S13.1 touched the path.
+//
+// THE GENERAL RULE, recorded in docs/S13.1-decisions.md: an agent must never exit on a condition that a
+// control-plane change could resolve.
+func enrollWithToken(ctx context.Context, logger *slog.Logger, apiURL, certDir, joinToken, nodeName string) (certPEM, keyPEM, caPEM []byte, ok bool) {
+	key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
+	if gerr != nil {
+		logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
+		return nil, nil, nil, false
+	}
+	res, eerr := control.Enroll(ctx, apiURL, joinToken, csr, nodeName, version(), protocolVersion)
+	if eerr != nil {
+		logger.Error("agent_enroll_failed",
+			slog.String("error", eerr.Error()),
+			slog.String("note", "NOT exiting — this may be resolvable from the control plane (a name still held "+
+				"by this node's own expired row, a consumed token, a restarting CP). Liveness stays up, readiness "+
+				"stays false."))
+		return nil, nil, nil, false
+	}
+	certPEM, keyPEM, caPEM = []byte(res.CertPEM), key, []byte(res.CAPEM)
+	if serr := saveCreds(certDir, certPEM, keyPEM, caPEM); serr != nil {
+		logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
+		return nil, nil, nil, false
+	}
+	logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
+	return certPEM, keyPEM, caPEM, true
 }

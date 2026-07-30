@@ -27,8 +27,16 @@ type Action int
 const (
 	// UseStored — proceed with the stored certificate. The DEFAULT and the safe direction.
 	UseStored Action = iota
-	// UseToken — enroll fresh with the join token, replacing whatever is stored.
+	// UseToken — enroll fresh with the join token, replacing whatever is stored. Creates a NEW node.
 	UseToken
+	// Recover — re-key IN PLACE by proving possession of the stored (expired) keypair.
+	//
+	// RANKED ABOVE UseToken (S13.1, amending WF-S11-11(a)). That earlier ruling chose the token because, when it
+	// was made, the token was the ONLY recovery path — proof-of-possession did not exist. It does now, and it is
+	// strictly better: re-key returns the SAME node, keeping its id, its site binding, its devices and its metrics
+	// series, where a token enrolment creates a new node and discards all four. The original ruling is superseded
+	// by a new capability, not corrected.
+	Recover
 	// Idle — there is no usable identity AND no token. Stay up (liveness) but not ready, and say why.
 	Idle
 )
@@ -45,6 +53,9 @@ type Verdict struct {
 	// NameMismatch: the stored certificate names a different node than TUNNEX_NODE_NAME requested (WF-S11-11b).
 	// Reported SEPARATELY from Action, because on its own it must never authorize discarding a working identity.
 	NameMismatch bool
+	// HaveToken records whether a join token is also available, so a caller attempting Recover knows whether it
+	// has a fallback. Reported rather than acted on here: this package decides, the caller executes.
+	HaveToken bool
 }
 
 // Decide is the whole rule. now is injected so expiry is testable.
@@ -85,21 +96,27 @@ func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool,
 	expired := now.After(leaf.NotAfter)
 
 	// 3. EXPIRED. The case this package exists for. /agent/renew requires the certificate that expired, so no
-	//    amount of waiting recovers it — a token is the only way forward, and the stored identity is worthless.
+	//    amount of waiting recovers it.
+	//
+	//    RECOVER FIRST, token second. The agent still holds the private key the control plane recorded, so proving
+	//    possession of it re-keys this node IN PLACE — same id, same site binding, same devices. A token enrolment
+	//    would work too and would throw all of that away, so it is the FALLBACK, tried only when re-key fails.
+	//    (Review finding #2: this branch previously chose the token whenever one was present, which on the shipped
+	//    Helm shape — where TUNNEX_JOIN_TOKEN is injected on every pod start — meant re-key was never attempted at
+	//    all, and the enrolment then collided with the node's own expired-but-not-revoked row.)
 	if expired {
 		age := now.Sub(leaf.NotAfter).Round(time.Minute)
 		ev := fmt.Sprintf("stored certificate for %q expired %s ago (NotAfter %s)",
 			cn, age, leaf.NotAfter.UTC().Format(time.RFC3339))
+		fallback := " No join token is available, so re-key is the ONLY route back: if the control plane refuses " +
+			"it (this node's key predates key recording, or it was revoked), an operator must mint a join token."
 		if haveToken {
-			return Verdict{Action: UseToken, Reason: "stored_identity_expired", StoredCN: cn,
-				NameMismatch: mismatch,
-				Evidence:     ev + "; enrolling with the join token — renewal is impossible once the certificate has lapsed"}
+			fallback = " A join token is also present and is the FALLBACK — used only if re-key is refused, " +
+				"because enrolling with it would create a NEW node and discard this one's site binding and devices."
 		}
-		return Verdict{Action: Idle, Reason: "stored_identity_expired_no_token", StoredCN: cn,
-			NameMismatch: mismatch,
-			Evidence: ev + " and no join token was supplied. This gateway CANNOT recover on its own: the " +
-				"renewal endpoint requires the certificate that expired. Re-enroll it — mint a join token in " +
-				"the control plane and restart this agent with TUNNEX_JOIN_TOKEN set"}
+		return Verdict{Action: Recover, Reason: "stored_identity_expired", StoredCN: cn,
+			NameMismatch: mismatch, HaveToken: haveToken,
+			Evidence: ev + "; attempting re-key by proof of possession, which recovers this node IN PLACE." + fallback}
 	}
 
 	// 4. NAME MISMATCH ON A STILL-VALID CERTIFICATE — loud, but it does NOT authorize re-enrollment.

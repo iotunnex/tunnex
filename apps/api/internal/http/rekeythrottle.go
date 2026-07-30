@@ -74,10 +74,16 @@ func (t *rekeyThrottle) allow(remoteAddr string) bool {
 	return true
 }
 
-// clientIP strips the port. It reads RemoteAddr ONLY and deliberately ignores X-Forwarded-For: a header a caller
-// controls is not an identity, and trusting it here would let one attacker present as a million. A deployment behind
-// a proxy therefore throttles per-proxy, which is a real limitation and the honest one — resolving it needs a
-// trusted-proxy configuration, which belongs to the general mechanism rather than to this.
+// clientIP strips the port from r.RemoteAddr.
+//
+// THIS IS ONLY SAFE BECAUSE OF WHERE THE MIDDLEWARE IS REGISTERED. `middleware.RealIP` overwrites RemoteAddr from
+// client-supplied headers, so a throttle running after it keys on a value the caller chooses. This one is
+// registered BEFORE RealIP (router.go) and therefore sees the raw peer address. Review finding #1 was exactly this
+// defect: the code ignored X-Forwarded-For, and the middleware above it had already laundered that header into the
+// field being read.
+//
+// A deployment behind a proxy therefore throttles per-proxy, which is a real limitation and the honest one —
+// resolving it needs trusted-proxy configuration, which belongs to the general mechanism rather than to this.
 func clientIP(remoteAddr string) string {
 	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		return host
@@ -98,10 +104,36 @@ func (t *rekeyThrottle) throttled(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// rekeyAttemptsPerMinute is generous for a real recovering gateway (which needs two requests, once) and
-// uninteresting to an attacker, who gains nothing from a handful of guesses against a gate that requires knowing a
-// real certificate serial for a genuinely expired node.
-const rekeyAttemptsPerMinute = 10
+// rekeyAttemptsPerMinute is DERIVED from the worst legitimate case, not chosen for feeling strict.
+//
+// The binding constraint is a whole fleet recovering at once after an outage longer than the 48h certificate TTL.
+// Because the throttle keys on the RAW PEER address (it must, or the key is forgeable), every gateway behind an
+// ingress or NAT shares ONE bucket — so the budget has to cover the fleet, not one host.
+//
+// Worked through: an un-recovered agent retries on a 30s floor, so in any 60s window it makes at most 2 attempts,
+// and each attempt is 2 requests (challenge + submit) = 4 requests/min per gateway. For a 100-gateway fleet all
+// expiring together that is 400 requests/min through a single shared bucket. 600 leaves headroom for jitter and
+// clock spread without the tail: at 10/min a 100-gateway recovery would have taken over three hours, which is a
+// self-inflicted outage dressed as a security control.
+//
+// And 600/min is still a real bound on what it protects: ~10 RSA-2048 verifications per second, low single-digit
+// percent of one core, and only for requests that already named a real certificate serial for a genuinely expired
+// node — everything else is refused by a field comparison before any cryptographic work.
+//
+// SHARED-BUCKET LIMITATION, stated in the same register as the per-proxy one below: behind a proxy or NAT this is
+// a per-DEPLOYMENT budget, not a per-caller one, so one misbehaving client there can consume a recovering fleet's
+// allowance. Fixing that needs trusted-proxy configuration, which belongs to the general rate-limiting mechanism
+// (still owed — see docs/S13.1-decisions.md), not to this file.
+const rekeyAttemptsPerMinute = 600
+
+// maxRekeyBodyBytes caps the request body on the re-key routes.
+//
+// There is NO body-size limit anywhere else in apps/api — a fact worth having written down rather than
+// rediscovered (registered in docs/S13.1-decisions.md). These two routes get one now because they are
+// unauthenticated, and an unbounded body was being fully decoded and schema-validated before the throttle was
+// consulted. A CSR plus a base64 signature and nonce is a few kilobytes; 64 KiB is generous for that and still
+// refuses a megabyte.
+const maxRekeyBodyBytes = 64 << 10
 
 // rekeyOnly applies the throttle to the re-key paths and leaves every other route untouched.
 //
@@ -113,6 +145,9 @@ func rekeyOnly(t *rekeyThrottle) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/v1/agent/rekey", "/api/v1/agent/rekey/challenge":
+				// Cap the body BEFORE anything reads it. Registered ahead of the OpenAPI validator, so this is the
+				// first code that touches the request at all.
+				r.Body = http.MaxBytesReader(w, r.Body, maxRekeyBodyBytes)
 				t.throttled(next.ServeHTTP)(w, r)
 			default:
 				next.ServeHTTP(w, r)

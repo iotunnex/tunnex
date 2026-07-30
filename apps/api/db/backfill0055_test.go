@@ -67,7 +67,12 @@ func TestBackfill0055CannotFalsePositive(t *testing.T) {
 		t.Fatal(err)
 	}
 	queries := string(q)
-	if !strings.Contains(queries, "cert_not_after = $4") {
+	// SCOPED through queryBlock (review #10). This was a whole-file substring match, and this branch added a
+	// SECOND query — RekeyNode — containing the same `cert_not_after = $4` text, so the guard began passing on a
+	// coincidence: deleting the clause from RenewNodeCert would have left it green. The neighbouring CreateNode
+	// assertion was scoped in the same commit that minted the census law; this one was missed, which makes the
+	// law's first violation its own commit.
+	if !strings.Contains(queryBlock(queries, "RenewNodeCert"), "cert_not_after = $4") {
 		t.Error("RenewNodeCert must SET cert_not_after unconditionally, so a renewal overwrites a backfilled " +
 			"bound with the real NotAfter. Without that, an estimate written by 0055 outlives the condition it " +
 			"estimated")

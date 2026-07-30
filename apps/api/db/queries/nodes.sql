@@ -76,15 +76,27 @@ SET wg_public_key = @wg_public_key,
 WHERE id = @id AND status = 'active';
 
 -- name: RevokeNode :exec
--- UNBINDS THE SITE (S13.1 WF-S11-14, the other half). A revoked gateway kept its site_id, so it remained a
--- site binding visible to any consumer that did not filter on status — the stale binding at its source. Clearing
--- it makes the filtered and unfiltered readers agree by construction rather than by each remembering.
+-- KEEPS THE SITE BINDING. The unbind added for WF-S11-14 was RULED REVERSED ON EVIDENCE after review, because the
+-- status filter on ListSiteNodesForOrg was sufficient for the compiler input on its own and the unbind bought
+-- nothing while costing three things:
 --
--- The binding is not lost to history: the audit row for node.revoked records the node, and EPIC 13's D5 will
--- record the CAUSE of a revocation so a cascade can be distinguished from a deliberate act. What is cleared is
--- the LIVE binding, which is the only thing a compiler or an election should ever read.
+--   1. BindNodeToSite has no status guard and authorizes purely on site_id being NULL, so an unbound-by-revocation
+--      gateway could be bound to any site via API/CLI/GitOps — previously refused as already-bound. The site then
+--      held a dead gateway that the status-filtered compiler input excludes, so cross-site traffic was silently
+--      denied while the UI showed a gateway present: the exact policy-reads-correct-traffic-denied class the
+--      filter was added to close.
+--   2. assembleTopology joins a site's gateways with `n.site_id === s.id`, so a revoked gateway vanished from the
+--      Sites card entirely — indistinguishable from a site that never had one, and it made the badge-suppression
+--      fix landed in the same commit unreachable.
+--   3. Nothing recorded which site the gateway served. The node.revoked audit row's metadata was an empty map, so
+--      after the unbind neither UI, API nor audit log could answer it — while the docs told the operator to
+--      re-apply that very binding.
+--
+-- THE PRINCIPLE THIS ESTABLISHES CONCRETELY: revocation preserves what it invalidates. Marking a row revoked is
+-- enough; destroying the facts that explain it is not part of the job. Readers that must ignore a revoked gateway
+-- filter on status — which is one predicate in one place, versus three consequences spread across three surfaces.
 UPDATE nodes
-SET status = 'revoked', revoked_at = now(), site_id = NULL
+SET status = 'revoked', revoked_at = now()
 WHERE org_id = $1 AND id = $2;
 
 -- name: ListActiveNodeIDsForOrg :many

@@ -36,20 +36,31 @@ func certFor(t *testing.T, cn string, notAfter time.Time) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// TestExpiredIdentityYieldsToTheToken — the defect WF-S11-11 named, as a red.
+// TestExpiredIdentityRECOVERSInPlace — ASSERTION AMENDED, and the amendment is a capability change rather than a
+// correction.
 //
-// An agent holding an expired certificate and handed a valid join token previously kept the certificate, logged a
-// WARN, and looped forever: /agent/renew is behind the same client-cert requirement as every other agent route,
-// so the only endpoint that could issue a new certificate requires the one that expired. The operator did what
-// the docs prescribe and the product ignored them.
-func TestExpiredIdentityYieldsToTheToken(t *testing.T) {
+// It previously asserted UseToken: an expired certificate must yield to a join token. That was right when written,
+// because the token was the ONLY recovery path — proof of possession did not exist. It does now, and it is strictly
+// better: re-key returns the SAME node with its id, site binding, devices and metrics series intact, where a token
+// enrolment creates a new node and discards all four. So the original ruling is SUPERSEDED BY A NEW CAPABILITY, not
+// corrected.
+//
+// Review finding #2 is why this could not stay as it was: preferring the token whenever one is present meant that on
+// the shipped Helm shape — TUNNEX_JOIN_TOKEN injected on every pod start — re-key was NEVER attempted, and the
+// enrolment then collided with this node's own expired-but-not-revoked row, returning 409 and exiting the agent into
+// CrashLoopBackOff.
+func TestExpiredIdentityRECOVERSInPlace(t *testing.T) {
 	now := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
 	expired := certFor(t, "aws-gw-1", now.Add(-72*time.Hour))
 
 	v := Decide(expired, nil, "aws-gw-1", true, now)
-	if v.Action != UseToken {
-		t.Fatalf("an expired identity must yield to a join token, got action %v (%s). Keeping it is a deadlock: "+
-			"renewal requires the certificate that expired", v.Action, v.Reason)
+	if v.Action != Recover {
+		t.Fatalf("an expired identity must attempt RE-KEY first, got action %v (%s). A token enrolment would also "+
+			"work and would discard this node's identity, site binding and devices — so it is the fallback, not the "+
+			"first choice", v.Action, v.Reason)
+	}
+	if !v.HaveToken {
+		t.Error("the verdict must report that a fallback token exists, so the caller knows it has one")
 	}
 	if v.Reason != "stored_identity_expired" {
 		t.Errorf("reason must name the determination, got %q", v.Reason)
@@ -91,14 +102,14 @@ func TestNameMismatchOnAValidCertKEEPSTheIdentity(t *testing.T) {
 	}
 }
 
-// TestMismatchAndExpiredYieldsToTheToken — the composition. Once the certificate is dead there is nothing left to
-// protect, so the mismatch no longer argues for keeping it.
-func TestMismatchAndExpiredYieldsToTheToken(t *testing.T) {
+// TestMismatchAndExpiredAttemptsRecovery — the composition. Once the certificate is dead there is nothing left to
+// protect, so the mismatch no longer argues for keeping it. (Amended from UseToken to Recover with the rest.)
+func TestMismatchAndExpiredAttemptsRecovery(t *testing.T) {
 	now := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
 	dead := certFor(t, "azure-gw", now.Add(-1*time.Hour))
 
 	v := Decide(dead, nil, "aws-gw-1", true, now)
-	if v.Action != UseToken {
+	if v.Action != Recover {
 		t.Fatalf("expired beats mismatch: an unusable certificate is not worth protecting, got %v (%s)",
 			v.Action, v.Reason)
 	}
@@ -136,12 +147,19 @@ func TestUncertaintyFailsTowardTheStoredIdentity(t *testing.T) {
 func TestUnusableWithoutATokenIdlesLOUDLY(t *testing.T) {
 	now := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
 
-	v := Decide(certFor(t, "gw", now.Add(-time.Hour)), nil, "gw", false, now)
+	// AMENDED: an EXPIRED certificate with no token no longer idles — it attempts re-key, which needs no token
+	// because the proof is the stored key itself. Only an identity that cannot prove anything idles.
+	if v := Decide(certFor(t, "gw", now.Add(-time.Hour)), nil, "gw", false, now); v.Action != Recover {
+		t.Fatalf("expired with no token must still ATTEMPT re-key — proof of possession needs the stored key, not "+
+			"a token; got %v (%s)", v.Action, v.Reason)
+	}
+	// An UNREADABLE identity is the real idle case: nothing to prove possession OF, and no token to fall back on.
+	v := Decide([]byte("garbage"), nil, "gw", false, now)
 	if v.Action != Idle {
-		t.Fatalf("expired with no token must idle, not proceed into a retry loop that cannot succeed; got %v", v.Action)
+		t.Fatalf("an unreadable identity with no token must idle; got %v", v.Action)
 	}
 	// The remedy, not just the condition — the teaching-text convention.
-	for _, want := range []string{"CANNOT recover", "Re-enroll", "TUNNEX_JOIN_TOKEN"} {
+	for _, want := range []string{"re-enrolled", "no join token"} {
 		if !strings.Contains(v.Evidence, want) {
 			t.Errorf("the idle message must name the REMEDY; missing %q in %q", want, v.Evidence)
 		}
@@ -183,7 +201,7 @@ func TestExpiryBoundaryIsExclusive(t *testing.T) {
 		t.Errorf("at exactly NotAfter the certificate is still usable, got %v (%s) — a fast clock must not "+
 			"re-enroll a live gateway", v.Action, v.Reason)
 	}
-	if v := Decide(c, nil, "gw", true, notAfter.Add(time.Nanosecond)); v.Action != UseToken {
+	if v := Decide(c, nil, "gw", true, notAfter.Add(time.Nanosecond)); v.Action != Recover {
 		t.Errorf("one instant past NotAfter it is expired, got %v (%s)", v.Action, v.Reason)
 	}
 }
@@ -212,10 +230,7 @@ func TestRekeyCannotBeTriggeredByConnectionFAILURE(t *testing.T) {
 	// VERDICT-SET assertion: the only reasons that may authorize a re-key attempt are the two locally-provable
 	// expiry verdicts. If a new reason is added, this list must be revisited deliberately — and in particular no
 	// reason derived from reachability may appear, because none can be: see the signature above.
-	rekeyable := map[string]bool{
-		"stored_identity_expired":          true,
-		"stored_identity_expired_no_token": true,
-	}
+	rekeyable := map[string]bool{"stored_identity_expired": true}
 	now := time.Now()
 	all := []Verdict{
 		Decide(nil, errors.New("missing"), "gw", false, now),                  // no_identity_no_token

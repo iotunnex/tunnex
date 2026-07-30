@@ -100,14 +100,31 @@ func TestRevokedGatewayGetsNoSitePlacement(t *testing.T) {
 			"one, not the site (node %s)", second)
 	}
 
-	// HALF 2 — the UNBIND: site_id is cleared at source, so even a consumer that forgets to filter sees nothing.
+	// THE BINDING IS PRESERVED — ASSERTION REVERSED, and the reversal is a ruling overturned on evidence.
+	//
+	// This previously asserted that revocation must CLEAR site_id ("no stale binding for an unfiltered reader to
+	// find"). Review found the unbind bought nothing and cost three things, so it was reverted and the filter kept:
+	//
+	//   1. BindNodeToSite authorizes purely on site_id being NULL and has no status guard, so an
+	//      unbound-by-revocation gateway could be bound to any site via API/CLI/GitOps — previously refused as
+	//      already-bound. The site then held a dead gateway the status-filtered compiler input excludes, so
+	//      cross-site traffic was silently denied while the UI showed a gateway present.
+	//   2. assembleTopology joins on `n.site_id === s.id`, so a revoked gateway vanished from the Sites card
+	//      entirely — indistinguishable from a site that never had one, and it made the badge-suppression fix from
+	//      the same commit unreachable.
+	//   3. Nothing recorded which site the gateway served, while the docs told the operator to re-apply it.
+	//
+	// REVOCATION PRESERVES WHAT IT INVALIDATES. Marking the row revoked is the job; destroying the facts that
+	// explain it is not. Readers that must ignore a revoked gateway filter on status — one predicate in one place,
+	// versus three consequences across three surfaces.
 	var boundAfter *uuid.UUID
 	if err := pool.QueryRow(f.ctx, `SELECT site_id FROM nodes WHERE id=$1`, f.node).Scan(&boundAfter); err != nil {
 		t.Fatalf("read binding: %v", err)
 	}
-	if boundAfter != nil {
-		t.Errorf("revocation must UNBIND the site (site_id = NULL), leaving no stale binding for an unfiltered "+
-			"reader to find; still bound to %s", *boundAfter)
+	if boundAfter == nil {
+		t.Error("revocation must PRESERVE the site binding: it is the only surviving record of which site the " +
+			"gateway served, the Sites card needs it to render the revoked row at all, and clearing it unguards " +
+			"BindNodeToSite. The status filter is what keeps a revoked gateway out of compilation")
 	}
 }
 

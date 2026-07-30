@@ -3,6 +3,8 @@ package http
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +74,58 @@ func TestThrottleRefusalLeaksNothing(t *testing.T) {
 				t.Errorf("the refusal body must carry no detail; got %q", body)
 			}
 		}
+	}
+}
+
+// TestThrottleIsRegisteredBeforeRealIP — the guard that would have caught review finding #1, and did not exist.
+//
+// WHY THE OTHER TESTS IN THIS FILE COULD NOT. They call `th.throttled(...)` directly on a bare httptest request, so
+// they prove the throttle ignores X-Forwarded-For *in isolation*. The defect was not in the throttle: it was in the
+// CHAIN. `middleware.RealIP` overwrites r.RemoteAddr from client-supplied True-Client-IP / X-Real-IP / leftmost
+// X-Forwarded-For, so a throttle registered after it keys on a value the caller chooses — and a unit test that never
+// runs RealIP cannot see that. The guard asserted a property the production path did not have, and passed.
+//
+// So this asserts the REGISTRATION ORDER, which is where the property actually lives. chi runs r.Use middleware in
+// registration order, so rekeyOnly must appear before middleware.RealIP for the raw peer address to survive — and
+// before the OpenAPI validator, so a refused request does not pay a full body decode first (finding #4).
+//
+// Source-order assertion, scoped to NewRouter per the census law: matching these calls anywhere in the file would be
+// matching a coincidence of the text, and the comments above them name both symbols while explaining the ordering.
+func TestThrottleIsRegisteredBeforeRealIP(t *testing.T) {
+	raw, err := os.ReadFile("router.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "func NewRouter(")
+	if start < 0 {
+		t.Fatal("NewRouter not found — the guard would vouch for nothing")
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(src[start:], "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(line + "\n")
+	}
+	body := code.String()
+
+	throttle := strings.Index(body, "rekeyOnly(")
+	realIP := strings.Index(body, "middleware.RealIP")
+	validator := strings.Index(body, "OapiRequestValidator")
+
+	if throttle < 0 {
+		t.Fatal("the re-key throttle must be registered — two unauthenticated routes depend on it")
+	}
+	if realIP >= 0 && throttle > realIP {
+		t.Error("rekeyOnly MUST be registered before middleware.RealIP. RealIP rewrites r.RemoteAddr from " +
+			"client-supplied headers, so a throttle running after it keys on a value the attacker chooses: varying " +
+			"one header gives every request a fresh bucket and the cap never engages, on an unauthenticated route " +
+			"that performs RSA verification (review #1)")
+	}
+	if validator >= 0 && throttle > validator {
+		t.Error("rekeyOnly MUST be registered before the OpenAPI request validator, or every refused request still " +
+			"pays a full body decode and schema validation before the 429 — spending exactly the CPU and memory " +
+			"the throttle exists to protect (review #4)")
 	}
 }
