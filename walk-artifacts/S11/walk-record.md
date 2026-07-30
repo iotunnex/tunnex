@@ -1018,3 +1018,79 @@ broken, and would be right.
 **Recorded as walk-procedure cost, not blame:** three attempts, a wrong host, a pinned volume, and an undocumented
 step — for the ordinary case of a gateway that was switched off. This is the operational reality behind ruling the
 **gateway recovery** story beta-blocking.
+
+---
+
+## Criterion 6 — WF-S11-8(a) PROVEN on the wire, and the N-1 witness is live
+
+Enrollment under the freed name succeeded on the deployment where the wall was found:
+
+```
+"msg":"agent_enrolling","node_name":"aws-gw-1"
+"msg":"agent_enrolled","node_id":"019fb18b-ea05-7455-9d3a-b93b0dc1539d"
+"msg":"agent_wg_key_reported","public_key":"zJYoUxPYdjGZNXBgYsyvcc+ixV77bBl6zERHPS15UCQ="
+"msg":"agent_ready"
+```
+
+```
+   name   | status  | max_ver |        cert_not_after         |      policy_reported_at
+ aws-gw-1 | revoked |    6    | 2026-07-27 06:13:03.614498+00 | 2026-07-25 06:13:03.614498+00
+ aws-gw-1 | active  |    6    | 2026-08-01 05:42:44.481299+00 | 2026-07-30 05:43:15.112863+00
+```
+
+| check | verdict |
+|---|---|
+| two rows share the name, one revoked one active | ✅ **WF-S11-8(a) on the wire** — the partial index under real data |
+| `max_ver 6` against a CP at 7 | ✅ the N-1 witness is live |
+| `cert_not_after` **genuinely stamped** (+48h from enrolment, microseconds distinct from `policy_reported_at`) | ✅ closes the overwrite-path observation previously red-covered-but-unobserved |
+| `preflight` no longer lists it | ✅ bricked list is now `[azure-gw, aws-gw-2]`; neither `aws-gw-1` row appears |
+
+**The gauge reached `healthy` for the first time in the walk:**
+
+```
+cert_expired_cannot_reconnect 2    healthy 1    site_link_down 1
+```
+
+Sums to 4 (the non-revoked count), and the metric has now demonstrated **four distinct kinds including
+`healthy`** — retiring Leg 0's open item completely. A metric that had only ever shown one value is
+indistinguishable from a stuck one; this one moves, and can reach green.
+
+### Three hand-run steps that WF-S11-6/8/11 cost, recorded
+
+For the ordinary case of a machine being switched off: **revoke via a UI action that did not exist until this
+walk** → **destroy a Docker volume named in no document** (which failed first time: a container that exited six
+days ago, `tunnex-node-old`, still pinned it) → **re-enroll**, after a previous attempt silently discarded a valid
+token. Plus a fourth still to come — re-binding the site.
+
+### WF-S11-12 — a gateway with NO policy artifact renders `healthy`
+
+**Severity: MEDIUM. HALTED, not patched — see the reason below.**
+
+```
+aws-gw-1 | active | site_id NULL | applied_hash NULL     -> kind: healthy
+```
+
+`pushed[n.ID]` is `""` for an unbound gateway and `caps.PolicyHash` is `""`, so `pushed == applied` and the
+projection returns `healthy`. Defensible in the abstract: nothing desired, nothing applied, genuinely in sync.
+
+In context it is the **reassuring-green trap** — the class `site_subnet_unreachable` was minted for. This gateway
+is a ZTNA enforcement point that has just come back from a rebuild, enforces nothing, serves no devices, and lost
+its site membership for a reason invisible to the operator. `wg0` has no peers. Green is the one thing it should
+not say.
+
+**It is also live proof of why WF-S11-8(b) matters**: the gateway is green *because* the rebuild orphaned its site
+binding. The revoked row still carries `site_id 019f8e4a-…` and `applied_hash 152716a5fa58`; the new row carries
+neither. (a) made the name reusable; (b) is what makes the gateway the *same* gateway.
+
+**Why halted rather than fixed.** WF-S11-10 and WF-S11-10b were both fold-induced defects in this exact
+health-kind path. The budget rule is explicit that repeated fold-induced defects in one component mean HALT, paper
+the state model, **reduce not patch** — and a third mid-walk change to the same component is precisely the
+pattern it forbids. Options for disposition:
+
+- **(a) Paper the state model.** What does health mean over an EMPTY desired state? A distinct kind
+  (`no_policy_assigned`), or `desync_unknown`, or unboundedness as a separate axis like `ovpn_health`. A design
+  question, not a condition. **Recommended, inside the gateway-recovery story** — an orphaned rebuild reading
+  green is the same subject as the orphaning.
+- **(b) Narrowest fix** — set `PushKnown: false` when a node has no site and no grants, yielding
+  `desync_unknown`. Small, but it overloads "we could not determine" with "there is nothing to determine", two
+  states this project has repeatedly refused to merge.
