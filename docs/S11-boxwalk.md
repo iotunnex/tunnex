@@ -171,12 +171,20 @@ will actually hit.
 ```bash
 # [azure-cp] a deliberately WRONG key — scratch material, gitignore at creation
 head -c 32 /dev/urandom | base64 > /tmp/wrong-master.key    # NEVER commit this
-sudo docker run --rm --network tunnex_default \
-  -v /tmp/wrong-master.key:/wrong.key:ro -v /tmp/walk.manifest.json:/m.json:ro \
+# --entrypoint IS REQUIRED. The image's ENTRYPOINT is tunnex-api, so passing the binary as an
+# ARGUMENT runs the SERVER with an ignored argv — it boots, migrates, and dies on its own
+# wrong-key guard, which looks like a refusal but is a different one. (Walk error, recorded.)
+# -i IS ALSO REQUIRED: without it the container's stdin is closed and the manifest never
+# arrives (`read manifest: EOF`). The redirect feeds the docker CLIENT, not the container.
+sudo docker run --rm -i --network tunnex_default --entrypoint /usr/local/bin/backupctl \
+  -v /tmp/wrong-master.key:/wrong.key:ro \
   -e TUNNEX_MASTER_KEY_FILE=/wrong.key -e TUNNEX_SECRETS_DIR=/tmp/s \
   -e DATABASE_URL="postgres://tunnex:tunnex_dev_password@postgres:5432/tunnex?sslmode=disable" \
-  tunnex-api /usr/local/bin/backupctl verify < /tmp/walk.manifest.json; echo "exit=$?"
+  tunnex-api verify < /tmp/walk.manifest.json; echo "exit=$?"
 ```
+
+Note the other legs invoke these tools via `docker compose exec`, which does **not** apply `ENTRYPOINT` — only
+this `docker run` needed the override.
 
 - **PASS:** `REFUSING TO RESTORE`, **exit 2**, the message naming **both fingerprints**, the **agent CA**, and
   the word **orphaned**. And critically: **nothing was written** — re-run Leg 3's `cert_serial` query and

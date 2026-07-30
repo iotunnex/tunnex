@@ -193,10 +193,92 @@ This is the claim in `self-host.md` — *"the control plane degrades; tunnels su
 wire instead of an assertion. The schema was dropped and recreated under a live tunnel and the data path never
 noticed.
 
-**Observation, under test, not a finding yet:** two packets returned in exactly 2× baseline (`seq=892` at
-`09:06:07`, `seq=917` at `09:06:32`) — 25 s apart, matching the peers' `persistent keepalive: every 25 seconds`.
-No loss either time. n=2 is suggestive, not conclusive; periodicity being checked across the whole log before
-it is called jitter or a pattern.
+**Observation, tested and closed — and it exonerates this leg.** Two packets returned at exactly 2× baseline,
+25 s apart, matching the peers' `persistent keepalive: every 25 seconds`. n=2 being suggestive rather than
+conclusive, the whole log was swept: **47 of 919 packets (~5%) exceed 400 ms**, at sequences
+`0, 20, 45, 55, 80, 105, 115, 140, 165, 175, 200, 224, 234, …` — spacing `25, 25, 10` repeating, a 60-second
+cycle with three events at +0/+25/+50. That is keepalive-correlated, one extra RTT, **zero packets lost**.
+
+The decisive detail is that it begins at **`icmp_seq=0`**, fifteen minutes before the restore. Pre-existing and
+unrelated to Leg 3 — which is why it was worth measuring rather than calling "jitter," the comfortable answer
+that would have left an unexplained latency pattern sitting inside the walk's headline evidence.
+
+---
+
+## Leg 4 — the CATASTROPHIC case proven SAFE — **PASS, all four**
+
+```
+REFUSING TO RESTORE
+
+master key mismatch: this control plane's master key (fingerprint 2dc7a85e04a7) is NOT the key
+this backup was sealed under (fingerprint 912f6a205877).
+
+Restoring anyway would produce a control plane that starts, serves, and CANNOT READ ITS OWN
+AGENT CA — every enrolled gateway would be orphaned and would have to re-enroll.
+Restore the master key that belongs to this backup, then retry. The key is never contained in
+the backup; it is the separate artifact you were asked to custody.
+exit=2
+```
+
+| criterion | verdict |
+|---|---|
+| exit **2**, distinct from exit 1 (couldn't evaluate) | ✅ |
+| **both** fingerprints named | ✅ `2dc7a85e04a7` vs `912f6a205877` |
+| names **AGENT CA** and **orphaned** | ✅ verbatim, plus the re-enrol consequence and the custody reminder |
+| fleet unmutated afterwards | ✅ four cert serials unchanged |
+
+The refusal states the **consequence**, not merely the mismatch. That is the property that makes it effective:
+an operator mid-incident who reads "starts, serves, and CANNOT READ ITS OWN AGENT CA" does not reach for a
+`--force`.
+
+**A suspicion disproved, in the good direction.** The first (invalid) attempt suggested `backupctl` might share
+the server's bootstrap path, which would have meant `verify` runs migrations on the way to refusing — violating
+the read-only contract that makes "run it before you touch anything" safe advice. The valid run emitted **no
+`schema_migrated` line**. `verify` is genuinely read-only.
+
+### Two walk-procedure errors in this leg, both mine
+
+Recorded because the runsheet is an artifact under test and a procedure that needs three attempts is a
+procedure with a defect.
+
+1. **Missing `--entrypoint`.** `api.Dockerfile` sets `ENTRYPOINT ["/usr/local/bin/tunnex-api"]`, so
+   `docker run … tunnex-api /usr/local/bin/backupctl verify` ran *the server* with an ignored argv. It booted,
+   migrated, and died on its own wrong-key guard — an exit 1 that looks like a refusal but is a different one.
+   Every other leg uses `docker compose exec`, which does not apply `ENTRYPOINT`; only this `docker run` needed
+   the override.
+2. **Missing `-i`.** Without it the container's stdin is closed and the redirect feeds the docker *client*:
+   `read manifest: EOF`, exit 1.
+
+Both folded into `docs/S11-boxwalk.md` with the reason inline, so the next reader does not re-derive them.
+
+### An unplanned proof, from error 1
+
+The invalid run produced evidence worth keeping — the **control plane refusing to start under a wrong master
+key**:
+
+```
+"msg":"agent_ca_failed","error":"agent CA exists but is unusable; refusing to regenerate
+ (a new CA would orphan every enrolled agent): decrypt CA key: cipher: message authentication failed"
+```
+
+`self-host.md` §2 claims "a mis-set or malformed key fails startup loudly, and Tunnex never regenerates."
+Proven on the wire, by accident, at the server tier rather than the tool tier — a second independent guard on
+the same catastrophe.
+
+**Observation from it, registered:** the server ran migrations *before* validating the master key
+(`schema_migrated version 53` precedes `agent_ca_failed`). Harmless as observed — the schema was already at 53
+and migrations carry no key material — but the ordering means a wrong-key boot touches the schema before
+discovering it cannot work. Key-first would be the better order.
+
+---
+
+## WF-S11-3 — `backupctl` stdin failure does not name the expected invocation
+
+**Severity: LOW.** `backupctl verify` with no stdin prints `read manifest: EOF` and exits 1. Honest and
+useless: it names the operation and the condition but not the fix. It cost a walk cycle and would cost an
+operator one, in the middle of a restore, which is the worst possible moment to be guessing at argument syntax.
+
+Suggested: `no manifest on stdin — pipe one in:  backupctl verify < backup.manifest.json`.
 
 ---
 
