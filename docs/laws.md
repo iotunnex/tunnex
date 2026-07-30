@@ -243,6 +243,13 @@ passed silently**. For a moment the core fix of an entire slice appeared to be u
 it is a mutation that never ran. So:
 
 - Prefer mutations that keep every symbol used — `expired := false` rather than `if false {`.
+- **THE DISCRIMINATOR — when a build failure IS the rejection.** A build failure is a **valid** rejection when the
+  guard *is* the type signature: adding a `lastHandshakeFailed bool` to a decision function that must not see the
+  network fails with `not enough arguments in call to Decide`, and that is precisely the guard working — the
+  compiler is enforcing the constraint, and the author is sent back to the reasoning. It is an **invalid** mutation
+  when the guard is *behavioural* and the build failure merely prevented the behaviour from running: neutralising
+  `if expired {` orphaned a variable, so nothing executed and the output was indistinguishable from a pass. Ask
+  which kind of guard you are testing before reading the outcome.
 - Have the harness distinguish **build failure**, **test failure**, and **pass** as three outcomes, never two.
   Grepping for `FAIL:` alone conflates the first with the third.
 - The pass you must see is the *named assertion message*, not merely the absence of output. Absence of output is
