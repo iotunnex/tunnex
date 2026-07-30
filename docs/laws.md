@@ -247,3 +247,47 @@ it is a mutation that never ran. So:
   Grepping for `FAIL:` alone conflates the first with the third.
 - The pass you must see is the *named assertion message*, not merely the absence of output. Absence of output is
   the failure mode.
+
+---
+
+## A CENSUS MUST ASSERT THE PROPERTY, NEVER A COINCIDENCE OF THE CURRENT TEXT
+
+*Minted: EPIC 13 / S13.1 Slice 4. A corollary of COULD THIS CHECK HAVE FAILED?, pointed at the guards' matching.*
+
+Censuses in this repo read source text — Dockerfiles, `.sql` files, enum blocks, renderers. That is their strength
+and their trap: it is easy to match something that is *true of the text today* rather than the *property being
+guarded*.
+
+Three instances, all this epic:
+
+- A guard asserted `strings.Contains(queries, "cert_not_after)")` — the closing paren of an INSERT column list. It
+  was pinning the column's **position at the end of the list**. Appending a new column after it was a completely
+  legitimate change and it **broke the guard**, which teaches the next author to weaken the guard rather than trust
+  it.
+- A kind census matched `[a-z_]+` and silently dropped `k8s_endpoints_unavailable`, because the name contains a
+  digit. The pattern encoded an assumption about naming that the names did not honour.
+- A shipping census guessed binary names from package names, and `./cmd/server` builds `tunnex-api`. It both
+  false-passed and false-failed until it parsed the `-o` flag instead.
+
+**THE LAW:** assert the property, scoped. **Position, ordering, adjacency and formatting are coincidences**;
+presence *within a named scope* is the property. Concretely:
+
+- Extract the region first (this query, this const block, this build stage), then assert **within** it — so a match
+  elsewhere in the file cannot vouch for it.
+- Match identifiers, not punctuation. `cert_not_after` inside `CreateNode`, not `cert_not_after)` anywhere.
+- Derive the expected set from the source of truth (`AllKinds()`, the `-o` flag) rather than restating it.
+- When a guard fails on a change you believe is correct, the first question is whether the guard is pinned to a
+  coincidence — not whether the change is wrong.
+
+### Companion: BENIGN vs INERT — what a non-rejecting mutation actually means
+
+A mutation that produces no failure has two very different explanations, and conflating them is how a guard is
+wrongly trusted or wrongly deleted:
+
+- **BENIGN** — the property is genuinely still enforced, by another path. Neutralising an empty-key check left the
+  case refused by a later parse failure: **defence in depth**, so the mutation revealed redundancy, not absence.
+- **INERT** — nothing enforces the property, and the guard never did. A red asserting
+  `degradedKind(CertExpired: false)` is not the cert-expired kind passed with its own fix removed.
+
+Tell them apart by asking *what refused, and why* — then mutate **that** instead. If nothing refuses, the guard is
+inert and the property is unprotected.
