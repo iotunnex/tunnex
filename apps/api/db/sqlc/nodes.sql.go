@@ -459,7 +459,7 @@ func (q *Queries) RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) er
 
 const revokeNode = `-- name: RevokeNode :exec
 UPDATE nodes
-SET status = 'revoked', revoked_at = now()
+SET status = 'revoked', revoked_at = now(), site_id = NULL
 WHERE org_id = $1 AND id = $2
 `
 
@@ -468,6 +468,13 @@ type RevokeNodeParams struct {
 	ID    uuid.UUID `json:"id"`
 }
 
+// UNBINDS THE SITE (S13.1 WF-S11-14, the other half). A revoked gateway kept its site_id, so it remained a
+// site binding visible to any consumer that did not filter on status — the stale binding at its source. Clearing
+// it makes the filtered and unfiltered readers agree by construction rather than by each remembering.
+//
+// The binding is not lost to history: the audit row for node.revoked records the node, and EPIC 13's D5 will
+// record the CAUSE of a revocation so a cascade can be distinguished from a deliberate act. What is cleared is
+// the LIVE binding, which is the only thing a compiler or an election should ever read.
 func (q *Queries) RevokeNode(ctx context.Context, arg RevokeNodeParams) error {
 	_, err := q.db.Exec(ctx, revokeNode, arg.OrgID, arg.ID)
 	return err

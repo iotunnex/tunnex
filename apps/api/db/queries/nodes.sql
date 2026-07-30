@@ -76,8 +76,15 @@ SET wg_public_key = @wg_public_key,
 WHERE id = @id AND status = 'active';
 
 -- name: RevokeNode :exec
+-- UNBINDS THE SITE (S13.1 WF-S11-14, the other half). A revoked gateway kept its site_id, so it remained a
+-- site binding visible to any consumer that did not filter on status — the stale binding at its source. Clearing
+-- it makes the filtered and unfiltered readers agree by construction rather than by each remembering.
+--
+-- The binding is not lost to history: the audit row for node.revoked records the node, and EPIC 13's D5 will
+-- record the CAUSE of a revocation so a cascade can be distinguished from a deliberate act. What is cleared is
+-- the LIVE binding, which is the only thing a compiler or an election should ever read.
 UPDATE nodes
-SET status = 'revoked', revoked_at = now()
+SET status = 'revoked', revoked_at = now(), site_id = NULL
 WHERE org_id = $1 AND id = $2;
 
 -- name: ListActiveNodeIDsForOrg :many

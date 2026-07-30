@@ -562,6 +562,18 @@ type Querier interface {
 	// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
 	// hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
 	// org-scoped via the node row (nodes.org_id).
+	//
+	// ACTIVE ONLY (S13.1 WF-S11-14, the SHARED-SEAM fix). This is the input its sibling at :77 already filters,
+	// with a comment saying revocation must drop a gateway here "no blackhole" — and this one did not. The
+	// consequence is not merely a wasted artifact: the compiler reduces these rows into `siteNode[site_id] =
+	// node_id`, a SINGLE-VALUE map, so for a site holding both a revoked and an active gateway the placement slot
+	// went to whichever row arrived last. With no ORDER BY that was NON-DETERMINISTIC and could flip between
+	// compiles — a site grant landing on a dead gateway while the live one never received it, traffic denied while
+	// the policy read correct.
+	//
+	// Filtering at the INPUT is deliberate: every consumer of this query is fixed at once, rather than each
+	// consumer remembering. ORDER BY makes the reduction deterministic even if a future change admits more than one
+	// active gateway per site.
 	ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
@@ -640,6 +652,13 @@ type Querier interface {
 	// Org-scoped + idempotent (already-revoked returns 0 rows). Revocation severs on the very next request
 	// (the auth path re-reads the row every time — no session cache).
 	RevokeMachineCredential(ctx context.Context, arg RevokeMachineCredentialParams) (int64, error)
+	// UNBINDS THE SITE (S13.1 WF-S11-14, the other half). A revoked gateway kept its site_id, so it remained a
+	// site binding visible to any consumer that did not filter on status — the stale binding at its source. Clearing
+	// it makes the filtered and unfiltered readers agree by construction rather than by each remembering.
+	//
+	// The binding is not lost to history: the audit row for node.revoked records the node, and EPIC 13's D5 will
+	// record the CAUSE of a revocation so a cascade can be distinguished from a deliberate act. What is cleared is
+	// the LIVE binding, which is the only thing a compiler or an election should ever read.
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	// The B2 sweep member: revoking a device revokes ALL its live OVPN certs, returning their serials
 	// so the caller pushes the updated CRL to the gateway (one sweep with address-release + status-clear).

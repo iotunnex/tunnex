@@ -82,8 +82,21 @@ WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '' AND status = '
 -- The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
 -- hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
 -- org-scoped via the node row (nodes.org_id).
+--
+-- ACTIVE ONLY (S13.1 WF-S11-14, the SHARED-SEAM fix). This is the input its sibling at :77 already filters,
+-- with a comment saying revocation must drop a gateway here "no blackhole" — and this one did not. The
+-- consequence is not merely a wasted artifact: the compiler reduces these rows into `siteNode[site_id] =
+-- node_id`, a SINGLE-VALUE map, so for a site holding both a revoked and an active gateway the placement slot
+-- went to whichever row arrived last. With no ORDER BY that was NON-DETERMINISTIC and could flip between
+-- compiles — a site grant landing on a dead gateway while the live one never received it, traffic denied while
+-- the policy read correct.
+--
+-- Filtering at the INPUT is deliberate: every consumer of this query is fixed at once, rather than each
+-- consumer remembering. ORDER BY makes the reduction deterministic even if a future change admits more than one
+-- active gateway per site.
 SELECT id, site_id, endpoint FROM nodes
-WHERE org_id = $1 AND site_id IS NOT NULL;
+WHERE org_id = $1 AND site_id IS NOT NULL AND status = 'active'
+ORDER BY id;
 
 -- name: ListSiteSubnetsForOrg :many
 -- lint:cross-org — site_subnets has no org_id of its own; scoped via the join to sites.org_id. The
