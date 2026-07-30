@@ -73,7 +73,7 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause
 `
 
 type CreateDeviceParams struct {
@@ -126,6 +126,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.Transport,
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
+		&i.RevokedCause,
 	)
 	return i, err
 }
@@ -143,7 +144,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -175,12 +176,13 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.Transport,
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
+		&i.RevokedCause,
 	)
 	return i, err
 }
 
 const getDeviceForUpdate = `-- name: GetDeviceForUpdate :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -217,6 +219,7 @@ func (q *Queries) GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdate
 		&i.Transport,
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
+		&i.RevokedCause,
 	)
 	return i, err
 }
@@ -474,8 +477,60 @@ func (q *Queries) ListActiveWireGuardPeersForNode(ctx context.Context, nodeID uu
 	return items, nil
 }
 
+const listCascadeRevokedDevicesForNode = `-- name: ListCascadeRevokedDevicesForNode :many
+SELECT id, name, user_id, assigned_ip, public_key, transport
+FROM devices
+WHERE node_id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListCascadeRevokedDevicesForNodeRow struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	UserID     uuid.UUID `json:"user_id"`
+	AssignedIp *string   `json:"assigned_ip"`
+	PublicKey  string    `json:"public_key"`
+	Transport  string    `json:"transport"`
+}
+
+// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+// The restore candidate set (S13.1 D5): devices revoked BECAUSE this gateway was, and only those.
+//
+// 'deliberate' rows are excluded by the predicate rather than by the caller remembering — a human decided about
+// those devices, and a gateway coming back must never overturn that. NULL cause is also excluded: revoked before
+// 0059, honestly unknown, and reviving a device whose reason nobody recorded is exactly the risk the column exists
+// to avoid.
+//
+// Returns the address each device HELD, so the caller can ask the allocation oracle whether it is still free.
+func (q *Queries) ListCascadeRevokedDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListCascadeRevokedDevicesForNodeRow, error) {
+	rows, err := q.db.Query(ctx, listCascadeRevokedDevicesForNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCascadeRevokedDevicesForNodeRow{}
+	for rows.Next() {
+		var i ListCascadeRevokedDevicesForNodeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.UserID,
+			&i.AssignedIp,
+			&i.PublicKey,
+			&i.Transport,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -525,6 +580,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.Transport,
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
+			&i.Device.RevokedCause,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -545,7 +601,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -600,6 +656,7 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.Transport,
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
+			&i.Device.RevokedCause,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -648,7 +705,7 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 }
 
 const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -701,6 +758,7 @@ func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) 
 			&i.Device.Transport,
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
+			&i.Device.RevokedCause,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -804,9 +862,59 @@ func (q *Queries) RejectDevice(ctx context.Context, arg RejectDeviceParams) (uui
 	return node_id, err
 }
 
+const restoreCascadeRevokedDevice = `-- name: RestoreCascadeRevokedDevice :one
+UPDATE devices
+SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2
+WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause
+`
+
+type RestoreCascadeRevokedDeviceParams struct {
+	ID         uuid.UUID `json:"id"`
+	AssignedIp *string   `json:"assigned_ip"`
+}
+
+// lint:cross-org — keyed by device id; the caller authorized via the org-scoped node and read the candidate set
+// from ListCascadeRevokedDevicesForNode.
+// Restores ONE cascade-revoked device (S13.1 D5), to the address the caller resolved.
+//
+// The `revoked_cause = 'cascade'` predicate is repeated here deliberately: the candidate query already filtered,
+// and this makes a caller that skipped it unable to revive a deliberately-revoked device anyway. Construction over
+// convention, the same shape as RekeyNode refusing to touch status.
+//
+// Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
+// was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+func (q *Queries) RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCascadeRevokedDeviceParams) (Device, error) {
+	row := q.db.QueryRow(ctx, restoreCascadeRevokedDevice, arg.ID, arg.AssignedIp)
+	var i Device
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.NodeID,
+		&i.Name,
+		&i.Platform,
+		&i.PublicKey,
+		&i.AssignedIp,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RevokedAt,
+		&i.DeletedAt,
+		&i.FullTunnel,
+		&i.ApprovedBy,
+		&i.HealthBlocked,
+		&i.Transport,
+		&i.ProvisioningMode,
+		&i.ProvisionedRanges,
+		&i.RevokedCause,
+	)
+	return i, err
+}
+
 const revokeDevice = `-- name: RevokeDevice :one
 UPDATE devices
-SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'deliberate' 
 WHERE id = $1 AND org_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
 RETURNING node_id
 `
@@ -817,10 +925,17 @@ type RevokeDeviceParams struct {
 }
 
 // Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
-// their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
-// pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
-// (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+// their own pending enrollment via this path). Returns the gateway node_id for the push. The caller reads the PRIOR
+// status (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
 // device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
+//
+// cause='deliberate' (S13.1 D5): a human decided about THIS device. A gateway coming back must NEVER revive it —
+// the whole point of recording the cause is that "its gateway went away" and "the user lost the laptop" stop
+// rendering identically.
+//
+// KEEPS assigned_ip. It used to be cleared "to free the pool address", but the address was already free the moment
+// status left ('active','pending') — both the unique index and ListActiveDeviceAllocations filter on exactly that.
+// Clearing it destroyed the only record of what the revocation took, for no gain.
 func (q *Queries) RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, revokeDevice, arg.ID, arg.OrgID)
 	var node_id uuid.UUID
@@ -830,14 +945,22 @@ func (q *Queries) RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uui
 
 const revokeDevicesForNode = `-- name: RevokeDevicesForNode :execrows
 UPDATE devices
-SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'cascade'
 WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL
 `
 
 // lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
 // gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
 // finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
-// linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
+// linger in the approval queue pointing at a dead gateway).
+//
+// cause='cascade' (S13.1 D5): nobody decided about THESE devices — their gateway went away. That is what makes
+// them restorable when the gateway comes back, and what distinguishes them from a deliberately revoked laptop.
+//
+// KEEPS assigned_ip, and the old comment claiming it "frees the address" was describing a side effect it did not
+// need: the address is free the instant status leaves ('active','pending'), because both readers that define
+// taken-ness filter on exactly that (devices_org_ip_key and ListActiveDeviceAllocations). Clearing it destroyed
+// the only record of what each user held, which is what made Wall 6 unrecoverable rather than merely painful.
 func (q *Queries) RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeDevicesForNode, nodeID)
 	if err != nil {

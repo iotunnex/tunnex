@@ -479,6 +479,16 @@ type Querier interface {
 	// as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
 	// rather than an OR-expansion the planner can't use.
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+	// The restore candidate set (S13.1 D5): devices revoked BECAUSE this gateway was, and only those.
+	//
+	// 'deliberate' rows are excluded by the predicate rather than by the caller remembering — a human decided about
+	// those devices, and a gateway coming back must never overturn that. NULL cause is also excluded: revoked before
+	// 0059, honestly unknown, and reviving a device whose reason nobody recorded is exactly the risk the column exists
+	// to avoid.
+	//
+	// Returns the address each device HELD, so the caller can ask the allocation oracle whether it is still free.
+	ListCascadeRevokedDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListCascadeRevokedDevicesForNodeRow, error)
 	ListCliCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]CliCredential, error)
 	// The org's reporting devices with their latest facts — the blast-radius input
 	// (D4): on enabling a check, count how many devices' LAST report would fail it
@@ -669,6 +679,17 @@ type Querier interface {
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
+	// lint:cross-org — keyed by device id; the caller authorized via the org-scoped node and read the candidate set
+	// from ListCascadeRevokedDevicesForNode.
+	// Restores ONE cascade-revoked device (S13.1 D5), to the address the caller resolved.
+	//
+	// The `revoked_cause = 'cascade'` predicate is repeated here deliberately: the candidate query already filtered,
+	// and this makes a caller that skipped it unable to revive a deliberately-revoked device anyway. Construction over
+	// convention, the same shape as RekeyNode refusing to touch status.
+	//
+	// Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
+	// was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+	RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCascadeRevokedDeviceParams) (Device, error)
 	// The SWEEP: password reset and account deactivation kill every live CLI
 	// credential exactly like they kill sessions (a surviving credential would be a
 	// back door around the sweep).
@@ -677,15 +698,30 @@ type Querier interface {
 	// (idempotent 204 semantics; no existence leak).
 	RevokeCliCredential(ctx context.Context, arg RevokeCliCredentialParams) (int64, error)
 	// Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
-	// their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
-	// pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
-	// (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+	// their own pending enrollment via this path). Returns the gateway node_id for the push. The caller reads the PRIOR
+	// status (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
 	// device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
+	//
+	// cause='deliberate' (S13.1 D5): a human decided about THIS device. A gateway coming back must NEVER revive it —
+	// the whole point of recording the cause is that "its gateway went away" and "the user lost the laptop" stop
+	// rendering identically.
+	//
+	// KEEPS assigned_ip. It used to be cleared "to free the pool address", but the address was already free the moment
+	// status left ('active','pending') — both the unique index and ListActiveDeviceAllocations filter on exactly that.
+	// Clearing it destroyed the only record of what the revocation took, for no gain.
 	RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error)
 	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
 	// gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
 	// finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
-	// linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
+	// linger in the approval queue pointing at a dead gateway).
+	//
+	// cause='cascade' (S13.1 D5): nobody decided about THESE devices — their gateway went away. That is what makes
+	// them restorable when the gateway comes back, and what distinguishes them from a deliberately revoked laptop.
+	//
+	// KEEPS assigned_ip, and the old comment claiming it "frees the address" was describing a side effect it did not
+	// need: the address is free the instant status leaves ('active','pending'), because both readers that define
+	// taken-ness filter on exactly that (devices_org_ip_key and ListActiveDeviceAllocations). Clearing it destroyed
+	// the only record of what each user held, which is what made Wall 6 unrecoverable rather than merely painful.
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	// Org-scoped + idempotent (already-revoked returns 0 rows). Revocation severs on the very next request

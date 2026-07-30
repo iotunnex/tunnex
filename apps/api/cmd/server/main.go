@@ -252,6 +252,21 @@ func main() {
 	// the gateway's WireGuard public key, so every peer's AllowedIPs and every site link must reconcile — the same
 	// org-wide fan-out devices.PushOrgNodes uses, reached through the same hub.
 	nodeSvc.SetPushOrg(deviceSvc.PushOrgNodes)
+	// S13.1 D5 (Wall 6): a recovered gateway brings its users back with it. Only cascade-revoked devices —
+	// a deliberately revoked laptop is never revived by a gateway rebuild.
+	nodeSvc.SetRestoreDevices(func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error) {
+		res, err := deviceSvc.RestoreCascadeRevokedDevices(ctx, orgID, nodeID)
+		if err != nil {
+			return 0, 0, err
+		}
+		readdressed := 0
+		for _, r := range res {
+			if !r.KeptAddress {
+				readdressed++
+			}
+		}
+		return len(res), readdressed, nil
+	})
 	nodeSvc.SetOVPNCRLProvider(ovpnSvc.GetCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	machineAuthSvc := machineauth.NewService(pool, sealer) // S10.2: machine credentials (GitOps operator)

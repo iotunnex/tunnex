@@ -168,8 +168,29 @@ func (s *Service) Rekey(ctx context.Context, certSerial string, nonce, csrPEM, s
 	log.Info("node_rekeyed", "new_cert_serial", iss.Serial, "old_key_fingerprint", oldFP,
 		"new_key_fingerprint", newFP, "authorized_by", why)
 
-	// (7) AFTER commit. The WireGuard public key will change on the agent's next report, so every peer's AllowedIPs
-	//     and every site link must reconcile — a full sweep, not a field update.
+	// (7) AFTER commit — RESTORE THE USERS, then push.
+	//
+	// WALL 6 (S13.1 D5): revoking a gateway cascades to every device homed on it, so recovery WITHOUT this step
+	// hands back a working gateway with ZERO users, each needing a re-issued one-time config — one rebuild becoming
+	// a fleet-wide user event, invisible until people call. Only cause='cascade' devices come back; a deliberately
+	// revoked laptop is never revived by a gateway rebuild.
+	//
+	// Outside the transaction for the same reason the push is: it allocates addresses under the org lock and can
+	// fail on an exhausted pool, and a re-key that already succeeded cryptographically must not be rolled back by
+	// it. A failed restore leaves those devices cascade-revoked and a retry picks them up — delayed, not lost.
+	if s.restoreDevices != nil {
+		restored, readdressed, rerr := s.restoreDevices(ctx, node.OrgID, node.ID)
+		switch {
+		case rerr != nil:
+			log.Error("device_restore_after_rekey_failed", "error", rerr.Error(),
+				"consequence", "the gateway is recovered but its devices are still cascade-revoked; they are "+
+					"restorable and a later retry will pick them up")
+		case restored > 0:
+			log.Info("devices_restored_after_rekey", "restored", restored, "readdressed", readdressed)
+		}
+	}
+	// The WireGuard public key will change on the agent's next report, so every peer's AllowedIPs and every site
+	// link must reconcile — a full sweep, not a field update.
 	if s.pushOrg != nil {
 		s.pushOrg(ctx, node.OrgID)
 	}

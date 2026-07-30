@@ -109,6 +109,8 @@ type Device struct {
 	Transport         string             `json:"transport"`
 	ProvisioningMode  string             `json:"provisioning_mode"`
 	ProvisionedRanges []byte             `json:"provisioned_ranges"`
+	// Why this device was revoked: 'cascade' (its gateway was revoked — restorable) or 'deliberate' (an operator revoked this device — never restorable). NULL = revoked before 0059, honestly unknown, treated as NOT restorable (S13.1 D5).
+	RevokedCause *string `json:"revoked_cause"`
 }
 
 type DeviceHealth struct {

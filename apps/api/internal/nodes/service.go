@@ -175,6 +175,10 @@ type Service struct {
 	// cryptographically. nil → no push (open build / tests); the recovering agent's own next reconcile still
 	// converges it.
 	pushOrg func(ctx context.Context, orgID uuid.UUID)
+	// restoreDevices (S13.1 D5, Wall 6) brings back the devices that were cascade-revoked when this gateway was
+	// revoked. Wired to devices.Service.RestoreCascadeRevokedDevices. nil → not wired (open build / tests), and a
+	// recovered gateway then simply comes back with no users, which is the behaviour this closes.
+	restoreDevices func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error)
 }
 
 // NewService builds the node service.
@@ -195,6 +199,11 @@ func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, 
 // SetRebuildCRL wires the shared OVPN CRL rebuild (Slice 5) for the node-revoke path — ovpn.Service.RebuildCRL.
 func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) {
 	s.rebuildCRL = fn
+}
+
+// SetRestoreDevices wires cascade-restore (S13.1 D5). Returns (restored, readdressed).
+func (s *Service) SetRestoreDevices(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error)) {
+	s.restoreDevices = fn
 }
 
 // SetPushOrg wires the full-sweep reconciliation signal (S13.1). Called after a re-key commits.
