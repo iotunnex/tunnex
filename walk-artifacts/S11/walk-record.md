@@ -504,3 +504,85 @@ the EPIC 11 box-walk" — written in Slice 4, about a leg that had not run. It b
 not the same as being true when written. The ✅/🔶/⚠️ marks invented **one slice later** in `self-host.md` exist
 for exactly this, and the unmarked forward-claim sat in a neighbouring file the whole time. A new honesty
 convention needs a census of the surface it covers, exactly like a new guard does.
+
+---
+
+## WF-S11-6 — a gateway offline longer than `CertTTL` can NEVER rejoin (cert-renewal deadlock)
+
+**Severity: HIGH. Found while staging criterion 6; it BLOCKS criterion 6.** Confirmed on the wire and in code.
+
+### Mechanism
+
+- `agentca.CertTTL = 48 * time.Hour` (S3.1: short lifetime bounds a compromised cert's window).
+- The agent renews at **half-life** via `POST /agent/renew` — **over the mTLS channel**.
+- That listener is `ClientAuth: tls.RequireAndVerifyClientCert` for **every** route, `/agent/renew` included
+  (`agentchannel.go:55`, `:68`).
+
+So the expired certificate is rejected **during the TLS handshake**, before any handler runs. The only endpoint
+that can issue a new certificate requires the certificate that expired. There is no recovery path.
+
+`control/client.go:117` states the assumption in a comment: *"Renewing at half-life keeps the agent from ever
+reaching cert expiry."* That holds for a **continuously running** agent and silently fails for any other kind.
+
+### Evidence
+
+`aws-gw-1` (powered off 2026-07-25, restarted 2026-07-30 04:08 — cert expired 2026-07-27):
+
+```
+"msg":"reconcile_interval_failed","error":"Get \"https://104.45.208.156:8443/agent/desired-state\":
+   remote error: tls: expired certificate"
+"msg":"agent_report_key_failed",   "error":"Post \".../agent/report\": remote error: tls: expired certificate"
+"msg":"agent_stats_read_failed",   "error":"wg show wg0 dump: ... Unable to access interface: No such device"
+```
+
+`remote error:` = the **server** sent the alert, so this is the CP rejecting the client cert, not a local clock
+or trust problem. No `wg0` in `ip -brief addr show`: having never received desired-state, the agent never built
+the interface. It looped for five minutes with no path out and would loop forever.
+
+(The two interleaved `connection refused` lines are the CP's api container restarting during a rebuild —
+unrelated, and they resolve back to the same TLS alert.)
+
+### Why this is a beta blocker rather than a curiosity
+
+EPIC 11's acceptance question is *"what breaks when a stranger runs this in production, unattended, for a
+month?"* This answers it directly: **any gateway unreachable for more than 48 hours is permanently bricked
+until a human re-enrolls it.** A site down over a long weekend, a VM stopped to save money, an outage, an RMA,
+a scheduled maintenance window longer than two days. The recovery — re-enrolment — is documented in
+`self-host.md` only as what to do for a *lost* gateway, so an operator has no reason to connect it to "my
+gateway was switched off."
+
+### The second half: the CP cannot see it
+
+From the control plane's side this node is simply **not reporting**. The gauge reads `site_link_down`; there is
+**no health kind for "this agent's certificate expired and it cannot reconnect."** An operator sees a stale
+gateway, not a bricked one, and those require entirely different actions. `preflight` counts it *inside* the
+version window on last-known data — correctly, per the WF-S11-2 fold, and it is exactly the case where being
+"not confirmed live" understates the situation.
+
+That is an observability gap in the epic that just built the observability floor, and it is the
+who-reads-this probe inverted: not a channel field with no consumer, but a **real failure state with no
+rendering at all**.
+
+### Halted for disposition — this is a design fork, not a fold
+
+Options, with the security argument each carries:
+
+- **(a) Longer TTL.** Moves the cliff, does not remove it, and directly weakens the S3.1 bound. Rejected on
+  sight.
+- **(b) Grace on `/agent/renew` only** — accept a cert that is expired but otherwise valid (correct CA, node not
+  revoked, within a bounded grace, e.g. 30 days) for that one endpoint. Small change. Partially relaxes the
+  compromise window S3.1 chose 48h to bound — but only for renewal, and revocation still cuts it dead.
+- **(c) A durable enrolment credential**, separate from the mTLS cert: the 48h cert keeps guarding the data
+  channel while a long-lived secret survives downtime and is used only to re-obtain a cert. Revoking a node
+  kills both. Cleanest security story, largest change, and how fleets normally solve this.
+- **(d) Accept and surface** — document the limit honestly, add a health kind for cert-expired-cannot-reconnect,
+  and make the agent's own error name the remedy instead of looping on a bare TLS alert.
+
+(d) is not an alternative to (b)/(c); it is required regardless, because today the failure is invisible to the
+operator and unactionable to the agent.
+
+### Immediate consequence for criterion 6
+
+The N-1 witness cannot connect, so the N/N-1 contract cannot be proven until `aws-gw-1` is re-enrolled.
+Re-enrolment is a hand-run step, and it is recorded as **forced by WF-S11-6** — not as a defect in criterion 6's
+own procedure.
