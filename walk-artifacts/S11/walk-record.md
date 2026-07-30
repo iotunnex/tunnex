@@ -1155,3 +1155,79 @@ A mechanism that worked (both editions build correctly, and the tag does exactly
 did not (rebuild instructions that silently changed the product), and a document asserting the procedure (a
 provenance census that vouched for the wrong thing). Thirteenth instance — and the first one where I was the
 operator the gap misled.
+
+---
+
+## WF-S11-12 REINSTATED on enterprise — the withdrawal was wrong
+
+Re-run after restoring `TUNNEX_BUILD_TAGS=enterprise` (`"edition":"enterprise"` asserted from `/api/v1/meta`,
+provenance lines present, **14** kind series):
+
+```
+tunnex_gateway_policy_health{kind="cert_expired_cannot_reconnect"} 2
+tunnex_gateway_policy_health{kind="healthy"} 1
+tunnex_gateway_policy_health{kind="site_link_down"} 1
+```
+
+**Identical to the open reading.** `aws-gw-1` — active, `site_id NULL`, `applied_hash NULL`, `wg0` with no peers
+— still reads **`healthy`** with the policy engine present. So WF-S11-12 is genuine and my edition-confounding
+worry was unfounded. Reinstated with correct evidence; the earlier withdrawal is the error, not the finding.
+
+The counts matching across both editions is a free cross-check worth keeping: the `!enterprise` switch and the
+enterprise `degradedKind` projection agree on this fleet — the structural-agreement property both code paths'
+comments claim and neither had demonstrated.
+
+---
+
+## WF-S11-14 — a revoked gateway is still fed to the POLICY COMPILER as a site binding
+
+**Severity: MEDIUM-HIGH, pending trace. HALTED.** Found by inspection while preparing the site re-bind — and the
+walk had just exercised its exact trigger by revoking a site-bound gateway.
+
+Two queries feed related decisions about a site's gateways, and only one filters revoked rows:
+
+```sql
+-- hub-set / hub-election input (sites.sql:77) — FILTERS
+SELECT id, site_id, wg_public_key, endpoint, last_seen_at, hub_priority FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '' AND status = 'active';
+--  its own comment: "Revoking a gateway drops it here → the derive-then-filter drops it from the
+--  active order (no blackhole) and RevokeNode's ReconcileHubSet trigger makes the configured drop
+--  durable + audited."
+
+-- ListSiteNodesForOrg (sites.sql:85) — the S8.2 POLICY COMPILER input — DOES NOT
+SELECT id, site_id, endpoint FROM nodes
+WHERE org_id = $1 AND site_id IS NOT NULL;
+--  its own comment: "The compiler places a src_kind='site' grant on the src + dst gateways AND the
+--  transit HUB (B1) — the hub is the site gateway with a public endpoint, so endpoint is needed to
+--  designate it."
+```
+
+One query is explicit that revocation must drop a gateway to avoid a blackhole. The other, feeding grant
+placement and transit-hub designation, applies no status filter at all.
+
+**Live state that makes this concrete:** `aws-gw-1` is `revoked` and *still carries*
+`site_id 019f8e4a-2664-7a7c-9671-790ff28a240b`. Revocation's full sweep (peer slot, pool address, telemetry) does
+not unbind the site. So that site now holds a revoked gateway bound and a live gateway unbound.
+
+**What I have NOT traced, stated plainly:** whether the compiler's transit-hub designation actually diverges from
+the hub-set election in practice — that requires following `siteLinkGraphFrom` and the compiler's placement
+against both inputs. What *is* established is the **asymmetry**: two inputs to related decisions, one filtered by
+status and one not, with revocation as the trigger.
+
+If it does diverge, the failure mode is the one the filtered query's own comment calls unacceptable: transit
+placed on a dead gateway, so cross-site traffic blackholes while the policy reads correct — and no health kind
+points at the cause, because the gateway rendering the problem is `revoked` and therefore shows no badge at all
+(WF-S11-10's fix, working as intended, hiding this).
+
+**Options:**
+
+- **(a) Filter `ListSiteNodesForOrg` on `status = 'active'`**, matching its sibling. Almost certainly correct and a
+  one-line change — but it alters *compiler input*, so it needs a fixture red proving a revoked gateway receives
+  no placement and is never designated hub, plus a re-run of the site-transit walk legs. Not a fold to make at the
+  tail of a walk.
+- **(b) Unbind the site on revocation** — add `site_id = NULL` to the sweep. Fixes the input at source and makes
+  both queries agree by construction, at the cost of the historical record of which site the gateway served.
+- **(c) Both**, with (a) as the guard and (b) as the semantic.
+
+Belongs with the **gateway recovery** story: "what happens when a gateway comes back" and "what is cleaned up when
+one goes away" are the same subject, and this is the going-away half.
