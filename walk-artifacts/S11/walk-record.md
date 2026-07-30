@@ -655,3 +655,85 @@ backfill0055_test.go:50: the bound MUST be last_seen_at + CertTTL. ...
 Only `last_seen_at` bounds it correctly. A first draft of that red's message claimed the substitution "can
 false-positive" for both cases, which was true of one and wrong about the other; corrected, because a test
 message is read at 3am by someone deciding whether to trust it.
+
+---
+
+## WF-S11-8 — a gateway can NEVER be re-enrolled under its own name
+
+**Severity: HIGH. Found while executing WF-S11-6's documented remedy. HALTED for disposition.**
+
+### Evidence
+
+```
+tunnex=# \d nodes
+Indexes:
+    "nodes_org_id_name_key" UNIQUE CONSTRAINT, btree (org_id, name)
+Check constraints:
+    "nodes_status_check" CHECK (status = ANY (ARRAY['active'::text, 'revoked'::text]))
+```
+
+The uniqueness on `(org_id, name)` is **unconditional** — not partial on `revoked_at IS NULL`. The only lifecycle
+operation in the API surface is `POST /nodes/{id}/revoke`, which sets `status='revoked'`; there is **no delete**
+(`grep DeleteNode` finds nothing in `db/queries/nodes.sql`). So a revoked row retains its name permanently and
+`CreateNode` returns `409 node_exists` (`service.go:277`).
+
+### Why this is broader than WF-S11-6
+
+WF-S11-6's remedy is "re-enroll the gateway", and this makes that impossible under the original name. But the
+blast radius is much wider, because **nothing about it is specific to certificate expiry.** `self-host.md` §7
+states:
+
+> **A lost gateway**: re-enrol it (one pasted command). It generates a fresh key; the CP re-issues its
+> certificate. Nothing needs restoring.
+
+A destroyed VM, a failed disk, a hardware RMA, a mistakenly-deleted state volume — every one of those follows
+that sentence to a 409. **The documented recovery story for the most ordinary failure in the product does not
+work as written**, and it has presumably never worked, because recovering a gateway under its own name has never
+been exercised.
+
+Consequences of the only available workaround (enroll under a different name):
+
+- the site binding is orphaned — the new node is not the old node, so it must be re-bound;
+- every dashboard, alert, runbook and saved query referencing the old name silently refers to a dead row;
+- the name is consumed permanently, so each failure of a given gateway burns a name (`aws-gw-1`, `aws-gw-1b`,
+  `aws-gw-1c`);
+- the revoked row lingers with its cert serial, pool address and telemetry history, indistinguishable in a name
+  search from the live gateway.
+
+### The pattern this completes
+
+Three of this epic's findings are now the same shape, and it is worth naming: **a mechanism that works, a
+procedure around it that does not, and documentation asserting the procedure.**
+
+| finding | mechanism | procedure | doc |
+|---|---|---|---|
+| WF-S11-1 | `preflight`/`backupctl` compile and pass their units | not shipped in the image | two runbooks named them |
+| WF-S11-6 | short-lived certs bound compromise, renewal works | renewal requires the cert that expired | `self-host.md` implied recovery was automatic |
+| WF-S11-8 | enrollment works; revocation works | re-enrolment under the same name is impossible | "re-enrol it (one pasted command)" |
+
+None of the three is a bug in a function. All three are gaps between components that each work correctly, and
+**not one was findable by a unit test** — which is the argument for walking a story that this epic has now made
+three times.
+
+### Options (surfaced, not chosen)
+
+- **(a) Make the uniqueness partial** — `UNIQUE (org_id, name) WHERE revoked_at IS NULL`. Smallest change; a
+  revoked gateway frees its name and re-enrolment works as documented. Question it raises: two rows with the same
+  name in history, so audit and telemetry queries must disambiguate by id rather than name (they mostly already
+  do — this needs a census, not an assumption).
+- **(b) A replace-in-place enrolment** — a join token pinned to an EXISTING node re-keys that row rather than
+  inserting: same id, same site binding, same history, new cert serial. Best operator experience by far, since
+  the gateway keeps its identity across a rebuild. Largest change, and it needs care that "re-key" cannot be
+  used as a credential-swap attack on a live node.
+- **(c) A delete endpoint** — explicit, destructive, frees the name. Honest but crude: it discards the audit
+  trail of a gateway that existed, which the revoked row exists to preserve.
+- **(d) Document the rename** — accept the limitation and tell operators to expect a new name. Cheapest, and it
+  makes the product's ordinary failure recovery permanently worse than its docs currently promise.
+
+Recommendation: **(b) as the goal, (a) as the near-term unblock**, both under the same story as WF-S11-6's (c) —
+they are one subject, "how does a gateway come back", and solving them separately would produce two half-answers.
+
+### Consequence for criterion 6, today
+
+The N-1 witness must be enrolled under a **new name** to proceed. Recorded as forced by WF-S11-8, not as a
+choice.
