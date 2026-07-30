@@ -197,3 +197,53 @@ absent while a vacuous check is visibly **green** — and green is what people a
 **A check written in the same breath as its fix encodes the author's belief about the fix rather than the
 behaviour of the system.** Separating them costs a minute. Not separating them costs the first incident the
 check was supposed to prevent.
+
+
+---
+
+## A DETERMINATION OF "GONE" MUST PROVE THE CREDENTIAL CANNOT WORK
+
+*Minted: EPIC 13 / S13.1, from a ruling that was wrong as literally written — and whose counterexample was in the
+walk that produced it.*
+
+Recovery mechanisms need to decide when an existing credential may be **replaced**. The condition ruled for
+WF-S11-11 listed three determinations of "unusable": **expired**, **unreadable**, and **name mismatch**. The first
+two are proofs the credential *cannot function*. The third is a proof that *configuration disagrees* — which is
+not the same thing, and treating it as equivalent is destructive.
+
+**The counterexample is in the walk that produced the ruling.** The enrolment command was pasted on the wrong
+host: `azure-gw`, holding `azure-gw`'s **valid** certificate, with `TUNNEX_NODE_NAME=aws-gw-1`. Under a
+mismatch-authorizes rule the agent would have abandoned a live gateway's identity and enrolled that host as a
+different node — a working gateway made to look dead while a second node took its name. That is precisely the
+S8.2c WF-2 disaster the stored-identity preference exists to prevent, **reproduced by the guard meant to help**.
+
+**THE LAW:** a determination that the original is *gone* must rest on evidence the credential **cannot work** —
+expired, revoked, cryptographically unusable. Evidence that configuration merely **disagrees** — a mismatched
+name, an unexpected host, a surprising label — is a **loud ERROR and never an authorization**. When the two kinds
+of evidence conflict, the fail-toward-the-existing-identity clause governs.
+
+The same shape governs the CP side (S13.1 D3): `revoked` or `cert_not_after < now()` may authorize a re-key;
+`last_seen_at` stale may not. Silence is not proof that something cannot work — it is only proof that we have not
+heard from it.
+
+---
+
+## MUTATION-TESTING COROLLARY — A MUTATION MUST COMPILE
+
+*Minted: EPIC 13 / S13.1. COULD THIS CHECK HAVE FAILED?, applied to the thing checking the checks.*
+
+Mutation testing is a habit in this repo now: break the fix, watch the guard fail, restore. The trap is one level
+up again.
+
+A mutation that replaced `if expired {` with `if false {` **orphaned a variable and failed to build**. The harness
+grepped for test-failure patterns, matched nothing, and printed nothing — **identical output to a mutation that
+passed silently**. For a moment the core fix of an entire slice appeared to be unguarded.
+
+**THE COROLLARY:** a mutation must **compile**. A build failure is not a passing test and it is not a failing one;
+it is a mutation that never ran. So:
+
+- Prefer mutations that keep every symbol used — `expired := false` rather than `if false {`.
+- Have the harness distinguish **build failure**, **test failure**, and **pass** as three outcomes, never two.
+  Grepping for `FAIL:` alone conflates the first with the third.
+- The pass you must see is the *named assertion message*, not merely the absence of output. Absence of output is
+  the failure mode.
