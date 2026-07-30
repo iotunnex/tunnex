@@ -72,8 +72,27 @@ func TestBackfill0055CannotFalsePositive(t *testing.T) {
 			"bound with the real NotAfter. Without that, an estimate written by 0055 outlives the condition it " +
 			"estimated")
 	}
-	if !strings.Contains(queries, "cert_not_after)") {
+	// Asserts the COLUMN IS RECORDED, not its position in the list. The first version matched
+	// "cert_not_after)" — the closing paren of the INSERT column list — which broke the moment 0057 legitimately
+	// appended cert_public_key after it. A guard pinned to an incidental detail fails on correct changes and
+	// teaches the next author to weaken it; the same over-narrow-pattern class as the [a-z_]+ regex that silently
+	// dropped k8s_endpoints_unavailable for containing a digit.
+	if createNode := queryBlock(queries, "CreateNode"); !strings.Contains(createNode, "cert_not_after") {
 		t.Error("CreateNode must record cert_not_after at enrollment — a re-enrolled gateway (the documented " +
 			"remedy for WF-S11-6) must come back with a REAL expiry, not inherit a stale bound")
 	}
+}
+
+// queryBlock returns one sqlc query's text, so an assertion about a specific query cannot be satisfied by a
+// coincidence elsewhere in the file.
+func queryBlock(all, name string) string {
+	start := strings.Index(all, "-- name: "+name+" ")
+	if start < 0 {
+		return ""
+	}
+	rest := all[start+1:]
+	if next := strings.Index(rest, "-- name: "); next >= 0 {
+		return rest[:next]
+	}
+	return rest
 }

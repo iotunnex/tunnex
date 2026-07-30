@@ -261,6 +261,8 @@ type Node struct {
 	HubPriority       *int32             `json:"hub_priority"`
 	// Expiry of the currently-issued agent cert. Stamped at enroll/renew from the certificate's own NotAfter. Rows predating migration 0054 carry a BOUND backfilled by 0055 as last_seen_at + CertTTL (an UPPER bound on the true expiry, so it can never false-positive; overwritten by the real value on the next enroll/renew). NULL = never reported, honestly unknown. Past = the agent CANNOT reconnect (S11 WF-S11-6).
 	CertNotAfter pgtype.Timestamptz `json:"cert_not_after"`
+	// base64(SPKI DER) of the public key bound by the current agent certificate, stamped at enroll and renew. Verification material for proof-of-possession re-key (S13.1 D7). NULL = enrolled before 0057 and not yet renewed: PoP cannot recover that node, only a join token can.
+	CertPublicKey *string `json:"cert_public_key"`
 }
 
 type NodeJoinToken struct {

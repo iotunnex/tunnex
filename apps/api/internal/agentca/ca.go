@@ -156,24 +156,39 @@ func (c *CA) Fingerprint() string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// SignCSR signs a PEM CSR as an agent leaf certificate valid for CertTTL. The
-// returned serial is stored on the node record and IS the agent's identity.
-//
-// notAfter is the certificate's OWN NotAfter, returned rather than recomputed by callers (S11 WF-S11-6). One
-// truth: a caller that wrote time.Now().Add(CertTTL) into the node row would be recording what it BELIEVES the
-// cert says, and the two could drift. The CP stores this so it can later answer "has this agent's certificate
-// expired" from its signing record instead of inferring it from silence.
-func (c *CA) SignCSR(csrPEM []byte, commonName string) (certPEM string, serial string, notAfter time.Time, err error) {
+// Issued is everything the control plane records about a certificate it just minted. Returned as a struct rather
+// than a growing tuple: this is the third field to be added (serial, then NotAfter for S11 WF-S11-6, now the
+// public key for S13.1 D7), and each addition existed because the CP had failed to record something it later
+// needed to answer a question about its own fleet.
+type Issued struct {
+	CertPEM string
+	Serial  string // stored on the node record; IS the agent's identity
+	// NotAfter is the certificate's OWN expiry, returned rather than recomputed by callers. One truth: a caller
+	// writing time.Now().Add(CertTTL) into the node row records what it BELIEVES the cert says, and the two can
+	// drift. The CP stores this to answer "has this agent's certificate expired" from its signing record rather
+	// than inferring it from silence.
+	NotAfter time.Time
+	// PublicKeySPKI is the DER-encoded SubjectPublicKeyInfo of the key this certificate binds (S13.1 D7).
+	//
+	// WHY THE CP MUST KEEP IT: gateway recovery authenticates a returning agent by PROOF OF POSSESSION of its
+	// existing keypair (D1(c)), and a signature can only be verified against a public key the CP holds. It held
+	// none — only the serial. nodes.wg_public_key cannot substitute: WireGuard keys are X25519, for
+	// Diffie-Hellman, and cannot produce signatures at all. That is arithmetic, not policy.
+	PublicKeySPKI []byte
+}
+
+// SignCSR signs a PEM CSR as an agent leaf certificate valid for CertTTL.
+func (c *CA) SignCSR(csrPEM []byte, commonName string) (Issued, error) {
 	blk, _ := pem.Decode(csrPEM)
 	if blk == nil {
-		return "", "", time.Time{}, errors.New("malformed CSR PEM")
+		return Issued{}, errors.New("malformed CSR PEM")
 	}
 	csr, err := x509.ParseCertificateRequest(blk.Bytes)
 	if err != nil {
-		return "", "", time.Time{}, fmt.Errorf("parse CSR: %w", err)
+		return Issued{}, fmt.Errorf("parse CSR: %w", err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return "", "", time.Time{}, fmt.Errorf("CSR signature: %w", err)
+		return Issued{}, fmt.Errorf("CSR signature: %w", err)
 	}
 	sn := bigSerial()
 	tmpl := &x509.Certificate{
@@ -186,10 +201,21 @@ func (c *CA) SignCSR(csrPEM []byte, commonName string) (certPEM string, serial s
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, csr.PublicKey, c.key)
 	if err != nil {
-		return "", "", time.Time{}, err
+		return Issued{}, err
+	}
+	// Canonicalise the key as SPKI DER — the form x509.ParsePKIXPublicKey reads back, so verification never has
+	// to guess an encoding. Taken from the CSR's key, which is the key this certificate binds by construction.
+	spki, err := x509.MarshalPKIXPublicKey(csr.PublicKey)
+	if err != nil {
+		return Issued{}, fmt.Errorf("marshal public key: %w", err)
 	}
 	out := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	return string(out), serialString(sn), tmpl.NotAfter, nil
+	return Issued{
+		CertPEM:       string(out),
+		Serial:        serialString(sn),
+		NotAfter:      tmpl.NotAfter,
+		PublicKeySPKI: spki,
+	}, nil
 }
 
 // ServerTLSCertificate mints an ephemeral server certificate (signed by the CA)
@@ -227,11 +253,11 @@ func (c *CA) SelfTest() error {
 		return err
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	certPEM, _, _, err := c.SignCSR(csrPEM, "selftest")
+	iss, err := c.SignCSR(csrPEM, "selftest")
 	if err != nil {
 		return fmt.Errorf("selftest sign: %w", err)
 	}
-	blk, _ := pem.Decode([]byte(certPEM))
+	blk, _ := pem.Decode([]byte(iss.CertPEM))
 	leaf, err := x509.ParseCertificate(blk.Bytes)
 	if err != nil {
 		return err

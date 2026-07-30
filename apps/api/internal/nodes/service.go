@@ -266,19 +266,20 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		if nodeName == "" {
 			return apierr.BadRequest("node_name_required", "a node name is required")
 		}
-		certPEM, serial, notAfter, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
+		iss, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
 		if e != nil {
 			return apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 		}
-		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: serial,
-			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}})
+		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: iss.Serial,
+			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
+			CertPublicKey: spkiText(iss.PublicKeySPKI)})
 		if e != nil {
 			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")
 			}
 			return e
 		}
-		res = EnrollResult{NodeID: node.ID.String(), CertPEM: certPEM, CAPEM: string(s.ca.CertPEM())}
+		res = EnrollResult{NodeID: node.ID.String(), CertPEM: iss.CertPEM, CAPEM: string(s.ca.CertPEM())}
 		// Same keyed fingerprint as the node.token_issued row — issue and redeem
 		// correlate in the audit stream without the raw token appearing anywhere.
 		return audit(ctx, q, tok.OrgID, nil, "node.enrolled", "node", node.ID.String(),
@@ -312,15 +313,18 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 	if node.Status != "active" {
 		return "", apierr.New(401, "agent_revoked", "this agent has been revoked")
 	}
-	certPEM, serial, notAfter, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
+	iss, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
 	if err != nil {
 		return "", apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 	}
-	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: serial,
-		AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}}); err != nil {
+	// Stamped on RENEWAL as well as enrolment (S13.1 D7): that is what makes PoP coverage arrive within one
+	// renewal cycle for a running fleet, instead of only for gateways enrolled after 0057 shipped.
+	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: iss.Serial,
+		AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
+		CertPublicKey: spkiText(iss.PublicKeySPKI)}); err != nil {
 		return "", err
 	}
-	return certPEM, nil
+	return iss.CertPEM, nil
 }
 
 // DesiredState returns the interface config + peers the agent should converge
@@ -2137,4 +2141,15 @@ func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UU
 		Action: action, TargetType: &targetType, TargetID: &targetID, Metadata: b,
 	})
 	return err
+}
+
+// spkiText encodes an SPKI DER blob for storage. base64 rather than hex: it is the form every TLS tool prints and
+// roughly a third shorter, and the column is read only by verification code that decodes it symmetrically.
+// An empty blob stores NULL — honestly unknown, never an empty string masquerading as a key.
+func spkiText(spki []byte) *string {
+	if len(spki) == 0 {
+		return nil
+	}
+	enc := base64.StdEncoding.EncodeToString(spki)
+	return &enc
 }
