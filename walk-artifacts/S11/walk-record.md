@@ -338,6 +338,72 @@ two failure modes with very different speeds.
 
 ---
 
+## Leg 6 — THE UPGRADE PROCEDURE — **criteria 1–3 PASS; criterion 4 FORKED**
+
+Provenance first: the build log shows `[build 7/7] … -o /out/preflight ./cmd/preflight && … backupctl` and
+three `COPY … /usr/local/bin/` lines, so WF-S11-1's fix is in the rolled image.
+
+| criterion | evidence | verdict |
+|---|---|---|
+| 1. preflight **refuses**, refuse-don't-warn observed | exit 1, naming the unconfirmed rollback plan | ✅ |
+| 2. confirmed run passes | exit 0, all four checks `ok` | ✅ |
+| 3. migrate clean and idempotent | `migrate_up_complete version 53 dirty:false`, no new migrations | ✅ |
+| 4. CP rolls and self-recovers | `ok leader` after `up -d --build api` | ✅ |
+| 5. gateway reconciles with **no action, no re-enrolment** | `k8s` serial `5308c954…` unchanged; `policy_reported_at` advanced `03:54:36 → 03:57:36` | ✅ |
+| **6. an N-1 agent still healthy after the roll** | **no live N-1 agent exists** | ⛔ forked |
+
+Criterion 5 is the substantive half: the agent reported *again, after* the roll, on the same certificate, with
+nobody touching it.
+
+**Stated limit, so the leg is not read as more than it is.** The image was already at the census sha, so this
+roll carries **no version delta**. It proves the *procedure* — preflight's refuse-then-pass direction, migration
+idempotence, and that gateways survive a CP roll untouched. It does **not** prove an N→N+1 upgrade.
+
+### Criterion 6 — the fork
+
+| node | max_ver | last reported | state |
+|---|---|---|---|
+| **k8s** (the only live gateway) | **7** = N | `03:57:36` | live, at N |
+| aws-gw-1 | 6 = N-1 | `2026-07-25 06:13` | off, 5 days |
+| azure-gw | 6 = N-1 | `2026-07-25 06:13` | off, 5 days |
+| aws-gw-2 | 6 = N-1 | `2026-07-25 06:12` | off, 5 days |
+
+Three agents sit at exactly N-1 and all three are dead; the only breathing gateway is at N. Options, surfaced
+rather than chosen:
+
+- **A — power on one AWS gateway.** One console action buys three proofs: a live N-1 agent across the roll, site
+  links recovering on the wire, and a health-kind transition off `site_link_down` — which would exercise a gauge
+  that has reported exactly one kind for the whole walk. Recommended if those instances are cheap to start.
+- **B — named substitute.** `TestNMinusOneAgentsCanStillApply` + `TestNewContentRaisesRequiredVersion` cover the
+  mechanism; wire proof deferred on a named trigger. Honest, but leaves the contract that makes rolling upgrades
+  possible proven only in unit tests — the weaker side of SUBSTITUTES ≠ SATISFIES.
+- **C — build an N-1 agent image** from an older commit. Heaviest, and proves the contract against a synthetic
+  agent rather than a real one.
+
+This also made **WF-S11-2 concrete rather than hypothetical**: preflight said "all 4 gateway(s) at v6 or newer"
+about a fleet where three of four last spoke five days ago.
+
+---
+
+## WF-S11-5 — `preflight` prints its verdict above the evidence
+
+**Severity: LOW.** Observed at Leg 6 step 1:
+
+```
+REFUSING: 1 check(s) failed. Nothing was changed.      <-- the conclusion
+Tunnex upgrade preflight
+  [ok  ] database reachable    connected                <-- the evidence it summarizes
+  [FAIL] rollback plan         unconfirmed. ...
+```
+
+The check table is written to **stdout** and the refusal to **stderr**; unbuffered interleaving puts the
+conclusion first. The confirmed run (exit 0, entirely stdout) printed in the right order, which confirms the
+cause rather than leaving it a guess. An operator meets `REFUSING` with nothing above it explaining why.
+
+Fix: flush stdout before writing the stderr summary.
+
+---
+
 ## WF-S11-4 — the docs conflate process death with network partition
 
 **Severity: LOW (documentation precision).** `self-host.md` §6 and `upgrade.md` both state that after a *hard*
