@@ -23,8 +23,10 @@ func NewPolicyPort(pool *pgxpool.Pool, hub *nodepush.Hub) policyPort {
 // StartPolicyGrantSweeper runs the S7.5.4 temporary-grant expiry sweep (enterprise
 // only): a lapsed grant's /32 is pushed off every org gateway promptly (the compiler
 // filter is the correctness backstop; this is promptness). No-op in the open build.
-func StartPolicyGrantSweeper(ctx context.Context, pool *pgxpool.Pool, hub *nodepush.Hub) {
+// mayTick gates the sweep on scheduler leadership (S13.1 review #10): it DELETES expired grants, audits each, and
+// pushes affected orgs, so N replicas means N concurrent delete-and-push cycles over the same rows.
+func StartPolicyGrantSweeper(ctx context.Context, pool *pgxpool.Pool, hub *nodepush.Hub, mayTick func() bool) {
 	svc := policy.NewService(pool)
 	svc.SetNotifier(hub)
-	go svc.StartGrantExpirySweeper(ctx)
+	go svc.StartGrantExpirySweeper(ctx, mayTick)
 }
