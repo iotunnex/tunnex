@@ -42,12 +42,19 @@ would be a recovery claim the artifact could not honour.
 
 ## Taking a backup
 
+`backupctl` ships **inside the control-plane image**, because that is the only place `TUNNEX_MASTER_KEY` and
+`DATABASE_URL` are already in the environment — the manifest's whole job is to fingerprint the key this
+deployment actually holds, so it must run where that key is.
+
 ```bash
 # 1. The dump.
 pg_dump --format=custom --no-owner "$DATABASE_URL" > tunnex-$(date +%F).dump
 
 # 2. The manifest (records WHICH master key this dump is sealed under — never the key itself).
-tunnex-api backup-manifest > tunnex-$(date +%F).manifest.json
+#    Compose:
+docker compose exec -T api backupctl manifest "pre-upgrade" > tunnex-$(date +%F).manifest.json
+#    Kubernetes:
+kubectl -n tunnex exec deploy/tunnex-api -- backupctl manifest "pre-upgrade" > tunnex-$(date +%F).manifest.json
 
 # 3. The master key — stored SEPARATELY, once. It does not change between backups.
 #    In Kubernetes it is the Secret the chart requires you to create (the chart never mints one,
@@ -64,7 +71,9 @@ this control plane has the key this backup was sealed under?*
 ```bash
 # 1. Put the master key in place FIRST (the CP will not start without it, and will never mint one).
 # 2. Verify BEFORE writing anything — this refuses if the key does not match the backup.
-tunnex-api restore-verify < tunnex-2026-07-29.manifest.json
+#    Run it in the control plane, against the key that control plane holds. Exit 2 = key mismatch.
+docker compose exec -T api backupctl verify < tunnex-2026-07-29.manifest.json
+#    Kubernetes: kubectl -n tunnex exec -i deploy/tunnex-api -- backupctl verify < tunnex-2026-07-29.manifest.json
 # 3. Only if step 2 passed:
 pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" tunnex-2026-07-29.dump
 ```
@@ -82,8 +91,10 @@ key that belongs to that backup and retry.
 
 Your gateways reconnect on their own. They hold their own keys and pin the agent CA — which is in the
 restored database, sealed under the key you just verified — so no re-enrolment, no new certificates, and no
-manual step. That is the property the whole design protects, and it is verified on real hardware in the
-EPIC 11 box-walk: restore a control plane from backup, and an existing agent connects unchanged.
+manual step. That is the property the whole design protects, and it is the EPIC 11 box-walk's owed proof:
+restore a control plane from backup on real hardware, and an existing agent connects unchanged. Until that leg
+is recorded in `walk-artifacts/S11/`, treat this paragraph as the design's intent rather than a demonstrated
+result.
 
 Running tunnels are not interrupted by a control-plane outage in the first place — agents reconcile against
 last-known state and keep forwarding — so a restore is a recovery of management, not of connectivity.

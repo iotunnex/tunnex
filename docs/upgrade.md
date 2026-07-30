@@ -27,8 +27,12 @@ Safe, but you will want to know: that is what preflight is for.
 
 ## Before you upgrade: preflight
 
+`preflight` ships **inside the control-plane image** — it needs `DATABASE_URL`, and an operator running it
+before a roll should be reading the database the deployment actually uses, not one named on a laptop:
+
 ```bash
-preflight
+docker compose exec -T api preflight                        # Compose
+kubectl -n tunnex exec deploy/tunnex-api -- preflight        # Kubernetes
 ```
 
 It **changes nothing** — every check is a read — and it **refuses** rather than warning, because a warning in
@@ -48,7 +52,7 @@ The rollback check is an explicit acknowledgement, because preflight cannot see 
 
 ```bash
 # after taking a backup and verifying it with `backupctl verify`
-TUNNEX_PREFLIGHT_BACKUP_CONFIRMED=yes preflight
+docker compose exec -T -e TUNNEX_PREFLIGHT_BACKUP_CONFIRMED=yes api preflight
 ```
 
 ## The rolling procedure
@@ -57,12 +61,13 @@ TUNNEX_PREFLIGHT_BACKUP_CONFIRMED=yes preflight
 
 ```bash
 # 1. Back up, and VERIFY the backup against the master key you hold.
+#    backupctl/preflight run IN the control plane — that is where the master key and DATABASE_URL are.
 pg_dump --format=custom --no-owner "$DATABASE_URL" > pre-upgrade.dump
-backupctl manifest "pre-upgrade" > pre-upgrade.manifest.json
-backupctl verify < pre-upgrade.manifest.json      # must pass before you continue
+docker compose exec -T api backupctl manifest "pre-upgrade" > pre-upgrade.manifest.json
+docker compose exec -T api backupctl verify < pre-upgrade.manifest.json   # must pass before you continue
 
-# 2. Preflight.
-TUNNEX_PREFLIGHT_BACKUP_CONFIRMED=yes preflight   # refuses if anything would strand the roll
+# 2. Preflight.  Refuses if anything would strand the roll.
+docker compose exec -T -e TUNNEX_PREFLIGHT_BACKUP_CONFIRMED=yes api preflight
 
 # 3. Migrate the database. Migrations are backward-compatible for one version (enforced by
 #    TestMigrationsAreBackwardCompatibleForOneVersion), so the OLD control plane keeps working
@@ -113,8 +118,8 @@ There is no downgrade. Restore:
 
 ```bash
 # 1. Put the master key that belongs to the backup in place.
-# 2. Verify BEFORE writing anything — this refuses on a key mismatch.
-backupctl verify < pre-upgrade.manifest.json
+# 2. Verify BEFORE writing anything — this refuses on a key mismatch (exit 2).
+docker compose exec -T api backupctl verify < pre-upgrade.manifest.json
 # 3. Only if step 2 passed:
 pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" pre-upgrade.dump
 # 4. Roll the control-plane image back to the previous version.
