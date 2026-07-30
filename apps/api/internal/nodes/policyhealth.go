@@ -296,3 +296,45 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	}
 	return KindSilentDesync // fresh, mismatched, age >= T
 }
+
+// RekeyAuthorized is the S13.1 D3 GATE, and it is the first thing built in Slice 4 — before any re-key mechanism
+// exists — because the property that must never happen is easier to prove impossible than to retrofit.
+//
+// THE ATTACK IT FORBIDS. Re-key lets a caller that proves possession of a node's original keypair obtain a fresh
+// certificate for that SAME node id. Unguarded, that is a takeover primitive: re-key a healthy production gateway
+// and the caller's agent inherits its identity, its site binding and its policy, while the real gateway is
+// silently displaced. So re-key is permitted ONLY against a node the control plane can itself verify is gone.
+//
+// TWO PIECES OF EVIDENCE, AND NO OTHERS:
+//
+//   - `revoked` — the strongest: a human decided.
+//   - `cert_not_after < now()` — arithmetic on the CP's OWN signing record (stamped at issuance since migration
+//     0054, bounded for pre-existing rows by 0055 in a direction that cannot false-positive).
+//
+// EXPLICITLY INADMISSIBLE:
+//
+//   - `last_seen_at` stale. Silence has many causes; it is not proof that a credential cannot work. This is the
+//     inference the entire EPIC 11 walk taught us to refuse, and admitting it here would let a network partition
+//     authorize a takeover.
+//   - Any operator- or client-supplied "force". A guard overridable by the party most motivated to override it is
+//     documentation, not a guard. There is no parameter for it and there must not be.
+//
+// The determination follows the law minted in this epic: it must prove the credential CANNOT WORK, never merely
+// that configuration disagrees.
+func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time) (bool, string) {
+	if status == "revoked" {
+		return true, "node is revoked — an operator deliberately retired it"
+	}
+	if certNotAfterKnown && certNotAfter.Before(now) {
+		return true, "the certificate this control plane issued expired at " +
+			certNotAfter.UTC().Format(time.RFC3339) + " — the agent cannot authenticate and cannot renew"
+	}
+	if !certNotAfterKnown {
+		// UNKNOWN is not gone. A row with no recorded expiry predates migration 0054 and 0055 declined to bound
+		// it (it had never reported), so the CP knows nothing about whether this node still works.
+		return false, "this control plane has no record of when the node's certificate expires, so it cannot " +
+			"establish that the node is gone. Revoke it explicitly to authorize replacement"
+	}
+	return false, "the node's certificate is still valid until " + certNotAfter.UTC().Format(time.RFC3339) +
+		" — a live gateway must never be re-keyed. Revoke it first if you intend to replace it"
+}
