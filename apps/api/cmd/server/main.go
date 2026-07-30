@@ -248,6 +248,10 @@ func main() {
 	// plus CRL delivery (crl-verify always-on, lazy-inits an empty CRL).
 	deviceSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
 	nodeSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
+	// S13.1: the full-sweep reconciliation signal a re-key fires AFTER its transaction commits. A re-key changes
+	// the gateway's WireGuard public key, so every peer's AllowedIPs and every site link must reconcile — the same
+	// org-wide fan-out devices.PushOrgNodes uses, reached through the same hub.
+	nodeSvc.SetPushOrg(deviceSvc.PushOrgNodes)
 	nodeSvc.SetOVPNCRLProvider(ovpnSvc.GetCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	machineAuthSvc := machineauth.NewService(pool, sealer) // S10.2: machine credentials (GitOps operator)

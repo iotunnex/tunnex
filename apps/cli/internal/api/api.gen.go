@@ -1277,6 +1277,41 @@ type RegisterSiteRequest struct {
 	Name string `json:"name"`
 }
 
+// RekeyChallengeRequest defines model for RekeyChallengeRequest.
+type RekeyChallengeRequest struct {
+	// CertSerial Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9).
+	CertSerial string `json:"cert_serial"`
+}
+
+// RekeyChallengeResponse defines model for RekeyChallengeResponse.
+type RekeyChallengeResponse struct {
+	// Nonce base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known.
+	Nonce string `json:"nonce"`
+}
+
+// RekeyRequest defines model for RekeyRequest.
+type RekeyRequest struct {
+	AgentVersion string `json:"agent_version"`
+
+	// CertSerial Serial of the certificate being replaced.
+	CertSerial string `json:"cert_serial"`
+
+	// Csr PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material.
+	Csr string `json:"csr"`
+
+	// Nonce base64 nonce from /agent/rekey/challenge.
+	Nonce string `json:"nonce"`
+
+	// Signature base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by the OLD private key. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR.
+	Signature string `json:"signature"`
+}
+
+// RekeyResponse defines model for RekeyResponse.
+type RekeyResponse struct {
+	CaPem   string `json:"ca_pem"`
+	CertPem string `json:"cert_pem"`
+}
+
 // ResizeConflict defines model for ResizeConflict.
 type ResizeConflict struct {
 	OrphanCount int      `json:"orphan_count"`
@@ -1515,6 +1550,12 @@ type ListRoutedRangesParams struct {
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
+// RekeyAgentJSONRequestBody defines body for RekeyAgent for application/json ContentType.
+type RekeyAgentJSONRequestBody = RekeyRequest
+
+// RekeyChallengeJSONRequestBody defines body for RekeyChallenge for application/json ContentType.
+type RekeyChallengeJSONRequestBody = RekeyChallengeRequest
+
 // CliAuthorizeJSONRequestBody defines body for CliAuthorize for application/json ContentType.
 type CliAuthorizeJSONRequestBody = CliAuthorizeRequest
 
@@ -1745,6 +1786,16 @@ type ClientInterface interface {
 	EnrollAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	EnrollAgent(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RekeyAgentWithBody request with any body
+	RekeyAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RekeyAgent(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RekeyChallengeWithBody request with any body
+	RekeyChallengeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RekeyChallenge(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CliAuthorizeWithBody request with any body
 	CliAuthorizeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2217,6 +2268,54 @@ func (c *Client) EnrollAgentWithBody(ctx context.Context, contentType string, bo
 
 func (c *Client) EnrollAgent(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnrollAgentRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyAgentRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyAgent(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyAgentRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyChallengeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyChallengeRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyChallenge(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyChallengeRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4276,6 +4375,86 @@ func NewEnrollAgentRequestWithBody(server string, contentType string, body io.Re
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/agent/enroll")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRekeyAgentRequest calls the generic RekeyAgent builder with application/json body
+func NewRekeyAgentRequest(server string, body RekeyAgentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRekeyAgentRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRekeyAgentRequestWithBody generates requests for RekeyAgent with any type of body
+func NewRekeyAgentRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agent/rekey")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRekeyChallengeRequest calls the generic RekeyChallenge builder with application/json body
+func NewRekeyChallengeRequest(server string, body RekeyChallengeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRekeyChallengeRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRekeyChallengeRequestWithBody generates requests for RekeyChallenge with any type of body
+func NewRekeyChallengeRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agent/rekey/challenge")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -9465,6 +9644,16 @@ type ClientWithResponsesInterface interface {
 
 	EnrollAgentWithResponse(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*EnrollAgentResponse, error)
 
+	// RekeyAgentWithBodyWithResponse request with any body
+	RekeyAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error)
+
+	RekeyAgentWithResponse(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error)
+
+	// RekeyChallengeWithBodyWithResponse request with any body
+	RekeyChallengeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error)
+
+	RekeyChallengeWithResponse(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error)
+
 	// CliAuthorizeWithBodyWithResponse request with any body
 	CliAuthorizeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CliAuthorizeResponse, error)
 
@@ -9939,6 +10128,52 @@ func (r EnrollAgentResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r EnrollAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RekeyAgentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RekeyResponse
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RekeyAgentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RekeyAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RekeyChallengeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RekeyChallengeResponse
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RekeyChallengeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RekeyChallengeResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -12644,6 +12879,40 @@ func (c *ClientWithResponses) EnrollAgentWithResponse(ctx context.Context, body 
 	return ParseEnrollAgentResponse(rsp)
 }
 
+// RekeyAgentWithBodyWithResponse request with arbitrary body returning *RekeyAgentResponse
+func (c *ClientWithResponses) RekeyAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error) {
+	rsp, err := c.RekeyAgentWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyAgentResponse(rsp)
+}
+
+func (c *ClientWithResponses) RekeyAgentWithResponse(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error) {
+	rsp, err := c.RekeyAgent(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyAgentResponse(rsp)
+}
+
+// RekeyChallengeWithBodyWithResponse request with arbitrary body returning *RekeyChallengeResponse
+func (c *ClientWithResponses) RekeyChallengeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error) {
+	rsp, err := c.RekeyChallengeWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyChallengeResponse(rsp)
+}
+
+func (c *ClientWithResponses) RekeyChallengeWithResponse(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error) {
+	rsp, err := c.RekeyChallenge(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyChallengeResponse(rsp)
+}
+
 // CliAuthorizeWithBodyWithResponse request with arbitrary body returning *CliAuthorizeResponse
 func (c *ClientWithResponses) CliAuthorizeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CliAuthorizeResponse, error) {
 	rsp, err := c.CliAuthorizeWithBody(ctx, contentType, body, reqEditors...)
@@ -14130,6 +14399,72 @@ func ParseEnrollAgentResponse(rsp *http.Response) (*EnrollAgentResponse, error) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest EnrollResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRekeyAgentResponse parses an HTTP response from a RekeyAgentWithResponse call
+func ParseRekeyAgentResponse(rsp *http.Response) (*RekeyAgentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RekeyAgentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RekeyResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRekeyChallengeResponse parses an HTTP response from a RekeyChallengeWithResponse call
+func ParseRekeyChallengeResponse(rsp *http.Response) (*RekeyChallengeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RekeyChallengeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RekeyChallengeResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

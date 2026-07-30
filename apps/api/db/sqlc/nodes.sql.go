@@ -67,6 +67,9 @@ type ConsumeRekeyChallengeParams struct {
 	CertSerial string `json:"cert_serial"`
 }
 
+// lint:cross-org — a challenge carries no org and cannot: it is issued before the caller is known to be anyone,
+// and binding it to an org would require resolving the serial at issue time, which is the enumeration oracle D9
+// exists to avoid. The org is established later, from the node the serial resolves to.
 // SINGLE-USE, enforced by the UPDATE's own WHERE clause rather than by a read-then-write: two concurrent submits
 // with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
 // would have a race exactly wide enough to matter here.
@@ -194,6 +197,7 @@ DELETE FROM node_rekey_challenges
 WHERE expires_at < now() - interval '1 hour'
 `
 
+// lint:cross-org — a retention sweep over a table with no org column, by design (see ConsumeRekeyChallenge).
 // Pruning for a table an unauthenticated endpoint writes to. Consumed rows are kept briefly too — a consumed nonce
 // must keep failing rather than becoming unknown, so deleting it the instant it is spent would turn replay into
 // "no such challenge" and lose the distinction in the log.
@@ -529,6 +533,11 @@ type RekeyNodeParams struct {
 //
 // Guarded on the CALLER having already authorized: status must still be what it was when RekeyAuthorized ran, so a
 // node revoked or renewed in the meantime cannot be re-keyed on a stale decision.
+// lint:cross-org — authorization here is the CERT SERIAL plus proof of possession, not an org membership: the
+// caller is an unauthenticated agent that holds no session and no org context, which is the whole premise of
+// recovery (its certificate is the thing that failed). The serial is globally unique (nodes_cert_serial_key), so it
+// identifies exactly one node and therefore exactly one org — the same reasoning that annotates
+// GetNodeByCertSerial, which is how every authenticated agent request already resolves its node.
 // IT CANNOT RESURRECT. This statement does not mention `status` or `revoked_at` at ALL — not "sets them
 // carefully", does not reference them. Re-key is therefore incapable of un-revoking a node rather than merely
 // forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on

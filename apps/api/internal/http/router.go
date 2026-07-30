@@ -215,6 +215,15 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	}
 	r.Use(gate)
 
+	// S13.1: throttle the two RE-KEY routes and nothing else. Applied by PATH rather than as a global
+	// middleware, because rate limiting for login, enrolment, the agent channel and the wider API is UNBUILT and
+	// still owed — this must not be mistaken for it. See internal/http/rekeythrottle.go, whose name and placement
+	// are the guard, and the honest ledger entry in docs/S13.1-decisions.md.
+	//
+	// These two are singled out because they are UNAUTHENTICATED by construction (the caller's certificate is the
+	// thing that has failed) and one of them performs RSA verification, which is CPU-amplifying.
+	r.Use(rekeyOnly(newRekeyThrottle(rekeyAttemptsPerMinute)))
+
 	strict := api.NewStrictHandlerWithOptions(srv, nil, api.StrictHTTPServerOptions{
 		// Both hooks render typed *apierr.Error (and anything else) as the envelope.
 		RequestErrorHandlerFunc:  apierr.Write,

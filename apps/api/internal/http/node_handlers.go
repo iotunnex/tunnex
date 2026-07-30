@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/base64"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -139,4 +140,52 @@ func toAPINode(n sqlc.Node) api.Node {
 		out.SiteId = &sid
 	}
 	return out
+}
+
+// RekeyChallenge POST /api/v1/agent/rekey/challenge (public — see the paper's D8 statement).
+//
+// Mints a single-use nonce for a certificate serial WITHOUT checking that the serial is known. That absence is the
+// anti-enumeration property (D9): a challenge that succeeded only for real serials would make certificate serials
+// probeable one request at a time. An unknown serial fails at SUBMIT, with the same uniform refusal as every other
+// failure.
+func (s apiServer) RekeyChallenge(ctx context.Context, req api.RekeyChallengeRequestObject) (api.RekeyChallengeResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	nonce, err := s.nodes.IssueRekeyChallenge(ctx, req.Body.CertSerial)
+	if err != nil {
+		return nil, err
+	}
+	return api.RekeyChallenge200JSONResponse{
+		Body:    api.RekeyChallengeResponse{Nonce: base64.StdEncoding.EncodeToString(nonce)},
+		Headers: api.RekeyChallenge200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// RekeyAgent POST /api/v1/agent/rekey (public — the entire defence is the gone-gate plus the proof).
+//
+// UNAUTHENTICATED BY CONSTRUCTION: the caller's certificate is the thing that has failed, and Go's ClientAuth is a
+// listener property with no per-route relaxation, so this cannot live beside /agent/renew on the mTLS channel. The
+// gate authorizes ONLY on certificate expiry and refuses a revoked node — a proof of possession must never overturn
+// a human decision, because it cannot distinguish the legitimate holder from whoever took the key.
+//
+// Malformed base64 returns the SAME refusal as a wrong key: decoding is the first thing an attacker can vary, and a
+// distinct error for it would be a free signal about how far a probe got.
+func (s apiServer) RekeyAgent(ctx context.Context, req api.RekeyAgentRequestObject) (api.RekeyAgentResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	nonce, nErr := base64.StdEncoding.DecodeString(req.Body.Nonce)
+	sig, sErr := base64.StdEncoding.DecodeString(req.Body.Signature)
+	if nErr != nil || sErr != nil {
+		return nil, nodes.ErrRekeyRefused
+	}
+	certPEM, caPEM, err := s.nodes.Rekey(ctx, req.Body.CertSerial, nonce, []byte(req.Body.Csr), sig, req.Body.AgentVersion)
+	if err != nil {
+		return nil, err
+	}
+	return api.RekeyAgent200JSONResponse{
+		Body:    api.RekeyResponse{CertPem: certPEM, CaPem: caPEM},
+		Headers: api.RekeyAgent200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
 }

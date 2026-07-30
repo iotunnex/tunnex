@@ -336,3 +336,35 @@ reasoning is lost and the decision gets re-litigated by someone who only sees th
 So: the commit states which behaviour was wrong and why, and the test carries the reasoning — for a security
 inversion, **the attack chain itself**, not just the rule. A future reader who finds `revoked → refuse` with no
 explanation will eventually decide it is an inconvenience worth relaxing.
+
+---
+
+## A FORWARD REFERENCE NAMES AN INTENTION, NEVER A CAPABILITY
+
+*Minted: EPIC 13 / S13.1. A comment citing a story is not a citation of code.*
+
+`auth/service.go:177` read:
+
+```go
+// (Per-caller email throttling is a separate concern — S11.3 rate limiting.)
+```
+
+Accurate when written, and it reads like a pointer to a mechanism. It is a pointer to a **plan**. S11.3 was scoped,
+listed as UNBUILT in EPIC 11's own verify pass, and never shipped — Slice 1 delivered the security-CI tier instead.
+Two epics later that comment was read as evidence the throttle existed, and a ruling was made on it: *"rate-limit it
+(S11.3 shipped the machinery)."* The machinery did not exist.
+
+This is the same shape as EPIC 11's advisory CI job that never ran, and as a runbook naming a binary the image did
+not contain: **an artifact that reads like evidence of a thing rather than evidence of a plan for the thing.**
+
+**THE LAW:** a comment, doc, or ticket that cites a story name is naming an intention. Before relying on it:
+
+- **Grep for the code, not the citation.** "Where is this implemented" is a different question from "where is this
+  mentioned", and the second is much easier to answer accidentally.
+- **Write forward references so they cannot be misread** — *"there is no rate limiting today; S11.3 would add it"*
+  rather than *"S11.3 rate limiting"*. The tense is the whole difference.
+- **When a plan item is descoped, sweep its forward references.** A citation outliving its story is how a plan
+  becomes a phantom capability that someone later builds a ruling on.
+
+Corollary of ARTIFACT-EXISTS ≠ ARTIFACT-WORKS, one step earlier: here the artifact does not exist at all, and the
+*reference* is what exists.

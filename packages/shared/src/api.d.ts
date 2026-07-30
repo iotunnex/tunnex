@@ -1449,6 +1449,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/rekey/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a single-use nonce for proof-of-possession re-key (unauthenticated)
+         * @description S13.1 D9. Returns a single-use, short-lived nonce the agent signs together with its new CSR. UNAUTHENTICATED by construction: the caller's certificate is the thing that has failed. It does NOT verify that the serial is known — a challenge that succeeded only for real serials would make certificate serials probeable one request at a time, so an unknown serial fails at SUBMIT with the same uniform refusal as every other failure. Rate-limited per client address.
+         */
+        post: operations["rekeyChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/rekey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key an existing gateway by proof of possession (unauthenticated)
+         * @description S13.1. Issues a fresh certificate for an EXISTING node id — same node, same site binding, same history — to a caller proving possession of the keypair the control plane recorded for it. UNAUTHENTICATED by construction; its entire defence is (i) the gone-gate, which authorizes ONLY on certificate expiry and REFUSES a revoked node, and (ii) the signature over (nonce ‖ CSR). A revoked gateway recovers with an operator-minted join token instead — a proof of possession must never overturn a human decision, since it cannot distinguish the legitimate holder from whoever took the key. Every failure returns the SAME refusal: live node, unknown serial, spent nonce, malformed CSR and wrong key are indistinguishable, so the endpoint cannot be used as an oracle. Rate-limited per client address.
+         */
+        post: operations["rekeyAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations": {
         parameters: {
             query?: never;
@@ -2406,6 +2446,29 @@ export interface components {
         };
         SsoRedirect: {
             redirect_url: string;
+        };
+        RekeyChallengeRequest: {
+            /** @description Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
+            cert_serial: string;
+        };
+        RekeyChallengeResponse: {
+            /** @description base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known. */
+            nonce: string;
+        };
+        RekeyRequest: {
+            /** @description Serial of the certificate being replaced. */
+            cert_serial: string;
+            /** @description base64 nonce from /agent/rekey/challenge. */
+            nonce: string;
+            /** @description PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material. */
+            csr: string;
+            /** @description base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by the OLD private key. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR. */
+            signature: string;
+            agent_version: string;
+        };
+        RekeyResponse: {
+            cert_pem: string;
+            ca_pem: string;
         };
         EnrollRequest: {
             join_token: string;
@@ -5093,6 +5156,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rekeyChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RekeyChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description A nonce. Says nothing about whether the serial is known. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RekeyChallengeResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rekeyAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RekeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Re-keyed — returns the new certificate and the CA. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RekeyResponse"];
                 };
             };
             default: components["responses"]["Error"];

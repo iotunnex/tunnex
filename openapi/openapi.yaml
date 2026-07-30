@@ -1838,6 +1838,62 @@ paths:
               schema: { $ref: "#/components/schemas/GenericMessage" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/agent/rekey/challenge:
+    post:
+      operationId: rekeyChallenge
+      summary: Request a single-use nonce for proof-of-possession re-key (unauthenticated)
+      description: >-
+        S13.1 D9. Returns a single-use, short-lived nonce the agent signs together with its new CSR.
+        UNAUTHENTICATED by construction: the caller's certificate is the thing that has failed.
+        It does NOT verify that the serial is known — a challenge that succeeded only for real serials
+        would make certificate serials probeable one request at a time, so an unknown serial fails at
+        SUBMIT with the same uniform refusal as every other failure. Rate-limited per client address.
+      tags: [nodes]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RekeyChallengeRequest" }
+      responses:
+        "200":
+          description: A nonce. Says nothing about whether the serial is known.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RekeyChallengeResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/agent/rekey:
+    post:
+      operationId: rekeyAgent
+      summary: Re-key an existing gateway by proof of possession (unauthenticated)
+      description: >-
+        S13.1. Issues a fresh certificate for an EXISTING node id — same node, same site binding, same
+        history — to a caller proving possession of the keypair the control plane recorded for it.
+        UNAUTHENTICATED by construction; its entire defence is (i) the gone-gate, which authorizes ONLY
+        on certificate expiry and REFUSES a revoked node, and (ii) the signature over (nonce ‖ CSR).
+        A revoked gateway recovers with an operator-minted join token instead — a proof of possession
+        must never overturn a human decision, since it cannot distinguish the legitimate holder from
+        whoever took the key. Every failure returns the SAME refusal: live node, unknown serial, spent
+        nonce, malformed CSR and wrong key are indistinguishable, so the endpoint cannot be used as an
+        oracle. Rate-limited per client address.
+      tags: [nodes]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RekeyRequest" }
+      responses:
+        "200":
+          description: Re-keyed — returns the new certificate and the CA.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RekeyResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations:
     get:
       operationId: listOrganizations
@@ -3037,6 +3093,47 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    RekeyChallengeRequest:
+      type: object
+      required: [cert_serial]
+      additionalProperties: false
+      properties:
+        cert_serial:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: "Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9)."
+
+    RekeyChallengeResponse:
+      type: object
+      required: [nonce]
+      additionalProperties: false
+      properties:
+        nonce:
+          type: string
+          description: "base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known."
+
+    RekeyRequest:
+      type: object
+      required: [cert_serial, nonce, csr, signature, agent_version]
+      additionalProperties: false
+      properties:
+        cert_serial: { type: string, minLength: 1, maxLength: 100, description: "Serial of the certificate being replaced." }
+        nonce: { type: string, description: "base64 nonce from /agent/rekey/challenge." }
+        csr: { type: string, description: "PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material." }
+        signature:
+          type: string
+          description: "base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by the OLD private key. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR."
+        agent_version: { type: string, maxLength: 50 }
+
+    RekeyResponse:
+      type: object
+      required: [cert_pem, ca_pem]
+      additionalProperties: false
+      properties:
+        cert_pem: { type: string }
+        ca_pem: { type: string }
 
     EnrollRequest:
       type: object
