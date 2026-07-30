@@ -297,43 +297,56 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	return KindSilentDesync // fresh, mismatched, age >= T
 }
 
-// RekeyAuthorized is the S13.1 D3 GATE, and it is the first thing built in Slice 4 — before any re-key mechanism
-// exists — because the property that must never happen is easier to prove impossible than to retrofit.
+// RekeyAuthorized is the S13.1 D3 GATE, built before any re-key mechanism because a property that must never
+// happen is easier to prove impossible than to retrofit.
 //
-// THE ATTACK IT FORBIDS. Re-key lets a caller that proves possession of a node's original keypair obtain a fresh
-// certificate for that SAME node id. Unguarded, that is a takeover primitive: re-key a healthy production gateway
-// and the caller's agent inherits its identity, its site binding and its policy, while the real gateway is
-// silently displaced. So re-key is permitted ONLY against a node the control plane can itself verify is gone.
+// AUTHORIZED BY CERTIFICATE EXPIRY ONLY. Revocation REFUSES.
 //
-// TWO PIECES OF EVIDENCE, AND NO OTHERS:
+// THE ATTACK THAT AMENDED THIS GATE. D3 originally listed `revoked` as authorizing — it looked like the strongest
+// evidence a node is gone. It is, and that was the wrong question. Trace it:
 //
-//   - `revoked` — the strongest: a human decided.
-//   - `cert_not_after < now()` — arithmetic on the CP's OWN signing record (stamped at issuance since migration
-//     0054, bounded for pre-existing rows by 0055 in a direction that cannot false-positive).
+//  1. an attacker steals a gateway's state volume, which is its private key;
+//  2. the operator notices and REVOKES that gateway — the product's answer to a stolen credential;
+//  3. the attacker calls re-key, proving possession of the stolen key;
+//  4. `revoked` authorizes it;
+//  5. the attacker holds a fresh certificate for that node id — active, same site binding, same policy.
 //
-// EXPLICITLY INADMISSIBLE:
+// Revocation defeated by the exact credential it was invoked against. The paper already forbade this in a
+// condition on the same page ("re-key must not become an un-revoke; revocation is the product's security
+// primitive") — the evidence list contradicted a condition in its own document. The condition was right and the
+// list was wrong.
 //
-//   - `last_seen_at` stale. Silence has many causes; it is not proof that a credential cannot work. This is the
-//     inference the entire EPIC 11 walk taught us to refuse, and admitting it here would let a network partition
-//     authorize a takeover.
+// THE DISTINCTION, which generalizes past this endpoint: EXPIRY IS AN ABSENCE OF ACTION; REVOCATION IS THE
+// PRESENCE OF A DECISION. A cryptographic proof may overturn the first and must never overturn the second, because
+// the proof cannot distinguish the legitimate holder from whoever took the key — and revocation is precisely the
+// response to that ambiguity. A revoked gateway recovers through an operator-minted join token: a human act, which
+// is the right gate for undoing a human decision.
+//
+// ALSO INADMISSIBLE:
+//
+//   - `last_seen_at` stale. Silence is not proof a credential cannot work — the inference the EPIC 11 walk taught
+//     us to refuse. This function takes no liveness argument at all, so it cannot be passed in by mistake.
 //   - Any operator- or client-supplied "force". A guard overridable by the party most motivated to override it is
-//     documentation, not a guard. There is no parameter for it and there must not be.
+//     documentation. There is no parameter for it and there must not be.
 //
-// The determination follows the law minted in this epic: it must prove the credential CANNOT WORK, never merely
-// that configuration disagrees.
+// THE RETURNED REASON IS FOR THE LOG, NEVER THE RESPONSE. D8's uniform-refusal rule: an attacker probing with a
+// stolen key must not learn revoked-versus-not-found-versus-live. The remedy belongs in the operator-facing docs
+// and the health surface, not in what the endpoint says back.
 func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time) (bool, string) {
 	if status == "revoked" {
-		return true, "node is revoked — an operator deliberately retired it"
-	}
-	if certNotAfterKnown && certNotAfter.Before(now) {
-		return true, "the certificate this control plane issued expired at " +
-			certNotAfter.UTC().Format(time.RFC3339) + " — the agent cannot authenticate and cannot renew"
+		return false, "node is REVOKED — an operator deliberately retired it, and a proof of possession cannot " +
+			"distinguish the real gateway from whoever holds its stolen key. Re-key must never un-revoke. " +
+			"Recover it with an operator-minted join token"
 	}
 	if !certNotAfterKnown {
 		// UNKNOWN is not gone. A row with no recorded expiry predates migration 0054 and 0055 declined to bound
 		// it (it had never reported), so the CP knows nothing about whether this node still works.
 		return false, "this control plane has no record of when the node's certificate expires, so it cannot " +
-			"establish that the node is gone. Revoke it explicitly to authorize replacement"
+			"establish that the node is gone. Recover it with an operator-minted join token"
+	}
+	if certNotAfter.Before(now) {
+		return true, "the certificate this control plane issued expired at " +
+			certNotAfter.UTC().Format(time.RFC3339) + " — the agent cannot authenticate and cannot renew"
 	}
 	return false, "the node's certificate is still valid until " + certNotAfter.UTC().Format(time.RFC3339) +
 		" — a live gateway must never be re-keyed. Revoke it first if you intend to replace it"

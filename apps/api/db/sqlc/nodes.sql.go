@@ -55,6 +55,37 @@ func (q *Queries) ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJ
 	return i, err
 }
 
+const consumeRekeyChallenge = `-- name: ConsumeRekeyChallenge :one
+UPDATE node_rekey_challenges
+SET consumed_at = now()
+WHERE nonce = $1 AND cert_serial = $2 AND consumed_at IS NULL AND expires_at > now()
+RETURNING nonce, cert_serial, created_at, expires_at, consumed_at
+`
+
+type ConsumeRekeyChallengeParams struct {
+	Nonce      []byte `json:"nonce"`
+	CertSerial string `json:"cert_serial"`
+}
+
+// SINGLE-USE, enforced by the UPDATE's own WHERE clause rather than by a read-then-write: two concurrent submits
+// with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
+// would have a race exactly wide enough to matter here.
+//
+// Returns the row only when it was unconsumed AND unexpired AND bound to this serial. No rows = refuse, and the
+// caller must not distinguish which of those it was.
+func (q *Queries) ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error) {
+	row := q.db.QueryRow(ctx, consumeRekeyChallenge, arg.Nonce, arg.CertSerial)
+	var i NodeRekeyChallenge
+	err := row.Scan(
+		&i.Nonce,
+		&i.CertSerial,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const createJoinToken = `-- name: CreateJoinToken :one
 INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at)
 VALUES ($1, $2, $3, $4)
@@ -137,6 +168,41 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.CertPublicKey,
 	)
 	return i, err
+}
+
+const createRekeyChallenge = `-- name: CreateRekeyChallenge :exec
+INSERT INTO node_rekey_challenges (nonce, cert_serial, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateRekeyChallengeParams struct {
+	Nonce      []byte    `json:"nonce"`
+	CertSerial string    `json:"cert_serial"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
+// serial it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+// oversight.
+func (q *Queries) CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error {
+	_, err := q.db.Exec(ctx, createRekeyChallenge, arg.Nonce, arg.CertSerial, arg.ExpiresAt)
+	return err
+}
+
+const deleteExpiredRekeyChallenges = `-- name: DeleteExpiredRekeyChallenges :execrows
+DELETE FROM node_rekey_challenges
+WHERE expires_at < now() - interval '1 hour'
+`
+
+// Pruning for a table an unauthenticated endpoint writes to. Consumed rows are kept briefly too — a consumed nonce
+// must keep failing rather than becoming unknown, so deleting it the instant it is spent would turn replay into
+// "no such challenge" and lose the distinction in the log.
+func (q *Queries) DeleteExpiredRekeyChallenges(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRekeyChallenges)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
@@ -436,6 +502,71 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 		return nil, err
 	}
 	return items, nil
+}
+
+const rekeyNode = `-- name: RekeyNode :one
+UPDATE nodes
+SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now()
+WHERE id = $1 AND cert_serial = $6 AND status = 'active'
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key
+`
+
+type RekeyNodeParams struct {
+	ID            uuid.UUID          `json:"id"`
+	CertSerial    string             `json:"cert_serial"`
+	CertPublicKey *string            `json:"cert_public_key"`
+	CertNotAfter  pgtype.Timestamptz `json:"cert_not_after"`
+	AgentVersion  string             `json:"agent_version"`
+	CertSerial_2  string             `json:"cert_serial_2"`
+}
+
+// THE IDENTITY CHANGE, atomic (S13.1 D2). SAME node id — that is the whole point: the gateway that comes back IS
+// the gateway that left, keeping its site binding, its history and its metrics series.
+//
+// Rotates the serial, the recorded public key and the expiry together. A row half-re-keyed — new certificate,
+// old recorded key — is a node whose proof-of-possession material no longer matches what it holds, so the columns
+// move in one statement.
+//
+// Guarded on the CALLER having already authorized: status must still be what it was when RekeyAuthorized ran, so a
+// node revoked or renewed in the meantime cannot be re-keyed on a stale decision.
+// IT CANNOT RESURRECT. This statement does not mention `status` or `revoked_at` at ALL — not "sets them
+// carefully", does not reference them. Re-key is therefore incapable of un-revoking a node rather than merely
+// forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on
+// `status = 'active'` so a revoked row cannot be re-keyed even if a future caller reached here without the gate.
+// TestRekeyQueryCannotResurrect enforces both halves against this text.
+func (q *Queries) RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, error) {
+	row := q.db.QueryRow(ctx, rekeyNode,
+		arg.ID,
+		arg.CertSerial,
+		arg.CertPublicKey,
+		arg.CertNotAfter,
+		arg.AgentVersion,
+		arg.CertSerial_2,
+	)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Status,
+		&i.CertSerial,
+		&i.AgentVersion,
+		&i.EnrolledAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WgPublicKey,
+		&i.Endpoint,
+		&i.Capabilities,
+		&i.PolicyDesyncSince,
+		&i.PolicyReportedAt,
+		&i.SiteID,
+		&i.HubPriority,
+		&i.CertNotAfter,
+		&i.CertPublicKey,
+	)
+	return i, err
 }
 
 const renewNodeCert = `-- name: RenewNodeCert :exec

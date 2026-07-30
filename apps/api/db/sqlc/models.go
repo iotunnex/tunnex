@@ -285,6 +285,14 @@ type NodePeerStatus struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
+type NodeRekeyChallenge struct {
+	Nonce      []byte             `json:"nonce"`
+	CertSerial string             `json:"cert_serial"`
+	CreatedAt  time.Time          `json:"created_at"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+}
+
 type OrgHealthCheck struct {
 	OrgID     uuid.UUID `json:"org_id"`
 	CheckKind string    `json:"check_kind"`

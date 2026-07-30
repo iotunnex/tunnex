@@ -291,3 +291,48 @@ wrongly trusted or wrongly deleted:
 
 Tell them apart by asking *what refused, and why* — then mutate **that** instead. If nothing refuses, the guard is
 inert and the property is unprotected.
+
+---
+
+## EXPIRY IS AN ABSENCE OF ACTION; REVOCATION IS THE PRESENCE OF A DECISION
+
+*Minted: EPIC 13 / S13.1, from a ruling that was wrong and an attack chain that proved it.*
+
+A recovery mechanism authenticated by **proof of possession** asks "do you still hold the key?" It cannot ask "are
+you the person who should hold it." That distinction decides what such a proof may overturn.
+
+**A cryptographic proof may overturn an absence of action. It must never overturn a decision.**
+
+The attack that established this: an attacker steals a gateway's state volume — its private key. The operator
+notices and **revokes** the gateway, which is the product's answer to a stolen credential. The attacker then proves
+possession of the stolen key and, under a gate that accepted `revoked` as authorizing, receives a fresh certificate
+for that node — active, same identity, same policy. **Revocation defeated by the exact credential it was invoked
+against.**
+
+`revoked` had been listed as the *strongest* authorizing evidence, on the reasoning that it is the strongest
+evidence the node is **gone**. It is. That was the wrong question: strength-of-evidence-that-it-is-gone is not
+validity-of-authorization-to-**return**.
+
+**THE LAW:**
+
+- **Expiry, lapse, timeout, absence of a heartbeat** — nobody decided anything. A proof of possession may recover
+  from these, because no intent is being overridden.
+- **Revocation, suspension, deliberate disablement, an explicit deny** — a human decided. Only another human act may
+  undo it. A credential must never be able to reverse the decision made *about that credential*.
+
+Undoing a decision requires an act of the same kind: an operator-minted token, an authenticated administrative call,
+a signed approval. Never a proof that the holder is still the holder — that is precisely what was doubted.
+
+**And prefer construction to convention when enforcing it.** The statement that performs recovery does not
+*carefully avoid* resurrecting a revoked row; it does not reference `status` or `revoked_at` at all, so no future
+call path can reintroduce it. The gate that authorizes takes no liveness parameter, so staleness cannot be passed in
+by mistake. A rule that cannot be expressed is stronger than a rule that is merely followed.
+
+### Corollary — WHEN A RED'S ASSERTION INVERTS, SAY WHICH BEHAVIOUR WAS WRONG
+
+A test whose expectation reverses is recording a **decision**, not applying a fix. Quietly editing it is how the
+reasoning is lost and the decision gets re-litigated by someone who only sees the current line.
+
+So: the commit states which behaviour was wrong and why, and the test carries the reasoning — for a security
+inversion, **the attack chain itself**, not just the rule. A future reader who finds `revoked → refuse` with no
+explanation will eventually decide it is an inconvenience worth relaxing.

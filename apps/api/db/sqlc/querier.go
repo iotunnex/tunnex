@@ -94,6 +94,13 @@ type Querier interface {
 	// Atomic single-use: only an UNUSED code for THIS user is burned; returns its id on success,
 	// 0 rows if already used / not found (no which-code oracle to the caller).
 	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (uuid.UUID, error)
+	// SINGLE-USE, enforced by the UPDATE's own WHERE clause rather than by a read-then-write: two concurrent submits
+	// with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
+	// would have a race exactly wide enough to matter here.
+	//
+	// Returns the row only when it was unconsumed AND unexpired AND bound to this serial. No rows = refuse, and the
+	// caller must not distinguish which of those it was.
+	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
@@ -167,6 +174,10 @@ type Querier interface {
 	// ∈ {resource,group,site}; S10.3: +k8s_service (exactly one of dst_resource_id/dst_group_id/dst_site_id/
 	// dst_k8s_service_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
+	// lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
+	// serial it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+	// oversight.
+	CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
 	CreateSite(ctx context.Context, arg CreateSiteParams) (Site, error)
@@ -190,6 +201,10 @@ type Querier interface {
 	DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error)
 	// lint:cross-org — user-scoped login challenge (GC, ledgered to S11).
 	DeleteExpiredMfaChallenges(ctx context.Context) error
+	// Pruning for a table an unauthenticated endpoint writes to. Consumed rows are kept briefly too — a consumed nonce
+	// must keep failing rather than becoming unknown, so deleting it the instant it is spent would turn replay into
+	// "no such challenge" and lose the distinction in the log.
+	DeleteExpiredRekeyChallenges(ctx context.Context) (int64, error)
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
 	DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterParams) error
@@ -622,6 +637,21 @@ type Querier interface {
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.
 	RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error)
+	// THE IDENTITY CHANGE, atomic (S13.1 D2). SAME node id — that is the whole point: the gateway that comes back IS
+	// the gateway that left, keeping its site binding, its history and its metrics series.
+	//
+	// Rotates the serial, the recorded public key and the expiry together. A row half-re-keyed — new certificate,
+	// old recorded key — is a node whose proof-of-possession material no longer matches what it holds, so the columns
+	// move in one statement.
+	//
+	// Guarded on the CALLER having already authorized: status must still be what it was when RekeyAuthorized ran, so a
+	// node revoked or renewed in the meantime cannot be re-keyed on a stale decision.
+	// IT CANNOT RESURRECT. This statement does not mention `status` or `revoked_at` at ALL — not "sets them
+	// carefully", does not reference them. Re-key is therefore incapable of un-revoking a node rather than merely
+	// forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on
+	// `status = 'active'` so a revoked row cannot be re-keyed even if a future caller reached here without the gate.
+	// TestRekeyQueryCannotResurrect enforces both halves against this text.
+	RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a
 	// manual membership even if one somehow shared the (group,user) key.

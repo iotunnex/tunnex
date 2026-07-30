@@ -32,19 +32,57 @@ func TestRekeyRefusedAgainstALiveNode(t *testing.T) {
 	}
 }
 
-// TestRekeyAuthorizedOnlyByTheTwoRuledEvidences — D3 is an ALLOWLIST of two facts. This asserts both halves and,
-// more importantly, that nothing else qualifies.
-func TestRekeyAuthorizedOnlyByTheTwoRuledEvidences(t *testing.T) {
+// TestRekeyNeverUnRevokes — THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, and that inversion is a
+// security decision rather than a fix, so the reasoning lives here.
+//
+// The original red asserted that a REVOKED node AUTHORIZES re-key, on the reasoning that revocation is the
+// strongest available evidence a node is gone. That is true, and it was the wrong question. The attack:
+//
+//  1. an attacker steals a gateway's state volume, which is its private key;
+//  2. the operator notices and REVOKES that gateway — the product's answer to a stolen credential;
+//  3. the attacker calls re-key, proving possession of the stolen key;
+//  4. `revoked` authorizes it;
+//  5. the attacker holds a fresh certificate for that node id — active, same site binding, same policy.
+//
+// Revocation defeated by the exact credential it was invoked against. The paper already forbade this in a
+// condition on the same page; the evidence list contradicted it. The condition was right.
+//
+// A future reader who sees "revoked → refuse" without the chain above will eventually decide it is an
+// inconvenience worth relaxing. That is why the chain is here and not only in the paper.
+//
+// EXPIRY IS AN ABSENCE OF ACTION; REVOCATION IS THE PRESENCE OF A DECISION. A cryptographic proof may overturn
+// the first and must never overturn the second: the proof cannot distinguish the legitimate holder from whoever
+// took the key, and revocation is precisely the response to that ambiguity.
+func TestRekeyNeverUnRevokes(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Hour), now.Add(time.Hour)
 
-	if ok, _ := RekeyAuthorized("revoked", future, true, now); !ok {
-		t.Error("a REVOKED node must authorize re-key even while its certificate is still technically valid — a " +
-			"human decided, which is the strongest evidence available")
+	// Revoked, certificate still valid.
+	if ok, reason := RekeyAuthorized("revoked", future, true, now); ok {
+		t.Fatalf("a REVOKED node must NEVER authorize re-key: proof of possession cannot tell the real gateway "+
+			"from whoever stole its key, so authorizing would let the stolen credential undo the revocation "+
+			"invoked against it. Got authorized with %q", reason)
 	}
+	// Revoked AND expired — still refused. Expiry does not launder a revocation.
+	if ok, reason := RekeyAuthorized("revoked", past, true, now); ok {
+		t.Fatalf("revoked AND expired must still refuse — expiry must not launder away a human decision. Got %q", reason)
+	}
+	// The refusal must name the remedy, and it must be the HUMAN one.
+	_, reason := RekeyAuthorized("revoked", past, true, now)
+	if !strings.Contains(reason, "join token") {
+		t.Errorf("the refusal must direct the operator to the human recovery path (a minted join token); got %q", reason)
+	}
+}
+
+// TestExpiryIsTheONLYAuthorization — the positive half, and the completeness of the allowlist.
+func TestExpiryIsTheONLYAuthorization(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	past, future := now.Add(-time.Hour), now.Add(time.Hour)
+
 	if ok, _ := RekeyAuthorized("active", past, true, now); !ok {
-		t.Error("an EXPIRED certificate must authorize re-key: the agent cannot authenticate and cannot renew, " +
-			"which is the whole condition this epic exists to recover from")
+		t.Error("an EXPIRED certificate on an ACTIVE node must authorize re-key: the agent cannot authenticate " +
+			"and cannot renew, which is the whole condition this epic exists to recover from — and no human " +
+			"decided anything, so no decision is being overturned")
 	}
 	if ok, _ := RekeyAuthorized("active", future, true, now); ok {
 		t.Error("valid certificate + active status must NOT authorize")
@@ -77,12 +115,16 @@ func TestUnknownExpiryIsNotGone(t *testing.T) {
 		t.Fatalf("an unknown expiry must NOT authorize re-key — the control plane cannot establish the node is "+
 			"gone, and 'I cannot tell' is not 'it is fine'. Got %q", reason)
 	}
-	if !strings.Contains(reason, "no record") || !strings.Contains(reason, "Revoke it explicitly") {
-		t.Errorf("the refusal must state that the CP cannot establish absence, and name the explicit remedy; got %q", reason)
+	if !strings.Contains(reason, "no record") || !strings.Contains(reason, "join token") {
+		t.Errorf("the refusal must state that the CP cannot establish absence, and name the human remedy; got %q", reason)
 	}
-	// ...but a revoked node with unknown expiry IS authorized: the human decision stands on its own.
-	if ok, _ := RekeyAuthorized("revoked", time.Time{}, false, now); !ok {
-		t.Error("revocation authorizes regardless of what is known about expiry — it is an independent evidence")
+	// SECOND INVERTED ASSERTION, same reasoning as TestRekeyNeverUnRevokes. This previously asserted that a
+	// revoked node with unknown expiry IS authorized, on the grounds that "revocation is independent evidence".
+	// It is independent evidence that the node is GONE — and simultaneously evidence that a human wanted the
+	// key-holder locked out, which is exactly what proof of possession cannot adjudicate.
+	if ok, _ := RekeyAuthorized("revoked", time.Time{}, false, now); ok {
+		t.Error("revoked + unknown expiry must refuse: neither fact authorizes a return, and the revocation is a " +
+			"decision a cryptographic proof must not overturn")
 	}
 }
 
