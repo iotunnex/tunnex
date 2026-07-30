@@ -101,9 +101,133 @@ document describing it. Reworded to name it as the walk's owed proof, conditiona
 
 ---
 
-## Open at Leg 0
+## Leg 1 — the fleet baseline
 
-- **`tunnex_gateway_policy_health{kind="healthy"} 0`** with four non-revoked gateways. Not yet diagnosed: the
-  fleet may legitimately be in `desync_unknown` (three of the four are dormant cross-cloud walk hosts), or the
-  gauge's org walk may be under-counting. Resolved before Leg 1 — a health floor that reads zero on a working
-  fleet is either an honest state or a broken metric, and which one it is matters more than either leg after it.
+Captured `2026-07-30T03:34:14Z`, before anything destructive.
+
+```
+interface: wg0   public key: KhC1ubO4+9HRyNFujU3QPxnS2Q7V0y2vAgi50DhzlW0=
+
+peer: TOtAdJqLVL/S+9nbWsc2CB+X09vA5qzMB56avEhf4kc=   (the laptop client)
+  endpoint: 103.77.0.135:15170   allowed ips: 10.99.0.4/32
+  latest handshake: 7 seconds ago
+  transfer: 321.42 KiB received, 171.58 KiB sent          <-- Leg 3 must EXCEED this
+
+peer: LYO7iCchBpplzAKRSCw3cHSqxPaMyMJ2tZs5vjSCc0s=   endpoint 15.135.130.96:51820
+  allowed ips: (none)                                      <-- STANDBY hub peer (S8.6 HA, correct)
+  transfer: 0 B received, 6.71 MiB sent
+peer: lrGiH7wTWpsOB4lWox149aI/LgGYrwYzJaaYeVAeJWM=   endpoint 15.134.60.253:51820
+  allowed ips: 172.31.0.0/16
+  transfer: 0 B received, 6.71 MiB sent
+```
+
+**This leg independently closed Leg 0's open item.** Both site-link peers show *sending, receiving nothing* —
+the gateway is talking to two AWS hosts that have been down since Jul 23. The health surface reported
+`site_link_down` = 4; the wire says `site_link_down`, reached by a different route. Two independent renderings
+of the same truth agreeing is what makes the gauge trustworthy for the legs that follow, so
+`healthy = 0` is an honest state and **there is no metric defect**. (My prediction going in was that all 13
+series would read zero and the gauge had never run. Wrong, and wrong in the direction that matters.)
+
+---
+
+## Leg 2 — backup per the runbook as written — PASS
+
+```json
+{
+  "version": 1,
+  "taken_at": "2026-07-30T03:34:42.896143359Z",
+  "master_key_fingerprint": "912f6a205877",
+  "schema_version": 53,
+  "note": "S11 walk"
+}
+```
+
+`backupctl verify` → **exit 0**: *"ok: this control plane holds the master key this backup was sealed under
+(fingerprint 912f6a205877, taken 2026-07-30 03:34:42 UTC, schema version 53)"*. Dump: 156 761 bytes.
+
+| criterion | verdict |
+|---|---|
+| manifest carries a key fingerprint | ✅ |
+| manifest carries **no key material** | ✅ the only hex present is the 12-char fingerprint; no base64, no 64-hex blob |
+| `verify` exits 0 naming what it matched | ✅ fingerprint + timestamp + schema version |
+
+**Registered residual (not a finding):** the fingerprint is 48 bits and the manifest is **unsigned**. That is
+correct for the job it actually does — catching operator error, "did you bring the right key" — and the doc
+frames it that way. It is not an authenticated artifact: anyone who can write your manifest can write anything
+in it. Worth one sentence in `backup-restore.md` rather than a scope expansion.
+
+---
+
+## Leg 3 — TRUST AFTER RESTORE — **PASS, all four proofs. Owed debt #1 DISCHARGED.**
+
+`pg_restore --clean --if-exists` over the live deployment, `03:35:47Z` → `03:35:57Z`, then `restart api`.
+
+| proof | evidence | verdict |
+|---|---|---|
+| 1. cert serials unchanged | all four byte-identical to Leg 1 (`bb79126b…`, `cb882e06…`, `7d84d493…`, `5308c954…`) | ✅ |
+| 2. no re-enrolment | agent-log grep `enroll\|certificate\|csr` over the window returned **nothing** | ✅ |
+| 3. counters advanced | 321.42/171.58 KiB → **338.00/188.43 KiB**; handshake 17 s | ✅ |
+| 4. no data-path interruption | see below | ✅ |
+| (bonus) CP self-recovered | `/readyz` → `ok leader`, leadership re-acquired with no manual step | ✅ |
+
+Proof 1 is the headline: **identical serials mean the agent CA was decrypted out of the restored, sealed data.**
+Had the master key not matched what the dump was sealed under, the CA would have been unreadable and the fleet
+would have re-issued — which is the silent orphaning the manifest exists to prevent.
+
+**Proof 4, measured rather than eyeballed.** The restore window is `09:05:47–09:05:57` local, which is
+`icmp_seq=872–882`. Every sequence number in that range is present at an unchanged ~240 ms:
+
+```
+09:05:47 icmp_seq=872 time=240.407 ms      <-- restore begins
+09:05:52 icmp_seq=877 time=240.445 ms
+09:05:57 icmp_seq=882 time=239.835 ms      <-- restore complete, api restarting
+```
+
+And across the entire 15-minute log (`08:51:12` → `09:06:34`, 919 packets): **zero `icmp_seq`
+discontinuities, zero timeouts.** The gap detector matters — a dropped packet leaves a hole in the sequence
+while the surrounding lines still look continuous, which is exactly how "it looked fine" conceals a data-path
+break. A first tail of the log showed only `09:06:15` onward, *after* the window; that would have been
+recovery evidence masquerading as survival evidence, so the window was pulled explicitly.
+
+This is the claim in `self-host.md` — *"the control plane degrades; tunnels survive"* — earning its ✅ from a
+wire instead of an assertion. The schema was dropped and recreated under a live tunnel and the data path never
+noticed.
+
+**Observation, under test, not a finding yet:** two packets returned in exactly 2× baseline (`seq=892` at
+`09:06:07`, `seq=917` at `09:06:32`) — 25 s apart, matching the peers' `persistent keepalive: every 25 seconds`.
+No loss either time. n=2 is suggestive, not conclusive; periodicity being checked across the whole log before
+it is called jitter or a pattern.
+
+---
+
+## WF-S11-2 — `preflight` reports last-known agent versions as though they were live
+
+**Severity: LOW.** Found at Leg 0's re-verify. **Held for disposition.**
+
+`preflight` printed *"all 4 gateway(s) at v6 or newer"* about a fleet the health surface simultaneously reported
+as 4× `site_link_down`, and which Leg 1's `wg show` confirmed is two-thirds powered off. Both statements are
+true; together they read as a contradiction.
+
+`agentCompatWindow` reads persisted `nodes.capabilities->>'max_policy_version'` — last-known, not live. Three of
+those gateways went down on Jul 23; their v6 is a memory. **The logic is right**: staleness is conservative for
+this check's purpose, since a dead agent cannot have been silently downgraded, so last-known is a safe floor.
+The *wording* is not — "all 4 gateway(s) at v6 or newer" reads as a liveness claim the check never made, and an
+operator about to roll would take it as "the fleet is fine."
+
+Two candidate shapes, and one is a design change rather than a fix:
+
+- **(a) wording only** — "all 4 gateway(s) **last reported** v6 or newer", naming the read as last-known.
+- **(b) staleness as its own verdict** — count gateways whose report is stale and return them as
+  unknown-and-refuse, consistent with the check's existing unknown-≠-pass stance.
+
+Recommendation: **(a) now, (b) registered.** (b) would make `preflight` refuse rolls on any deployment with a
+legitimately dormant site, which is a policy decision about what an upgrade gate should block.
+
+---
+
+## Resolved at Leg 1
+
+- ~~`tunnex_gateway_policy_health{kind="healthy"} 0` with four non-revoked gateways — broken gauge or honest
+  state?~~ **Honest state.** The kinds sum to exactly 4, reconciling against the `revoked_at IS NULL` row count,
+  and `site_link_down` = 4 is corroborated on the wire by both site-link peers showing sent-but-never-received.
+  No defect.
