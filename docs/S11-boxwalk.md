@@ -219,14 +219,28 @@ sudo docker exec tunnex-api-2    wget -qO- http://127.0.0.1:9090/readyz; echo
 - **PASS:** one reports `ok leader`, the other `ok follower`. **Both are 200** — a follower is ready on purpose.
 - Now **roll**, with the witness flow running:
 
+**`restart` CANNOT PROVE THIS AND WILL FALSE-PASS.** A restarted leader is back in under a second and reclaims
+the lock ~400 ms after releasing it — long before the follower's 10-second retry tick — so the takeover path is
+never exercised. Worse, the criterion "the surviving replica now reports `ok leader`" is *satisfied* by the
+restarted leader itself, so a careless reading records a pass for a leg that proved nothing. Observed on the
+first attempt; recorded in the walk record.
+
+**STOP the leader and leave it stopped.** Poll in the SAME command block as the stop — a separately-pasted loop
+starts after the event.
+
 ```bash
-# stop the LEADER; leadership must move to the follower
-sudo docker compose restart api          # (or restart tunnex-api-2 if it holds the lock)
-sleep 15
-sudo docker compose exec -T api  wget -qO- http://127.0.0.1:9090/readyz; echo
-sudo docker exec tunnex-api-2    wget -qO- http://127.0.0.1:9090/readyz; echo
-sudo docker logs tunnex-api-2 2>&1 | grep -E 'leader_acquired|leader_released' | tail -3
+sudo docker compose stop api             # (or `docker stop tunnex-api-2` if IT holds the lock)
+for i in $(seq 1 15); do
+  a=$(sudo docker compose exec -T api wget -qO- -T2 http://127.0.0.1:9090/readyz 2>/dev/null || echo DOWN)
+  b=$(sudo docker exec tunnex-api-2  wget -qO- -T2 http://127.0.0.1:9090/readyz 2>/dev/null || echo DOWN)
+  printf '%s  api-1=%-12s api-2=%s\n' "$(date -u +%T)" "$a" "$b"; sleep 2
+done
+sudo docker logs tunnex-api-2 2>&1 | grep -E 'leader_acquired|leader_released'
+sudo docker compose start api             # then confirm it comes back as FOLLOWER
 ```
+
+The returning replica must come back a **follower** — api-2 holds the lock now, and a second acquirer would mean
+the lock is not exclusive.
 
 - **PASS, all three:**
   1. Leadership **moved** — the surviving replica now reports `ok leader`, with `leader_acquired` in its log.

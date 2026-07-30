@@ -272,6 +272,91 @@ discovering it cannot work. Key-first would be the better order.
 
 ---
 
+## Leg 5 — HA UNDER A ROLL — **PASS, all four. Owed debt #2 DISCHARGED.**
+
+Second replica `tunnex-api-2`: same network, `--volumes-from tunnex-api-1`, env inherited from the running
+container. **Admission gate:** both replicas logged `master_key_fp: 85bfff0a3a64` and
+`session_secret_fp: d4f81511cfe9` — identical, so this is one deployment with two replicas rather than two
+deployments. api-2 also logged `agent_ca_ready ca_fp: b394684347d8`, reading the CA out of sealed data.
+
+> Note on the gate: I predicted api-2 would log `912f6a205877`, the *manifest's* fingerprint. It does not, and
+> the reason is correct design — `backup.KeyFingerprint` and `crypto.Sealer.Fingerprint` HMAC different
+> domain-separation probes, so a backup identity cannot be confused with a runtime identity. The gate held
+> because it compared api-1 against api-2 rather than against a remembered constant.
+
+```
+03:49:33   stop the leader (graceful; container exits at ~03:49:43)
+03:49:44   api-1=DOWN   api-2=ok follower      <-- NO LEADER AT ALL. Captured.
+03:49:45.481  api-2  leader_acquired            <-- ~2.5s after api-1 exited
+03:49:46 … 03:50:13   api-1=DOWN   api-2=ok leader      (15 samples)
+03:50:28 … 03:50:35   api-1=ok follower   api-2=ok leader
+```
+
+| criterion | verdict |
+|---|---|
+| 1. leadership moved | ✅ api-2 acquired ~2.5 s after the leader exited, inside the documented ~10 s |
+| 2. never two leaders | ✅ 15 paired samples plus the handover instant |
+| 3. returning replica is a **follower** | ✅ `ok follower` — the advisory lock is genuinely exclusive |
+| 4. no data-path loss | ✅ `s11-witness2.log`: 133 packets `09:19:14`→`09:21:27`, **zero gaps, zero timeouts**, roll window `seq 19–78` present at unchanged RTT |
+
+**The `03:49:44` sample is the most valuable observation in this leg** and it was nearly missed: api-1 down,
+api-2 still `follower` — a real instant with **no leader at all**. That is the failure direction the mechanism
+was chosen for. A session-scoped Postgres advisory lock fails toward *nobody leads*, never toward two, and here
+it is on a wire instead of in a design note.
+
+Takeover at 2.5 s rather than 10 s is explained rather than celebrated: api-2's retry ticker had been running
+since `03:43:55`, so its next tick fell 2.5 s after the lock freed. Latency is uniform in [0, 10 s]; this
+sampled the lucky end, so **~10 s remains the honest documented number.**
+
+### The first attempt was INVALID, for three independent reasons — all mine
+
+Recorded in full because the runsheet is an artifact under test, and because reason 1 is a procedure that
+produces a **false pass**.
+
+1. **`docker compose restart` cannot prove takeover.** api-1 released the lock at `03:45:32.160` and
+   **re-acquired it at `03:45:32.588` — 428 ms later**, long before api-2's 10 s retry tick. api-2 never got a
+   `leader_acquired` at all. Worse, my stated criterion ("the surviving replica now reports `ok leader`") is
+   *satisfied* by the restarted leader itself, so a careless reading records a pass for a leg that proved
+   nothing. Fixed in the runsheet: **stop the leader and leave it stopped**, and require the returning replica
+   to come back a follower.
+   *What it did prove:* `leader_released` fired, so the explicit unlock on graceful shutdown works — the lock is
+   handed back deliberately, not left for Postgres to reap.
+2. **The poll window missed the event by 51 seconds.** Backgrounding the restart and pasting the loop separately
+   meant observation began at `03:46:23` for a transition at `03:45:32`. Fixed: the stop and the poll go in one
+   block.
+3. **The witness flow was dead.** `s11-witness.log` ended at `09:06:34` local — nine minutes *before* the roll.
+   Its gap check returned clean, which is a clean bill of health for a log that does not cover the leg: exactly
+   the shape of evidence rejected at Leg 3, and it had to be rejected here too. Fixed: restart the witness and
+   verify replies *before* the leg, then grep the window explicitly rather than trusting a gap count.
+
+### Bonus proof from cleanup: hard-kill recovery
+
+`docker rm -f tunnex-api-2` is SIGKILL — no graceful unlock, no `leader_released` from api-2. The sole survivor
+read `ok follower` immediately afterwards (a deployment with **no leader**), then acquired at `03:51:46.873`,
+within one retry tick. See **WF-S11-4**: this is *faster* than the documented expectation, and the docs conflate
+two failure modes with very different speeds.
+
+---
+
+## WF-S11-4 — the docs conflate process death with network partition
+
+**Severity: LOW (documentation precision).** `self-host.md` §6 and `upgrade.md` both state that after a *hard*
+leader failure, takeover "waits for Postgres to notice the dead session — potentially minutes." Measured above:
+a SIGKILLed replica was reaped and leadership reclaimed **within one 10 s tick**.
+
+The two cases differ materially and the wording merges them:
+
+| failure | what Postgres sees | recovery | status |
+|---|---|---|---|
+| process / container death | socket **closes**, backend reaped at once | ≤10 s | ✅ proven (`03:51:46.873`) |
+| true network partition | socket stays open, waits out TCP keepalive | minutes | ⚠️ not tested |
+
+Process death is the common case and it is fast; current wording tells operators to expect minutes for it.
+Recommend folding the distinction and attaching "minutes" only to the partition case — marked untested, because
+it is.
+
+---
+
 ## WF-S11-3 — `backupctl` stdin failure does not name the expected invocation
 
 **Severity: LOW.** `backupctl verify` with no stdin prints `read manifest: EOF` and exits 1. Honest and
