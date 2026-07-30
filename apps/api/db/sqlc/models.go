@@ -267,6 +267,8 @@ type Node struct {
 	CertNotAfter pgtype.Timestamptz `json:"cert_not_after"`
 	// base64(SPKI DER) of the public key bound by the current agent certificate, stamped at enroll and renew. Verification material for proof-of-possession re-key (S13.1 D7). NULL = enrolled before 0057 and not yet renewed: PoP cannot recover that node, only a join token can.
 	CertPublicKey *string `json:"cert_public_key"`
+	// SHA-256 of cert_public_key's SPKI DER, lowercase hex. GENERATED from the key so the two cannot drift. The second re-key identifier (S13.1 D10); NOT unique — the lookup refuses on multiple matches.
+	CertKeyFingerprint *string `json:"cert_key_fingerprint"`
 }
 
 type NodeJoinToken struct {
@@ -290,11 +292,13 @@ type NodePeerStatus struct {
 }
 
 type NodeRekeyChallenge struct {
-	Nonce      []byte             `json:"nonce"`
-	CertSerial string             `json:"cert_serial"`
-	CreatedAt  time.Time          `json:"created_at"`
-	ExpiresAt  time.Time          `json:"expires_at"`
-	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	Nonce          []byte             `json:"nonce"`
+	CertSerial     *string            `json:"cert_serial"`
+	CreatedAt      time.Time          `json:"created_at"`
+	ExpiresAt      time.Time          `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	Identifier     *string            `json:"identifier"`
+	IdentifierKind string             `json:"identifier_kind"`
 }
 
 type OrgHealthCheck struct {

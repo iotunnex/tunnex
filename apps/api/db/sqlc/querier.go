@@ -101,8 +101,15 @@ type Querier interface {
 	// with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
 	// would have a race exactly wide enough to matter here.
 	//
-	// Returns the row only when it was unconsumed AND unexpired AND bound to this serial. No rows = refuse, and the
-	// caller must not distinguish which of those it was.
+	// Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
+	// refuse, and the caller must not distinguish which of those it was.
+	// coalesce(identifier, cert_serial) is the OTHER HALF of migration 0061's rolling-upgrade shim, and it is needed for
+	// the same reason the write half is: during a roll the agent's two round trips (challenge, then submit) can land on
+	// DIFFERENT replicas. The write half lets a previous-version replica consume a challenge this version issued; this
+	// lets THIS version consume a challenge the previous one issued, whose `identifier` is NULL because that version did
+	// not know the column. Half a shim would leave a straddled attempt failing — bounded, since the agent retries, but
+	// degrading re-key during exactly the window an operator is most likely to be recovering a gateway.
+	// It collapses to `identifier = $2` when the CONTRACT migration drops cert_serial.
 	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
@@ -178,8 +185,16 @@ type Querier interface {
 	// dst_k8s_service_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
 	// lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
-	// serial it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+	// identifier it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
 	// oversight.
+	// The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
+	// other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
+	// cert_serial is written TRANSITIONALLY alongside identifier, and only for serial-kind challenges (NULL for a
+	// fingerprint, which is not a serial). It is the rolling-upgrade shim from migration 0061: a previous-version
+	// replica reads cert_serial, and without this it could not consume a challenge a new replica issued — degrading
+	// re-key during exactly the window an operator is most likely to be recovering a gateway. NOTHING in this version
+	// reads it, so the copy cannot diverge in a way that matters, and the CONTRACT migration that drops it is
+	// registered in docs/S13.1-decisions.md.
 	CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
@@ -320,6 +335,25 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
+	// The SECOND re-key identifier (S13.1 D10). :many, and the plurality is the POINT.
+	//
+	// cert_key_fingerprint is deliberately NOT unique (see migration 0061: a UNIQUE index would turn a lookup ambiguity
+	// into a migration failure on any fleet that already enrolled two nodes with the same key). So this query returns up
+	// to TWO rows and its caller REFUSES when it gets more than one. A `:one` query would have raised a runtime
+	// "multiple rows" error — a refusal by accident, at a moment when identity is being trusted, distinguishable in
+	// timing and in the log from a clean refusal. Ambiguity here fails CLOSED, deliberately and visibly.
+	//
+	// EXACT MATCH ONLY — `=` on the full 64-hex digest. Never a prefix, never a LIKE: a prefix match would let a caller
+	// narrow the fleet's key space one request at a time, which is precisely the enumeration property D9 chose the
+	// serial over the node name to avoid.
+	//
+	// REVOKED ROWS ARE NOT FILTERED, matching GetNodeByCertSerial. A revoked node must be refused by the GONE-GATE, at
+	// the same stage and with the same logged reason as it is on the serial path — filtering it out here would make the
+	// two identifiers produce different diagnostics for the same condition, and an operator reading "no node holds this
+	// key" for a node they revoked yesterday is being misled by their own tooling.
+	// lint:cross-org — same reasoning as GetNodeByCertSerial and RekeyNode: the caller is an unauthenticated agent with
+	// no session and no org context, and the recorded key material IS the identity claim being tested.
+	GetNodesByCertKeyFingerprint(ctx context.Context, certKeyFingerprint *string) ([]Node, error)
 	// The org's current signed CRL (delivery reads this; empty crl_pem = not-yet-ready, skip this tick).
 	GetOVPNCRLForOrg(ctx context.Context, orgID uuid.UUID) (GetOVPNCRLForOrgRow, error)
 	// lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.

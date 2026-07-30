@@ -58,13 +58,15 @@ func (q *Queries) ConsumeJoinToken(ctx context.Context, tokenHash []byte) (NodeJ
 const consumeRekeyChallenge = `-- name: ConsumeRekeyChallenge :one
 UPDATE node_rekey_challenges
 SET consumed_at = now()
-WHERE nonce = $1 AND cert_serial = $2 AND consumed_at IS NULL AND expires_at > now()
-RETURNING nonce, cert_serial, created_at, expires_at, consumed_at
+WHERE nonce = $1 AND coalesce(identifier, cert_serial) = $2 AND identifier_kind = $3
+  AND consumed_at IS NULL AND expires_at > now()
+RETURNING nonce, cert_serial, created_at, expires_at, consumed_at, identifier, identifier_kind
 `
 
 type ConsumeRekeyChallengeParams struct {
-	Nonce      []byte `json:"nonce"`
-	CertSerial string `json:"cert_serial"`
+	Nonce          []byte  `json:"nonce"`
+	Identifier     *string `json:"identifier"`
+	IdentifierKind string  `json:"identifier_kind"`
 }
 
 // lint:cross-org — a challenge carries no org and cannot: it is issued before the caller is known to be anyone,
@@ -74,10 +76,17 @@ type ConsumeRekeyChallengeParams struct {
 // with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
 // would have a race exactly wide enough to matter here.
 //
-// Returns the row only when it was unconsumed AND unexpired AND bound to this serial. No rows = refuse, and the
-// caller must not distinguish which of those it was.
+// Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
+// refuse, and the caller must not distinguish which of those it was.
+// coalesce(identifier, cert_serial) is the OTHER HALF of migration 0061's rolling-upgrade shim, and it is needed for
+// the same reason the write half is: during a roll the agent's two round trips (challenge, then submit) can land on
+// DIFFERENT replicas. The write half lets a previous-version replica consume a challenge this version issued; this
+// lets THIS version consume a challenge the previous one issued, whose `identifier` is NULL because that version did
+// not know the column. Half a shim would leave a straddled attempt failing — bounded, since the agent retries, but
+// degrading re-key during exactly the window an operator is most likely to be recovering a gateway.
+// It collapses to `identifier = $2` when the CONTRACT migration drops cert_serial.
 func (q *Queries) ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error) {
-	row := q.db.QueryRow(ctx, consumeRekeyChallenge, arg.Nonce, arg.CertSerial)
+	row := q.db.QueryRow(ctx, consumeRekeyChallenge, arg.Nonce, arg.Identifier, arg.IdentifierKind)
 	var i NodeRekeyChallenge
 	err := row.Scan(
 		&i.Nonce,
@@ -85,6 +94,8 @@ func (q *Queries) ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyCha
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
+		&i.Identifier,
+		&i.IdentifierKind,
 	)
 	return i, err
 }
@@ -126,7 +137,7 @@ func (q *Queries) CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint
 `
 
 type CreateNodeParams struct {
@@ -169,26 +180,41 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.HubPriority,
 		&i.CertNotAfter,
 		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
 	)
 	return i, err
 }
 
 const createRekeyChallenge = `-- name: CreateRekeyChallenge :exec
-INSERT INTO node_rekey_challenges (nonce, cert_serial, expires_at)
-VALUES ($1, $2, $3)
+INSERT INTO node_rekey_challenges (nonce, identifier, identifier_kind, expires_at, cert_serial)
+VALUES ($1, $2, $3, $4, CASE WHEN $3 = 'cert_serial' THEN $2 END)
 `
 
 type CreateRekeyChallengeParams struct {
-	Nonce      []byte    `json:"nonce"`
-	CertSerial string    `json:"cert_serial"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	Nonce          []byte    `json:"nonce"`
+	Identifier     *string   `json:"identifier"`
+	IdentifierKind string    `json:"identifier_kind"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 // lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
-// serial it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+// identifier it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
 // oversight.
+// The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
+// other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
+// cert_serial is written TRANSITIONALLY alongside identifier, and only for serial-kind challenges (NULL for a
+// fingerprint, which is not a serial). It is the rolling-upgrade shim from migration 0061: a previous-version
+// replica reads cert_serial, and without this it could not consume a challenge a new replica issued — degrading
+// re-key during exactly the window an operator is most likely to be recovering a gateway. NOTHING in this version
+// reads it, so the copy cannot diverge in a way that matters, and the CONTRACT migration that drops it is
+// registered in docs/S13.1-decisions.md.
 func (q *Queries) CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error {
-	_, err := q.db.Exec(ctx, createRekeyChallenge, arg.Nonce, arg.CertSerial, arg.ExpiresAt)
+	_, err := q.db.Exec(ctx, createRekeyChallenge,
+		arg.Nonce,
+		arg.Identifier,
+		arg.IdentifierKind,
+		arg.ExpiresAt,
+	)
 	return err
 }
 
@@ -210,7 +236,7 @@ func (q *Queries) DeleteExpiredRekeyChallenges(ctx context.Context) (int64, erro
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes
 WHERE cert_serial = $1
 `
 
@@ -240,12 +266,13 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 		&i.HubPriority,
 		&i.CertNotAfter,
 		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
 	)
 	return i, err
 }
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes
 WHERE org_id = $1 AND name = $2 AND revoked_at IS NULL
 `
 
@@ -282,6 +309,7 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 		&i.HubPriority,
 		&i.CertNotAfter,
 		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
 	)
 	return i, err
 }
@@ -302,6 +330,72 @@ func (q *Queries) GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriority
 	var hub_priority *int32
 	err := row.Scan(&hub_priority)
 	return hub_priority, err
+}
+
+const getNodesByCertKeyFingerprint = `-- name: GetNodesByCertKeyFingerprint :many
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes
+WHERE cert_key_fingerprint = $1
+LIMIT 2
+`
+
+// The SECOND re-key identifier (S13.1 D10). :many, and the plurality is the POINT.
+//
+// cert_key_fingerprint is deliberately NOT unique (see migration 0061: a UNIQUE index would turn a lookup ambiguity
+// into a migration failure on any fleet that already enrolled two nodes with the same key). So this query returns up
+// to TWO rows and its caller REFUSES when it gets more than one. A `:one` query would have raised a runtime
+// "multiple rows" error — a refusal by accident, at a moment when identity is being trusted, distinguishable in
+// timing and in the log from a clean refusal. Ambiguity here fails CLOSED, deliberately and visibly.
+//
+// EXACT MATCH ONLY — `=` on the full 64-hex digest. Never a prefix, never a LIKE: a prefix match would let a caller
+// narrow the fleet's key space one request at a time, which is precisely the enumeration property D9 chose the
+// serial over the node name to avoid.
+//
+// REVOKED ROWS ARE NOT FILTERED, matching GetNodeByCertSerial. A revoked node must be refused by the GONE-GATE, at
+// the same stage and with the same logged reason as it is on the serial path — filtering it out here would make the
+// two identifiers produce different diagnostics for the same condition, and an operator reading "no node holds this
+// key" for a node they revoked yesterday is being misled by their own tooling.
+// lint:cross-org — same reasoning as GetNodeByCertSerial and RekeyNode: the caller is an unauthenticated agent with
+// no session and no org context, and the recorded key material IS the identity claim being tested.
+func (q *Queries) GetNodesByCertKeyFingerprint(ctx context.Context, certKeyFingerprint *string) ([]Node, error) {
+	rows, err := q.db.Query(ctx, getNodesByCertKeyFingerprint, certKeyFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Node{}
+	for rows.Next() {
+		var i Node
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.Status,
+			&i.CertSerial,
+			&i.AgentVersion,
+			&i.EnrolledAt,
+			&i.LastSeenAt,
+			&i.RevokedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.WgPublicKey,
+			&i.Endpoint,
+			&i.Capabilities,
+			&i.PolicyDesyncSince,
+			&i.PolicyReportedAt,
+			&i.SiteID,
+			&i.HubPriority,
+			&i.CertNotAfter,
+			&i.CertPublicKey,
+			&i.CertKeyFingerprint,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getOrgHubSet = `-- name: GetOrgHubSet :one
@@ -462,7 +556,7 @@ func (q *Queries) ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID)
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -497,6 +591,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 			&i.HubPriority,
 			&i.CertNotAfter,
 			&i.CertPublicKey,
+			&i.CertKeyFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -512,7 +607,7 @@ const rekeyNode = `-- name: RekeyNode :one
 UPDATE nodes
 SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now()
 WHERE id = $1 AND cert_serial = $6 AND status = 'active'
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint
 `
 
 type RekeyNodeParams struct {
@@ -574,6 +669,7 @@ func (q *Queries) RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, err
 		&i.HubPriority,
 		&i.CertNotAfter,
 		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
 	)
 	return i, err
 }

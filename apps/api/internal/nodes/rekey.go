@@ -3,9 +3,7 @@ package nodes
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -32,28 +30,97 @@ const challengeTTL = 2 * time.Minute
 var ErrRekeyRefused = apierr.New(http.StatusForbidden, "rekey_refused",
 	"re-key refused. If this gateway was revoked, recover it with a join token instead.")
 
-// IssueRekeyChallenge mints a single-use nonce for a certificate serial.
+// IssueRekeyChallenge mints a single-use nonce for an IDENTIFIER — a certificate serial or a key fingerprint (D10).
 //
-// IT DOES NOT CHECK THAT THE SERIAL EXISTS. A challenge that succeeded only for known serials would be an
-// enumeration oracle, and node certificate serials would then be probeable one request at a time. So the nonce is
-// minted and recorded for whatever serial is asked about; a serial nobody has fails at SUBMIT, with the same
-// uniform refusal as every other failure. Flood protection is the endpoint's rate limit, not this function.
-func (s *Service) IssueRekeyChallenge(ctx context.Context, certSerial string) ([]byte, error) {
-	if certSerial == "" {
+// IT DOES NOT CHECK THAT THE IDENTIFIER EXISTS. A challenge that succeeded only for known identifiers would be an
+// enumeration oracle, and both kinds would then be probeable one request at a time. So the nonce is minted and
+// recorded for whatever is asked about; an identifier nobody has fails at SUBMIT, with the same uniform refusal as
+// every other failure. Flood protection is the endpoint's rate limit, not this function.
+//
+// The nonce is bound to the identifier AND ITS KIND, so a challenge taken out under one cannot be spent under the
+// other.
+func (s *Service) IssueRekeyChallenge(ctx context.Context, ident RekeyIdentifier) ([]byte, error) {
+	// The KIND is validated here, not only where the wire is parsed. Found by
+	// TestBothIdentifiersRefuseIndistinguishably: an unrecognised kind reached the INSERT and came back as a CHECK
+	// constraint violation — a 500, distinguishable at a glance from the 403 every other refusal returns. The
+	// handler cannot currently produce one (ParseRekeyIdentifier emits only these two), so this is the second layer;
+	// the point of the second layer is that the first one might change.
+	switch ident.Kind {
+	case IdentifierCertSerial, IdentifierKeyFingerprint:
+	default:
+		return nil, ErrRekeyRefused
+	}
+	if ident.Value == "" {
 		return nil, ErrRekeyRefused
 	}
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
+	// A pointer because migration 0061 leaves `identifier` NULLABLE for one release: SET NOT NULL would break the
+	// rolling upgrade (the previous version inserts without it). It is never nil here — the contract migration makes
+	// that structural.
+	value := ident.Value
 	if err := s.q.CreateRekeyChallenge(ctx, sqlc.CreateRekeyChallengeParams{
-		Nonce:      nonce,
-		CertSerial: certSerial,
-		ExpiresAt:  time.Now().Add(challengeTTL),
+		Nonce:          nonce,
+		Identifier:     &value,
+		IdentifierKind: ident.Kind,
+		ExpiresAt:      time.Now().Add(challengeTTL),
 	}); err != nil {
 		return nil, err
 	}
 	return nonce, nil
+}
+
+// resolveRekeyIdentity turns an identifier into exactly one node, or refuses.
+//
+// THE AMBIGUITY CASE IS THE REASON THIS IS A FUNCTION. cert_key_fingerprint is not unique (migration 0061 states
+// why), so the fingerprint lookup can return more than one row — and an identifier that resolves to two nodes is
+// ambiguous at exactly the moment it is being TRUSTED. That fails closed, here, with the same refusal as an unknown
+// identifier: the caller cannot learn that it hit an ambiguity, and the log records which one it was.
+//
+// Neither lookup filters revoked rows. A revoked node must be refused by the GONE-GATE — the same stage, the same
+// logged reason, whichever identifier named it — because an operator reading "no node holds this key" for a gateway
+// they revoked yesterday is being misled by their own tooling.
+func (s *Service) resolveRekeyIdentity(ctx context.Context, ident RekeyIdentifier, log *slog.Logger) (sqlc.Node, error) {
+	switch ident.Kind {
+	case IdentifierCertSerial:
+		node, err := s.q.GetNodeByCertSerial(ctx, ident.Value)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				log.Warn("rekey_refused", "reason", "no node holds this certificate serial")
+				return sqlc.Node{}, ErrRekeyRefused
+			}
+			return sqlc.Node{}, err
+		}
+		return node, nil
+
+	case IdentifierKeyFingerprint:
+		v := ident.Value
+		rows, err := s.q.GetNodesByCertKeyFingerprint(ctx, &v)
+		if err != nil {
+			return sqlc.Node{}, err
+		}
+		switch len(rows) {
+		case 0:
+			log.Warn("rekey_refused", "reason", "no node holds this key fingerprint")
+			return sqlc.Node{}, ErrRekeyRefused
+		case 1:
+			return rows[0], nil
+		default:
+			// Two nodes recorded the same public key. Nothing prevents it (a copied state directory plus a second
+			// join token), and it is not evidence of an attack — but it makes the claim unresolvable, and guessing
+			// which node the caller meant is the one thing this must never do.
+			log.Error("rekey_refused",
+				"reason", "AMBIGUOUS: more than one node records this public key, so the identifier does not name a node",
+				"remedy", "recover this gateway with a join token, and re-key the duplicate so the fleet holds one key per node")
+			return sqlc.Node{}, ErrRekeyRefused
+		}
+
+	default:
+		log.Warn("rekey_refused", "reason", "unknown identifier kind")
+		return sqlc.Node{}, ErrRekeyRefused
+	}
 }
 
 // Rekey issues a fresh certificate for an EXISTING node, authenticated by proof of possession of the keypair the
@@ -81,25 +148,25 @@ func (s *Service) IssueRekeyChallenge(ctx context.Context, certSerial string) ([
 // THE WINDOW THIS LEAVES, STATED HONESTLY: between commit and push the control plane believes the new key and the
 // fleet has not been told. The recovering gateway's own next reconcile closes it for itself; other gateways converge
 // on the push, or on their next poll if the push is lost. A lost push is a DELAYED convergence, never a lost one.
-func (s *Service) Rekey(ctx context.Context, certSerial string, nonce, csrPEM, signature []byte, agentVersion string) (certPEM, caPEM string, err error) {
-	log := slog.With("op", "rekey", "cert_serial", certSerial)
+func (s *Service) Rekey(ctx context.Context, ident RekeyIdentifier, nonce, csrPEM, signature []byte, agentVersion string) (certPEM, caPEM string, err error) {
+	log := slog.With("op", "rekey", "identifier_kind", ident.Kind, "identifier", ident.Value)
 
-	// (1) Single-use nonce. The UPDATE's own WHERE enforces it, so two concurrent submits cannot both win.
-	if _, e := s.q.ConsumeRekeyChallenge(ctx, sqlc.ConsumeRekeyChallengeParams{Nonce: nonce, CertSerial: certSerial}); e != nil {
+	// (1) Single-use nonce, bound to this identifier AND kind. The UPDATE's own WHERE enforces it, so two concurrent
+	//     submits cannot both win.
+	value := ident.Value
+	if _, e := s.q.ConsumeRekeyChallenge(ctx, sqlc.ConsumeRekeyChallengeParams{
+		Nonce: nonce, Identifier: &value, IdentifierKind: ident.Kind,
+	}); e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
-			log.Warn("rekey_refused", "reason", "challenge unknown, expired, already used, or bound to another serial")
+			log.Warn("rekey_refused", "reason", "challenge unknown, expired, already used, or bound to another identifier")
 			return "", "", ErrRekeyRefused
 		}
 		return "", "", e
 	}
 
-	// (2) Resolve.
-	node, e := s.q.GetNodeByCertSerial(ctx, certSerial)
+	// (2) Resolve — by either identifier, refusing on ambiguity.
+	node, e := s.resolveRekeyIdentity(ctx, ident, log)
 	if e != nil {
-		if errors.Is(e, pgx.ErrNoRows) {
-			log.Warn("rekey_refused", "reason", "no node holds this certificate serial")
-			return "", "", ErrRekeyRefused
-		}
 		return "", "", e
 	}
 	log = log.With("node_id", node.ID.String(), "org_id", node.OrgID.String())
@@ -138,7 +205,11 @@ func (s *Service) Rekey(ctx context.Context, certSerial string, nonce, csrPEM, s
 			CertPublicKey: spkiText(iss.PublicKeySPKI),
 			CertNotAfter:  pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
 			AgentVersion:  agentVersion,
-			CertSerial_2:  certSerial,
+			// The compare-and-swap guard is the row's OWN current serial, read in (2) — not the caller's
+			// identifier, which may be a fingerprint. Same protection either way: a concurrent re-key or revoke
+			// that moved the row makes this match nothing, and the decision made in (3) is refused rather than
+			// applied to a state that no longer holds.
+			CertSerial_2: node.CertSerial,
 		})
 		if ue != nil {
 			if errors.Is(ue, pgx.ErrNoRows) {
@@ -156,7 +227,8 @@ func (s *Service) Rekey(ctx context.Context, certSerial string, nonce, csrPEM, s
 		// Inventing a parallel mechanism now would hand that story fifteen helpers to collapse instead of
 		// fourteen, with the newest one as the exception.
 		return audit(ctx, q, node.OrgID, nil, "node.rekeyed", "node", node.ID.String(), map[string]any{
-			"old_cert_serial":     certSerial,
+			"identified_by":       ident.Kind,
+			"old_cert_serial":     node.CertSerial,
 			"new_cert_serial":     updated.CertSerial,
 			"old_key_fingerprint": oldFP,
 			"new_key_fingerprint": newFP,
@@ -200,10 +272,16 @@ func (s *Service) Rekey(ctx context.Context, certSerial string, nonce, csrPEM, s
 // keyFingerprint renders a short, non-reversible id for a recorded public key, for audit and logs. Public keys are
 // not secret, so this is for READABILITY rather than protection — a 12-hex prefix is comparable at a glance where a
 // 392-character base64 blob is not.
+//
+// IT IS NOW A PREFIX OF THE IDENTIFIER, and that is a deliberate REDEFINITION (D10). It used to digest the base64
+// TEXT; it now digests the SPKI DER, so `old_key_fingerprint` in an audit row is the first 12 hex of the same value
+// an agent sends as `key_fingerprint`, and an operator can match the two. The consequence, stated rather than
+// discovered: fingerprints in audit rows written BEFORE this change are not comparable with ones written after,
+// because they were computed over a different input.
 func keyFingerprint(spkiB64 string) string {
-	if spkiB64 == "" {
+	full := KeyFingerprintFromStored(spkiB64)
+	if full == "" {
 		return "none"
 	}
-	sum := sha256.Sum256([]byte(spkiB64))
-	return hex.EncodeToString(sum[:6])
+	return full[:12]
 }

@@ -1280,7 +1280,10 @@ type RegisterSiteRequest struct {
 // RekeyChallengeRequest defines model for RekeyChallengeRequest.
 type RekeyChallengeRequest struct {
 	// CertSerial Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9).
-	CertSerial string `json:"cert_serial"`
+	CertSerial *string `json:"cert_serial,omitempty"`
+
+	// KeyFingerprint SHA-256 of the agent's recorded public key (SPKI DER), lowercase hex — the SECOND identifier (D10). Supply EXACTLY ONE of cert_serial or key_fingerprint; supplying both, neither, or a malformed value is refused identically to an unknown identifier, so the endpoint cannot be probed for well-formedness. It exists because a re-key whose RESPONSE is lost leaves the control plane holding a serial the agent never received: the agent's stored serial is stale, and its only durable handle on its own identity is the key material the control plane recorded. No length or pattern constraint here on purpose — a schema violation would answer with 400 where an unknown identifier answers 403, which is a distinction worth denying.
+	KeyFingerprint *string `json:"key_fingerprint,omitempty"`
 }
 
 // RekeyNonce defines model for RekeyNonce.
@@ -1293,16 +1296,19 @@ type RekeyNonce struct {
 type RekeyRequest struct {
 	AgentVersion string `json:"agent_version"`
 
-	// CertSerial Serial of the certificate being replaced.
-	CertSerial string `json:"cert_serial"`
+	// CertSerial Serial of the certificate being replaced. EXACTLY ONE of cert_serial or key_fingerprint.
+	CertSerial *string `json:"cert_serial,omitempty"`
 
 	// Csr PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material.
 	Csr string `json:"csr"`
 
+	// KeyFingerprint SHA-256 of the recorded public key (SPKI DER), lowercase hex. Must match the identifier the challenge was issued for — a nonce is bound to its identifier, so the two cannot be mixed. See RekeyChallengeRequest for why a second identifier exists.
+	KeyFingerprint *string `json:"key_fingerprint,omitempty"`
+
 	// Nonce base64 nonce from /agent/rekey/challenge.
 	Nonce string `json:"nonce"`
 
-	// Signature base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by the OLD private key. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR.
+	// Signature base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by whichever private key the control plane RECORDED for this node — the expired certificate's key when identifying by cert_serial, or the key named by key_fingerprint. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR.
 	Signature string `json:"signature"`
 }
 

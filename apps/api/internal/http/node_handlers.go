@@ -144,15 +144,22 @@ func toAPINode(n sqlc.Node) api.Node {
 
 // RekeyChallenge POST /api/v1/agent/rekey/challenge (public — see the paper's D8 statement).
 //
-// Mints a single-use nonce for a certificate serial WITHOUT checking that the serial is known. That absence is the
-// anti-enumeration property (D9): a challenge that succeeded only for real serials would make certificate serials
-// probeable one request at a time. An unknown serial fails at SUBMIT, with the same uniform refusal as every other
-// failure.
+// Mints a single-use nonce for an IDENTIFIER WITHOUT checking that it is known. That absence is the anti-enumeration
+// property (D9): a challenge that succeeded only for real identifiers would make them probeable one request at a
+// time. An unknown identifier fails at SUBMIT, with the same uniform refusal as every other failure.
+//
+// TWO IDENTIFIERS (D10), and a malformed or contradictory pair is refused with nodes.ErrRekeyRefused — the SAME
+// answer as an unknown identifier — rather than with a 400. A caller who could tell "your fingerprint is the wrong
+// shape" from "no node has that fingerprint" learns the shape, and an endpoint that answers questions gets asked.
 func (s apiServer) RekeyChallenge(ctx context.Context, req api.RekeyChallengeRequestObject) (api.RekeyChallengeResponseObject, error) {
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	nonce, err := s.nodes.IssueRekeyChallenge(ctx, req.Body.CertSerial)
+	ident, ok := nodes.ParseRekeyIdentifier(deref(req.Body.CertSerial), deref(req.Body.KeyFingerprint))
+	if !ok {
+		return nil, nodes.ErrRekeyRefused
+	}
+	nonce, err := s.nodes.IssueRekeyChallenge(ctx, ident)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +187,12 @@ func (s apiServer) RekeyAgent(ctx context.Context, req api.RekeyAgentRequestObje
 	if nErr != nil || sErr != nil {
 		return nil, nodes.ErrRekeyRefused
 	}
-	certPEM, caPEM, err := s.nodes.Rekey(ctx, req.Body.CertSerial, nonce, []byte(req.Body.Csr), sig, req.Body.AgentVersion)
+	// Same refusal for a bad identifier as for a bad signature, by the same reasoning as the decode above.
+	ident, ok := nodes.ParseRekeyIdentifier(deref(req.Body.CertSerial), deref(req.Body.KeyFingerprint))
+	if !ok {
+		return nil, nodes.ErrRekeyRefused
+	}
+	certPEM, caPEM, err := s.nodes.Rekey(ctx, ident, nonce, []byte(req.Body.Csr), sig, req.Body.AgentVersion)
 	if err != nil {
 		return nil, err
 	}

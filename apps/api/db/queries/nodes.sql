@@ -206,10 +206,18 @@ SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2;
 
 -- name: CreateRekeyChallenge :exec
 -- lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
--- serial it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+-- identifier it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
 -- oversight.
-INSERT INTO node_rekey_challenges (nonce, cert_serial, expires_at)
-VALUES ($1, $2, $3);
+-- The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
+-- other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
+-- cert_serial is written TRANSITIONALLY alongside identifier, and only for serial-kind challenges (NULL for a
+-- fingerprint, which is not a serial). It is the rolling-upgrade shim from migration 0061: a previous-version
+-- replica reads cert_serial, and without this it could not consume a challenge a new replica issued — degrading
+-- re-key during exactly the window an operator is most likely to be recovering a gateway. NOTHING in this version
+-- reads it, so the copy cannot diverge in a way that matters, and the CONTRACT migration that drops it is
+-- registered in docs/S13.1-decisions.md.
+INSERT INTO node_rekey_challenges (nonce, identifier, identifier_kind, expires_at, cert_serial)
+VALUES ($1, $2, $3, $4, CASE WHEN $3 = 'cert_serial' THEN $2 END);
 
 -- name: ConsumeRekeyChallenge :one
 -- lint:cross-org — a challenge carries no org and cannot: it is issued before the caller is known to be anyone,
@@ -219,11 +227,19 @@ VALUES ($1, $2, $3);
 -- with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
 -- would have a race exactly wide enough to matter here.
 --
--- Returns the row only when it was unconsumed AND unexpired AND bound to this serial. No rows = refuse, and the
--- caller must not distinguish which of those it was.
+-- Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
+-- refuse, and the caller must not distinguish which of those it was.
+-- coalesce(identifier, cert_serial) is the OTHER HALF of migration 0061's rolling-upgrade shim, and it is needed for
+-- the same reason the write half is: during a roll the agent's two round trips (challenge, then submit) can land on
+-- DIFFERENT replicas. The write half lets a previous-version replica consume a challenge this version issued; this
+-- lets THIS version consume a challenge the previous one issued, whose `identifier` is NULL because that version did
+-- not know the column. Half a shim would leave a straddled attempt failing — bounded, since the agent retries, but
+-- degrading re-key during exactly the window an operator is most likely to be recovering a gateway.
+-- It collapses to `identifier = $2` when the CONTRACT migration drops cert_serial.
 UPDATE node_rekey_challenges
 SET consumed_at = now()
-WHERE nonce = $1 AND cert_serial = $2 AND consumed_at IS NULL AND expires_at > now()
+WHERE nonce = $1 AND coalesce(identifier, cert_serial) = $2 AND identifier_kind = $3
+  AND consumed_at IS NULL AND expires_at > now()
 RETURNING *;
 
 -- name: DeleteExpiredRekeyChallenges :execrows
@@ -233,6 +249,29 @@ RETURNING *;
 -- "no such challenge" and lose the distinction in the log.
 DELETE FROM node_rekey_challenges
 WHERE expires_at < now() - interval '1 hour';
+
+-- name: GetNodesByCertKeyFingerprint :many
+-- The SECOND re-key identifier (S13.1 D10). :many, and the plurality is the POINT.
+--
+-- cert_key_fingerprint is deliberately NOT unique (see migration 0061: a UNIQUE index would turn a lookup ambiguity
+-- into a migration failure on any fleet that already enrolled two nodes with the same key). So this query returns up
+-- to TWO rows and its caller REFUSES when it gets more than one. A `:one` query would have raised a runtime
+-- "multiple rows" error — a refusal by accident, at a moment when identity is being trusted, distinguishable in
+-- timing and in the log from a clean refusal. Ambiguity here fails CLOSED, deliberately and visibly.
+--
+-- EXACT MATCH ONLY — `=` on the full 64-hex digest. Never a prefix, never a LIKE: a prefix match would let a caller
+-- narrow the fleet's key space one request at a time, which is precisely the enumeration property D9 chose the
+-- serial over the node name to avoid.
+--
+-- REVOKED ROWS ARE NOT FILTERED, matching GetNodeByCertSerial. A revoked node must be refused by the GONE-GATE, at
+-- the same stage and with the same logged reason as it is on the serial path — filtering it out here would make the
+-- two identifiers produce different diagnostics for the same condition, and an operator reading "no node holds this
+-- key" for a node they revoked yesterday is being misled by their own tooling.
+-- lint:cross-org — same reasoning as GetNodeByCertSerial and RekeyNode: the caller is an unauthenticated agent with
+-- no session and no org context, and the recorded key material IS the identity claim being tested.
+SELECT * FROM nodes
+WHERE cert_key_fingerprint = $1
+LIMIT 2;
 
 -- name: RekeyNode :one
 -- THE IDENTITY CHANGE, atomic (S13.1 D2). SAME node id — that is the whole point: the gateway that comes back IS

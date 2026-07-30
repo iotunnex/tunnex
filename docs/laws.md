@@ -88,6 +88,15 @@ Sizing a mirrored-guard item from the instance systematically under-estimates it
 audit behaviour", because that change is what must be mirrored N times) rather than a vague one ("someday
 unify these"). The next person is forced into the work anyway; the ledger should say so.
 
+**Corollary — CHECK THE REMEDY, NOT ONLY THE CLAIM (founder-ratified 2026-07-30, S13.1 Slice 6).** A census of
+user-facing strings must ask what each one PRESCRIBES as well as what it asserts. Slice 6's census graded three
+`needs_reexport` consumers on whether they named a *cause*, and passed the badge label `re-export needed` as
+"cause-neutral ✅" — while the widening made it visible to MANAGED devices, for which there is no export path at
+all. The tooltip was caught because it named the wrong cause; the label was missed because it named no cause and
+nobody asked whether it named a possible ACTION. **A label can lie through the remedy it prescribes, and a
+census that only grades claims will pass it.** Every censused string gets both questions: is what it says still
+true, and is what it tells the user to do still possible.
+
 ## PROVE-A-GUARD-REJECTS law (founder-ratified 2026-07-29, EPIC 11) — a new guard is not accepted until it has failed on a planted violation
 
 **A guard that has only ever passed is indistinguishable from a guard that does nothing.** Green is the state

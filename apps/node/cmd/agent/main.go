@@ -447,7 +447,50 @@ func saveCreds(dir string, cert, key, ca []byte) error {
 			return err
 		}
 	}
+	// A pending re-key key is SUPERSEDED the moment a real identity lands — whether it landed by re-key promotion,
+	// by renewal, or by join-token enrolment. Leaving it would make the next recovery attempt spend a challenge
+	// proving possession of a key the control plane does not hold. Best-effort: a stale pending key costs one wasted
+	// attempt, and failing the save over it would cost the identity that just succeeded.
+	_ = os.Remove(filepath.Join(dir, pendingKeyFile))
 	return nil
+}
+
+// pendingKeyFile holds a keypair minted for a re-key that has been SUBMITTED but not confirmed.
+//
+// It is a separate filename rather than an early write to key.pem on purpose: key.pem must always be the key that
+// matches cert.pem, and a re-key in flight has no certificate yet. loadCreds and identity.Decide never look at this
+// file, so a pending key cannot become an identity by accident — only saveCreds can promote it.
+const pendingKeyFile = "rekey-pending-key.pem"
+
+// loadOrCreatePendingKey returns the pending re-key key, minting and PERSISTING one if none exists.
+//
+// The second return says whether it was already on disk — which is the only evidence available that an earlier
+// attempt got far enough for the control plane to have recorded it. See attemptRekey for why that ordering matters.
+func loadOrCreatePendingKey(dir string) (keyPEM []byte, wasOnDisk bool, err error) {
+	path := filepath.Join(dir, pendingKeyFile)
+	if b, rerr := os.ReadFile(path); rerr == nil && len(b) > 0 {
+		if _, perr := control.KeyFingerprintFromPEM(b); perr == nil {
+			return b, true, nil
+		}
+		// Unreadable pending material is worse than none: it would be submitted, refused, and looked like a
+		// server-side refusal. Replace it loudly-by-consequence (the caller logs the mint) rather than carrying it.
+	}
+	k, err := control.GenerateKey()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, false, err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, k, 0o600); err != nil {
+		return nil, false, err
+	}
+	// Rename so a crash mid-write cannot leave a truncated key that would then be submitted as an identity.
+	if err := os.Rename(tmp, path); err != nil {
+		return nil, false, err
+	}
+	return k, false, nil
 }
 
 func renewLoop(ctx context.Context, client *control.Client, certDir string, every time.Duration, logger *slog.Logger) {
@@ -754,18 +797,91 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 		return nil, nil, nil
 	}
 
+	// THE PENDING KEY, and why it is on disk before anything is sent (S13.1 D10).
+	//
+	// Re-key commits on the control plane and THEN answers. If that answer is lost — a dropped connection, an
+	// ingress timeout, this process restarting — the control plane holds a new serial and a new public key that this
+	// agent never saw. Retrying with the stored certificate's serial then names a row that no longer exists, and
+	// every future attempt is refused: one dropped packet costing a gateway its identity, recoverable only by an
+	// operator minting a join token, which creates a NEW node whose site binding is gone and whose devices need
+	// re-issuing.
+	//
+	// So the key is persisted FIRST, and reused across attempts. Reused deliberately: a fresh key per attempt would
+	// walk the identity forward every time, and after a lost response the agent would hold a key the control plane
+	// never recorded, which is the same brick by a longer route. One pending key converges.
+	pending, pendingWasOnDisk, perr := loadOrCreatePendingKey(certDir)
+	if perr != nil {
+		logger.Error("agent_rekey_impossible",
+			slog.String("reason", "could not persist a new keypair before attempting re-key: "+perr.Error()),
+			slog.String("remedy", "check the state directory is writable, then restart this agent"))
+		return nil, nil, nil
+	}
+	pendingFP, fperr := control.KeyFingerprintFromPEM(pending)
+	if fperr != nil {
+		logger.Error("agent_rekey_impossible", slog.String("reason", "pending key unreadable: "+fperr.Error()))
+		return nil, nil, nil
+	}
+
+	// The identities to try, IN ORDER, and each is a complete attempt with its own challenge.
+	//
+	// The fingerprint identity goes FIRST, and only when a pending key SURVIVED FROM AN EARLIER ATTEMPT: that is the
+	// only situation in which the control plane can already hold it. On a first attempt it cannot, so trying it would
+	// spend a challenge to learn nothing. The serial identity is second because it is the one that fails after a
+	// lost commit — and the agent cannot tell which case it is in, because refusals are uniform by design. It does
+	// not need to: it tries both, and each attempt is independently sound.
+	type identity struct {
+		ident  control.Identifier
+		popKey []byte
+		note   string
+	}
+	identities := []identity{}
+	if pendingWasOnDisk {
+		identities = append(identities, identity{
+			ident:  control.Identifier{KeyFingerprint: pendingFP},
+			popKey: pending,
+			note:   "a previous attempt may have committed on the control plane without this agent seeing the answer",
+		})
+	}
+	identities = append(identities, identity{
+		ident:  control.Identifier{CertSerial: serial},
+		popKey: keyPEM,
+		note:   "the identity this agent's stored certificate names",
+	})
+
 	backoff := rekeyBackoffFloor
 	for attempt := 1; ; attempt++ {
-		newKey, newCert, newCA, err := control.Rekey(ctx, apiURL, serial, keyPEM, version(), nodeName)
-		if err == nil {
-			if serr := saveCreds(certDir, newCert, newKey, newCA); serr != nil {
-				logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
-				return nil, nil, nil
+		var err error
+		for _, id := range identities {
+			var newCert, newCA []byte
+			newCert, newCA, err = control.Rekey(ctx, apiURL, id.ident, pending, id.popKey, version(), nodeName)
+			if err == nil {
+				// PROMOTE: the pending key becomes the identity, and saveCreds clears the pending file as part of
+				// the same promotion — a superseded pending key left behind would make the NEXT recovery spend an
+				// attempt on an identifier the control plane does not hold.
+				if serr := saveCreds(certDir, newCert, pending, newCA); serr != nil {
+					logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
+					return nil, nil, nil
+				}
+				logger.Info("agent_rekeyed",
+					slog.String("old_cert_serial", serial),
+					slog.String("identified_by", id.ident.Describe()),
+					slog.String("note", "recovered by proof of possession — same node, same identity, new key"))
+				return newCert, pending, newCA
 			}
-			logger.Info("agent_rekeyed",
-				slog.String("old_cert_serial", serial),
-				slog.String("note", "recovered by proof of possession — same node, same identity, new key"))
-			return newCert, newKey, newCA
+			if errors.Is(err, control.ErrRekeyThrottled) {
+				break // Do not burn the second identity's request on a rate limit; back off and start over.
+			}
+			if len(identities) > 1 {
+				logger.Warn("agent_rekey_identity_refused",
+					slog.Int("attempt", attempt),
+					slog.String("identified_by", id.ident.Describe()),
+					slog.String("why_tried", id.note),
+					slog.String("note", "refusals are uniform, so this says nothing about the reason; trying the "+
+						"next identity this agent can prove"))
+			}
+		}
+		if err == nil {
+			return nil, nil, nil // unreachable: a nil error returns above
 		}
 
 		// THROTTLED IS NOT REFUSED (review #10). A refusal means this will never work; a 429 means not right now.
@@ -792,6 +908,8 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 		logger.Error("agent_rekey_refused",
 			slog.Int("attempt", attempt),
 			slog.String("cert_serial", serial),
+			slog.String("pending_key_fingerprint", pendingFP[:12]),
+			slog.Int("identities_tried", len(identities)),
 			slog.String("local_finding", "this agent's certificate has expired; it cannot authenticate and cannot renew"),
 			slog.String("server_said", "refused, without a reason (the control plane's refusals are uniform by "+
 				"design so the endpoint cannot be probed)"),
