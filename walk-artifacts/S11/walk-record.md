@@ -912,3 +912,73 @@ that each surface makes a coherent decision about it. That gap is the actual les
 than patched.
 
 `test-editions` after the fix: 0 FAIL / 67 packages, both editions.
+
+---
+
+## WF-S11-11 — an agent handed a join token while holding an UNUSABLE identity prefers the unusable one
+
+**Severity: HIGH. The third wall in "how does a gateway come back", and the most damning of the three.**
+HALTED for disposition.
+
+### What happened
+
+`aws-gw-1` was re-enrolled with a freshly minted, valid join token, using the command the product itself
+generated, on the correct host. The agent logged:
+
+```
+"msg":"agent_reusing_stored_identity","state_dir":"/var/lib/tunnex-node","node_name":"aws-gw-1",
+"note":"this host already holds a gateway identity; wipe the state volume to re-enroll fresh"
+```
+
+…**discarded the token**, resumed its expired certificate, and looped on
+`remote error: tls: expired certificate` exactly as before. A `WARN`. Not an error, not a refusal — it never
+says the token was thrown away.
+
+### Why this is worse than WF-S11-6 and WF-S11-8
+
+Those two made recovery *impossible*. This one makes recovery **look like it happened**. The operator did
+precisely what `self-host.md` prescribes — *"a lost gateway: re-enrol it (one pasted command)"* — with a valid
+token, and the product preferred a credential it knows cannot authenticate. The actual remedy is to wipe a Docker
+volume **whose name appears in no document**; it was found here only by running `docker volume ls` on a hunch.
+
+### The design intent was right; the gap is a missing exception
+
+`apps/node/cmd/agent/main.go:82` records the history:
+
+> `WF-2: an existing identity was found in the state volume — this host already ran a gateway. Name it LOUD at`
+> `boot: a re-used VM silently keeps its OLD identity (and org), which mis-convicted D2 during the cross-cloud`
+> `walk.`
+
+Preferring the stored identity is **deliberate and correct**: it prevents a stray join token from hijacking a
+working gateway. The WARN was added as a diagnostic for identity *carry-over* on a re-used VM. Nobody considered
+the stored identity being **dead**, so a diagnostic for one problem now papers over an unrecoverable one.
+
+### Options (surfaced, not chosen)
+
+- **(a) Prefer the token when the stored identity is UNUSABLE.** The agent holds its own certificate, so it can
+  read `NotAfter` locally with no CP round-trip. If the stored cert is expired **and** a join token is present,
+  enroll with the token. An expired certificate is worthless, so preferring a fresh token over it **cannot lose
+  anything** — and the guard shape is identical to the one already papered for WF-S11-8(b): act only when the
+  original is provably unusable. Recommended.
+- **(b) Refuse loudly instead of proceeding.** If a token is supplied and ignored, exit non-zero naming the
+  volume to wipe. Strictly better than today's silent WARN, and strictly worse than (a): it still requires the
+  operator to destroy state manually.
+- **(c) Document the wipe.** Cheapest, and leaves the product's ordinary recovery a two-step procedure whose
+  second step is "delete this Docker volume". Not sufficient alone.
+
+Recommendation: **(a), with (b) as the fallback for the cases (a) cannot judge** — a stored identity that is
+corrupt rather than expired, where `NotAfter` cannot be read at all. Both belong to the **gateway recovery**
+story, which now removes **four** walls, not three.
+
+### The pattern, fifth instance
+
+| finding | mechanism | procedure | doc |
+|---|---|---|---|
+| WF-S11-1 | tools compile, units pass | not shipped in the image | runbooks named them |
+| WF-S11-6 | short certs + renewal work | renewal needs the dead cert | implied auto-recovery |
+| WF-S11-8 | enroll + revoke work | same-name re-enroll impossible | "one pasted command" |
+| WF-S11-9 | revoke endpoint works | no way to call it | recovery is routine |
+| **WF-S11-11** | **enrollment works, token valid** | **agent discards the token** | **"one pasted command"** |
+
+Five for five. And three of the five are the same *sentence* in `self-host.md` failing three different ways.
+That sentence has never been executed against a gateway that had previously existed.
