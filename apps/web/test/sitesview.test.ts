@@ -233,3 +233,42 @@ describe("gatewayOnline (WF-1 positive health)", () => {
     expect(gatewayOnline("revoked", false, null)).toBe(false);
   });
 });
+
+// WF-S11-10c (S13.1 Slice 3) — a REVOKED gateway carries no health badge on the Sites surface.
+//
+// Found on a live dashboard, where `aws-site` rendered:
+//     aws-gw-1  revoked  offline  certificate expired — re-enroll this gateway
+// Two labels contradicting each other, and the instructional one urging the operator to undo a deliberate
+// revocation. `revoked` IS the state; a degradation badge beside it describes a gateway that is no longer meant to
+// work.
+//
+// The same defect was fixed in Gateways.tsx during EPIC 11, and it survived HERE because that fix was
+// component-local — which is why this one lives in the view-model, where every consumer of the join gets it.
+describe("assembleTopology: revoked gateways carry no health badge (WF-S11-10c)", () => {
+  const site = { id: "site-1", name: "aws-site" } as never;
+  const gw = (over: Record<string, unknown>) =>
+    ({
+      id: "n1",
+      name: "aws-gw-1",
+      site_id: "site-1",
+      status: "active",
+      policy_degraded: true,
+      policy_degraded_kind: "cert_expired_cannot_reconnect",
+      ...over,
+    }) as never;
+
+  it("suppresses the badge for a revoked gateway", () => {
+    const [card] = assembleTopology([site], {}, [gw({ status: "revoked" })]);
+    expect(card.gateways[0].status).toBe("revoked");
+    expect(
+      card.gateways[0].health,
+      "a revoked gateway must show no degradation badge: `revoked` is its state, and 'certificate expired — " +
+        "re-enroll this gateway' beside it tells the operator to undo a deliberate revocation",
+    ).toBeNull();
+  });
+
+  it("still badges an ACTIVE gateway — suppression must not silence the live fleet", () => {
+    const [card] = assembleTopology([site], {}, [gw({ status: "active" })]);
+    expect(card.gateways[0].health).not.toBeNull();
+  });
+});

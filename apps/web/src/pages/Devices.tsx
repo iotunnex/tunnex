@@ -5,6 +5,7 @@ import { api, apiErrorMessage, type Device, type Node, type Org } from "../lib/a
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input, StatusDot } from "../components/ui";
 import { Gateways } from "../components/Gateways";
+import { defaultDeviceNode, selectableNodes } from "../lib/nodepick";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 import { postureBadge, postureBadgeClass } from "../lib/postureview";
 import { exportCeremony, shouldRenderQR, type ExportKind } from "../lib/deviceexport";
@@ -92,7 +93,12 @@ export default function Devices() {
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    if (!org || nodes.length === 0) return;
+    // S13.1: the target gateway is chosen by ONE rule (lib/nodepick), which excludes revoked gateways. This used
+    // to be `nodes[0]`, indexing a list that includes revoked rows ordered by created_at — so on any deployment
+    // whose oldest gateway had been revoked, every new device was homed on a dead one and handed a one-time config
+    // that could never connect. Refusing beats falling back: a one-time secret cannot be re-issued.
+    const target = defaultDeviceNode(nodes);
+    if (!org || !target) return;
     setBusy(true);
     setError(null);
     setSecret(null);
@@ -100,7 +106,7 @@ export default function Devices() {
       // OpenVPN export: mint an OVPN device + its one-time .ovpn (opt-in gated server-side).
       const { data, error } = await api.POST("/api/v1/organizations/{orgId}/ovpn-profiles", {
         params: { path: { orgId: org.id } },
-        body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel },
+        body: { name, node_id: target.id, full_tunnel: fullTunnel },
       });
       setBusy(false);
       if (error || !data) {
@@ -118,7 +124,7 @@ export default function Devices() {
     // so provisioning="static" bakes the approved ranges + DNS (Part-2) and records the snapshot.
     const { data, error } = await api.POST("/api/v1/organizations/{orgId}/devices", {
       params: { path: { orgId: org.id } },
-      body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel, provisioning: "static" },
+      body: { name, node_id: target.id, full_tunnel: fullTunnel, provisioning: "static" },
     });
     setBusy(false);
     if (error || !data) {
@@ -220,12 +226,19 @@ export default function Devices() {
               <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
               Full tunnel
             </label>
-            <Button type="submit" disabled={busy || nodes.length === 0}>
+            <Button type="submit" disabled={busy || selectableNodes(nodes).length === 0}>
               {busy ? "Creating…" : kind === "openvpn" ? "Export OpenVPN profile" : "Create device"}
             </Button>
           </div>
-          {nodes.length === 0 && (
-            <p className="mt-3 text-xs text-amber-400">No gateway node is enrolled yet — enroll one to create devices.</p>
+          {/* Counts SELECTABLE gateways, not all rows. A fleet whose only gateway is revoked previously showed no
+              warning at all and offered an enabled button that homed the device on a dead gateway. The two
+              situations need different words, because the remedies differ. */}
+          {selectableNodes(nodes).length === 0 && (
+            <p className="mt-3 text-xs text-amber-400">
+              {nodes.length === 0
+                ? "No gateway node is enrolled yet — enroll one to create devices."
+                : "No ACTIVE gateway: every enrolled gateway is revoked. Enroll or re-enroll one before creating devices."}
+            </p>
           )}
         </Card>
       </form>
