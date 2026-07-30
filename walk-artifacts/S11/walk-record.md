@@ -1094,3 +1094,64 @@ pattern it forbids. Options for disposition:
 - **(b) Narrowest fix** — set `PushKnown: false` when a node has no site and no grants, yielding
   `desync_unknown`. Small, but it overloads "we could not determine" with "there is nothing to determine", two
   states this project has repeatedly refused to merge.
+
+---
+
+## WF-S11-13 — the CP was rebuilt as the OPEN edition mid-walk, and nothing was checking
+
+**Severity: HIGH as a walk-integrity defect (my error, and a gap in my own runsheet).** No product defect.
+
+`make up-enterprise` sets `TUNNEX_BUILD_TAGS=enterprise`. Every rebuild I issued after Leg 6 step 4 was a plain
+`sudo docker compose up -d --build api`, which **silently rebuilds the OPEN image**. The evidence was in every
+build log I read:
+
+```
+RUN CGO_ENABLED=0 GOOS=linux go build -tags "" -trimpath ...
+```
+
+`-tags ""`. Printed four separate times, read four separate times, not noticed once — because I was checking the
+*sha* and the sha was always right.
+
+### What stands and what does not
+
+| legs | edition | status |
+|---|---|---|
+| Leg 0 — provenance, 13 kinds, loopback `000`, binaries | **enterprise** | ✅ stands |
+| Legs 1–5 — baseline, backup, **trust-after-restore**, wrong-key refusal, **HA under a roll** | **enterprise** | ✅ **both owed debts stand** |
+| Leg 6 criteria 1–3 — preflight refuse/pass, migrate | enterprise | ✅ stands |
+| Leg 6 criteria 4–5 and every observation after ~03:57 | **open** | ⚠️ must be re-verified |
+
+Edition-independent, therefore unaffected: **WF-S11-1** (packaging), **-2** (preflight wording), **-3** (stdin
+error), **-4** (docs), **-5** (output ordering), **-8** (name uniqueness), **-9** (revoke UI), **-11/-11b** (agent
+identity precedence).
+
+**Compromised, and withdrawn pending re-test:**
+
+- **WF-S11-12 does not stand.** The open build has **no policy engine at all**, so a gateway carrying no artifact
+  is expected *by design* — not the site-binding orphaning I attributed it to. `applied_hash NULL` had a much
+  duller explanation than the reassuring-green trap I diagnosed. The finding may still be real on enterprise; it
+  is unproven either way and must be re-run there.
+- **The health-kind observations exercised the `!enterprise` branch**, not `degradedKind`. The cert-expired case
+  is checked first and unconditionally, so it fires in both editions — but `healthy`, `site_link_down` and the
+  3→2→ counts all came from the open-only path. The kind rendering is proven in **open** only.
+- **Criterion 6 is unprovable on open**, because there are no policy artifacts to version. The N/N-1 contract
+  needs the enterprise engine.
+
+### The runsheet finding underneath it
+
+**Leg 0's provenance census verified the sha and the toolchain and never the edition** — on an open-core product
+where a large share of the walk's subject matter is enterprise-gated. That is the actual defect: not that I typed
+the wrong command, but that the runsheet had no check that would catch typing the wrong command. A provenance
+census which confirms *which commit* but not *which product* is half a census, and its passing is exactly the
+kind of reassurance this walk has been finding all night.
+
+Folded into `docs/S11-boxwalk.md` Leg 0: assert `"edition":"enterprise"` from `/api/v1/meta`, **after every
+rebuild rather than once at the start** — the edition is a property of the last build, not of the branch. Any leg
+whose conclusion depends on the policy engine must also state which edition it ran under.
+
+### Same class as the other twelve
+
+A mechanism that worked (both editions build correctly, and the tag does exactly what it says), a procedure that
+did not (rebuild instructions that silently changed the product), and a document asserting the procedure (a
+provenance census that vouched for the wrong thing). Thirteenth instance — and the first one where I was the
+operator the gap misled.

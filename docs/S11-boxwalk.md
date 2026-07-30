@@ -94,6 +94,27 @@ sudo docker compose logs api 2>&1 | grep -E 'leader_acquired|metrics_listener_st
   proves D3.2 is.
 - **IF ABSENT → STOP.** It is a provenance failure, not a code failure. Rebuild.
 
+### The EDITION is half of provenance, and this runsheet originally omitted it
+
+```bash
+# [azure-cp] — anything other than "enterprise" invalidates every policy-related leg
+curl -s localhost/api/v1/meta | grep -o '"edition":"[a-z]*"'
+```
+
+This is an **open-core** product and much of what the walk exercises is enterprise-gated, so the right sha is
+only half the story. `make up-enterprise` sets `TUNNEX_BUILD_TAGS=enterprise`; a plain
+`docker compose up -d --build api` **silently rebuilds the OPEN image** — visible in the build log as
+`go build -tags ""` and nowhere else.
+
+During this walk exactly that happened, mid-run, and went unnoticed for several legs: the sha was correct, the
+provenance lines were present, and nothing was checking the edition. The open build has **no policy engine at
+all**, so a gateway legitimately carries no artifact — which briefly looked like a health-reporting defect
+(WF-S11-12) rather than an edition difference.
+
+**Re-check the edition after EVERY rebuild, not once at the start.** The edition is a property of the last build,
+not of the branch — so any leg that rebuilds the CP must re-assert it, and a leg whose conclusion depends on the
+policy engine must state which edition it ran under.
+
 ```bash
 # The new surfaces, observed (Leg 5 of the acceptance list):
 sudo docker compose exec -T api wget -qO- http://127.0.0.1:9090/readyz          # -> "ok leader"
