@@ -863,3 +863,52 @@ author's belief about the fix rather than the behaviour of the system.* Removing
 is the only way to tell the difference, and it costs one minute.
 
 Gates after the fold: web typecheck + 183 tests + build green; `test-editions` 0 FAIL / 67 packages, both editions.
+
+### WF-S11-10b — the fix above was INCOMPLETE, and arithmetic caught it
+
+Immediately after WF-S11-10 shipped, the live scrape read:
+
+```
+tunnex_gateway_policy_health{kind="cert_expired_cannot_reconnect"} 2
+tunnex_gateway_policy_health{kind="site_link_down"} 2
+```
+
+**The kinds sum to 4 on a fleet with three non-revoked gateways.** So the revoked one was still being counted —
+it had merely moved from `cert_expired_cannot_reconnect` to `site_link_down` when the status gate landed. The
+label was fixed; the presence was not.
+
+**And I had asserted the opposite, twice, without checking.** I wrote that "the health query filters
+`revoked_at IS NULL`". That is true of *preflight's* query and false of `ListNodes`
+(`SELECT * FROM nodes WHERE org_id = $1`), which is what `FleetHealthCounts` walks. Two different queries,
+conflated, stated as fact. The metric disagreeing with its own row count is what exposed it, not a test.
+
+**Why this is more serious than the mislabelling it followed.** Revoked rows are **never deleted** — revoke
+preserves the audit trail deliberately and there is no delete endpoint. So counting them means every degradation
+series drifts, over a deployment's life, toward being dominated by long-dead gateways. An alert on
+`site_link_down > 0` becomes **permanently firing and therefore permanently ignored**. A metric that cannot
+return to zero cannot be alerted on, which makes it worse than absent.
+
+It was also, precisely, the **one-truth violation I had just claimed to fix**: the console suppresses badges on
+revoked rows, so dashboard and metric would report different numbers of unhealthy gateways.
+
+Fixed in `FleetHealthCounts` via `activeForFleetHealth`, filtered at the **tally** rather than in
+`PolicyHealthForNodes` — the dashboard legitimately lists revoked rows and renders them as `revoked`; it is the
+fleet count that must speak only for gateways expected to work.
+
+Red proven to reject, and written as a pure function this time precisely because the previous attempt was a
+tautology:
+
+```
+fleethealth_test.go:32: fleet health must count only active gateways: got 5 of 5, want 2.
+  Revoked rows accumulate forever, so counting them makes every degradation series permanently non-zero
+```
+
+**Two fold-induced defects in the same component, one after the other.** Per the budget rule this is the point
+to say so plainly rather than continue patching: WF-S11-10 and 10b are both in the health-kind rendering path,
+and both came from adding a kind without censusing every consumer of the kind set — the metric tally, the badge
+renderer, and the revoked-row semantics each needed a decision, and I made one of the three. The mirror-surface
+census (`TestEveryHealthKindReachesItsMirrorSurfaces`) checks that a kind REACHES its surfaces; it does not check
+that each surface makes a coherent decision about it. That gap is the actual lesson, and it is registered rather
+than patched.
+
+`test-editions` after the fix: 0 FAIL / 67 packages, both editions.
