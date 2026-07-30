@@ -418,3 +418,24 @@ pipeline or assert the position itself. Concretely:
 
 This is COULD THIS CHECK HAVE FAILED? narrowed to a specific mechanism: the check *could* have failed on a wrong
 function, and *could not* have failed on a wrong pipeline — which was the way it was actually wrong.
+
+## A UNIT TEST PROVES BEHAVIOUR, NEVER REACHABILITY (founder-ratified 2026-07-30, S13.1)
+
+**For every mechanism: name the caller, and prove the trigger can CO-OCCUR with the gate.**
+
+EPIC 13 shipped `RestoreCascadeRevokedDevices` with reds that all passed. It has one caller (`Rekey`); devices are
+cascade-revoked in one place (`Revoke`); and `Rekey` refuses a revoked node (D3). So the only trigger that creates
+the work puts the node into the one state that can never reach the code that does it — **correct code wired to a
+trigger it cannot fire from.** The reds proved the restore does the right thing *when called*. Nothing proved it is
+ever called, and nothing in the build or the story-end review asked.
+
+It surfaced while a WALK LEG was being drafted, because writing a leg forces the sequence to be stated end to end —
+which is a reason to draft walk legs early, not only before a walk.
+
+**This is the [who-reads-this probe](#) one layer up.** That probe catches a PRODUCER with no consumer (a channel
+field nothing reads); this catches a CONSUMER with no reachable producer. Same defect class, opposite end, and both
+land on the dormant-machinery law.
+
+**The check, and it is cheap:** grep the callers of the new function AND the callers of whatever produces the state
+it consumes, then ask whether both sets of preconditions can be true **at the same time**. Cheapest at design time,
+still cheap while drafting a walk leg, expensive after it ships as code that never runs.
