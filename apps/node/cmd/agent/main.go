@@ -27,6 +27,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/node/internal/dnsforward"
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
 	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
+	"github.com/tunnexio/tunnex/apps/node/internal/identity"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 	"github.com/tunnexio/tunnex/apps/node/internal/ovpnserver"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
@@ -53,15 +54,43 @@ func main() {
 	defer stop()
 
 	certPEM, keyPEM, caPEM, err := loadCreds(certDir)
-	if err != nil {
-		// Not enrolled yet. Enroll if we have a join token; otherwise idle
-		// (liveness up, readiness false) until one is provided.
-		if joinToken == "" {
-			logger.Warn("agent_not_enrolled", slog.String("reason", "no cert and no TUNNEX_JOIN_TOKEN"))
-			<-ctx.Done()
-			return
+
+	// S13.1: the stored-identity-vs-join-token decision is a PURE FUNCTION (internal/identity), not an inline
+	// branch. It used to be one, and it was wrong in the case that matters most: an EXPIRED stored certificate
+	// was preferred over a valid join token the operator had just supplied, so the agent looped forever on
+	// `tls: expired certificate` — /agent/renew requires the certificate that expired (EPIC 11 WF-S11-11). The
+	// safe direction is always the stored identity; the function narrows that preference to the cases where the
+	// stored identity can still work, and cites the evidence for every determination.
+	verdict := identity.Decide(certPEM, err, nodeName, joinToken != "", time.Now())
+
+	// WF-S11-11b: report the identity actually IN USE, not the one requested. `nodeName` came from
+	// TUNNEX_NODE_NAME and was never reconciled with the certificate, so a wrong-host run printed the requested
+	// name while reusing a different gateway's identity — the diagnostic hid the very fact it exists to show.
+	nodeName = identity.EffectiveName(verdict, nodeName)
+
+	switch verdict.Action {
+	case identity.Idle:
+		// Liveness stays up, readiness stays false. LOUD, and naming the remedy rather than the condition: this
+		// state never resolves on its own, so a warning an operator can act on is the entire value here.
+		logger.Error("agent_no_usable_identity",
+			slog.String("reason", verdict.Reason),
+			slog.String("remedy", verdict.Evidence),
+			slog.String("state_dir", certDir))
+		<-ctx.Done()
+		return
+
+	case identity.UseToken:
+		logger.Info("agent_enrolling",
+			slog.String("node_name", nodeName),
+			slog.String("reason", verdict.Reason),
+			slog.String("evidence", verdict.Evidence))
+		if verdict.StoredCN != "" {
+			// A REPLACEMENT, not a first enrolment — say so, and name what is being replaced.
+			logger.Warn("agent_replacing_unusable_identity",
+				slog.String("stored_cn", verdict.StoredCN),
+				slog.String("enrolling_as", nodeName),
+				slog.Bool("name_mismatch", verdict.NameMismatch))
 		}
-		logger.Info("agent_enrolling", slog.String("node_name", nodeName))
 		key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
 		if gerr != nil {
 			logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
@@ -78,14 +107,23 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
-	} else {
-		// WF-2: an existing identity was found in the state volume — this host already ran a gateway.
-		// Name it LOUD at boot: a re-used VM silently keeps its OLD identity (and org), which mis-convicted
-		// D2 during the cross-cloud walk. To RE-ENROLL a re-used host, wipe the state volume first.
-		logger.Warn("agent_reusing_stored_identity",
+
+	case identity.UseStored:
+		// WF-2 (S8.2c) protection, intact: a re-used VM keeps its OLD identity and org rather than silently
+		// adopting a new one. Still named LOUD at boot, and now it names the identity it KEPT.
+		lg := logger.Warn
+		if verdict.NameMismatch {
+			// A valid certificate for a DIFFERENT node than requested is almost always operator error — a
+			// mis-set env var, a cloned image, or a command run on the wrong host. ERROR, because the operator
+			// asked for something that is not happening, and the agent will not resolve it for them.
+			lg = logger.Error
+		}
+		lg("agent_reusing_stored_identity",
 			slog.String("state_dir", certDir),
-			slog.String("node_name", nodeName),
-			slog.String("note", "this host already holds a gateway identity; wipe the state volume to re-enroll fresh"))
+			slog.String("stored_cn", verdict.StoredCN),
+			slog.String("reason", verdict.Reason),
+			slog.Bool("name_mismatch", verdict.NameMismatch),
+			slog.String("note", verdict.Evidence))
 	}
 
 	client, err := control.NewClient(agentURL, serverName, nodeName, certPEM, keyPEM, caPEM)
