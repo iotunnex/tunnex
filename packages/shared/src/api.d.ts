@@ -2540,7 +2540,7 @@ export interface components {
             platform?: string;
             public_key: string;
             assigned_ip?: string;
-            /** @description S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices. */
+            /** @description True when the config this device was ISSUED no longer matches reality, so the user must re-import it. Two causes: (1) its baked site ROUTES no longer match the org's current routed ranges — STATIC exports only, since a managed device polls routes; (2) its baked tunnel ADDRESS is not the device's current address — EVERY mode, including managed, because every issued config embeds an interface address. Reported for all provisioning modes; false when nothing was recorded at issuance (rows predating the address snapshot), because unknown must not be reported as stale. Advisory, never enforcement. */
             needs_reexport?: boolean;
             /** @enum {string} */
             status: "active" | "revoked" | "pending";

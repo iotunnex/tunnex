@@ -127,14 +127,15 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 				meta["previous_assigned_ip"] = old
 				meta["consequence"] = "the device's exported profile embeds the OLD address and will not connect " +
 					"until re-imported"
-				// HONEST INTERIM GAP (S13.1, ruled at the Slice 5/6 split): this event is the ONLY signal that the
-				// address changed. The device surface cannot show it yet — needs_reexport is derived from baked
-				// RANGES, and there is no provisioned_ip column to compare an address against, so a re-addressed
-				// device renders exactly as clean as one that kept its address. The ruled fork's third condition
-				// ("mark stale only in the fallback case") therefore has no mechanism until Slice 6. Recorded here
-				// deliberately: the audit trail carries the fact even while the UI cannot, so Slice 6 closes a
-				// NAMED gap rather than adding a feature.
-				meta["surface_gap"] = "no device-surface staleness signal until S13.1 Slice 6 adds provisioned_ip"
+				// The device SURFACE carries this too, as of Slice 6: devices.provisioned_ip snapshots the address
+				// the config baked, and needs_reexport now compares it for every provisioning mode. No flag is
+				// written here — staleness stays DERIVED at read time, so re-addressing cannot leave a stored bit
+				// that disagrees with the row. Deliberately: the fork's third condition ("mark stale only in the
+				// fallback case") is satisfied by the comparison being true only when the address actually moved.
+				//
+				// Slice 5 shipped with this as a NAMED interim gap (the audit event was the only signal, and the
+				// meta carried a `surface_gap` key saying so). Slice 6 closed it; the key is gone rather than left
+				// to age into a false claim.
 			}
 			if aerr := audit(ctx, q, orgID, nil, action, "device", restored.ID.String(), meta); aerr != nil {
 				return aerr

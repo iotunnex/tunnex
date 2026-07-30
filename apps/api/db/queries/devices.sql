@@ -262,10 +262,14 @@ WHERE d.node_id = $1 AND d.transport = 'openvpn' AND d.status = 'active'
 ORDER BY d.id;
 
 -- name: SetDeviceProvisioning :exec
--- S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
--- CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+-- Records what the ISSUED CONFIG baked, at issuance. Called after CreateDevice on every path.
+--
+-- provisioned_ranges is STATIC-ONLY (managed devices poll routes, so there is nothing baked to go stale).
+-- provisioned_ip is recorded for EVERY MODE (S13.1 Slice 6): every issued config embeds an interface address,
+-- managed included, so a managed device whose address later changes is just as stale — and was silently excluded
+-- from the staleness signal, leaving its user to discover the problem by failing to connect.
 -- lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
-UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
+UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, provisioned_ip = $4, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListStaticDevicesForOrg :many

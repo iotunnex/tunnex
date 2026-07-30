@@ -312,11 +312,15 @@ export default function Devices() {
                   const pb = postureBadge(d);
                   return pb ? <span className={`ml-2 text-xs ${postureBadgeClass(pb.tone)}`}>{pb.label}</span> : null;
                 })()}
-              {/* S9.1 Part-2 stale-profile surface: a static profile whose baked site routes no longer
-                  match the org's current ranges — the never-silently-broken law made visible. */}
+              {/* Stale-config surface: the config this device was ISSUED no longer matches reality — the
+                  never-silently-broken law made visible. TWO causes now (S13.1 Slice 6): baked site routes for
+                  static exports, and the tunnel ADDRESS for every mode including managed. The label is
+                  CAUSE-NEUTRAL on purpose — it used to say "predates a site-range change", which is a false
+                  explanation for a device whose address moved, and "re-export" is not the action a managed
+                  device's owner takes. The server field is one boolean by the same choice (see ProfileStale). */}
               {d.status !== "revoked" && d.needs_reexport && (
-                <span className="ml-2 text-xs text-amber-400" title="This device's exported profile predates a site-range change — re-export and re-import it.">
-                  re-export needed
+                <span className="ml-2 text-xs text-amber-400" title="This device's config no longer matches its current settings — its tunnel address or its baked site routes have changed since it was issued. Re-create the device and import the new config; until then it may not connect.">
+                  config out of date
                 </span>
               )}
             </div>

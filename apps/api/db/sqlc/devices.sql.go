@@ -73,7 +73,7 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip
 `
 
 type CreateDeviceParams struct {
@@ -127,6 +127,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
 		&i.RevokedCause,
+		&i.ProvisionedIp,
 	)
 	return i, err
 }
@@ -144,7 +145,7 @@ func (q *Queries) DeleteDeviceStatus(ctx context.Context, deviceID uuid.UUID) er
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 `
 
@@ -177,12 +178,13 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
 		&i.RevokedCause,
+		&i.ProvisionedIp,
 	)
 	return i, err
 }
 
 const getDeviceForUpdate = `-- name: GetDeviceForUpdate :one
-SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause FROM devices
+SELECT id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -220,6 +222,7 @@ func (q *Queries) GetDeviceForUpdate(ctx context.Context, arg GetDeviceForUpdate
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
 		&i.RevokedCause,
+		&i.ProvisionedIp,
 	)
 	return i, err
 }
@@ -530,7 +533,7 @@ func (q *Queries) ListCascadeRevokedDevicesForNode(ctx context.Context, nodeID u
 }
 
 const listDevicesByOrg = `-- name: ListDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, d.provisioned_ip, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -581,6 +584,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
 			&i.Device.RevokedCause,
+			&i.Device.ProvisionedIp,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -601,7 +605,7 @@ func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]List
 }
 
 const listDevicesByUser = `-- name: ListDevicesByUser :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, d.provisioned_ip, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -657,6 +661,7 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
 			&i.Device.RevokedCause,
+			&i.Device.ProvisionedIp,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -705,7 +710,7 @@ func (q *Queries) ListNodeIDsForUserActiveDevices(ctx context.Context, userID uu
 }
 
 const listPendingDevicesByOrg = `-- name: ListPendingDevicesByOrg :many
-SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d.assigned_ip, d.status, d.created_at, d.updated_at, d.revoked_at, d.deleted_at, d.full_tunnel, d.approved_by, d.health_blocked, d.transport, d.provisioning_mode, d.provisioned_ranges, d.revoked_cause, d.provisioned_ip, ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
@@ -759,6 +764,7 @@ func (q *Queries) ListPendingDevicesByOrg(ctx context.Context, orgID uuid.UUID) 
 			&i.Device.ProvisioningMode,
 			&i.Device.ProvisionedRanges,
 			&i.Device.RevokedCause,
+			&i.Device.ProvisionedIp,
 			&i.LastHandshakeAt,
 			&i.RxBytes,
 			&i.TxBytes,
@@ -866,7 +872,7 @@ const restoreCascadeRevokedDevice = `-- name: RestoreCascadeRevokedDevice :one
 UPDATE devices
 SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2
 WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip
 `
 
 type RestoreCascadeRevokedDeviceParams struct {
@@ -908,6 +914,7 @@ func (q *Queries) RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCa
 		&i.ProvisioningMode,
 		&i.ProvisionedRanges,
 		&i.RevokedCause,
+		&i.ProvisionedIp,
 	)
 	return i, err
 }
@@ -970,7 +977,7 @@ func (q *Queries) RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (i
 }
 
 const setDeviceProvisioning = `-- name: SetDeviceProvisioning :exec
-UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
+UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, provisioned_ip = $4, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -978,13 +985,23 @@ type SetDeviceProvisioningParams struct {
 	ID                uuid.UUID `json:"id"`
 	ProvisioningMode  string    `json:"provisioning_mode"`
 	ProvisionedRanges []byte    `json:"provisioned_ranges"`
+	ProvisionedIp     *string   `json:"provisioned_ip"`
 }
 
-// S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
-// CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+// Records what the ISSUED CONFIG baked, at issuance. Called after CreateDevice on every path.
+//
+// provisioned_ranges is STATIC-ONLY (managed devices poll routes, so there is nothing baked to go stale).
+// provisioned_ip is recorded for EVERY MODE (S13.1 Slice 6): every issued config embeds an interface address,
+// managed included, so a managed device whose address later changes is just as stale — and was silently excluded
+// from the staleness signal, leaving its user to discover the problem by failing to connect.
 // lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 func (q *Queries) SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error {
-	_, err := q.db.Exec(ctx, setDeviceProvisioning, arg.ID, arg.ProvisioningMode, arg.ProvisionedRanges)
+	_, err := q.db.Exec(ctx, setDeviceProvisioning,
+		arg.ID,
+		arg.ProvisioningMode,
+		arg.ProvisionedRanges,
+		arg.ProvisionedIp,
+	)
 	return err
 }
 

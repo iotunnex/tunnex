@@ -111,6 +111,8 @@ type Device struct {
 	ProvisionedRanges []byte             `json:"provisioned_ranges"`
 	// Why this device was revoked: 'cascade' (its gateway was revoked — restorable) or 'deliberate' (an operator revoked this device — never restorable). NULL = revoked before 0059, honestly unknown, treated as NOT restorable (S13.1 D5).
 	RevokedCause *string `json:"revoked_cause"`
+	// The tunnel address baked into this device's ISSUED config, snapshotted at issuance for every provisioning mode. Compared against assigned_ip at read time to derive needs_reexport. NULL = predates 0060, honestly unknown, not reported stale (S13.1 Slice 6).
+	ProvisionedIp *string `json:"provisioned_ip"`
 }
 
 type DeviceHealth struct {

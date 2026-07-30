@@ -715,3 +715,47 @@ func TestStaticExportZeroRangesIdentical(t *testing.T) {
 		t.Fatalf("zero-ranges static must bake only the pool (identical to today); got:\n%s", res.Config)
 	}
 }
+
+// TestIssuanceRecordsTheADDRESSItBaked — the issuance half of Slice 6, asserted against the CONFIG TEXT rather
+// than against the row alone.
+//
+// The claim is not "a column got written"; it is "what we recorded equals what the user's config actually bakes".
+// A test that compares the snapshot to dev.AssignedIp would pass even if the config rendered a different address,
+// which is the failure it is supposed to make impossible. So it reads the address out of the rendered config and
+// requires the persisted snapshot to match it.
+//
+// MANAGED mode deliberately: the previous code recorded the snapshot only for STATIC exports, so a managed device
+// had nothing to compare and rendered as clean forever after its address changed.
+func TestIssuanceRecordsTheADDRESSItBaked(t *testing.T) {
+	ctx, tx := txOrSkip(t)
+	svc, org, user, node := setup(t, tx, 10)
+
+	res, err := svc.Create(ctx, CreateInput{OrgID: org, ActorID: user, OwnerID: user, NodeID: node, Name: "laptop"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if res.Device.ProvisioningMode != "managed" {
+		t.Fatalf("default provisioning must be managed, got %q", res.Device.ProvisioningMode)
+	}
+	if res.Device.ProvisionedIp == nil {
+		t.Fatal("issuance must record the address it baked FOR EVERY MODE — a managed device with no snapshot " +
+			"can never be reported stale, which is how a re-addressed device stayed invisible")
+	}
+	if !strings.Contains(res.Config, "Address = "+*res.Device.ProvisionedIp+"/32") {
+		t.Fatalf("the recorded snapshot %q is not the address the issued config bakes; the snapshot is only worth "+
+			"anything if it equals what the user holds:\n%s", *res.Device.ProvisionedIp, res.Config)
+	}
+
+	// And it is PERSISTED, not just set on the returned struct — the comparison happens on a later read.
+	row, err := svc.q.GetDevice(ctx, sqlc.GetDeviceParams{ID: res.Device.ID, OrgID: org})
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if row.ProvisionedIp == nil || *row.ProvisionedIp != *res.Device.AssignedIp {
+		t.Fatalf("persisted snapshot %v must equal the assigned address %q", row.ProvisionedIp, *res.Device.AssignedIp)
+	}
+	// The ranges half must stay ABSENT for managed: routes are polled, so there is nothing baked to compare.
+	if len(row.ProvisionedRanges) != 0 {
+		t.Fatalf("a managed device must carry NO ranges snapshot (it polls routes); got %s", row.ProvisionedRanges)
+	}
+}

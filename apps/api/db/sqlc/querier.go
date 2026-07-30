@@ -761,8 +761,12 @@ type Querier interface {
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
 	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
-	// S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
-	// CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+	// Records what the ISSUED CONFIG baked, at issuance. Called after CreateDevice on every path.
+	//
+	// provisioned_ranges is STATIC-ONLY (managed devices poll routes, so there is nothing baked to go stale).
+	// provisioned_ip is recorded for EVERY MODE (S13.1 Slice 6): every issued config embeds an interface address,
+	// managed included, so a managed device whose address later changes is just as stale — and was silently excluded
+	// from the staleness signal, leaving its user to discover the problem by failing to connect.
 	// lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 	SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error
 	// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
