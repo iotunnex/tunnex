@@ -1939,7 +1939,13 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// blocks the mTLS channel itself, which has nothing to do with the policy engine, so this is core and
 		// not enterprise. NULL cert_not_after means "issued before we recorded expiry" = UNKNOWN, never
 		// expired: a column added in 0054 must not retroactively declare every pre-existing gateway bricked.
-		certExpired := n.CertNotAfter.Valid && n.CertNotAfter.Time.Before(now)
+		// ACTIVE nodes only (WF-S11-10). A revoked gateway's certificate expiring is not a fault — refusing its
+		// renewal IS the revocation mechanism, so an expired cert on a revoked node is the system working as
+		// designed. Reporting cert_expired_cannot_reconnect there would prescribe "re-enroll this gateway" for a
+		// gateway an operator deliberately retired, contradicting the `revoked` state shown beside it. It also
+		// keeps this per-node kind consistent with the fleet metric, whose query already filters revoked rows —
+		// one truth, two renderings.
+		certExpired := CertExpiredForNode(n.Status, n.CertNotAfter.Time, n.CertNotAfter.Valid, now)
 		if certExpired {
 			// The authoritative BOOL must agree with the kind (structural agreement — a gateway that cannot
 			// connect is degraded by any definition). The bool stays the load-bearing signal.

@@ -156,6 +156,23 @@ type KindInput struct {
 	CertExpired bool
 }
 
+// CertExpiredForNode decides the WF-S11-6 input from a node row. Extracted as a pure function for one reason:
+// as an inline expression at the call site it was UNTESTABLE, and the first red written for it asserted only
+// that degradedKind(CertExpired: false) does not return the cert-expired kind — a tautology that passed with the
+// fix removed (the tautological-guard law, S7.5.5, caught in the act).
+//
+// Two conditions, each load-bearing:
+//
+//   - ACTIVE only. Refusing a revoked agent's renewal IS the revocation mechanism, so a revoked node's expired
+//     certificate is the system working as designed. Reporting it would prescribe "re-enroll this gateway" for a
+//     gateway an operator deliberately retired — an instruction to undo an intentional security action (WF-S11-10,
+//     observed on a live dashboard next to the word "revoked").
+//   - KNOWN expiry only. An unrecorded expiry is UNKNOWN, never expired: migration 0054 added the column
+//     nullable precisely so it could not retroactively brick every enrolled gateway.
+func CertExpiredForNode(status string, notAfter time.Time, notAfterKnown bool, now time.Time) bool {
+	return status == "active" && notAfterKnown && notAfter.Before(now)
+}
+
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
 // × transition-evidence TABLE in docs/S7.4-decisions.md. Drift between this and degradedKind
 // (or the paper) is caught at review; an evidence-less state is a paper finding.

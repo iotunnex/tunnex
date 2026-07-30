@@ -808,3 +808,58 @@ The instruction mentioned deleting a gateway. There is **no delete endpoint** an
 delete is WF-S11-8 option (c), which was *not* ruled — and with (a) shipped, the name is already freed, which was
 the only practical reason to want one. If a delete is wanted for tidiness rather than recovery, that is a
 separate decision about discarding audit history.
+
+---
+
+## WF-S11-10 — a revoked gateway was told to re-enroll because its certificate expired
+
+**Severity: MEDIUM. My own fold-induced defect, seen on the live dashboard one commit after shipping the kind.**
+
+```
+aws-gw-1  0.1.0  revoked  certificate expired — re-enroll this gateway
+```
+
+Two labels contradicting each other, and the instructional one is wrong: **refusing a revoked agent's renewal IS
+the revocation mechanism**, so a revoked gateway's expired certificate is the system working exactly as designed.
+Telling the operator to re-enroll it is a confident instruction to **undo a deliberate security action**.
+
+**Authorship, precisely.** The latent inconsistency is pre-existing: `Gateways.tsx` has never suppressed health
+badges for revoked rows the way `Devices.tsx` always has (`d.status !== "revoked" && …`). But that stayed
+invisible while the badges were *vague* — a revoked gateway reading "degraded" is uninformative, not wrong. My
+kind turned vague into **actionable and wrong**, which is what made a five-story-old inconsistency visible.
+
+### Fixed at both tiers, for different reasons
+
+- **CP-side** — `CertExpiredForNode` gates on `status == "active"`. This also restores agreement with the fleet
+  metric, whose query already filters revoked rows: one truth, two renderings.
+- **UI-side** — no health badge on a revoked gateway row, matching the `Devices.tsx` precedent. `revoked` **is**
+  the state; a degradation badge beside it describes a gateway that is no longer meant to work.
+
+### The red I wrote first could not fail — the tautological-guard law, caught in the act
+
+The first attempt asserted `degradedKind(KindInput{CertExpired: false})` does not return the cert-expired kind.
+That is a **tautology**. Verified by removing the production fix and re-running: **everything passed.**
+
+```
+=== with the fix REMOVED, does anything fail? ===
+ok    github.com/tunnexio/tunnex/apps/api/internal/nodes    0.634s
+```
+
+The decision under test was never the projection — it was *which node rows count as expired at all*, and that
+lived in an untestable inline expression at the call site. Extracted to `CertExpiredForNode(status, notAfter,
+known, now)` and exercised directly, with both gates proven to reject independently:
+
+```
+REVOKED + expired: got true, want false — refusing a revoked agent's renewal IS revocation working;
+  prescribing re-enrolment would undo a deliberate security action
+active + expiry UNKNOWN: got true, want false — 0054 added the column nullable so it could not
+  retroactively brick every enrolled gateway
+```
+
+**This is the second check this session that could not fail** — after the dead witness log whose gap detector
+returned clean for a window it never observed. Both were caught by asking "could this have failed?" rather than
+"did it pass". The pattern is worth stating: *a check written at the same moment as the fix tends to encode the
+author's belief about the fix rather than the behaviour of the system.* Removing the fix and watching the check
+is the only way to tell the difference, and it costs one minute.
+
+Gates after the fold: web typecheck + 183 tests + build green; `test-editions` 0 FAIL / 67 packages, both editions.

@@ -245,10 +245,15 @@ export function Gateways({
               <span className="text-sm text-white">{n.name}</span>
               <span className="ml-2 font-mono text-xs text-slate-500">{n.agent_version}</span>
               {n.status === "revoked" && <span className="ml-2 text-xs text-rose-400">revoked</span>}
-              {(() => {
-                const b = policyHealthBadge(n);
-                return b ? <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>{b.label}</span> : null;
-              })()}
+              {/* WF-S11-10: no health badge on a revoked gateway — `revoked` IS its state, and a degradation
+                  badge beside it describes a gateway that is no longer meant to work. Matches the same
+                  suppression Devices.tsx has always applied to device rows; this list never had it, which stayed
+                  invisible only while the badges were vague ("degraded") rather than instructional. */}
+              {n.status !== "revoked" &&
+                (() => {
+                  const b = policyHealthBadge(n);
+                  return b ? <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>{b.label}</span> : null;
+                })()}
               {/* S9.1 4d: OpenVPN refuse-loudly surfaced (a different axis from policy health) — an
                   OVPN-enabled gateway missing its material/binary shows WHY, and keeps serving WireGuard. */}
               {n.ovpn_health && (

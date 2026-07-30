@@ -87,3 +87,44 @@ func TestCertExpiryRankingIsDeclaredInTheTransitionTable(t *testing.T) {
 		t.Fatal("a state with no declared evidence-in is a paper finding")
 	}
 }
+
+// TestCertExpiredForNodeGatesOnStatusAndKnowledge — WF-S11-10, and a replacement for a red that could not fail.
+//
+// The first attempt asserted degradedKind(CertExpired: false) != the cert-expired kind, which is a tautology: it
+// passed with the production fix removed. The decision being tested is not the projection, it is which node rows
+// count as expired at all — so that decision was extracted from an inline expression into CertExpiredForNode and
+// is exercised directly here.
+//
+// The revoked case is the one found on a live dashboard, where a revoked gateway rendered
+// "revoked  certificate expired — re-enroll this gateway": two labels contradicting each other, one of them
+// instructing the operator to undo a deliberate revocation.
+func TestCertExpiredForNodeGatesOnStatusAndKnowledge(t *testing.T) {
+	now := time.Now()
+	past, future := now.Add(-time.Hour), now.Add(time.Hour)
+
+	cases := []struct {
+		name     string
+		status   string
+		notAfter time.Time
+		known    bool
+		want     bool
+		why      string
+	}{
+		{"active + expired", "active", past, true, true,
+			"the whole point: an active gateway whose cert lapsed cannot reconnect"},
+		{"REVOKED + expired", "revoked", past, true, false,
+			"refusing a revoked agent's renewal IS revocation working; prescribing re-enrolment would undo a " +
+				"deliberate security action"},
+		{"active + expiry UNKNOWN", "active", time.Time{}, false, false,
+			"0054 added the column nullable so it could not retroactively brick every enrolled gateway"},
+		{"active + still valid", "active", future, true, false,
+			"a valid certificate is not an expired one"},
+		{"revoked + expiry unknown", "revoked", time.Time{}, false, false,
+			"neither condition holds"},
+	}
+	for _, c := range cases {
+		if got := CertExpiredForNode(c.status, c.notAfter, c.known, now); got != c.want {
+			t.Errorf("%s: got %v, want %v — %s", c.name, got, c.want, c.why)
+		}
+	}
+}
