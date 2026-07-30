@@ -436,6 +436,60 @@ Two more conventions came out of the walk itself:
   surviving replica reports `ok leader`") was satisfied *by the restarted leader itself*. The runsheet now stops
   the leader and requires the returning replica to come back a **follower**.
 
+## REGISTERED STORY — **gateway recovery** (BETA-BLOCKING)
+
+One story, because the subject is one question: **how does a gateway come back?** The walk found three separate
+walls in front of it, and solving them apart would produce three half-answers.
+
+| wall | finding | state |
+|---|---|---|
+| **expired cert** — renewal requires the certificate that expired, so a gateway offline >48h can never reconnect | WF-S11-6 (c) | to build |
+| **burned name** — `(org_id, name)` was unconditionally unique and there is no delete, so a revoked gateway held its name forever and re-enrolment answered 409 | WF-S11-8 (a) | **SHIPPED as the near-term unblock** (migration 0056) |
+| **lost identity** — a rebuilt gateway is a NEW node: new id, orphaned site binding, fresh metrics series, every runbook reference pointing at a dead row | WF-S11-8 (b) | to build — **the actual fix** |
+
+**(a) fixes the error; (b) fixes the problem.** (a) makes re-enrolment succeed, which is why it shipped now — but
+the gateway that comes back is not the gateway that left. Replace-in-place enrolment is what an operator expects:
+same node, same site binding, same history, new credential.
+
+### (b)'s security question, papered before it is built
+
+*"A join token pinned to an existing node re-keys that row"* must not become a **credential swap on a live
+node**. If anyone holding a valid join token can re-key an arbitrary node, that is a takeover primitive: mint a
+token, re-key a healthy production gateway, and the attacker's agent inherits its identity, its site binding and
+its policy — while the real gateway is silently displaced.
+
+**The guard: re-key is permitted only against a node whose original is PROVABLY GONE.** Concretely, the target
+must be in a state the control plane can verify itself — `revoked`, or cert-expired-and-unreachable
+(`cert_not_after < now()`, which since 0054/0055 is CP-recorded rather than inferred). **Never against a node
+that is currently reporting.** A live, healthy gateway must be un-re-keyable by any token, which means the check
+belongs on the server and cannot be a client-supplied flag.
+
+Two further conditions for the paper when the story opens:
+
+1. **Revocation must still win.** Re-key must not resurrect a node an operator deliberately revoked without that
+   being an explicit, audited act — otherwise re-key becomes an un-revoke, and revocation is the product's
+   security primitive.
+2. **The audit trail must show the succession**, not a mutation: one node whose credential changed, with the
+   cause and the actor, so "this gateway was rebuilt on the 4th" is answerable later.
+
+### What shipped now (a), and its census
+
+Migration 0056 replaces the unconditional constraint with `UNIQUE (org_id, name) WHERE revoked_at IS NULL`. The
+ruling required the census **before** landing, not after — because duplicate names among revoked rows would
+surface any latent name-keyed lookup, and finding those by breakage is the wrong order:
+
+| angle | result |
+|---|---|
+| name-keyed SQL lookups on `nodes` | **one** — `GetNodeByOrgName`, whose only caller was a test; now filtered to `revoked_at IS NULL` |
+| SQL joins on `nodes.name` | none |
+| Go-side name maps / by-name resolvers | none |
+| `node_join_tokens.node_name` | a **pin** compared at enrolment, not a lookup key |
+| identity resolution | `cert_serial`, globally unique — authentication never touches the name |
+
+Kept as a guard (`TestNoAmbiguousNodeNameLookups`), because a by-name lookup is the natural thing to write, it
+works in every fixture with one node per name, and it fails only on a deployment that has rebuilt a gateway —
+exactly the shape that reaches production.
+
 ## Status
 
 D1–D5 RULED (this paper). Slice cut confirmed. Ledger triaged (hardening folds here; features carry

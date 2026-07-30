@@ -33,8 +33,12 @@ SELECT * FROM nodes
 WHERE cert_serial = $1;
 
 -- name: GetNodeByOrgName :one
+-- ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
+-- active one, so an unfiltered name lookup is ambiguous — and a :one query answering "multiple rows" is a
+-- confusing runtime failure rather than a compile-time one. Filtering here makes the query correct by
+-- construction instead of correct by the caller remembering.
 SELECT * FROM nodes
-WHERE org_id = $1 AND name = $2;
+WHERE org_id = $1 AND name = $2 AND revoked_at IS NULL;
 
 -- name: ListNodes :many
 SELECT * FROM nodes

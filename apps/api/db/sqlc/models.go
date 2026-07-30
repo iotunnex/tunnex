@@ -259,7 +259,7 @@ type Node struct {
 	PolicyReportedAt  pgtype.Timestamptz `json:"policy_reported_at"`
 	SiteID            pgtype.UUID        `json:"site_id"`
 	HubPriority       *int32             `json:"hub_priority"`
-	// Expiry of the currently-issued agent cert, stamped at enroll/renew. NULL = issued before this column existed (unknown, not expired). Past = the agent CANNOT reconnect: /agent/renew requires the cert that expired (S11 WF-S11-6).
+	// Expiry of the currently-issued agent cert. Stamped at enroll/renew from the certificate's own NotAfter. Rows predating migration 0054 carry a BOUND backfilled by 0055 as last_seen_at + CertTTL (an UPPER bound on the true expiry, so it can never false-positive; overwritten by the real value on the next enroll/renew). NULL = never reported, honestly unknown. Past = the agent CANNOT reconnect (S11 WF-S11-6).
 	CertNotAfter pgtype.Timestamptz `json:"cert_not_after"`
 }
 

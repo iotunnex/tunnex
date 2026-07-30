@@ -289,6 +289,10 @@ type Querier interface {
 	// lint:cross-org — the mTLS client cert IS the identity; the org comes from the
 	// node row. Used to authorize every agent request.
 	GetNodeByCertSerial(ctx context.Context, certSerial string) (Node, error)
+	// ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
+	// active one, so an unfiltered name lookup is ambiguous — and a :one query answering "multiple rows" is a
+	// confusing runtime failure rather than a compile-time one. Filtering here makes the query correct by
+	// construction instead of correct by the caller remembering.
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
 	// lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
 	// old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).

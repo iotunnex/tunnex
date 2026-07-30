@@ -172,7 +172,7 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
 SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after FROM nodes
-WHERE org_id = $1 AND name = $2
+WHERE org_id = $1 AND name = $2 AND revoked_at IS NULL
 `
 
 type GetNodeByOrgNameParams struct {
@@ -180,6 +180,10 @@ type GetNodeByOrgNameParams struct {
 	Name  string    `json:"name"`
 }
 
+// ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
+// active one, so an unfiltered name lookup is ambiguous — and a :one query answering "multiple rows" is a
+// confusing runtime failure rather than a compile-time one. Filtering here makes the query correct by
+// construction instead of correct by the caller remembering.
 func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error) {
 	row := q.db.QueryRow(ctx, getNodeByOrgName, arg.OrgID, arg.Name)
 	var i Node
