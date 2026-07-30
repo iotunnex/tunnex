@@ -129,3 +129,39 @@ func TestThrottleIsRegisteredBeforeRealIP(t *testing.T) {
 			"the throttle exists to protect (review #4)")
 	}
 }
+
+// TestChallengeSweeperIsWired — review #5, and a producer-without-consumer guard.
+//
+// `DeleteExpiredRekeyChallenges` was generated and called from nowhere, so node_rekey_challenges — written by an
+// UNAUTHENTICATED endpoint, one row per request for any serial asked about — was never pruned. Migration 0058's own
+// comment and its expires_at index described pruning that no code performed: the artifact existed and the behaviour
+// did not.
+//
+// This asserts the sweeper is actually WIRED, in main.go, and leader-gated like every other tick. A query with no
+// caller is the shape this epic keeps finding, and grep is the only thing that catches it.
+func TestChallengeSweeperIsWired(t *testing.T) {
+	raw, err := os.ReadFile("../../cmd/server/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(string(raw), "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(line + "\n")
+	}
+	body := code.String()
+
+	call := strings.Index(body, "DeleteExpiredRekeyChallenges(")
+	if call < 0 {
+		t.Fatal("node_rekey_challenges must be swept: the table is written by an UNAUTHENTICATED endpoint, one row " +
+			"per challenge request for any serial asked about, so without a sweeper it grows until the database " +
+			"volume fills. A generated query with no caller is not pruning.")
+	}
+	// Leader-gated, so "exactly one replica ticks" stays true of the whole tick set rather than most of it.
+	gate := strings.LastIndex(body[:call], "elector.IsLeader()")
+	if gate < 0 {
+		t.Error("the challenge sweep must be leader-gated like every other scheduler tick (S11 D4)")
+	}
+}

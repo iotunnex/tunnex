@@ -375,3 +375,37 @@ not contain: **an artifact that reads like evidence of a thing rather than evide
 
 Corollary of ARTIFACT-EXISTS ≠ ARTIFACT-WORKS, one step earlier: here the artifact does not exist at all, and the
 *reference* is what exists.
+
+---
+
+## A GUARD MUST BE EXERCISED THROUGH THE STACK IT RUNS IN
+
+*Minted: EPIC 13 / S13.1, from a review finding on a guard written in the same slice as the law it violated.*
+
+A test that calls the function directly tests **the function**. It does not test **the protection** — because the
+protection is the function *plus everything the request passes through before reaching it*.
+
+The instance: a per-endpoint throttle read `r.RemoteAddr` and deliberately ignored `X-Forwarded-For`, on the
+reasoning that a header the caller controls is not an identity. Three tests asserted exactly that, including one
+that rotated a forged `X-Forwarded-For` across four requests and proved the budget still bound. All three passed.
+
+**And the throttle was defeated in production**, because `middleware.RealIP` was registered *above* it and had
+already overwritten `r.RemoteAddr` with the client-supplied header value. The tests built bare `httptest` requests
+and never ran that middleware, so they proved a property of the function that the deployed path did not have. The
+guard was inert and was reported as proven.
+
+**THE LAW:** when a guard's correctness depends on its position in a pipeline — middleware order, interceptor
+chains, decorator stacks, hook ordering, SQL executed through a wrapper — the test must either run the real
+pipeline or assert the position itself. Concretely:
+
+- **Assert the position.** `TestThrottleIsRegisteredBeforeRealIP` reads the router and fails if the registration
+  order changes. Blunt, and it catches the actual defect where a unit test cannot.
+- **Or exercise the composed handler**, not the leaf — build the router and send a request through it.
+- **Ask what runs before this.** The question that would have found this in seconds is not "does my function
+  ignore the header" but "**is `RemoteAddr` still the peer address by the time my function reads it?**"
+- **Suspect any guard whose input is mutated upstream.** Anything that rewrites request fields — proxy middleware,
+  body decoders, auth context injectors, path rewriters — turns "I read X" into "I read whatever the chain left in
+  X".
+
+This is COULD THIS CHECK HAVE FAILED? narrowed to a specific mechanism: the check *could* have failed on a wrong
+function, and *could not* have failed on a wrong pipeline — which was the way it was actually wrong.

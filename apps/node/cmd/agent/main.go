@@ -768,6 +768,26 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 			return newCert, newKey, newCA
 		}
 
+		// THROTTLED IS NOT REFUSED (review #10). A refusal means this will never work; a 429 means not right now.
+		// Conflating them made the agent double its backoff toward the hour ceiling and print a most-likely-cause
+		// pointing at revocation, for a pure rate-limit condition — the honest-diagnosis property of this slice,
+		// defeated by one error mapping.
+		if errors.Is(err, control.ErrRekeyThrottled) {
+			wait := rekeyBackoffFloor
+			logger.Warn("agent_rekey_throttled",
+				slog.Int("attempt", attempt),
+				slog.String("note", "the control plane is rate-limiting re-key attempts; this is NOT a refusal and "+
+					"says nothing about whether this gateway can recover"),
+				slog.String("retry_in", wait.String()),
+				slog.String("error", err.Error()))
+			if !sleepCtx(ctx, wait) {
+				return nil, nil, nil
+			}
+			// Deliberately does NOT advance the backoff: a throttle is a queueing signal, and escalating on it
+			// would turn a busy control plane into an hour-long tail for a fleet that is recovering normally.
+			continue
+		}
+
 		// The refusal says nothing, so say what we know locally rather than guessing at the server's reason.
 		logger.Error("agent_rekey_refused",
 			slog.Int("attempt", attempt),

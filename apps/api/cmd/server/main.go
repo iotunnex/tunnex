@@ -351,6 +351,40 @@ func main() {
 			}
 		}
 	}()
+	// S13.1 (review #5): sweep spent and expired re-key challenges. node_rekey_challenges is written by an
+	// UNAUTHENTICATED endpoint — one row per challenge request, for any serial asked about, valid or not — and
+	// migration 0058's own comment plus its expires_at index describe pruning that no code performed. Without this
+	// loop the table grows until the Postgres volume fills, which is the same failure the flow-log retention sweep
+	// above exists to prevent, on a table an attacker can write to directly.
+	//
+	// Leader-gated like every other tick (D4): pruning twice is harmless, but there is no reason to spend two
+	// replicas on it, and gating keeps "exactly one ticks" true of the whole set rather than most of it.
+	//
+	// Consumed rows are retained for an hour past expiry by the query itself, deliberately: a replayed nonce must
+	// keep failing as SPENT rather than becoming unknown, or the log loses the distinction between an attack and a
+	// typo.
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				if !elector.IsLeader() {
+					continue
+				}
+				sctx, scancel := context.WithTimeout(context.Background(), time.Minute)
+				if n, err := fq.DeleteExpiredRekeyChallenges(sctx); err != nil {
+					logger.Error("rekey_challenge_sweep_failed", slog.String("error", err.Error()))
+				} else if n > 0 {
+					logger.Info("rekey_challenge_sweep", slog.Int64("deleted", n))
+				}
+				scancel()
+			}
+		}
+	}()
+
 	// S8.6 hub-HA failover tick: read member freshness → derive the active hub order → on a change, persist
 	// (atomic generation bump) + audit + let the ordinary compile+push carry it. Rides the same
 	// ticker-goroutine pattern as the retention sweep; a no-op for orgs without a multi-member hub set.

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +24,26 @@ import (
 // indistinguishable, so the endpoint cannot be used as an oracle). So the agent must not try to interpret the
 // refusal — it reports what it knows LOCALLY instead, which is the only honest thing it can say.
 var ErrRekeyRefused = errors.New("control plane refused the re-key")
+
+// ErrRekeyThrottled is DISTINCT from a refusal, and the distinction is the point (review #10).
+//
+// A refusal means "this will never work" — the node is revoked, or its key predates key recording — and the right
+// response is to back off toward the hour ceiling and tell the operator to mint a join token. A 429 means "not
+// right now", and treating it as a refusal defeats the honest-diagnosis property this slice was built around: the
+// agent would double its backoff toward an hour and print a most-likely-cause pointing at revocation, for what is
+// purely a rate limit. Throttled means retry SOONER and say so.
+var ErrRekeyThrottled = errors.New("control plane throttled the re-key attempt")
+
+// retryAfter reads the server's Retry-After when it is a plain seconds value, which is what the throttle sends.
+// Returns 0 when absent or unparseable — the caller then picks its own short delay rather than guessing long.
+func retryAfter(resp *http.Response) time.Duration {
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 && secs < 3600 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 0
+}
 
 // Rekey recovers an identity whose certificate has expired, by proving possession of the keypair the control plane
 // already recorded for it (S13.1).
@@ -78,6 +99,9 @@ func Rekey(ctx context.Context, apiURL, certSerial string, oldKeyPEM []byte, age
 		return nil, nil, nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, nil, nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, nil, nil, ErrRekeyRefused
 	}
@@ -100,6 +124,9 @@ func rekeyChallenge(ctx context.Context, apiURL, certSerial string) ([]byte, err
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, ErrRekeyRefused
 	}
