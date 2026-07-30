@@ -259,6 +259,8 @@ type Node struct {
 	PolicyReportedAt  pgtype.Timestamptz `json:"policy_reported_at"`
 	SiteID            pgtype.UUID        `json:"site_id"`
 	HubPriority       *int32             `json:"hub_priority"`
+	// Expiry of the currently-issued agent cert, stamped at enroll/renew. NULL = issued before this column existed (unknown, not expired). Past = the agent CANNOT reconnect: /agent/renew requires the cert that expired (S11 WF-S11-6).
+	CertNotAfter pgtype.Timestamptz `json:"cert_not_after"`
 }
 
 type NodeJoinToken struct {

@@ -266,11 +266,12 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		if nodeName == "" {
 			return apierr.BadRequest("node_name_required", "a node name is required")
 		}
-		certPEM, serial, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
+		certPEM, serial, notAfter, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
 		if e != nil {
 			return apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 		}
-		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: serial, AgentVersion: agentVersion})
+		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: serial,
+			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}})
 		if e != nil {
 			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")
@@ -311,11 +312,12 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 	if node.Status != "active" {
 		return "", apierr.New(401, "agent_revoked", "this agent has been revoked")
 	}
-	certPEM, serial, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
+	certPEM, serial, notAfter, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
 	if err != nil {
 		return "", apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 	}
-	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: serial, AgentVersion: agentVersion}); err != nil {
+	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: serial,
+		AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}}); err != nil {
 		return "", err
 	}
 	return certPEM, nil
@@ -1933,8 +1935,24 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 		// with the bool structurally (not just architecturally): if caps somehow carry an apply
 		// error, reflect it (apply_failing/stuck) so {Degraded,Kind} can't disagree; else healthy.
 		// (Normally the open agent reports neither field — this is the structural guarantee.)
+		// S11 WF-S11-6 — EDITION-INDEPENDENT and evaluated before everything else. An expired client cert
+		// blocks the mTLS channel itself, which has nothing to do with the policy engine, so this is core and
+		// not enterprise. NULL cert_not_after means "issued before we recorded expiry" = UNKNOWN, never
+		// expired: a column added in 0054 must not retroactively declare every pre-existing gateway bricked.
+		certExpired := n.CertNotAfter.Valid && n.CertNotAfter.Time.Before(now)
+		if certExpired {
+			// The authoritative BOOL must agree with the kind (structural agreement — a gateway that cannot
+			// connect is degraded by any definition). The bool stays the load-bearing signal.
+			deg = true
+		}
+
 		kind := KindHealthy
 		switch {
+		case certExpired:
+			// FIRST, both editions. Every case below reads the agent's LAST REPORT, which is stale by
+			// construction once the certificate lapsed — so any other kind would describe a past state and
+			// prescribe a remedy that cannot work. Only re-enrolment recovers this.
+			kind = KindCertExpiredCannotReconnect
 		case !enterprise && caps.PolicyRefusedVersion > 0:
 			// S8.1 D1: the version gate is on the AGENT — edition-independent. An open-build
 			// gateway has no policy engine (no desync path) but still refuses a too-new artifact.
@@ -1978,6 +1996,7 @@ func (s *Service) PolicyHealthForNodes(ctx context.Context, orgID uuid.UUID, nod
 				ConntrackFlushUnavailable:   conntrackFlushUnavailable,     // S8.7 Slice 2 (lowest priority)
 				K8sEndpointsUnavailable:     k8sEndpointsUnavail,           // S10.3 WF-K5 (above conntrack, below apply/link)
 				HubForwardingNotReconciling: hubForwardingNotReconciling,   // WF-C L2 D-WFC2-1a (zombie hub)
+				CertExpired:                 certExpired,                   // S11 WF-S11-6 — ranked first inside degradedKind too
 			})
 		}
 		ph := PolicyHealth{Degraded: deg, Kind: kind}

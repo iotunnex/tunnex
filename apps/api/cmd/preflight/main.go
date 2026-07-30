@@ -125,7 +125,7 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 	// The agent's reported ceiling lives in nodes.capabilities (jsonb), written by ReportWGInfo — read it
 	// from there rather than from a status table, because that is where it actually is.
 	rows, err := pool.Query(ctx, `
-		SELECT name, COALESCE((capabilities->>'max_policy_version')::int, 0), policy_reported_at
+		SELECT name, COALESCE((capabilities->>'max_policy_version')::int, 0), policy_reported_at, cert_not_after
 		  FROM nodes
 		 WHERE revoked_at IS NULL`)
 	if err != nil {
@@ -135,16 +135,24 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 	}
 	defer rows.Close()
 
-	var tooOld, unknown, stale []string
+	var tooOld, unknown, stale, bricked []string
 	total := 0
 	for rows.Next() {
 		var name string
 		var v int
-		var reportedAt *time.Time
-		if err := rows.Scan(&name, &v, &reportedAt); err != nil {
+		var reportedAt, certNotAfter *time.Time
+		if err := rows.Scan(&name, &v, &reportedAt, &certNotAfter); err != nil {
 			return check{"agent version window", false, "scan: " + err.Error()}
 		}
 		total++
+		// S11 WF-S11-6 — collected FIRST and reported as a FAILURE, because a fleet containing gateways that
+		// cannot reconnect is not a fleet it is safe to roll. The previous behaviour counted these inside the
+		// version window on last-known data and printed "all N gateway(s) ... safe to proceed" — a
+		// reassuring-green gate, and the exact class this repo has ruled against repeatedly. Their reported
+		// version is real; their ability to receive anything is not.
+		if certNotAfter != nil && certNotAfter.Before(time.Now()) {
+			bricked = append(bricked, fmt.Sprintf("%s (cert expired %s)", name, ago(certNotAfter)))
+		}
 		switch {
 		case v == 0:
 			unknown = append(unknown, name)
@@ -162,6 +170,16 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 	}
 
 	switch {
+	case len(bricked) > 0:
+		// REFUSES. Not because the roll would damage these gateways — they are already unreachable — but
+		// because an operator about to upgrade must not be told the fleet is fine when part of it is
+		// unrecoverable without manual work. The remedy exists and is named.
+		return check{"agent version window", false, fmt.Sprintf(
+			"%d of %d gateway(s) CANNOT RECONNECT — their agent certificate has expired, and /agent/renew "+
+				"requires the certificate that expired: %v. These gateways are receiving nothing and will not "+
+				"recover on their own; RE-ENROLL them (docs/self-host.md). Their last-reported version says "+
+				"nothing about what they can apply now (S11 WF-S11-6)",
+			len(bricked), total, sample(bricked, 8))}
 	case len(tooOld) > 0:
 		return check{"agent version window", false, fmt.Sprintf(
 			"%d of %d gateway(s) below the supported window (oldest supported: v%d): %v — after the upgrade "+
@@ -193,21 +211,32 @@ func agentCompatWindow(ctx context.Context, pool *pgxpool.Pool) check {
 // changes WORDING only — never whether preflight passes.
 const staleAfter = time.Hour
 
-// since renders a human age, or names the absence. A nil report time is not "0s ago"; it is "never".
+// since renders a REPORT age, or names its absence. A nil report time is not "0s ago"; it is "never".
 func since(t *time.Time) string {
 	if t == nil {
 		return "never reported"
 	}
+	if d := time.Since(*t); d < 2*time.Minute {
+		return "reported just now"
+	}
+	return "last reported " + ago(t)
+}
+
+// ago is the bare age, caption-free, so a caller can say what the timestamp MEANS. Split out because
+// `since(certNotAfter)` rendered a certificate expiry as "last reported 3d ago" — a fluent sentence about the
+// wrong fact, which is worse than an awkward one about the right fact.
+func ago(t *time.Time) string {
+	if t == nil {
+		return "unknown"
+	}
 	d := time.Since(*t)
 	switch {
-	case d < 2*time.Minute:
-		return "reported just now"
 	case d < time.Hour:
-		return fmt.Sprintf("last reported %dm ago", int(d.Minutes()))
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 48*time.Hour:
-		return fmt.Sprintf("last reported %dh ago", int(d.Hours()))
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
-	return fmt.Sprintf("last reported %dd ago", int(d.Hours()/24))
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
 // backupExists is a REMINDER with teeth, and it is why D1 and D2 were ruled in this order.

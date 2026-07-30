@@ -36,6 +36,16 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       return { label: "site subnet unreachable", tone: "danger" }; // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped)
     case "conntrack_flush_unavailable":
       return { label: "expiry-flush degraded", tone: "warn" }; // S8.7: can't tear down expired-grant flows (CAP_NET_ADMIN?) — revoked flows may linger
+    case "cert_expired_cannot_reconnect":
+      // S11 WF-S11-6: the agent's cert expired, so it cannot authenticate to the CP — including the renewal
+      // endpoint, which needs the cert that expired. The label carries the REMEDY because no other kind's
+      // remedy applies and waiting is actively wrong: this never self-heals.
+      return { label: "certificate expired — re-enroll this gateway", tone: "danger" };
+    case "k8s_endpoints_unavailable":
+      // S10.3 WF-K5 — added here by the S11 mirror-surface census (WF-S11-7): the kind shipped in the Go enum
+      // and the metrics but never reached the spec or this renderer, so it fell through to the generic
+      // degraded badge and its named remedy was invisible in the product.
+      return { label: "no Kubernetes endpoint view (check API access + RBAC)", tone: "danger" };
     case "hub_forwarding_not_reconciling":
       // WF-C L2: zombie hub — wire fresh, agent dead. The label names BOTH halves so it lies in neither
       // direction (not "offline" — it forwards; not "healthy" — it's stale). Remedy: restart the agent

@@ -68,6 +68,25 @@ const (
 	// mints NO new freshness (the WF-B no-third-freshness discipline). Remedy is unique: restart the agent
 	// (the wire is fine — do NOT touch the tunnel). Edition-independent (a crashed agent is core, not policy).
 	KindHubForwardingNotReconciling PolicyDegradedKind = "hub_forwarding_not_reconciling"
+
+	// KindCertExpiredCannotReconnect (S11 walk WF-S11-6): the agent's mTLS client certificate has EXPIRED, so
+	// it cannot reach ANY agent endpoint — including /agent/renew, the only one that could issue a new
+	// certificate. The gateway is BRICKED until a human re-enrolls it; no amount of waiting helps.
+	//
+	// THIS IS THE STATE THE PRODUCT COULD PREVIOUSLY NOT NAME, and its absence was the sharp half of the
+	// finding: a gateway offline for two hours and a gateway offline for two days rendered IDENTICALLY (stale
+	// reports, site links down), while demanding completely different actions — wait, versus re-enroll now.
+	//
+	// Derived from the CP's OWN SIGNING RECORD (nodes.cert_not_after, stamped at enroll/renew), not inferred
+	// from silence: silence has many causes, an expiry we ourselves minted has one meaning. That also lets the
+	// state be evaluated BEFORE the agent tries and fails — a gateway 40 hours into a 48-hour certificate is
+	// eight hours from unrecoverable, which is worth saying while it is still actionable.
+	//
+	// Ranked HIGHEST, above even unsupported_policy_version: an agent that cannot complete a TLS handshake
+	// cannot refuse an artifact, report an apply error, or desync. Every other kind's evidence is its last
+	// report, which is by definition stale here — so any other kind would be describing the past and
+	// prescribing the wrong remedy.
+	KindCertExpiredCannotReconnect PolicyDegradedKind = "cert_expired_cannot_reconnect"
 )
 
 // T (desyncDebounce) + the report-freshness window F are derived from the agent REPORT
@@ -130,6 +149,11 @@ type KindInput struct {
 	// degradedKind stays pure and no freshness is recomputed here. Ranked above the apply/desync kinds: a
 	// dead agent's LAST report is stale, so its apply-error/desync fields must not mask "the agent is dead".
 	HubForwardingNotReconciling bool
+	// CertExpired (S11 WF-S11-6): the CP's recorded cert_not_after for this node is in the past. Computed by
+	// the CALLER from the node row so degradedKind stays pure and mints no clock of its own. NOT derived from
+	// report staleness — that is the whole point: staleness is a symptom with many causes, an expired
+	// certificate we issued ourselves is a diagnosis with one remedy.
+	CertExpired bool
 }
 
 // TransitionRule documents ONE state's authoritative evidence-in — mirrors the state × render
@@ -141,6 +165,7 @@ type TransitionRule struct {
 }
 
 var transitionTable = []TransitionRule{
+	{KindCertExpiredCannotReconnect, "CP-recorded cert_not_after is in the PAST (CertExpired) — the agent cannot complete a TLS handshake, so it cannot reach /agent/renew either; remedy = RE-ENROLL the gateway. Ranked FIRST because every other kind's evidence is the agent's last report, which is necessarily stale once it can no longer connect"},
 	{KindUnsupportedPolicyVersion, "agent REFUSED a too-new artifact (UnsupportedVersion) — checked FIRST, remedy = upgrade the agent"},
 	{KindSiteHubDown, "site gateway, HUB site-link no fresh handshake (SiteHubDown) — remedy = fix the hub; outranks a single spoke link-down"},
 	{KindSiteLinkDown, "site gateway, a spoke site-link no fresh handshake (SiteLinkDown) — remedy = fix that spoke's tunnel/NAT"},
@@ -173,7 +198,14 @@ func AllKinds() []PolicyDegradedKind {
 // a live apply error is self-evident from the agent's last report; the desync path needs a
 // FRESH applied hash (a server-side compare is meaningless on a stale one).
 func degradedKind(in KindInput) PolicyDegradedKind {
-	// S8.1 D1 — HIGHEST priority: the agent refused a too-new artifact and went deny-all. This is
+	// S11 WF-S11-6 — ABSOLUTE highest priority. The agent cannot complete a TLS handshake, so it cannot have
+	// reported anything since its certificate lapsed: every field below is stale by construction. Reporting
+	// any other kind here would describe a past state and prescribe a remedy that cannot be applied (you
+	// cannot upgrade, restart or reconcile your way out of an expired certificate — only re-enroll).
+	if in.CertExpired {
+		return KindCertExpiredCannotReconnect
+	}
+	// S8.1 D1 — highest priority among reported states: the agent refused a too-new artifact and went deny-all. This is
 	// a version-incapability, not a stale/failing apply; its remedy (upgrade the agent) is unique,
 	// so it must not be masked by the desync/apply-error paths below.
 	if in.UnsupportedVersion {

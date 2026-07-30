@@ -74,3 +74,7 @@ S.conf
 wrong-master.key
 *-master.key
 walk-artifacts/**/*.key
+
+# stray `go build ./cmd/...` outputs (S11)
+/apps/api/preflight
+/apps/api/backupctl

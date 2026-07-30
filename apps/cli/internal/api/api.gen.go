@@ -216,11 +216,13 @@ const (
 // Defines values for NodePolicyDegradedKind.
 const (
 	ApplyFailing                NodePolicyDegradedKind = "apply_failing"
+	CertExpiredCannotReconnect  NodePolicyDegradedKind = "cert_expired_cannot_reconnect"
 	ConntrackFlushUnavailable   NodePolicyDegradedKind = "conntrack_flush_unavailable"
 	Converging                  NodePolicyDegradedKind = "converging"
 	DesyncUnknown               NodePolicyDegradedKind = "desync_unknown"
 	Healthy                     NodePolicyDegradedKind = "healthy"
 	HubForwardingNotReconciling NodePolicyDegradedKind = "hub_forwarding_not_reconciling"
+	K8sEndpointsUnavailable     NodePolicyDegradedKind = "k8s_endpoints_unavailable"
 	SilentDesync                NodePolicyDegradedKind = "silent_desync"
 	SiteHubDown                 NodePolicyDegradedKind = "site_hub_down"
 	SiteLinkDown                NodePolicyDegradedKind = "site_link_down"

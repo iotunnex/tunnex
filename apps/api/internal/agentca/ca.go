@@ -158,17 +158,22 @@ func (c *CA) Fingerprint() string {
 
 // SignCSR signs a PEM CSR as an agent leaf certificate valid for CertTTL. The
 // returned serial is stored on the node record and IS the agent's identity.
-func (c *CA) SignCSR(csrPEM []byte, commonName string) (certPEM string, serial string, err error) {
+//
+// notAfter is the certificate's OWN NotAfter, returned rather than recomputed by callers (S11 WF-S11-6). One
+// truth: a caller that wrote time.Now().Add(CertTTL) into the node row would be recording what it BELIEVES the
+// cert says, and the two could drift. The CP stores this so it can later answer "has this agent's certificate
+// expired" from its signing record instead of inferring it from silence.
+func (c *CA) SignCSR(csrPEM []byte, commonName string) (certPEM string, serial string, notAfter time.Time, err error) {
 	blk, _ := pem.Decode(csrPEM)
 	if blk == nil {
-		return "", "", errors.New("malformed CSR PEM")
+		return "", "", time.Time{}, errors.New("malformed CSR PEM")
 	}
 	csr, err := x509.ParseCertificateRequest(blk.Bytes)
 	if err != nil {
-		return "", "", fmt.Errorf("parse CSR: %w", err)
+		return "", "", time.Time{}, fmt.Errorf("parse CSR: %w", err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return "", "", fmt.Errorf("CSR signature: %w", err)
+		return "", "", time.Time{}, fmt.Errorf("CSR signature: %w", err)
 	}
 	sn := bigSerial()
 	tmpl := &x509.Certificate{
@@ -181,10 +186,10 @@ func (c *CA) SignCSR(csrPEM []byte, commonName string) (certPEM string, serial s
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, csr.PublicKey, c.key)
 	if err != nil {
-		return "", "", err
+		return "", "", time.Time{}, err
 	}
 	out := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	return string(out), serialString(sn), nil
+	return string(out), serialString(sn), tmpl.NotAfter, nil
 }
 
 // ServerTLSCertificate mints an ephemeral server certificate (signed by the CA)
@@ -222,7 +227,7 @@ func (c *CA) SelfTest() error {
 		return err
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	certPEM, _, err := c.SignCSR(csrPEM, "selftest")
+	certPEM, _, _, err := c.SignCSR(csrPEM, "selftest")
 	if err != nil {
 		return fmt.Errorf("selftest sign: %w", err)
 	}

@@ -194,6 +194,9 @@ type Reconciler struct {
 	// nil when not wired (e.g. tests) → the check is skipped.
 	siteLinkStale *atomic.Bool
 	lastStatsOK   time.Time // F2: last successful backend.Stats read — the one timestamp for three-state staleness
+	// brickedLogged (S11 WF-S11-6) latches the once-only ERROR for a terminal, unrecoverable condition — an
+	// expired agent certificate. Latched rather than rate-limited because the state never clears on its own.
+	brickedLogged atomic.Bool
 	// siteSubnetUnreachable (S8.2c D3) is an optional sink: each reconcile, if the CP advertised local site
 	// subnets (LocalSubnets) but NO host address is inside any of them, the gateway is fronting a subnet it
 	// isn't on (bridge-trapped wg0, or a misconfigured advertisement). Surfaced as site_subnet_unreachable
@@ -413,6 +416,7 @@ func (r *Reconciler) Run(ctx context.Context, client ControlClient, interval, ba
 			return
 		case err := <-watchCh:
 			if err != nil {
+				r.logBrickedOnce(err)
 				r.logger.Warn("watch_failed_backing_off", slog.String("error", err.Error()))
 				if !sleep(ctx, backoff) {
 					return
@@ -424,9 +428,20 @@ func (r *Reconciler) Run(ctx context.Context, client ControlClient, interval, ba
 			}
 		case <-ticker.C:
 			if _, err := r.runOnce(ctx, client); err != nil {
+				r.logBrickedOnce(err)
 				r.logger.Warn("reconcile_interval_failed", slog.String("error", err.Error()))
 			}
 		}
+	}
+}
+
+// logBrickedOnce raises the unrecoverable case to ERROR exactly once (S11 WF-S11-6). ONCE is the point: the
+// retry loop runs every few seconds, so repeating the remedy would bury it in the same wall of text it exists to
+// cut through — and the WARN backoff lines still show the loop is alive. The condition is terminal, so one loud
+// line at the moment it is first detected is the whole signal.
+func (r *Reconciler) logBrickedOnce(err error) {
+	if msg, ok := CertExpiredRemedy(err); ok && r.brickedLogged.CompareAndSwap(false, true) {
+		r.logger.Error("agent_cert_expired_cannot_reconnect", slog.String("remedy", msg))
 	}
 }
 

@@ -22,8 +22,8 @@ WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING *;
 
 -- name: CreateNode :one
-INSERT INTO nodes (org_id, name, cert_serial, agent_version)
-VALUES ($1, $2, $3, $4)
+INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetNodeByCertSerial :one
@@ -45,7 +45,7 @@ ORDER BY created_at;
 -- lint:cross-org — keyed by node id after the caller authorized via the current
 -- cert; renewal rotates the serial and stamps activity/version.
 UPDATE nodes
-SET cert_serial = $2, agent_version = $3, last_seen_at = now()
+SET cert_serial = $2, agent_version = $3, cert_not_after = $4, last_seen_at = now()
 WHERE id = $1 AND status = 'active';
 
 -- name: TouchNodeSeen :exec
