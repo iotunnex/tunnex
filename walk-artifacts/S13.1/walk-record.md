@@ -269,3 +269,40 @@ have altered the outcome of *taking* the token path, not the *ranking* that avoi
 reads only the stored certificate and `joinToken != ""`, both identical in a pod. **Recommendation: do not spend
 the `k8s` control node re-testing a branch already proven three times.** If the Helm path needs covering
 specifically, it belongs to the S10.3 in-cluster walk.
+
+**RULED (2026-07-31): the leg is NOT OWED.** Recorded so the absence is legible as a DECISION rather than an
+omission — the check was run, the citation chain above is the evidence, and three wire exercises were judged
+sufficient. A later reader finding no precedence leg in the sheet should land here rather than infer it was
+forgotten.
+
+### Follow-up read — does the in-cluster agent PERSIST its credentials? **YES**
+
+The skip argument was that `Decide` reads the stored certificate and token presence, both identical in a pod.
+That is true of the **DECISION**; the **INPUT** depends on the volume. Had the chart mounted the state dir on an
+`emptyDir`, the certificate would die with the pod, `Decide` would see none, and the in-cluster agent would take
+the TOKEN path on every restart — recovery-by-proof structurally unavailable in Kubernetes.
+
+**It does not.** Cited:
+
+| | |
+|---|---|
+| `deploy/helm/tunnex-gateway/values.yaml:74-75` | `persistence: enabled: **true**` — the default |
+| `templates/deployment.yaml:141-144` | `- name: state` → **`persistentVolumeClaim`** |
+| `templates/pvc.yaml` | a real PVC, `ReadWriteOnce`, 128Mi |
+| `templates/deployment.yaml:129-131` + `:118` | mounted at `/var/lib/tunnex-node` = `TUNNEX_NODE_STATE_DIR` |
+
+`cert.pem`, `key.pem`, `ca.pem` and `rekey-pending-key.pem` all survive a pod restart. The chart already reasons
+about it (`deployment.yaml:120-122`): *"once the node cert is on the state PVC, the agent re-attaches its identity
+without it."*
+
+**The `emptyDir` branch is opt-OUT and carries its cost beside the switch** (`values.yaml:78-79`): *"For ephemeral
+clusters you can disable persistence (emptyDir); a restart then re-enrolls (needs a fresh join token) —
+acceptable only for testing."*
+
+**No limitations-table row, no chart fix registered.** Disabling persistence is a documented configuration choice
+with its consequence stated — a different shape from the pre-0057 nodes, which cannot recover regardless of
+anyone's choice.
+
+**Labelled honestly: this is a CODE READ, not an observation.** The walk never ran with persistence disabled. The
+volume type is unambiguous, but the claim is read from the chart — the same distinction as Leg 1's site-binding
+gap, recorded rather than blurred.
