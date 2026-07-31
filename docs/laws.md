@@ -27,6 +27,40 @@ Laws minted across stories, previously scattered in `docs/S*-decisions.md`. New 
 3. **`/etc/resolver` owned-marker + refuse-on-collision** (S8.4) — resolver files carry a `# tunnex-managed` first line; a desired domain colliding with a foreign resolver file is REFUSED (`resolver_domain_conflict`), never overwritten.
 4. **Resolver sweep — startup ONLY in S8.4; crash/owner-loss sweep DEFERRED to S8.4b/S8.5** (the F6 → rider → removal arc, terminal form). S8.4 keeps ONLY `CleanStaleResolvers` at helper startup (race-free, `SelfHeal`-precedented). The crash/owner-loss sweep was attempted twice — an eager per-exit sweep (diverged from the kill-switch grace, raced a reconnect) and a release-rider parasitic on the kill-switch (moved FS I/O under the Supervisor lock, left a StateDown persistence gap, added an unsynchronized callback) — **three defect rounds in one component before the terminal move: REMOVE it.** The machinery was dormant — the client resolver path is inert until S8.5 (no resolver files are installed in S8.4), so there was never any crash residue to sweep. It is deferred to S8.4b/S8.5 where it is exercisable, red-able, and walk-provable, with a NAMED ORDERING PRECONDITION: the sweep must land BEFORE the client resolver path activates. **DORMANT-MACHINERY ADDENDUM (the arc's one-sentence law):** build lifecycle machinery only for code paths that are LIVE in the story that builds them — dormant machinery cannot be walk-proven, and unproven lifecycle code is where defect clusters breed (instances: Windows NRPT staging, the resolver release-rider; the S8.2-#5 forward-chain gap as the original demonstration). A sweep that is a *decision-maker* is the smell; a sweep that *rides a decision* is better; a sweep built for code that isn't live yet is the disease.
 
+## DORMANT-MACHINERY — INSTANCE 2 (EPIC 13, WF-S13-6, founder-ruled 2026-07-31): the epic that minted the law shipped a case of it
+
+**S8.4 minted the law; EPIC 13 is its second instance, and a more dangerous shape.** In S8.4 the dormant code was
+a *sweep* for residue that could not exist yet. Here the dormant code is **the feature itself** — gateway
+recovery — in the case the epic was opened to fix.
+
+**The caller/trigger analysis, stated the way the law now requires:**
+
+| | |
+|---|---|
+| **the machinery** | `attemptRekey` — proof-of-possession recovery |
+| **its only caller** | `main()`, `apps/node/cmd/agent/main.go:77`, via `identity.Decide` on credentials read at boot |
+| **the trigger it must serve** | a certificate expiring at **runtime**, under a process that is already up |
+| **can caller and trigger co-occur?** | **NO.** `main()` runs once, before the trigger exists. Nothing re-enters it |
+
+Recovery is therefore **reachable only by restarting the process** — and the epic's headline claim is that a
+gateway comes back *by itself*.
+
+**The epic WROTE THE BUG DOWN AS A SAFETY PROPERTY.** `docs/S13.1-decisions.md:1277`, from Batch B:
+
+> *"There is no path from the in-loop clock check to starting a recovery, so a clock that jumps the other way
+> cannot…"*
+
+That sentence is **correct about NTP** — a backward clock jump must not trigger a recovery — and it is **also an
+exact description of the defect**. The same absent edge that makes a clock jump safe makes runtime expiry
+unrecoverable. It was reasoned about, written down, and shipped, because it was only ever examined from the
+direction where it is a virtue.
+
+**What this adds to the law:** when you record that *no path exists* from X to Y as a safety property, **state
+what else that missing path was carrying.** An absent edge is a guarantee in one direction and a gap in the
+other, and the note that proves the guarantee is the natural place to notice the gap. See also
+`tunnex-unit-tests-prove-behaviour-not-reachability` — name the trigger, then check the caller can co-occur with
+it.
+
 ## Prior laws (lifted from decision docs — pointers)
 - **Fixture-fidelity law** (S8.2): a test double must not be more capable than the real substrate (the fake stripped `SiteLink` on read). Contrapositive (S8.3): when the kernel genuinely reports a field, PARSE and COMPARE it (keepalive), so convergence is real not fixtured.
 - **Four-word reconcile model** (S8.2): {atomic fetch, fail-static, full-sweep, keep-last-value} — any deviation is a finding.

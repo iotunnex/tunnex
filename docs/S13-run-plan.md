@@ -53,6 +53,32 @@ grep TUNNEX_AGENT_CERT_TTL .env                    # exactly ONE line, =10m
 sudo docker compose logs api 2>&1 | grep agent_cert_ttl_shortened | tail -1   # MUST be present
 ```
 
+## B0-PRE — B′ IS STUCK. The restart that unblocks staging IS EVIDENCE — record it.
+
+At §B staging, B′ (`aws-gw-2`) was found expired and looping `tls: expired certificate` with **no re-key attempt
+of any kind** — WF-S13-6. Staging cannot proceed on a dead gateway, so B′ must be restarted.
+
+**That restart is not housekeeping. It is the manual step the epic exists to remove**, performed by hand, on the
+walk that is meant to prove the epic. Record it as a line in the walk record with its timestamp and this reason —
+**not silently, and not in a shell you do not narrate.**
+
+```bash
+# [aws-gw-2] the manual intervention WF-S13-6 forces. Record the time.
+sudo docker restart tunnex-node
+sudo docker logs --tail 30 tunnex-node 2>&1 | grep -iE "rekey|recovered|identity"
+```
+
+Recovery is expected to succeed **on boot** — that is the path that works.
+
+> ### §B's Leg 1 TESTS THE BOOT PATH ONLY. Say so in the record.
+>
+> Every §B recovery is a stop-then-start, so §B proves boot-time recovery and **nothing about runtime expiry**.
+> It is not a weaker version of the acceptance leg; it is a different leg. **§C's C-LEG-0 is the only place the
+> runtime case is proven**, and it does not run until the remedy lands.
+>
+> **B1–B4, B6 and B7 are CP-side and unaffected by the agent remedy** — they stay valid whatever shape the fix
+> takes, which is why §B continues now rather than waiting.
+
 ## B0a — PROVENANCE: §B runs the SAME BINARY as §A. Do not rebuild.
 
 Everything committed between §A's run and §B is **documentation plus two dev scripts** (`scripts/mutate.sh`,
@@ -344,7 +370,42 @@ registered either way — but registered **with measurements** rather than with 
 
 ---
 
-# §C — THE 48-HOUR RUN. NARROW. ONE SUBJECT.
+# §C — THE RUNTIME-EXPIRY RUN (reframed 2026-07-31 by WF-S13-6)
+
+> ## §C'S PURPOSE CHANGED. It is no longer a re-proof of the TTL knob.
+>
+> §C was scoped as *"prove the shortening knob did not change behaviour"* — one subject, natural expiry, Leg 1.
+> **That design is WF-S13-6's exact trigger**: an agent left running until its certificate expires underneath it.
+>
+> So §C becomes **the acceptance test for the remedy, in the shape of the original incident.** It is the only
+> section that reproduces what happened to `aws-gw-1` — not a manufactured expiry, but a gateway that was up the
+> whole time and whose credential died while it worked.
+>
+> The knob check rides along (the certificate is issued at the default TTL and must be observed to expire when it
+> says it will), but it is no longer why §C exists. **§C does not run until the remedy has landed** — before
+> that, its result is known in advance, and a run whose outcome is known proves nothing.
+
+## C-LEG-0 — THE ACCEPTANCE LEG. No restart. No operator action.
+
+**This leg exists in no other section, and its absence is why the defect shipped.** §A stopped-then-started the
+agent every time, which manufactured a boot with an expired certificate — the one path `attemptRekey` sits on.
+
+**Setup:** a gateway, agent **running**, certificate valid, left alone.
+
+**The falsifying condition — the leg FAILS if any of these is true:**
+
+1. the container is restarted, by anyone or anything, at any point;
+2. an operator touches the box after setup;
+3. the certificate passes `NotAfter` and **no `agent_rekey_attempt` appears** within one renew interval.
+
+**PASS:** the certificate expires under the running process, the agent attempts recovery **on its own**, recovers
+**in place** — same node id, same `site_id`, same devices — and the CP shows a new `cert_not_after` with
+`cert_delivered` observed flipping `f` → `t`.
+
+**Record the container's start time and the recovery time in the same table.** A restart between them, from any
+cause, voids the leg — that is the entire point of it.
+
+## The original §C scope, retained
 
 ## §C.0 — DELETE the TTL line. Do not append an override.
 
