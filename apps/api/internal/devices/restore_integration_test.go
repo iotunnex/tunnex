@@ -4,7 +4,9 @@ package devices
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -123,7 +125,7 @@ func TestRestoreNeverRevivesADeliberatelyRevokedDevice(t *testing.T) {
 	f.revokeDeliberately(t, deliberate)
 	f.revokeGatewayCascade(t) // sweeps whatever is still active — i.e. only `cascade`
 
-	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node)
+	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -156,7 +158,7 @@ func TestRestoreReclaimsTheOriginalAddressWhenFree(t *testing.T) {
 	dev := f.addDevice(t, "laptop", "10.99.0.20")
 	f.revokeGatewayCascade(t)
 
-	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node)
+	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestRestoreAllocatesFreshWhenTheAddressWasTaken(t *testing.T) {
 	// ('active','pending') the pool considered it free, and both the unique index and the allocation oracle agree.
 	squatter := f.addDevice(t, "someone-else", "10.99.0.30")
 
-	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node)
+	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -215,7 +217,7 @@ func TestRestoreSkipsRowsWithNoRecordedCause(t *testing.T) {
 	legacy := f.addDevice(t, "legacy", "10.99.0.40")
 	f.revokeWithNoCause(t, legacy) // pre-0059 shape: revoked, cause NULL
 
-	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node)
+	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil)
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -224,5 +226,136 @@ func TestRestoreSkipsRowsWithNoRecordedCause(t *testing.T) {
 			t.Fatal("a device revoked before the cause column existed must NOT be restored: nobody recorded why, " +
 				"and 'I cannot tell' must never resolve to 'it is safe to revive'")
 		}
+	}
+}
+
+// addNode seeds a second gateway — the REPLACEMENT an operator restores onto.
+func (f *restoreFixture) addNode(t *testing.T, name string, revoked bool) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	status, rev := "active", "NULL"
+	if revoked {
+		status, rev = "revoked", "now()"
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint,status,revoked_at)
+		VALUES ($1,$2,$3,$4,$5,'gw.example.com:51820',$6,`+rev+`)`,
+		id, f.org, name, "serial-"+id.String(), "c2VydmVycHVia2V5MDAwMDAwMDAwMDAwMDAwMDAwMD0=", status); err != nil {
+		t.Fatalf("addNode %s: %v", name, err)
+	}
+	return id
+}
+
+func (f *restoreFixture) nodeOf(t *testing.T, deviceID uuid.UUID) uuid.UUID {
+	t.Helper()
+	var n uuid.UUID
+	if err := f.pool.QueryRow(f.ctx, "SELECT node_id FROM devices WHERE id=$1", deviceID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestOperatorRestoreIsREACHABLE — the Slice 7 red, and it is written to prove REACHABILITY, not behaviour.
+//
+// THE DEFECT IT CLOSES. Every earlier restore red called RestoreCascadeRevokedDevices directly and passed. They
+// proved the restore does the right thing WHEN CALLED. Nothing proved it is ever called — and it was not:
+// devices are cascade-revoked only by nodes.Revoke, and re-key REFUSES a revoked node (D3), so the only trigger
+// that created the work put the node into the one state that could never reach the code which undoes it.
+//
+// So this red drives the OPERATOR'S ENTRY POINT — the same function the HTTP handler calls, with the same
+// arguments a request produces — and asserts devices come back THROUGH it. A test that called the inner function
+// would re-commit the original error with more code around it.
+func TestOperatorRestoreIsREACHABLE(t *testing.T) {
+	f := seedRestoreFixture(t)
+	actor := f.owner
+	replacement := f.addNode(t, "gw-replacement-"+uuid.NewString()[:8], false)
+
+	keeps := f.addDevice(t, "keeps-address", "10.99.0.11")
+	f.revokeGatewayCascade(t) // the gateway was revoked; every device homed on it went with it
+
+	res, err := f.svc.RestoreCascadedDevicesByOperator(t.Context(), actor, f.org, f.node, replacement)
+	if err != nil {
+		t.Fatalf("the operator entry point must restore: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 device restored through the operator trigger, got %d", len(res))
+	}
+	if got := f.statusOf(t, keeps); got != "active" {
+		t.Fatalf("the device must be active again; got %q", got)
+	}
+
+	// RE-HOMED, and this is why the trigger takes a target at all: the source gateway is revoked and never
+	// coming back, so restoring onto it would produce an `active` device pointing at something that will never
+	// serve it — a row that reads healthy on every surface and works nowhere.
+	if got := f.nodeOf(t, keeps); got != replacement {
+		t.Fatalf("the restored device must be homed to the REPLACEMENT gateway; got %v want %v", got, replacement)
+	}
+
+	// The act is on the record, with the HUMAN who did it — the authorization story of Slice 7 in one row.
+	var actorID uuid.UUID
+	var meta []byte
+	if err := f.pool.QueryRow(f.ctx,
+		`SELECT actor_user_id, metadata FROM audit_logs WHERE org_id=$1 AND action='node.devices_restored'
+		 ORDER BY created_at DESC LIMIT 1`, f.org).Scan(&actorID, &meta); err != nil {
+		t.Fatalf("the operator restore must be audited: %v", err)
+	}
+	if actorID != actor {
+		t.Fatalf("the audit row must name the human who asked; got %v", actorID)
+	}
+	if !strings.Contains(string(meta), replacement.String()) {
+		t.Fatalf("the audit must record which gateway the devices were restored onto; got %s", meta)
+	}
+}
+
+// TestOperatorRestoreRefusesADEADTarget — the obvious operator mistake, refused.
+//
+// The natural thing to type is the gateway you just revoked. That node can never serve these devices again, so
+// accepting it would hand back rows that are `active` and unreachable — worse than leaving them revoked, because
+// revoked is honest and this is not.
+func TestOperatorRestoreRefusesADEADTarget(t *testing.T) {
+	f := seedRestoreFixture(t)
+	dead := f.addNode(t, "gw-dead-"+uuid.NewString()[:8], true)
+	d := f.addDevice(t, "stays-dead", "10.99.0.21")
+	f.revokeGatewayCascade(t)
+
+	if _, err := f.svc.RestoreCascadedDevicesByOperator(t.Context(), f.owner, f.org, f.node, dead); !errors.Is(err, ErrRestoreTargetUnusable) {
+		t.Fatalf("a REVOKED target must be refused; got %v", err)
+	}
+	if got := f.statusOf(t, d); got != "revoked" {
+		t.Fatalf("a refused restore must change nothing; device is %q", got)
+	}
+
+	// A target in ANOTHER org is the same refusal — the source is org-scoped and so is the target, or an admin
+	// could rehome another tenant's devices onto their own gateway.
+	if _, err := f.svc.RestoreCascadedDevicesByOperator(t.Context(), f.owner, f.org, f.node, uuid.New()); !errors.Is(err, ErrRestoreTargetUnusable) {
+		t.Fatalf("an unknown/foreign target must be refused; got %v", err)
+	}
+	if _, err := f.svc.RestoreCascadedDevicesByOperator(t.Context(), f.owner, f.org, uuid.New(), f.addNode(t, "gw-ok-"+uuid.NewString()[:8], false)); !errors.Is(err, ErrRestoreSourceUnknown) {
+		t.Fatalf("an unknown source must be refused distinctly; got %v", err)
+	}
+}
+
+// TestOperatorRestoreIsAuditedEVENWhenNothingComesBack — the swallowed-audit law, one step earlier.
+//
+// "An admin restored a gateway's devices and nothing came back" is exactly the event someone needs to find later.
+// An audit that only fires when work happened cannot answer "did anyone try?".
+func TestOperatorRestoreIsAuditedEVENWhenNothingComesBack(t *testing.T) {
+	f := seedRestoreFixture(t)
+	target := f.addNode(t, "gw-empty-"+uuid.NewString()[:8], false)
+
+	res, err := f.svc.RestoreCascadedDevicesByOperator(t.Context(), f.owner, f.org, f.node, target)
+	if err != nil {
+		t.Fatalf("restoring nothing is a normal answer, not an error: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("no candidates existed; got %d", len(res))
+	}
+	var n int
+	if err := f.pool.QueryRow(f.ctx,
+		`SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='node.devices_restored'`, f.org).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("the attempt must be audited even with zero candidates; got %d rows", n)
 	}
 }

@@ -871,7 +871,7 @@ func (q *Queries) RejectDevice(ctx context.Context, arg RejectDeviceParams) (uui
 
 const restoreCascadeRevokedDevice = `-- name: RestoreCascadeRevokedDevice :one
 UPDATE devices
-SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2
+SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2, node_id = $3
 WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
 RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip
 `
@@ -879,6 +879,7 @@ RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip,
 type RestoreCascadeRevokedDeviceParams struct {
 	ID         uuid.UUID `json:"id"`
 	AssignedIp *string   `json:"assigned_ip"`
+	NodeID     uuid.UUID `json:"node_id"`
 }
 
 // lint:cross-org — keyed by device id; the caller authorized via the org-scoped node and read the candidate set
@@ -891,8 +892,14 @@ type RestoreCascadeRevokedDeviceParams struct {
 //
 // Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
 // was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+//
+// node_id is SET, not left alone (S13.1 Slice 7). The re-key path passes the device's existing gateway and nothing
+// moves. The OPERATOR path passes the REPLACEMENT gateway, because a gateway that was revoked is never active again
+// — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
+// the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
+// authorizes both nodes and proves the target is live; this statement only records the binding it is given.
 func (q *Queries) RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCascadeRevokedDeviceParams) (Device, error) {
-	row := q.db.QueryRow(ctx, restoreCascadeRevokedDevice, arg.ID, arg.AssignedIp)
+	row := q.db.QueryRow(ctx, restoreCascadeRevokedDevice, arg.ID, arg.AssignedIp, arg.NodeID)
 	var i Device
 	err := row.Scan(
 		&i.ID,

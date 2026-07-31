@@ -305,7 +305,13 @@ ORDER BY id;
 --
 -- Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
 -- was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+--
+-- node_id is SET, not left alone (S13.1 Slice 7). The re-key path passes the device's existing gateway and nothing
+-- moves. The OPERATOR path passes the REPLACEMENT gateway, because a gateway that was revoked is never active again
+-- — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
+-- the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
+-- authorizes both nodes and proves the target is live; this statement only records the binding it is given.
 UPDATE devices
-SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2
+SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2, node_id = $3
 WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
 RETURNING *;

@@ -585,6 +585,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}/restore-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore the devices a gateway revoke cascaded, onto a replacement gateway
+         * @description S13.1 Slice 7. Revoking a gateway revokes every device homed on it, so rebuilding that gateway hands back a working gateway with ZERO users. This brings those devices back — onto a REPLACEMENT gateway, because a revoked node is never active again (recovery from a revoke is a join-token enrolment, which creates a new node). ONLY devices revoked as a CASCADE return; a device an admin revoked deliberately is never revived by a gateway rebuild. A device that cannot reclaim its original address comes back on a fresh one and is audited distinctly — its config embeds the old address and must be re-imported. A DELIBERATE OPERATOR ACT by construction: RBAC device:restore, audited with the actor. Re-key performs the same restore for a gateway that recovered ITSELF, where no human is involved and nothing re-homes; this endpoint is the only path for a gateway that was REVOKED, which proof of possession must never undo (D3).
+         */
+        post: operations["restoreNodeDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority": {
         parameters: {
             query?: never;
@@ -2447,6 +2470,27 @@ export interface components {
         SsoRedirect: {
             redirect_url: string;
         };
+        RestoreNodeDevicesRequest: {
+            /**
+             * Format: uuid
+             * @description The LIVE gateway the restored devices are homed to. Required rather than defaulted: a revoked gateway is never active again, so there is no sane default, and silently restoring onto the dead node would produce active devices pointing at a gateway that will never serve them.
+             */
+            target_node_id: string;
+        };
+        RestoreNodeDevicesResponse: {
+            /** @description How many devices came back. */
+            restored: number;
+            /** @description How many could NOT reclaim their original address. Each of those users must re-import their config; the device list surfaces it as needs_reexport. */
+            readdressed: number;
+            devices: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                kept_address: boolean;
+                assigned_ip: string;
+                previous_assigned_ip?: string;
+            }[];
+        };
         RekeyChallengeRequest: {
             /** @description Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
             cert_serial?: string;
@@ -3703,6 +3747,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    restoreNodeDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreNodeDevicesRequest"];
+            };
+        };
+        responses: {
+            /** @description What was restored. Zero restored is a normal answer, not an error. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreNodeDevicesResponse"];
+                };
             };
             default: components["responses"]["Error"];
         };

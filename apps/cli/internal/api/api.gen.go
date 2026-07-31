@@ -1353,6 +1353,29 @@ type ResourceRequest struct {
 // ResourceRequestProtocol defines model for ResourceRequest.Protocol.
 type ResourceRequestProtocol string
 
+// RestoreNodeDevicesRequest defines model for RestoreNodeDevicesRequest.
+type RestoreNodeDevicesRequest struct {
+	// TargetNodeId The LIVE gateway the restored devices are homed to. Required rather than defaulted: a revoked gateway is never active again, so there is no sane default, and silently restoring onto the dead node would produce active devices pointing at a gateway that will never serve them.
+	TargetNodeId openapi_types.UUID `json:"target_node_id"`
+}
+
+// RestoreNodeDevicesResponse defines model for RestoreNodeDevicesResponse.
+type RestoreNodeDevicesResponse struct {
+	Devices []struct {
+		AssignedIp         string             `json:"assigned_ip"`
+		Id                 openapi_types.UUID `json:"id"`
+		KeptAddress        bool               `json:"kept_address"`
+		Name               string             `json:"name"`
+		PreviousAssignedIp *string            `json:"previous_assigned_ip,omitempty"`
+	} `json:"devices"`
+
+	// Readdressed How many could NOT reclaim their original address. Each of those users must re-import their config; the device list surfaces it as needs_reexport.
+	Readdressed int `json:"readdressed"`
+
+	// Restored How many devices came back.
+	Restored int `json:"restored"`
+}
+
 // RouteLANRequest defines model for RouteLANRequest.
 type RouteLANRequest struct {
 	// Cidr The LAN CIDR to route (IPv4). Validated disjoint from the org's other subnets + pool.
@@ -1666,6 +1689,9 @@ type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
 // SetHubPriorityJSONRequestBody defines body for SetHubPriority for application/json ContentType.
 type SetHubPriorityJSONRequestBody = HubPriorityRequest
+
+// RestoreNodeDevicesJSONRequestBody defines body for RestoreNodeDevices for application/json ContentType.
+type RestoreNodeDevicesJSONRequestBody = RestoreNodeDevicesRequest
 
 // ExportOVPNProfileJSONRequestBody defines body for ExportOVPNProfile for application/json ContentType.
 type ExportOVPNProfileJSONRequestBody = ExportOVPNProfileRequest
@@ -2121,6 +2147,11 @@ type ClientInterface interface {
 	SetHubPriorityWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SetHubPriority(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestoreNodeDevicesWithBody request with any body
+	RestoreNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RestoreNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RevokeNode request
 	RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3738,6 +3769,30 @@ func (c *Client) SetHubPriorityWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) SetHubPriority(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetHubPriorityRequest(c.Server, orgId, nodeId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestoreNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestoreNodeDevicesRequestWithBody(c.Server, orgId, nodeId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestoreNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestoreNodeDevicesRequest(c.Server, orgId, nodeId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -8049,6 +8104,60 @@ func NewSetHubPriorityRequestWithBody(server string, orgId openapi_types.UUID, n
 	return req, nil
 }
 
+// NewRestoreNodeDevicesRequest calls the generic RestoreNodeDevices builder with application/json body
+func NewRestoreNodeDevicesRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRestoreNodeDevicesRequestWithBody(server, orgId, nodeId, "application/json", bodyReader)
+}
+
+// NewRestoreNodeDevicesRequestWithBody generates requests for RestoreNodeDevices with any type of body
+func NewRestoreNodeDevicesRequestWithBody(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s/restore-devices", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRevokeNodeRequest generates requests for RevokeNode
 func NewRevokeNodeRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -9978,6 +10087,11 @@ type ClientWithResponsesInterface interface {
 	SetHubPriorityWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
 
 	SetHubPriorityWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
+
+	// RestoreNodeDevicesWithBodyWithResponse request with any body
+	RestoreNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error)
+
+	RestoreNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error)
 
 	// RevokeNodeWithResponse request
 	RevokeNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeNodeResponse, error)
@@ -12073,6 +12187,29 @@ func (r SetHubPriorityResponse) StatusCode() int {
 	return 0
 }
 
+type RestoreNodeDevicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RestoreNodeDevicesResponse
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RestoreNodeDevicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestoreNodeDevicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type RevokeNodeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -13944,6 +14081,23 @@ func (c *ClientWithResponses) SetHubPriorityWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseSetHubPriorityResponse(rsp)
+}
+
+// RestoreNodeDevicesWithBodyWithResponse request with arbitrary body returning *RestoreNodeDevicesResponse
+func (c *ClientWithResponses) RestoreNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error) {
+	rsp, err := c.RestoreNodeDevicesWithBody(ctx, orgId, nodeId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestoreNodeDevicesResponse(rsp)
+}
+
+func (c *ClientWithResponses) RestoreNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error) {
+	rsp, err := c.RestoreNodeDevices(ctx, orgId, nodeId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestoreNodeDevicesResponse(rsp)
 }
 
 // RevokeNodeWithResponse request returning *RevokeNodeResponse
@@ -17061,6 +17215,39 @@ func ParseSetHubPriorityResponse(rsp *http.Response) (*SetHubPriorityResponse, e
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestoreNodeDevicesResponse parses an HTTP response from a RestoreNodeDevicesWithResponse call
+func ParseRestoreNodeDevicesResponse(rsp *http.Response) (*RestoreNodeDevicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestoreNodeDevicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RestoreNodeDevicesResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

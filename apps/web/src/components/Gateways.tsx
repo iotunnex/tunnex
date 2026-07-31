@@ -105,6 +105,13 @@ export function Gateways({
   // tunnel". Mirrors the MfaSettings disable ceremony.
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  // S13.1 Slice 7: which REVOKED gateway is having its devices restored, and onto which replacement.
+  // WF-S11-9 is the precedent that makes this non-optional: a capability that exists only in the API is a
+  // capability the product does not have, and that finding was about this exact page.
+  const [restoreFrom, setRestoreFrom] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<string>("");
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<string | null>(null);
   const [nodeName, setNodeName] = useState("");
   const [endpoint, setEndpoint] = useState(""); // D4a: admin-entered public ip:port (blank = NAT'd spoke)
   const [pinnedEndpoint, setPinnedEndpoint] = useState<string | null>(null);
@@ -195,6 +202,51 @@ export function Gateways({
       setRevoking(null);
     }
   }
+
+  // S13.1 Slice 7. Revoking a gateway cascade-revokes every device homed on it, and re-key REFUSES a revoked
+  // node (D3) — a proof of possession must never overturn a human decision. So the ONLY way those users come
+  // back is a human asking, which is what this is: a deliberate operator act, permissioned (device:restore) and
+  // audited with the actor, naming the LIVE gateway they are restored onto. Restoring onto the revoked gateway
+  // is refused by the server, because active devices pointing at a dead gateway read healthy everywhere and
+  // work nowhere.
+  async function restoreDevices(sourceNodeId: string) {
+    setError(null);
+    setRestoring(true);
+    try {
+      const { data, error: e } = await api.POST(
+        "/api/v1/organizations/{orgId}/nodes/{nodeId}/restore-devices",
+        {
+          params: { path: { orgId: org.id, nodeId: sourceNodeId } },
+          body: { target_node_id: restoreTarget },
+        },
+      );
+      if (e) {
+        setError(apiErrorMessage(e, "Could not restore this gateway's devices."));
+        return;
+      }
+      const restored = data?.restored ?? 0;
+      const readdressed = data?.readdressed ?? 0;
+      // The re-address count is stated rather than buried: each of those users must re-import a config, and
+      // the device list marks them "config out of date". Reporting only the total would hide the work.
+      setRestoreResult(
+        restored === 0
+          ? "No devices needed restoring — nothing was revoked as a cascade from this gateway."
+          : `Restored ${restored} device${restored === 1 ? "" : "s"}` +
+              (readdressed > 0
+                ? `. ${readdressed} could not reclaim its original address and must re-import a config — they are marked "config out of date" in Devices.`
+                : ", each keeping its original address, so existing configs keep working."),
+      );
+      setRestoreFrom(null);
+      setRestoreTarget("");
+      onNodesChanged?.();
+    } catch {
+      setError("Could not reach the API.");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  const liveGateways = nodes.filter((n) => n.status === "active");
 
   return (
     <Card>
@@ -292,9 +344,65 @@ export function Gateways({
                     Revoke
                   </Button>
                 ))}
+              {/* S13.1 Slice 7 — only on a REVOKED gateway, because that is the only state whose devices are
+                  stranded: re-key brings back a gateway that expired, and D3 refuses to re-key one that was
+                  revoked. Withheld entirely when there is no live gateway to restore onto, rather than offered
+                  and then refused. */}
+              {n.status === "revoked" &&
+                liveGateways.length > 0 &&
+                (restoreFrom === n.id ? (
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Restore its devices onto</span>
+                    <select
+                      className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-200"
+                      value={restoreTarget}
+                      onChange={(e) => setRestoreTarget(e.target.value)}
+                      aria-label="Replacement gateway"
+                    >
+                      <option value="">Choose a gateway…</option>
+                      {liveGateways.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="primary"
+                      onClick={() => restoreDevices(n.id)}
+                      disabled={restoring || restoreTarget === ""}
+                    >
+                      {restoring ? "Restoring…" : "Restore devices"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setRestoreFrom(null);
+                        setRestoreTarget("");
+                      }}
+                      disabled={restoring}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setRestoreResult(null);
+                      setRestoreFrom(n.id);
+                    }}
+                  >
+                    Restore devices
+                  </Button>
+                ))}
             </div>
           </li>
         ))}
+        {restoreResult && (
+          <li className="text-xs text-emerald-300" role="status">
+            {restoreResult}
+          </li>
+        )}
         {nodes.length === 0 && (
           <li className="text-sm text-slate-500">
             No gateway enrolled yet. Enroll one to start serving WireGuard peers.

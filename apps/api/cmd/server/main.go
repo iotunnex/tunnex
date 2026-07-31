@@ -255,7 +255,9 @@ func main() {
 	// S13.1 D5 (Wall 6): a recovered gateway brings its users back with it. Only cascade-revoked devices —
 	// a deliberately revoked laptop is never revived by a gateway rebuild.
 	nodeSvc.SetRestoreDevices(func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error) {
-		res, err := deviceSvc.RestoreCascadeRevokedDevices(ctx, orgID, nodeID)
+		// Same node in both positions, and no actor: a re-keyed gateway keeps its devices where they were, and
+		// no human was present — the gateway proved possession of its own key.
+		res, err := deviceSvc.RestoreCascadeRevokedDevices(ctx, orgID, nodeID, nodeID, nil)
 		if err != nil {
 			return 0, 0, err
 		}

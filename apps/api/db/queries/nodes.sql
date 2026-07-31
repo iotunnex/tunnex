@@ -32,6 +32,12 @@ RETURNING *;
 SELECT * FROM nodes
 WHERE cert_serial = $1;
 
+-- name: GetNodeForOrg :one
+-- An ORG-SCOPED node by id, whatever its status. Revoked rows included deliberately: the operator restore
+-- (S13.1 Slice 7) names a REVOKED node as its source — that is the whole point — and a lookup that filtered them
+-- out would make the one legitimate case unreachable. The caller decides what each side must be.
+SELECT * FROM nodes WHERE id = $1 AND org_id = $2;
+
 -- name: GetNodeByOrgName :one
 -- ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
 -- active one, so an unfiltered name lookup is ambiguous — and a :one query answering "multiple rows" is a

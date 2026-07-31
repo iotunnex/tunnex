@@ -314,6 +314,47 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 	return i, err
 }
 
+const getNodeForOrg = `-- name: GetNodeForOrg :one
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes WHERE id = $1 AND org_id = $2
+`
+
+type GetNodeForOrgParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// An ORG-SCOPED node by id, whatever its status. Revoked rows included deliberately: the operator restore
+// (S13.1 Slice 7) names a REVOKED node as its source — that is the whole point — and a lookup that filtered them
+// out would make the one legitimate case unreachable. The caller decides what each side must be.
+func (q *Queries) GetNodeForOrg(ctx context.Context, arg GetNodeForOrgParams) (Node, error) {
+	row := q.db.QueryRow(ctx, getNodeForOrg, arg.ID, arg.OrgID)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Status,
+		&i.CertSerial,
+		&i.AgentVersion,
+		&i.EnrolledAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WgPublicKey,
+		&i.Endpoint,
+		&i.Capabilities,
+		&i.PolicyDesyncSince,
+		&i.PolicyReportedAt,
+		&i.SiteID,
+		&i.HubPriority,
+		&i.CertNotAfter,
+		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
+	)
+	return i, err
+}
+
 const getNodeHubPriority = `-- name: GetNodeHubPriority :one
 SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2
 `

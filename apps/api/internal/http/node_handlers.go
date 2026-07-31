@@ -3,14 +3,17 @@ package http
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
@@ -120,6 +123,57 @@ func (s apiServer) RevokeNode(ctx context.Context, req api.RevokeNodeRequestObje
 	}
 	return api.RevokeNode204Response{
 		Headers: api.RevokeNode204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// RestoreNodeDevices POST /api/v1/organizations/{orgId}/nodes/{nodeId}/restore-devices (S13.1 Slice 7).
+//
+// THE REACHABLE TRIGGER. Revoking a gateway cascade-revokes every device homed on it, and re-key REFUSES a revoked
+// node (D3) — so before this endpoint the restore code existed with nothing able to reach it. A human with
+// device:restore names the dead gateway and the live replacement, and the act is audited whether or not anything
+// came back.
+//
+// device:restore rather than org:update (which revokes a node): granting the power to take access away must not
+// silently grant the power to hand it back.
+func (s apiServer) RestoreNodeDevices(ctx context.Context, req api.RestoreNodeDevicesRequestObject) (api.RestoreNodeDevicesResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermDeviceRestore); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	res, err := s.devices.RestoreCascadedDevicesByOperator(ctx, p.UserID, req.OrgId, req.NodeId, req.Body.TargetNodeId)
+	switch {
+	case errors.Is(err, devices.ErrRestoreSourceUnknown):
+		return nil, apierr.NotFound("node_not_found", err.Error())
+	case errors.Is(err, devices.ErrRestoreTargetUnusable):
+		return nil, apierr.BadRequest("invalid_target_node", err.Error())
+	case err != nil:
+		return nil, err
+	}
+
+	body := api.RestoreNodeDevicesResponse{Restored: len(res)}
+	for _, r := range res {
+		if !r.KeptAddress {
+			body.Readdressed++
+		}
+		entry := struct {
+			AssignedIp         string             `json:"assigned_ip"`
+			Id                 openapi_types.UUID `json:"id"`
+			KeptAddress        bool               `json:"kept_address"`
+			Name               string             `json:"name"`
+			PreviousAssignedIp *string            `json:"previous_assigned_ip,omitempty"`
+		}{AssignedIp: r.NewIP, Id: r.DeviceID, KeptAddress: r.KeptAddress, Name: r.Name}
+		if !r.KeptAddress && r.OldIP != "" {
+			old := r.OldIP
+			entry.PreviousAssignedIp = &old
+		}
+		body.Devices = append(body.Devices, entry)
+	}
+	return api.RestoreNodeDevices200JSONResponse{
+		Body:    body,
+		Headers: api.RestoreNodeDevices200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
 

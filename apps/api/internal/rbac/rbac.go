@@ -38,6 +38,15 @@ const (
 	// Same owner/admin grain (a require-mode check can disconnect devices). The
 	// self-REPORT endpoint carries no perm: it is device-owner-authed in the service.
 	PermDeviceHealthManage Permission = "device_health:manage"
+	// PermDeviceRestore governs restoring the devices a gateway revoke cascaded (S13.1 Slice 7). Named per
+	// feature, and deliberately NOT a reuse of org:update (which revokes a node) or device:approve: this is the
+	// capability to UNDO a revoke's blast radius, and reusing the revoke permission would mean everyone who can
+	// take access away silently gained the power to hand it back — the two halves of a security decision, granted
+	// by one checkbox. Owner/admin grain: restoring a device returns network access to a user.
+	//
+	// It is the AUTHORIZATION HALF of D3. A proof of possession may never overturn a human decision, so the only
+	// thing that can is another human, holding a permission that says so.
+	PermDeviceRestore Permission = "device:restore"
 	// PermMfaManage governs ORG-LEVEL MFA (S7.5.5, enterprise): the enforce toggle + admin-reset
 	// of a member's MFA. Named per feature (NOT a policy/member reuse) — MFA governance is its own
 	// axis, and admin-reset is an account-takeover-adjacent power (disenroll-only, audited,
@@ -98,6 +107,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyView:         true,
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
+		PermDeviceRestore:      true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,
@@ -113,6 +123,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyView:         true,
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
+		PermDeviceRestore:      true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,

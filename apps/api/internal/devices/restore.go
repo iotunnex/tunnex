@@ -2,9 +2,11 @@ package devices
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
@@ -47,7 +49,20 @@ type RestoreResult struct {
 //
 // DELIBERATELY REVOKED DEVICES ARE NEVER TOUCHED: the candidate query filters on cause='cascade', and the restore
 // statement repeats that predicate so a caller who skipped the filter still cannot revive one.
-func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeID uuid.UUID) ([]RestoreResult, error) {
+// TWO CALLERS, AND THE SECOND ONE IS WHY THIS IS REACHABLE AT ALL (S13.1 Slice 7).
+//
+// The first is re-key: a gateway recovers itself and its devices come back where they were (targetNodeID ==
+// sourceNodeID). The second is an OPERATOR, restoring a revoked gateway's devices onto a REPLACEMENT gateway.
+//
+// The second exists because the first could never fire. Devices are cascade-revoked only by nodes.Revoke, and
+// re-key REFUSES a revoked node (D3) — so the only trigger that creates this work put the node into the one state
+// that could never reach the code which undoes it. The mechanism was correct and unreachable, which the
+// dormant-machinery law names and which the reds could not see: a unit test proves behaviour, never reachability.
+//
+// actor is the human who asked. nil on the re-key path — no person was present, the gateway proved possession of
+// its own key — and set on the operator path, because a human undoing a human's revoke is the whole authorization
+// story (D3 refuses to let a proof do it).
+func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourceNodeID, targetNodeID uuid.UUID, actor *uuid.UUID) ([]RestoreResult, error) {
 	var out []RestoreResult
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// The ORG advisory lock, the same one device-create takes, so allocation and restore serialize on one
@@ -55,9 +70,26 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
 			return e
 		}
-		candidates, err := q.ListCascadeRevokedDevicesForNode(ctx, nodeID)
+		candidates, err := q.ListCascadeRevokedDevicesForNode(ctx, sourceNodeID)
 		if err != nil {
 			return err
+		}
+		// THE OPERATOR ACT IS RECORDED BEFORE ITS RESULT IS KNOWN, and unconditionally.
+		//
+		// In the SAME transaction as the restores, so a partial failure takes the record with it — and above the
+		// zero-candidates early return, because "an admin restored a gateway's devices and nothing came back" is
+		// exactly the event someone will later need to find. An audit that only fires when work happened cannot
+		// answer "did anyone try?", which is the swallowed-audit law one step earlier.
+		if actor != nil {
+			if aerr := audit(ctx, q, orgID, actor, "node.devices_restored", "node", sourceNodeID.String(),
+				map[string]any{
+					"target_node_id": targetNodeID.String(),
+					"candidates":     len(candidates),
+					"authorized_by": "operator (device:restore) — a human undoing a human's revoke, which is the " +
+						"only thing permitted to: proof of possession must never overturn a human decision (D3)",
+				}); aerr != nil {
+				return aerr
+			}
 		}
 		if len(candidates) == 0 {
 			return nil
@@ -106,7 +138,7 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 				ip, kept = fresh, false
 			}
 			restored, rerr := q.RestoreCascadeRevokedDevice(ctx, sqlc.RestoreCascadeRevokedDeviceParams{
-				ID: c.ID, AssignedIp: &ip,
+				ID: c.ID, AssignedIp: &ip, NodeID: targetNodeID,
 			})
 			if rerr != nil {
 				return rerr
@@ -122,6 +154,14 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 			// re-imported. Same row otherwise, so the restore itself is always on the record.
 			action := "device.restored"
 			meta := map[string]any{"cause": "gateway_recovered", "assigned_ip": ip, "kept_address": kept}
+			if targetNodeID != sourceNodeID {
+				// RE-HOMED, and it is recorded per device because the consequence is per device: this config now
+				// names a different gateway (endpoint and public key), so it must be re-imported even when the
+				// address was reclaimed.
+				meta["cause"] = "operator_restore"
+				meta["previous_node_id"] = sourceNodeID.String()
+				meta["node_id"] = targetNodeID.String()
+			}
 			if !kept {
 				action = "device.restored_readdressed"
 				meta["previous_assigned_ip"] = old
@@ -137,7 +177,7 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 				// meta carried a `surface_gap` key saying so). Slice 6 closed it; the key is gone rather than left
 				// to age into a false claim.
 			}
-			if aerr := audit(ctx, q, orgID, nil, action, "device", restored.ID.String(), meta); aerr != nil {
+			if aerr := audit(ctx, q, orgID, actor, action, "device", restored.ID.String(), meta); aerr != nil {
 				return aerr
 			}
 		}
@@ -154,11 +194,53 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, nodeI
 			}
 		}
 		s.logger.Info("devices_restored_after_gateway_recovery",
-			slog.String("node_id", nodeID.String()),
+			slog.String("source_node_id", sourceNodeID.String()),
+			slog.String("target_node_id", targetNodeID.String()),
 			slog.Int("restored", len(out)),
 			slog.Int("kept_original_address", len(out)-readdressed),
 			slog.Int("readdressed_needing_reimport", readdressed))
 		s.PushOrgNodes(ctx, orgID)
 	}
 	return out, nil
+}
+
+// ErrRestoreTargetUnusable is returned when the named replacement gateway cannot host restored devices.
+//
+// Distinct from a generic bad-request so the UI can say WHICH half was wrong, and refused rather than silently
+// falling back to the source node: restoring onto the revoked gateway would produce devices that are `active` and
+// point at something that will never serve them — a state that reads healthy on every surface and works nowhere.
+var ErrRestoreTargetUnusable = errors.New("the target gateway must be an active, unrevoked node in this organization")
+
+// ErrRestoreSourceUnknown is returned when the source node is not this org's.
+var ErrRestoreSourceUnknown = errors.New("no such gateway in this organization")
+
+// RestoreCascadedDevicesByOperator is THE REACHABLE TRIGGER (S13.1 Slice 7) — the entry point an operator's request
+// actually lands on, and the one the reachability red must drive.
+//
+// It exists because the re-key path could never fire for a REVOKED gateway (D3 refuses it), which is the only way
+// devices become cascade-revoked. A human, holding device:restore, names the dead gateway and the live replacement.
+//
+// VALIDATION IS THE AUTHORIZATION: the source must be this org's, and the target must be this org's AND alive.
+// Both are checked here rather than in the handler, so a second caller (a CLI, a future bulk tool) cannot reach the
+// restore without them.
+func (s *Service) RestoreCascadedDevicesByOperator(ctx context.Context, actor, orgID, sourceNodeID, targetNodeID uuid.UUID) ([]RestoreResult, error) {
+	if _, err := s.q.GetNodeForOrg(ctx, sqlc.GetNodeForOrgParams{ID: sourceNodeID, OrgID: orgID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRestoreSourceUnknown
+		}
+		return nil, err
+	}
+	target, err := s.q.GetNodeForOrg(ctx, sqlc.GetNodeForOrgParams{ID: targetNodeID, OrgID: orgID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRestoreTargetUnusable
+		}
+		return nil, err
+	}
+	// A revoked target is the failure mode worth naming: the obvious operator mistake is to name the gateway they
+	// just revoked, which is the one node that can never serve these devices again.
+	if target.RevokedAt.Valid || target.Status != "active" {
+		return nil, ErrRestoreTargetUnusable
+	}
+	return s.RestoreCascadeRevokedDevices(ctx, orgID, sourceNodeID, targetNodeID, &actor)
 }
