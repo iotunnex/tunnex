@@ -852,13 +852,17 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 	for attempt := 1; ; attempt++ {
 		var err error
 		for _, id := range identities {
-			var newCert, newCA []byte
-			newCert, newCA, err = control.Rekey(ctx, apiURL, id.ident, pending, id.popKey, version(), nodeName)
+			var newCert []byte
+			// caPEM is the anchor ALREADY ON DISK, passed in at the top of this function and never replaced.
+			// Review pass 1 #1: this path is unauthenticated plain HTTP, so a CA arriving in the response is
+			// attacker-controlled input, and writing it would hand the responder every future desired state.
+			// Rekey verifies the issued certificate chains to this anchor and refuses otherwise.
+			newCert, err = control.Rekey(ctx, apiURL, id.ident, pending, id.popKey, caPEM, version(), nodeName)
 			if err == nil {
 				// PROMOTE: the pending key becomes the identity, and saveCreds clears the pending file as part of
 				// the same promotion — a superseded pending key left behind would make the NEXT recovery spend an
 				// attempt on an identifier the control plane does not hold.
-				if serr := saveCreds(certDir, newCert, pending, newCA); serr != nil {
+				if serr := saveCreds(certDir, newCert, pending, caPEM); serr != nil {
 					logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
 					return nil, nil, nil
 				}
@@ -866,7 +870,7 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 					slog.String("old_cert_serial", serial),
 					slog.String("identified_by", id.ident.Describe()),
 					slog.String("note", "recovered by proof of possession — same node, same identity, new key"))
-				return newCert, pending, newCA
+				return newCert, pending, caPEM
 			}
 			if errors.Is(err, control.ErrRekeyThrottled) {
 				break // Do not burn the second identity's request on a rate limit; back off and start over.
@@ -901,6 +905,31 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 			}
 			// Deliberately does NOT advance the backoff: a throttle is a queueing signal, and escalating on it
 			// would turn a busy control plane into an hour-long tail for a fleet that is recovering normally.
+			continue
+		}
+
+		// AN UNTRUSTED RESPONSE IS NOT A REFUSAL. The control plane never answered — something else did, or
+		// something mangled the answer. Printing "mint a join token" here would talk an operator into discarding a
+		// working identity because an attacker or a broken proxy answered a plain-HTTP request.
+		if errors.Is(err, control.ErrIssuedCertUntrusted) {
+			logger.Error("agent_rekey_response_untrusted",
+				slog.Int("attempt", attempt),
+				slog.String("local_finding", "a re-key response arrived whose certificate does NOT chain to this "+
+					"agent's trusted CA, so it did not come from this control plane"),
+				slog.String("consequence", "nothing was written; this agent kept its existing CA, certificate and key"),
+				slog.String("remedy", "check what is answering "+apiURL+" — a proxy, a captive portal, or an "+
+					"attacker on the path. Do NOT re-enroll on the strength of this message"),
+				slog.String("retry_in", backoff.String()),
+				slog.String("error", err.Error()))
+			if !sleepCtx(ctx, backoff) {
+				return nil, nil, nil
+			}
+			if backoff < rekeyBackoffCeiling {
+				backoff *= 2
+				if backoff > rekeyBackoffCeiling {
+					backoff = rekeyBackoffCeiling
+				}
+			}
 			continue
 		}
 

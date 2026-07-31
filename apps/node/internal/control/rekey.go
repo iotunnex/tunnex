@@ -141,10 +141,27 @@ func csrForKey(keyPEM []byte, commonName string) (csrPEM []byte, err error) {
 //
 // popKeyPEM is whichever key the control plane RECORDED for this node — the expired certificate's key when
 // identifying by serial, or the pending key itself when identifying by its fingerprint after a lost response.
-func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, popKeyPEM []byte, agentVersion, commonName string) (certPEM, caPEM []byte, err error) {
+//
+// THE ANCHOR IS AN INPUT, NEVER AN OUTPUT (review pass 1 #1, R1). This runs over the PUBLIC listener, which ships
+// as plain HTTP (TUNNEX_API_URL defaults to http://api:8080) — so the responder is UNAUTHENTICATED and anyone on
+// the path can be it. Writing a CA from that response would replace the only RootCAs the mTLS control channel
+// has, and an attacker who answered once would own every subsequent desired state: peers, AllowedIPs, policy,
+// routes, DNS. So `trustedCAPEM` comes IN, the issued certificate must CHAIN TO IT, and no CA comes out.
+//
+// What that trades: an attacker who answers can make recovery FAIL. They could already do that by dropping the
+// request, so the capability is not new — whereas anchor replacement was permanent impersonation. Refusing is
+// strictly the better failure.
+//
+// CA ROTATION DOES NOT RIDE THIS PATH (ruled). If it is ever needed it gets its own authenticated mechanism;
+// this defect existed because a recovery path was quietly doing a rotation path's job.
+func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, popKeyPEM, trustedCAPEM []byte, agentVersion, commonName string) (certPEM []byte, err error) {
+	if len(trustedCAPEM) == 0 {
+		// No anchor means nothing to verify against, and "I cannot check" must never resolve to "it is fine".
+		return nil, errors.New("no trusted CA on disk to verify the issued certificate against")
+	}
 	popKey, err := parseRSAKey(popKeyPEM)
 	if err != nil {
-		return nil, nil, fmt.Errorf("stored key unusable: %w", err)
+		return nil, fmt.Errorf("stored key unusable: %w", err)
 	}
 
 	// The CSR is over the PENDING key — fresh material, minted and persisted by the caller before this call. The
@@ -153,16 +170,16 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 	// walking the identity forward on every attempt.
 	csrPEM, err := csrForKey(pendingKeyPEM, commonName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	csrBlk, _ := pem.Decode(csrPEM)
 	if csrBlk == nil {
-		return nil, nil, errors.New("generated CSR is not PEM")
+		return nil, errors.New("generated CSR is not PEM")
 	}
 
 	nonce, err := rekeyChallenge(ctx, apiURL, ident)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// The signed message must match the server's construction exactly. Kept adjacent to the request that carries
@@ -171,7 +188,7 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 	sum := sha256.Sum256(msg)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, popKey, crypto.SHA256, sum[:])
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	fields := ident.fields()
@@ -184,23 +201,71 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
+		return nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, ErrRekeyRefused
+		return nil, ErrRekeyRefused
 	}
 	var out struct {
 		CertPEM string `json:"cert_pem"`
 		CAPEM   string `json:"ca_pem"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return []byte(out.CertPEM), []byte(out.CAPEM), nil
+	// VERIFY BEFORE ANYTHING TOUCHES DISK. Two properties, and both must hold:
+	//
+	//  1. the issued certificate CHAINS TO THE ANCHOR THIS AGENT ALREADY TRUSTS — so a responder who is not the
+	//     control plane cannot hand us an identity at all;
+	//  2. it certifies the PENDING KEY we just asked for — otherwise a replayed or substituted certificate over
+	//     someone else's key would be promoted into key.pem's place and the pair would not match.
+	//
+	// The response's own ca_pem is deliberately IGNORED and not returned. It is attacker-controlled input on this
+	// path, and there is no version of "trust it a little" that is safe.
+	if err := verifyIssued([]byte(out.CertPEM), trustedCAPEM, pendingKeyPEM); err != nil {
+		return nil, err
+	}
+	return []byte(out.CertPEM), nil
+}
+
+// ErrIssuedCertUntrusted is the refusal when a re-key response does not verify. Distinct from ErrRekeyRefused
+// (which is the control plane saying no) because this one means the RESPONDER IS NOT THE CONTROL PLANE — a
+// materially different thing for an operator to read, and the agent must not print "mint a join token" for it.
+var ErrIssuedCertUntrusted = errors.New("the issued certificate does not chain to this agent's trusted CA")
+
+func verifyIssued(certPEM, trustedCAPEM, pendingKeyPEM []byte) error {
+	blk, _ := pem.Decode(certPEM)
+	if blk == nil {
+		return fmt.Errorf("%w: response certificate is not PEM", ErrIssuedCertUntrusted)
+	}
+	cert, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		return fmt.Errorf("%w: response certificate does not parse: %v", ErrIssuedCertUntrusted, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(trustedCAPEM) {
+		return fmt.Errorf("%w: the on-disk CA is not usable as a trust anchor", ErrIssuedCertUntrusted)
+	}
+	// KeyUsageAny: this agent's certificate is a CLIENT credential, and the point here is provenance — did our CA
+	// sign it — not what it is allowed to do. The control plane decides EKUs; re-imposing them here would be a
+	// second opinion that can only drift from the issuer's.
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+		return fmt.Errorf("%w: %v", ErrIssuedCertUntrusted, err)
+	}
+	pending, err := parseRSAKey(pendingKeyPEM)
+	if err != nil {
+		return fmt.Errorf("%w: pending key unusable: %v", ErrIssuedCertUntrusted, err)
+	}
+	got, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok || got.N.Cmp(pending.N) != 0 || got.E != pending.E {
+		return fmt.Errorf("%w: the issued certificate does not certify the key this agent asked for",
+			ErrIssuedCertUntrusted)
+	}
+	return nil
 }
 
 func rekeyChallenge(ctx context.Context, apiURL string, ident Identifier) ([]byte, error) {

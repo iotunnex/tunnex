@@ -3,7 +3,9 @@ package nodes
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -172,7 +174,22 @@ func (s *Service) Rekey(ctx context.Context, ident RekeyIdentifier, nonce, csrPE
 	log = log.With("node_id", node.ID.String(), "org_id", node.OrgID.String())
 
 	// (3) GATE FIRST — before any cryptographic work, so timing cannot become a liveness oracle.
-	authorized, why := RekeyAuthorized(node.Status, node.CertNotAfter.Time, node.CertNotAfter.Valid, time.Now())
+	//
+	// The redelivery input is computed here, from a CSR PARSE and a byte comparison. Parsing is not the expensive,
+	// timing-visible step the ordering law is about — that is the RSA verification in (4), which still runs after
+	// the gate. What this establishes is only "does the CSR carry the key we already have on file"; whether the
+	// caller HOLDS that key is settled in (4), so the carve-out cannot authorize anyone who fails the proof.
+	provesCurrentKey := false
+	if ident.Kind == IdentifierKeyFingerprint && node.CertPublicKey != nil {
+		if blk, _ := pem.Decode(csrPEM); blk != nil {
+			if csr, perr := x509.ParseCertificateRequest(blk.Bytes); perr == nil {
+				if spki, merr := x509.MarshalPKIXPublicKey(csr.PublicKey); merr == nil {
+					provesCurrentKey = base64.StdEncoding.EncodeToString(spki) == *node.CertPublicKey
+				}
+			}
+		}
+	}
+	authorized, why := RekeyAuthorized(node.Status, node.CertNotAfter.Time, node.CertNotAfter.Valid, time.Now(), provesCurrentKey)
 	if !authorized {
 		log.Warn("rekey_refused", "reason", why)
 		return "", "", ErrRekeyRefused

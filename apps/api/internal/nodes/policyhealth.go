@@ -332,11 +332,34 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 // THE RETURNED REASON IS FOR THE LOG, NEVER THE RESPONSE. D8's uniform-refusal rule: an attacker probing with a
 // stolen key must not learn revoked-versus-not-found-versus-live. The remedy belongs in the operator-facing docs
 // and the health surface, not in what the endpoint says back.
-func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time) (bool, string) {
+// provesCurrentKey is the REDELIVERY carve-out (review pass 1 #3, the D3/D10 collision).
+//
+// THE COLLISION. D10 exists so a LOST RESPONSE cannot brick a gateway: the control plane committed a new
+// certificate the agent never received, and the agent recovers by naming the key the CP recorded. But committing
+// that certificate ALSO advanced `cert_not_after` — the exact column this gate reads — so the node now looks
+// LIVE, and the gate refuses the recovery D10 was built to make possible, for a full 48h certificate lifetime.
+// Every artifact D10 shipped (migration 0061, the generated fingerprint column, its index, the identifier
+// columns) was justified by a property the gate then denied.
+//
+// THE CARVE-OUT, AND WHY IT IS NOT A BACKDOOR. It authorizes only when the caller proves possession of the key
+// the control plane RECORDS RIGHT NOW, and asks for a certificate over THAT SAME KEY. Such a caller already holds
+// the node's identity in full: the certificate is public material and the private key is the entire secret, so
+// they can authenticate on the mTLS channel this instant. Re-issuing over the same key grants them nothing they
+// lack — it is REDELIVERY of a grant already made, not a new grant.
+//
+// What it deliberately does NOT do: it cannot rotate to a different key (the CSR must carry the recorded key),
+// and it cannot touch a REVOKED node — that check runs first and is unconditional, because revocation is a human
+// decision and no proof may overturn it.
+func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time, provesCurrentKey bool) (bool, string) {
 	if status == "revoked" {
 		return false, "node is REVOKED — an operator deliberately retired it, and a proof of possession cannot " +
 			"distinguish the real gateway from whoever holds its stolen key. Re-key must never un-revoke. " +
 			"Recover it with an operator-minted join token"
+	}
+	if provesCurrentKey {
+		return true, "the caller proved possession of the key this control plane currently records AND asked for " +
+			"a certificate over that same key — a REDELIVERY of a grant already made (D10 lost-response recovery), " +
+			"which grants no capability the key holder does not already have"
 	}
 	if !certNotAfterKnown {
 		// UNKNOWN is not gone. A row with no recorded expiry predates migration 0054 and 0055 declined to bound

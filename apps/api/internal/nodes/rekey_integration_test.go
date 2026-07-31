@@ -13,6 +13,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -190,24 +191,53 @@ func TestLostResponseDoesNotBrickTheGateway(t *testing.T) {
 		t.Fatal("a refused attempt must not change the node's identity")
 	}
 
-	// (4) Recovery by fingerprint. To reach the gate, the row must be in the state a gateway needing recovery is in
-	//     — expired — which is what it will be by the time the agent gets here in the field.
-	if _, err := f.tx.Exec(f.ctx,
-		"UPDATE nodes SET cert_not_after = now() - interval '2 days' WHERE id=$1", id); err != nil {
+	// (4) Recovery by fingerprint — WITH THE ROW EXACTLY AS THE LOST RESPONSE LEFT IT.
+	//
+	// THIS TEST USED TO CHEAT HERE, and review pass 1 #3 caught it. It hand-applied
+	//     UPDATE nodes SET cert_not_after = now() - interval '2 days'
+	// with a comment claiming that is "what it will be by the time the agent gets here in the field". That is
+	// FALSE, and it was the defect wearing the costume of setup: the re-key in step (1) COMMITTED a fresh
+	// certificate, so cert_not_after is 48 HOURS IN THE FUTURE — the node reads LIVE, and the gate refused the
+	// recovery D10 exists for. The guard fabricated the state that made it pass.
+	//
+	// So nothing is touched. The row stays as the control plane left it, and recovery must work anyway, through
+	// the redelivery carve-out: the caller proves the key the CP records NOW and asks for a certificate over that
+	// same key.
+	var notAfter time.Time
+	if err := f.tx.QueryRow(f.ctx, "SELECT cert_not_after FROM nodes WHERE id=$1", id).Scan(&notAfter); err != nil {
 		t.Fatal(err)
 	}
-	k3 := rsaKey(t)
+	if !notAfter.After(time.Now()) {
+		t.Fatalf("this test is only meaningful while the committed certificate is still VALID — the whole point "+
+			"is that the node reads live; cert_not_after=%s", notAfter)
+	}
+
+	// The CSR carries k2, the key the control plane recorded in step (1) — redelivery, not rotation.
 	fp2 := fingerprintOf(t, &k2.PublicKey)
-	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fp2}, k2, k3); err != nil {
-		t.Fatalf("re-key by the fingerprint of the key the control plane RECORDED must succeed — this is the whole "+
-			"of D10, and without it a single dropped response costs a gateway its identity: %v", err)
+	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fp2}, k2, k2); err != nil {
+		t.Fatalf("re-key by the fingerprint of the key the control plane RECORDED must succeed against a row whose "+
+			"certificate is still valid — that row is exactly what a lost response leaves behind, and without this "+
+			"a single dropped packet costs a gateway its identity for a full certificate lifetime: %v", err)
 	}
 	recovered := f.row(t, id)
 	if recovered.ID != id {
 		t.Fatal("recovery must return the SAME node — same site binding, same history")
 	}
-	if got := KeyFingerprintFromStored(*recovered.CertPublicKey); got != fingerprintOf(t, &k3.PublicKey) {
-		t.Fatal("the recovered node must record the newly issued key")
+	if got := KeyFingerprintFromStored(*recovered.CertPublicKey); got != fp2 {
+		t.Fatal("redelivery must leave the SAME key on record — rotating here would mean the carve-out issued over " +
+			"a key the caller had not proven, which is the one thing it must not do")
+	}
+
+	// AND THE ROTATION IT MUST REFUSE: same proof, but asking for a certificate over a DIFFERENT key. The caller
+	// holds k2, so they can already be this node — but the carve-out authorizes redelivery only, and a live node
+	// must not be re-keyed onto new material by anyone.
+	k3 := rsaKey(t)
+	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fingerprintOf(t, &k3.PublicKey)}, k2, k3); !errors.Is(err, ErrRekeyRefused) {
+		t.Fatalf("a fingerprint that is not the recorded key must not resolve; got %v", err)
+	}
+	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fp2}, k2, k3); !errors.Is(err, ErrRekeyRefused) {
+		t.Fatalf("proving the current key must NOT authorize issuing over a DIFFERENT key while the node is live — "+
+			"that is rotation, not redelivery, and the gate has no business allowing it; got %v", err)
 	}
 }
 

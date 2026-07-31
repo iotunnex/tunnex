@@ -18,7 +18,7 @@ import (
 func TestRekeyRefusedAgainstALiveNode(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
-	ok, reason := RekeyAuthorized("active", now.Add(24*time.Hour), true, now)
+	ok, reason := RekeyAuthorized("active", now.Add(24*time.Hour), true, now, false)
 	if ok {
 		t.Fatalf("re-key MUST be refused against a live node with a valid certificate — authorizing it is a "+
 			"takeover primitive, not a recovery path. Got authorized with reason %q", reason)
@@ -58,17 +58,17 @@ func TestRekeyNeverUnRevokes(t *testing.T) {
 	past, future := now.Add(-time.Hour), now.Add(time.Hour)
 
 	// Revoked, certificate still valid.
-	if ok, reason := RekeyAuthorized("revoked", future, true, now); ok {
+	if ok, reason := RekeyAuthorized("revoked", future, true, now, false); ok {
 		t.Fatalf("a REVOKED node must NEVER authorize re-key: proof of possession cannot tell the real gateway "+
 			"from whoever stole its key, so authorizing would let the stolen credential undo the revocation "+
 			"invoked against it. Got authorized with %q", reason)
 	}
 	// Revoked AND expired — still refused. Expiry does not launder a revocation.
-	if ok, reason := RekeyAuthorized("revoked", past, true, now); ok {
+	if ok, reason := RekeyAuthorized("revoked", past, true, now, false); ok {
 		t.Fatalf("revoked AND expired must still refuse — expiry must not launder away a human decision. Got %q", reason)
 	}
 	// The refusal must name the remedy, and it must be the HUMAN one.
-	_, reason := RekeyAuthorized("revoked", past, true, now)
+	_, reason := RekeyAuthorized("revoked", past, true, now, false)
 	if !strings.Contains(reason, "join token") {
 		t.Errorf("the refusal must direct the operator to the human recovery path (a minted join token); got %q", reason)
 	}
@@ -79,12 +79,12 @@ func TestExpiryIsTheONLYAuthorization(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Hour), now.Add(time.Hour)
 
-	if ok, _ := RekeyAuthorized("active", past, true, now); !ok {
+	if ok, _ := RekeyAuthorized("active", past, true, now, false); !ok {
 		t.Error("an EXPIRED certificate on an ACTIVE node must authorize re-key: the agent cannot authenticate " +
 			"and cannot renew, which is the whole condition this epic exists to recover from — and no human " +
 			"decided anything, so no decision is being overturned")
 	}
-	if ok, _ := RekeyAuthorized("active", future, true, now); ok {
+	if ok, _ := RekeyAuthorized("active", future, true, now, false); ok {
 		t.Error("valid certificate + active status must NOT authorize")
 	}
 }
@@ -99,7 +99,7 @@ func TestStalenessIsNotEvidenceOfGone(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
 	// A node silent for a month, with a VALID certificate. Silence is not proof that a credential cannot work.
-	if ok, reason := RekeyAuthorized("active", now.Add(720*time.Hour), true, now); ok {
+	if ok, reason := RekeyAuthorized("active", now.Add(720*time.Hour), true, now, false); ok {
 		t.Fatalf("a long-silent node with a valid certificate must NOT authorize re-key: silence has many "+
 			"causes and none of them is proof the credential stopped working. Got %q", reason)
 	}
@@ -110,7 +110,7 @@ func TestStalenessIsNotEvidenceOfGone(t *testing.T) {
 func TestUnknownExpiryIsNotGone(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
-	ok, reason := RekeyAuthorized("active", time.Time{}, false, now)
+	ok, reason := RekeyAuthorized("active", time.Time{}, false, now, false)
 	if ok {
 		t.Fatalf("an unknown expiry must NOT authorize re-key — the control plane cannot establish the node is "+
 			"gone, and 'I cannot tell' is not 'it is fine'. Got %q", reason)
@@ -122,7 +122,7 @@ func TestUnknownExpiryIsNotGone(t *testing.T) {
 	// revoked node with unknown expiry IS authorized, on the grounds that "revocation is independent evidence".
 	// It is independent evidence that the node is GONE — and simultaneously evidence that a human wanted the
 	// key-holder locked out, which is exactly what proof of possession cannot adjudicate.
-	if ok, _ := RekeyAuthorized("revoked", time.Time{}, false, now); ok {
+	if ok, _ := RekeyAuthorized("revoked", time.Time{}, false, now, false); ok {
 		t.Error("revoked + unknown expiry must refuse: neither fact authorizes a return, and the revocation is a " +
 			"decision a cryptographic proof must not overturn")
 	}
@@ -137,8 +137,60 @@ func TestUnknownExpiryIsNotGone(t *testing.T) {
 func TestRekeyGateTakesNoForceParameter(t *testing.T) {
 	// If a bool were added for "force", this assignment stops compiling and the author has to come back to the
 	// paper. That is the point: the test's value is that it must be EDITED, not that it runs.
-	var gate func(string, time.Time, bool, time.Time) (bool, string) = RekeyAuthorized
+	//
+	// IT WAS EDITED ONCE, deliberately, and the justification belongs here rather than in a commit message.
+	// Review pass 1 #3 added `provesCurrentKey`. THAT IS NOT A FORCE FLAG, and the distinction is exact:
+	//
+	//   a FORCE flag is CALLER-ASSERTED INTENT — "do it anyway" — so the party most motivated to override the
+	//   guard is the party who sets it, which is why it is documentation rather than a guard;
+	//
+	//   `provesCurrentKey` is a CALLER-INDEPENDENT FACT, derived by the control plane from the request's own
+	//   cryptographic content compared against the CP's own record. A caller cannot set it by asking for it. They
+	//   can only make it true by actually holding the key the control plane already trusts — at which point they
+	//   can authenticate as the node anyway, so the gate is not being overridden, it is being told something it
+	//   would have concluded had it been able to see that far.
+	//
+	// The test that keeps that honest is TestRedeliveryCarveOutCannotUnRevoke: whatever this parameter means, it
+	// must never reach a revoked node.
+	var gate func(string, time.Time, bool, time.Time, bool) (bool, string) = RekeyAuthorized
 	if gate == nil {
 		t.Fatal("unreachable")
+	}
+}
+
+// TestRedeliveryCarveOutCannotUnRevoke — the carve-out's boundary, and the property that makes it safe to have.
+//
+// provesCurrentKey authorizes a REDELIVERY: the caller holds the key the control plane records now, so it can
+// already authenticate as this node, and re-issuing over the same key grants nothing new. It must NEVER reach a
+// revoked node — revocation is a human decision, and if a proof of possession could overturn it, D3 would be a
+// comment rather than a gate.
+func TestRedeliveryCarveOutCannotUnRevoke(t *testing.T) {
+	now := time.Now()
+	for _, notAfter := range []time.Time{now.Add(-48 * time.Hour), now.Add(48 * time.Hour)} {
+		if ok, reason := RekeyAuthorized("revoked", notAfter, true, now, true); ok {
+			t.Fatalf("a REVOKED node must be refused even when the caller proves the current key: %q", reason)
+		}
+	}
+}
+
+// TestRedeliveryAuthorizesTheLOSTRESPONSECase — the D3/D10 collision, as a unit.
+//
+// A lost re-key response leaves the control plane holding a FRESH certificate the agent never received. The node
+// therefore reads as live, and before this carve-out the gate refused the recovery D10 exists for — for a full
+// 48h certificate lifetime.
+func TestRedeliveryAuthorizesTheLOSTRESPONSECase(t *testing.T) {
+	now := time.Now()
+	fresh := now.Add(47 * time.Hour) // what a just-committed re-key leaves behind
+
+	if ok, _ := RekeyAuthorized("active", fresh, true, now, false); ok {
+		t.Fatal("without the proof, a live node must still be refused — that is the whole gate")
+	}
+	ok, reason := RekeyAuthorized("active", fresh, true, now, true)
+	if !ok {
+		t.Fatal("with the current key proven AND the CSR carrying that same key, redelivery must be authorized: " +
+			"the caller can already authenticate as this node, so re-issuing over the same key grants nothing new")
+	}
+	if !strings.Contains(reason, "REDELIVERY") {
+		t.Fatalf("the authorization reason must name redelivery, so an audit row says which rule allowed it; got %q", reason)
 	}
 }

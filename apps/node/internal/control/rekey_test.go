@@ -6,27 +6,60 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // rekeyServer is a control plane that RECORDS what the agent sent, so the reds can assert the request rather than
 // only the outcome.
+// The harness reuses client_test.go's testCA. Before review pass 1 #1 it returned the literal string "CERT" and
+// every test passed — which is precisely the defect: the agent verified nothing, so a fixture that certified
+// nothing was indistinguishable from a real control plane.
+
+// issueFor signs a leaf over pub, as the control plane would for a submitted CSR.
+func (ca *testCA) issueFor(t *testing.T, pub *rsa.PublicKey) []byte {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "gw"},
+		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(48 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, pub, ca.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
 type rekeyServer struct {
 	nonce     []byte
 	lastBody  map[string]string
 	challenge map[string]string // the identifier fields the challenge call carried
 	refuse    bool
+
+	ca *testCA // the CA the agent trusts, unless a test swaps it
+	// issueOver, when set, is the key the server certifies INSTEAD of the one the CSR carried — the substituted
+	// certificate case.
+	issueOver *rsa.PublicKey
+	// caInBody is the ca_pem the server ATTACHES to its response. Tests set it to a hostile CA to prove the agent
+	// ignores it. Empty = send the real one.
+	caInBody []byte
 }
 
 func (s *rekeyServer) start(t *testing.T) string {
 	t.Helper()
 	s.nonce = []byte("server-issued-nonce-0123456789ab")
+	if s.ca == nil {
+		s.ca = newTestCA(t)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/agent/rekey/challenge", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
@@ -42,7 +75,24 @@ func (s *rekeyServer) start(t *testing.T) string {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"cert_pem": "CERT", "ca_pem": "CA"})
+		// Sign the key the CSR actually carried, exactly as the control plane does — unless a test substitutes one.
+		blk, _ := pem.Decode([]byte(body["csr"]))
+		csr, cerr := x509.ParseCertificateRequest(blk.Bytes)
+		if cerr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		pub := csr.PublicKey.(*rsa.PublicKey)
+		if s.issueOver != nil {
+			pub = s.issueOver
+		}
+		caBody := s.caInBody
+		if len(caBody) == 0 {
+			caBody = s.ca.pem
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"cert_pem": string(s.ca.issueFor(t, pub)), "ca_pem": string(caBody),
+		})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -77,7 +127,7 @@ func TestRekeyIssuesOverThePENDINGKeyNotAFreshOne(t *testing.T) {
 	url := srv.start(t)
 	pending, old := testKey(t), testKey(t)
 
-	if _, _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, old, "0.1.0", "gw"); err != nil {
+	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, old, srv.ca.pem, "0.1.0", "gw"); err != nil {
 		t.Fatalf("rekey: %v", err)
 	}
 
@@ -107,7 +157,7 @@ func TestProofIsSignedByThePoPKeyAndBoundToTheCSR(t *testing.T) {
 	url := srv.start(t)
 	pending, old := testKey(t), testKey(t)
 
-	if _, _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, old, "0.1.0", "gw"); err != nil {
+	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, old, srv.ca.pem, "0.1.0", "gw"); err != nil {
 		t.Fatalf("rekey: %v", err)
 	}
 	sig, err := base64.StdEncoding.DecodeString(srv.lastBody["signature"])
@@ -143,7 +193,7 @@ func TestIdentifierIsCarriedOnBOTHRoundTRIPS(t *testing.T) {
 		srv := &rekeyServer{}
 		url := srv.start(t)
 		pending := testKey(t)
-		if _, _, err := Rekey(t.Context(), url, c.ident, pending, pending, "0.1.0", "gw"); err != nil {
+		if _, err := Rekey(t.Context(), url, c.ident, pending, pending, srv.ca.pem, "0.1.0", "gw"); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		if srv.challenge[c.field] != c.want {
@@ -172,7 +222,7 @@ func TestRefusalIsNotThrottled(t *testing.T) {
 	srv := &rekeyServer{refuse: true}
 	url := srv.start(t)
 	pending := testKey(t)
-	_, _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, "0.1.0", "gw")
+	_, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, srv.ca.pem, "0.1.0", "gw")
 	if !errors.Is(err, ErrRekeyRefused) {
 		t.Fatalf("a 403 must be ErrRekeyRefused, got %v", err)
 	}
@@ -182,3 +232,91 @@ func TestRefusalIsNotThrottled(t *testing.T) {
 }
 
 var _ = rand.Reader
+
+// TestHostileResponderCannotReplaceTheTrustAnchor — review pass 1 #1 (CRITICAL), R1.
+//
+// THE ATTACK IT CLOSES. Re-key runs over TUNNEX_API_URL, which defaults to plain HTTP, so the responder is
+// unauthenticated and anyone on the path can be it. The agent used to write the response's ca_pem into ca.pem —
+// the ONLY RootCAs its mTLS control channel has — so one answered request bought permanent control-plane
+// impersonation: every subsequent peer set, policy artifact, route and DNS forward would come from the attacker.
+//
+// The fix is refusal, not detection: the anchor is an INPUT, the issued certificate must chain to it, and no CA
+// is returned to be written. An attacker who answers can now only make recovery fail — which they could already
+// do by dropping the request.
+func TestHostileResponderCannotReplaceTheTrustAnchor(t *testing.T) {
+	realCA := newTestCA(t)
+	attackerCA := newTestCA(t)
+
+	// The server is the attacker: it signs with ITS OWN CA and attaches its own ca_pem, exactly as a real control
+	// plane would attach the real one.
+	srv := &rekeyServer{ca: attackerCA}
+	url := srv.start(t)
+	pending := testKey(t)
+
+	cert, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, realCA.pem, "0.1.0", "gw")
+	if !errors.Is(err, ErrIssuedCertUntrusted) {
+		t.Fatalf("a certificate signed by a CA this agent does not trust must be REFUSED, got err=%v", err)
+	}
+	if cert != nil {
+		t.Fatal("nothing may be returned for the caller to write — a refusal that still hands back material is " +
+			"one careless caller away from being no refusal at all")
+	}
+	if errors.Is(err, ErrRekeyRefused) {
+		t.Fatal("an untrusted response must NOT read as a control-plane refusal: the CP never answered, and " +
+			"printing its remedy would talk an operator into discarding a working identity")
+	}
+}
+
+// TestResponseCAIsIGNOREDEvenWhenTheCertIsGenuine — the narrower half, and the one a partial fix would miss.
+//
+// A responder that somehow holds a genuine certificate could still attach a hostile ca_pem. The agent must not
+// write it, must not return it, and must not treat its presence as meaningful at all.
+func TestResponseCAIsIGNOREDEvenWhenTheCertIsGenuine(t *testing.T) {
+	realCA := newTestCA(t)
+	hostile := newTestCA(t)
+	srv := &rekeyServer{ca: realCA, caInBody: hostile.pem}
+	url := srv.start(t)
+	pending := testKey(t)
+
+	cert, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, realCA.pem, "0.1.0", "gw")
+	if err != nil {
+		t.Fatalf("a genuine certificate must still be accepted: %v", err)
+	}
+	if cert == nil {
+		t.Fatal("the issued certificate must be returned")
+	}
+	// The signature of the fix: Rekey has NO channel through which a CA can reach the caller.
+	if got := srv.lastBody["ca_pem"]; got != "" {
+		t.Log("(the server did attach a ca_pem; the point is that the agent has nowhere to put it)")
+	}
+}
+
+// TestIssuedCertMustCertifyTHISAgentsKey — the second property, independent of provenance.
+//
+// A certificate that chains correctly but certifies a DIFFERENT key would be promoted into key.pem's place,
+// leaving a cert/key pair that does not match — an identity this agent cannot use and, at boot, cannot explain.
+func TestIssuedCertMustCertifyTHISAgentsKey(t *testing.T) {
+	ca := newTestCA(t)
+	someoneElse := testKey(t)
+	otherPub := pubOf(t, someoneElse)
+
+	srv := &rekeyServer{ca: ca, issueOver: otherPub}
+	url := srv.start(t)
+	pending := testKey(t)
+
+	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, ca.pem, "0.1.0", "gw"); !errors.Is(err, ErrIssuedCertUntrusted) {
+		t.Fatalf("a certificate over a key this agent did not ask for must be refused, got %v", err)
+	}
+}
+
+// TestNoAnchorOnDiskIsRefusedNotAssumed — "I cannot check" must never resolve to "it is fine".
+func TestNoAnchorOnDiskIsRefusedNotAssumed(t *testing.T) {
+	srv := &rekeyServer{}
+	url := srv.start(t)
+	pending := testKey(t)
+
+	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, nil, "0.1.0", "gw"); err == nil {
+		t.Fatal("with no trusted CA on disk there is nothing to verify against, and re-key must refuse rather " +
+			"than accept whatever answers")
+	}
+}
