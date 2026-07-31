@@ -36,6 +36,37 @@ var ErrRekeyRefused = errors.New("control plane refused the re-key")
 // purely a rate limit. Throttled means retry SOONER and say so.
 var ErrRekeyThrottled = errors.New("control plane throttled the re-key attempt")
 
+// ErrRekeyTransient is a fault that says NOTHING about whether this gateway can recover: a connection refused, a
+// DNS failure, a 5xx, a body that would not decode.
+//
+// It exists because conflating it with a refusal is destructive, not merely imprecise. A refusal makes the agent
+// print "mint a join token" — and acting on that during a control-plane blip DISCARDS a working identity, creating
+// a new node whose site binding is gone and whose devices need re-issuing. The remedy for a refusal is the worst
+// possible response to an outage.
+var ErrRekeyTransient = errors.New("the re-key attempt did not complete")
+
+// throttled carries the server's Retry-After so the caller can honour it instead of guessing. Before this, the
+// value was parsed, formatted into an error STRING, and thrown away — the agent then retried on its own floor
+// while the log printed the server's number, so the two disagreed in writing.
+type throttled struct{ after time.Duration }
+
+func (t throttled) Error() string {
+	if t.after > 0 {
+		return ErrRekeyThrottled.Error() + " (retry after " + t.after.String() + ")"
+	}
+	return ErrRekeyThrottled.Error()
+}
+func (t throttled) Is(target error) bool { return target == ErrRekeyThrottled }
+
+// RetryAfterOf returns the server-requested delay carried by a throttle error, or 0 when there is none.
+func RetryAfterOf(err error) time.Duration {
+	var t throttled
+	if errors.As(err, &t) {
+		return t.after
+	}
+	return 0
+}
+
 // retryAfter reads the server's Retry-After when it is a plain seconds value, which is what the throttle sends.
 // Returns 0 when absent or unparseable — the caller then picks its own short delay rather than guessing long.
 func retryAfter(resp *http.Response) time.Duration {
@@ -201,21 +232,22 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
-		return nil, err
+		// A transport fault is NOT a refusal: nothing answered, so nothing was decided.
+		return nil, fmt.Errorf("%w: %v", ErrRekeyTransient, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
+		return nil, throttled{after: retryAfter(resp)}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, ErrRekeyRefused
+	if err := classify(resp.StatusCode); err != nil {
+		return nil, err
 	}
 	var out struct {
 		CertPEM string `json:"cert_pem"`
 		CAPEM   string `json:"ca_pem"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: response body did not decode: %v", ErrRekeyTransient, err)
 	}
 	// VERIFY BEFORE ANYTHING TOUCHES DISK. Two properties, and both must hold:
 	//
@@ -274,20 +306,21 @@ func rekeyChallenge(ctx context.Context, apiURL string, ident Identifier) ([]byt
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
-		return nil, err
+		// A transport fault is NOT a refusal: nothing answered, so nothing was decided.
+		return nil, fmt.Errorf("%w: %v", ErrRekeyTransient, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("%w (retry after %s)", ErrRekeyThrottled, retryAfter(resp))
+		return nil, throttled{after: retryAfter(resp)}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, ErrRekeyRefused
+	if err := classify(resp.StatusCode); err != nil {
+		return nil, err
 	}
 	var out struct {
 		Nonce string `json:"nonce"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: nonce response did not decode: %v", ErrRekeyTransient, err)
 	}
 	return base64.StdEncoding.DecodeString(out.Nonce)
 }
@@ -309,4 +342,21 @@ func parseRSAKey(keyPEM []byte) (*rsa.PrivateKey, error) {
 		return nil, errors.New("not an RSA key")
 	}
 	return k, nil
+}
+
+// classify turns a status code into the ONE distinction the agent may act on.
+//
+// The refusal BODY is uniform by design and says nothing; the STATUS is the only legitimate signal, and treating
+// every non-200 as a permanent refusal threw that away. 403 is the control plane deciding. Anything else is the
+// control plane not answering — a proxy, a load balancer, a restart, a captive portal — and must never produce the
+// "mint a join token" remedy, because acting on it during an outage destroys a working identity.
+func classify(status int) error {
+	switch {
+	case status == http.StatusOK:
+		return nil
+	case status == http.StatusForbidden:
+		return ErrRekeyRefused
+	default:
+		return fmt.Errorf("%w: unexpected status %d", ErrRekeyTransient, status)
+	}
 }

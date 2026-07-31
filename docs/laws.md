@@ -480,3 +480,36 @@ land on the dormant-machinery law.
 **The check, and it is cheap:** grep the callers of the new function AND the callers of whatever produces the state
 it consumes, then ask whether both sets of preconditions can be true **at the same time**. Cheapest at design time,
 still cheap while drafting a walk leg, expensive after it ships as code that never runs.
+
+---
+
+## ABSENCE MUST BE THE CLOSED STATE (founder-ratified 2026-07-31, S13.1 D3)
+
+**A column whose ABSENT value means PERMIT is a fail-open waiting for the first writer that does not know about
+it. Choose the encoding so absence is the CLOSED state.**
+
+This is a by-construction rule, not a check. A check asks every future writer to remember; an encoding cannot be
+forgotten, because the database supplies the safe value to anyone who says nothing.
+
+**Three instances, all inside one ruling, which is why it is a law and not a note:**
+
+1. **Existing rows.** `nodes.cert_delivered_at` shipped as a nullable timestamp where NULL meant *undelivered* —
+   the state that OPENS the re-key redelivery carve-out. A new nullable column reads NULL for the entire fleet, so
+   deploying it would have opened the carve-out for every node in the field on day one: **a fail-open introduced
+   by the fix for a fail-open.** Caught before merge and closed by a backfill (0063).
+2. **New rows.** The backfill fixed the rows that existed and did nothing for the ones created afterwards.
+   `CreateNode` names six columns and not the marker, so **every freshly enrolled node** read undelivered while
+   holding a valid certificate — on every replica, not only an older one mid-roll. The backfill answered
+   "what about the fleet?" and nobody asked "what about tomorrow's fleet?" (0064).
+3. **The encoding that looks right and is not.** `NOT NULL DEFAULT now()` was the obvious repair and cannot work:
+   re-key must still express *never delivered*, and NOT NULL forbids the value that meant it. The shape that
+   satisfies both halves is a **boolean `NOT NULL DEFAULT true`** — absence lands CLOSED, and only the one
+   statement that legitimately opens the state says so explicitly.
+
+**The test that distinguishes a real application of this law from a restatement:** write the INSERT that an
+unaware writer produces — naming exactly the columns today's code names, and nothing else — and assert the
+resulting row is in the refusing state. If that test cannot fail, the encoding is not doing the work.
+
+**Related:** this is the schema-level sibling of *a determination of "gone" must prove the credential cannot work*
+and of the fail-closed direction in KILL-SWITCH-NO-UNBOUNDED-I/O. Same instinct, moved from code into DDL, where
+it cannot be refactored away.

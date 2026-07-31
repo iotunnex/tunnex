@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -49,6 +50,10 @@ type rekeyServer struct {
 	// issueOver, when set, is the key the server certifies INSTEAD of the one the CSR carried — the substituted
 	// certificate case.
 	issueOver *rsa.PublicKey
+	// failStatus, when non-zero, is returned by the SUBMIT route instead of a certificate.
+	failStatus int
+	// throttleFor, when non-zero, answers 429 with that many seconds of Retry-After.
+	throttleFor int
 	// caInBody is the ca_pem the server ATTACHES to its response. Tests set it to a hostile CA to prove the agent
 	// ignores it. Empty = send the real one.
 	caInBody []byte
@@ -71,6 +76,15 @@ func (s *rekeyServer) start(t *testing.T) string {
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.lastBody = body
+		if s.throttleFor > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(s.throttleFor))
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		if s.failStatus != 0 {
+			w.WriteHeader(s.failStatus)
+			return
+		}
 		if s.refuse {
 			w.WriteHeader(http.StatusForbidden)
 			return
@@ -318,5 +332,58 @@ func TestNoAnchorOnDiskIsRefusedNotAssumed(t *testing.T) {
 	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, nil, "0.1.0", "gw"); err == nil {
 		t.Fatal("with no trusted CA on disk there is nothing to verify against, and re-key must refuse rather " +
 			"than accept whatever answers")
+	}
+}
+
+// TestTransportFaultsAreNOTRefusals — review pass 1 #10 and pass 3 claims 9/10/14.
+//
+// The refusal BODY is uniform by design and says nothing; the STATUS is the only signal the agent may act on. Every
+// non-200 used to become ErrRekeyRefused, so a control-plane restart, a proxy 502 or a dropped connection all
+// printed "mint a join token" — and acting on that during an outage DISCARDS a working identity, creating a new
+// node whose site binding is gone and whose devices need re-issuing. The remedy for a refusal is the worst possible
+// response to a blip.
+func TestTransportFaultsAreNOTRefusals(t *testing.T) {
+	for _, status := range []int{500, 502, 503, 404, 400} {
+		srv := &rekeyServer{failStatus: status}
+		url := srv.start(t)
+		pending := testKey(t)
+		_, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, srv.ca.pem, "0.1.0", "gw")
+		if errors.Is(err, ErrRekeyRefused) {
+			t.Fatalf("status %d must NOT read as a control-plane refusal — nothing decided anything", status)
+		}
+		if !errors.Is(err, ErrRekeyTransient) {
+			t.Fatalf("status %d must be transient, got %v", status, err)
+		}
+	}
+	// 403 IS the control plane deciding, and must stay distinguishable.
+	srv := &rekeyServer{refuse: true}
+	url := srv.start(t)
+	pending := testKey(t)
+	if _, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, srv.ca.pem, "0.1.0", "gw"); !errors.Is(err, ErrRekeyRefused) {
+		t.Fatalf("403 must remain a refusal, got %v", err)
+	}
+	// An unreachable endpoint is transient too — nothing answered at all.
+	if _, err := Rekey(t.Context(), "http://127.0.0.1:1", Identifier{CertSerial: "S1"}, pending, pending, srv.ca.pem, "0.1.0", "gw"); !errors.Is(err, ErrRekeyTransient) {
+		t.Fatalf("an unreachable control plane must be transient, got %v", err)
+	}
+}
+
+// TestRetryAfterIsCARRIEDNotJustPrinted — pass 3 claim 10.
+//
+// Retry-After was parsed, formatted into the error STRING, and discarded. The agent then retried on its own floor
+// while the log printed the server's number, so the two disagreed in writing and the operator had no way to know
+// which one the code used.
+func TestRetryAfterIsCARRIEDNotJustPrinted(t *testing.T) {
+	srv := &rekeyServer{throttleFor: 60}
+	url := srv.start(t)
+	pending := testKey(t)
+
+	_, err := Rekey(t.Context(), url, Identifier{CertSerial: "S1"}, pending, pending, srv.ca.pem, "0.1.0", "gw")
+	if !errors.Is(err, ErrRekeyThrottled) {
+		t.Fatalf("429 must be a throttle, got %v", err)
+	}
+	if got := RetryAfterOf(err); got != 60*time.Second {
+		t.Fatalf("the server's Retry-After must be RECOVERABLE from the error, not only rendered into its text; "+
+			"got %v", got)
 	}
 }

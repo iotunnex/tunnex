@@ -176,3 +176,14 @@ func parseLeaf(certPEM []byte) (*x509.Certificate, error) {
 	}
 	return x509.ParseCertificate(blk.Bytes)
 }
+
+// NotAfter returns the stored certificate's expiry, or the zero time when it cannot be read. Exported so the
+// renewal schedule can anchor to the CERTIFICATE rather than to process start — a ticker from boot lets a restart
+// past half-life expire while running (review pass 3 claims 5/12).
+func NotAfter(certPEM []byte) time.Time {
+	c, err := parseLeaf(certPEM)
+	if err != nil {
+		return time.Time{}
+	}
+	return c.NotAfter
+}
