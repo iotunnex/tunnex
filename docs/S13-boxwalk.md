@@ -4,6 +4,29 @@ Status: **RUNSHEET** (plan). Executes in a walk session, AFTER the epic-end revi
 DURING the session under `walk-artifacts/S13/`; any scratch key material (device configs, join tokens, agent state
 dirs) is **gitignored at creation** — device configs contain private keys.
 
+## REBASED ON THE FOLDED CODE (2026-07-31) — leg-by-leg verdict
+
+This runsheet was written before review pass 1 and before four fold batches (~20 fixes, migrations 0062–0064).
+Every leg was re-read against the code as it now stands.
+
+| leg | verdict | why |
+|---|---|---|
+| **0** provenance | **NEEDS REWRITE** | schema version is now **64**, not 61, and three new columns must be censused |
+| **1** PoP self-recovery | **STILL VALID**, extended | expiry still authorizes; adds an assertion that `cert_delivered` goes FALSE on re-key |
+| **2** keyless → token | **NEEDS REWRITE** | the agent now hands over to the token **by itself** after three refusals — the leg's "mint a token and restart" no longer describes what happens |
+| **3a** revoked → refused | **STILL VALID** | the revoked check runs first and unconditionally, through both predicate changes |
+| **3b** refusal surface (local) | **NEEDS REWRITE** | adds the NUL-serial case (#12: must be 403, not 500) and the removed `maxLength` (#18: no 400) |
+| **3c** live node refused | **NEW** | the delivery marker created walkable behaviour that did not exist: a caller holding a live node's own key must be REFUSED |
+| **4** operator restore | **NEEDS REWRITE** | Batch C changed four things in the path (#7 node-status guard, #8 prior status, #9 OVPN certs, #14 pool membership) |
+| **5** deliberate stays dead | **STILL VALID**, extended | now also: the deliberately-revoked OVPN **certificate** must stay revoked |
+| **6** re-addressed says so | **NEEDS REWRITE** | F3 is FIXED, so the leg must test the fix — see its own falsification note |
+| **7** lost-response (D10) | **NEEDS REWRITE** | recovery now happens **in-process** (#6), and the CP-side predicate changed twice |
+| **8** save-failure retry | **NEW** | claims 7/15: a save failure after the CP committed must recover the SAME node id, not enrol a new one |
+
+**Nothing came out VACUOUS.** Every leg still tests something real; four needed their expectations moved.
+
+---
+
 ## What this walk must prove
 
 EPIC 13 exists because of one observed event: **an AWS gateway went offline past its 48-hour certificate lifetime and
@@ -139,7 +162,14 @@ Then the surfaces this epic added, each confirmed present rather than assumed:
 # [azure-cp] schema version and the two columns the recovery path depends on
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c "SELECT version, dirty FROM schema_migrations;"
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c "\d nodes" | grep -E "cert_not_after|cert_public_key|cert_key_fingerprint"
-sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c "\d devices" | grep -E "provisioned_ip|revoked_cause"
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c "\d devices" | grep -E "provisioned_ip|revoked_cause|revoked_prev_status|provisioned_node_id"
+# The delivery marker and its fail-safe default (0063/0064) — the gate's input, and the column whose ABSENT value
+# must mean CLOSED. A default of anything but `true` is a fleet-wide fail-open.
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT column_default, is_nullable FROM information_schema.columns
+   WHERE table_name='nodes' AND column_name='cert_delivered';"          # -> true / NO
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT cert_delivered, count(*) FROM nodes WHERE revoked_at IS NULL GROUP BY 1;"   # -> overwhelmingly t
 
 # The re-key routes exist and are UNAUTHENTICATED — a 403 refusal, never a 401 or a 404
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $CP/api/v1/agent/rekey/challenge \
@@ -185,6 +215,11 @@ journalctl -u tunnex-node -f | grep -E 'agent_rekeyed|agent_rekey_refused|agent_
   5. an audit row `node.rekeyed` carrying `old_cert_serial`, `new_cert_serial`, **both key fingerprints**, and
      `authorized_by` — a *succession*, so "this gateway was rebuilt on the 4th" is answerable later
   6. **zero operator commands** beyond starting the agent
+  7. **`cert_delivered` is FALSE immediately after the re-key and TRUE again after the agent's first authenticated
+     request.** This is the gate's whole input (D3): re-key clears it in the same statement that replaces the
+     serial, and `AuthenticateCert` sets it on first use. Sample it twice — right after `agent_rekeyed`, and after
+     the first `/agent/desired-state` — because a marker that never clears makes lost-response recovery
+     impossible, and one that never sets leaves the carve-out open on a live node
 - **EVIDENCE:** the before/after node rows side by side, the audit row's metadata, the agent log lines.
 - **The audit fingerprint is a 12-hex PREFIX of the full identifier** (D10 redefinition) — confirm
   `old_key_fingerprint` matches the `fp` column captured before the leg. If it does not, the audit trail is naming
@@ -222,6 +257,18 @@ Start gateway B. It will attempt PoP, be refused, and back off.
     and exiting forfeits the reconciliation that would have fixed it.
   - `fp_gone = t` — the fingerprint is **generated from the key**, so removing one removes the other. A non-NULL
     fingerprint over a NULL key would match every other keyless node.
+> **REWRITTEN (fold Batch B, #5).** The agent no longer waits to be restarted. If `TUNNEX_JOIN_TOKEN` is already
+> in its environment, **three consecutive refusals hand over automatically** and it enrols itself. So run this leg
+> BOTH ways, and the first way is the one that never worked before:
+>
+> **2a — token already present.** Start B with the token set. PASS: three `agent_rekey_refused` lines, then
+> `agent_rekey_exhausted`, then `agent_falling_back_to_join_token`, with **no operator action between them**. This
+> is the finding that made the documented remedy reachable; before the fold the agent looped forever with the
+> token unused.
+>
+> **2b — no token.** Start B with no token. PASS: it keeps retrying and **does not exit** — with nothing to hand
+> over to, retrying beats idling. Confirm the backoff escalates toward the ceiling and the process stays up.
+
 - **Then the fallback, per the remedy the agent printed:** mint a join token in the UI, set it, restart.
   - **PASS:** the gateway enrols. **It is a NEW node** — and the agent said so before it happened
     (`agent_falling_back_to_join_token`: *"this creates a NEW node: its site binding must be re-applied and devices
@@ -288,11 +335,62 @@ for id in '{"cert_serial":"nobody-has-this"}' \
 done
 ```
 
+Add the two cases the fold closed:
+
+```bash
+# [local] #12 — a NUL in the serial reached a Postgres text bind and returned 500. Must now be the uniform 403.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/v1/agent/rekey/challenge \
+  -H 'content-type: application/json' --data-binary $'{"cert_serial":"abc\u0000def"}'    # -> 403, never 500
+
+# [local] #18 — maxLength is gone from both identifier fields, so an over-long value is refused by the HANDLER
+# (403) rather than by the schema validator (400). Any 400 here is the oracle the paper says it denies.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/v1/agent/rekey/challenge \
+  -H 'content-type: application/json' -d "{\"cert_serial\":\"$(python3 -c 'print("a"*5000)')\"}"   # -> 403
+```
+
 - **PASS:** a **nonce** for the two well-formed single-identifier cases (anti-enumeration: the challenge never
   confirms existence), and the **identical 403 refusal** for both-identifiers, malformed, and neither — never a 400,
   because a schema violation answering differently from an unknown identifier tells a prober how far they got.
 - Then the same comparison on `/agent/rekey` with a garbage signature: unknown serial, unknown fingerprint, live
   node and wrong key must be **the same response**.
+
+---
+
+### 3c — A LIVE NODE, ITS OWN KEY, REFUSED (NEW — the delivery marker made this walkable)
+
+**This behaviour did not exist when the runsheet was written, and the first version of the fix got it WRONG.** The
+D3/D10 collision was first closed with a carve-out keyed on *the caller proving the currently-recorded key* — which
+a LIVE gateway's key-holder also satisfies. Because re-key replaces `cert_serial`, and the agent channel
+authenticates against exactly that column, exercising it **displaced the running gateway**. It needed only the
+private key, never the certificate.
+
+The predicate is now **delivery**: a running gateway's certificate has authenticated, so it is marked delivered,
+so it cannot be redelivered. The live case is unreachable rather than refused — and this leg proves that on a wire.
+
+**Subject: gateway A after Leg 1**, recovered and running normally.
+
+```bash
+# [gateway A] the material an attacker with filesystem access would have — the KEY ALONE, no certificate.
+sudo cat /var/lib/tunnex-node/key.pem > /tmp/stolen.key      # gitignore scratch key material AT CREATION
+# compute the fingerprint the way the agent does, and drive the endpoint directly from ANOTHER host:
+openssl rsa -in /tmp/stolen.key -pubout -outform DER 2>/dev/null | openssl dgst -sha256 -hex
+```
+
+```bash
+# [azure-cp] the row that must be UNTOUCHED, before and after
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name, cert_serial, cert_delivered FROM nodes WHERE name='<A>';"
+```
+
+Then submit a full re-key from a third host using the stolen key: challenge by `key_fingerprint`, sign
+`(nonce ‖ CSR DER)` with it, CSR over the same key.
+
+- **PASS:** refused with the uniform 403, `cert_serial` **unchanged**, and gateway A's tunnel never drops.
+- **THE FAILING OBSERVATION, NAMED:** if the serial moves, gateway A takes 401 `unknown_agent` on its next
+  request and the walk has reproduced the takeover this fix exists to remove.
+- **EVIDENCE:** the before/after node row, gateway A's agent log across the window, and the CP log line naming
+  which rule refused.
+- **Delete `/tmp/stolen.key` when the leg ends**, and never commit it.
 
 ---
 
@@ -327,11 +425,15 @@ from whatever happens.
 |---|---|---|
 | **F1** | the restored device appears in `psql` as `active` on B′, but **`wg show` on B′ does not list its peer** | the restore is a database write plus a push. If the push does not place the peer, the device is "restored" into a config the data plane never learned |
 | **F2** | the device is active and peered, but **cannot pass traffic with the config it already holds** | its existing config embeds the **old gateway's endpoint and public key**. Re-homing changes `node_id` in the row; it cannot change a file on the user's laptop |
-| **F3** | **F2 happens and NOTHING tells the user.** `needs_reexport` stays absent for a device that kept its address | Slice 6 derives staleness from the **address** and the baked **ranges**. It does not compare the **gateway**. A re-homed device that reclaimed its address is, on that logic, perfectly fresh — and unusable |
+| **F3** | ~~F2 happens and nothing tells the user~~ — **CONFIRMED AT THE DESK AND SINCE FIXED**; `provisioned_node_id` now carries the gateway and Leg 6 tests the fix | the prediction recorded before the walk was that F3 would fire. It did, from code, at `2c6a314`. The fix is folded; the leg that tests it is Leg 6, with a NEW falsifying condition |
 
 **My prediction, recorded before the walk so it cannot be adjusted after: F3 WILL FIRE.** I can find no code that
 compares the issued config's gateway against the device's current node, and the re-home path is new. If the walk
 refutes that prediction, the prediction was wrong and the leg passes — which is the point of writing it down.
+
+> **OUTCOME: the prediction held.** Confirmed by reading the code at `2c6a314` (annotation below), fixed in fold
+> Batch C. **F3 is therefore no longer a falsifying observation for this leg** — it has been answered. What
+> remains open here is F1 and F2, which the desk could not settle.
 
 **F1 and F2 are genuinely open.** I have not traced the push far enough to predict them, and a walk is what
 settles that.
@@ -367,6 +469,22 @@ settles that.
 
 If all three hold clean, the leg passes and Wall 6 is closed on the wire. If F3 fires alone, the mechanism works
 and the *surface* is incomplete — a finding, held, not fixed here.
+
+### REBASED ON BATCH C — four behaviours in this path changed under the leg
+
+| fold | what to observe HERE |
+|---|---|
+| **#7** the target node is read `FOR UPDATE` and must be active | restoring onto a **revoked** target is refused. Try it deliberately: name gateway C (the revoked one) as the target and require a refusal, then confirm no device row moved |
+| **#8** devices return to the status the cascade FOUND | stage one device as `pending` (never approved) before revoking C. It must come back **pending**, not active. With the org's approval gate ON, this is the difference between a restore and a silent approval |
+| **#9** OpenVPN certificates are revived with the device | if any restored device is OVPN, its `ovpn_client_certs.revoked_at` must be NULL afterwards **and the org CRL must have been rebuilt** — otherwise the device is active and the gateway still refuses its credential |
+| **#14** an address outside the org's CURRENT pool is not reclaimed | only observable if the pool was shrunk between revoke and restore. Optional on the rig; unit-proven |
+
+```bash
+# [azure-cp] #8 — stage the never-approved device BEFORE revoking C
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name, status, revoked_prev_status FROM devices WHERE node_id='<C-id>' ORDER BY name;"
+# after the restore, the same query: `was-pending` must read status='pending', revoked_prev_status=NULL
+```
 
 ### Forcing the re-address case — PINNED: deliberate pre-allocation
 
@@ -426,6 +544,17 @@ needs a `curl` because the affordance is missing or broken, that is a finding.
 Rides Leg 4. The third device (prerequisite 4) was revoked **by an admin** before the gateway was, so it carries
 `revoked_cause='deliberate'`.
 
+**EXTENDED BY #9.** Revocation is a three-part act, so the discrimination has to hold in all three places. If the
+deliberately-revoked device is an OpenVPN one, its **certificate** must also stay revoked and stay on the CRL:
+
+```bash
+# [azure-cp] the deliberate device's certificate must survive the restore, revoked
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT d.name, d.status, d.revoked_cause, c.revoked_at, c.revoked_cause
+   FROM devices d LEFT JOIN ovpn_client_certs c ON c.device_id = d.id
+   WHERE d.node_id='<C-id>' ORDER BY d.name;"
+```
+
 - **PASS:** after any restore, that device is **still revoked**, still `deliberate`, and **no** `device.restored`
   audit row names it.
 - **WHY IT MATTERS MORE THAN IT LOOKS:** a gateway rebuild that quietly revives a laptop an admin revoked is a
@@ -434,51 +563,93 @@ Rides Leg 4. The third device (prerequisite 4) was revoked **by an admin** befor
 
 ---
 
-## Leg 6 — THE RE-ADDRESSED DEVICE SAYS SO
+## Leg 6 — THE STALENESS SURFACE, walked for SENSITIVITY **and** SPECIFICITY
 
-A device restored onto a **different** address holds a config that embeds the old one and **will not connect**. Before
-Slice 6 the audit log recorded it and the device surface could not — it rendered exactly as clean as one that never
-moved, and its owner would have discovered the problem by failing to connect.
+**REWRITTEN: F3 was confirmed and fixed, so this leg tests the fix — and it carries the same constraint Leg 4 got.**
 
-- **PASS:**
-  - the re-addressed device shows **`config out of date`** in Devices, and its tooltip names *either* cause without
-    prescribing an action its provisioning mode cannot take (the census correction: *a label can lie through the
-    remedy it prescribes*);
-  - the device that kept its address shows **nothing**;
-  - a **managed (desktop-client) device** whose address changed shows it too — that half was the gap, and a rig with
-    only static exports proves the wrong half.
-- **NEGATIVE HALF, and it must be checked:** a device with **no** snapshot (any row predating migration 0060) shows
-  **nothing**. Unknown is not stale; a permanent false positive across a healthy fleet trains operators to ignore the
-  surface, which is worse than the surface not existing.
+The original leg asked whether the surface stays silent when it should speak. It does; that was confirmed at the
+desk at `2c6a314` and fixed in Batch C (`provisioned_node_id`, compared for static exports). **A rewrite describing
+that fix's happy path would convert a falsification into a confirmation**, which is exactly what this walk must
+not do.
+
+### The NEW falsifying condition, and it is a real one
+
+The claim has moved. It is no longer *"does the surface notice a re-home"* — that is now code with a red. It is:
+
+> **The staleness surface is TRUSTWORTHY: it fires when a device's issued config is dead, and stays silent
+> otherwise.**
+
+A warning surface has two failure modes and only one of them has ever been tested. Nothing on any wire has
+verified the second.
+
+| # | falsifying observation | why it is live, not a formality |
+|---|---|---|
+| **G1 — insensitive** | a re-homed STATIC export shows nothing | the fix's own claim; a red covers it, so this is the weaker half |
+| **G2 — UNSPECIFIC** | a device that was **never re-homed** shows `config out of date`, or a re-homed one keeps showing it **after being re-issued** | **the snapshot is written at issuance by one code path and compared by another.** If `provisioned_node_id` is written wrong, or not written at all for some creation path, every static device in the fleet shows a permanent warning — and a permanent false positive is WORSE than the gap it replaced, because it trains operators to ignore the surface. The unknown-is-not-stale rule exists for exactly this, and nothing has checked it on real data |
+| **G3 — the known residual, observed rather than assumed** | a **managed** device re-homed onto a NON-hub-set gateway shows nothing and cannot connect | registered, not fixed. The walk must RECORD which of the three rows each device fell in, because a rig whose replacement gateway happens to be a hub-set member shows managed devices self-healing and could be misread as "no residual" |
+
+**I can write a failing condition for this leg, and G2 is it.** The specificity half has no wire evidence at all.
+
+```bash
+# [azure-cp] SPECIFICITY — the whole fleet, before anything is re-homed. Every static device must read false.
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name, provisioning_mode, provisioned_node_id IS NOT NULL AS snap, node_id = provisioned_node_id AS same
+   FROM devices WHERE status='active' ORDER BY name;"
+```
+
+- **PASS — sensitivity:** the re-homed static device shows **`config out of date`**, and re-importing its new
+  config clears the badge AND restores connectivity.
+- **PASS — specificity:** every device that was **not** re-homed shows **nothing**, including the one that kept its
+  address, and including every device created before the column existed (`snap = f` must render silent).
+- **RECORD for G3:** for each restored device, which row of the table above it fell in.
+- **NEGATIVE HALF, unchanged and still required:** a device with no snapshot at all shows nothing. Unknown is not
+  stale.
 
 ---
 
-## Leg 7 — LOST-RESPONSE RECOVERY (D10, this session's build, wire-unproven)
+## Leg 7 — LOST-RESPONSE RECOVERY (D10) — REWRITTEN: it now recovers IN-PROCESS
 
-Beyond the six, and local: the newest code in the epic, proven only against a database.
+**Local.** The scenario is unchanged: the control plane commits a re-key and the answer is lost, so it holds a
+serial the agent never received. **Two things about it changed under this runsheet.**
 
-**The scenario:** the control plane commits a re-key and the answer is lost. It now holds a serial the agent never
-received; the agent's stored serial names a row that no longer exists. Before D10 that was permanent — one dropped
-packet costing a gateway its identity.
-
-```bash
-# [local] simulate the lost answer: drop the RESPONSE, not the request.
-# e.g. run the agent against a proxy that forwards POST /api/v1/agent/rekey and then kills the connection
-# before the body returns, or SIGKILL the agent between the CP's commit log line and its own save.
-```
+1. **The agent recovers without being restarted** (#6). `pendingWasOnDisk` used to be sampled once before the
+   retry loop, so the process that suffered the lost response never tried the fingerprint identity that its own
+   pending key exists to provide. It is now rebuilt every pass.
+2. **The control-plane predicate changed twice.** A lost commit advances `cert_not_after`, so the node reads live
+   and the gate refused the very recovery D10 exists for. It is now keyed on **delivery**: that certificate was
+   never used, so redelivery is authorized — and a *delivered* certificate is not, which is Leg 3c.
 
 - **PASS:**
-  - the CP logs `node_rekeyed` (it committed) while the agent logs no `agent_rekeyed` (it never saw the answer);
-  - `rekey-pending-key.pem` **exists in the agent's state dir** — written *before* the request went out, which is
-    what makes the next step possible at all;
-  - on retry the agent tries the **fingerprint identity first**, logs `agent_rekey_identity_refused` at most for the
-    serial, and recovers **the same node id**;
-  - the audit row records `identified_by=key_fingerprint`;
-  - after promotion the **pending file is gone** — a superseded pending key would make the next recovery spend an
-    attempt on an identifier the control plane does not hold.
-- **CONVERGENCE, the property to look for:** a second lost response must not walk the identity forward. The pending
-  key is **reused**, so repeated failures converge on one identity instead of leaving the agent proving possession of
-  something the control plane never saw.
+  - the CP logs `node_rekeyed` while the agent logs no `agent_rekeyed` (it never saw the answer);
+  - `rekey-pending-key.pem` exists in the state dir — written **before** the request went out;
+  - **the same process recovers**, with no restart, logging `agent_rekeyed identified_by=key_fingerprint ...`;
+  - the node id is unchanged and `cert_delivered` reads FALSE between the commit and the agent's first
+    authenticated request;
+  - after promotion the pending file is **gone**.
+- **CONVERGENCE:** a second lost response must not walk the identity forward — the pending key is reused, so
+  repeated failures converge on one identity.
+
+---
+
+## Leg 8 — A SAVE FAILURE AFTER THE COMMIT (NEW — claims 7/15)
+
+**Local.** This behaviour did not exist when the runsheet was written, and the old behaviour destroyed identities.
+
+A `saveCreds` failure **after** the control plane committed used to be terminal: the CP had spent its one
+issuance, the agent could not write it, and the loop fell through to the join token — **trading a full disk for
+the node's identity, its site binding and every device homed on it.** Under the undelivered predicate that
+certificate was never used, so a retry is legal and the loop takes it.
+
+```bash
+# [local] fill the state dir's filesystem, or bind-mount it read-only, THEN trigger recovery with a token present.
+```
+
+- **PASS:** `agent_save_creds_failed` appears, the agent **does not enrol**, and a later pass recovers **the same
+  node id** once the write can succeed.
+- **THE FAILING OBSERVATION:** a new node appears in the Gateways list. That is the identity being destroyed by a
+  local disk condition, which is the defect.
+- **Why a token must be present for this leg:** without one there is nothing to fall through TO, and the leg would
+  pass for the wrong reason.
 
 ---
 

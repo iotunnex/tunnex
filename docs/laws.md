@@ -229,6 +229,18 @@ existed one version ago. *The law was invoked to justify the work that the law w
 
 ### FURTHER INSTANCES (2026-07-31, EPIC 13 fold)
 
+**Instance 6 — and the procedure is now MECHANIZED rather than remembered.** A third mutation reported `ok`
+because a Python syntax error inside the heredoc meant the patch never applied. Three false proofs in one session,
+all the same shape: **the outcome was verified and the APPLICATION was not.**
+
+`scripts/mutate.sh` now asserts, before any test runs: the anchor exists (and exactly once), the file actually
+changed on disk, and the result still compiles. Anchor and replacement are read from FILES, never argv, so no
+shell escaping can corrupt them. A mutation that matches nothing now exits with a message saying so, instead of a
+green test.
+
+**The generalisation, since it cost three instances to learn:** when a check's setup can silently fail, the check
+verifies nothing and reports success. Verify the setup, not just the result.
+
 **A false proof through mangled tooling — instance 4 of this class.** A mutation round was run through a shell
 function whose `\&` escaping silently corrupted every patch: two mutations produced BUILD failures (already known
 to be indistinguishable from a pass) and one reported **`ok`** — a mutation that never applied, read as "the fix

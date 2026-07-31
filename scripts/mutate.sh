@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# mutate.sh — apply ONE mutation, PROVE it landed, run a test command, restore.
+#
+# WHY THIS EXISTS. Three mutation rounds in one session reported `ok` because the patch never applied:
+# twice from shell escaping mangling the replacement, once from a Python syntax error in a heredoc. Each time the
+# green was read as "the fix is unnecessary" — a false proof, and exactly the could-this-check-have-failed class
+# the repo already has a law for. Verifying the OUTCOME was never the gap; verifying the APPLICATION was.
+#
+# Three assertions, in order, before any test runs:
+#   1. the anchor EXISTS in the file (a mutation that matches nothing is not a mutation)
+#   2. the file CHANGED on disk (proves the write happened, not just that the script ran)
+#   3. the package still BUILDS (a build failure is indistinguishable from a pass — the mutation-must-compile law)
+#
+# Usage:
+#   scripts/mutate.sh <file> <anchor-file> <replacement-file> <test-command...>
+# The anchor and replacement are read from FILES, never from argv, so no shell escaping can corrupt them.
+set -euo pipefail
+
+file=$1; anchor_f=$2; repl_f=$3; shift 3
+[ -f "$file" ] || { echo "MUTATE: no such file: $file" >&2; exit 2; }
+
+backup=$(mktemp); cp "$file" "$backup"
+restore() { cp "$backup" "$file"; rm -f "$backup"; }
+trap restore EXIT
+
+python3 - "$file" "$anchor_f" "$repl_f" <<'PY'
+import sys
+target, anchor_f, repl_f = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(target).read()
+anchor = open(anchor_f).read().rstrip('\n')
+repl = open(repl_f).read().rstrip('\n')
+if anchor not in src:
+    sys.exit("MUTATE: ANCHOR NOT FOUND — the mutation would have applied nothing and the test would have passed "
+             "for the wrong reason. This is the failure this script exists to make impossible.")
+if src.count(anchor) > 1:
+    sys.exit("MUTATE: anchor matches %d times — ambiguous; narrow it." % src.count(anchor))
+open(target, 'w').write(src.replace(anchor, repl, 1))
+print("MUTATE: anchor found once, replacement written")
+PY
+
+# (2) the file actually changed
+if cmp -s "$backup" "$file"; then
+  echo "MUTATE: FILE UNCHANGED after the write — refusing to run the test." >&2
+  exit 3
+fi
+echo "MUTATE: file changed ($(diff <(cat "$backup") "$file" | grep -c '^[<>]') lines)"
+
+# (3) it still compiles — a build failure reads exactly like a pass
+if ! bash -c "${BUILD_CMD:-go build ./...}" >/dev/null 2>&1; then
+  echo "MUTATE: THE MUTATION DOES NOT COMPILE. A build failure is indistinguishable from a passing test — " >&2
+  echo "        rewrite it so it compiles (orphaned variables are the usual cause), then re-run." >&2
+  exit 4
+fi
+echo "MUTATE: compiles — running the test; it MUST fail"
+
+set +e
+"$@"; rc=$?
+set -e
+if [ $rc -eq 0 ]; then
+  echo "MUTATE: *** THE TEST PASSED UNDER THE MUTATION *** — the guard does not cover this behaviour." >&2
+  exit 5
+fi
+echo "MUTATE: test failed under the mutation, as required. Restoring."
