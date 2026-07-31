@@ -58,9 +58,24 @@ func TestRekeyQueryCannotResurrect(t *testing.T) {
 	}
 
 	// And the WHERE clause must still refuse a revoked row outright — defence in depth for the same property.
-	if !strings.Contains(sql, "status = 'active'") {
-		t.Error("RekeyNode must be guarded on status = 'active', so a revoked row cannot be re-keyed even if a " +
-			"caller reaches this query without consulting RekeyAuthorized")
+	//
+	// PARSED, NOT SUBSTRING-MATCHED (review pass 1 #19). The guard used to assert that the text
+	// `status = 'active'` appeared SOMEWHERE, which a WHERE clause of `id = $1 OR status = 'active'` satisfies
+	// perfectly while re-keying every active node in the fleet. The guard's own docstring claimed it proved the
+	// filter "holds even without the gate"; it proved the characters were present.
+	//
+	// So: isolate the WHERE clause, require the status filter to be AND-ed, and refuse a disjunction outright.
+	where := sql[strings.Index(sql, "where "):]
+	if i := strings.Index(where, "returning"); i > 0 {
+		where = where[:i]
+	}
+	if strings.Contains(where, " or ") {
+		t.Errorf("RekeyNode's WHERE must not contain a disjunction — one OR turns a guarded update into a "+
+			"fleet-wide one, and every substring this guard checks would still be present. Got: %q", where)
+	}
+	if !strings.Contains(where, "and status = 'active'") {
+		t.Errorf("RekeyNode must be guarded on AND status = 'active', so a revoked row cannot be re-keyed even if "+
+			"a caller reaches this query without consulting RekeyAuthorized. Got: %q", where)
 	}
 	// The identity must be PRESERVED, not reassigned — D2's replace-in-place. Keyed on id, and on the OLD serial
 	// so a stale request cannot rotate a key that has already moved on.

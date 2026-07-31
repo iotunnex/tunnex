@@ -2492,7 +2492,7 @@ export interface components {
             }[];
         };
         RekeyChallengeRequest: {
-            /** @description Serial of the agent's CURRENT (expired) certificate. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
+            /** @description Serial of the agent's CURRENT (expired) certificate. NO length or pattern constraint, deliberately and for the same reason key_fingerprint carries none: a schema violation answers 400 where an unknown identifier answers 403, and that difference tells a prober how far they got. The handler validates and returns the UNIFORM refusal. The 64 KiB body cap bounds the request. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
             cert_serial?: string;
             /** @description SHA-256 of the agent's recorded public key (SPKI DER), lowercase hex — the SECOND identifier (D10). Supply EXACTLY ONE of cert_serial or key_fingerprint; supplying both, neither, or a malformed value is refused identically to an unknown identifier, so the endpoint cannot be probed for well-formedness. It exists because a re-key whose RESPONSE is lost leaves the control plane holding a serial the agent never received: the agent's stored serial is stale, and its only durable handle on its own identity is the key material the control plane recorded. No length or pattern constraint here on purpose — a schema violation would answer with 400 where an unknown identifier answers 403, which is a distinction worth denying. */
             key_fingerprint?: string;
@@ -2502,7 +2502,7 @@ export interface components {
             nonce: string;
         };
         RekeyRequest: {
-            /** @description Serial of the certificate being replaced. EXACTLY ONE of cert_serial or key_fingerprint. */
+            /** @description Serial of the certificate being replaced. EXACTLY ONE of cert_serial or key_fingerprint. No length constraint — see RekeyChallengeRequest. */
             cert_serial?: string;
             /** @description SHA-256 of the recorded public key (SPKI DER), lowercase hex. Must match the identifier the challenge was issued for — a nonce is bound to its identifier, so the two cannot be mixed. See RekeyChallengeRequest for why a second identifier exists. */
             key_fingerprint?: string;

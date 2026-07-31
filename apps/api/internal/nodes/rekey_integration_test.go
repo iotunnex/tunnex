@@ -353,79 +353,49 @@ func TestGeneratedFingerprintColumnMatchesTheGoldenVector(t *testing.T) {
 	}
 }
 
-// TestChallengeSurvivesAROLLINGUpgradeBOTHWAYS — migration 0061's compatibility shim, asserted in both directions.
+// TestAChallengeRoundTripsUnderITSOWNIdentifier — what replaced the rolling-upgrade shim test (review pass 1 #20).
 //
-// WHY IT EXISTS AT ALL. The first draft of 0061 RENAMED cert_serial to identifier, and the rolling-upgrade guard
-// (TestMigrationsAreBackwardCompatibleForOneVersion, S11 D1) refused it: mid-roll, the previous control-plane version
-// runs against this schema and a renamed column stops existing for it. So the column was ADDED instead, and both
-// halves of a shim exist for one release.
+// THE SHIM IS GONE, AND SO IS THE TEST THAT VOUCHED FOR IT. Migration 0061 wrote cert_serial alongside identifier
+// and read coalesce(identifier, cert_serial), to let a previous-version replica consume a challenge this version
+// issued. That version CANNOT EXIST: node_rekey_challenges is created by migration 0058, in the SAME RELEASE. No
+// shipped control plane has ever read this table.
 //
-// AND WHY BOTH DIRECTIONS ARE TESTED. An agent's re-key is TWO round trips, and during a roll they can land on
-// DIFFERENT replicas:
+// It was built because TestMigrationsAreBackwardCompatibleForOneVersion refused a RENAME — a line-level regex over
+// migration text with no notion of which tables the previous version knew. Its verdict was taken as authority and
+// machinery was built to satisfy it. The old test then asserted, in both directions, that the machinery worked.
 //
-//	old replica issues  → new replica consumes    (identifier IS NULL — the read half, coalesce)
-//	new replica issues  → old replica consumes    (cert_serial written — the write half)
-//
-// Half a shim leaves a straddled attempt failing. Bounded, because the agent retries — but it would degrade re-key
-// during exactly the window an operator is most likely to be recovering a gateway, which is the opposite of what a
-// rolling upgrade is for.
-func TestChallengeSurvivesAROLLINGUpgradeBOTHWAYS(t *testing.T) {
+// What is worth asserting is the behaviour that remains: a challenge is bound to the identifier AND KIND it was
+// issued for, and cannot be spent under another.
+func TestAChallengeRoundTripsUnderITSOWNIdentifier(t *testing.T) {
 	f := seedRekeyFixture(t)
 	k := rsaKey(t)
 	_, serial := f.addExpiredNode(t, "gw-roll-"+uuid.NewString()[:8], &k.PublicKey)
 
-	// DIRECTION 1 — a challenge as the PREVIOUS version wrote it: cert_serial only, no identifier, kind defaulted.
-	oldNonce := []byte("previous-version-nonce-0123456789")
-	if _, err := f.tx.Exec(f.ctx,
-		"INSERT INTO node_rekey_challenges (nonce, cert_serial, expires_at) VALUES ($1,$2,now() + interval '2 minutes')",
-		oldNonce, serial); err != nil {
-		t.Fatalf("seed previous-version challenge: %v", err)
+	nonce, err := f.svc.IssueRekeyChallenge(f.ctx, RekeyIdentifier{Kind: IdentifierCertSerial, Value: serial})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	// The WRONG kind must not consume it, even with the right value.
+	if _, err := f.svc.q.ConsumeRekeyChallenge(f.ctx, sqlc.ConsumeRekeyChallengeParams{
+		Nonce: nonce, Identifier: &serial, IdentifierKind: IdentifierKeyFingerprint,
+	}); err == nil {
+		t.Fatal("a challenge issued for a SERIAL must not be spendable as a FINGERPRINT — the kind is bound with " +
+			"the value precisely so the two cannot be mixed")
 	}
 	got, err := f.svc.q.ConsumeRekeyChallenge(f.ctx, sqlc.ConsumeRekeyChallengeParams{
-		Nonce: oldNonce, Identifier: &serial, IdentifierKind: IdentifierCertSerial,
+		Nonce: nonce, Identifier: &serial, IdentifierKind: IdentifierCertSerial,
 	})
 	if err != nil {
-		t.Fatalf("this version must be able to consume a challenge the PREVIOUS version issued (its identifier "+
-			"column is NULL, which is what coalesce(identifier, cert_serial) is for): %v", err)
+		t.Fatalf("the identifier it WAS issued for must consume it: %v", err)
 	}
 	if got.ConsumedAt.Time.IsZero() {
 		t.Fatal("consuming must stamp consumed_at — single-use is the replay defence")
 	}
-
-	// DIRECTION 2 — a challenge as THIS version writes it must remain readable by the previous version, which reads
-	// cert_serial. Serial-kind carries it; fingerprint-kind cannot (a fingerprint is not a serial) and must be NULL
-	// rather than a value the old column's readers would misinterpret.
-	for _, c := range []struct {
-		kind, value string
-		wantSerial  bool
-	}{
-		{IdentifierCertSerial, serial, true},
-		{IdentifierKeyFingerprint, goldenFingerprint, false},
-	} {
-		nonce, err := f.svc.IssueRekeyChallenge(f.ctx, RekeyIdentifier{Kind: c.kind, Value: c.value})
-		if err != nil {
-			t.Fatalf("%s: issue: %v", c.kind, err)
-		}
-		var storedSerial, storedIdent *string
-		if err := f.tx.QueryRow(f.ctx,
-			"SELECT cert_serial, identifier FROM node_rekey_challenges WHERE nonce=$1", nonce,
-		).Scan(&storedSerial, &storedIdent); err != nil {
-			t.Fatalf("%s: read back: %v", c.kind, err)
-		}
-		if storedIdent == nil || *storedIdent != c.value {
-			t.Fatalf("%s: identifier must always be written by this version; got %v", c.kind, storedIdent)
-		}
-		if c.wantSerial {
-			if storedSerial == nil || *storedSerial != c.value {
-				t.Fatalf("serial-kind must ALSO populate cert_serial so a previous-version replica can consume it; "+
-					"got %v", storedSerial)
-			}
-			continue
-		}
-		if storedSerial != nil {
-			t.Fatalf("fingerprint-kind must leave cert_serial NULL — a fingerprint is not a serial, and writing one "+
-				"there would have a previous-version replica resolving it as one; got %q", *storedSerial)
-		}
+	// SINGLE USE: a second attempt with the same nonce must find nothing.
+	if _, err := f.svc.q.ConsumeRekeyChallenge(f.ctx, sqlc.ConsumeRekeyChallengeParams{
+		Nonce: nonce, Identifier: &serial, IdentifierKind: IdentifierCertSerial,
+	}); err == nil {
+		t.Fatal("a spent nonce must not be spendable again")
 	}
 }
 

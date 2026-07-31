@@ -2,7 +2,12 @@ package agentca
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"os"
 	"testing"
 	"time"
@@ -87,5 +92,34 @@ func TestCASignedCertVerifiesAndExpires(t *testing.T) {
 	}
 	if len(ca.CertPEM()) == 0 || ca.Pool() == nil {
 		t.Fatal("CA cert/pool missing")
+	}
+}
+
+// TestSignCSRRefusesKeyTypesRecoveryCannotVerify — review pass 1 #17.
+//
+// rekey.Verify narrowed to RSA deliberately and wrote down why. The ISSUER that populates the very field that
+// verifier reads was never narrowed to match, so a node enrolling with an ECDSA key received a perfectly good
+// certificate and a recorded public key its own recovery path can never verify — proof-of-possession recovery
+// silently and permanently unavailable for that node, with nothing saying so until the day it is needed.
+func TestSignCSRRefusesKeyTypesRecoveryCannotVerify(t *testing.T) {
+	ek, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: "gw"}}, ek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+
+	q, ctx, key := setup(t)
+	ca, _, cerr := LoadOrCreate(ctx, q, newSealer(t, key))
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if _, err := ca.SignCSR(csrPEM, "gw"); err == nil {
+		t.Fatal("issuing over a key type the recovery verifier cannot accept must be REFUSED at the door: the " +
+			"certificate would work and the recovery would not, and nothing would say so until it was needed")
 	}
 }

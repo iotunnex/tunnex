@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,5 +165,44 @@ func TestChallengeSweeperIsWired(t *testing.T) {
 	gate := strings.LastIndex(body[:call], "elector.IsLeader()")
 	if gate < 0 {
 		t.Error("the challenge sweep must be leader-gated like every other scheduler tick (S11 D4)")
+	}
+}
+
+// TestAThrottled429IsLOGGED — review pass 1 #13.
+//
+// The throttle is registered ABOVE the access logger, deliberately: it must key on the RAW peer address before
+// middleware.RealIP rewrites it from client-supplied headers. The cost of that ordering was that a 429 left NO
+// server-side trace — no log line, no request id, no source address — so the one endpoint pair that is
+// unauthenticated by construction was the only one whose refusals were invisible.
+//
+// That matters more than tidiness because the budget is a per-DEPLOYMENT one: fleet-wide recovery starvation
+// (finding #4, accepted as a bounded limitation) was undiagnosable from the control plane's own logs. A bound
+// nobody can observe is not a bound.
+func TestAThrottled429IsLOGGED(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	th := newRekeyThrottle(1)
+	h := th.throttled(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/v1/agent/rekey", nil)
+		req.RemoteAddr = "203.0.113.9:5555"
+		h(rec, req)
+		if i == 1 && rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("second request must be throttled, got %d", rec.Code)
+		}
+	}
+	out := buf.String()
+	if !strings.Contains(out, "rekey_throttled") {
+		t.Fatal("a throttled re-key must leave a server-side log line — it is registered above the access logger, " +
+			"so nothing downstream will record it, and fleet-wide starvation would be undiagnosable")
+	}
+	if !strings.Contains(out, "203.0.113.9") {
+		t.Fatalf("the log must name the peer the budget was spent by, or an operator cannot tell a flood from a "+
+			"recovering fleet; got %s", out)
 	}
 }

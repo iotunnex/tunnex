@@ -190,6 +190,21 @@ func (c *CA) SignCSR(csrPEM []byte, commonName string) (Issued, error) {
 	if err := csr.CheckSignature(); err != nil {
 		return Issued{}, fmt.Errorf("CSR signature: %w", err)
 	}
+	// THE ISSUER ACCEPTS ONLY WHAT THE RECOVERY VERIFIER CAN ACCEPT (review pass 1 #17).
+	//
+	// rekey.Verify narrowed to RSA deliberately, and wrote down why: "it keeps the verifier from silently
+	// accepting a key type whose signature semantics nobody here has reasoned about". The ISSUER that populates
+	// the very field that verifier reads was never narrowed to match — so a node enrolling with an ECDSA or Ed25519
+	// key got a perfectly good certificate and a `cert_public_key` its own recovery path can never verify.
+	//
+	// The failure is silent and permanent: proof-of-possession recovery is unavailable for that node forever, and
+	// nothing says so until the day it needs it. Two components disagreeing about the accepted key set is the
+	// defect; refusing at the door is where it costs nothing.
+	if _, ok := csr.PublicKey.(*rsa.PublicKey); !ok {
+		return Issued{}, fmt.Errorf("unsupported CSR public key type %T: this CA issues over RSA only, because "+
+			"proof-of-possession recovery verifies RSA signatures — issuing over anything else would create an "+
+			"identity that can never be recovered", csr.PublicKey)
+	}
 	sn := bigSerial()
 	tmpl := &x509.Certificate{
 		SerialNumber: sn,

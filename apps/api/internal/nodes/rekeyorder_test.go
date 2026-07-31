@@ -13,7 +13,21 @@ import (
 // expensive, timing-visible step in the handler; the D3 gate is a field comparison. If verification ran first, the
 // response latency would differ measurably between "this serial belongs to a live gateway" and "this serial belongs
 // to an expired one" — turning the endpoint into a liveness oracle for a fleet, queryable by anyone who can reach
-// the API. Running the cheap gate first makes every refused request cost the same.
+// the API. Running the cheap gate first removes THAT oracle.
+//
+// WHAT IT DOES NOT DO, corrected here rather than left as a comfortable overstatement (review pass 1 #16). This
+// guard used to claim the ordering makes "every refused request cost the same". IT DOES NOT. A WRONG-KEY refusal
+// passes the gate and pays for a full RSA verification; an unknown-identifier or live-node refusal does not. So
+// wrong-key remains distinguishable by latency from the other refusals — the one asymmetry the ordering cannot
+// remove, because the work is the point of that check.
+//
+// The residual is bounded and stated in docs/S13.1-decisions.md: distinguishing "wrong key for a real, expired
+// node" from "everything else" tells an attacker they have found a recoverable node — which the challenge
+// endpoint already refuses to confirm, and which reaching this far already required. Equalising it would mean
+// performing a decoy verification on every refusal, which trades a measurable oracle for a constant CPU cost on an
+// unauthenticated route: the wrong trade for this surface, made deliberately.
+//
+// This guard asserts the ORDERING, which is real. It no longer vouches for equal cost, which was not.
 //
 // This is a source-order assertion, which is a blunt instrument — but the alternative is measuring timing in a test,
 // which is flaky, and asserting nothing, which is how a refactor silently reverses it. Scoped to the Rekey function

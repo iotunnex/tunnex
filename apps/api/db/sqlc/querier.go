@@ -103,13 +103,9 @@ type Querier interface {
 	//
 	// Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
 	// refuse, and the caller must not distinguish which of those it was.
-	// coalesce(identifier, cert_serial) is the OTHER HALF of migration 0061's rolling-upgrade shim, and it is needed for
-	// the same reason the write half is: during a roll the agent's two round trips (challenge, then submit) can land on
-	// DIFFERENT replicas. The write half lets a previous-version replica consume a challenge this version issued; this
-	// lets THIS version consume a challenge the previous one issued, whose `identifier` is NULL because that version did
-	// not know the column. Half a shim would leave a straddled attempt failing — bounded, since the agent retries, but
-	// degrading re-key during exactly the window an operator is most likely to be recovering a gateway.
-	// It collapses to `identifier = $2` when the CONTRACT migration drops cert_serial.
+	// The read half of the same removed shim (review pass 1 #20): coalesce(identifier, cert_serial) existed to consume
+	// a challenge written by a previous version that did not know the column. No such version exists — 0058 created
+	// this table in the same release — so the fallback could only ever match rows this version wrote itself.
 	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
@@ -189,12 +185,15 @@ type Querier interface {
 	// oversight.
 	// The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
 	// other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
-	// cert_serial is written TRANSITIONALLY alongside identifier, and only for serial-kind challenges (NULL for a
-	// fingerprint, which is not a serial). It is the rolling-upgrade shim from migration 0061: a previous-version
-	// replica reads cert_serial, and without this it could not consume a challenge a new replica issued — degrading
-	// re-key during exactly the window an operator is most likely to be recovering a gateway. NOTHING in this version
-	// reads it, so the copy cannot diverge in a way that matters, and the CONTRACT migration that drops it is
-	// registered in docs/S13.1-decisions.md.
+	// THE ROLLING-UPGRADE SHIM IS GONE (review pass 1 #20). It wrote cert_serial alongside identifier so a
+	// previous-version replica could consume a challenge this version issued — protecting a control-plane version
+	// THAT CANNOT EXIST: node_rekey_challenges is created by migration 0058, in the SAME RELEASE as 0061. No shipped
+	// version has ever read this table, let alone that column.
+	//
+	// It was built because TestMigrationsAreBackwardCompatibleForOneVersion refused a RENAME — and that guard is a
+	// line-level regex over migration text with no notion of which tables the previous version knew, so it fired on a
+	// rename inside a table one version ago did not have. Its verdict was taken as authority and a shim was built to
+	// satisfy it. The column stays until the registered contract migration drops it; nothing writes it now.
 	CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)

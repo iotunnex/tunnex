@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -96,6 +97,22 @@ func clientIP(remoteAddr string) string {
 func (t *rekeyThrottle) throttled(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !t.allow(r.RemoteAddr) {
+			// LOGGED HERE, because nothing downstream will (review pass 1 #13). This middleware is registered
+			// ABOVE the access logger — deliberately, so the throttle keys on the raw peer address before
+			// middleware.RealIP rewrites it from client-supplied headers — and the cost of that ordering is that a
+			// 429 leaves no server-side trace at all: no log line, no request id, no source address.
+			//
+			// The one endpoint pair that is unauthenticated by construction was therefore the only one whose
+			// refusals were invisible, and its budget is a per-DEPLOYMENT one (rekeyAttemptsPerMinute). Fleet-wide
+			// recovery starvation was undiagnosable from the control plane's own logs — an operator could not even
+			// confirm it was happening. A bound nobody can see is not a bound.
+			slog.Warn("rekey_throttled",
+				"peer", clientIP(r.RemoteAddr),
+				"path", r.URL.Path,
+				"limit_per_minute", t.perMin,
+				"note", "the re-key throttle keys on the RAW peer address, which behind a proxy or ingress is the "+
+					"proxy — so this budget is shared by every caller behind it. Sustained entries here mean "+
+					"gateway self-recovery is being denied fleet-wide (docs/S13.1-decisions.md, finding #4)")
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return

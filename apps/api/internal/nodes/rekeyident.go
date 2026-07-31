@@ -43,6 +43,21 @@ const (
 // keyFingerprintHexLen is the length of a SHA-256 digest in lowercase hex. Exact — see ParseRekeyIdentifier.
 const keyFingerprintHexLen = 64
 
+// maxSerialLen bounds the serial a caller may name. The body cap already bounds the request; this bounds what
+// reaches a database parameter.
+const maxSerialLen = 100
+
+// isPrintableASCII refuses control bytes — NUL above all, which Postgres rejects in a text value and which
+// therefore turned an attacker-controlled field into a 500.
+func isPrintableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 // ParseRekeyIdentifier turns the wire's two optional fields into ONE identifier, or refuses.
 //
 // EXACTLY ONE, and the refusal for "both" is the same as the refusal for "neither" and for "malformed". A caller who
@@ -58,6 +73,17 @@ func ParseRekeyIdentifier(certSerial, keyFingerprint string) (RekeyIdentifier, b
 	case certSerial != "" && keyFingerprint != "":
 		return RekeyIdentifier{}, false
 	case certSerial != "":
+		// THE VALUE IS VALIDATED, not just its presence (review pass 1 #12). A NUL byte — which the schema
+		// explicitly permits, since it carries no pattern — reached a Postgres text bind and came back as a raw
+		// encoding error: a 500, distinguishable at a glance from the 403 every other refusal returns. Exact
+		// sibling of the identifier_kind defect already fixed in rekey.go, one field over: the parser checked the
+		// KIND and never the VALUE, and the serial branch inspected nothing at all.
+		//
+		// Serials are hex as this CA issues them; the check is deliberately a shade wider (printable, bounded) so
+		// it refuses what breaks a bind without asserting a format the issuer might legitimately change.
+		if len(certSerial) > maxSerialLen || !isPrintableASCII(certSerial) {
+			return RekeyIdentifier{}, false
+		}
 		return RekeyIdentifier{Kind: IdentifierCertSerial, Value: certSerial}, true
 	case keyFingerprint != "":
 		if len(keyFingerprint) != keyFingerprintHexLen || !isLowerHex(keyFingerprint) {

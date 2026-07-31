@@ -100,3 +100,28 @@ func TestFingerprintLookupIsEXACTMatchOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestSerialVALUEIsValidatedNotJustPresent — review pass 1 #12.
+//
+// A NUL byte in cert_serial reached a Postgres text bind and returned a RAW encoding error: a 500, visibly
+// different from the 403 every other refusal returns, on an unauthenticated route. Exact sibling of the
+// identifier_kind defect already fixed one file over — the parser validated the KIND and never the VALUE, and the
+// serial branch inspected nothing at all. The schema permits it, deliberately, because adding a pattern would
+// create a 400-vs-403 split of its own.
+func TestSerialVALUEIsValidatedNotJustPresent(t *testing.T) {
+	for _, bad := range []struct{ value, why string }{
+		{"abc\x00def", "a NUL byte is what Postgres rejects in a text value, turning an attacker-controlled field " +
+			"into a 500 that is distinguishable at a glance from the uniform refusal"},
+		{"abc\ndef", "a newline is a control byte and has no business in a certificate serial"},
+		{strings.Repeat("a", maxSerialLen+1), "an unbounded serial reaches a database parameter"},
+		{"abc\x7fdef", "DEL is a control byte"},
+	} {
+		if _, ok := ParseRekeyIdentifier(bad.value, ""); ok {
+			t.Errorf("ParseRekeyIdentifier accepted %q: %s", bad.value, bad.why)
+		}
+	}
+	// A real serial still parses — the check must not be so narrow that it refuses what this CA issues.
+	if _, ok := ParseRekeyIdentifier("bb79126b0ae42e44d477931c28256b31", ""); !ok {
+		t.Fatal("a hex serial as this CA issues them must be accepted")
+	}
+}
