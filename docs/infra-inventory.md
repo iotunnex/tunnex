@@ -47,6 +47,26 @@ sudo docker ps --format '{{.Names}}\t{{.Image}}' | grep -i node
 ls -d ~/tunnex 2>/dev/null && echo "compose-managed" || echo "standalone docker run"
 ```
 
+## azure-gw CANNOT host a second agent — k3s owns `wg0` there
+
+**Found the hard way on 2026-07-31; do not rediscover it.**
+
+`azure-gw` runs the node-agent **inside the k3s cluster**, serving the `k8s` node row — which is why that row's
+endpoint is `52.190.140.51:51820`, azure-gw's own public address. The pod uses **host networking** and owns
+`wg0` on the host.
+
+**A second host-network agent on azure-gw would contend for the same interface.** So azure-gw is NOT a spare
+gateway host: the box has one agent slot and k3s is in it.
+
+Consequences for any walk needing N expired subjects:
+
+- the fleet has **two** usable VM agent hosts (aws-gw-1, aws-gw-2), not three;
+- the `k8s` row is a usable subject **only** via `kubectl`/Helm (scale to 0 to stop it, and the image must be
+  imported into k3s's containerd with `k3s ctr images import`, not `docker load`);
+- where a walk needs more subjects than hosts, **sequence roles on one host** rather than doubling up agents —
+  EPIC 13 ran A then C on aws-gw-1, which preserved the reason for separate subjects (B's refusal cause must not
+  be conflated with C's) at no cost.
+
 ## Walk-role assignment — EPIC 13 (`docs/S13-boxwalk.md`)
 
 The walk needs **three gateways whose certificates have genuinely expired**, and the fleet has exactly three

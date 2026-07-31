@@ -185,3 +185,49 @@ affordance.
    deliberately does not cover was never isolated. `contended` had both changed and fired on the address cause.
 6. **Legs 3b, 7, 8** (local): the identifier-refusal matrix, lost-response recovery in-process, and the
    save-failure retry.
+
+---
+
+# DISPOSITIONS (2026-07-31)
+
+## WF-S13-2 — **WITHDRAWN**, not re-ranked
+
+I reported that the emitted enrol command omits `TUNNEX_NODE_ENDPOINT`. **It does not.**
+`remoteEnrollCommand` (`apps/web/src/components/Gateways.tsx:42-51`) emits it whenever the operator supplies one,
+and omits it only when they deliberately leave it blank — which S8.2c established as **blank = NAT'd spoke**, a
+gateway behind NAT with no reachable endpoint by definition. The form already says so
+(`Gateways.tsx:268` *"Public endpoint (optional — ip:port peers dial)"*, `:436` *"No public endpoint set → this
+gateway is treated as a NAT'd spoke"*).
+
+`azure-gw`'s blank endpoint is therefore a correctly-recorded unreachable gateway, not a defect.
+
+**The real defect was already WF-S13-1**, and this evidence sharpens it: the product knows a gateway is
+unreachable, says so at mint time, and then **still offers it as a device target**. The knowledge exists; the
+picker does not consult it.
+
+*Recorded as a withdrawal rather than deleted: a finding that was acted on and turned out wrong is part of the
+record.*
+
+## WF-S13-1 — REGISTERED, both halves, with a trigger
+
+Three surfaces choose a gateway by `selectableNodes(nodes)[0]` / first-`active`, and none lets an operator
+choose: `apps/web` device form · `apps/cli device create` · the restore target picker.
+
+**Not folded, and the reason is that the obvious fix is the risky half.** Narrowing the predicate to "can serve"
+(reported endpoint + key, unexpired certificate, recent `last_seen_at`) can make the selectable set **empty** on
+a fleet whose gateways are all stale — turning a confusing default into a hard block, with no affordance to
+explain which condition failed. That needs the explicit-target UI and the diagnostic message in the same change,
+which is a slice, not a fold.
+
+**TRIGGER: the next change to device creation, or the first support report of a device homed on a dead gateway.**
+
+## WF-S13-4 — FOLD (next session, with a red)
+
+The restore consumes one candidate's remembered address to re-address another. Small, contained, and it costs a
+user a re-import they did not need. `used` gets seeded with every candidate's `assigned_ip` before the loop,
+released as each is assigned. Red: two cascaded devices whose addresses would collide under the current
+allocator, asserting **both** reclaim.
+
+## WF-S13-5 — FOLD (with WF-S13-4)
+
+Plural/singular in Slice 7's own banner. Trivial, and it is the sentence an operator reads after a restore.

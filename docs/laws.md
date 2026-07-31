@@ -472,6 +472,33 @@ pipeline or assert the position itself. Concretely:
 This is COULD THIS CHECK HAVE FAILED? narrowed to a specific mechanism: the check *could* have failed on a wrong
 function, and *could not* have failed on a wrong pipeline — which was the way it was actually wrong.
 
+## A FIXTURE THAT RESTATES PRODUCTION TESTS THE RESTATEMENT (founder-ratified 2026-07-31, WF-S13-3)
+
+**Fixture-fidelity, in the direction nobody watches for.** The known form is a fixture that records LESS than
+production, so a red fails for the wrong reason — annoying, and self-announcing. This is the mirror: a fixture
+that records MORE, so a red **passes** for the wrong reason. Nothing draws attention to a pass.
+
+**The instance.** EPIC 13's fold for finding #8 added `revoked_prev_status` to the restore's READ side and, via a
+bare `s.replace` whose anchor missed by one space, never added it to the production sweep. The same fold "fixed"
+the test fixture to set the column by hand. So the red asserted against a fixture **simulating a production
+change that did not exist** — and passed. So did a mutation round. Four gates, a review pass and a mutation round
+all missed it; the box-walk found it in one query.
+
+**THE RULE:** a fixture must **CALL** the production path it depends on, never restate it. Where restating is
+unavoidable, the red is not evidence about production and must say so in its own comment.
+
+**THE COROLLARY, and it amends a claim made earlier in the same epic:** *per-fix reds substitute for a review pass
+ONLY where the fixture calls production.* Where a fixture restates it, the red proves the restatement and the
+review remains owed. That claim was endorsed on the strength of a mutation round catching two vacuous guards —
+and WF-S13-3 is the case it does not cover, because the mutation round passed too.
+
+**Mechanically enforced, in the half that was missing:** `scripts/prove-fix.sh` requires the red to **FAIL BEFORE
+the edit**, then proves the anchor matched exactly once, the file changed, it compiles, and the red passes after.
+Assertion 1 is the one this incident needed — the fixture's simulation made the red green *before* the edit, and
+that gate would have stopped it.
+
+---
+
 ## A UNIT TEST PROVES BEHAVIOUR, NEVER REACHABILITY (founder-ratified 2026-07-30, S13.1)
 
 **For every mechanism: name the caller, and prove the trigger can CO-OCCUR with the gate.**

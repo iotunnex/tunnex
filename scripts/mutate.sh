@@ -11,6 +11,10 @@
 #   2. the file CHANGED on disk (proves the write happened, not just that the script ran)
 #   3. the package still BUILDS (a build failure is indistinguishable from a pass — the mutation-must-compile law)
 #
+# COMPANION: scripts/prove-fix.sh applies the SAME assertions to a FIX — plus "the red must fail BEFORE the edit",
+# which is the gate WF-S13-3 needed and did not have. Use mutate.sh to prove a guard rejects; use prove-fix.sh to
+# prove an edit landed and that its red depended on it.
+#
 # Usage:
 #   scripts/mutate.sh <file> <anchor-file> <replacement-file> <test-command...>
 # The anchor and replacement are read from FILES, never from argv, so no shell escaping can corrupt them.
