@@ -207,6 +207,31 @@ absent while a vacuous check is visibly **green** — and green is what people a
 behaviour of the system.** Separating them costs a minute. Not separating them costs the first incident the
 check was supposed to prevent.
 
+### INSTANCE COUNT — the law is NOT BINDING (founder-ratified 2026-07-31, EPIC 13 review pass 1)
+
+**Six prior instances, and then THREE MORE IN A SINGLE REVIEW PASS — on the story that was supposed to satisfy
+this law.** Counted here rather than given a new law, because a second law would be a way of not noticing that
+the first one is not working.
+
+The class is narrower than the law's general form and worth naming precisely: **a guard whose expectation is
+derived from the artifact under test** (first papered at S7.5.5 as the tautological-guard finding). Pass 1's
+three:
+
+| # | guard | what it derives from the artifact | what it therefore cannot catch |
+|---|---|---|---|
+| 3 | `rekey_integration_test.go:195-198` | hand-applies the `UPDATE` that pushes `cert_not_after` back into the past | that a lost re-key commit *advances* the very column the gone-gate reads, so real fingerprint recovery is refused for a full 48h TTL. The test fabricates the state that makes it pass |
+| 19 | `rekeyquery_test.go:61` | asserts the presence of a substring of the query it is guarding | a `WHERE` clause that re-keys **every active node** still passes |
+| 20 | `migrationcompat_test.go:33-41` | a line-level regex over migration text, with no notion of which tables the previous version had | that it fires on a `RENAME` inside a table created in the **same release** — forcing an expand/contract shim onto a version that cannot exist, which was then documented as protecting it |
+
+**Three in one pass means the law is being read and not applied.** #20 is the sharpest: the guard's verdict was
+taken as authority and a compatibility shim was built to satisfy it, without anyone asking whether the table
+existed one version ago. *The law was invoked to justify the work that the law would have prevented.*
+
+**What binds, from now on, when a guard is written or trusted:** state, in one sentence beside it, **what the
+guard reads and where that value comes from.** If the answer is "from the thing it is checking", it is not a
+guard — it is a restatement. Applies equally to trusting an EXISTING guard's verdict: #20 was a failure to ask
+that question of a guard someone else wrote.
+
 
 ---
 
