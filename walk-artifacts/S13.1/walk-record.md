@@ -210,6 +210,18 @@ record.*
 
 ## WF-S13-1 — REGISTERED, both halves, with a trigger
 
+### LIVE EVIDENCE, not hypothetical
+
+**`azure-gw` is `status='active'`, has been dead since 2026-07-25, has never reported an endpoint — and is a
+SELECTABLE DEVICE TARGET.** It is the first `active` row by `created_at`, so `selectableNodes(nodes)[0]` picks it,
+and the walk hit exactly that: device creation refused with *"the node has not reported its endpoint/key yet"*.
+
+It is also a **WF-S11-10c sighting**: that host runs its agent inside k3s (serving the `k8s` row), so the
+Gateways list shows **two gateways for one host**, one of them a six-day-old corpse. The product knows the row is
+unreachable — it renders "certificate expired" against it — and still offers it as a place to put a device.
+
+The predicate is not merely imprecise; there is a row on a live fleet, today, that it gets wrong.
+
 Three surfaces choose a gateway by `selectableNodes(nodes)[0]` / first-`active`, and none lets an operator
 choose: `apps/web` device form · `apps/cli device create` · the restore target picker.
 
@@ -231,3 +243,29 @@ allocator, asserting **both** reclaim.
 ## WF-S13-5 — FOLD (with WF-S13-4)
 
 Plural/singular in Slice 7's own banner. Trivial, and it is the sentence an operator reads after a restore.
+
+---
+
+## PRECEDENCE LEG — CHECKED, NOT OWED (2026-07-31)
+
+Asked: was `Recover ranked above UseToken` trivially satisfied in Leg 1, the way the `site_id` claim was?
+
+**No — it was genuinely exercised.** Cited:
+
+| step | evidence |
+|---|---|
+| a token WAS in the environment | aws-gw-1's `docker run` included `-e TUNNEX_JOIN_TOKEN=g4Q11tOrIvjQ…`, run verbatim |
+| `haveToken` is presence, not validity | `cmd/agent/main.go:45,64` — `Decide(certPEM, err, nodeName, joinToken != "", …)` |
+| expired ⇒ `Recover` regardless of the token | `internal/identity/decide.go:117-118` — the expired branch returns `Action: Recover` and merely RECORDS `HaveToken` |
+| and it did | Leg 1 logged `agent_rekeyed`, not `agent_enrolling` |
+
+Legs 2a and 3a re-exercised it twice more: token present, re-key attempted FIRST, fallback only after three
+refusals.
+
+The token was **spent**, which changes nothing about the ruling — `Decide` never sees validity. Spentness would
+have altered the outcome of *taking* the token path, not the *ranking* that avoided it.
+
+**What remains unexercised is the k3s/Helm ENVIRONMENT**, not the decision: `Decide` takes no network argument and
+reads only the stored certificate and `joinToken != ""`, both identical in a pod. **Recommendation: do not spend
+the `k8s` control node re-testing a branch already proven three times.** If the Helm path needs covering
+specifically, it belongs to the S10.3 in-cluster walk.

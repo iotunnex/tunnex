@@ -10,7 +10,7 @@ Keep this current. A walk that guesses which box plays which role burns a 48-hou
 | host | public | private | role |
 |---|---|---|---|
 | **azure-cp** | `104.45.208.156` | `10.0.0.4` | **control plane** — docker-compose stack (api, web, nginx, postgres, redis, mailpit). Runs migrations. Never a gateway |
-| **azure-gw** | `52.190.140.51` | `10.0.0.5` | gateway. Same VNet as the CP, so device traffic to it stays inside Azure |
+| **azure-gw** | `52.190.140.51` | `10.0.0.5` | **runs k3s.** Its node-agent lives INSIDE the cluster and IS the `k8s` node row (that row's endpoint is `52.190.140.51:51820` — this host's own address). The separate `azure-gw` NODE ROW is a **stale leftover**: `status='active'` in the DB, dead since 2026-07-25, no endpoint ever reported |
 | **aws-gw-1** | `15.134.60.253` | `172.31.1.217` | gateway. **The box whose real-world certificate expiry started EPIC 13** |
 | **aws-gw-2** | `15.135.130.96` | `172.31.9.62` | gateway |
 | **aws-behind-host** | — | `172.31.10.85` | LAN host BEHIND aws-gw. No public address. Exists to prove site transit reaches a machine that is not itself a gateway — not a gateway, never enrolled |
@@ -47,16 +47,30 @@ sudo docker ps --format '{{.Names}}\t{{.Image}}' | grep -i node
 ls -d ~/tunnex 2>/dev/null && echo "compose-managed" || echo "standalone docker run"
 ```
 
-## azure-gw CANNOT host a second agent — k3s owns `wg0` there
+## azure-gw: one host, one agent, TWO node rows — and only one is real
+
+**Corrected 2026-07-31.** The host `azure-gw` runs **k3s**, and its node-agent runs **inside the cluster**. That
+agent is the **`k8s` node row** — confirmed by that row's endpoint, `52.190.140.51:51820`, which is azure-gw's own
+public address.
+
+The separate **`azure-gw` node row is STALE**: `status='active'`, last seen 2026-07-25, **no endpoint ever
+reported**. Nothing serves it. It is a leftover from a VM-level agent that no longer exists.
+
+### The ambiguity is a WF-S11-10c sighting
+
+EPIC 11's WF-S11-10c was *a surface rendering rows that do not correspond to reality* — health badges on revoked
+gateways, a site showing "2 gateways" both dead while the live one was orphaned. **This is the same class:** the
+Gateways list shows `azure-gw` **and** `k8s` as two gateways, when there is one host with one agent and one of
+those rows has been dead for six days. An operator reading that list cannot tell which is which.
+
+It is also the live evidence under WF-S13-1: that stale row is `active`, so it is a **selectable device target**.
+
+### `wg0` contention — no second host-network agent
+
+The in-cluster agent uses **host networking** and owns `wg0` on azure-gw. A second host-network agent would
+contend for the same interface. **azure-gw is not a spare gateway host: one agent slot, and k3s is in it.**
 
 **Found the hard way on 2026-07-31; do not rediscover it.**
-
-`azure-gw` runs the node-agent **inside the k3s cluster**, serving the `k8s` node row — which is why that row's
-endpoint is `52.190.140.51:51820`, azure-gw's own public address. The pod uses **host networking** and owns
-`wg0` on the host.
-
-**A second host-network agent on azure-gw would contend for the same interface.** So azure-gw is NOT a spare
-gateway host: the box has one agent slot and k3s is in it.
 
 Consequences for any walk needing N expired subjects:
 
