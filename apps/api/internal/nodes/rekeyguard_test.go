@@ -139,22 +139,46 @@ func TestRekeyGateTakesNoForceParameter(t *testing.T) {
 	// paper. That is the point: the test's value is that it must be EDITED, not that it runs.
 	//
 	// IT WAS EDITED ONCE, deliberately, and the justification belongs here rather than in a commit message.
-	// Review pass 1 #3 added `provesCurrentKey`. THAT IS NOT A FORCE FLAG, and the distinction is exact:
+	// Review pass 1 #3 added a fifth parameter, now `certUndelivered`. THAT IS NOT A FORCE FLAG, and the
+	// distinction is exact:
 	//
 	//   a FORCE flag is CALLER-ASSERTED INTENT — "do it anyway" — so the party most motivated to override the
 	//   guard is the party who sets it, which is why it is documentation rather than a guard;
 	//
-	//   `provesCurrentKey` is a CALLER-INDEPENDENT FACT, derived by the control plane from the request's own
-	//   cryptographic content compared against the CP's own record. A caller cannot set it by asking for it. They
-	//   can only make it true by actually holding the key the control plane already trusts — at which point they
-	//   can authenticate as the node anyway, so the gate is not being overridden, it is being told something it
-	//   would have concluded had it been able to see that far.
+	//   `certUndelivered` is a CALLER-INDEPENDENT FACT the control plane OBSERVED ABOUT ITSELF: whether the
+	//   certificate it last issued has ever been used to authenticate. A caller cannot set it, cannot assert it,
+	//   and cannot make it true — only the absence of the CP's own observation makes it true.
+	//
+	//   ITS FIRST VERSION WAS WEAKER AND WAS WRONG. `provesCurrentKey` keyed on the CALLER'S possession, which a
+	//   live gateway's key-holder also has, so it authorized displacing a running node. The lesson is in the
+	//   difference: "what the caller can prove" and "what we observed about our own issuance" look equally
+	//   objective and are not.
 	//
 	// The test that keeps that honest is TestRedeliveryCarveOutCannotUnRevoke: whatever this parameter means, it
 	// must never reach a revoked node.
 	var gate func(string, time.Time, bool, time.Time, bool) (bool, string) = RekeyAuthorized
 	if gate == nil {
 		t.Fatal("unreachable")
+	}
+}
+
+// TestRedeliveryREFUSESALiveNode — THE REGRESSION RED for the live-node takeover this carve-out's first version
+// introduced (S13.1 D3, found by the author after Batch A).
+//
+// The first predicate was "the caller proves the key the CP currently records". A LIVE gateway's key-holder
+// satisfies that, and RekeyNode replaces cert_serial — the column the agent channel authenticates against — so
+// exercising it displaced the running gateway. The narrowed predicate is DELIVERY: a running gateway's
+// certificate has authenticated, so it is marked delivered, so it can never be the subject of a redelivery.
+//
+// This red fails if anyone widens the predicate back toward the caller's possession.
+func TestRedeliveryREFUSESALiveNode(t *testing.T) {
+	now := time.Now()
+	live := now.Add(47 * time.Hour) // a valid certificate — the node is running
+
+	// DELIVERED = false is the ONLY thing that may authorize. A live node is delivered by definition.
+	if ok, reason := RekeyAuthorized("active", live, true, now, false); ok {
+		t.Fatalf("a live gateway must be refused: its certificate has authenticated, so nothing about it is "+
+			"undelivered, and re-keying it would displace the running credential — got %q", reason)
 	}
 }
 
@@ -176,19 +200,20 @@ func TestRedeliveryCarveOutCannotUnRevoke(t *testing.T) {
 // TestRedeliveryAuthorizesTheLOSTRESPONSECase — the D3/D10 collision, as a unit.
 //
 // A lost re-key response leaves the control plane holding a FRESH certificate the agent never received. The node
-// therefore reads as live, and before this carve-out the gate refused the recovery D10 exists for — for a full
-// 48h certificate lifetime.
+// therefore reads as live by expiry, and before this carve-out the gate refused the recovery D10 exists for — for
+// a full 48h certificate lifetime. What distinguishes it from an actually-live node is DELIVERY: this certificate
+// has never authenticated.
 func TestRedeliveryAuthorizesTheLOSTRESPONSECase(t *testing.T) {
 	now := time.Now()
 	fresh := now.Add(47 * time.Hour) // what a just-committed re-key leaves behind
 
 	if ok, _ := RekeyAuthorized("active", fresh, true, now, false); ok {
-		t.Fatal("without the proof, a live node must still be refused — that is the whole gate")
+		t.Fatal("a DELIVERED certificate on a live node must still be refused — that is the whole gate")
 	}
 	ok, reason := RekeyAuthorized("active", fresh, true, now, true)
 	if !ok {
-		t.Fatal("with the current key proven AND the CSR carrying that same key, redelivery must be authorized: " +
-			"the caller can already authenticate as this node, so re-issuing over the same key grants nothing new")
+		t.Fatal("an UNDELIVERED certificate plus a CSR over the recorded key must authorize redelivery — that is " +
+			"the lost-response case, and refusing it costs the gateway its identity for a full certificate lifetime")
 	}
 	if !strings.Contains(reason, "REDELIVERY") {
 		t.Fatalf("the authorization reason must name redelivery, so an audit row says which rule allowed it; got %q", reason)

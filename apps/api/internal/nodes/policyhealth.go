@@ -332,34 +332,39 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 // THE RETURNED REASON IS FOR THE LOG, NEVER THE RESPONSE. D8's uniform-refusal rule: an attacker probing with a
 // stolen key must not learn revoked-versus-not-found-versus-live. The remedy belongs in the operator-facing docs
 // and the health surface, not in what the endpoint says back.
-// provesCurrentKey is the REDELIVERY carve-out (review pass 1 #3, the D3/D10 collision).
+// certUndelivered is the REDELIVERY carve-out (S13.1 D3, RULED after review pass 1 #3 and the live-node takeover
+// its first version introduced).
 //
-// THE COLLISION. D10 exists so a LOST RESPONSE cannot brick a gateway: the control plane committed a new
-// certificate the agent never received, and the agent recovers by naming the key the CP recorded. But committing
-// that certificate ALSO advanced `cert_not_after` — the exact column this gate reads — so the node now looks
-// LIVE, and the gate refuses the recovery D10 was built to make possible, for a full 48h certificate lifetime.
-// Every artifact D10 shipped (migration 0061, the generated fingerprint column, its index, the identifier
-// columns) was justified by a property the gate then denied.
+// THE COLLISION IT SOLVES. D10 exists so a LOST RESPONSE cannot brick a gateway: the control plane committed a
+// certificate the agent never received. But committing it ALSO advanced cert_not_after, the column this gate
+// reads, so the node looked LIVE and the gate refused the recovery D10 was built for — for a full 48h lifetime.
 //
-// THE CARVE-OUT, AND WHY IT IS NOT A BACKDOOR. It authorizes only when the caller proves possession of the key
-// the control plane RECORDS RIGHT NOW, and asks for a certificate over THAT SAME KEY. Such a caller already holds
-// the node's identity in full: the certificate is public material and the private key is the entire secret, so
-// they can authenticate on the mTLS channel this instant. Re-issuing over the same key grants them nothing they
-// lack — it is REDELIVERY of a grant already made, not a new grant.
+// THE FAILED FIRST ATTEMPT, ON THE RECORD. The carve-out was first written as "the caller proves the key the CP
+// currently records". That authorized any holder of the private key INCLUDING while the gateway was running, and
+// because RekeyNode replaces cert_serial — the column the agent channel authenticates against — exercising it
+// DISPLACED the live gateway. It needed only the private key, never the certificate, so a key stolen without its
+// certificate went from inert to immediately usable. A live-node takeover through the gate built to refuse live
+// nodes.
 //
-// What it deliberately does NOT do: it cannot rotate to a different key (the CSR must carry the recorded key),
-// and it cannot touch a REVOKED node — that check runs first and is unconditional, because revocation is a human
-// decision and no proof may overturn it.
-func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time, provesCurrentKey bool) (bool, string) {
+// THE PREDICATE THAT IS ACTUALLY MEANT. Not "who is asking" but "was the thing we issued ever delivered". A
+// running gateway's certificate HAS AUTHENTICATED — that is what running means — so it is marked delivered
+// (MarkCertDelivered, on first use), and the live case cannot arise. Undelivered is a state only a lost response
+// produces.
+//
+// It still cannot rotate to a different key (the caller must ask for a certificate over the recorded one), and it
+// still cannot touch a REVOKED node — that check runs first, unconditionally, because revocation is a human
+// decision no proof may overturn.
+func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time, certUndelivered bool) (bool, string) {
 	if status == "revoked" {
 		return false, "node is REVOKED — an operator deliberately retired it, and a proof of possession cannot " +
 			"distinguish the real gateway from whoever holds its stolen key. Re-key must never un-revoke. " +
 			"Recover it with an operator-minted join token"
 	}
-	if provesCurrentKey {
-		return true, "the caller proved possession of the key this control plane currently records AND asked for " +
-			"a certificate over that same key — a REDELIVERY of a grant already made (D10 lost-response recovery), " +
-			"which grants no capability the key holder does not already have"
+	if certUndelivered {
+		return true, "the certificate this control plane last issued for this node has NEVER been used to " +
+			"authenticate, and the caller asked for one over the same recorded key — a REDELIVERY of a grant that " +
+			"was made but never arrived (D10 lost-response recovery). A running gateway's certificate has " +
+			"authenticated by definition, so this state cannot describe a live node"
 	}
 	if !certNotAfterKnown {
 		// UNKNOWN is not gone. A row with no recorded expiry predates migration 0054 and 0055 declined to bound

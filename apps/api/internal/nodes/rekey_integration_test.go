@@ -88,8 +88,8 @@ func (f *rekeyFixture) addExpiredNode(t *testing.T, name string, pub *rsa.Public
 		t.Fatal(err)
 	}
 	if _, err := f.tx.Exec(f.ctx, `
-		INSERT INTO nodes (id,org_id,name,cert_serial,cert_public_key,cert_not_after,status)
-		VALUES ($1,$2,$3,$4,$5,now() - interval '2 days','active')`,
+		INSERT INTO nodes (id,org_id,name,cert_serial,cert_public_key,cert_not_after,status,cert_delivered_at)
+		VALUES ($1,$2,$3,$4,$5,now() - interval '2 days','active',now() - interval '3 days')`,
 		id, f.org, name, serial, base64.StdEncoding.EncodeToString(spki)); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
@@ -206,6 +206,17 @@ func TestLostResponseDoesNotBrickTheGateway(t *testing.T) {
 	var notAfter time.Time
 	if err := f.tx.QueryRow(f.ctx, "SELECT cert_not_after FROM nodes WHERE id=$1", id).Scan(&notAfter); err != nil {
 		t.Fatal(err)
+	}
+	// AND ITS CERTIFICATE HAS NEVER BEEN DELIVERED — the fact that distinguishes a lost response from a live
+	// gateway, and the only thing the carve-out is allowed to key on. RekeyNode cleared it in the same statement
+	// that replaced the serial (D3 condition 1); a marker that survived the swap would describe the old
+	// certificate while naming the new one.
+	var delivered *time.Time
+	if err := f.tx.QueryRow(f.ctx, "SELECT cert_delivered_at FROM nodes WHERE id=$1", id).Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+	if delivered != nil {
+		t.Fatalf("re-key must CLEAR cert_delivered_at in the same statement that replaces the serial; got %v", delivered)
 	}
 	if !notAfter.After(time.Now()) {
 		t.Fatalf("this test is only meaningful while the committed certificate is still VALID — the whole point "+
@@ -414,5 +425,38 @@ func TestChallengeSurvivesAROLLINGUpgradeBOTHWAYS(t *testing.T) {
 			t.Fatalf("fingerprint-kind must leave cert_serial NULL — a fingerprint is not a serial, and writing one "+
 				"there would have a previous-version replica resolving it as one; got %q", *storedSerial)
 		}
+	}
+}
+
+// TestADELIVEREDCertificateCannotBeRedelivered — the integration-level REGRESSION RED for the live-node takeover
+// (S13.1 D3, introduced by this carve-out's first version and found by the author).
+//
+// The first predicate keyed on the CALLER'S possession of the recorded key, which a live gateway's key-holder
+// also has. Because RekeyNode replaces cert_serial — the column the agent channel authenticates against — that
+// authorized DISPLACING a running gateway with nothing but a stolen private key, no certificate needed.
+//
+// The narrowed predicate is the control plane's own observation: has this certificate ever authenticated? A
+// running gateway's has. So the live case is not refused by a check — it is unreachable.
+func TestADELIVEREDCertificateCannotBeRedelivered(t *testing.T) {
+	f := seedRekeyFixture(t)
+	k := rsaKey(t)
+	id, _ := f.addExpiredNode(t, "gw-live-"+uuid.NewString()[:8], &k.PublicKey)
+
+	// A LIVE gateway: valid certificate, and it has authenticated — which is what running means.
+	if _, err := f.tx.Exec(f.ctx,
+		"UPDATE nodes SET cert_not_after = now() + interval '30 days', cert_delivered_at = now() WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	before := f.row(t, id)
+
+	// The attacker holds the node's private key and nothing else. Under the first predicate this succeeded.
+	fp := fingerprintOf(t, &k.PublicKey)
+	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fp}, k, k); !errors.Is(err, ErrRekeyRefused) {
+		t.Fatalf("re-keying a LIVE gateway must be refused even by a caller holding its key — otherwise a private "+
+			"key stolen without its certificate displaces the running gateway (401 unknown_agent on its next "+
+			"request); got %v", err)
+	}
+	if after := f.row(t, id); after.CertSerial != before.CertSerial {
+		t.Fatal("a refused attempt must not move the serial — that IS the displacement")
 	}
 }

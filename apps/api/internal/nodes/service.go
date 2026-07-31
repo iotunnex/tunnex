@@ -323,6 +323,17 @@ func (s *Service) AuthenticateCert(ctx context.Context, certSerial string) (sqlc
 	if node.Status != "active" {
 		return sqlc.Node{}, apierr.New(401, "agent_revoked", "this agent has been revoked")
 	}
+	// FIRST USE MARKS DELIVERY (S13.1 D3). This is the observation that makes the redelivery carve-out safe: a
+	// certificate that has authenticated cannot be the subject of a lost-response recovery, so a LIVE gateway is
+	// excluded structurally rather than by a liveness check the gate deliberately does not have. A no-op after the
+	// first call (the UPDATE's own WHERE), and best-effort: failing an agent request because a marker could not be
+	// written would trade a real outage for a bookkeeping one. The cost of a missed write is one node that stays
+	// eligible for redelivery until its next request.
+	if !node.CertDeliveredAt.Valid {
+		if merr := s.q.MarkCertDelivered(ctx, node.ID); merr != nil {
+			slog.Warn("cert_delivery_mark_failed", "node_id", node.ID.String(), "error", merr.Error())
+		}
+	}
 	return node, nil
 }
 

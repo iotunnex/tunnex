@@ -681,6 +681,14 @@ type Querier interface {
 	// guard). Resize takes only the org key; allocation takes {owner,org} sorted;
 	// resize never waits on the owner key, so no inversion/deadlock.
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
+	// Delivery is recorded THE FIRST TIME a certificate authenticates, and only then: the WHERE clause makes this a
+	// no-op on every subsequent request, so the agent channel pays one write per credential rather than one per call.
+	//
+	// This is what makes the D3 redelivery carve-out safe. A RUNNING gateway's certificate has authenticated by
+	// definition, so it is delivered, so the carve-out cannot touch it — the live-node case is excluded structurally
+	// rather than by a check someone must remember to write.
+	// lint:cross-org — keyed by node id, resolved from the presented client certificate; the caller IS the node.
+	MarkCertDelivered(ctx context.Context, id uuid.UUID) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	// One stamp for all three poll outcomes (the two-tier health, D2):
@@ -714,6 +722,11 @@ type Querier interface {
 	// forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on
 	// `status = 'active'` so a revoked row cannot be re-keyed even if a future caller reached here without the gate.
 	// TestRekeyQueryCannotResurrect enforces both halves against this text.
+	// cert_delivered_at IS CLEARED IN THIS SAME STATEMENT (S13.1 D3 condition 1), not in a follow-up write.
+	// A new serial that inherited the old serial's delivered marker leaves the redelivery gate either permanently
+	// shut (the new certificate looks delivered before it has ever been used, so a lost response is unrecoverable) or
+	// permanently open (if the inherited value were NULL) — and neither state announces itself. One statement, so the
+	// marker cannot disagree with the serial it describes.
 	RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a

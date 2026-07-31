@@ -227,6 +227,22 @@ three:
 taken as authority and a compatibility shim was built to satisfy it, without anyone asking whether the table
 existed one version ago. *The law was invoked to justify the work that the law would have prevented.*
 
+### FURTHER INSTANCES (2026-07-31, EPIC 13 fold)
+
+**A false proof through mangled tooling — instance 4 of this class.** A mutation round was run through a shell
+function whose `\&` escaping silently corrupted every patch: two mutations produced BUILD failures (already known
+to be indistinguishable from a pass) and one reported **`ok`** — a mutation that never applied, read as "the fix
+is unnecessary". The rule that now binds: **mutation rounds are applied through a heredoc with an anchor
+assertion** (`assert old in s`) so a patch that does not match fails loudly instead of passing quietly. Re-running
+the same round correctly produced four clean FAILs.
+
+**Fixture fidelity — two more instances, both caught by the reds themselves.** A cascade helper that recorded
+LESS than the production sweep it mirrored, so a restored device looked like a pre-migration row and the red
+failed for the wrong reason. And a fixture using fixed certificate serials against a globally unique column: it
+passed once and then failed on a constraint forever — **a fixture whose first green is its only green**, caught by
+`make test-editions` rather than by the direct run that wrote it. Both are the fixture-fidelity law: a fixture
+that cannot express the production state tests a different system.
+
 **What binds, from now on, when a guard is written or trusted:** state, in one sentence beside it, **what the
 guard reads and where that value comes from.** If the answer is "from the thing it is checking", it is not a
 guard — it is a restatement. Applies equally to trusting an EXISTING guard's verdict: #20 was a failure to ask

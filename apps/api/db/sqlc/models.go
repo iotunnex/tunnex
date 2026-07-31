@@ -272,6 +272,8 @@ type Node struct {
 	CertPublicKey *string `json:"cert_public_key"`
 	// SHA-256 of cert_public_key's SPKI DER, lowercase hex. GENERATED from the key so the two cannot drift. The second re-key identifier (S13.1 D10); NOT unique — the lookup refuses on multiple matches.
 	CertKeyFingerprint *string `json:"cert_key_fingerprint"`
+	// When the CURRENT cert_serial was first seen authenticating on the agent channel. NULL = issued but never used, which is the only state the D3 redelivery carve-out authorizes. Cleared by RekeyNode in the same statement that replaces cert_serial (S13.1).
+	CertDeliveredAt pgtype.Timestamptz `json:"cert_delivered_at"`
 }
 
 type NodeJoinToken struct {
