@@ -134,8 +134,12 @@ RETURNING node_id;
 -- need: the address is free the instant status leaves ('active','pending'), because both readers that define
 -- taken-ness filter on exactly that (devices_org_ip_key and ListActiveDeviceAllocations). Clearing it destroyed
 -- the only record of what each user held, which is what made Wall 6 unrecoverable rather than merely painful.
+-- revoked_prev_status records WHAT THE CASCADE FOUND (review pass 1 #8). Without it the restore has to guess,
+-- and it guessed 'active' — promoting a device that was PENDING, never approved by anyone, straight past the
+-- org's approval gate. The schema recorded WHY a device was revoked and not WHAT IT WAS.
 UPDATE devices
-SET status = 'revoked', revoked_at = now(), revoked_cause = 'cascade'
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'cascade',
+    revoked_prev_status = status
 WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL;
 
 -- name: DeleteDeviceStatus :exec

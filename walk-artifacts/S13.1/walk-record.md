@@ -67,3 +67,58 @@ No product path can home a device on `aws-gw-1`, so the walk's devices are creat
 explicit `node_id`. **That is a workaround for WF-S13-1, not a walk procedure**, and it is recorded here rather
 than performed quietly: the zero-touch bar applies to recovery, and this is device staging, but a reader must be
 able to tell which commands were the product working and which were us going around it.
+
+---
+
+## WF-S13-3 — Batch C's #8 fix HALF-LANDED, and its red passed because the FIXTURE simulated the missing half
+
+**Found on the wire, at Leg 3a's cascade.** Severity **HIGH** — the approval bypass #8 was raised to fix was still
+live. **Self-inflicted, in the fold that was supposed to close it.**
+
+### What the wire showed
+
+Revoking `aws-gw-1` cascaded its three devices correctly — `revoked_cause = 'cascade'` ✅, `assigned_ip`
+preserved ✅ — and left **`revoked_prev_status` EMPTY on all three**.
+
+### Why
+
+The production sweep never received the column:
+
+```sql
+UPDATE devices
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'cascade'     -- no revoked_prev_status
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL;
+```
+
+The Batch C edit used a bare `s.replace()` whose anchor read `IN ('active','pending')` while the file reads
+`IN ('active', 'pending')` — **one space**. It matched nothing, changed nothing, and reported success.
+
+### Why no test caught it — this is the important half
+
+The red for #8 (`TestRestoreDoesNotPromoteANEVERAPPROVEDDevice`) **passed**, because the same fold "corrected" the
+test fixture `revokeGatewayCascade` to set `revoked_prev_status = status` by hand. **The fixture simulated a
+production change that did not exist, and the red asserted against the simulation.**
+
+That is the fixture-fidelity law running in REVERSE. Its known form is a fixture that records LESS than
+production, so a red fails for the wrong reason. This is a fixture that records MORE — so a red PASSES for the
+wrong reason, which is strictly more dangerous because nothing draws attention to it.
+
+It is also the fourth instance this session of *a patch that did not apply and reported success* — the same class
+as the three mutation false-proofs that motivated `scripts/mutate.sh` and its anchor assertion. **The script was
+written and then not used on this edit.**
+
+### Fixed
+
+1. The sweep now records `revoked_prev_status = status`, applied with an `assert old in s`.
+2. **The fixture no longer restates the production query — it CALLS it** (`f.svc.q.RevokeDevicesForNode`). A
+   fixture that restates production tests the restatement; calling the real query makes divergence impossible by
+   construction.
+3. Mutation-proven: removing the column from the sweep now FAILS the red (`a device that WAS active must come
+   back active; got "pending"`). Under the old fixture that same mutation passed.
+
+### Consequence for this run
+
+The three devices already cascaded carry `revoked_prev_status = NULL`, so Leg 4's restore will take the
+**unknown-prior-status** branch. **#8's recorded-prior-status path is therefore UNPROVEN on this rehearsal** and
+is owed by the 48-hour run. The unknown branch can still be exercised here by turning the org's approval gate on
+before the restore — the fail-safe direction (`NULL + approval on → pending`).

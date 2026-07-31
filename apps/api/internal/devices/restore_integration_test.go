@@ -82,14 +82,17 @@ func (f *restoreFixture) revokeDeliberately(t *testing.T, id uuid.UUID) {
 // gateway revocation does, so a deliberately-revoked row is already out of range.
 func (f *restoreFixture) revokeGatewayCascade(t *testing.T) {
 	t.Helper()
-	if _, err := f.pool.Exec(f.ctx,
-		// MIRRORS RevokeDevicesForNode EXACTLY, including revoked_prev_status (0062) — a fixture that records
-		// less than the production sweep makes every restored device look like a pre-0062 row, which is a
-		// different test than the one being written (fixture-fidelity law).
-		`UPDATE devices SET status='revoked', revoked_at=now(), revoked_cause='cascade',
-		                    revoked_prev_status=status
-		 WHERE node_id=$1 AND status IN ('active','pending') AND deleted_at IS NULL`, f.node); err != nil {
-		t.Fatal(err)
+	// CALLS THE PRODUCTION SWEEP, rather than restating it.
+	//
+	// This helper used to hand-write the UPDATE, and the EPIC 13 walk found what that hides: the production
+	// query had never been given `revoked_prev_status` (a bare string replace whose anchor missed by one space),
+	// while this fixture set it. The red then asserted against a fixture simulating a fix that did not exist,
+	// and passed — only the wire caught it.
+	//
+	// A fixture that RESTATES production tests the restatement. Calling the real query makes the divergence
+	// impossible by construction.
+	if _, err := f.svc.q.RevokeDevicesForNode(f.ctx, f.node); err != nil {
+		t.Fatalf("cascade sweep: %v", err)
 	}
 }
 
