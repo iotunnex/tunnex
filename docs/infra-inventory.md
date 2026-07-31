@@ -69,19 +69,22 @@ Consequences for any walk needing N expired subjects:
 
 ## Walk-role assignment — EPIC 13 (`docs/S13-boxwalk.md`)
 
-The walk needs **three gateways whose certificates have genuinely expired**, and the fleet has exactly three
-gateway VMs, so there is no spare. Assignments are load-bearing: each subject must carry exactly ONE reason to be
-refused, or the uniform-refusal surface makes the leg prove nothing.
+The walk needs **three gateways whose certificates have genuinely expired**, and this fleet has **two usable VM
+agent hosts** (see the k3s section above). **Corrected 2026-07-31 after the rehearsal** — the original assignment
+put C on `azure-gw`, which cannot host a second agent.
 
-| walk role | host | why this one | ends the walk as |
+**The resolution was to SEQUENCE, not to find a third host.** A and C are the same box in different states, run in
+order. That preserves the actual reason the runsheet wanted three subjects — B's refusal (keyless) must never be
+conflated with C's (revoked) — because B's key stays unrecorded while C's is recorded throughout.
+
+| walk role | host | why | ends as |
 |---|---|---|---|
-| **A** — recovers by PoP (Leg 1) | **aws-gw-1** | the box whose real expiry started the epic; recovering it in place is the epic's own story closing | recovered, same node id |
-| **B** — keyless → token fallback (Leg 2) | **aws-gw-2** | ends as a **NEW node** (site binding lost, devices need re-issuing), so it goes on the least entangled box | re-enrolled as B′, and is Leg 4's restore TARGET |
-| **C** — revoked → refused (Leg 3a) | **azure-gw** | hosts the Legs 4/5/6 devices; nearest the CP, so device traffic is simplest to stage | **revoked and dead** — re-enrol it after the walk |
-| out of the walk | the **k8s** node row | keep one live node untouched as a control | unchanged |
+| **A** — recovers by PoP (Leg 1) | **aws-gw-1** | the box whose real expiry started the epic | recovered, same node id |
+| **B** — keyless → token (Leg 2) | **aws-gw-2** | ends as a NEW node, so the destructive outcome sits on the least entangled box | re-enrolled as **B′**, Leg 4's restore target |
+| **C** — revoked → refused (Leg 3a), and Legs 4/5/6's devices | **aws-gw-1 again**, after Leg 1 | sequenced; its key is recorded, so its refusal has exactly one cause | revoked |
+| control | the **k8s** row | one live node, untouched | unchanged |
 
-**C is where the walk's devices live**, not A — Leg 4 restores a *revoked* gateway's devices, and C is the one
-that gets revoked.
+**The devices live on C**, which is aws-gw-1 — Leg 4 restores a *revoked* gateway's devices.
 
 **aws-behind-host is not used by the EPIC 13 walk.** It is a site-transit subject, and gateway recovery does not
 exercise transit.

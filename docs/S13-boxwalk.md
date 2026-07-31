@@ -4,6 +4,14 @@ Status: **RUNSHEET** (plan). Executes in a walk session, AFTER the epic-end revi
 DURING the session under `walk-artifacts/S13/`; any scratch key material (device configs, join tokens, agent state
 dirs) is **gitignored at creation** — device configs contain private keys.
 
+> ## ⚠ READ `docs/S13-run-plan.md` FIRST — DO NOT RUN THIS SHEET END TO END AT 48h
+>
+> This file is the LEGS. The RUNS are three, and they buy different things: §A rehearsal #1 (complete at 10m),
+> §B rehearsal #2 (10m — the items §A could not cover, plus Legs 7/8 and refusal timing), §C the 48-hour run
+> (**narrow: one subject, one recovery**, proving only that the TTL knob did not change behaviour).
+>
+> Running everything here at 48h spends two days re-proving what §A proved in ten minutes.
+
 ## REBASED ON THE FOLDED CODE (2026-07-31) — leg-by-leg verdict
 
 This runsheet was written before review pass 1 and before four fold batches (~20 fixes, migrations 0062–0064).
