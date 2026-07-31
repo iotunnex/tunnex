@@ -48,14 +48,59 @@ start and end.
 
 ## Prerequisites — what Pawan needs staged
 
-| # | Requirement | Why | Lead time |
+### THREE expired gateways, not two — and the reason is the uniform-refusal surface itself
+
+Legs 1, 2 and 3a each need a gateway whose certificate has genuinely expired, and they need **three different
+ones**, because the refusals are indistinguishable **by construction**:
+
+| leg | subject | why it must be its OWN host |
+|---|---|---|
+| **1** PoP self-recovery | **A** | A ends the leg RECOVERED, holding a fresh 48h certificate. It is no longer an expired subject for anything after it |
+| **2** keyless → token fallback | **B** | its `cert_public_key` is nulled as declared staging, so PoP is refused *for lack of verification material*. The leg then re-enrols B by token, which issues a fresh certificate — B is no longer expired either |
+| **3a** revoked → refused | **C** | refused *because it was revoked* |
+
+**Running 2 and 3a on one host proves neither.** The endpoint returns the SAME refusal for a revoked node and for
+a node with no recorded key — that uniformity is D8/D9, deliberate, and the whole point of the surface. So a
+single host carrying both conditions produces one refusal attributable to either cause, and the leg cannot
+distinguish what it just proved. The evidence that separates them lives in the CP log and in the agent's own
+local diagnosis, and each needs a subject in exactly one of the two states.
+
+A third host is cheap to stage and **impossible to add on walk day** — it needs 48 hours it cannot get.
+
+### Staging order — FORCED, and the stop is last
+
+The clock and the device prerequisites are in tension: **a live agent renews every 24h and pushes `not_after`
+forward**, so A cannot be live while its clock runs — but the devices Legs 4/5/6 need must be created *and
+connected* on A **while A is live**. So the order below is not a preference, it is the only order that works. Do
+not spend the 48-hour wait before the prerequisites exist.
+
+| # | step | on | must be true before moving on |
 |---|---|---|---|
-| 1 | **azure-cp up (enterprise edition)** | the rig; several legs read audit rows and device state | — |
-| 2 | **TWO gateways offline for ≥ 48 hours** — call them **A** and **B** | `agentca.CertTTL` is a **constant 48h and not configurable**, so an expired agent certificate cannot be manufactured: the clock is the only way. A is the PoP-recovery subject, B is the refusal subject, and B is consumed by its leg (it ends revoked) | **START 48h+ BEFORE THE WALK** |
-| 3 | At least **one device homed on gateway A**, ideally two — one whose address will be free at restore, one whose address will have been taken | Legs 4 and 6 have no subject otherwise | — |
-| 4 | A **third device, deliberately revoked** by an admin before A is revoked | Leg 5's subject: it must stay dead through a restore that revives its neighbours | — |
-| 5 | The **agent logs reachable** on both A and B (`journalctl -u tunnex-node` or `kubectl logs`) | the agent's local diagnosis is the *subject* of Leg 2, not a debugging aid | — |
-| 6 | A local stack (`make up-enterprise`) | Legs 0b, 3b and 7 run here — see the split below | — |
+| 1 | Control plane at this branch, **enterprise**, schema 61 | azure-cp | Leg 0's CP census recorded |
+| 2 | Agent image at this branch on **A, B, C** — restart in place where possible | each host | Leg 0's per-host census recorded (sha + edition) |
+| 3 | All three enrolled and healthy | azure-cp | a node row per host, `key_recorded = t` for **A** and **C** |
+| 4 | **Create the devices on A** — `keeps` and `contended` (Legs 4/6) and `deliberate` (Leg 5) | UI / API | three device rows homed on A |
+| 5 | **CONNECT each device and pass traffic** | the device | a handshake and non-zero transfer counters in `wg show` on A |
+| 6 | **Revoke the `deliberate` device** as an admin | UI | `revoked_cause = 'deliberate'` on that row |
+| 7 | Record identity for A, B, C: serial, `cert_not_after`, fingerprint | azure-cp | `walk-artifacts/S13.1/clock-record.md` filled |
+| 8 | **STOP all three agents — LAST** | each host | `docker ps` empty per host; stop timestamp recorded |
+
+Step 5 is not ceremony. Leg 6 asks whether a *user* can tell their config went stale; a device that never
+connected cannot demonstrate that it stopped working, and a `needs_reexport` badge on a device nobody ever used
+proves the badge renders, not that it warns anyone.
+
+Step 8 last, and **idle is not stopped** — `renewLoop` runs regardless of whether anything is reconciling, and one
+renew silently costs another 48 hours.
+
+### The rest
+
+| # | Requirement | Why | Clock? |
+|---|---|---|---|
+| 1 | **azure-cp up (enterprise edition)** | several legs read audit rows and device state | — |
+| 2 | **A live REPLACEMENT gateway for Leg 4** | the operator restore re-homes onto a live node, and the server refuses a revoked or foreign target. **B-after-token-re-enrolment (Leg 2) serves** — it is a fresh live node by then — so no fourth host is needed, but Leg 2 must run BEFORE Leg 4 | none |
+| 3 | The **agent logs reachable** on A, B and C | the agent's local diagnosis is the *subject* of Leg 2, not a debugging aid | — |
+| 4 | A local stack (`make up-enterprise`) | Legs 0b, 3b and 7 | **CLOCK-FREE — stage any time** |
+| 5 | **Dropped-response tooling for Leg 7** — a proxy that forwards `POST /agent/rekey` and kills the connection before the body returns, or a scripted `SIGKILL` of the agent between the CP's commit log line and its own save | Leg 7 has no subject without a way to lose a response | **CLOCK-FREE — stage any time** |
 
 Shell vars: `CP=http://10.0.0.4` · `ORG=<org-uuid>` · on azure-cp, `cd ~/tunnex`.
 
@@ -64,10 +109,10 @@ Shell vars: `CP=http://10.0.0.4` · `ORG=<org-uuid>` · on azure-cp, `cd ~/tunne
 | leg | where | why |
 |---|---|---|
 | 0 | both | provenance is per-environment |
-| **1** PoP self-recovery | **RIG ONLY** | needs a genuinely expired certificate on a real agent (48h clock) |
-| **2** token-only fallback | **RIG ONLY** | same, plus the agent's own log is the evidence |
-| **3** revoked → refused | **RIG** (3a) **+ LOCAL** (3b) | 3a is the agent's own behaviour; 3b drives the endpoint directly with `curl` so the *refusal surface* is exercised without spending a 48h gateway |
-| 4 cascade restore | RIG | rides Leg 1's recovery |
+| **1** PoP self-recovery — **host A** | **RIG ONLY** | needs a genuinely expired certificate on a real agent (48h clock) |
+| **2** keyless → token fallback — **host B** | **RIG ONLY** | same, plus the agent's own log is the evidence |
+| **3** revoked → refused — **host C** (3a) | **RIG** (3a) **+ LOCAL** (3b) | 3a is the agent's own behaviour; 3b drives the endpoint directly with `curl` so the *refusal surface* is exercised without spending a 48h gateway |
+| 4 operator restore | RIG | needs Leg 2's re-enrolled B as the live target, and Leg 3a's revoked C as the source |
 | 5 deliberate revoke stays dead | RIG | rides Leg 4 |
 | 6 re-addressed → config out of date | RIG | rides Leg 4 |
 | **7** lost-response recovery (D10) | **LOCAL** | the newest code, wire-unproven; drivable against a local CP without burning a 48h gateway |
@@ -156,7 +201,9 @@ D1(a) keeps it as the always-available manual path.
 **Staging (declared):**
 
 ```bash
-# [azure-cp] STAGING — simulate a pre-0057 node. This is setup, not procedure.
+# [azure-cp] STAGING — simulate a pre-0057 node on HOST B ONLY. This is setup, not procedure.
+# B is the keyless subject and nothing else: it must NOT also be revoked, or its refusal has two causes and
+# proves neither (the endpoint answers identically for both).
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
   "UPDATE nodes SET cert_public_key = NULL WHERE name='<B>';"
 # Confirm the generated fingerprint went NULL with it — the column is derived, not written
@@ -191,18 +238,27 @@ Start gateway B. It will attempt PoP, be refused, and back off.
 
 ### 3a — on the rig, through the agent
 
-**Subject: gateway B**, now expired *and* revoked. Revoke it in the UI (Gateways → Revoke), which also **cascades to
-its devices** — that cascade is Leg 4's premise, so capture the device rows now.
+**Subject: gateway C** — expired, and now revoked. NOT B: B is the keyless subject, and a host carrying both
+conditions produces a refusal attributable to either, which the uniform-refusal surface makes indistinguishable by
+construction. C's `cert_public_key` must still be RECORDED (`key_recorded = t`), so the ONLY reason it can be
+refused is the revocation — that is the whole point of the leg.
+
+Revoke it in the UI (Gateways → Revoke), which also **cascades to its devices** — that cascade is Leg 4's premise.
+
+> **Move A's devices to C before this leg, or give C its own.** Leg 4 restores a REVOKED gateway's devices, and C
+> is the revoked one. Either home the Leg 4/5/6 devices on C at staging step 4 instead of A, or accept that Leg 4's
+> source is C and stage its devices accordingly. **Pin this at staging time** — discovering on walk day that the
+> cascade landed on the wrong host costs the leg.
 
 ```bash
 # [azure-cp] BEFORE: the row that must be UNTOUCHED afterwards, and the cascade
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
-  "SELECT id, cert_serial, status, revoked_at FROM nodes WHERE name='<B>';"
+  "SELECT id, cert_serial, status, revoked_at, cert_public_key IS NOT NULL AS key_recorded FROM nodes WHERE name='<C>';"
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
-  "SELECT name, status, revoked_cause, assigned_ip FROM devices WHERE node_id='<B-id>' ORDER BY name;"
+  "SELECT name, status, revoked_cause, assigned_ip FROM devices WHERE node_id='<C-id>' ORDER BY name;"
 ```
 
-Start gateway B's agent and let it attempt recovery.
+Start gateway C's agent and let it attempt recovery.
 
 - **PASS:**
   - `agent_rekey_refused` — **and the refusal is indistinguishable from every other refusal.** The response carries
@@ -240,45 +296,101 @@ done
 
 ---
 
-## Leg 4 — CASCADE RESTORE (premise flagged — read this first)
+## Leg 4 — THE OPERATOR RESTORE, walked as a FALSIFICATION ATTEMPT
 
-**Wall 6:** revoking a gateway cascades to every device homed on it, so recovery *without* restoring them hands back
-a working gateway with **zero users**, each needing a re-issued one-time config — one rebuild becoming a fleet-wide
-user event, invisible until people call.
+**Source: gateway C** (revoked in Leg 3a, its devices cascade-revoked with it). **Target: B′** — gateway B after
+its token re-enrolment in Leg 2, which is a fresh live node. Leg 2 and Leg 3a must both be done first.
 
-> ### ⚠ DESK-CHECK FINDING, RAISED WHILE DRAFTING THIS LEG — DO NOT WALK AROUND IT
->
-> `RestoreCascadeRevokedDevices` has exactly **one** caller: `nodes.Rekey`, after commit. Devices are cascade-revoked
-> in exactly **one** place: `nodes.Revoke`. And **`Rekey` refuses a revoked node** (D3). So the trigger that produces
-> cascade-revoked devices puts the node into the one state that can never reach the code which restores them.
->
-> On this reading the restore path is **unreachable in production** — correct code wired to a trigger it cannot fire
-> from, which is precisely what the DORMANT-MACHINERY law names. It is a **decide-item, not a walk finding**, and it
-> is surfaced rather than resolved: either a reachable trigger is named (an operator "restore devices" action on a
-> recovered gateway, or an un-revoke that D3 has good reason to refuse), or the mechanism is removed and Wall 6 is
-> re-opened honestly.
->
-> **Walk it anyway, as a falsification attempt.** The desk analysis may be wrong — that is what a wire proof is for.
-> If the sequence below produces `devices_restored_after_rekey`, the analysis was wrong and the leg passes. If it
-> produces nothing, the walk has confirmed the finding on the wire, which is worth more than the leg would have been.
+### What this leg is now, and the trap it must not fall into
 
-**Sequence (rig):** on gateway A — recovered in Leg 1 — revoke it, confirm the cascade, then attempt recovery.
+The leg was written to expose a defect: `RestoreCascadeRevokedDevices` had one caller (`Rekey`), devices are
+cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger that created the work
+put the node into the one state that could never reach the code that undid it. **Slice 7 was then built to fix
+exactly that**, adding the operator-initiated restore.
+
+**So a leg that now walks Slice 7's happy path is a confirmation wearing a falsification's clothes.** The code was
+written against this leg; of course the endpoint returns 200. That proves the author and the walker agree, which
+is worth nothing.
+
+The claim under test therefore moves one level up, to the thing Slice 7 does **not** self-evidently establish:
+
+> **A restored device is back IN SERVICE — not merely back to `status='active'`.**
+
+That is falsifiable, and it is the claim Wall 6 actually made.
+
+### THE FALSIFYING OBSERVATIONS — write these down before running anything
+
+The leg **FAILS** on any one of these. They are listed first, deliberately, so the result cannot be read backwards
+from whatever happens.
+
+| # | observation that FALSIFIES the claim | why it is a real risk, not a formality |
+|---|---|---|
+| **F1** | the restored device appears in `psql` as `active` on B′, but **`wg show` on B′ does not list its peer** | the restore is a database write plus a push. If the push does not place the peer, the device is "restored" into a config the data plane never learned |
+| **F2** | the device is active and peered, but **cannot pass traffic with the config it already holds** | its existing config embeds the **old gateway's endpoint and public key**. Re-homing changes `node_id` in the row; it cannot change a file on the user's laptop |
+| **F3** | **F2 happens and NOTHING tells the user.** `needs_reexport` stays absent for a device that kept its address | Slice 6 derives staleness from the **address** and the baked **ranges**. It does not compare the **gateway**. A re-homed device that reclaimed its address is, on that logic, perfectly fresh — and unusable |
+
+**My prediction, recorded before the walk so it cannot be adjusted after: F3 WILL FIRE.** I can find no code that
+compares the issued config's gateway against the device's current node, and the re-home path is new. If the walk
+refutes that prediction, the prediction was wrong and the leg passes — which is the point of writing it down.
+
+**F1 and F2 are genuinely open.** I have not traced the push far enough to predict them, and a walk is what
+settles that.
+
+If all three hold clean, the leg passes and Wall 6 is closed on the wire. If F3 fires alone, the mechanism works
+and the *surface* is incomplete — a finding, held, not fixed here.
+
+### Forcing the re-address case — PINNED: deliberate pre-allocation
+
+Half this leg is the reclaim-first behaviour, and with a roomy pool it never fires: the allocator hands the
+restored device a fresh address, the `readdressed` path is never taken, and the leg silently proves half of what it
+claims. **Correct code whose trigger never co-occurs — the same shape as the defect this leg exists for.**
+
+**Mechanism (pinned; do not substitute a pool resize):** after C is revoked and before the restore, create a decoy
+device on B′ and confirm it took the address the `contended` device held.
 
 ```bash
-# [azure-cp] after revoking A: every device homed on it must be revoked with cause='cascade', KEEPING assigned_ip
+# [azure-cp] 1. the address to contend for — captured BEFORE anything is created
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
-  "SELECT name, status, revoked_cause, assigned_ip FROM devices WHERE node_id='<A-id>' ORDER BY name;"
+  "SELECT name, status, revoked_cause, assigned_ip FROM devices WHERE node_id='<C-id>' ORDER BY name;"
+#    record: contended = <the assigned_ip of the device named `contended`>
+
+# 2. create a decoy device on B′ in the UI, then CONFIRM it took that exact address
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name, assigned_ip FROM devices WHERE name='decoy-1';"
 ```
 
-- **First PASS criterion, independent of the finding above:** cascade-revoked devices **keep `assigned_ip`**.
-  Revocation preserves what it invalidates — a revoked row that lost its address made the original unreclaimable *in
-  principle*, and `revoked_cause` is what makes a cascade distinguishable from a deliberate revoke at all.
-- **Then**, if a reachable recovery exists for A: `devices_restored_after_rekey restored=N readdressed=M` in the CP
-  log, audit rows `device.restored` / `device.restored_readdressed`, and each restored device **active again**.
-- **Reclaim-first:** a device whose original address is still free comes back **on the same address**; one whose
-  address was taken by a live device comes back on a **fresh** one and is audited distinctly.
+- Cascade-revoked rows **keep** `assigned_ip` but are excluded from `ListActiveDeviceAllocations` (status filter),
+  so that address reads as free and the allocator should hand it to the next device created.
+- **If `decoy-1` did NOT take it**, create `decoy-2`, `decoy-3` … and check each. **Bound it at five.** If five
+  decoys have not taken the address, STOP and record it: the allocator does not behave as assumed, which is itself
+  worth knowing, and the pool-resize fallback goes in the record as a deviation rather than being done silently.
+- The `keeps` device's address must be left **untouched**, so one device reclaims and one cannot. Both halves in
+  one restore is the only way to see the discrimination work.
 
----
+### Sequence
+
+```bash
+# [azure-cp] BEFORE — the cascade, with addresses PRESERVED
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name, status, revoked_cause, assigned_ip FROM devices WHERE node_id='<C-id>' ORDER BY name;"
+```
+
+- **PASS criterion 0, independent of everything else:** cascade-revoked devices **keep `assigned_ip`**. Revocation
+  preserves what it invalidates; a revoked row that lost its address made the original unreclaimable *in principle*.
+
+Then, in the UI: **Gateways → the revoked C → "Restore devices" → choose B′.** Zero-touch bar applies — if this
+needs a `curl` because the affordance is missing or broken, that is a finding.
+
+- **PASS:**
+  - `restored=2`, `readdressed=1` — `keeps` reclaims its address, `contended` gets a fresh one;
+  - both rows now `active` **and `node_id = B′`**;
+  - audit: one `node.devices_restored` naming **the human**, plus per-device `device.restored` /
+    `device.restored_readdressed` carrying `previous_node_id`;
+  - **F1 checked:** `wg show` on B′ lists both peers;
+  - **F2 checked:** the `keeps` device, using **the config it already had**, connects and passes traffic through
+    B′ — or does not, which is F2;
+  - **F3 checked:** the Devices list shows **`config out of date`** for `contended` (address changed) — and what it
+    shows for `keeps`, which is the prediction.
 
 ## Leg 5 — A DELIBERATELY-REVOKED DEVICE STAYS DEAD
 

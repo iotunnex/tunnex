@@ -26,14 +26,15 @@ host's identity is unusable.
 
 ## The gate
 
-**Earliest legal walk time = the LATER of the two hosts' `cert_not_after`, plus a margin.**
+**Earliest legal walk time = the LATEST of the THREE hosts' `cert_not_after`, plus a margin.**
 
 Not "stop time + 48h" — that is the wrong quantity and is always too late. The certificate expires at its own
 `not_after`, which was fixed when it was last issued or renewed, possibly long before the stop. A host renewed 20
 hours ago expires in 28, not 48.
 
-Both hosts must be past their own `not_after` before Legs 1–3 mean anything: Leg 1's subject must be genuinely
-unable to authenticate, and so must Leg 2's and Leg 3a's.
+All THREE hosts must be past their own `not_after` before Legs 1–3 mean anything: Leg 1's subject (A) must be
+genuinely unable to authenticate, and so must Leg 2's (B) and Leg 3a's (C). Three subjects, because the refusals
+are indistinguishable by construction — a host carrying two conditions proves neither.
 
 ---
 
@@ -69,11 +70,12 @@ sudo docker inspect --format '{{index .Config.Labels "org.opencontainers.image.t
 |---|---|---|---|---|---|---|
 | _(azure-cp)_ | control plane | n/a | n/a | **PENDING** | **PENDING** | **PENDING** |
 | _(host A)_ | PoP-recovery subject | **PENDING** | n/a (agent) | — | — | — |
-| _(host B)_ | refusal / fallback subject | **PENDING** | n/a (agent) | — | — | — |
+| _(host B)_ | keyless → token fallback subject | **PENDING** | n/a (agent) | — | — | — |
+| _(host C)_ | revoked → refused subject | **PENDING** | n/a (agent) | — | — | — |
 
 ---
 
-## Step 2 — bring both agents up and prove ENROLMENT SUCCEEDED
+## Step 2 — bring ALL THREE agents up and prove ENROLMENT SUCCEEDED
 
 A running process is not an enrolled agent. The proof is a node row with a certificate, not a container that
 started.
@@ -92,9 +94,12 @@ sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
    FROM nodes WHERE revoked_at IS NULL ORDER BY enrolled_at;"
 ```
 
-**`key_recorded` must be TRUE for host A.** Proof-of-possession recovery is impossible without it, and Leg 1 is
-the leg the epic exists for. (Host B's is deliberately nulled *during* the walk, as declared staging in Leg 2 —
-not now.)
+**`key_recorded` must be TRUE for hosts A AND C.** C's refusal must be attributable to its REVOCATION alone; if
+its key were also missing, the refusal has two causes and the endpoint answers identically for both.
+
+For host A it is what makes the leg possible at all: proof-of-possession recovery cannot work without it, and
+Leg 1 is the leg the epic exists for. (Host B's is deliberately nulled *during* the walk, as declared staging in
+Leg 2 — **not now**, or B spends its 48 hours as the wrong subject.)
 
 ### Evidence — identity at stop time
 
@@ -102,10 +107,11 @@ not now.)
 |---|---|---|---|---|---|
 | _(host A)_ | **PENDING** | **PENDING** | **PENDING** | **PENDING** | **PENDING** |
 | _(host B)_ | **PENDING** | **PENDING** | **PENDING** | **PENDING** | **PENDING** |
+| _(host C)_ | **PENDING** | **PENDING** | **PENDING** | **PENDING** | **PENDING** |
 
 ---
 
-## Step 3 — STOP both agents, and prove stopped
+## Step 3 — STOP all three agents, and prove stopped
 
 ```bash
 # [each gateway host]
@@ -124,13 +130,14 @@ Idle is not stopped. An agent that is up but not reconciling still runs `renewLo
 |---|---|---|---|
 | _(host A)_ | **PENDING** | **PENDING** | **PENDING** |
 | _(host B)_ | **PENDING** | **PENDING** | **PENDING** |
+| _(host C)_ | **PENDING** | **PENDING** | **PENDING** |
 
 ---
 
 ## Step 4 — the gate
 
 ```
-EARLIEST LEGAL WALK TIME  =  max(host A cert_not_after, host B cert_not_after) + 15 min margin
+EARLIEST LEGAL WALK TIME  =  max(A cert_not_after, B cert_not_after, C cert_not_after) + 15 min margin
 ```
 
 **PENDING** — cannot be computed until the `cert_not_after` values above are recorded.
@@ -142,5 +149,25 @@ sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
   "SELECT name, cert_not_after, cert_not_after < now() AS expired FROM nodes WHERE revoked_at IS NULL;"
 ```
 
-Both subjects must read `expired = t`. If either reads `f`, the walk **does not start** — Legs 1, 2 and 3a would
-all be exercising a live gateway and would prove nothing about recovery.
+**All three subjects must read `expired = t`.** If any reads `f`, the walk **does not start** — that leg would be
+exercising a live gateway and would prove nothing about recovery.
+
+---
+
+## The device prerequisites are part of this record, because they cannot be added later
+
+Legs 4/5/6 need devices that were created **and connected** on a gateway while it was live. Once the clock starts
+that gateway is stopped, and a device created afterwards has never passed traffic — it can demonstrate that a
+badge renders, not that a user was warned.
+
+Per `docs/S13-boxwalk.md`'s staging order, before the stop: three devices on the Leg-4 source gateway
+(`keeps`, `contended`, `deliberate`), each **connected with a handshake and non-zero transfer counters**, and
+`deliberate` then revoked by an admin so it carries `revoked_cause='deliberate'`.
+
+### Evidence — devices staged before the stop
+
+| device | homed on | assigned_ip | handshake seen | status at stop |
+|---|---|---|---|---|
+| `keeps` | **PENDING** | **PENDING** | **PENDING** | **PENDING** |
+| `contended` | **PENDING** | **PENDING** | **PENDING** | **PENDING** |
+| `deliberate` | **PENDING** | **PENDING** | **PENDING** | **PENDING** (must be `revoked` / `deliberate`) |
