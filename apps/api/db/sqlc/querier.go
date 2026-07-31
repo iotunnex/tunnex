@@ -332,6 +332,12 @@ type Querier interface {
 	// (S13.1 Slice 7) names a REVOKED node as its source — that is the whole point — and a lookup that filtered them
 	// out would make the one legitimate case unreachable. The caller decides what each side must be.
 	GetNodeForOrg(ctx context.Context, arg GetNodeForOrgParams) (Node, error)
+	// The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
+	// refuses if the node is not active — because revoke takes the same row lock, so a revoke that lands mid-restore
+	// either commits first (we see it revoked and refuse) or waits for us. Without the lock the restore authorized on
+	// state read BEFORE the identity commit and applied AFTER it, and a re-key racing an operator revoke re-activated
+	// the very devices that revoke had just cascaded.
+	GetNodeForOrgForUpdate(ctx context.Context, arg GetNodeForOrgForUpdateParams) (Node, error)
 	// lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
 	// old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
 	GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriorityParams) (*int32, error)
@@ -733,7 +739,20 @@ type Querier interface {
 	// — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
 	// the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
 	// authorizes both nodes and proves the target is live; this statement only records the binding it is given.
+	// status comes from the CALLER, resolved from revoked_prev_status (review pass 1 #8). Asserting 'active' here
+	// promoted a device that was PENDING — never approved by anyone — straight past the org's approval gate, because
+	// the statement declared a terminal value for a set whose members were not all in the same state.
 	RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCascadeRevokedDeviceParams) (Device, error)
+	// The third part of the act, reversed (review pass 1 #9). Revoking a node revokes its devices AND their OpenVPN
+	// client certificates AND rebuilds the CRL. Restore reversed only the first, so an OVPN device came back `active`
+	// with its certificate still revoked and still on the org CRL — control plane green, data plane refusing, and the
+	// operator told it succeeded.
+	//
+	// cause='cascade' ONLY, exactly like the device restore: a certificate an operator revoked deliberately is never
+	// revived by a gateway rebuild. The predicate is repeated here rather than left to the caller, same as
+	// RestoreCascadeRevokedDevice.
+	// lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
+	RestoreCascadeRevokedOVPNCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]RestoreCascadeRevokedOVPNCertsForDeviceRow, error)
 	// The SWEEP: password reset and account deactivation kill every live CLI
 	// credential exactly like they kill sessions (a surviving credential would be a
 	// back door around the sweep).

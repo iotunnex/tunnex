@@ -64,11 +64,29 @@ type RestoreResult struct {
 // story (D3 refuses to let a proof do it).
 func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourceNodeID, targetNodeID uuid.UUID, actor *uuid.UUID) ([]RestoreResult, error) {
 	var out []RestoreResult
+	crlDirty := false
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// The ORG advisory lock, the same one device-create takes, so allocation and restore serialize on one
 		// snapshot instead of racing to hand the same free address to two devices.
 		if e := q.LockDeviceKey(ctx, orgID.String()); e != nil {
 			return e
+		}
+		// #7 — THE TARGET MUST STILL BE ALIVE AT COMMIT TIME, not merely when the caller decided to restore.
+		//
+		// The re-key path calls this AFTER its own transaction committed, so the authorization was taken against a
+		// state that may since have changed: an operator revoke landing in that window cascaded these very devices,
+		// and restoring them re-activated what a human had just deliberately switched off — the device tier
+		// contradicting D3 while the node tier obeyed it. FOR UPDATE, because revoke takes the same row lock: a
+		// concurrent revoke either commits first (we see it and refuse) or waits behind us.
+		target, terr := q.GetNodeForOrgForUpdate(ctx, sqlc.GetNodeForOrgForUpdateParams{ID: targetNodeID, OrgID: orgID})
+		if terr != nil {
+			if errors.Is(terr, pgx.ErrNoRows) {
+				return ErrRestoreTargetUnusable
+			}
+			return terr
+		}
+		if target.RevokedAt.Valid || target.Status != "active" {
+			return ErrRestoreTargetUnusable
 		}
 		candidates, err := q.ListCascadeRevokedDevicesForNode(ctx, sourceNodeID)
 		if err != nil {
@@ -98,6 +116,10 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 		if err != nil {
 			return err
 		}
+		// #8 — a device whose approval was never granted must not be granted BY A RESTORE. The org's gate decides
+		// what an unknown prior status resolves to: with approval ON, unknown becomes `pending` (one operator
+		// click) rather than `active` (a silent bypass). Rows written before 0062 are the unknown case.
+		approvalOn := org.DeviceApproval == "on"
 		// ONE read of the oracle, then tracked locally as we hand addresses out — otherwise two devices in this
 		// same loop could both be told the same free address is theirs.
 		allocs, err := q.ListActiveDeviceAllocations(ctx, orgID)
@@ -128,6 +150,13 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 			// raises a constraint violation instead, which a mutation test confirmed (the failure arrived as
 			// SQLSTATE 23505, not as this function's assertion). Worth naming: "defence in depth" and "a blind
 			// guard I have not noticed yet" look identical until you check which layer caught it.
+			// #14 — taken-ness and VALIDITY are different questions, and only the first was being asked. A pool
+			// shrink cannot see revoked rows (the orphan guard inspects live allocations), so a remembered address
+			// can be outside the org's current pool: reclaiming it hands the user an address nothing routes, and
+			// every surface reads clean.
+			if old != "" && !ipalloc.InPool(org.PoolCidr, old) {
+				old = ""
+			}
 			if old == "" || taken[old] {
 				fresh, aerr := ipalloc.Allocate(org.PoolCidr, used)
 				if aerr != nil {
@@ -137,11 +166,32 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 				}
 				ip, kept = fresh, false
 			}
+			// #8 — restore to the status the cascade FOUND, never a declared one.
+			status := "active"
+			switch {
+			case c.RevokedPrevStatus != nil && *c.RevokedPrevStatus != "":
+				status = *c.RevokedPrevStatus
+			case approvalOn:
+				status = "pending" // unknown prior status + an approval gate: refuse to grant what nobody granted
+			}
 			restored, rerr := q.RestoreCascadeRevokedDevice(ctx, sqlc.RestoreCascadeRevokedDeviceParams{
-				ID: c.ID, AssignedIp: &ip, NodeID: targetNodeID,
+				ID: c.ID, AssignedIp: &ip, NodeID: targetNodeID, Status: status,
 			})
 			if rerr != nil {
 				return rerr
+			}
+			// #9 — the THIRD PART OF THE ACT. Revoking a node revoked the device, its OpenVPN client certificate
+			// and the org CRL; restoring only the device left an `active` row whose credential the data plane still
+			// refuses. cause='cascade' only, so an operator's deliberate certificate revocation survives a gateway
+			// rebuild. The CRL is rebuilt after commit, by the same shared seam the revoke path uses.
+			if restored.Transport == "openvpn" {
+				revived, oerr := q.RestoreCascadeRevokedOVPNCertsForDevice(ctx, restored.ID)
+				if oerr != nil {
+					return oerr
+				}
+				if len(revived) > 0 {
+					crlDirty = true
+				}
 			}
 			taken[ip] = true
 			used = append(used, ip)
@@ -153,7 +203,8 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 			// back" and a changed address is the surprise: that user's config no longer works and must be
 			// re-imported. Same row otherwise, so the restore itself is always on the record.
 			action := "device.restored"
-			meta := map[string]any{"cause": "gateway_recovered", "assigned_ip": ip, "kept_address": kept}
+			meta := map[string]any{"cause": "gateway_recovered", "assigned_ip": ip, "kept_address": kept,
+				"restored_to_status": status}
 			if targetNodeID != sourceNodeID {
 				// RE-HOMED, and it is recorded per device because the consequence is per device: this config now
 				// names a different gateway (endpoint and public key), so it must be re-imported even when the
@@ -200,6 +251,17 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 			slog.Int("kept_original_address", len(out)-readdressed),
 			slog.Int("readdressed_needing_reimport", readdressed))
 		s.PushOrgNodes(ctx, orgID)
+		// #9 — the CRL is derived from the certificate rows, so reviving certificates without rebuilding it leaves
+		// the fleet refusing credentials the control plane now considers valid. After commit, like the push and for
+		// the same reason: a transaction must not depend on a network call, and a failed rebuild is a delayed
+		// convergence rather than a lost restore.
+		if crlDirty && s.rebuildCRL != nil {
+			if rerr := s.rebuildCRL(ctx, orgID); rerr != nil {
+				s.logger.Error("crl_rebuild_after_restore_failed", slog.String("error", rerr.Error()),
+					slog.String("consequence", "restored OpenVPN devices will keep being refused by the gateway "+
+						"until the next scheduled CRL rebuild"))
+			}
+		}
 	}
 	return out, nil
 }

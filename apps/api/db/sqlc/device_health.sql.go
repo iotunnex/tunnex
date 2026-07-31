@@ -209,7 +209,7 @@ func (q *Queries) ListOrgHealthChecks(ctx context.Context, orgID uuid.UUID) ([]O
 const setDeviceHealthBlocked = `-- name: SetDeviceHealthBlocked :one
 UPDATE devices SET health_blocked = $2, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip, revoked_prev_status, provisioned_node_id
 `
 
 type SetDeviceHealthBlockedParams struct {
@@ -245,6 +245,8 @@ func (q *Queries) SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealt
 		&i.ProvisionedRanges,
 		&i.RevokedCause,
 		&i.ProvisionedIp,
+		&i.RevokedPrevStatus,
+		&i.ProvisionedNodeID,
 	)
 	return i, err
 }

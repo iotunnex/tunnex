@@ -339,14 +339,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			mode = "static"
 			rj, _ = json.Marshal(staticRanges)
 		}
+		// provisioned_node_id joins the snapshot (F3): the issued config bakes THIS gateway's endpoint and public
+		// key, so a device later re-homed onto another gateway holds a config naming one that will never serve it.
+		nodeSnap := pgtype.UUID{Bytes: [16]byte(dev.NodeID), Valid: true}
 		if e := q.SetDeviceProvisioning(ctx, sqlc.SetDeviceProvisioningParams{
 			ID: dev.ID, ProvisioningMode: mode, ProvisionedRanges: rj, ProvisionedIp: dev.AssignedIp,
+			ProvisionedNodeID: nodeSnap,
 		}); e != nil {
 			return e
 		}
 		dev.ProvisioningMode = mode
 		dev.ProvisionedRanges = rj
 		dev.ProvisionedIp = dev.AssignedIp
+		dev.ProvisionedNodeID = nodeSnap
 		keySource := "client"
 		if oneTimePriv != "" {
 			keySource = "server"

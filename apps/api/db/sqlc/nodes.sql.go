@@ -355,6 +355,49 @@ func (q *Queries) GetNodeForOrg(ctx context.Context, arg GetNodeForOrgParams) (N
 	return i, err
 }
 
+const getNodeForOrgForUpdate = `-- name: GetNodeForOrgForUpdate :one
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint FROM nodes WHERE id = $1 AND org_id = $2 FOR UPDATE
+`
+
+type GetNodeForOrgForUpdateParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
+// refuses if the node is not active — because revoke takes the same row lock, so a revoke that lands mid-restore
+// either commits first (we see it revoked and refuse) or waits for us. Without the lock the restore authorized on
+// state read BEFORE the identity commit and applied AFTER it, and a re-key racing an operator revoke re-activated
+// the very devices that revoke had just cascaded.
+func (q *Queries) GetNodeForOrgForUpdate(ctx context.Context, arg GetNodeForOrgForUpdateParams) (Node, error) {
+	row := q.db.QueryRow(ctx, getNodeForOrgForUpdate, arg.ID, arg.OrgID)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.Status,
+		&i.CertSerial,
+		&i.AgentVersion,
+		&i.EnrolledAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WgPublicKey,
+		&i.Endpoint,
+		&i.Capabilities,
+		&i.PolicyDesyncSince,
+		&i.PolicyReportedAt,
+		&i.SiteID,
+		&i.HubPriority,
+		&i.CertNotAfter,
+		&i.CertPublicKey,
+		&i.CertKeyFingerprint,
+	)
+	return i, err
+}
+
 const getNodeHubPriority = `-- name: GetNodeHubPriority :one
 SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2
 `

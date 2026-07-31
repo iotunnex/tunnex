@@ -72,7 +72,7 @@ const insertOVPNClientCert = `-- name: InsertOVPNClientCert :one
 
 INSERT INTO ovpn_client_certs (org_id, device_id, serial, common_name, not_after)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, org_id, device_id, serial, common_name, not_after, issued_at, revoked_at
+RETURNING id, org_id, device_id, serial, common_name, not_after, issued_at, revoked_at, revoked_cause
 `
 
 type InsertOVPNClientCertParams struct {
@@ -103,6 +103,7 @@ func (q *Queries) InsertOVPNClientCert(ctx context.Context, arg InsertOVPNClient
 		&i.NotAfter,
 		&i.IssuedAt,
 		&i.RevokedAt,
+		&i.RevokedCause,
 	)
 	return i, err
 }
@@ -146,7 +147,7 @@ func (q *Queries) InsertOVPNServerCert(ctx context.Context, arg InsertOVPNServer
 }
 
 const listActiveOVPNClientCertsByOrg = `-- name: ListActiveOVPNClientCertsByOrg :many
-SELECT id, org_id, device_id, serial, common_name, not_after, issued_at, revoked_at FROM ovpn_client_certs
+SELECT id, org_id, device_id, serial, common_name, not_after, issued_at, revoked_at, revoked_cause FROM ovpn_client_certs
 WHERE org_id = $1 AND revoked_at IS NULL
 ORDER BY issued_at
 `
@@ -171,6 +172,7 @@ func (q *Queries) ListActiveOVPNClientCertsByOrg(ctx context.Context, orgID uuid
 			&i.NotAfter,
 			&i.IssuedAt,
 			&i.RevokedAt,
+			&i.RevokedCause,
 		); err != nil {
 			return nil, err
 		}
@@ -216,6 +218,46 @@ func (q *Queries) ListRevokedOVPNSerialsByOrg(ctx context.Context, orgID uuid.UU
 	return items, nil
 }
 
+const restoreCascadeRevokedOVPNCertsForDevice = `-- name: RestoreCascadeRevokedOVPNCertsForDevice :many
+UPDATE ovpn_client_certs SET revoked_at = NULL, revoked_cause = NULL
+WHERE device_id = $1 AND revoked_at IS NOT NULL AND revoked_cause = 'cascade'
+RETURNING org_id, serial
+`
+
+type RestoreCascadeRevokedOVPNCertsForDeviceRow struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	Serial string    `json:"serial"`
+}
+
+// The third part of the act, reversed (review pass 1 #9). Revoking a node revokes its devices AND their OpenVPN
+// client certificates AND rebuilds the CRL. Restore reversed only the first, so an OVPN device came back `active`
+// with its certificate still revoked and still on the org CRL — control plane green, data plane refusing, and the
+// operator told it succeeded.
+//
+// cause='cascade' ONLY, exactly like the device restore: a certificate an operator revoked deliberately is never
+// revived by a gateway rebuild. The predicate is repeated here rather than left to the caller, same as
+// RestoreCascadeRevokedDevice.
+// lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
+func (q *Queries) RestoreCascadeRevokedOVPNCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]RestoreCascadeRevokedOVPNCertsForDeviceRow, error) {
+	rows, err := q.db.Query(ctx, restoreCascadeRevokedOVPNCertsForDevice, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RestoreCascadeRevokedOVPNCertsForDeviceRow{}
+	for rows.Next() {
+		var i RestoreCascadeRevokedOVPNCertsForDeviceRow
+		if err := rows.Scan(&i.OrgID, &i.Serial); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeOVPNClientCertsForDevice = `-- name: RevokeOVPNClientCertsForDevice :many
 UPDATE ovpn_client_certs
 SET revoked_at = now()
@@ -248,7 +290,7 @@ func (q *Queries) RevokeOVPNClientCertsForDevice(ctx context.Context, deviceID u
 }
 
 const revokeOVPNClientCertsForNode = `-- name: RevokeOVPNClientCertsForNode :many
-UPDATE ovpn_client_certs SET revoked_at = now()
+UPDATE ovpn_client_certs SET revoked_at = now(), revoked_cause = 'cascade'
 WHERE device_id IN (SELECT id FROM devices WHERE node_id = $1 AND deleted_at IS NULL) AND revoked_at IS NULL
 RETURNING org_id
 `

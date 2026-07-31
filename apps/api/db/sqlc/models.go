@@ -112,7 +112,10 @@ type Device struct {
 	// Why this device was revoked: 'cascade' (its gateway was revoked — restorable) or 'deliberate' (an operator revoked this device — never restorable). NULL = revoked before 0059, honestly unknown, treated as NOT restorable (S13.1 D5).
 	RevokedCause *string `json:"revoked_cause"`
 	// The tunnel address baked into this device's ISSUED config, snapshotted at issuance for every provisioning mode. Compared against assigned_ip at read time to derive needs_reexport. NULL = predates 0060, honestly unknown, not reported stale (S13.1 Slice 6).
-	ProvisionedIp *string `json:"provisioned_ip"`
+	ProvisionedIp     *string `json:"provisioned_ip"`
+	RevokedPrevStatus *string `json:"revoked_prev_status"`
+	// The gateway whose endpoint + public key this device's ISSUED config baked. Compared against node_id at read time to derive needs_reexport for STATIC exports (S13.1 review fold F3).
+	ProvisionedNodeID pgtype.UUID `json:"provisioned_node_id"`
 }
 
 type DeviceHealth struct {
@@ -340,14 +343,15 @@ type Organization struct {
 }
 
 type OvpnClientCert struct {
-	ID         uuid.UUID          `json:"id"`
-	OrgID      uuid.UUID          `json:"org_id"`
-	DeviceID   uuid.UUID          `json:"device_id"`
-	Serial     string             `json:"serial"`
-	CommonName string             `json:"common_name"`
-	NotAfter   time.Time          `json:"not_after"`
-	IssuedAt   time.Time          `json:"issued_at"`
-	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	ID           uuid.UUID          `json:"id"`
+	OrgID        uuid.UUID          `json:"org_id"`
+	DeviceID     uuid.UUID          `json:"device_id"`
+	Serial       string             `json:"serial"`
+	CommonName   string             `json:"common_name"`
+	NotAfter     time.Time          `json:"not_after"`
+	IssuedAt     time.Time          `json:"issued_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	RevokedCause *string            `json:"revoked_cause"`
 }
 
 type OvpnCrl struct {

@@ -269,7 +269,8 @@ ORDER BY d.id;
 -- managed included, so a managed device whose address later changes is just as stale — and was silently excluded
 -- from the staleness signal, leaving its user to discover the problem by failing to connect.
 -- lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
-UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, provisioned_ip = $4, updated_at = now()
+UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, provisioned_ip = $4,
+                   provisioned_node_id = $5, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListStaticDevicesForOrg :many
@@ -289,7 +290,7 @@ ORDER BY id;
 -- to avoid.
 --
 -- Returns the address each device HELD, so the caller can ask the allocation oracle whether it is still free.
-SELECT id, name, user_id, assigned_ip, public_key, transport
+SELECT id, name, user_id, assigned_ip, public_key, transport, revoked_prev_status
 FROM devices
 WHERE node_id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
 ORDER BY id;
@@ -311,7 +312,11 @@ ORDER BY id;
 -- — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
 -- the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
 -- authorizes both nodes and proves the target is live; this statement only records the binding it is given.
+-- status comes from the CALLER, resolved from revoked_prev_status (review pass 1 #8). Asserting 'active' here
+-- promoted a device that was PENDING — never approved by anyone — straight past the org's approval gate, because
+-- the statement declared a terminal value for a set whose members were not all in the same state.
 UPDATE devices
-SET status = 'active', revoked_at = NULL, revoked_cause = NULL, assigned_ip = $2, node_id = $3
+SET status = $4, revoked_at = NULL, revoked_cause = NULL, revoked_prev_status = NULL,
+    assigned_ip = $2, node_id = $3
 WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
 RETURNING *;

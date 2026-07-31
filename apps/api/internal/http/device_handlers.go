@@ -55,7 +55,7 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 		// where the ranges half stays static-only and the address half does not. Gating out here is what hid
 		// managed devices from the signal.
 		stale := devices.ProfileStale(d.Device.ProvisioningMode, d.Device.ProvisionedRanges, current,
-			d.Device.ProvisionedIp, d.Device.AssignedIp)
+			d.Device.ProvisionedIp, d.Device.AssignedIp, d.Device.ProvisionedNodeID, d.Device.NodeID)
 		ad.NeedsReexport = &stale
 		out = append(out, ad)
 	}

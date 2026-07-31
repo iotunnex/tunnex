@@ -38,6 +38,14 @@ WHERE cert_serial = $1;
 -- out would make the one legitimate case unreachable. The caller decides what each side must be.
 SELECT * FROM nodes WHERE id = $1 AND org_id = $2;
 
+-- name: GetNodeForOrgForUpdate :one
+-- The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
+-- refuses if the node is not active — because revoke takes the same row lock, so a revoke that lands mid-restore
+-- either commits first (we see it revoked and refuse) or waits for us. Without the lock the restore authorized on
+-- state read BEFORE the identity commit and applied AFTER it, and a re-key racing an operator revoke re-activated
+-- the very devices that revoke had just cascaded.
+SELECT * FROM nodes WHERE id = $1 AND org_id = $2 FOR UPDATE;
+
 -- name: GetNodeByOrgName :one
 -- ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
 -- active one, so an unfiltered name lookup is ambiguous — and a :one query answering "multiple rows" is a

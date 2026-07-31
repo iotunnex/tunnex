@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -82,7 +83,11 @@ func (f *restoreFixture) revokeDeliberately(t *testing.T, id uuid.UUID) {
 func (f *restoreFixture) revokeGatewayCascade(t *testing.T) {
 	t.Helper()
 	if _, err := f.pool.Exec(f.ctx,
-		`UPDATE devices SET status='revoked', revoked_at=now(), revoked_cause='cascade'
+		// MIRRORS RevokeDevicesForNode EXACTLY, including revoked_prev_status (0062) — a fixture that records
+		// less than the production sweep makes every restored device look like a pre-0062 row, which is a
+		// different test than the one being written (fixture-fidelity law).
+		`UPDATE devices SET status='revoked', revoked_at=now(), revoked_cause='cascade',
+		                    revoked_prev_status=status
 		 WHERE node_id=$1 AND status IN ('active','pending') AND deleted_at IS NULL`, f.node); err != nil {
 		t.Fatal(err)
 	}
@@ -357,5 +362,160 @@ func TestOperatorRestoreIsAuditedEVENWhenNothingComesBack(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("the attempt must be audited even with zero candidates; got %d rows", n)
+	}
+}
+
+// TestRestoreRefusesWhenTheTargetWasREVOKEDUnderIt — review pass 1 #7.
+//
+// The re-key path calls restore AFTER its own transaction commits, so authorization was taken against a state
+// that may since have changed. An operator revoke landing in that window cascade-revokes these very devices, and
+// restoring them re-activates what a human just deliberately switched off — the device tier contradicting D3
+// while the node tier obeys it. The row is read FOR UPDATE inside the restore's own transaction, so a concurrent
+// revoke either commits first (seen, refused) or waits.
+func TestRestoreRefusesWhenTheTargetWasREVOKEDUnderIt(t *testing.T) {
+	f := seedRestoreFixture(t)
+	d := f.addDevice(t, "victim", "10.99.0.31")
+	f.revokeGatewayCascade(t)
+
+	// The node is revoked between the caller's decision and the restore — modelled by revoking it first, which is
+	// the state the restore will read.
+	if _, err := f.pool.Exec(f.ctx, "UPDATE nodes SET status='revoked', revoked_at=now() WHERE id=$1", f.node); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.RestoreCascadeRevokedDevices(t.Context(), f.org, f.node, f.node, nil); !errors.Is(err, ErrRestoreTargetUnusable) {
+		t.Fatalf("restoring onto a node that is no longer active must be refused; got %v", err)
+	}
+	if got := f.statusOf(t, d); got != "revoked" {
+		t.Fatalf("a refused restore must change nothing; device is %q", got)
+	}
+}
+
+// TestRestoreDoesNotPromoteANEVERAPPROVEDDevice — review pass 1 #8.
+//
+// The restore statement used to assert status='active' for a set whose members were not all active. A device
+// sitting in `pending` — never approved by anyone — came back APPROVED, silently bypassing the org's device
+// gate. The schema recorded WHY a device was revoked and not WHAT IT WAS.
+func TestRestoreDoesNotPromoteANEVERAPPROVEDDevice(t *testing.T) {
+	f := seedRestoreFixture(t)
+	if _, err := f.pool.Exec(f.ctx, "UPDATE organizations SET device_approval='on' WHERE id=$1", f.org); err != nil {
+		t.Fatal(err)
+	}
+	approved := f.addDevice(t, "was-active", "10.99.0.41")
+	pendingDev := f.addDevice(t, "was-pending", "10.99.0.42")
+	if _, err := f.pool.Exec(f.ctx, "UPDATE devices SET status='pending' WHERE id=$1", pendingDev); err != nil {
+		t.Fatal(err)
+	}
+	f.revokeGatewayCascade(t)
+
+	if _, err := f.svc.RestoreCascadeRevokedDevices(t.Context(), f.org, f.node, f.node, nil); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got := f.statusOf(t, approved); got != "active" {
+		t.Fatalf("a device that WAS active must come back active; got %q", got)
+	}
+	if got := f.statusOf(t, pendingDev); got != "pending" {
+		t.Fatalf("a device that was PENDING must come back pending — a gateway rebuild must not grant an approval "+
+			"no human granted; got %q", got)
+	}
+}
+
+// TestRestoreReclaimsONLYAnAddressStillInsideThePool — review pass 1 #14.
+//
+// 0059 stopped clearing assigned_ip so a revoked row remembers what it held, and that is right for taken-ness.
+// But the pool can be SHRUNK while those rows are invisible to the shrink guard, which inspects live allocations
+// only. Reclaiming then hands a device an address its own org no longer routes — broken, and clean on every
+// surface. Taken-ness and validity are different questions.
+func TestRestoreReclaimsONLYAnAddressStillInsideThePool(t *testing.T) {
+	f := seedRestoreFixture(t)
+	outside := f.addDevice(t, "outside-pool", "10.99.0.200")
+	f.revokeGatewayCascade(t)
+	// The pool shrinks under the revoked row — exactly what the orphan guard cannot see.
+	if _, err := f.pool.Exec(f.ctx, "UPDATE organizations SET pool_cidr='10.99.0.0/28' WHERE id=$1", f.org); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.svc.RestoreCascadeRevokedDevices(t.Context(), f.org, f.node, f.node, nil)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 restored, got %d", len(res))
+	}
+	if res[0].KeptAddress {
+		t.Fatal("an address outside the org's CURRENT pool must NOT be reclaimed — nothing routes it, and the " +
+			"device would read healthy everywhere and work nowhere")
+	}
+	var ip string
+	if err := f.pool.QueryRow(f.ctx, "SELECT assigned_ip FROM devices WHERE id=$1", outside).Scan(&ip); err != nil {
+		t.Fatal(err)
+	}
+	if ip == "10.99.0.200" {
+		t.Fatal("the out-of-pool address was handed back")
+	}
+}
+
+// TestRestoreRevivesTheOVPNCERTIFICATEToo — review pass 1 #9.
+//
+// Revoking a node is a THREE-PART ACT: the device rows, their OpenVPN client certificates, and the org CRL. The
+// restore reversed one third, producing a state no revoke/restore pair should reach — control plane green, data
+// plane refusing, operator told it succeeded. The device was `active` and its certificate was still revoked and
+// still on the CRL, so the user's profile was rejected at connect time with nothing on any surface to explain it.
+func TestRestoreRevivesTheOVPNCERTIFICATEToo(t *testing.T) {
+	f := seedRestoreFixture(t)
+	dev := f.addDevice(t, "ovpn-user", "10.99.0.51")
+	if _, err := f.pool.Exec(f.ctx, "UPDATE devices SET transport='openvpn' WHERE id=$1", dev); err != nil {
+		t.Fatal(err)
+	}
+	// A deliberately-revoked certificate on ANOTHER device, to prove the cause discrimination survives here too.
+	other := f.addDevice(t, "ovpn-retired", "10.99.0.52")
+	if _, err := f.pool.Exec(f.ctx, "UPDATE devices SET transport='openvpn' WHERE id=$1", other); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []struct {
+		id     uuid.UUID
+		serial string
+		// UNIQUE PER RUN: ovpn_client_certs.serial is globally unique, so fixed literals make a test that passes
+		// exactly once and then fails on a constraint forever after — a fixture whose first green is the only one.
+	}{{dev, "A1-" + uuid.NewString()}, {other, "A2-" + uuid.NewString()}} {
+		if _, err := f.pool.Exec(f.ctx,
+			`INSERT INTO ovpn_client_certs (org_id, device_id, serial, common_name, not_after)
+			 VALUES ($1,$2,$3,'cn',now() + interval '365 days')`, f.org, d.id, d.serial); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// `other`'s certificate is retired by a human BEFORE the gateway is revoked.
+	if _, err := f.pool.Exec(f.ctx,
+		"UPDATE ovpn_client_certs SET revoked_at=now(), revoked_cause='deliberate' WHERE device_id=$1", other); err != nil {
+		t.Fatal(err)
+	}
+	f.revokeDeliberately(t, other)
+
+	// The gateway revoke: devices cascade, and so do their live certificates.
+	f.revokeGatewayCascade(t)
+	if _, err := f.pool.Exec(f.ctx,
+		`UPDATE ovpn_client_certs SET revoked_at=now(), revoked_cause='cascade'
+		 WHERE device_id=$1 AND revoked_at IS NULL`, dev); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.svc.RestoreCascadeRevokedDevices(t.Context(), f.org, f.node, f.node, nil); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	var revokedAt *time.Time
+	if err := f.pool.QueryRow(f.ctx,
+		"SELECT revoked_at FROM ovpn_client_certs WHERE device_id=$1", dev).Scan(&revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	if revokedAt != nil {
+		t.Fatal("a restored OpenVPN device's certificate must be revived with it — otherwise the device is active " +
+			"and the gateway still refuses its credential, which is the reassuring-green failure in one row")
+	}
+	// The deliberate one must NOT come back, by the same rule that governs the devices.
+	if err := f.pool.QueryRow(f.ctx,
+		"SELECT revoked_at FROM ovpn_client_certs WHERE device_id=$1", other).Scan(&revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	if revokedAt == nil {
+		t.Fatal("a certificate an operator revoked DELIBERATELY must never be revived by a gateway rebuild")
 	}
 }
