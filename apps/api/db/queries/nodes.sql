@@ -46,7 +46,7 @@ SELECT * FROM nodes WHERE id = $1 AND org_id = $2;
 -- definition, so it is delivered, so the carve-out cannot touch it — the live-node case is excluded structurally
 -- rather than by a check someone must remember to write.
 -- lint:cross-org — keyed by node id, resolved from the presented client certificate; the caller IS the node.
-UPDATE nodes SET cert_delivered_at = now() WHERE id = $1 AND cert_delivered_at IS NULL;
+UPDATE nodes SET cert_delivered = true, cert_delivered_at = now() WHERE id = $1 AND cert_delivered = false;
 
 -- name: GetNodeForOrgForUpdate :one
 -- The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
@@ -324,6 +324,6 @@ LIMIT 2;
 -- marker cannot disagree with the serial it describes.
 UPDATE nodes
 SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now(),
-    cert_delivered_at = NULL
+    cert_delivered = false, cert_delivered_at = NULL
 WHERE id = $1 AND cert_serial = $6 AND status = 'active'
 RETURNING *;

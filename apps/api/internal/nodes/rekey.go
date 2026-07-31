@@ -183,7 +183,7 @@ func (s *Service) Rekey(ctx context.Context, ident RekeyIdentifier, nonce, csrPE
 	// on record was never used (so this cannot be a live gateway) AND the caller asks for one over the key already
 	// recorded (so this is redelivery, never rotation).
 	redeliverable := false
-	if !node.CertDeliveredAt.Valid && ident.Kind == IdentifierKeyFingerprint && node.CertPublicKey != nil {
+	if !node.CertDelivered && ident.Kind == IdentifierKeyFingerprint && node.CertPublicKey != nil {
 		if blk, _ := pem.Decode(csrPEM); blk != nil {
 			if csr, perr := x509.ParseCertificateRequest(blk.Bytes); perr == nil {
 				if spki, merr := x509.MarshalPKIXPublicKey(csr.PublicKey); merr == nil {

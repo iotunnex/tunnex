@@ -211,12 +211,13 @@ func TestLostResponseDoesNotBrickTheGateway(t *testing.T) {
 	// gateway, and the only thing the carve-out is allowed to key on. RekeyNode cleared it in the same statement
 	// that replaced the serial (D3 condition 1); a marker that survived the swap would describe the old
 	// certificate while naming the new one.
-	var delivered *time.Time
-	if err := f.tx.QueryRow(f.ctx, "SELECT cert_delivered_at FROM nodes WHERE id=$1", id).Scan(&delivered); err != nil {
+	var delivered bool
+	if err := f.tx.QueryRow(f.ctx, "SELECT cert_delivered FROM nodes WHERE id=$1", id).Scan(&delivered); err != nil {
 		t.Fatal(err)
 	}
-	if delivered != nil {
-		t.Fatalf("re-key must CLEAR cert_delivered_at in the same statement that replaces the serial; got %v", delivered)
+	if delivered {
+		t.Fatal("re-key must set cert_delivered=false in the same statement that replaces the serial — a marker " +
+			"that survived the swap would describe the OLD certificate while naming the new one")
 	}
 	if !notAfter.After(time.Now()) {
 		t.Fatalf("this test is only meaningful while the committed certificate is still VALID — the whole point "+
@@ -444,7 +445,7 @@ func TestADELIVEREDCertificateCannotBeRedelivered(t *testing.T) {
 
 	// A LIVE gateway: valid certificate, and it has authenticated — which is what running means.
 	if _, err := f.tx.Exec(f.ctx,
-		"UPDATE nodes SET cert_not_after = now() + interval '30 days', cert_delivered_at = now() WHERE id=$1", id); err != nil {
+		"UPDATE nodes SET cert_not_after = now() + interval '30 days', cert_delivered = true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
 	before := f.row(t, id)
@@ -459,4 +460,49 @@ func TestADELIVEREDCertificateCannotBeRedelivered(t *testing.T) {
 	if after := f.row(t, id); after.CertSerial != before.CertSerial {
 		t.Fatal("a refused attempt must not move the serial — that IS the displacement")
 	}
+}
+
+// TestAnENROLLEDNodeIsClosedByDefault — the fail-safe encoding (S13.1 D3 condition 2, extended to new rows).
+//
+// CreateNode does not mention the delivery column, and neither does any older control-plane replica mid-roll. A
+// NULLABLE timestamp made that absence mean UNDELIVERED — the state that OPENS the redelivery carve-out — so
+// every freshly enrolled node was exposed from enrolment until its first authenticated request, on every replica.
+//
+// The boolean's DEFAULT TRUE makes absence mean CLOSED. This red inserts a node exactly as an unaware writer
+// would, naming no delivery column at all.
+func TestAnENROLLEDNodeIsClosedByDefault(t *testing.T) {
+	f := seedRekeyFixture(t)
+	k := rsaKey(t)
+	id := uuid.New()
+	// The columns CreateNode names, and nothing else — the shape an older replica writes.
+	if _, err := f.tx.Exec(f.ctx, `
+		INSERT INTO nodes (id,org_id,name,cert_serial,agent_version,cert_not_after,cert_public_key)
+		VALUES ($1,$2,$3,$4,'0.1.0',now() + interval '48 hours',$5)`,
+		id, f.org, "gw-fresh-"+uuid.NewString()[:8], "serial-"+uuid.NewString(),
+		base64.StdEncoding.EncodeToString(mustSPKI(t, &k.PublicKey))); err != nil {
+		t.Fatal(err)
+	}
+	var delivered bool
+	if err := f.tx.QueryRow(f.ctx, "SELECT cert_delivered FROM nodes WHERE id=$1", id).Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+	if !delivered {
+		t.Fatal("a writer that does not know the delivery column must land in the CLOSED state — otherwise every " +
+			"newly enrolled node, and every node enrolled by an older replica during a roll, is redeliverable " +
+			"while live: a fail-open introduced by the fix for a fail-open")
+	}
+
+	// And the gate agrees: the carve-out must not authorize this node.
+	if err := f.attempt(t, RekeyIdentifier{Kind: IdentifierKeyFingerprint, Value: fingerprintOf(t, &k.PublicKey)}, k, k); !errors.Is(err, ErrRekeyRefused) {
+		t.Fatalf("a freshly enrolled, live node must be refused; got %v", err)
+	}
+}
+
+func mustSPKI(t *testing.T, pub *rsa.PublicKey) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }

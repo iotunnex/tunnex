@@ -137,7 +137,7 @@ func (q *Queries) CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered
 `
 
 type CreateNodeParams struct {
@@ -182,6 +182,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }
@@ -237,7 +238,7 @@ func (q *Queries) DeleteExpiredRekeyChallenges(ctx context.Context) (int64, erro
 }
 
 const getNodeByCertSerial = `-- name: GetNodeByCertSerial :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes
 WHERE cert_serial = $1
 `
 
@@ -269,12 +270,13 @@ func (q *Queries) GetNodeByCertSerial(ctx context.Context, certSerial string) (N
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }
 
 const getNodeByOrgName = `-- name: GetNodeByOrgName :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes
 WHERE org_id = $1 AND name = $2 AND revoked_at IS NULL
 `
 
@@ -313,12 +315,13 @@ func (q *Queries) GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNamePara
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }
 
 const getNodeForOrg = `-- name: GetNodeForOrg :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes WHERE id = $1 AND org_id = $2
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes WHERE id = $1 AND org_id = $2
 `
 
 type GetNodeForOrgParams struct {
@@ -355,12 +358,13 @@ func (q *Queries) GetNodeForOrg(ctx context.Context, arg GetNodeForOrgParams) (N
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }
 
 const getNodeForOrgForUpdate = `-- name: GetNodeForOrgForUpdate :one
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes WHERE id = $1 AND org_id = $2 FOR UPDATE
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes WHERE id = $1 AND org_id = $2 FOR UPDATE
 `
 
 type GetNodeForOrgForUpdateParams struct {
@@ -399,6 +403,7 @@ func (q *Queries) GetNodeForOrgForUpdate(ctx context.Context, arg GetNodeForOrgF
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }
@@ -422,7 +427,7 @@ func (q *Queries) GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriority
 }
 
 const getNodesByCertKeyFingerprint = `-- name: GetNodesByCertKeyFingerprint :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes
 WHERE cert_key_fingerprint = $1
 LIMIT 2
 `
@@ -477,6 +482,7 @@ func (q *Queries) GetNodesByCertKeyFingerprint(ctx context.Context, certKeyFinge
 			&i.CertPublicKey,
 			&i.CertKeyFingerprint,
 			&i.CertDeliveredAt,
+			&i.CertDelivered,
 		); err != nil {
 			return nil, err
 		}
@@ -646,7 +652,7 @@ func (q *Queries) ListNodePeerStatusForOrg(ctx context.Context, orgID uuid.UUID)
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at FROM nodes
+SELECT id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered FROM nodes
 WHERE org_id = $1
 ORDER BY created_at
 `
@@ -683,6 +689,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 			&i.CertPublicKey,
 			&i.CertKeyFingerprint,
 			&i.CertDeliveredAt,
+			&i.CertDelivered,
 		); err != nil {
 			return nil, err
 		}
@@ -695,7 +702,7 @@ func (q *Queries) ListNodes(ctx context.Context, orgID uuid.UUID) ([]Node, error
 }
 
 const markCertDelivered = `-- name: MarkCertDelivered :exec
-UPDATE nodes SET cert_delivered_at = now() WHERE id = $1 AND cert_delivered_at IS NULL
+UPDATE nodes SET cert_delivered = true, cert_delivered_at = now() WHERE id = $1 AND cert_delivered = false
 `
 
 // Delivery is recorded THE FIRST TIME a certificate authenticates, and only then: the WHERE clause makes this a
@@ -713,9 +720,9 @@ func (q *Queries) MarkCertDelivered(ctx context.Context, id uuid.UUID) error {
 const rekeyNode = `-- name: RekeyNode :one
 UPDATE nodes
 SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now(),
-    cert_delivered_at = NULL
+    cert_delivered = false, cert_delivered_at = NULL
 WHERE id = $1 AND cert_serial = $6 AND status = 'active'
-RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at
+RETURNING id, org_id, name, status, cert_serial, agent_version, enrolled_at, last_seen_at, revoked_at, created_at, updated_at, wg_public_key, endpoint, capabilities, policy_desync_since, policy_reported_at, site_id, hub_priority, cert_not_after, cert_public_key, cert_key_fingerprint, cert_delivered_at, cert_delivered
 `
 
 type RekeyNodeParams struct {
@@ -784,6 +791,7 @@ func (q *Queries) RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, err
 		&i.CertPublicKey,
 		&i.CertKeyFingerprint,
 		&i.CertDeliveredAt,
+		&i.CertDelivered,
 	)
 	return i, err
 }

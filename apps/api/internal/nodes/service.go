@@ -329,7 +329,7 @@ func (s *Service) AuthenticateCert(ctx context.Context, certSerial string) (sqlc
 	// first call (the UPDATE's own WHERE), and best-effort: failing an agent request because a marker could not be
 	// written would trade a real outage for a bookkeeping one. The cost of a missed write is one node that stays
 	// eligible for redelivery until its next request.
-	if !node.CertDeliveredAt.Valid {
+	if !node.CertDelivered {
 		if merr := s.q.MarkCertDelivered(ctx, node.ID); merr != nil {
 			slog.Warn("cert_delivery_mark_failed", "node_id", node.ID.String(), "error", merr.Error())
 		}
