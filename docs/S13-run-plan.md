@@ -66,6 +66,13 @@ git diff --name-only c417c85..HEAD | grep -vE '^(docs/|walk-artifacts/|scripts/)
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -tAc "SELECT max(version) FROM schema_migrations;"   # 64
 ```
 
+**RECORD THREE SHAS, not one.** The running api image is built from **`c417c85`**; the checkout is **`5249aa9`**;
+the diff between them is **docs + `scripts/` only — no `apps/` code, no migrations**. All three go in the walk
+record. A later reader seeing image ≠ checkout cannot otherwise tell *deliberate* from *stale*, and this session
+opened with exactly that shape read the other way: the rig sat on `5cf282f` while local was 24 commits ahead, and
+the only thing that caught it was a schema-version mismatch. **Divergence is not evidence of staleness and
+sameness is not evidence of currency — the DIFF is the evidence, so record the diff.**
+
 **`make up-enterprise` must NOT run for §B.** Rebuilding would swap the artifact under the walk for no gain, and
 it would cost the thing that makes §B worth running: §A and §B execute the *same* binary, so a §B result that
 differs from §A is a difference in the **staging**, not in the build. That is what makes the two runs comparable
@@ -92,7 +99,7 @@ Two rulings fixed the order:
 
 | # | step | why here |
 |---|---|---|
-| 1 | re-enrol **aws-gw-1** with a fresh token → new row **A1′** | the restore target for B3/B4; aws-gw-1 is revoked and cannot come back any other way |
+| 1 | re-enrol **aws-gw-1** — **under its OWN name**, fresh token → new row **A1′** | the restore target for B3/B4; aws-gw-1 is revoked and cannot come back any other way. **See B0b: the name is free** |
 | 2 | **bind B′ to a site** (Sites → Bind gateway) | B1's precondition — the claim is that `site_id` SURVIVES recovery, so it must exist first |
 | 3 | approval gate **ON** | B3 needs a device that is `pending` and stays that way |
 | 4 | create on B′: `b3-pending` (leave unapproved) · `b3-active` (approve) · `b4-managed` (approve, managed) · optionally a static | B3 needs both prior statuses; B4 needs a managed device whose address will be RECLAIMED |
@@ -106,6 +113,30 @@ Two rulings fixed the order:
 | 10 | **restore onto A1′** | B3 (pending returns pending) + B4 (managed, address reclaimed, gateway moved → NO badge) |
 | 11 | approval gate **OFF** | leave the org as found |
 | 12 | **B5 — Legs 7/8** locally | independent of the rig; any time |
+
+### B0b — the name is FREE. An earlier rename instruction was wrong; it is withdrawn.
+
+A draft of step 1 said to enrol as `aws-gw-1b` because *"the old name is taken by a revoked row."* **That was
+wrong, and it contradicted §A's own record** (Leg 2b: *"name freed by the revoke (WF-S11-8a)"*). Checked at both
+layers rather than argued:
+
+- **Schema.** Migration **0056** replaced the unconditional `nodes_org_id_name_key` with
+  `CREATE UNIQUE INDEX nodes_org_id_name_active_key ON nodes (org_id, name) WHERE revoked_at IS NULL`. In schema
+  64. A revoked row does not hold its name.
+- **Application.** `nodes/service.go:297` raises `409 node_exists` **only** from `pgerr.IsUnique` on
+  `CreateNode` — so it fires only for a **non-revoked** duplicate. There is no independent Go-side name check.
+- **Lookups.** `GetNodeByOrgName` carries `AND revoked_at IS NULL` (`nodes.sql:65`), and
+  `TestNoAmbiguousNodeNameLookups` (`apps/api/db/nodenamecensus_test.go`) is the standing guard.
+
+**So why did §A's enrol refuse `aws-gw-2`?** Because that name was held by an **ACTIVE** row at that moment.
+Leg 2's token fallback **creates a new node without revoking the old one** — `019f8e49` was revoked only later.
+The 409 was correct and WF-S11-8a was working. The error was mine: I generalised one refusal into a rule about
+revoked rows that the evidence never supported, then wrote a workaround for it.
+
+**Both `aws-gw-1` rows are revoked today, so step 1 enrols under the real name — and that is a FREE PROOF.**
+§A never exercised WF-S11-8a, because its only name collision was against an active row. Step 1 is the first
+time a merged S11 guard is tested on the wire: **if it 409s, that is a regression in a merged fix, found on the
+S13 walk — raise it as a finding, do not rename around it.**
 
 **WF-S13-4 will not interfere**: it fires only when a device cannot reclaim and allocates fresh. Stage no decoy,
 so every device reclaims and B4's "only the gateway moved" holds.
@@ -151,6 +182,23 @@ first use, and a marker that never clears makes lost-response recovery impossibl
 grant an approval no human granted.
 
 ## B4 — F3's residual, observed rather than assumed
+
+> ### PRECONDITION, ASSERTED AND RECORDED: A1′ IS IN NO HUB SET
+>
+> A replacement gateway that is a **hub-set member** re-points managed devices through the dial channel, so the
+> device self-heals and B4 reads "no badge" — the PASS condition — **for the wrong reason**. The leg would then
+> prove nothing in either direction, which is worse than failing.
+>
+> ```bash
+> # [azure-cp] BEFORE the restore. Must return zero rows.
+> sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+>   "SELECT org_id, configured, demoted FROM org_hub_set
+>    WHERE '<A1-node-id>' = ANY(configured) OR '<A1-node-id>' = ANY(demoted);"
+> ```
+>
+> **Record the empty result in the walk record.** An unasserted precondition is indistinguishable from a
+> forgotten one once the run is over. A freshly enrolled node has no site binding and should not be in
+> `configured` — *should* is the reason to check, not the reason to skip.
 
 No §A device isolated it: `contended` was managed but had *both* address and gateway changed, so it fired on the
 address cause.
@@ -268,6 +316,12 @@ curl -s -D- -o /dev/null -X POST localhost/api/v1/agent/rekey/challenge \
 sudo docker compose logs api --since 2m 2>&1 | grep rekey_throttled | tail -3
 #   #13's fix: the 429 must leave a SERVER-SIDE line naming the peer. Before Batch D there was none.
 ```
+
+> **BLAST RADIUS, stated before it is discovered.** B7's failure mode is not confined to B7. If the agent
+> miscounts a 429 as a refusal, three of them exhaust into **token enrolment** — and B′ becomes a NEW node,
+> destroying **B1's site binding** and **B2's flip subject** along with it. That is the same event as PASS
+> condition 3 failing, seen from the staging side. **Accepted at a 10-minute TTL**: re-staging costs ~30 minutes
+> and no 48-hour clock is running. It would NOT be acceptable in §C, which is why B7 lives here and not there.
 
 **Then, with the bucket still exhausted, start B′'s agent.** It arrives through the same proxy, so it is throttled
 too — which is the point.
