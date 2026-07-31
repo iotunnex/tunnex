@@ -53,6 +53,39 @@ grep TUNNEX_AGENT_CERT_TTL .env                    # exactly ONE line, =10m
 sudo docker compose logs api 2>&1 | grep agent_cert_ttl_shortened | tail -1   # MUST be present
 ```
 
+## B0 — STAGING ORDER (ruled 2026-07-31). Read before touching anything.
+
+**The roles INVERT from §A.** After §A, `aws-gw-1` is revoked — D3 forbids its recovery — so the only live,
+key-recorded gateway is **B′** (`aws-gw-2`, node `019fb892…`). B′ is therefore rehearsal #2's **subject**, and a
+re-enrolled `aws-gw-1` is the **restore target**.
+
+Two rulings fixed the order:
+
+- **Approval gate: ON for staging, OFF after B3.** A `pending` device cannot connect (no peer), so B4's managed
+  device must be **approved** before it is asked to demonstrate anything. Turning the gate off afterwards leaves
+  the org as we found it; existing `pending` rows stay pending, which is what B3 needs.
+- **B6's timing runs in the window between expiry and recovery**, against B′ itself. That is the only moment the
+  wrong-key population exists — expired, active, key-recorded — without a fourth agent host the fleet does not
+  have.
+
+| # | step | why here |
+|---|---|---|
+| 1 | re-enrol **aws-gw-1** with a fresh token → new row **A1′** | the restore target for B3/B4; aws-gw-1 is revoked and cannot come back any other way |
+| 2 | **bind B′ to a site** (Sites → Bind gateway) | B1's precondition — the claim is that `site_id` SURVIVES recovery, so it must exist first |
+| 3 | approval gate **ON** | B3 needs a device that is `pending` and stays that way |
+| 4 | create on B′: `b3-pending` (leave unapproved) · `b3-active` (approve) · `b4-managed` (approve, managed) · optionally a static | B3 needs both prior statuses; B4 needs a managed device whose address will be RECLAIMED |
+| 5 | **connect** `b3-active` and `b4-managed` | a device that never worked cannot show it stopped working |
+| 6 | **stop B′'s agent**, record `cert_not_after` at the stop, wait ~10 min | the clock |
+| 7 | **B6 — timing**, now | the only window where B′ is expired + active + key-recorded |
+| 8 | start **B2's poller**, then start B′'s agent | B1 + B2 + Leg 1 in one motion |
+| 9 | **revoke B′** → cascade. Assert `revoked_prev_status` is RECORDED | the column §A found empty (WF-S13-3) |
+| 10 | **restore onto A1′** | B3 (pending returns pending) + B4 (managed, address reclaimed, gateway moved → NO badge) |
+| 11 | approval gate **OFF** | leave the org as found |
+| 12 | **B5 — Legs 7/8** locally | independent of the rig; any time |
+
+**WF-S13-4 will not interfere**: it fires only when a device cannot reclaim and allocates fresh. Stage no decoy,
+so every device reclaims and B4's "only the gateway moved" holds.
+
 ## B1 — Leg 1 with a SITE-BOUND gateway
 
 §A's Leg 1 asserted *"`site_id` unchanged across recovery"* against a node that **had no site binding** — trivially
