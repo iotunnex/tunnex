@@ -14,6 +14,7 @@
 package identity
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -58,16 +59,60 @@ type Verdict struct {
 	HaveToken bool
 }
 
+// Stored is EVERYTHING the gate reads. Every field is LOCAL — a file on this host, or this host's clock, which
+// arrives as Decide's `now` argument.
+//
+// THERE IS NO NETWORK FIELD, AND THERE MUST NEVER BE ONE. An agent that re-keys because it cannot reach the
+// control plane would hammer an unauthenticated endpoint during every partition, CP restart and DNS blip —
+// hardest at the moment the CP can least cope. The guarantee is structural rather than disciplinary: there is
+// nothing to pass. Widening this struct is the edit a future author must make, and must justify.
+//
+// The per-file errors are SEPARATE on purpose. loadCreds used to collapse three files into one error, so an
+// unreadable ca.pem was reported as "no credentials" and spent the join token on a node whose identity was
+// perfectly provable (pass-3 claims 16-19, 50). Which file failed changes the verdict, so the verdict must be
+// able to see which file failed.
+type Stored struct {
+	CertPEM, KeyPEM, CAPEM []byte
+	CertErr, KeyErr, CAErr error
+}
+
+func (st Stored) certUsable() bool { return st.CertErr == nil && len(st.CertPEM) > 0 }
+func (st Stored) keyUsable() bool  { return st.KeyErr == nil && len(st.KeyPEM) > 0 }
+
+// anchorUsable — the trust anchor must PARSE, not merely exist. A zero-length ca.pem is the shape renewLoop used
+// to write when it discarded a read error (pass-3 claims 30/32/37/46/52), and it reached AppendCertsFromPEM as a
+// hard os.Exit(1) on the NEXT boot: a crash loop with no diagnosis, from one transient read.
+func (st Stored) anchorUsable() bool {
+	if st.CAErr != nil || len(st.CAPEM) == 0 {
+		return false
+	}
+	return x509.NewCertPool().AppendCertsFromPEM(st.CAPEM)
+}
+
+// pairMatches asks the SAME question control.NewClient asks, with the same function, so the gate and the client
+// can never disagree about whether a credential set is usable. NewClient's disagreement is fatal (os.Exit); the
+// gate's is recoverable, and the gate runs first.
+func (st Stored) pairMatches() bool {
+	_, err := tls.X509KeyPair(st.CertPEM, st.KeyPEM)
+	return err == nil
+}
+
 // Decide is the whole rule. now is injected so expiry is testable.
 //
-// THE SAFE DIRECTION IS `UseStored`, and every uncertain case resolves there. That is not timidity: enrolling
+// THE SAFE DIRECTION IS UseStored, and every uncertain case resolves there. That is not timidity: enrolling
 // with a token abandons the stored identity, and abandoning a LIVE gateway's identity makes it appear dead to the
 // control plane while a second node takes its name. The S8.2c WF-2 incident (a re-used VM silently keeping its
 // old identity and org) is why the stored identity is preferred at all; this function narrows that preference to
 // the cases where the stored identity can actually still work.
-func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool, now time.Time) Verdict {
-	// 1. NOTHING STORED. The original bootstrap case.
-	if loadErr != nil || len(certPEM) == 0 {
+//
+// THE SECOND SAFE DIRECTION, added after the pass-3 triage: where an identity is DAMAGED but still PROVABLE,
+// route to Recover rather than to UseToken. Proof of possession repairs the node in place; a token replaces it.
+// Three previously-unrouted states are provable — an unreadable certificate beside a readable key, a mismatched
+// pair, and a pair the promotion sequence interrupted — and each used to end in os.Exit(1) or a spent token.
+func Decide(st Stored, requestedName string, haveToken bool, now time.Time) Verdict {
+	// 1. NOTHING STORED. The original bootstrap case: no certificate AND no key. A fresh host has no ca.pem
+	//    either, so this must be tested before the anchor.
+	if !st.certUsable() && !st.keyUsable() {
 		if haveToken {
 			return Verdict{Action: UseToken, Reason: "no_stored_identity",
 				Evidence: "no credentials in the state directory; enrolling with the join token"}
@@ -77,9 +122,38 @@ func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool,
 				"provide a join token to enroll this gateway"}
 	}
 
-	leaf, parseErr := parseLeaf(certPEM)
+	// 2. THE TRUST ANCHOR IS UNUSABLE, but identity material exists.
+	//
+	//    IDLE, AND DELIBERATELY NOT UseToken. Without an anchor nothing can be verified — not the control plane's
+	//    server certificate, and not a re-key response (verifyIssued needs it) — so no path preserves the identity.
+	//    But spending the token would DESTROY a node whose only fault is one missing, entirely reconstructible file:
+	//    ca.pem is the control plane's agent CA, identical on every gateway. Idling keeps the node recoverable by an
+	//    operator who copies one file; enrolling makes that impossible. That is pass-3 claim 50's defect, and the
+	//    ruling is to refuse to destroy rather than to proceed.
+	if !st.anchorUsable() {
+		return Verdict{Action: Idle, Reason: "trust_anchor_unusable", HaveToken: haveToken,
+			Evidence: "ca.pem is missing, unreadable or not a certificate, so NOTHING can be verified — not the " +
+				"control plane's identity and not a re-key response. This gateway's own certificate and key are " +
+				"NOT being discarded: restore ca.pem (it is the control plane's agent CA, the same file on every " +
+				"gateway) and restart. Enrolling with a join token would create a NEW node and throw away this " +
+				"one's site binding and devices, to fix a missing file"}
+	}
 
-	// 2. STORED BUT UNREADABLE. Nothing can be recovered from it, so a token loses nothing.
+	// 3. THE CERTIFICATE IS UNUSABLE BUT THE KEY IS NOT — and the key is what the control plane RECORDED.
+	//
+	//    Recoverable: re-key identifies by the key's fingerprint, so the certificate is not needed to prove who
+	//    this is. This branch used to spend the join token (pass-3 claims 18/19), destroying an identity the
+	//    control plane could still prove, because the table read only cert.pem.
+	if !st.certUsable() {
+		return Verdict{Action: Recover, Reason: "stored_cert_unusable_key_provable", HaveToken: haveToken,
+			Evidence: "the stored certificate is missing or unreadable, but key.pem is intact — and the key is " +
+				"what the control plane recorded, so this node can still PROVE who it is. Attempting re-key by " +
+				"key fingerprint, which recovers it in place"}
+	}
+
+	leaf, parseErr := parseLeaf(st.CertPEM)
+
+	// 4. STORED BUT UNPARSEABLE, with no usable key to fall back on.
 	if parseErr != nil {
 		if haveToken {
 			return Verdict{Action: UseToken, Reason: "stored_identity_unreadable",
@@ -95,15 +169,45 @@ func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool,
 	mismatch := requestedName != "" && cn != "" && requestedName != cn
 	expired := now.After(leaf.NotAfter)
 
-	// 3. EXPIRED. The case this package exists for. /agent/renew requires the certificate that expired, so no
+	// 5. THE KEY IS UNUSABLE WHILE THE CERTIFICATE IS FINE. Nothing local can prove possession, so re-key has no
+	//    material to work with and the token is the honest remedy.
+	if !st.keyUsable() {
+		if haveToken {
+			return Verdict{Action: UseToken, Reason: "stored_key_unusable", StoredCN: cn,
+				Evidence: "key.pem is missing or unreadable, so possession of this node's recorded key cannot be " +
+					"proven and re-key has nothing to offer; enrolling with the join token"}
+		}
+		return Verdict{Action: Idle, Reason: "stored_key_unusable_no_token", StoredCN: cn,
+			Evidence: "key.pem is missing or unreadable and no join token was supplied — re-key needs the private " +
+				"key the control plane recorded, so this gateway must be re-enrolled"}
+	}
+
+	// 6. THE PAIR DOES NOT MATCH. cert.pem and key.pem are each fine and belong to different identities.
+	//
+	//    THIS IS THE INTERRUPTED PROMOTION (pass-1 #11, never actually fixed — the fold made the failure testable
+	//    and survivable and left the state itself unrouted). saveCreds renames ca.pem, cert.pem, key.pem in turn;
+	//    an interruption between the second and third leaves a NEW certificate beside the OLD key. That new
+	//    certificate is VALID, so the old gate said UseStored, NewClient's X509KeyPair failed, and the process
+	//    exited — into a restart that reproduced the identical state. A permanent crash loop that never once
+	//    reached Recover, from an interruption lasting milliseconds.
+	//
+	//    RECOVER, because it is provable both ways: the pending key from the interrupted re-key is still on disk
+	//    (saveCreds removes it only after the final rename), and key.pem still holds whatever the control plane
+	//    last recorded. One of the two identities re-key tries will be the one the control plane holds.
+	if !st.pairMatches() {
+		return Verdict{Action: Recover, Reason: "stored_pair_mismatch", StoredCN: cn,
+			NameMismatch: mismatch, HaveToken: haveToken,
+			Evidence: "cert.pem and key.pem do not belong to the same identity — the signature of a credential " +
+				"write interrupted partway. Re-keying by proof of possession, which repairs it in place. This " +
+				"state is NOT a reason to enroll fresh: the material to prove this node is still on disk"}
+	}
+
+	// 7. EXPIRED. The case this package exists for. /agent/renew requires the certificate that expired, so no
 	//    amount of waiting recovers it.
 	//
 	//    RECOVER FIRST, token second. The agent still holds the private key the control plane recorded, so proving
 	//    possession of it re-keys this node IN PLACE — same id, same site binding, same devices. A token enrolment
 	//    would work too and would throw all of that away, so it is the FALLBACK, tried only when re-key fails.
-	//    (Review finding #2: this branch previously chose the token whenever one was present, which on the shipped
-	//    Helm shape — where TUNNEX_JOIN_TOKEN is injected on every pod start — meant re-key was never attempted at
-	//    all, and the enrolment then collided with the node's own expired-but-not-revoked row.)
 	if expired {
 		age := now.Sub(leaf.NotAfter).Round(time.Minute)
 		ev := fmt.Sprintf("stored certificate for %q expired %s ago (NotAfter %s)",
@@ -119,16 +223,12 @@ func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool,
 			Evidence: ev + "; attempting re-key by proof of possession, which recovers this node IN PLACE." + fallback}
 	}
 
-	// 4. NAME MISMATCH ON A STILL-VALID CERTIFICATE — loud, but it does NOT authorize re-enrollment.
+	// 8. NAME MISMATCH ON A STILL-VALID CERTIFICATE — loud, but it does NOT authorize re-enrollment.
 	//
-	//    This is the case where the literal reading of "unusable" would be actively destructive. On the EPIC 11
-	//    walk the enrollment command was pasted on the WRONG HOST: azure-gw, carrying azure-gw's valid identity,
-	//    with TUNNEX_NODE_NAME=aws-gw-1. Had a mismatch authorized using the token, the agent would have
-	//    abandoned azure-gw's identity and enrolled that host as aws-gw-1 — a working gateway made to look dead,
-	//    which is exactly the S8.2c WF-2 disaster the stored-identity preference was built to prevent.
-	//
-	//    So: keep the identity, and shout. A mismatch is almost always operator error (a mis-set env var, a
-	//    cloned VM image, a command run on the wrong box) and the operator, not the agent, must resolve it.
+	//    On the EPIC 11 walk the enrollment command was pasted on the WRONG HOST: azure-gw, carrying azure-gw's
+	//    valid identity, with TUNNEX_NODE_NAME=aws-gw-1. Had a mismatch authorized using the token, the agent
+	//    would have abandoned azure-gw's identity and enrolled that host as aws-gw-1 — a working gateway made to
+	//    look dead, which is exactly the S8.2c WF-2 disaster the stored-identity preference was built to prevent.
 	if mismatch {
 		return Verdict{Action: UseStored, Reason: "stored_identity_name_mismatch", StoredCN: cn,
 			NameMismatch: true,
@@ -138,8 +238,8 @@ func Decide(certPEM []byte, loadErr error, requestedName string, haveToken bool,
 				cn, requestedName, requestedName)}
 	}
 
-	// 5. A valid stored identity that matches. The overwhelmingly common path, and a token present alongside it
-	//    is ignored ON PURPOSE — that is the WF-2 protection, still intact.
+	// 9. A valid stored identity that matches, with a matching key and a usable anchor. The common path, and a
+	//    token present alongside it is ignored ON PURPOSE — that is the WF-2 protection, still intact.
 	return Verdict{Action: UseStored, Reason: "stored_identity_valid", StoredCN: cn,
 		Evidence: fmt.Sprintf("stored certificate for %q is valid until %s",
 			cn, leaf.NotAfter.UTC().Format(time.RFC3339))}

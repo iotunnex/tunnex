@@ -53,7 +53,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	certPEM, keyPEM, caPEM, err := loadCreds(certDir)
+	stored := loadStored(certDir)
+	certPEM, keyPEM, caPEM := stored.CertPEM, stored.KeyPEM, stored.CAPEM
 
 	// S13.1: the stored-identity-vs-join-token decision is a PURE FUNCTION (internal/identity), not an inline
 	// branch. It used to be one, and it was wrong in the case that matters most: an EXPIRED stored certificate
@@ -61,7 +62,7 @@ func main() {
 	// `tls: expired certificate` — /agent/renew requires the certificate that expired (EPIC 11 WF-S11-11). The
 	// safe direction is always the stored identity; the function narrows that preference to the cases where the
 	// stored identity can still work, and cites the evidence for every determination.
-	verdict := identity.Decide(certPEM, err, nodeName, joinToken != "", time.Now())
+	verdict := identity.Decide(stored, nodeName, joinToken != "", time.Now())
 
 	// WF-S11-11b: report the identity actually IN USE, not the one requested. `nodeName` came from
 	// TUNNEX_NODE_NAME and was never reconciled with the certificate, so a wrong-host run printed the requested
@@ -79,7 +80,7 @@ func main() {
 		switch outcome {
 		case rekeyRecovered:
 			certPEM, keyPEM, caPEM = c, k, ca
-			nodeName = identity.EffectiveName(identity.Decide(certPEM, nil, nodeName, false, time.Now()), nodeName)
+			nodeName = identity.EffectiveName(identity.Decide(identity.Stored{CertPEM: certPEM, KeyPEM: keyPEM, CAPEM: caPEM}, nodeName, false, time.Now()), nodeName)
 
 		case rekeyNotNeeded:
 			// The CLOCK was wrong, not the credential. Keep the stored identity and carry on as if this had never
@@ -412,20 +413,19 @@ func serveHealth(addr string, ready *atomic.Bool, logger *slog.Logger) {
 	}
 }
 
-func loadCreds(dir string) (cert, key, ca []byte, err error) {
-	cert, err = os.ReadFile(filepath.Join(dir, "cert.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	key, err = os.ReadFile(filepath.Join(dir, "key.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	ca, err = os.ReadFile(filepath.Join(dir, "ca.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return cert, key, ca, nil
+// loadStored reads the credential set WITHOUT collapsing it.
+//
+// It used to return on the first error, so three files became one error and the caller learned only "something
+// failed". An unreadable ca.pem was then reported as "no credentials in the state directory" — false — and the
+// agent spent its join token, enrolling as a NEW node and discarding the site binding and devices of a gateway
+// whose identity was perfectly provable (pass-3 claims 16, 17, 18, 19, 50). WHICH FILE FAILED CHANGES THE
+// VERDICT, so the verdict must be able to see which file failed.
+func loadStored(dir string) identity.Stored {
+	var st identity.Stored
+	st.CertPEM, st.CertErr = os.ReadFile(filepath.Join(dir, "cert.pem"))
+	st.KeyPEM, st.KeyErr = os.ReadFile(filepath.Join(dir, "key.pem"))
+	st.CAPEM, st.CAErr = os.ReadFile(filepath.Join(dir, "ca.pem"))
+	return st
 }
 
 // saveCreds writes the credential set so that a crash leaves EITHER the old set or the new set, never a mixture
@@ -554,7 +554,20 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 				t.Reset(renewRetryInterval)
 				continue
 			}
-			ca, _ := os.ReadFile(filepath.Join(certDir, "ca.pem"))
+			// THE READ ERROR IS NOT DISCARDED (pass-3 claims 30, 32, 37, 46, 52). It used to be `ca, _ :=`, and
+			// the empty result went straight to saveCreds — which atomically REPLACED the trust anchor with a
+			// zero-length file. The next boot failed AppendCertsFromPEM and os.Exit(1)'d, forever, from one
+			// transient read. A renewal must never be able to destroy the anchor it did not fetch.
+			ca, caErr := os.ReadFile(filepath.Join(certDir, "ca.pem"))
+			if caErr != nil {
+				logger.Warn("agent_renew_anchor_unreadable",
+					slog.String("error", caErr.Error()),
+					slog.String("consequence", "the renewed certificate was NOT written; the existing credential "+
+						"set is untouched and this agent keeps using it"),
+					slog.String("remedy", "check "+certDir+" is readable; renewal retries on the next tick"))
+				t.Reset(renewRetryInterval)
+				continue
+			}
 			if err := saveCreds(certDir, certPEM, keyPEM, ca); err != nil {
 				logger.Warn("agent_renew_persist_failed", slog.String("error", err.Error()))
 				continue
@@ -883,7 +896,7 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 		// stored certificate is valid after all. A clock that jumps the OTHER way (backwards, making a valid cert
 		// look not-yet-valid, or forwards, making a valid one look expired) cannot trigger recovery from in here.
 		if len(certPEM) > 0 {
-			if v := identity.Decide(certPEM, nil, nodeName, haveToken, time.Now()); v.Action == identity.UseStored {
+			if v := identity.Decide(identity.Stored{CertPEM: certPEM, KeyPEM: keyPEM, CAPEM: caPEM}, nodeName, haveToken, time.Now()); v.Action == identity.UseStored {
 				logger.Warn("agent_rekey_no_longer_needed",
 					slog.Int("attempt", attempt),
 					slog.String("reason", "the stored certificate is valid as of the current clock — the expiry "+
