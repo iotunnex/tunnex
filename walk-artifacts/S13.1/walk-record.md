@@ -306,3 +306,42 @@ anyone's choice.
 **Labelled honestly: this is a CODE READ, not an observation.** The walk never ran with persistence disabled. The
 volume type is unambiguous, but the claim is read from the chart — the same distinction as Leg 1's site-binding
 gap, recorded rather than blurred.
+
+---
+
+# §B staging — WF-S13-6 OBSERVED, and the manual restart it forced
+
+**This entry is evidence, not housekeeping.** The restart below is the operator action EPIC 13 exists to remove,
+performed by hand on the walk meant to prove the epic.
+
+| event | time (UTC) | source |
+|---|---|---|
+| B′'s certificate expires | **14:41:45** | `nodes.cert_not_after`, prior value |
+| agent keeps running, logging `tls: expired certificate` against report / status / desired-state / watch | 14:41:45 → 15:41:10 | `docker logs`, continuous, **zero `agent_rekey_*` lines** |
+| **manual `docker restart tunnex-node`** | **15:41:10** | `date -u` on aws-gw-2 |
+| `agent_rekeyed` — *"recovered by proof of possession — same node, same identity, new key"* | **15:41:11.774** | agent log |
+| CP confirms: same id `019fb892…`, `status=active`, new `cert_not_after` `15:51:11`, `cert_delivered=t` | 15:42 | psql |
+
+**STUCK FOR 59 MINUTES 25 SECONDS. RECOVERED IN 1.77 SECONDS.**
+
+That ratio is the finding. The recovery path is not slow, not fragile and not conditional — it is **correct and
+instant**, and it is **unreachable** without a human typing `docker restart`. `identified_by` shows
+`cert_serial`, so even the identification worked first try.
+
+**The gateway was recoverable the entire hour.** Nothing was wrong with the credential material, the CP, the
+network, or the code that recovers. The only missing thing was a second invocation of a decision the agent
+already knows how to make.
+
+## What this discharges and what it does NOT
+
+- **DISCHARGES:** boot-path recovery by proof of possession, in place, on a real expired gateway — same node id,
+  same identity, new key. That half of the epic works.
+- **DOES NOT DISCHARGE:** runtime expiry. Every recovery on this walk, in §A and §B alike, is a
+  stop-then-start. **§C's C-LEG-0 is the only leg that proves the runtime case**, and it does not run until the
+  remedy lands.
+
+## Post-recovery state
+
+`agent_renew_scheduled_from_cert`: `cert_expires_in=9m0s`, `first_attempt_in=4m0s`. The renew loop is anchored to
+remaining life and will keep B′ alive at the 10-minute TTL — so B′ stays a valid staging subject and will not
+expire again unless deliberately stopped.
