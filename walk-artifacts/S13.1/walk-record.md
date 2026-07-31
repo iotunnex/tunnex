@@ -122,3 +122,66 @@ The three devices already cascaded carry `revoked_prev_status = NULL`, so Leg 4'
 **unknown-prior-status** branch. **#8's recorded-prior-status path is therefore UNPROVEN on this rehearsal** and
 is owed by the 48-hour run. The unknown branch can still be exercised here by turning the org's approval gate on
 before the restore — the fail-safe direction (`NULL + approval on → pending`).
+
+---
+
+# LEG RESULTS — REHEARSAL RUN (10-minute TTL), 2026-07-31
+
+CP `c417c85` (rebuilt mid-walk after WF-S13-3) · enterprise · schema 64 · agent image `dd4443ed4df0` on both hosts.
+
+| leg | verdict | the evidence that decided it |
+|---|---|---|
+| **0** provenance + surfaces | **PASS** | generated fingerprint column readable in `\d nodes`; `cert_delivered ... not null | true` **visible in the schema dump**; challenge returns **200 for a serial nobody has** (anti-enumeration) and **200 for an unknown fingerprint** (both identifiers); both-identifiers and neither-identifier return **403, identical, never 400** — finding #18's fix |
+| **1** PoP self-recovery | **PASS** | `agent_rekeyed identified_by="cert_serial 50d033b1…"`; **node id unchanged**; serial and fingerprint both moved; audited succession with **both key fingerprints** and `authorized_by`; **zero commands beyond `docker start`** |
+| **2a** automatic handover | **PASS** | 3 refusals → `agent_rekey_exhausted` → `agent_falling_back_to_join_token`, **all within the same second, no operator action** (#5). `identities_tried` went **1 → 2**: attempt 1 wrote the pending key, attempt 2 read it back and tried the fingerprint identity (**#6 on the wire**). `pending_key_fingerprint` identical across all attempts — the key is REUSED, which is the convergence property |
+| **2b** token fallback completes | **PASS** | new node id `019fb892…`, **`key_recorded = t`**, endpoint populated. Old row revoked → **the name was freed** (WF-S11-8a). Bonus: `agent_renew_scheduled_from_cert cert_expires_in=9m0s first_attempt_in=4m0s` — pass-3 claims 5/12 demonstrating themselves |
+| **3a** revoked → refused | **PASS** | agent refusal **textually identical to Leg 2's**, which was refused for a different reason. **Row unchanged** — same serial, same fingerprint, still revoked. CP log names the real cause where only an operator sees it. **Every refusal `403 / 178 bytes`, for two different internal causes**, while challenges are uniformly `200 / 57 bytes` — D8/D9 MEASURED, not asserted |
+| **4** operator restore | **PASS (mechanism)** + **WF-S13-4** | restored 3, re-homed to B′, audited with a human actor and `previous_node_id`. Address arithmetic defective — see WF-S13-4 |
+| **5** deliberate stays dead | **PASS** | `deliberate` untouched: `revoked`/`deliberate`, still on the old gateway, absent from every restore audit row |
+| **6** staleness surface | **PASS — both halves** | `static-keeps` shows **config out of date with its address UNCHANGED** — only the gateway comparison can fire that, so **F3's fix is proven in isolation**. `decoy-1`, nothing changed, shows **nothing** — the specificity half, which had never had wire evidence |
+| 3b · 7 · 8 | **NOT RUN** | local legs; the refusal-surface half of 3b was covered from the CP |
+
+## WF-S13-4 — the restore consumed one candidate's address to re-address another
+
+**MEDIUM.** Observed at Leg 4.
+
+| device | before | after | correct? |
+|---|---|---|---|
+| `keeps` | .2 | .3 | fresh was right — `.2` was genuinely held by `decoy-1` |
+| `contended` | .3 | **.4** | **wrong — `.3` was free until the restore itself took it** |
+| `static-keeps` | .5 | .5 | reclaimed ✓ |
+
+`keeps` could not reclaim `.2`, so it allocated fresh and was handed **`.3` — `contended`'s own remembered
+address**. `contended` then found its address taken *by the same restore* and was re-addressed to `.4`.
+
+`RestoreCascadeRevokedDevices` seeds `used` from `ListActiveDeviceAllocations` — **live** allocations only. The
+other candidates' remembered addresses are not reserved, so a fresh allocation inside the loop can consume one.
+
+**Cost:** a user re-imports a config who did not need to. Wall 6's failure mode — one rebuild becoming a
+fleet-wide user event — reduced but not eliminated. **Direction (not ruled):** seed `used` with every candidate's
+`assigned_ip` before the loop, releasing each as it is assigned.
+
+## WF-S13-1 — third surface
+
+The restore's target picker offered **`azure-gw`**: active, expired, no endpoint, cannot serve a device. Same
+predicate defect as the device-create picker and the CLI. Three surfaces now.
+
+## WF-S13-5 (LOW) — result banner grammar
+
+*"Restored 3 devices. 2 could not reclaim **its** original address"* — plural/singular mismatch in Slice 7's own
+affordance.
+
+## WHAT THIS REHEARSAL DOES **NOT** PROVE — owed by the 48-hour run
+
+1. **The 48-hour behaviour itself.** Every leg above ran at `TUNNEX_AGENT_CERT_TTL=10m`. The mechanics are
+   proven; the shipped lifetime is not.
+2. **Leg 1's site-binding claim.** `aws-gw-1` has no site binding, so *"`site_id` survives recovery"* was
+   trivially true and therefore untested. **The 48h run must use a site-bound gateway for Leg 1.**
+3. **`cert_delivered` false→true.** The window is seconds — the agent authenticates immediately after promotion —
+   and the sample landed after the flip. Leg 7 (local) can catch it, because there the timing is controllable.
+4. **#8's recorded-prior-status path** (WF-S13-3): the cascaded rows carry NULL, so the restore took the
+   unknown-prior branch and returned everything to `active`.
+5. **F3's known residual.** No device had *managed + gateway changed + address unchanged*, so the case the fix
+   deliberately does not cover was never isolated. `contended` had both changed and fired on the address cause.
+6. **Legs 3b, 7, 8** (local): the identifier-refusal matrix, lost-response recovery in-process, and the
+   save-failure retry.
