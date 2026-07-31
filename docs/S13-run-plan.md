@@ -53,6 +53,28 @@ grep TUNNEX_AGENT_CERT_TTL .env                    # exactly ONE line, =10m
 sudo docker compose logs api 2>&1 | grep agent_cert_ttl_shortened | tail -1   # MUST be present
 ```
 
+## B0a — PROVENANCE: §B runs the SAME BINARY as §A. Do not rebuild.
+
+Everything committed between §A's run and §B is **documentation plus two dev scripts** (`scripts/mutate.sh`,
+`scripts/prove-fix.sh`) — no `apps/` code and **no migrations**. Verify rather than trust:
+
+```bash
+# [azure-cp] pull the docs; the image is already correct
+cd ~/tunnex && git merge --ff-only origin/story/S13.1-gateway-recovery
+git log --oneline -1                                     # 779f1a0 or later
+git diff --name-only c417c85..HEAD | grep -vE '^(docs/|walk-artifacts/|scripts/)' || echo "DOCS ONLY — no rebuild"
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -tAc "SELECT max(version) FROM schema_migrations;"   # 64
+```
+
+**`make up-enterprise` must NOT run for §B.** Rebuilding would swap the artifact under the walk for no gain, and
+it would cost the thing that makes §B worth running: §A and §B execute the *same* binary, so a §B result that
+differs from §A is a difference in the **staging**, not in the build. That is what makes the two runs comparable
+rather than merely consecutive.
+
+`git fetch` is not `git pull`. On 2026-07-31 the rig ran `fetch`, reported success, and stayed seven commits
+behind — the second instance of the standing hazard, in a different disguise from the first. **Read the sha
+back after pulling; do not infer it from the command's exit status.**
+
 ## B0 — STAGING ORDER (ruled 2026-07-31). Read before touching anything.
 
 **The roles INVERT from §A.** After §A, `aws-gw-1` is revoked — D3 forbids its recovery — so the only live,
