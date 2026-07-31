@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -17,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -596,5 +598,163 @@ func TestExpiryWhileRUNNINGRecoversWithoutARestart(t *testing.T) {
 	if got := loadStored(dir); identity.NotAfter(got.CertPEM).Before(time.Now()) {
 		t.Errorf("re-key was attempted and the state directory still holds an expired certificate (NotAfter %s) — "+
 			"the recovery was not promoted", identity.NotAfter(got.CertPEM))
+	}
+}
+
+// throttlingCP answers every re-key challenge with 429 + Retry-After, and records which IDENTIFIER each attempt
+// named. It never issues, so the agent can only keep trying — which is the state under test.
+func throttlingCP(t *testing.T, seen *[]string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/agent/rekey/challenge", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch {
+		case body["cert_serial"] != "":
+			*seen = append(*seen, "cert_serial")
+		case body["key_fingerprint"] != "":
+			*seen = append(*seen, "key_fingerprint")
+		default:
+			*seen = append(*seen, "unknown")
+		}
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// expiredCredsIn writes an expired identity plus a PENDING key, so BOTH re-key identities are available.
+func expiredCredsIn(t *testing.T, dir string, caPEM []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(11), Subject: pkix.Name{CommonName: "gw"},
+		NotBefore: time.Now().Add(-48 * time.Hour), NotAfter: time.Now().Add(-time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pend, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{
+		"cert.pem": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		"key.pem":  pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+		"ca.pem":   caPEM,
+		// A pending key ON DISK is what makes the fingerprint identity available — the lost-response case.
+		pendingKeyFile: pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(pend)}),
+	}
+	for name, data := range files {
+		if werr := os.WriteFile(filepath.Join(dir, name), data, 0o600); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+}
+
+// TestAThrottledLoopDoesNotSTARVETheIdentityThatCanSucceed — pass-3 #34.
+//
+// THE ASYMMETRY. The identity list is [fingerprint, cert_serial]. Fingerprint is first because it serves the
+// LOST-RESPONSE case — if a previous attempt committed without this agent seeing the answer, the control plane
+// holds that key. That is correct, and it is the RARE case. cert_serial is the identity the control plane
+// USUALLY holds.
+//
+// Under a partially-exhausted bucket the throttle broke the identity loop before cert_serial was ever reached,
+// and the next attempt started at the fingerprint again — so the ONE identity that can succeed was starved by the
+// one that provably cannot, and the ordering alone decided whether a throttled fleet recovered at all.
+//
+// The assertion is that BOTH identities get their turn.
+func TestAThrottledLoopDoesNotSTARVETheIdentityThatCanSucceed(t *testing.T) {
+	dir := t.TempDir()
+	caPEM, _ := rekeyHarness(t, dir)
+	expiredCredsIn(t, dir, caPEM)
+
+	var seen []string
+	url := throttlingCP(t, &seen)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	st := loadStored(dir)
+	done := make(chan struct{})
+	go func() {
+		attemptRekey(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), url, dir,
+			st.CertPEM, st.KeyPEM, st.CAPEM, "gw", false)
+		close(done)
+	}()
+	<-done
+
+	sawSerial, sawFP := false, false
+	for _, id := range seen {
+		if id == "cert_serial" {
+			sawSerial = true
+		}
+		if id == "key_fingerprint" {
+			sawFP = true
+		}
+	}
+	if !sawFP {
+		t.Fatalf("the fingerprint identity was never tried at all; identities seen: %v", seen)
+	}
+	if !sawSerial {
+		t.Fatalf("under sustained throttling the cert_serial identity was NEVER tried in %d attempts (%v) — it is "+
+			"starved by the fingerprint, which is the lost-response fallback and the identity the control plane "+
+			"usually does NOT hold. The ordering, not the outage, decides whether a throttled fleet recovers",
+			len(seen), seen)
+	}
+}
+
+// TestPersistentThrottlingESCALATESRatherThanStallingSilently — pass-3 claims 9 and 14.
+//
+// AN EARLIER VERSION OF THIS RED WAS VACUOUS, and the way it failed is worth keeping. It asserted that sustained
+// throttling never reaches the join token — and it PASSED with `refusals++` injected into the throttle branch,
+// because the exhaustion check lives INSIDE the ErrRekeyRefused case (main.go:1194) and the throttle branch
+// continues before reaching it. A throttle STRUCTURALLY cannot spend the token, so the assertion could not fail
+// for any input: the thing it guarded was already guaranteed by the shape of the switch.
+//
+// So the defect in claims 9/14 is not token-spend. It is the SILENT STALL: the throttled branch slept and
+// continued forever at one WARN per attempt, indistinguishable from ordinary backoff, so a fleet being DENIED
+// recovery looked exactly like a fleet waiting politely. The remedy is escalation, and this asserts escalation.
+//
+// It still does not assert an EXIT, deliberately: a 429 says nothing about whether this gateway can recover, so
+// no number of them may hand over. What was missing was saying so loudly.
+func TestPersistentThrottlingESCALATESRatherThanStallingSilently(t *testing.T) {
+	dir := t.TempDir()
+	caPEM, _ := rekeyHarness(t, dir)
+	expiredCredsIn(t, dir, caPEM)
+
+	var seen []string
+	url := throttlingCP(t, &seen)
+
+	var logs bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	st := loadStored(dir)
+	outcome := make(chan rekeyOutcome, 1)
+	go func() {
+		_, _, _, o := attemptRekey(ctx, slog.New(slog.NewTextHandler(&logs, nil)), url, dir,
+			st.CertPEM, st.KeyPEM, st.CAPEM, "gw", true /* haveToken */)
+		outcome <- o
+	}()
+	got := <-outcome
+
+	if len(seen) <= rekeyThrottlesBeforeEscalation {
+		t.Fatalf("only %d attempts in the window; the test cannot reach the escalation threshold of %d",
+			len(seen), rekeyThrottlesBeforeEscalation)
+	}
+	if !strings.Contains(logs.String(), "agent_rekey_throttled_persistently") {
+		t.Errorf("after %d consecutive throttles the agent never escalated — it stalled at one WARN per attempt, "+
+			"which is indistinguishable from ordinary backoff. A gateway being DENIED recovery must not look like "+
+			"one waiting politely", len(seen))
+	}
+	// The never-exit ruling still stands: a rate limit must never spend the identity.
+	if got == rekeyExhausted {
+		t.Errorf("sustained throttling handed over to the join token, which creates a NEW node and discards this " +
+			"one's id, site binding and devices — because an intermediary was busy")
 	}
 }

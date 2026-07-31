@@ -941,6 +941,10 @@ const (
 // control plane may still be fixed underneath us.
 const rekeyRefusalsBeforeToken = 3
 
+// rekeyThrottlesBeforeEscalation — how many CONSECUTIVE 429s before the agent says loudly that it is being denied
+// recovery. Not an exit: a throttle is not a refusal, and no number of them may spend the identity.
+const rekeyThrottlesBeforeEscalation = 5
+
 // attemptRekey recovers an expired identity by proof of possession.
 //
 // WHAT IT LOGS, AND WHY THAT MATTERS. The control plane's refusal carries no reason. So the agent reports what it
@@ -958,15 +962,35 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 
 	backoff := rekeyBackoffFloor
 	refusals := 0
+	throttles := 0
+	// identityStart ROTATES on a throttled break, and the reason is an asymmetry that is easy to miss.
+	//
+	// The identity list is ordered [fingerprint, cert_serial] — fingerprint first because it is the LOST-RESPONSE
+	// case: if a previous attempt committed on the control plane without this agent seeing the answer, the CP holds
+	// that key and trying it first avoids asking for a second issuance. Correct, and it is the RARE case.
+	//
+	// cert_serial is the identity the control plane USUALLY holds. So under a partially-exhausted bucket — where
+	// some requests in each window succeed and the rest are refused with 429 — the fingerprint consumes each
+	// window's surviving request, the throttle breaks the identity loop before cert_serial is ever reached, and the
+	// next attempt starts at the fingerprint again. THE ONE IDENTITY THAT CAN SUCCEED IS STARVED BY THE ONE THAT
+	// PROVABLY CANNOT (pass-3 #34). Rotating the start index means no identity can be starved by another, so under
+	// a throttled fleet the ordering stops deciding whether recovery happens at all.
+	identityStart := 0
 	for attempt := 1; ; attempt++ {
 		// (1) THE PREMISE, RE-READ. A re-key is authorized by this agent's own observation that its certificate has
 		// expired, and that observation depends on the CLOCK. A gateway that booted with a fast clock — before NTP
 		// settled — decided it was expired and then never asked again, so a corrected clock could not release it.
 		//
-		// DIRECTION, STATED: this check can only CANCEL a re-key, never start one. The loop is entered from
-		// identity.Decide at boot and nothing here can enter it; re-reading the clock can only discover that the
-		// stored certificate is valid after all. A clock that jumps the OTHER way (backwards, making a valid cert
-		// look not-yet-valid, or forwards, making a valid one look expired) cannot trigger recovery from in here.
+		// DIRECTION, STATED: this check can only CANCEL a re-key, never start one. Re-reading the clock can only
+		// discover that the stored certificate is valid after all. A clock that jumps the OTHER way cannot trigger
+		// recovery from in here.
+		//
+		// CORRECTED with the runtime gate (WF-S13-6): this comment used to say "the loop is entered from
+		// identity.Decide at boot and nothing here can enter it." The first clause is no longer true —
+		// identityWatchLoop also enters it, on a timer, while the agent runs. THE SAFETY PROPERTY IS UNCHANGED and
+		// is worth restating rather than assuming: BOTH entrances are identity.Decide over purely local inputs, so
+		// neither can be induced by anything on the network. That old sentence is also the one that described the
+		// WF-S13-6 defect as a virtue, which is exactly why it is being rewritten and not merely deleted.
 		if len(certPEM) > 0 {
 			if v := identity.Decide(identity.Stored{CertPEM: certPEM, KeyPEM: keyPEM, CAPEM: caPEM}, nodeName, haveToken, time.Now()); v.Action == identity.UseStored {
 				logger.Warn("agent_rekey_no_longer_needed",
@@ -1028,7 +1052,8 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 		}
 
 		var err error
-		for _, id := range identities {
+		for n := range identities {
+			id := identities[(identityStart+n)%len(identities)]
 			var newCert []byte
 			// caPEM is the anchor ALREADY ON DISK and is never replaced (review pass 1 #1): this path is
 			// unauthenticated plain HTTP, so a CA in the response is attacker-controlled input.
@@ -1056,7 +1081,10 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 				return newCert, pending, caPEM, rekeyRecovered
 			}
 			if errors.Is(err, control.ErrRekeyThrottled) {
-				break // Do not burn the second identity's request on a rate limit.
+				// Do not burn the second identity's request on a rate limit — but ROTATE, so the identity that did
+				// not get its turn this time gets it first next time (#34).
+				identityStart = (identityStart + 1) % len(identities)
+				break
 			}
 			if len(identities) > 1 && errors.Is(err, control.ErrRekeyRefused) {
 				logger.Warn("agent_rekey_identity_refused",
@@ -1066,6 +1094,12 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 					slog.String("note", "refusals are uniform, so this says nothing about the reason; trying the "+
 						"next identity this agent can prove"))
 			}
+		}
+
+		// CONSECUTIVE throttles only: anything else answering — a refusal, a transient fault, a success — means the
+		// path is not saturated, and the escalation below must describe the present, not a historical total.
+		if !errors.Is(err, control.ErrRekeyThrottled) {
+			throttles = 0
 		}
 
 		switch {
@@ -1081,8 +1115,30 @@ func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir stri
 			if wait <= 0 || wait > rekeyBackoffCeiling {
 				wait = rekeyBackoffFloor
 			}
+			throttles++
+			// ESCALATION, because the throttled branch had NO EXIT AND NO ESCALATION (pass-3 claims 9 and 14): it
+			// slept and continued forever, at one WARN per attempt, indistinguishable from ordinary backoff. A
+			// fleet denied recovery by a rate limit looked exactly like a fleet waiting politely.
+			//
+			// IT STILL DOES NOT EXIT, AND THAT IS DELIBERATE. A 429 says nothing about whether this gateway can
+			// recover — falling back to the join token on a rate limit would destroy the node's id, site binding
+			// and devices because an intermediary was busy. The never-exit ruling stands; what was missing was
+			// SAYING SO LOUDLY. The remedy is an operator's to apply, and they cannot apply it unseen.
+			if throttles >= rekeyThrottlesBeforeEscalation {
+				logger.Error("agent_rekey_throttled_persistently",
+					slog.Int("consecutive_throttles", throttles),
+					slog.String("local_finding", "every re-key attempt has been rate-limited for "+
+						(time.Duration(throttles)*wait).String()+"; this gateway cannot recover while that lasts"),
+					slog.String("not_a_refusal", "the control plane has NOT refused this node. Its identity is "+
+						"intact and no join token has been or will be spent on a rate limit"),
+					slog.String("remedy", "the re-key throttle is keyed on the peer address the control plane SEES, "+
+						"which behind a reverse proxy is the proxy itself — so one caller can exhaust the budget "+
+						"for every gateway behind it. Check the control plane for rekey_throttled log lines and "+
+						"which peer is spending them"))
+			}
 			logger.Warn("agent_rekey_throttled",
 				slog.Int("attempt", attempt),
+				slog.Int("consecutive_throttles", throttles),
 				slog.String("note", "something is rate-limiting re-key attempts; this is NOT a refusal and says "+
 					"nothing about whether this gateway can recover. It may be the control plane or an intermediary "+
 					"— the agent cannot tell, and does not claim to"),
