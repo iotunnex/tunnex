@@ -336,6 +336,35 @@ refutes that prediction, the prediction was wrong and the leg passes — which i
 **F1 and F2 are genuinely open.** I have not traced the push far enough to predict them, and a walk is what
 settles that.
 
+> ### ANNOTATION — F3 CONFIRMED FROM CODE, checked at `2c6a314` (2026-07-31, desk, read-only)
+>
+> The prediction above is left EXACTLY as written; this is appended, not edited. A prediction recorded in advance
+> is worthless if it can be rewritten afterwards.
+>
+> **Outcome: CONFIRMED.** `needs_reexport` derives from five inputs at `internal/http/device_handlers.go:57-58` —
+> provisioning mode, the baked ranges snapshot, the org's current routed ranges, `provisioned_ip`, `assigned_ip`
+> (`internal/devices/staleprofile.go:48-56`). **Gateway identity is not among them**, no `provisioned_node_id` /
+> `_endpoint` / `_public_key` column exists, and no code anywhere compares the gateway baked into an issued config
+> against the device's current `node_id`. The config does embed it: `internal/devices/config.go:39-40` writes
+> `PublicKey` (the gateway's) and `Endpoint`.
+>
+> **Refinement the walk should still test — the blast radius is narrower than the prediction implied.** The WF-A
+> dial channel can re-point a RUNNING device, but `nodes.NodeDial` (`internal/nodes/service.go:868-874`) derives a
+> dial only when the device's node is a **hub-set member**; otherwise it returns `derived=false` and the client
+> keeps its baked endpoint. So:
+>
+> | device | after a re-home | warned? |
+> |---|---|---|
+> | static export | never polls; keeps the old gateway forever | **no** |
+> | managed, target NOT in the hub set | `derived=false`, keeps the baked endpoint | **no** |
+> | managed, target IS a hub-set member | swaps peer on the next poll | n/a — follows automatically |
+>
+> **What the walk must therefore record:** which of the three rows each restored device falls in, because a rig
+> whose replacement gateway happens to be a hub-set member would show managed devices reconnecting on their own
+> and could be read as "F3 did not fire". It fired; that rig just picked the one row where it does not bite.
+>
+> Ranked with review pass 1's findings as **desk-found**. NOT fixed here.
+
 If all three hold clean, the leg passes and Wall 6 is closed on the wire. If F3 fires alone, the mechanism works
 and the *surface* is incomplete — a finding, held, not fixed here.
 
