@@ -359,6 +359,7 @@ func main() {
 	// token (no silent re-admission).
 	renewEvery := getdur("TUNNEX_AGENT_RENEW_INTERVAL", 24*time.Hour)
 	go renewLoop(ctx, client, certDir, renewEvery, logger)
+	go identityWatchLoop(ctx, client, apiURL, certDir, nodeName, joinToken != "", identityWatchInterval, logger)
 
 	// Report per-peer live telemetry (handshake/bytes/endpoint) on an interval.
 	go statusLoop(ctx, client, backend, getdur("TUNNEX_AGENT_STATUS_INTERVAL", 30*time.Second), logger)
@@ -573,6 +574,77 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 				continue
 			}
 			logger.Info("agent_cert_renewed")
+		}
+	}
+}
+
+// identityWatchInterval — how often the identity gate is re-evaluated while the agent runs. A var so a red can
+// drive it fast; five minutes in production is far below any certificate lifetime and costs three file reads.
+var identityWatchInterval = 5 * time.Minute
+
+// identityWatchLoop — WF-S13-6. THE GATE RUNS MORE THAN ONCE.
+//
+// THE DEFECT THIS CLOSES. identity.Decide was evaluated exactly once, at boot, against the credentials on disk at
+// that instant; attemptRekey had exactly one caller, inside that boot switch. So recovery was reachable only from
+// a COLD START. A certificate that expired while the agent was running — the ordinary case, and the actual
+// incident that opened EPIC 13 — was detected, logged, and never acted on. Measured on the wire 2026-07-31:
+// STUCK 59 MINUTES, RECOVERED IN 1.77 SECONDS once a human typed `docker restart`.
+//
+// Nothing automatic could bridge that gap, because two individually-correct decisions composed badly: the loop
+// never exits on refusal (right — a gateway must not stop carrying traffic over a control-plane opinion), so
+// Docker's restart policy never fires, kubelet sees a process that is up (and the shipped chart declares no
+// probes at all), and systemd sees no failure code.
+//
+// WHY A TIMER AND NOT AN ERROR HANDLER. The obvious fix is to escalate when requests start failing with
+// `tls: expired certificate`. That would make a NETWORK SIGNAL the trigger, and identity.Decide's guarantee is
+// that no network signal can reach it — there is no argument to pass one through. An agent that re-keys because
+// it cannot reach the control plane hammers an unauthenticated endpoint during every partition and CP restart,
+// hardest when the CP can least cope.
+//
+// So this is not escalation-from-failure. It is THE EXISTING DECISION, INVOKED MORE THAN ONCE, over exactly the
+// inputs it already reads: the files in the state directory and this host's clock. The verdict a boot would have
+// reached is the verdict this reaches, which is why nothing about the decision needed to change.
+func identityWatchLoop(ctx context.Context, client *control.Client, apiURL, certDir, nodeName string,
+	haveToken bool, every time.Duration, logger *slog.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			// Re-read from DISK, not from a variable captured at boot: a renewal or an earlier recovery may have
+			// replaced the set since, and a stale copy would re-decide a question that no longer exists.
+			st := loadStored(certDir)
+			verdict := identity.Decide(st, nodeName, haveToken, time.Now())
+			if verdict.Action != identity.Recover {
+				continue
+			}
+			logger.Warn("agent_identity_recovery_at_runtime",
+				slog.String("reason", verdict.Reason),
+				slog.String("evidence", verdict.Evidence),
+				slog.String("note", "the identity gate reached a RECOVER verdict while this agent was already "+
+					"running. The trigger is local — this host's files against this host's clock — and no "+
+					"network outcome contributed to it"))
+
+			c, k, _, outcome := attemptRekey(ctx, logger, apiURL, certDir, st.CertPEM, st.KeyPEM, st.CAPEM,
+				nodeName, haveToken)
+			if outcome != rekeyRecovered {
+				// Every other outcome already logged its own diagnosis, and none of them is fixable from here.
+				// The next tick re-decides from disk, so a control plane repaired in the meantime is picked up
+				// without an operator touching this host.
+				continue
+			}
+			if err := client.AdoptCredentials(c, k); err != nil {
+				logger.Error("agent_identity_recovered_but_not_adopted",
+					slog.String("error", err.Error()),
+					slog.String("consequence", "the recovery SUCCEEDED and is on disk; this running process could "+
+						"not install it, so it takes effect on the next restart"))
+				continue
+			}
+			logger.Info("agent_identity_recovered_in_place",
+				slog.String("note", "recovered by proof of possession WITHOUT a restart — same node, same id, "+
+					"same site binding, same devices. The control channel re-handshakes with the new certificate"))
 		}
 	}
 }

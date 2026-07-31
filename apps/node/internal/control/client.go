@@ -142,6 +142,23 @@ func (c *Client) Renew(ctx context.Context, agentVersion string) (newCertPEM, ne
 	return body, keyPEM, nil
 }
 
+// AdoptCredentials installs a credential set this client did NOT fetch — the one proof-of-possession recovery
+// produced — and drops pooled connections so the next request re-handshakes with it.
+//
+// It exists so a recovery can land IN A RUNNING PROCESS. Re-key is not an mTLS call (that is the whole point: the
+// certificate it replaces has expired), so its result arrives outside this client and had nowhere to go. Without
+// this seam the only way to apply a recovery was to restart the agent, which is precisely what made the recovery
+// path unreachable at runtime (WF-S13-6).
+func (c *Client) AdoptCredentials(certPEM, keyPEM []byte) error {
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return err
+	}
+	c.cert.Store(&pair)
+	c.http.CloseIdleConnections()
+	return nil
+}
+
 // PolicyStatus is the APPLIED Zero Trust policy status (S7.2 staleness reporting):
 // the version + CANONICAL hash of the policy actually in force on the gateway's
 // forward chain (last successful nft apply), plus the last apply error if any. The

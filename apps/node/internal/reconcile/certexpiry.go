@@ -39,8 +39,17 @@ func CertExpiredRemedy(err error) (string, bool) {
 	return "", false
 }
 
+// remedy — REWRITTEN (S13.1, pass-3 claim 47). The previous text said "Retrying will NOT recover it. RE-ENROLL
+// this gateway", which was true when it was written and became FALSE when proof-of-possession recovery shipped.
+// It was printing the identity-DESTROYING instruction at the exact moment the identity-PRESERVING one would have
+// worked: re-enrolling creates a new node and discards this one's id, site binding, devices and metrics series.
+//
+// The message and the mechanism must not diverge again, which is why this constant names what the agent is
+// ACTUALLY DOING rather than instructing the operator to act.
 const remedy = "this gateway's agent certificate has EXPIRED, so it can no longer authenticate to the control " +
-	"plane — including the renewal endpoint, which requires the certificate that expired. Retrying will NOT " +
-	"recover it. RE-ENROLL this gateway: create a join token in the control plane (Sites → the site → enroll a " +
-	"gateway) and run the enrollment command on this host. Certificates last 48h and renew automatically while " +
-	"the agent is running, so this state means the host was unreachable for longer than that."
+	"plane — including the renewal endpoint, which requires the certificate that expired. THE AGENT IS " +
+	"RECOVERING THIS ITSELF: it re-keys by proving possession of the key the control plane already recorded, " +
+	"which restores this SAME gateway in place — same id, same site binding, same devices. No operator action " +
+	"is needed, and re-enrolling with a join token would DESTROY all of that, so do not do it unless the agent " +
+	"reports that re-key was refused (which happens only if this node was revoked, or enrolled before the " +
+	"control plane recorded agent keys)."

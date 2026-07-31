@@ -15,6 +15,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -246,7 +247,11 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 		CertPEM string `json:"cert_pem"`
 		CAPEM   string `json:"ca_pem"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// BOUNDED BEFORE ANYTHING IS PARSED OR VERIFIED (pass-3 claims 33/48). verifyIssued below decides whether the
+	// responder is the control plane — but it cannot run until the body has been read, so an unbounded read is a
+	// DoS that lands BEFORE the check that would have refused it. Both authenticated siblings bound theirs
+	// (client.go:61,130); these two, on the one route that needs no credential at all, did not.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, rekeyResponseLimit)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("%w: response body did not decode: %v", ErrRekeyTransient, err)
 	}
 	// VERIFY BEFORE ANYTHING TOUCHES DISK. Two properties, and both must hold:
@@ -267,6 +272,10 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 // ErrIssuedCertUntrusted is the refusal when a re-key response does not verify. Distinct from ErrRekeyRefused
 // (which is the control plane saying no) because this one means the RESPONDER IS NOT THE CONTROL PLANE — a
 // materially different thing for an operator to read, and the agent must not print "mint a join token" for it.
+// rekeyResponseLimit bounds both UNAUTHENTICATED response bodies. A certificate and a CA are a few kilobytes; 64
+// KiB is the same ceiling the control plane puts on the request side, so neither direction is the loose one.
+const rekeyResponseLimit = 64 << 10
+
 var ErrIssuedCertUntrusted = errors.New("the issued certificate does not chain to this agent's trusted CA")
 
 func verifyIssued(certPEM, trustedCAPEM, pendingKeyPEM []byte) error {
@@ -319,7 +328,9 @@ func rekeyChallenge(ctx context.Context, apiURL string, ident Identifier) ([]byt
 	var out struct {
 		Nonce string `json:"nonce"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// Bounded for the same reason as the submit response, and this one is reached even earlier — before any
+	// identity has been asserted at all.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, rekeyResponseLimit)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("%w: nonce response did not decode: %v", ErrRekeyTransient, err)
 	}
 	return base64.StdEncoding.DecodeString(out.Nonce)

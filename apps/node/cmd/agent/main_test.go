@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tunnexio/tunnex/apps/node/internal/control"
+	"github.com/tunnexio/tunnex/apps/node/internal/identity"
 )
 
 // TestLoadOrCreateWGKey covers the node-side re-key flow (watch-item a): the key
@@ -522,5 +523,78 @@ func TestTransientFailuresNEVERSpendTheIdentity(t *testing.T) {
 	}
 	if outcome != rekeyCancelled {
 		t.Fatalf("with only transient faults the loop must keep retrying until the context ends; got %v", outcome)
+	}
+}
+
+// TestExpiryWhileRUNNINGRecoversWithoutARestart — WF-S13-6, and this is the acceptance leg in miniature.
+//
+// THE DEFECT. identity.Decide ran once, at boot; attemptRekey had one caller, inside that boot switch. A
+// certificate that expired while the agent was ALREADY RUNNING was detected by the reconcile loop, logged with a
+// remedy telling the operator to re-enroll (destroying the node), and never acted on. Every walk leg had staged
+// expiry by STOPPING the agent first, which manufactured a cold boot — the one path that worked — so the defect
+// survived three review passes and a full rehearsal. Measured on the wire 2026-07-31: stuck 59 minutes, recovered
+// in 1.77 seconds once a human restarted the container.
+//
+// THE ASSERTION IS THE ABSENCE OF A RESTART. The process here is never restarted and nothing re-enters main();
+// the loop alone must carry a gateway from "expired on disk" to "re-keyed", and the control plane must observe
+// the attempt. If recovery is boot-only, `issued` stays 0 forever and this test times out.
+func TestExpiryWhileRUNNINGRecoversWithoutARestart(t *testing.T) {
+	dir := t.TempDir()
+	caPEM, issue := rekeyHarness(t, dir)
+	issued := 0
+	url := fakeCP(t, issue, &issued)
+
+	// An identity that is ALREADY EXPIRED on disk — the state a running agent drifts into, not one it boots with.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "gw"},
+		NotBefore: time.Now().Add(-48 * time.Hour), NotAfter: time.Now().Add(-time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	for name, data := range map[string][]byte{"cert.pem": certPEM, "key.pem": keyPEM, "ca.pem": caPEM} {
+		if werr := os.WriteFile(filepath.Join(dir, name), data, 0o600); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+
+	// A client built exactly as a RUNNING agent's would be, holding the now-expired pair.
+	client, err := control.NewClient("https://unused.invalid", "tunnex-control", "gw", certPEM, keyPEM, caPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		identityWatchLoop(ctx, client, url, dir, "gw", false, 20*time.Millisecond,
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && issued == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if issued == 0 {
+		t.Fatal("a certificate expired underneath a RUNNING agent and no re-key was ever attempted — recovery is " +
+			"reachable only from a cold boot, which is WF-S13-6. No restart happened in this test and none may: " +
+			"the whole claim of the epic is that a gateway comes back by itself")
+	}
+	// And the recovery must have LANDED on disk, not merely been requested.
+	if got := loadStored(dir); identity.NotAfter(got.CertPEM).Before(time.Now()) {
+		t.Errorf("re-key was attempted and the state directory still holds an expired certificate (NotAfter %s) — "+
+			"the recovery was not promoted", identity.NotAfter(got.CertPEM))
 	}
 }
