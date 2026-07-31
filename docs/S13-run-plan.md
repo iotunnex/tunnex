@@ -76,7 +76,9 @@ Two rulings fixed the order:
 | 4 | create on B′: `b3-pending` (leave unapproved) · `b3-active` (approve) · `b4-managed` (approve, managed) · optionally a static | B3 needs both prior statuses; B4 needs a managed device whose address will be RECLAIMED |
 | 5 | **connect** `b3-active` and `b4-managed` | a device that never worked cannot show it stopped working |
 | 6 | **stop B′'s agent**, record `cert_not_after` at the stop, wait ~10 min | the clock |
-| 7 | **B6 — timing**, now | the only window where B′ is expired + active + key-recorded |
+| 7 | **B6 — timing**, N BOUNDED | the only window where B′ is expired + active + key-recorded |
+| 7a | **drain the throttle**, confirm | B6 spends the SAME bucket Leg 1 needs — see B6's bound |
+| 7b | **B7 — saturate deliberately**, then start the agent | measures finding #4 and the agent's 429 handling in one motion |
 | 8 | start **B2's poller**, then start B′'s agent | B1 + B2 + Leg 1 in one motion |
 | 9 | **revoke B′** → cascade. Assert `revoked_prev_status` is RECORDED | the column §A found empty (WF-S13-3) |
 | 10 | **restore onto A1′** | B3 (pending returns pending) + B4 (managed, address reclaimed, gateway moved → NO badge) |
@@ -157,6 +159,32 @@ destroyed by a disk condition.
 
 ## B6 — TIMING: the third dimension of uniform refusal
 
+> ### BOUND N, AND DRAIN BEFORE LEG 1
+>
+> Each sample is **challenge + submit = 2 requests**, and the re-key bucket is **600/min**. Three populations at
+> 100 samples each is 600 requests — the bucket **exactly** — and Leg 1's recovery would then be throttled and
+> read as a failure that is not one.
+>
+> **It is one bucket, not several.** The throttle keys on the RAW peer address and is registered above
+> `middleware.RealIP`; the CP sits behind nginx, so every request arriving through the proxy — the timing curls
+> from azure-cp AND the agent's re-key from aws-gw-2 — is attributed to nginx's address. That is finding #4, and
+> it is why this section can starve the next one.
+>
+> **N = 40 per population** (3 × 40 × 2 = **240** requests, 40% of the budget), paced with a short sleep.
+>
+> **Then confirm the drain before starting the agent:**
+>
+> ```bash
+> sleep 70    # the window is a fixed minute; let it roll over
+> curl -s -o /dev/null -w 'drain check = %{http_code}\n' -X POST localhost/api/v1/agent/rekey/challenge \
+>   -H 'content-type: application/json' -d '{"cert_serial":"drain-probe"}'      # MUST be 200, not 429
+> ```
+>
+> **Window order, fixed:** stop → expiry → **B6 timing** → **drain confirmed** → B7 → B2 poller started →
+> agent started (Leg 1).
+
+### The measurement
+
 §A proved status code and body length are identical. **Timing was never measured**, and finding #16 conceded the
 one asymmetry the ordering cannot remove: **wrong-key is the only refusal that pays for a full RSA
 verification**, because it passes the gate. Unknown-identifier and revoked-node refusals do not.
@@ -194,6 +222,49 @@ timed() {  # $1=label $2=identifier-json
   expired, key-recorded node"* — which reaching that path already required.
 
 Either way it is **measured, not asserted** — the same standard §A applied to status and body length.
+
+## B7 — THE THROTTLE, MEASURED (its only wire exercise)
+
+Finding **#4** is registered as a bounded limitation **on a code read alone**: *"in every shipped topology the
+peer is the edge proxy, so the throttle is one global bucket and any unauthenticated caller can starve fleet-wide
+recovery."* Nothing has ever observed it. This costs one minute and settles it.
+
+**Its own line in the record — not folded into B6.**
+
+```bash
+# [azure-cp] deliberately exhaust the shared bucket — 700 challenges, past the 600/min ceiling
+for i in $(seq 1 700); do
+  curl -s -o /dev/null -w '%{http_code} ' -X POST localhost/api/v1/agent/rekey/challenge \
+    -H 'content-type: application/json' -d '{"cert_serial":"saturate"}'
+done | tr ' ' '\n' | sort | uniq -c
+#   EXPECT: ~600 x 200, then 429s. RECORD the counts.
+
+curl -s -D- -o /dev/null -X POST localhost/api/v1/agent/rekey/challenge \
+  -H 'content-type: application/json' -d '{"cert_serial":"saturate"}' | grep -iE '^HTTP|retry-after'
+#   RECORD the 429 and its Retry-After.
+
+sudo docker compose logs api --since 2m 2>&1 | grep rekey_throttled | tail -3
+#   #13's fix: the 429 must leave a SERVER-SIDE line naming the peer. Before Batch D there was none.
+```
+
+**Then, with the bucket still exhausted, start B′'s agent.** It arrives through the same proxy, so it is throttled
+too — which is the point.
+
+**PASS — three things, and the third is the decisive one:**
+
+1. **`agent_rekey_throttled`, NOT `agent_rekey_refused`.** A refusal means *this will never work*; a 429 means
+   *not right now*. Conflating them is what made the agent print the destructive "mint a join token" remedy for a
+   rate limit.
+2. **The server's `Retry-After` is HONOURED**, not merely printed — `retry_in` in the log matches the header
+   (Batch B, claims 9/10/14: the value used to be parsed into an error string and discarded while the agent
+   retried on its own floor, so the log and the code stated different intervals).
+3. **The agent RECOVERS once the window rolls over, with the SAME node id.** Throttles must not count toward the
+   three-refusal exhaustion. B′ has a token in its environment, so if they did count, it would fall back and
+   enrol as a **NEW node** — decisive in one field, exactly like the precedence check.
+
+**What this measures for #4:** how many requests one unauthenticated caller needs to deny gateway recovery to
+every gateway behind that proxy, and how long the denial lasts. Record both numbers. The limitation stays
+registered either way — but registered **with measurements** rather than with an inference.
 
 ---
 
