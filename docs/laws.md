@@ -61,6 +61,35 @@ other, and the note that proves the guarantee is the natural place to notice the
 `tunnex-unit-tests-prove-behaviour-not-reachability` — name the trigger, then check the caller can co-occur with
 it.
 
+## DOES THE REMEDY ADDRESS THE DEFECT, OR ITS NEIGHBOURHOOD? (founder-ratified 2026-08-01, EPIC 13, three instances in one epic)
+
+**A fold is not closed because an edit landed near the defect. Ask of every remedy: does this make the NAMED
+DEFECT impossible — or does it fix something ADJACENT to it?** Adjacent fixes are made in good faith, pass their
+reds, survive marker sweeps, and read as complete.
+
+**An earlier version of this law said multi-claim fold rows were the risky shape. That was wrong** — it was
+inferred from two instances and refuted by the third. **Claim count is a SYMPTOM, not the mechanism.**
+
+| instance | the defect | what the remedy did instead | claims in the row |
+|---|---|---|---|
+| claims 2/4/13/20 | nothing ENTERS the recovery loop at runtime | re-read the premise **inside** the loop — correct for 4/13/20, silent on 2 | 4 |
+| claims 9/10/14 | the throttled branch has no exit or escalation | honoured `Retry-After` — the interval, not the exit | 3 |
+| **#11** | an interrupted promotion leaves a mismatched pair | made the seam **injectable** and the failure **survivable** — the pair itself neither prevented nor detected | **1** |
+| (Batch A, found earlier by this same question) | re-key must refuse a node the CP cannot verify is GONE | authorized any caller **proving the current key** — a live-node takeover | 1 |
+
+**Two of four are single-claim rows.** The mechanism is that a defect has a NEIGHBOURHOOD — its consequences, its
+testability, its survivability, its adjacent parameters — and every one of those is a satisfying thing to fix.
+The fix is real, the red passes, the row gets ticked, and the defect is untouched.
+
+**What binds now:** state the remedy as a sentence that makes the defect impossible, and check that sentence
+against the defect's own words. *"The premise is re-read each pass"* does not contain *"something enters the
+loop."* *"The seam is injectable"* does not contain *"the pair matches."* If the remedy's sentence and the
+defect's sentence are about different subjects, the fold is open however good the code is.
+
+**The corollary that cost this epic three instances:** a marker sweep asks *did the edit land?* — a question all
+three passed. It cannot ask this one. **Sweeps verify presence; only reading the defect beside the remedy
+verifies closure.**
+
 ## Prior laws (lifted from decision docs — pointers)
 - **Fixture-fidelity law** (S8.2): a test double must not be more capable than the real substrate (the fake stripped `SiteLink` on read). Contrapositive (S8.3): when the kernel genuinely reports a field, PARSE and COMPARE it (keepalive), so convergence is real not fixtured.
 - **Four-word reconcile model** (S8.2): {atomic fetch, fail-static, full-sweep, keep-last-value} — any deviation is a finding.
