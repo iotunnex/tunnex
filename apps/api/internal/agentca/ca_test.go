@@ -123,3 +123,30 @@ func TestSignCSRRefusesKeyTypesRecoveryCannotVerify(t *testing.T) {
 			"certificate would work and the recovery would not, and nothing would say so until it was needed")
 	}
 }
+
+// TestCertTTLOnlyEverSHORTENS — the knob's security property, asserted in the direction that matters.
+//
+// Revocation in this product IS refusal-to-renew, so the certificate lifetime is exactly the window a revoked
+// agent keeps working. The knob exists because an expired certificate cannot be manufactured — the clock is the
+// only way — and rehearsing recovery at 48h per subject is impractical. It must therefore be impossible to use it
+// to LENGTHEN that window, from any environment, by any typo.
+func TestCertTTLOnlyEverSHORTENS(t *testing.T) {
+	for _, c := range []struct {
+		set  string
+		want time.Duration
+		why  string
+	}{
+		{"", MaxCertTTL, "unset must be the shipped default"},
+		{"10m", 10 * time.Minute, "a shorter TTL is honoured — that is the point"},
+		{"720h", MaxCertTTL, "a MONTH must be clamped to the ceiling: lengthening weakens revocation for the " +
+			"entire fleet, and no environment may do that at runtime"},
+		{"49h", MaxCertTTL, "one hour over the ceiling is still over the ceiling"},
+		{"1s", MinCertTTL, "below the floor an agent races its own renewal"},
+		{"not-a-duration", MaxCertTTL, "an unparseable value must fall back to the SAFE default, never to zero"},
+	} {
+		t.Setenv("TUNNEX_AGENT_CERT_TTL", c.set)
+		if got := resolveCertTTL(); got != c.want {
+			t.Errorf("TUNNEX_AGENT_CERT_TTL=%q -> %v, want %v: %s", c.set, got, c.want, c.why)
+		}
+	}
+}

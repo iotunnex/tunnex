@@ -18,7 +18,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,9 +30,60 @@ import (
 
 const secretName = "agent_ca"
 
-// CertTTL is the lifetime of an issued agent certificate. Revocation = refuse
-// renewal, so a short lifetime bounds a compromised cert's window (S3.1 decision).
-const CertTTL = 48 * time.Hour
+// MaxCertTTL is the CEILING on an issued agent certificate's lifetime, and it is a const because it is the
+// security property. Revocation in this product IS refusal-to-renew (S3.1), so the certificate lifetime is
+// exactly the window a compromised or revoked agent keeps working. Lengthening it weakens revocation for the
+// whole fleet; nothing may do that at runtime.
+const MaxCertTTL = 48 * time.Hour
+
+// MinCertTTL floors the knob below. Shorter than this and an agent's renewal (at half-life) races its own
+// expiry, which turns a configuration choice into an outage.
+const MinCertTTL = time.Minute
+
+// CertTTL is the lifetime actually issued. It may be SHORTENED via TUNNEX_AGENT_CERT_TTL and never lengthened.
+//
+// WHY THE KNOB EXISTS. An expired certificate cannot be manufactured — the clock is the only way — so every
+// rehearsal of the gateway-recovery path costs 48 hours of wall time per subject. A short TTL makes the same code
+// paths reachable in minutes.
+//
+// WHY IT ONLY SHORTENS. The dangerous direction is bounded BY CONSTRUCTION rather than by a warning: a value above
+// MaxCertTTL is clamped down, so no environment, no typo and no future operator can extend the window revocation
+// depends on. Shortening is safe in the same sense — it makes revocation take effect FASTER, never slower.
+//
+// A SHORTENED TTL IS A REHEARSAL, NOT THE PROOF. Any walk run under it exercises the mechanics and the code paths;
+// it does not exercise the 48-hour behaviour the product ships with. The walk record must state which TTL each leg
+// ran under (SUBSTITUTES ≠ SATISFIES).
+var CertTTL = resolveCertTTL()
+
+func resolveCertTTL() time.Duration {
+	raw := os.Getenv("TUNNEX_AGENT_CERT_TTL")
+	if raw == "" {
+		return MaxCertTTL
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		slog.Warn("agent_cert_ttl_ignored", "value", raw, "error", err.Error(),
+			"using", MaxCertTTL.String())
+		return MaxCertTTL
+	}
+	switch {
+	case d > MaxCertTTL:
+		// CLAMPED DOWN, never honoured. This is the direction that weakens revocation fleet-wide.
+		slog.Warn("agent_cert_ttl_clamped", "requested", d.String(), "ceiling", MaxCertTTL.String(),
+			"reason", "revocation in this product is refusal-to-renew, so the certificate lifetime IS the window "+
+				"a revoked agent keeps working. It cannot be extended at runtime")
+		return MaxCertTTL
+	case d < MinCertTTL:
+		slog.Warn("agent_cert_ttl_floored", "requested", d.String(), "floor", MinCertTTL.String(),
+			"reason", "an agent renews at half-life; below this it races its own expiry")
+		return MinCertTTL
+	}
+	slog.Warn("agent_cert_ttl_shortened", "ttl", d.String(), "default", MaxCertTTL.String(),
+		"consequence", "agent certificates are SHORT-LIVED in this deployment. Intended for rehearsing the "+
+			"recovery path without waiting out a real expiry — a walk run under this proves the mechanics, NOT "+
+			"the shipped 48h behaviour")
+	return d
+}
 
 // sealer is the subset of crypto.Sealer we need.
 type sealer interface {
