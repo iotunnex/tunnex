@@ -319,7 +319,24 @@ timed() {  # $1=label $2=identifier-json
 
 Either way it is **measured, not asserted** — the same standard §A applied to status and body length.
 
-## B7 — THE THROTTLE, MEASURED (its only wire exercise)
+## B7 — THE THROTTLE. REFRAMED 2026-08-01: an ACCEPTANCE TEST, not a throughput check.
+
+> **B7 MUST NOT RUN UNTIL THE THROTTLE FIX LANDS.** As designed, B7 drives the agent into a permanent 429 — and
+> that is a **known-broken branch**: pass-3 claims 9/14 plus #34, still owed. The throttled path `continue`s
+> without incrementing `refusals`, so an indefinite 429 is an indefinite stall with no escalation and no
+> fallback, and #34's `break` leaves the identity loop at the fingerprint every time. Running B7 before the fix
+> would confirm a defect already confirmed by reading the code, and would read as a walk failure rather than a
+> known gap.
+>
+> **AFTER the fix, B7 becomes the acceptance test on real infrastructure**, and the PASS condition is a sequence,
+> not a number: **saturate the bucket → the agent backs off → it ESCALATES (loudly, and without spending the
+> identity) → and it still RECOVERS, with the same node id.**
+>
+> **It is not a throughput measurement.** The request counts it records exist to bound finding #4 — how many
+> requests one unauthenticated caller needs to deny recovery to every gateway behind the proxy, and for how long.
+> Reading B7 as "how fast is the endpoint" would miss its entire subject.
+
+## B7 — the measurement, once the fix has landed
 
 Finding **#4** is registered as a bounded limitation **on a code read alone**: *"in every shipped topology the
 peer is the edge proxy, so the throttle is one global bucket and any unauthenticated caller can starve fleet-wide
