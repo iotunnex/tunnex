@@ -243,8 +243,47 @@ export default function VisualGallery() {
             />
           </Panel>
         </div>
+        {/* ⛔ COMBINATION 4 (S14.5): ALL THREE LINK TONES AT ONCE, WITH A NODE SELECTED.
+            `Link` was `healthy: boolean` under a three-entry legend. The tones only diverge visually when
+            they are adjacent, and `degraded` is the one that had nowhere to live — a two-state type forces
+            it to collapse into a neighbour, and collapsing it into `linked` is the silent-blackhole
+            direction. Selection is rendered ON, because dimming is a RELATIVE effect: an unselected diagram
+            proves nothing about what selection does to the other links. */}
         <div className="w-80">
-          <Panel title="Node link">
+          <Panel title="Node link — three tones, one selected">
+            <NodeLink
+              label="Topology"
+              source={{ endpoint: "/x" }}
+              failed={false}
+              nodes={[
+                { id: "h", label: "hub", kind: "hub", sub: "· us-east" },
+                { id: "a", label: "eu-lan", kind: "spoke", sub: "· 10.2.0.0/16" },
+                { id: "b", label: "ap-lan", kind: "spoke", sub: "· 10.3.0.0/16" },
+                { id: "c", label: "sa-lan", kind: "spoke", sub: "· 10.4.0.0/16" },
+              ]}
+              links={[
+                { from: "h", to: "a", tone: "linked" },
+                {
+                  from: "h",
+                  to: "b",
+                  tone: "degraded",
+                  note: "advertises a subnet with no host address inside it",
+                },
+                {
+                  from: "h",
+                  to: "c",
+                  tone: "down",
+                  note: "no fresh handshake to the hub",
+                },
+              ]}
+              selectedId="b"
+              onSelect={() => {}}
+              empty="none"
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Node link — inert (no onSelect)">
             <NodeLink
               label="Topology"
               source={{ endpoint: "/x" }}
@@ -253,7 +292,7 @@ export default function VisualGallery() {
                 { id: "h", label: "hub", kind: "hub" },
                 { id: "s", label: "spoke", kind: "spoke" },
               ]}
-              links={[{ from: "h", to: "s", healthy: false }]}
+              links={[{ from: "h", to: "s", tone: "down", note: "link down" }]}
               empty="none"
             />
           </Panel>

@@ -282,12 +282,41 @@ export interface Node {
   id: string;
   label: string;
   kind: "hub" | "spoke";
+  /** One line of true facts under the label. The wireframe's `kind · ip · status`, minus the ip we do not serve. */
+  sub?: string;
 }
+
+/**
+ * ⛔ THREE TONES, NOT A BOOLEAN — S14.5.
+ *
+ * This was `healthy: boolean` and the legend it feeds has THREE entries (linked · degraded · down). A
+ * two-state type under a three-state legend forces every caller to collapse `degraded` into one of the
+ * neighbours, and the safe-looking collapse (degraded → healthy) is the silent-blackhole direction.
+ *
+ * The control plane already distinguishes them: `site_link_down` / `site_hub_down` are their own health
+ * kinds. The type now carries what the data carries.
+ */
+export type LinkTone = "linked" | "degraded" | "down";
+
 export interface Link {
   from: string;
   to: string;
-  healthy: boolean;
+  tone: LinkTone;
+  /** Why it is not `linked`. Rendered verbatim in the list; never inferred from the tone. */
+  note?: string;
 }
+
+const LINK_STROKE: Record<LinkTone, string> = {
+  linked: "var(--tnx-ok)",
+  degraded: "var(--tnx-warn)",
+  down: "var(--tnx-danger)",
+};
+// `down` is dashed as well as red, so the state survives a monochrome print and a red-green viewer.
+const LINK_DASH: Record<LinkTone, string | undefined> = {
+  linked: undefined,
+  degraded: "4 3",
+  down: "2 3",
+};
 
 /**
  * The site topology.
@@ -304,6 +333,8 @@ export function NodeLink({
   nodes,
   links,
   empty = "No sites yet.",
+  selectedId,
+  onSelect,
 }: {
   label: string;
   source: VizSource;
@@ -311,6 +342,9 @@ export function NodeLink({
   nodes: Node[];
   links: Link[];
   empty?: ReactNode;
+  /** Controlled selection. Undefined = the diagram is inert, exactly as it was before S14.5. */
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 }) {
   const hub = nodes.find((n) => n.kind === "hub");
   const spokes = nodes.filter((n) => n.kind !== "hub");
@@ -320,6 +354,9 @@ export function NodeLink({
     const a = (i / Math.max(1, spokes.length)) * Math.PI * 2;
     pos.set(s.id, { x: 100 + Math.cos(a) * 70, y: 60 + Math.sin(a) * 45 });
   });
+
+  const interactive = onSelect != null;
+  const selected = nodes.find((n) => n.id === selectedId) ?? null;
 
   return (
     <VizFrame
@@ -334,6 +371,7 @@ export function NodeLink({
           const a = pos.get(l.from);
           const b = pos.get(l.to);
           if (!a || !b) return null;
+          const touches = selectedId === l.from || selectedId === l.to;
           return (
             <line
               key={`${l.from}-${l.to}`}
@@ -341,13 +379,16 @@ export function NodeLink({
               y1={a.y}
               x2={b.x}
               y2={b.y}
-              stroke={l.healthy ? "var(--tnx-ok)" : "var(--tnx-danger)"}
-              strokeWidth="1"
+              stroke={LINK_STROKE[l.tone]}
+              strokeDasharray={LINK_DASH[l.tone]}
+              strokeWidth={touches ? 2 : 1}
+              opacity={selectedId && !touches ? 0.25 : 1}
             />
           );
         })}
         {nodes.map((n) => {
           const p = pos.get(n.id)!;
+          const isSel = n.id === selectedId;
           return (
             <circle
               key={n.id}
@@ -355,29 +396,67 @@ export function NodeLink({
               cy={p.y}
               r={n.kind === "hub" ? 6 : 4}
               fill="var(--tnx-accent-500)"
+              stroke={isSel ? "var(--tnx-ink-heading)" : "none"}
+              strokeWidth={isSel ? 1.5 : 0}
+              opacity={selectedId && !isSel ? 0.4 : 1}
             />
           );
         })}
       </svg>
-      {/* Same rule as the donut: the SVG is decoration; this list is the content. Link health is stated in
-          words, so "down" is never carried by a red line alone. */}
+      {/* ⛔ THE SVG IS DECORATION. THIS LIST IS THE CONTENT — and it is what makes the diagram operable.
+          Selection lives on real <button> elements here, NOT on the <circle>s: an SVG node is not focusable,
+          not reachable by keyboard, and announces nothing. Clicking a circle is a shortcut for people who
+          can see and aim; the list is the interface. Link state is stated in WORDS, so "down" is never
+          carried by a red line alone. */}
       <ul className="mt-2 space-y-1 text-xs">
-        {nodes.map((n) => (
-          <li key={n.id} className="text-slate-400">
-            {n.label}
-            {n.kind === "hub" && (
-              <span className="ml-1 text-slate-600">(hub)</span>
-            )}
-          </li>
-        ))}
+        {nodes.map((n) => {
+          const isSel = n.id === selectedId;
+          const body = (
+            <>
+              {n.label}
+              {n.kind === "hub" && (
+                <span className="ml-1 text-ink-faint">(hub)</span>
+              )}
+              {n.sub && <span className="ml-1 text-ink-faint">{n.sub}</span>}
+            </>
+          );
+          return (
+            <li key={n.id}>
+              {interactive ? (
+                <button
+                  type="button"
+                  aria-pressed={isSel}
+                  onClick={() => onSelect(isSel ? null : n.id)}
+                  className={`w-full rounded px-1 text-left ${
+                    isSel ? "bg-white/10 text-ink-heading" : "text-ink-body"
+                  }`}
+                >
+                  {body}
+                </button>
+              ) : (
+                <span className="text-ink-body">{body}</span>
+              )}
+            </li>
+          );
+        })}
         {links
-          .filter((l) => !l.healthy)
+          .filter((l) => l.tone !== "linked")
           .map((l) => (
-            <li key={`${l.from}-${l.to}-d`} className="text-danger">
-              {l.from} ↔ {l.to} down
+            <li
+              key={`${l.from}-${l.to}-d`}
+              className={l.tone === "down" ? "text-danger" : "text-warn"}
+            >
+              {l.from} to {l.to}: {l.note ?? l.tone}
             </li>
           ))}
       </ul>
+      {interactive && (
+        <p className="mt-2 text-micro text-ink-faint">
+          {selected
+            ? `${selected.label}. ${selected.sub ?? "no further detail served"}`
+            : "Select a site to scope the actions panel."}
+        </p>
+      )}
     </VizFrame>
   );
 }

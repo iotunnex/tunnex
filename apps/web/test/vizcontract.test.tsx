@@ -133,11 +133,130 @@ describe("THE NUMBERS ARE TEXT, NOT ONLY GEOMETRY", () => {
           { id: "a", label: "hub-syd", kind: "hub" },
           { id: "b", label: "spoke-wus", kind: "spoke" },
         ]}
-        links={[{ from: "a", to: "b", healthy: false }]}
+        links={[
+          { from: "a", to: "b", tone: "down", note: "no fresh handshake" },
+        ]}
         empty="none"
       />,
     );
-    expect(screen.getByText(/a ↔ b down/)).toBeTruthy();
+    expect(screen.getByText(/a to b: no fresh handshake/)).toBeTruthy();
+  });
+
+  // S14.5 — the tone widened from a boolean to three states, so the MIDDLE one gets its own assertion.
+  // A two-state type under a three-entry legend forces `degraded` to collapse into a neighbour, and the
+  // comfortable collapse (degraded → linked) is the direction that hides a fault.
+  it("[NodeLink] a DEGRADED link is stated in words too, and is not collapsed into healthy", () => {
+    render(
+      <NodeLink
+        label="Topology"
+        source={SRC}
+        failed={false}
+        nodes={[
+          { id: "a", label: "hub-syd", kind: "hub" },
+          { id: "b", label: "spoke-wus", kind: "spoke" },
+        ]}
+        links={[
+          { from: "a", to: "b", tone: "degraded", note: "subnet unreachable" },
+        ]}
+        empty="none"
+      />,
+    );
+    expect(screen.getByText(/a to b: subnet unreachable/)).toBeTruthy();
+  });
+
+  // The diagram is operable by KEYBOARD or it is not operable. An SVG <circle> is not focusable and
+  // announces nothing, so selection lives on the list's buttons.
+  it("[NodeLink] selection is a real button with a pressed state, not a click target on an SVG shape", async () => {
+    const picked: (string | null)[] = [];
+    render(
+      <NodeLink
+        label="Topology"
+        source={SRC}
+        failed={false}
+        nodes={[
+          { id: "a", label: "hub-syd", kind: "hub" },
+          { id: "b", label: "spoke-wus", kind: "spoke" },
+        ]}
+        links={[{ from: "a", to: "b", tone: "linked" }]}
+        selectedId={null}
+        onSelect={(id) => picked.push(id)}
+        empty="none"
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /spoke-wus/ });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    btn.click();
+    expect(picked).toEqual(["b"]);
+  });
+
+  // ⛔ THE PRESSED STATE NEEDS BOTH HALVES, AND THE MUTATION PROVED IT.
+  //
+  // The test above asserts `aria-pressed="false"` on an UNSELECTED node. Hard-coding the attribute to
+  // `false` — deleting the selection state entirely from the announcement — LEFT IT GREEN, because false is
+  // what it expected. A test that only ever observes one value of a two-valued thing cannot tell the
+  // variable from the constant. This asserts the other half.
+  it("[NodeLink] the SELECTED node announces aria-pressed=true — the half the mutation walked through", () => {
+    render(
+      <NodeLink
+        label="Topology"
+        source={SRC}
+        failed={false}
+        nodes={[
+          { id: "a", label: "hub-syd", kind: "hub" },
+          { id: "b", label: "spoke-wus", kind: "spoke" },
+        ]}
+        links={[{ from: "a", to: "b", tone: "linked" }]}
+        selectedId="b"
+        onSelect={() => {}}
+        empty="none"
+      />,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: /spoke-wus/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("button", { name: /hub-syd/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
+  });
+
+  // Clicking the selected node CLEARS the selection. Without this, `onSelect` could always emit the id and
+  // both tests above would still pass.
+  it("[NodeLink] clicking the selected node deselects it", () => {
+    const picked: (string | null)[] = [];
+    render(
+      <NodeLink
+        label="Topology"
+        source={SRC}
+        failed={false}
+        nodes={[{ id: "b", label: "spoke-wus", kind: "spoke" }]}
+        links={[]}
+        selectedId="b"
+        onSelect={(id) => picked.push(id)}
+        empty="none"
+      />,
+    );
+    screen.getByRole("button", { name: /spoke-wus/ }).click();
+    expect(picked).toEqual([null]);
+  });
+
+  // Without onSelect the primitive must stay exactly as inert as it was before S14.5 — no buttons appear on
+  // a screen that never asked for selection.
+  it("[NodeLink] renders NO buttons when onSelect is omitted", () => {
+    render(
+      <NodeLink
+        label="Topology"
+        source={SRC}
+        failed={false}
+        nodes={[{ id: "a", label: "hub-syd", kind: "hub" }]}
+        links={[]}
+        empty="none"
+      />,
+    );
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 });
 
