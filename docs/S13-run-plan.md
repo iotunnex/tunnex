@@ -429,6 +429,36 @@ registered either way — but registered **with measurements** rather than with 
 > says it will), but it is no longer why §C exists. **§C does not run until the remedy has landed** — before
 > that, its result is known in advance, and a run whose outcome is known proves nothing.
 
+## §C STAGING — RULED 2026-08-01. Subject is aws-gw-1, and B7 moves here.
+
+**SUBJECT: `aws-gw-1` (`019fbb50…`), AFTER §B COMPLETES.** The written plan named `k8s`; `k8s` has
+`key_recorded=f`, so proof-of-possession recovery is **structurally impossible** for it and C-LEG-0 would have
+failed after 48 hours for a reason unrelated to `identityWatchLoop`. `aws-gw-1` has a recorded key, is free once
+§B is done, and is the box whose real expiry opened EPIC 13.
+
+**B7 MOVES FROM §B TO §C.** The throttle fix (`7d5f7ca`) is in the tree but deliberately NOT on the rig, which
+runs `c417c85` for §B's same-binary provenance. B7 needs the fix, and §C is the run that carries a rebuilt image.
+
+### §C RUN ORDER — the throttle leg runs FIRST, and the reason is the clock
+
+**B7 BEFORE the expiry leg. Not bolted on after.**
+
+```
+rebuild + deploy agent image (fa35e63+)   →  confirm agent healthy, cert VALID
+  →  B7: saturate the bucket  →  escalation observed  →  DRAIN CONFIRMED (probe returns 200)
+  →  ONLY THEN: leave it alone. The clock starts.
+  →  ~48h  →  C-LEG-0: expiry underneath a RUNNING agent, no restart, no operator action
+```
+
+**Why this order and not the reverse.** B7 deliberately saturates a shared, deployment-wide bucket. Running it
+*after* the clock would land it in the middle of C-LEG-0's window, where a throttled re-key is
+indistinguishable from the boot-only failure C-LEG-0 exists to detect — the leg would be unreadable in exactly
+the direction that matters. Running it first costs one minute and leaves the 48 hours clean.
+
+**The drain gate is mandatory between them** (`sleep 70`, then a challenge probe returning **200**, not 429).
+The clock does not start until that probe passes; otherwise the first hours of C-LEG-0 run against a bucket B7
+emptied.
+
 ## §C PREREQUISITES — establish these BEFORE the clock, not on the day
 
 **1. THE RIG NEEDS A REBUILT AGENT IMAGE.** §C proves `identityWatchLoop`, which **does not exist** in the

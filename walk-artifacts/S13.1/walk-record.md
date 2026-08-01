@@ -523,3 +523,24 @@ precisely why `k8s` was chosen.
 
 **Recommendation: option 2** — fewer moving parts, and the subject is the original incident. It changes §C's
 written staging, so it is a ruling, not a fold.
+
+
+## SCAFFOLDING DEPENDENCY CHECK — no remaining leg reads the hand-revoked row
+
+The `azure-gw` row (`019f8e46…`) was revoked by **hand-written SQL** — a state no product path produces (there is
+no `revoked_cause` on `nodes`; the API's gateway revoke goes through a different path entirely). **Every
+remaining leg was checked against it:**
+
+| leg | reads `019f8e46…`? |
+|---|---|
+| B1 site binding survives recovery | no — reads B′'s own `site_id` |
+| B2 `cert_delivered` flip | no — polls B′'s row |
+| B3 recorded prior status | no — cascade/restore between B′ and A1′ |
+| B4 F3 residual | no — one managed device on B′ |
+| B5 Legs 7/8 | no — local, no fleet state |
+| B6 refusal timing | no — B′'s serial, a wrong key, an unknown serial |
+| §C / C-LEG-0 / B7 | no — `aws-gw-1` only |
+
+**Nothing depends on a state the product cannot create.** One second-order effect noted and dismissed:
+`azure-site` now has one live gateway instead of two, which changes site-link health rendering — no leg asserts
+on it.
