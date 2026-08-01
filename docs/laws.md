@@ -510,3 +510,32 @@ CANNOT FAIL**, and it was caught **before the test was written**.
 **pure** `layoutIntent(width)` unit-tested at boundaries · a component tier that stays **width-blind** (and *a
 test that needs a viewport to pass IS the finding*) · a responsive contract asserting **absence by role** with
 capability **injected, never measured**.
+
+## A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS UNTIL A MUTATION CONFIRMS IT (2026-08-01, S14.2)
+
+**THE INSTANCE.** The responsive contract's central assertion — the one the whole compose-gate exists for —
+was written as:
+
+```tsx
+// `queryByRole` finds an element hidden with `display:none`, so a display:none implementation FAILS this.
+expect(screen.queryByRole("button", { name: /add rule/i })).toBeNull();
+```
+
+**The comment is wrong.** testing-library defaults to `hidden: false` and runs `isInaccessible`, which jsdom
+evaluates against inline styles. A `display:none` element is **excluded** from the query — so `queryByRole`
+returns `null` and the assertion **passes**. Mutation 1 (reimplement the gate as `display:none`) **passed**.
+
+**The assertion checked "not in the ACCESSIBLE TREE"; the comment claimed "not in the DOM".** Those two differ
+on *exactly* the failure mode being guarded against — a control that grants access, present to a keyboard and
+gone only to a sighted mouse user. **A member of the [[ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON]] family, and
+the sharpest one so far, because the false claim was written INSIDE the comment explaining why the assertion
+was rigorous.**
+
+**THE RULE. A CLAIM ABOUT A LIBRARY'S SEMANTICS IS A HYPOTHESIS. THE MUTATION IS THE EXPERIMENT.** Where an
+assertion's rigour depends on what a matcher *includes* — visibility, disabled state, `aria-hidden`, shadow
+roots, portals — **write the mutation that the claim says would be caught, and run it.** Prose confidence about
+a third-party default is not evidence, and it reads exactly like evidence.
+
+**The fix is a flag, not a rewrite:** `{ hidden: true }` searches the whole DOM regardless of visibility, and
+the same mutation then goes red. **The cost of finding this was one mutation. The cost of not finding it was a
+security-adjacent gate that passed while not gating.**
