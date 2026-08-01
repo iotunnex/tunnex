@@ -4,16 +4,11 @@
     // Composite projects must emit; send the throwaway config .d.ts/.js into
     // gitignored node_modules so `tsc -b` never pollutes the source tree.
     "outDir": "./node_modules/.tmp/tsnode",
-    "rootDir": "../..",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "strict": true
   },
-  // The shared design tokens are listed explicitly: vite.config.ts and tailwind.config.ts import them by
-  // RELATIVE path (config files load through Node, which cannot resolve a raw .ts package entry), and a
-  // composite project must list every file it compiles. rootDir is set to the workspace root so a file
-  // outside apps/web is legal here.
-  "include": ["vite.config.ts", "tailwind.config.ts"]
+  "include": ["vite.config.ts"]
 }

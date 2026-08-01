@@ -86,7 +86,18 @@ PG_DB ?= tunnex
 SECRETS_VOL := tunnex_tunnex_secrets
 
 .PHONY: generate
-generate: generate-go generate-ts generate-rbac sqlc ## Regenerate all code from openapi/openapi.yaml
+generate: generate-go generate-ts generate-rbac generate-tokens sqlc ## Regenerate all code from openapi/openapi.yaml
+
+.PHONY: generate-tokens
+generate-tokens: ## S14.1: emit the design-token artifacts from packages/shared/src/tokens.ts (the ONE authored form)
+	# Configs consume the EMITTED css/json, never the TypeScript: a config file loads through Node, which
+	# cannot read a raw .ts entry, and importing the .ts by relative path deadlocks TS project references.
+	# Committing the artifacts and drift-guarding them is this repo's established pattern (api.d.ts,
+	# rbac-policy.json) rather than a new one.
+	docker run --rm -v "$(PWD)":/w -w /w/packages/shared \
+	  -v tunnex-nm:/w/node_modules -v tunnex-shared-nm:/w/packages/shared/node_modules \
+	  node:20-alpine sh -c 'corepack enable && pnpm install --filter @tunnex/shared --no-frozen-lockfile >/dev/null && \
+	    ./node_modules/.bin/tsc -p tsconfig.tokens.json && node scripts/emit-tokens.mjs'
 
 .PHONY: generate-rbac
 generate-rbac: ## Emit the RBAC grant table (rbac.Policy) as JSON for the web client mirror
@@ -112,6 +123,7 @@ generate-ts: ## Generate the TypeScript API types from the spec
 generate-check: generate ## Fail if generated code is out of date (CI drift guard)
 	@git diff --exit-code -- \
 	  apps/api/internal/api apps/cli/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts apps/web/src/lib/rbac-policy.json \
+	  packages/shared/generated \
 	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
 	@echo "generated code is up to date."
 
