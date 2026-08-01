@@ -101,8 +101,8 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // that happens to appear.
     const [pendingEl, approvedEl] = await waitFor(
       () => [
-        screen.getByTitle("Pending approval — not yet routed"),
-        screen.getByTitle("Approved — routed"),
+        screen.getByTitle("Pending approval, not yet routed"),
+        screen.getByTitle("Approved, routed"),
       ],
       { timeout: 5000 },
     );
@@ -124,10 +124,10 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
 
   it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
     withAuth(<Sites />);
-    await waitFor(() => screen.getByTitle("Approved — routed"));
+    await waitFor(() => screen.getByTitle("Approved, routed"));
     // The pending counterpart must say the opposite in words. Colour-only differentiation would fail both a
     // screen reader and the accessibility gate the redesign now carries (registration consequence 1).
-    expect(screen.getByTitle("Pending approval — not yet routed")).toBeTruthy();
+    expect(screen.getByTitle("Pending approval, not yet routed")).toBeTruthy();
   });
 
   // The CW crossing decision, asserted through the production function rather than restated. It travels with

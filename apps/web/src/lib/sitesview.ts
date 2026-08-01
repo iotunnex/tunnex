@@ -8,6 +8,7 @@ import {
   type SiteLinkNote,
 } from "./healthview";
 import { relativeAge } from "./format";
+import type { Node as VizNode, Link as VizLink } from "../components/viz";
 
 // sitesview — PURE, electron-free view-models for the Sites page (S8.3 Slice 2). The page is a thin
 // render over these; the render-floor law binds here — every field a card shows traces to a WIRE value
@@ -16,9 +17,11 @@ import { relativeAge } from "./format";
 // never re-elects), health is READ from policyHealthBadge (the S7.4b/S8.2 kinds), and a site's gateways
 // are a LIST (CH: many nodes → one site; the UI never assumes one-gateway-per-site).
 
-// ── edition + RBAC gate ──────────────────────────────────────────────────────────────
-// The Sites PAGE is enterprise-gated (D1/D5): site-to-site governance is the enterprise value. Within
-// enterprise, ANY member sees the read-only topology (canView); mutating needs site:manage + a verified
+// ── RBAC gate ────────────────────────────────────────────────────────────────────────
+// ⛔ NO EDITION TERM (S14.5, founder-ruled). This comment used to open "The Sites PAGE is enterprise-gated
+// (D1/D5)" and that was never true of the server — see siteGate below. It is corrected rather than deleted
+// because a stale comment asserting a boundary is the same false-record class as the test that asserted it.
+// ANY member sees the read-only topology (canView); mutating needs site:manage + a verified
 // email (mirrors the server). A member (no site:manage) sees topology but NOT the pending queue (D5:
 // the queue is an action surface — visible-but-inert is the B6 cousin).
 export interface SiteGate {
@@ -258,4 +261,64 @@ export function assembleTopology(
       status: ss.status,
     })),
   }));
+}
+
+
+// ── the mesh (S14.5) ─────────────────────────────────────────────────────────────────
+//
+// ⛔ ONE NODE PER SITE, NOT PER REGION — the four-way test's case 2.
+//
+// The wireframe's mesh draws five REGIONS, each carrying a site count that drives its radius and its edge
+// width. We serve no region field on `Node` or `Site`, so the drawing's encoding has no data behind it.
+// Deriving a region client-side from gateway names would be a guess wearing a diagram's authority.
+//
+// So: one node per site, uniform size, no count glyph. The hub is READ from `is_site_hub` (the backend
+// election, never recomputed here) and is rendered as its own node when a hub gateway exists.
+
+export interface Mesh {
+  nodes: VizNode[];
+  links: VizLink[];
+}
+
+/**
+ * Build the topology diagram from the same wire facts the cards render.
+ *
+ * ⛔ TONE COMES FROM THE HEALTH KIND, NOT FROM A GUESS. `site_hub_down` / `site_link_down` are DOWN;
+ * anything else degraded is DEGRADED; no badge is LINKED. A site with no gateway bound has no link at all —
+ * which is different from a link that is down, and is drawn as an absent edge rather than a red one.
+ */
+export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
+  const hubNode = nodes.find((n) => n.is_site_hub && n.status === "active");
+  const out: Mesh = { nodes: [], links: [] };
+  if (hubNode) {
+    out.nodes.push({
+      id: "__hub",
+      label: hubNode.name,
+      kind: "hub",
+      sub: "· transit hub",
+    });
+  }
+  for (const c of cards) {
+    const approved = c.subnets.filter((s) => s.status === "approved");
+    const sub = approved.length
+      ? "· " + approved.map((s) => s.cidr).join(", ")
+      : "· no approved subnet";
+    out.nodes.push({ id: c.id, label: c.name, kind: "spoke", sub });
+
+    // No gateway bound → no site link exists yet. An absent edge, never a red one: "not connected" and
+    // "connection failed" are different facts and only one of them is a fault.
+    const gw = c.gateways.find((g) => g.status === "active");
+    if (!hubNode || !gw || gw.id === hubNode.id) continue;
+
+    const kind = gw.health?.label ?? null;
+    const down =
+      kind != null && /hub down|link down/i.test(kind);
+    out.links.push({
+      from: "__hub",
+      to: c.id,
+      tone: down ? "down" : kind ? "degraded" : "linked",
+      note: kind ?? undefined,
+    });
+  }
+  return out;
 }
