@@ -214,9 +214,9 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 		return nil, err
 	}
 
-	// The signed message must match the server's construction exactly. Kept adjacent to the request that carries
-	// it so the two cannot drift apart silently.
-	msg := append(append([]byte{}, nonce...), csrBlk.Bytes...)
+	// The signed message must match the control plane's construction exactly. ONE construction on this side, in
+	// signedMessage below, so the agent's own test cannot pin a private copy of it (pass-3 #43).
+	msg := signedMessage(nonce, csrBlk.Bytes)
 	sum := sha256.Sum256(msg)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, popKey, crypto.SHA256, sum[:])
 	if err != nil {
@@ -277,6 +277,23 @@ func Rekey(ctx context.Context, apiURL string, ident Identifier, pendingKeyPEM, 
 const rekeyResponseLimit = 64 << 10
 
 var ErrIssuedCertUntrusted = errors.New("the issued certificate does not chain to this agent's trusted CA")
+
+// signedMessage is the agent's half of the proof-of-possession message: the server nonce followed by the DER of
+// the CSR being submitted, concatenated with NO separator and NO length prefix.
+//
+// IT IS A SECOND IMPLEMENTATION OF apps/api/internal/rekey.SignedMessage, AND IT HAS TO BE. The agent is a
+// separate Go module and cannot import the control plane's internal packages — so the API's comment claiming
+// "one definition, imported by both sides' tests" was never true of this side (pass-3 #43).
+//
+// What binds them is a GOLDEN VECTOR asserted in BOTH modules' tests, exactly as D10 did for the key fingerprint:
+// expressions of one value that cannot share code, pinned to that value. If either side changes this
+// construction — adding the length-prefixing the API's own comment contemplates, say — the golden fails on that
+// side, loudly, instead of the fleet silently losing the ability to recover.
+func signedMessage(nonce, csrDER []byte) []byte {
+	msg := make([]byte, 0, len(nonce)+len(csrDER))
+	msg = append(msg, nonce...)
+	return append(msg, csrDER...)
+}
 
 func verifyIssued(certPEM, trustedCAPEM, pendingKeyPEM []byte) error {
 	blk, _ := pem.Decode(certPEM)

@@ -41,8 +41,17 @@ import (
 var ErrProofInvalid = errors.New("proof of possession is invalid")
 
 // SignedMessage is the exact byte string an agent must sign: the server nonce followed by the DER of the CSR it is
-// submitting. Exported because the AGENT must construct the identical bytes, and the two implementations agreeing
-// by accident is not a property worth relying on — one definition, imported by both sides' tests.
+// submitting.
+//
+// CORRECTED (pass-3 #43). This used to say "one definition, imported by both sides' tests." THAT WAS NEVER TRUE:
+// the agent is a SEPARATE GO MODULE and cannot import this package, so it necessarily carries its own
+// construction (apps/node/internal/control.signedMessage). The comment vouched for a coupling that does not
+// exist, which is the more dangerous kind of wrong — a future author adding the length-prefixing contemplated
+// below would have trusted it and broken every gateway's ability to recover, silently.
+//
+// What actually binds the two is a GOLDEN VECTOR asserted in BOTH modules' tests (D10's precedent, used for the
+// key fingerprint). Change this function and the golden fails on this side; change the agent's and it fails on
+// theirs.
 //
 // The nonce comes FIRST so that a signature cannot be transplanted onto a longer message with a different nonce
 // prefix; with a fixed-length nonce and length-prefixed hashing this is belt-and-braces, but the ordering costs

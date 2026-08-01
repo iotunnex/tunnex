@@ -179,7 +179,7 @@ func TestProofIsSignedByThePoPKeyAndBoundToTheCSR(t *testing.T) {
 		t.Fatal(err)
 	}
 	blk, _ := pem.Decode([]byte(srv.lastBody["csr"]))
-	sum := sha256.Sum256(append(append([]byte{}, srv.nonce...), blk.Bytes...))
+	sum := sha256.Sum256(signedMessage(srv.nonce, blk.Bytes))
 
 	if err := rsa.VerifyPKCS1v15(pubOf(t, old), crypto.SHA256, sum[:], sig); err != nil {
 		t.Fatalf("the proof must verify against the PoP key over (nonce || CSR DER): %v", err)
