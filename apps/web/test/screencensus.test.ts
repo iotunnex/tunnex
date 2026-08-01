@@ -25,6 +25,13 @@ const PAGES_DIR = join(__dirname, "..", "src", "pages");
 
 // EXEMPT — the reason is part of the datum, not documentation about it.
 const EXEMPT: Record<string, string> = {
+  // ⛔ NOT A PRODUCT SCREEN, AND NOT SHIPPED. The visual gallery is a fixture surface behind
+  // `VITE_VISUAL_GALLERY`, unset in every production build. It renders primitives with literal props, calls no
+  // API, and makes no decision — so a wiring test would assert that a fixture equals itself.
+  // ITS OWN GATE IS THE VIEWPORT LEG (e2e/visual/), which is the only thing that can judge it, plus
+  // `visualgallery.test.ts` proving the route is not shipped.
+  "VisualGallery.tsx":
+    "test fixture, build-flagged off; gated by the viewport leg and by the unshipped-route assertion",
   "Login.tsx": "unauthenticated shell — no backend concept to disagree about",
   "Signup.tsx": "unauthenticated shell — no backend concept to disagree about",
   "ForgotPassword.tsx":

@@ -241,6 +241,24 @@ seed-enterprise: ## Seed the ENTERPRISE fixtures (SSO config + strandable device
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed-enterprise
 
+.PHONY: visual
+visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN THE SAME CONTAINER CI USES.
+	# The playwright image is pinned to CI's. A baseline rendered on the host would NEVER match CI: font
+	# rasterisation and subpixel AA differ per platform, so the suite would be red on its first run and the
+	# only way out would be to widen the threshold — which is how a visual suite stops meaning anything.
+	# UPDATE a baseline with:  make visual-update
+	$(COMPOSE) up -d --wait
+	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
+
+.PHONY: visual-update
+visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COMMIT, .png FILES ONLY.
+	# A baseline update mixed into a feature commit is unreviewable — "N images changed" has to be a fact
+	# someone can see, not something buried in a 40-file diff.
+	$(COMPOSE) up -d --wait
+	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --update-snapshots"
+
 .PHONY: e2e
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e
 	$(COMPOSE) up -d --wait
