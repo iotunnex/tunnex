@@ -3116,9 +3116,27 @@ components:
           type: string
           enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version, site_hub_down, site_link_down, site_subnet_unreachable, conntrack_flush_unavailable, hub_forwarding_not_reconciling, k8s_endpoints_unavailable, cert_expired_cannot_reconnect]
           description: >-
-            Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail
+            S7.4b: the ADVISORY differentiated health kind — display detail
             over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on
-            this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the
+            this).
+            ⚠ EDITION: THE FIELD IS SERVED IN BOTH EDITIONS, and MOST kinds are edition-independent.
+            ENTERPRISE-ONLY is the DESYNC TRIO — `converging`, `silent_desync`, `desync_unknown` — which come
+            from `degradedKind(...)` under the `case enterprise:` arm, because only an enterprise build has a
+            policy engine that can desync. EVERY OTHER KIND has an explicit `!enterprise` branch in
+            `internal/nodes/service.go` (the switch at ~L1955): `cert_expired_cannot_reconnect`,
+            `unsupported_policy_version`, `site_hub_down`, `site_link_down`, `site_subnet_unreachable`,
+            `hub_forwarding_not_reconciling`, `apply_failing`, `stuck_enforcing`,
+            `k8s_endpoints_unavailable`, `conntrack_flush_unavailable`. `healthy` is the default in both.
+            `ListNodes` sets the field unconditionally (`internal/http/node_handlers.go`).
+            THIS PARAGRAPH IS LOAD-BEARING (S14.5): it previously opened "Zero Trust (enterprise, S7.4b)",
+            which reads as enterprise-ONLY. A UI gated on `edition === "enterprise"` on the strength of that
+            line would silently deny the open edition a site-link health signal it is entitled to — the
+            edition-mistaken-for-absence class. Corrected, not annotated: on an OpenAPI-first codebase a
+            wrong description is a wrong source of truth. ⚠ THE CORRECTION'S OWN FIRST DRAFT WAS ALSO WRONG
+            (it put `stuck_enforcing` on the enterprise side and named only 4 of the 10 open-edition kinds)
+            and was caught only by reading the switch rather than reasoning about which kinds "sound like"
+            policy features. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME.
+            `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the
             gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific
             kind. `converging` is a normal push settling (< the report-cadence debounce) and must not
             alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
