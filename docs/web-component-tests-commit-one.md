@@ -35,8 +35,20 @@ keep at the moment a green goes stale — and the only way to notice that moment
 a sha in the first place.
 
 **DISPOSITION:** founder-ruled — the wireframe was **renamed** to `.html.txt` (CodeQL classifies by extension),
-not path-excluded and not dismissed. See `docs/UI-REDESIGN-registration.md`. **A fresh CI run and a fresh sha
-are owed for this branch, and this table is not re-asserted until then.**
+not path-excluded and not dismissed. See `docs/UI-REDESIGN-registration.md`.
+
+### RE-ASSERTED — CI GREEN AT `598f133` (2026-08-01)
+
+**Every check on the PR passes, `CodeQL` aggregate included.** Verified by the alert list rather than the check
+colour: `code-scanning/alerts?ref=refs/pull/44/merge&tool_name=CodeQL` returns **ZERO** where it previously
+returned five. **The rename cleared it; the pre-committed fallback to per-alert dismissal was not needed.**
+
+| workflow | jobs | conclusion |
+|---|---|---|
+| **CI** | `gates` · `client (macos-latest)` · `client (windows-latest)` · `e2e` · `e2e-enterprise` | **all pass** |
+| **Security** | `gofmt + vet parity` · `govulncheck` ×5 · `CodeQL` ×2 blocking · **`CodeQL` aggregate** · `Trivy` ×2 | **all pass** |
+
+**Re-earned by any further commit** — which is the whole point of the paragraph above.
 
 ## 1. THE FIVE QUERY RULES — the binding contract
 
