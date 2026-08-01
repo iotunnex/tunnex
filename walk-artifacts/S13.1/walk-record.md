@@ -1606,3 +1606,77 @@ onto the dead node would produce active devices pointing at a gateway that will 
 *`active` is the wrong test*, and it reinforces the same one-truth slice: the API already computes a usable
 predicate (endpoint + key + reachable) and the consumers test `status` instead. **Noted here rather than filed
 separately — it is WF-S13-1, not a new finding.**
+
+### IT IS A COMPOSITION — TWO DEFECTS HID EACH OTHER, AND THAT IS THE STRONGEST ARGUMENT FOR THE ONE-TRUTH SLICE
+
+**Stated in these words because the shape matters more than either half:**
+
+1. **The wrong predicate let it through.** `status = active` admitted a target whose certificate had been
+   expired for 4h27m.
+2. **WF-S13-9 then made it WORK.** A1′'s connection predated its expiry and still authenticated, so the
+   desired-state push landed and `wg0` got the peers. **Nothing surfaced.**
+
+**Had the socket dropped, this would have been a database-only success onto a gateway that could never serve** —
+verbatim what the endpoint's own description says it exists to prevent: *"silently restoring onto the dead node
+would produce active devices pointing at a gateway that will never serve them."*
+
+**THE GUARD DID NOT FAIL VISIBLY. IT FAILED INVISIBLY, MASKED BY AN UNRELATED DEFECT.** A green result was
+produced by two wrongs, and neither would have been found by observing the outcome — only by asking why the
+outcome held. **That is the argument for the one-truth slice in its strongest form: a predicate that is wrong
+but usually works is worse than one that is wrong and always fails**, because nothing ever prompts the fix.
+
+
+# B2's VACUITY — CAUGHT BEFORE RUNNING. The detector's FIRST PROSPECTIVE CATCH.
+
+**Three instances of the sampling/observation class in one day. The first two were forensic. This one was
+prevented.**
+
+| # | instance | when caught |
+|---|---|---|
+| 1 | B2's 7-second poller against a ~2-second window | **after** twelve green samples had been recorded |
+| 2 | `TestExpiryWhileRUNNING…` waiting on `issued`, asserting the disk | **after** CI went red |
+| 3 | the restore-window poller for `cert_delivered` | **BEFORE it was written** |
+
+**The question that did it:** ***"does the code on this path actually produce the event I am about to watch
+for?"*** — answered by reading `restore.go` (it re-homes devices, never touches `cert_delivered`, never calls
+`RekeyNode`), **not by running anything.**
+
+**It cost one grep and it is the cheapest form of the check.** Instances 1 and 2 each cost a full observation
+cycle plus the reasoning to work out why the result was uninformative. **This should be the default before any
+poller, watcher or wait-loop is written, not a lesson applied after two failures.**
+
+**It also generalises past pollers:** the same question governs any assertion about an event — *what produces
+this, and can it produce it here?* Instance 2 failed that test too, in a different tense: the event existed, but
+the wait was on a **different** one.
+
+
+# THE `ct established,related` RESIDUAL IS WF-S13-12 ONE LAYER DOWN — SAME ROOT, SECOND CONSEQUENCE
+
+**S8.7's conntrack-flush mechanism EXISTS and was NEVER INVOKED.** The health surface even carries a
+`conntrack_flush_unavailable` kind, so the CP models this as a thing that can be unavailable — but on node
+revocation it is not unavailable, **it is unreachable.**
+
+**Same composition, second consequence:**
+
+| | mechanism | why it never ran |
+|---|---|---|
+| **WF-S13-12** | peer removal via desired-state reconcile | revocation severs the agent's authorization to fetch desired state |
+| **this residual** | conntrack flush (S8.7) | **the agent never learned of the revocation, so nothing triggered the flush** |
+
+The revoked gateway's forward chain keeps `ct state established,related accept`, so **new flows are dropped and
+flows already open at the moment of revocation continue.** No entries were found for the revoked addresses at
+read time, so the effect is **real in principle and unobserved in this instance** — the ping that succeeded was
+to the gateway's own interface, an input-path packet, and `tunnex_default_drop` read 0.
+
+**Linked deliberately rather than filed apart:** fixing WF-S13-12's root — giving the agent any way to learn it
+has been revoked — makes the flush reachable in the same motion. **Fixing the flush alone would fix nothing**,
+because nothing would ever call it.
+
+
+# §B step 11 — approval gate OFF. The org is as we found it. (2026-08-01, [agent])
+
+`PUT /device-approval {"mode":"off"}` → `{"mode":"off"}`, confirmed by a follow-up GET.
+
+**`b3-pending` (10.99.0.2) is STILL `pending`.** Disabling the gate does not retroactively approve the rows it
+created — which is the downgrade-releases-enforcement posture holding, and it is why step 11 could safely run
+after B3 rather than before it.
