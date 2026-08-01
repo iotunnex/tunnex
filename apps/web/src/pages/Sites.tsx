@@ -13,18 +13,24 @@ import {
   type SiteReferences,
   type Node,
   type HubSet,
+  type DNSForward,
 } from "../lib/api";
 import { hubSetView } from "../lib/hubsetview";
+import { mergeOrgForwards, type OrgForwardsView } from "../lib/dnsview";
 import { useAuth } from "../lib/auth";
 import {
+  Badge,
   Button,
   Card,
+  EmptyState,
   ErrorText,
   Field,
   Input,
   Modal,
+  Panel,
   Select,
 } from "../components/ui";
+import { NodeLink } from "../components/viz";
 import { LoadRetry } from "../components/LoadRetry";
 import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
@@ -36,6 +42,7 @@ import {
   disjointRefusal,
   forwardsInSubnet,
   nameMatchesExactly,
+  meshFrom,
   siteGate,
   sitesView,
   subCeilingGateways,
@@ -53,6 +60,9 @@ interface Raw {
   nodes: Node[];
   subnetsBySite: Record<string, SiteSubnet[]>;
   hubSet: HubSet | null; // S8.6 — the persisted HA hub set (null when unpinned / load failed: no HA surface)
+  // S14.5 D1 — the ORG-WIDE zone list, fanned out one request per site. Carries its own per-site failure
+  // record, because a short list on a conflict view reads as "no conflict".
+  forwards: OrgForwardsView;
 }
 
 export default function Sites() {
@@ -122,11 +132,30 @@ export default function Sites() {
         params: { path: { orgId: first.id } },
       }),
     )) as Loaded<HubSet>;
+    // D1 — the org-wide DNS fan-out. ONE request per site, issued HERE with the rest of the page load, not
+    // per render: a per-site effect would re-fire on every selection change the mesh causes.
+    //
+    // NON-FATAL per site, unlike the subnet loads above. A failed subnet load blocks the page because a
+    // partial topology is a wrong topology; a failed forwards load is recorded and NAMED instead, because
+    // one unreachable site must not hide the zones of the others. `mergeOrgForwards` carries which sites
+    // failed so the panel can refuse to claim a clean bill of health.
+    const fwdResults = (await Promise.all(
+      sRes.data.map((site) =>
+        loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/sites/{siteId}/dns-forwards", {
+            params: { path: { orgId: first.id, siteId: site.id } },
+          }),
+        ),
+      ),
+    )) as Loaded<DNSForward[]>[];
     setRaw({
       sites: sRes.data,
       nodes: nRes.data,
       subnetsBySite,
       hubSet: hRes.ok ? hRes.data : null,
+      forwards: mergeOrgForwards(
+        sRes.data.map((site, i) => ({ site, res: fwdResults[i] })),
+      ),
     });
   }, [myId]);
   useEffect(() => {
@@ -160,21 +189,27 @@ export default function Sites() {
   );
   const allGateways = useMemo(() => cards.flatMap((c) => c.gateways), [cards]);
 
+  // The mesh's selection. Drives the actions panel and the card list below it (D3).
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const selectedCard = cards.find((c) => c.id === selectedSiteId) ?? null;
+
+  const mesh = useMemo(() => meshFrom(cards, raw?.nodes ?? []), [cards, raw]);
+
   return (
-    <div>
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3.5">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-white">Sites</h1>
-          <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+          <h1 className="text-[22px] font-semibold text-ink-heading">Sites</h1>
+          <p className="text-cell text-ink-tertiary">{org ? org.name : "…"}</p>
         </div>
         {view === "body" && gate.canManage && (
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2.5">
             {unboundNodes.length > 0 && (
-              <Button onClick={() => setRoutingLan(true)}>Route a LAN</Button>
+              <Button variant="ghost" onClick={() => setRoutingLan(true)}>
+                Route a LAN (one screen)
+              </Button>
             )}
-            <Button variant="ghost" onClick={() => setRegistering(true)}>
-              Register site
-            </Button>
+            <Button onClick={() => setRegistering(true)}>Add site</Button>
           </div>
         )}
       </div>
@@ -182,39 +217,114 @@ export default function Sites() {
       {view === "load_retry" && (
         <LoadRetry error={loadError ?? "Couldn't load."} onRetry={reload} />
       )}
-      {view === "loading" && (
-        <p className="mt-6 text-sm text-slate-500">Loading…</p>
-      )}
+      {view === "loading" && <p className="text-cell text-ink-faint">Loading…</p>}
 
       {view === "body" && raw != null && org != null && (
         <>
-          {gate.canManage && (
-            <PendingQueue
-              orgId={org.id}
-              approvedCountBySite={approvedCountBySite}
-              allGateways={allGateways}
-              ceiling={meta?.protocol_version ?? 0}
-              onDone={reload}
-            />
-          )}
-          <HubSetSection
-            orgId={org.id}
-            canManage={gate.canManage}
-            hubSet={raw.hubSet}
-            gateways={allGateways}
-            onDone={reload}
-          />
+          {/* README: grid-template-columns 8fr 4fr, gap 12, align-items start. `min-w-0` on both tracks
+              because a grid item defaults to min-width:auto and a long CIDR or zone name would otherwise
+              push the track wider than its share — the same class as the 65px header overflow. */}
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[8fr_4fr]">
+            <div className="flex min-w-0 flex-col gap-3">
+              <Panel
+                title="Network map"
+                actions={
+                  /* D2 (ruled): scoped to the MAP, not the page. The mesh's edges are handshake-derived, so
+                     the claim is true here. Over the subnet queue it would not be — those are control-plane
+                     rows. */
+                  <span className="rounded-full border border-line bg-ink-800 px-2 py-0.5 font-mono text-micro text-ink-tertiary">
+                    ● WIRE-TRUTH
+                  </span>
+                }
+              >
+                <p className="text-micro text-ink-faint">
+                  Select a site to inspect it. The hub is derived by the backend.
+                </p>
+                <NodeLink
+                  label="Site topology"
+                  source={{ endpoint: "/api/v1/organizations/{orgId}/sites" }}
+                  failed={false}
+                  nodes={mesh.nodes}
+                  links={mesh.links}
+                  selectedId={selectedSiteId}
+                  onSelect={setSelectedSiteId}
+                  empty="No sites yet. Route a LAN to create the first one."
+                />
+                <ul className="flex flex-wrap gap-3 text-micro text-ink-tertiary">
+                  <li>
+                    <span className="mr-1 text-ok">━</span>linked
+                  </li>
+                  <li>
+                    <span className="mr-1 text-warn">╌</span>degraded
+                  </li>
+                  <li>
+                    <span className="mr-1 text-danger">┄</span>down
+                  </li>
+                </ul>
+                <p className="text-micro text-ink-faint">
+                  Link state is derived from the WireGuard handshake. A down site
+                  bridge is never shown as healthy.
+                </p>
+              </Panel>
+
+              <DNSForwardsPanel
+                view={raw.forwards}
+                siteCount={raw.sites.length}
+              />
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-3">
+              {gate.canManage && (
+                <PendingQueue
+                  orgId={org.id}
+                  approvedCountBySite={approvedCountBySite}
+                  allGateways={allGateways}
+                  ceiling={meta?.protocol_version ?? 0}
+                  onDone={reload}
+                />
+              )}
+              <SiteActionsPanel
+                card={selectedCard}
+                canManage={gate.canManage}
+                orgId={org.id}
+                unboundNodes={unboundNodes}
+                hasSites={cards.length > 0}
+                onDone={reload}
+              />
+              <HubSetSection
+                orgId={org.id}
+                canManage={gate.canManage}
+                hubSet={raw.hubSet}
+                gateways={allGateways}
+                onDone={reload}
+              />
+            </div>
+          </div>
+
+          {/* D3 (ruled): the mesh sits ABOVE the cards, it does not replace them. The wireframe drew only a
+              diagram because a drawing never had to manage anything; the cards are where subnets are
+              advertised, gateways bound and zones edited. Selecting a node scopes this list rather than
+              hiding it. */}
           <Topology
-            cards={cards}
+            cards={selectedCard ? [selectedCard] : cards}
             canManage={gate.canManage}
             orgId={org.id}
             unboundNodes={unboundNodes}
             onDone={reload}
           />
+          {selectedCard && (
+            <button
+              type="button"
+              onClick={() => setSelectedSiteId(null)}
+              className="self-start text-cell text-ink-tertiary underline"
+            >
+              Show all {cards.length} sites
+            </button>
+          )}
         </>
       )}
       {view === "body" && raw == null && (
-        <p className="mt-6 text-sm text-slate-500">Loading…</p>
+        <p className="text-cell text-ink-faint">Loading…</p>
       )}
 
       {registering && org && (
@@ -233,6 +343,179 @@ export default function Sites() {
         />
       )}
     </div>
+  );
+}
+
+// ── S14.5 — CROSS-SITE DNS FORWARDING, ORG-WIDE (D1) ────────────────────────────────────────────────────
+//
+// The wireframe lists zones across the org with a `via <site>` column. Our endpoint is per-site, so this is
+// an N+1 — founder-ruled and accepted, because the invariant it exists to show (one zone maps to one
+// resolver ORG-WIDE) cannot be seen from inside any single site.
+function DNSForwardsPanel({
+  view,
+  siteCount,
+}: {
+  view: OrgForwardsView;
+  siteCount: number;
+}) {
+  return (
+    <Panel title="Cross-site DNS forwarding">
+      {/* ⛔ THE PARTIAL-LOAD BANNER COMES FIRST, above the rows it qualifies. Below them it would be read
+          after the list had already been believed. */}
+      {view.failedSites.length > 0 && (
+        <p role="status" className="text-cell text-danger">
+          Could not read zones from {view.failedSites.join(", ")}. This list is
+          incomplete, so conflicts cannot be ruled out.
+        </p>
+      )}
+
+      {siteCount === 0 ? (
+        <EmptyState>
+          No sites yet, so there is nothing to forward between.
+        </EmptyState>
+      ) : view.rows.length === 0 ? (
+        <EmptyState>
+          {view.conflictsAreComplete
+            ? "No forwarded zones. Add one on a site below."
+            : "No zones read from the sites that answered."}
+        </EmptyState>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {view.rows.map((r) => {
+            const clashes = view.conflicts.includes(r.domain);
+            return (
+              <li
+                key={`${r.siteId}-${r.domain}`}
+                className="flex items-baseline gap-2 rounded-md border border-line bg-ink-800 px-2.5 py-2"
+              >
+                <span className="font-mono text-cell text-ink-body">
+                  {r.domain} to {r.resolverIp}
+                </span>
+                <span className="ml-auto text-micro text-ink-tertiary">
+                  via {r.siteName}
+                </span>
+                {clashes && <Badge tone="danger">conflict</Badge>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* ⛔ ONLY CLAIM A CLEAN BILL OF HEALTH WHEN THE READ WAS COMPLETE. "No conflicts found" and "no
+          conflicts exist" are different claims and only the second is reassuring. */}
+      {view.conflicts.length > 0 && (
+        <p className="text-cell text-danger">
+          {view.conflicts.join(", ")} resolves differently depending on the
+          site. The server allows one resolver per zone across the org, so a
+          device gets whichever route reaches it first.
+        </p>
+      )}
+
+      <p className="text-micro text-ink-faint">
+        A resolver must sit inside one of the site&rsquo;s approved subnets
+        (409 dns_resolver_not_in_site_subnet). One zone maps to one resolver
+        org-wide (409 dns_domain_conflict). Removing a zone withdraws it from
+        every gateway on the next reconcile.
+      </p>
+    </Panel>
+  );
+}
+
+// ── S14.5 — SITE ACTIONS, SCOPED TO THE SELECTION ───────────────────────────────────────────────────────
+//
+// The wireframe titles this "Site actions — ap-lan", i.e. it is already selection-scoped there. With nothing
+// selected it says so rather than presenting controls with no object, which is the shape that produces
+// "unbind, from what?".
+function SiteActionsPanel({
+  card,
+  canManage,
+  orgId,
+  unboundNodes,
+  hasSites,
+  onDone,
+}: {
+  card: SiteCard | null;
+  canManage: boolean;
+  orgId: string;
+  unboundNodes: Node[];
+  hasSites: boolean;
+  onDone: () => void;
+}) {
+  const [unbinding, setUnbinding] = useState(false);
+  const [binding, setBinding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const bound = card?.gateways.find((g) => g.status === "active") ?? null;
+
+  return (
+    <Panel title={card ? `Site actions: ${card.name}` : "Site actions"}>
+      {!hasSites ? (
+        <EmptyState>
+          No sites yet. Route a LAN to create one, then its actions appear here.
+        </EmptyState>
+      ) : !card ? (
+        <EmptyState>Select a site in the network map to act on it.</EmptyState>
+      ) : !canManage ? (
+        <p className="text-cell text-ink-tertiary">
+          Managing sites needs the site:manage permission and a verified email.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {bound ? (
+            <Button variant="ghost" onClick={() => setUnbinding(true)}>
+              Unbind {bound.name} (replace)
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              disabled={unboundNodes.length === 0}
+              onClick={() => setBinding(true)}
+            >
+              {unboundNodes.length === 0
+                ? "No unbound gateway to bind"
+                : "Bind a gateway"}
+            </Button>
+          )}
+          <Button variant="danger" onClick={() => setDeleting(true)}>
+            Remove site
+          </Button>
+        </div>
+      )}
+
+      {card && canManage && (
+        <p className="text-micro text-ink-faint">
+          Removing a site deletes the rules that reference it and releases its
+          subnets. The counts come from the server&rsquo;s cascade preview and
+          you type the site name to confirm.
+        </p>
+      )}
+
+      {unbinding && card && bound && (
+        <UnbindConfirm
+          orgId={orgId}
+          siteId={card.id}
+          gateways={card.gateways}
+          onDone={onDone}
+          onClose={() => setUnbinding(false)}
+        />
+      )}
+      {binding && card && (
+        <BindGatewayModal
+          orgId={orgId}
+          siteId={card.id}
+          nodes={unboundNodes}
+          onDone={onDone}
+          onClose={() => setBinding(false)}
+        />
+      )}
+      {deleting && card && (
+        <DeleteSiteModal
+          orgId={orgId}
+          site={card}
+          onDone={onDone}
+          onClose={() => setDeleting(false)}
+        />
+      )}
+    </Panel>
   );
 }
 
@@ -293,7 +576,7 @@ function RouteLANModal({
     >
       <p className="text-sm text-slate-400">
         Route a behind-gateway LAN to your devices. This registers a site on the
-        gateway, advertises the range, and approves it — the range then pushes
+        gateway, advertises the range, and approves it. The range then pushes
         to split-tunnel devices.
       </p>
       <Field label="Gateway">
@@ -389,7 +672,7 @@ function HubSetSection({
         <>
           {view.promotionInEffect && (
             <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-xs text-amber-300">
-              Failover in effect — the configured primary is unreachable; a
+              Failover in effect: the configured primary is unreachable, and a
               standby is carrying transit. The hub restores when it recovers.
               See the audit log (
               <span className="font-mono">hub_set.promotion</span>) for the
@@ -422,7 +705,7 @@ function HubSetSection({
                 )}
                 <span className="ml-auto text-[11px] text-slate-500">
                   ↓{m.rx} ↑{m.tx} ·{" "}
-                  {m.handshakeAge === "—"
+                  {m.handshakeAge === "n/a"
                     ? "no data"
                     : `handshake ${m.handshakeAge}`}
                 </span>
@@ -437,7 +720,7 @@ function HubSetSection({
       ) : (
         canManage && (
           <p className="mt-2 text-xs text-slate-500">
-            No HA hub set. Pin two or more gateways below to create one — the
+            No HA hub set. Pin two or more gateways below to create one. The
             pinned gateways become the ordered hub candidates (primary +
             standbys) and the CP fails transit over if the primary goes stale.
           </p>
@@ -595,8 +878,8 @@ function SiteCardView({
               }`}
               title={
                 s.status === "approved"
-                  ? "Approved — routed"
-                  : "Pending approval — not yet routed"
+                  ? "Approved, routed"
+                  : "Pending approval, not yet routed"
               }
             >
               {s.cidr}
@@ -626,14 +909,14 @@ function SiteCardView({
       {hasGateway && card.subnets.some((s) => s.status === "approved") && (
         <details className="mt-3 rounded-lg border border-white/5 bg-ink-900/60 px-3 py-2 text-xs text-slate-400">
           <summary className="cursor-pointer text-slate-300">
-            Cloud fabric setup — one console visit per side (why a behind-host
+            Cloud fabric setup, one console visit per side (why a behind-host
             may not reach yet)
           </summary>
           <div className="mt-2 space-y-2">
             <p>
               A gateway VM forwards for hosts on its LAN, but the cloud SDN must
               (1) let the VM forward and (2) route the REMOTE site's CIDR to
-              this gateway. Apply once, in the cloud console — never on the
+              this gateway. Apply once, in the cloud console, never on the
               gateway.
             </p>
             <p>
@@ -663,7 +946,7 @@ function SiteCardView({
               add the SAME route for the org's
               <span className="font-mono"> device pool CIDR</span> (Settings
               shows it, e.g. <span className="font-mono">10.99.0.0/24</span>) →
-              this gateway — behind-host replies to a connected device need a
+              this gateway. Behind-host replies to a connected device need a
               way back, exactly like a remote site's CIDR.
             </p>
             {/* WF-B (EPIC-8 smooth walk): behind-host HA needs a CLOUD-side route failover. The overlay
@@ -674,7 +957,7 @@ function SiteCardView({
                 High availability:
               </span>{" "}
               a promoted standby carries overlay transit automatically, but a
-              behind-host's VPC route points at ONE gateway ENI — on failover,
+              behind-host's VPC route points at ONE gateway ENI, so on failover
               repoint it to the new hub (AWS: route-table health check / a small
               Lambda; or a Gateway Load Balancer. Azure: a UDR update). Overlay
               HA is automatic; cloud-fabric HA is yours to wire (the zero-touch
@@ -925,7 +1208,7 @@ function AddSubnetModal({
       }
     >
       <p className="text-xs text-slate-500">
-        The subnet is advertised as PENDING — an owner or admin must approve it
+        The subnet is advertised as PENDING. An owner or admin must approve it
         before it routes.
       </p>
       <div className="mt-2">
@@ -1055,7 +1338,7 @@ function UnbindConfirm({
     >
       <p className="text-sm text-slate-400">
         The gateway's site-link peers and routes are swept. The site and its
-        subnets are kept — bind a replacement to restore routing.
+        subnets are kept. Bind a replacement to restore routing.
       </p>
       {gateways.length > 1 && (
         <Field label="Gateway to unbind">
@@ -1151,12 +1434,12 @@ function RemoveSubnetConfirm({
             <span className="font-semibold">
               withdraws its route from every gateway
             </span>{" "}
-            on the next reconcile — behind-hosts on other sites will no longer
+            on the next reconcile. Behind-hosts on other sites will no longer
             reach <span className="font-mono">{subnet.cidr}</span>.
           </>
         ) : (
           <>
-            This pending subnet is not yet routed — removing it just
+            This pending subnet is not yet routed, so removing it just
             un-advertises it.
           </>
         )}
@@ -1234,7 +1517,7 @@ function DNSForwardSection({
   return (
     <details className="mt-3 rounded-lg border border-white/5 bg-ink-900/60 px-3 py-2 text-xs text-slate-400">
       <summary className="cursor-pointer text-slate-300">
-        Cross-site DNS forwarding — resolve this site's names from other sites
+        Cross-site DNS forwarding: resolve this site's names from other sites
       </summary>
       <div className="mt-2 space-y-2">
         <p>
