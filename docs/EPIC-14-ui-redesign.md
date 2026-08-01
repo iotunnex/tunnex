@@ -539,3 +539,39 @@ donut renders its EMPTY STATE, not an arc. **He would be looking for a differenc
 cannot see anything.
 
 > **A BOUNDED FIX IS STILL AN UNREVIEWED CHANGE. THE BOUND SAYS HOW MUCH TO RE-LOOK AT — NOT WHETHER TO.**
+
+## ⚠ REGISTERED — `site link down` NAMES THE FAILURE OF A THING THAT WAS NEVER ATTEMPTED
+
+**AND THE PREDICTION WAS TESTED BY THE FOUNDER'S OWN MISREADING, BEFORE EITHER OF US DISCUSSED IT.**
+
+The claim was stated first, deliberately, so it would be CHECKED rather than FORMED:
+
+> *"The map is right and the card is wrong. `site_link_down` fires because a lone gateway is its own hub and
+> can never observe a fresh handshake. My claim is that this reads as 'down compared to what?'"*
+
+**The founder then looked at the screen and asked, unprompted: *"when will connectivity start after
+approve?"*** — the exact confusion predicted, on the first person to read it, with no discussion in between.
+
+> ## **A CLAIM STATED BEFORE THE LOOK, THEN CONFIRMED BY THE LOOKER'S OWN UNPROMPTED REACTION, IS THE
+> ## STRONGEST FORM OF EVIDENCE THIS PROCESS PRODUCES.**
+
+Had the reaction come after discussion it would have been contaminated; had the claim come after the reaction
+it would have been a rationalisation. **The ORDER is what made it evidence.**
+
+**THE DEFECT (pre-existing, S8.2-era, newly VISIBLE because the map now sits beside it):**
+`siteLinkVerdictFrom` (`service.go:1786`) sets the headline when the active primary hub is observed stale. On
+a one-gateway org that gateway IS the hub, there is no peer to handshake with, so the state is **permanently
+true and permanently meaningless** — it describes site-to-site transit that does not exist.
+
+**What `Approve` actually does, and why the badge misleads:** approving a subnet makes it a routed range
+pushed to split-tunnel devices — **real device-to-LAN connectivity**. It has nothing to do with the badge,
+which needs a **second gateway bound to a second site** to ever clear.
+
+**NOT FIXED IN THE UI.** Suppressing the badge client-side would be the client deciding a health question the
+server owns — the exact one-truth violation just swept out of this screen. **TRIGGER: the next control-plane
+story that touches site-link health.**
+
+## ✅ VERIFICATION CLOSED — the gate removal is proven on the OPEN edition
+
+The founder's 2026-08-02 run reported `"edition":"open"` in the badge **and Sites rendered**. That is the
+screen which previously showed an upsell. **The ruling is confirmed on a live stack, not only in unit tests.**

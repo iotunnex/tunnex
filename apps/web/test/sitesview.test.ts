@@ -327,3 +327,58 @@ describe("gatewayOnline (WF-1 positive health)", () => {
     expect(gatewayOnline("revoked", false, null)).toBe(false);
   });
 });
+
+import { meshFrom } from "../src/lib/sitesview";
+
+// S14.5 — the map's data, checked at the counts a real org actually has.
+//
+// ⛔ N=1 IS THE CASE THE DESIGN NEVER SHOWS. The wireframe draws five spokes filling a 600x320 frame; the
+// first customer has one. Placement inherited from that populated example put a lone spoke directly ABOVE
+// the hub, producing a column of two circles with two-thirds of the panel empty.
+describe("meshFrom — the sparse cases the wireframe never draws", () => {
+  const mkCard = (
+    id: string,
+    name: string,
+    gateways: ReturnType<typeof assembleTopology>[number]["gateways"],
+  ) =>
+    ({
+      id,
+      name,
+      gateways,
+      subnets: [{ id: "x", cidr: "10.1.0.0/24", status: "approved" }],
+    }) as never;
+
+  it("a site with NO gateway bound gets a node but NO edge", () => {
+    // "not connected" and "connection failed" are different facts, and only one of them is a fault. An edge
+    // in a failure tone would claim a link was attempted.
+    const m = meshFrom(
+      [mkCard("a", "hq-lan", [])],
+      [{ id: "h", name: "gw-hub", status: "active", is_site_hub: true } as Node],
+    );
+    expect(m.links).toEqual([]);
+    expect(m.nodes.map((n) => n.label)).toContain("hq-lan");
+  });
+
+  it("the ring carries the site's ACTIVE gateway count, and ZERO is a real answer", () => {
+    // Mechanism 9: a count only ever observed non-zero cannot be told from a constant.
+    const m = meshFrom([mkCard("a", "hq-lan", [])], []);
+    expect(m.nodes.find((n) => n.label === "hq-lan")?.value).toBe(0);
+  });
+
+  it("a lone site whose gateway IS the hub draws no edge — there is no link to itself", () => {
+    const gw = { id: "h", name: "gw-local-1", status: "active" } as never;
+    const m = meshFrom(
+      [mkCard("a", "hq-lan", [gw])],
+      [
+        {
+          id: "h",
+          name: "gw-local-1",
+          status: "active",
+          is_site_hub: true,
+        } as Node,
+      ],
+    );
+    expect(m.links).toEqual([]);
+    expect(m.nodes).toHaveLength(2); // the hub AND the site, both present
+  });
+});

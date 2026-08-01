@@ -673,6 +673,40 @@ function HubSetSection({
   // Nothing to show a MEMBER when no HA set is configured (zero-config — no HA surface).
   if (!view && !canManage) return null;
 
+  // ⛔ BELOW THE THRESHOLD THE PANEL EXPLAINS ITSELF AND OFFERS NO CONTROL (S14.5, founder-ruled).
+  //
+  // It used to render "pin as primary" beside a lone gateway, under copy about failing transit over to a
+  // standby if the primary goes stale. THERE IS NOTHING TO FAIL OVER TO. A control for multi-gateway transit,
+  // offered on a one-gateway stack, describes machinery that cannot engage — the same family as a
+  // `site link down` badge on a link that was never attempted.
+  //
+  // THE RULE, FOR EVERY SCREEN: WHEN A CONTROL IS MEANINGLESS AT CURRENT SCALE, RENDER THE PANEL WITH AN
+  // EMPTY STATE THAT NAMES THE PRECONDITION AND THE ACTION THAT CROSSES IT. NEVER THE CONTROL, NEVER
+  // DISABLED-WITHOUT-REASON, NEVER ABSENT.
+  //
+  //   · not ABSENT   — scale is a state the operator MOVES THROUGH, unlike an edition boundary, which is a
+  //                    purchase. Hiding HA means they never learn it exists nor what unlocks it.
+  //   · not DISABLED — a greyed control says something is unavailable without saying why or what to do.
+  //   · not OFFERED  — which is what shipped, and it produced the question "when does connectivity start?"
+  //
+  // An EXISTING hub set still renders in full: crossing back below the threshold (a gateway revoked) must
+  // show the set that is still configured, not hide it behind a precondition notice.
+  const HA_MIN_GATEWAYS = 2;
+  if (!view && gateways.length < HA_MIN_GATEWAYS) {
+    return (
+      <Card className="mt-6">
+        <h2 className="text-sm font-semibold text-slate-300">
+          Hub high-availability
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          High availability needs {HA_MIN_GATEWAYS} or more gateways. You have{" "}
+          {gateways.length}. Enrol another gateway and bind it to a site, then
+          pin the candidates here to create the hub set.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <Card className="mt-6">
       <div className="flex items-baseline justify-between">

@@ -390,15 +390,43 @@ export function NodeLink({
   // The wireframe's frame: 600x320, hub dead centre at (300,162). Spokes ring it. Starting at -90° puts
   // the first spoke at twelve o'clock, which is where a reader looks first; a lone spoke then sits ABOVE the
   // hub rather than at an arbitrary angle.
-  const HUB = { x: 300, y: 162 };
+  // ⛔ THE LAYOUT IS FITTED TO THE NODE COUNT, NOT INHERITED FROM THE POPULATED EXAMPLE.
+  //
+  // The wireframe places five spokes at fixed coordinates inside a 600x320 frame, and it looks right because
+  // five spokes FILL that frame. I took the frame and the ring radius and left them fixed — so ONE site
+  // rendered as a column of two circles with the left two-thirds of the panel empty. It read as a broken
+  // diagram rather than a sparse one.
+  //
+  // A LAYOUT DERIVED FROM A POPULATED EXAMPLE MUST BE CHECKED AT N=1. A design shows every diagram at its
+  // most interesting size, which is the size it will almost never have on a customer's first day.
+  //
+  // So: place on an ellipse whose radii SHRINK with small counts, angle the first spoke to the RIGHT (a
+  // relationship reads left-to-right, where straight-up reads as a stack), then FIT THE VIEWBOX to what was
+  // actually placed. The frame follows the content instead of the content rattling inside the frame.
+  const HUB = { x: 0, y: 0 };
+  const k = spokes.length;
   if (hub) pos.set(hub.id, HUB);
-  // A single spoke with NO hub has nothing to orbit, so it takes the centre. Orbiting an absent centre
-  // leaves a hole where the reader looks first and implies something belongs there.
-  if (!hub && spokes.length === 1) pos.set(spokes[0].id, HUB);
-  else spokes.forEach((s, i) => {
-    const a = (i / Math.max(1, spokes.length)) * Math.PI * 2 - Math.PI / 2;
-    pos.set(s.id, { x: HUB.x + Math.cos(a) * 200, y: HUB.y + Math.sin(a) * 105 });
-  });
+  if (!hub && k === 1) {
+    pos.set(spokes[0]!.id, HUB);
+  } else {
+    // One spoke needs no orbit, only distance. Two want opposite sides. Three or more want a ring.
+    const rx = k <= 1 ? 150 : k === 2 ? 175 : 200;
+    const ry = k <= 2 ? 0 : 105;
+    spokes.forEach((sp, i) => {
+      const a = k === 1 ? 0 : (i / k) * Math.PI * 2;
+      pos.set(sp.id, { x: HUB.x + Math.cos(a) * rx, y: HUB.y + Math.sin(a) * ry });
+    });
+  }
+
+  // Fit the viewBox to the placed nodes. PAD generously below: the label and sub-line are drawn UNDER each
+  // ring (r + 27), and a box fitted to the circles alone clips the text that carries the meaning.
+  const pts = [...pos.values()];
+  const R = 40; // largest ring + its selection halo
+  const minX = Math.min(...pts.map((p) => p.x)) - R - 30;
+  const maxX = Math.max(...pts.map((p) => p.x)) + R + 30;
+  const minY = Math.min(...pts.map((p) => p.y)) - R - 12;
+  const maxY = Math.max(...pts.map((p) => p.y)) + R + 34;
+  const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
 
   const interactive = onSelect != null;
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
@@ -418,9 +446,9 @@ export function NodeLink({
           `w-80`, where the same element is a tidy 192px and a solid dot reads as a deliberate dot.
           A COMPONENT CONSTRAINED BY ITS HARNESS IS NOT A COMPONENT THAT HAS BEEN TESTED AT SIZE. */}
       <svg
-        viewBox="0 0 600 320"
+        viewBox={viewBox}
         preserveAspectRatio="xMidYMid meet"
-        className="h-[300px] w-full"
+        className="h-[260px] w-full"
         role="presentation"
       >
         {links.map((l) => {
