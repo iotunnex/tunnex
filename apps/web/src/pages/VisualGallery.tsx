@@ -1,0 +1,297 @@
+import { useState } from "react";
+import {
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  Field,
+  Input,
+  List,
+  ListItem,
+  Loading,
+  Modal,
+  Panel,
+  Select,
+  StatusDot,
+} from "../components/ui";
+import { Donut, Histogram, NodeLink } from "../components/viz";
+import { OneTimeSecretModal } from "../components/OneTimeSecret";
+import { Icon, ICON_PATHS, type IconName } from "../components/Icon";
+
+// ⛔ THE VISUAL GALLERY — THE SUBJECT OF THE VIEWPORT LEG.
+//
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+// THIS GALLERY EXISTS TO HOLD STATES THAT ONLY OCCUR IN COMBINATION.
+// THAT IS A DIFFERENT THING FROM HOLDING EVERY COMPONENT.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// ⛔ SO IF YOU ARE EXTENDING THIS FILE: ADD COMBINATIONS, NOT MORE COMPONENTS.
+//
+// THE INSTANCE THAT EARNED THE RULE. `Card` gained `backdrop-filter` (the glass recipe). That makes an
+// element the containing block for `position: fixed` descendants — so all five modals rendered inside a Card
+// stopped being viewport-positioned, were clipped to the card, and had the card's own body sitting over their
+// buttons. Clicks stopped landing.
+//
+// NOTHING CAUGHT IT:
+//   · tsc                                    clean
+//   · 422 component tests                    green
+//   · a deliberate click-through of all 12   "nothing is broken"
+//     Card consumers, run FOR THIS PURPOSE
+//
+// It was invisible because NO TEST HAD A MODAL OPEN OVER A CARD. Every component was individually exercised
+// and correct. The defect lived in the RELATIONSHIP between two of them, and a gallery of isolated components
+// would have reproduced the same blind spot at higher cost.
+//
+// Hence: MODALS ARE RENDERED OPEN, INSIDE A CARD, ON PURPOSE. That single arrangement is worth more than
+// twenty more components rendered alone.
+//
+// ── why a gallery rather than per-screen snapshots ──────────────────────────────────────────────────────
+// All three visual defects of 2026-08-01 originated in SHARED CODE — a spacing config, a shared scale, a
+// shared primitive. NONE originated in a screen. A screen-shaped suite pays per-screen maintenance to catch
+// defects that are not screen-shaped, and needs re-baselining every time a screen is redesigned.
+//
+// ── shipping ───────────────────────────────────────────────────────────────────────────────────────────
+// Behind `VITE_VISUAL_GALLERY`, unset in every production build, so this route is tree-shaken out. A test
+// asserts the production bundle does not contain it — an unshipped surface must be PROVEN unshipped, not
+// assumed (see apps/web/test/visualgallery.test.ts).
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="font-mono text-micro font-semibold uppercase tracking-[.16em] text-ink-secondary">
+        {title}
+      </h2>
+      <div className="flex flex-wrap items-start gap-3">{children}</div>
+    </section>
+  );
+}
+
+const ROWS = [
+  { id: "a", name: "gw-us-east", ip: "10.99.0.2", state: "healthy" },
+  { id: "b", name: "gw-eu-1", ip: "10.99.0.3", state: "apply failing" },
+];
+const COLS = [
+  { key: "n", header: "Name", cell: (r: (typeof ROWS)[number]) => r.name },
+  { key: "i", header: "Address", cell: (r: (typeof ROWS)[number]) => r.ip },
+  {
+    key: "s",
+    header: "State",
+    cell: (r: (typeof ROWS)[number]) => <Badge tone="warn">{r.state}</Badge>,
+  },
+];
+
+export default function VisualGallery() {
+  // Open by default: the snapshot must contain the overlay, not a button that would reveal it.
+  const [showModal] = useState(true);
+
+  return (
+    <div className="tnx-page flex flex-col gap-3.5 p-6" data-visual-gallery>
+      <h1 className="text-[22px] font-semibold text-ink-heading">
+        Visual gallery
+      </h1>
+
+      <Section title="Buttons">
+        {(["primary", "ghost", "danger"] as const).map((v) => (
+          <span key={v} className="flex gap-2">
+            <Button variant={v}>{v}</Button>
+            <Button variant={v} disabled>
+              disabled
+            </Button>
+          </span>
+        ))}
+      </Section>
+
+      <Section title="Badges and status">
+        {(["ok", "warn", "danger", "neutral"] as const).map((t) => (
+          <Badge key={t} tone={t}>
+            {t}
+          </Badge>
+        ))}
+        {(["on", "off", "warn"] as const).map((t) => (
+          <StatusDot key={t} tone={t} />
+        ))}
+      </Section>
+
+      <Section title="Fields">
+        <div className="w-64">
+          <Field label="Device name">
+            <Input placeholder="laptop-anna" />
+          </Field>
+        </div>
+        <div className="w-64">
+          <Field label="Transport">
+            <Select>
+              <option>WireGuard</option>
+            </Select>
+          </Field>
+        </div>
+      </Section>
+
+      {/* ⛔ COMBINATION 1: a table in ALL THREE of its states, side by side. The failed and empty renderings
+          are the ones that historically diverge, and they are only comparable when adjacent. */}
+      <Section title="DataTable — populated / empty / failed">
+        <div className="w-80">
+          <Panel title="Populated">
+            <DataTable
+              caption="Gateways"
+              columns={COLS}
+              rows={ROWS}
+              rowKey={(r) => r.id}
+              empty="None."
+              failed={false}
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Empty">
+            <DataTable
+              caption="Empty"
+              columns={COLS}
+              rows={[]}
+              rowKey={(r) => r.id}
+              empty="No gateways yet."
+              failed={false}
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Failed">
+            <DataTable
+              caption="Failed"
+              columns={COLS}
+              rows={[]}
+              rowKey={(r) => r.id}
+              empty="No gateways yet."
+              failed={true}
+            />
+          </Panel>
+        </div>
+      </Section>
+
+      <Section title="Empty / loading">
+        <div className="w-80">
+          <Panel title="Empty state">
+            <EmptyState>No devices enrolled yet.</EmptyState>
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Loading">
+            <Loading />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="List">
+            <List label="Members">
+              <ListItem>alice@acme.io</ListItem>
+              <ListItem>bob@acme.io</ListItem>
+            </List>
+          </Panel>
+        </div>
+      </Section>
+
+      {/* ⛔ COMBINATION 2: a donut INSIDE a panel INSIDE the page grid — the nesting where the 24px-vs-96px
+          sizing defect actually lived. A donut rendered alone would have looked fine at any size. */}
+      <Section title="Visualisations in situ">
+        <div className="w-80">
+          <Panel title="Donut">
+            <Donut
+              label="Peer status"
+              source={{ endpoint: "/x" }}
+              failed={false}
+              centreLabel="devices"
+              slices={[
+                { label: "Connected", value: 83, tone: "ok" },
+                { label: "Idle", value: 23, tone: "neutral" },
+                { label: "Blocked", value: 9, tone: "warn" },
+                { label: "Revoked", value: 14, tone: "danger" },
+              ]}
+              empty="none"
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Histogram with a gap">
+            <Histogram
+              label="Verdicts"
+              source={{ endpoint: "/x" }}
+              failed={false}
+              bins={[
+                { label: "09", value: 5 },
+                { label: "10", value: 0 },
+                { label: "11", value: 0, gap: true },
+                { label: "12", value: 9 },
+              ]}
+              empty="none"
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Roadmap chart">
+            <Histogram
+              label="Site-link throughput"
+              source={{ roadmap: true, why: "no time-series endpoint exists" }}
+              failed={false}
+              bins={[]}
+              empty="none"
+            />
+          </Panel>
+        </div>
+        <div className="w-80">
+          <Panel title="Node link">
+            <NodeLink
+              label="Topology"
+              source={{ endpoint: "/x" }}
+              failed={false}
+              nodes={[
+                { id: "h", label: "hub", kind: "hub" },
+                { id: "s", label: "spoke", kind: "spoke" },
+              ]}
+              links={[{ from: "h", to: "s", healthy: false }]}
+              empty="none"
+            />
+          </Panel>
+        </div>
+      </Section>
+
+      {/* ⛔ COMBINATION 3 — THE ONE THAT EARNED THIS FILE.
+          A MODAL RENDERED OPEN, FROM INSIDE A CARD. `Card` carries `backdrop-filter`, which makes it the
+          containing block for `position: fixed` descendants. Before the portal fix this arrangement clipped
+          the overlay to the card and put the card's body over the modal's buttons.
+          The modals are portalled now, so the snapshot shows them centred on the VIEWPORT. If a future change
+          re-introduces the trap, this image moves and nothing else does. */}
+      <Section title="Overlays, open, from inside a Card">
+        <Card className="w-80">
+          <p className="text-cell text-ink-body">
+            A card containing an open modal.
+          </p>
+          {showModal && (
+            <Modal
+              title="Revoke device"
+              onDismiss={() => {}}
+              actions={<Button variant="danger">Revoke</Button>}
+            >
+              This removes the peer, releases its address, and cannot be undone.
+            </Modal>
+          )}
+        </Card>
+      </Section>
+
+      <Section title="Icons">
+        <div className="flex flex-wrap gap-3">
+          {(Object.keys(ICON_PATHS) as IconName[]).map((n) => (
+            <Icon key={n} name={n} size={16} className="text-ink-body" />
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+export { OneTimeSecretModal };

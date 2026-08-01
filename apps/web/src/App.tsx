@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { AuthLayout } from "./components/AuthLayout";
 import { MfaSettings } from "./components/MfaSettings";
 import { AppShell } from "./components/AppShell";
+import VisualGallery from "./pages/VisualGallery";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -42,6 +43,15 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
+        {/* The visual gallery is BUILD-FLAGGED OFF. `VITE_VISUAL_GALLERY` is unset in every production build,
+            so Vite's dead-code elimination drops the route and the import. Only the visual-regression job
+            builds with it on, and `test/visualgallery.test.ts` asserts the flag defaults off — an unshipped
+            surface must be PROVEN unshipped, not assumed.
+            Deliberately OUTSIDE RequireAuth: the gallery renders primitives with fixture data and touches no
+            API, so a login would add a dependency the snapshot does not need. */}
+        {import.meta.env.VITE_VISUAL_GALLERY === "1" && (
+          <Route path="/__visual" element={<VisualGallery />} />
+        )}
         <Route
           path="/login"
           element={

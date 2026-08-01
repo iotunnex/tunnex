@@ -152,6 +152,43 @@ jobs:
             mcr.microsoft.com/playwright:v1.48.2-jammy \
             sh -c "npm install --no-audit --no-fund --silent && npx playwright test"
 
+  # ── THE VIEWPORT LEG ────────────────────────────────────────────────────────────────────────────────────
+  # Answers ONE question: did anything move that nobody asked to move? It cannot answer "is this right" —
+  # only the founder's review does that (docs/EPIC-14-ui-redesign.md, the SECTION PROTOCOL).
+  #
+  # ⛔ ITS OWN JOB, NOT FOLDED INTO e2e. On 2026-08-01 `e2e` was RED for four consecutive pushes under a green
+  # local gate; a visual diff buried inside it would inherit that invisibility. It also needs its own
+  # artifacts (expected/actual/diff) and its failures MEAN something different: e2e red = broken behaviour,
+  # visual red = something moved, possibly on purpose.
+  #
+  # ⛔ BLOCKING, and unblocked by COMMITTING A BASELINE — never by re-running with --update-snapshots, which
+  # this job can never do because it only ever compares.
+  visual:
+    name: visual regression (blocking; unblock by committing a baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the stack + seed, with the gallery route enabled
+        run: |
+          cp .env.example .env
+          echo "VITE_VISUAL_GALLERY=1" >> .env
+          docker compose up -d --build --wait
+          make seed
+      - name: Playwright visual comparison
+        run: |
+          docker run --rm --network tunnex_default \
+            -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+            mcr.microsoft.com/playwright:v1.48.2-jammy \
+            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
+      - name: Upload the diff images for adjudication
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # S7.4c: the ENTERPRISE e2e — brings the stack up as the enterprise edition
   # (TUNNEX_BUILD_TAGS=enterprise) with seed-enterprise laid on top of seed, then
   # runs the REAL S4.5/S4.5b assertions (SSO no-secret payload + a live shrink that
