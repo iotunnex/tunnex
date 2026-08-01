@@ -556,3 +556,26 @@ it — from the author first, then from every reviewer after.
 **The fix is a flag, not a rewrite:** `{ hidden: true }` searches the whole DOM regardless of visibility, and
 the same mutation then goes red. **The cost of finding this was one mutation. The cost of not finding it was a
 security-adjacent gate that passed while not gating.**
+
+## VERIFY THE SCAN, NOT THE BADGE — AND ESPECIALLY ON A SLICE WHOSE OWN FINDING WAS A PASSING NON-ASSERTION (2026-08-01, S14.2)
+
+**A green check is a CLAIM ABOUT a scan. The alert list IS the scan.** When a security check flips from red to
+green after a fix, read the finding list at the ref — not the check's colour.
+
+```
+gh api "repos/<o>/<r>/code-scanning/alerts?ref=refs/pull/<n>/merge&state=open&tool_name=CodeQL"
+```
+
+**THE INSTANCE.** The wireframe rename was verified by that query returning **zero** where it had returned
+five, before the aggregate check was believed. Which was lucky in the order it happened: the aggregate passed
+through `failure` → **`neutral`** → `pass` as analyses re-ran, and `neutral` reads as "not red" to anyone
+skimming. **Two of those three states would have been mis-read as success by colour alone.**
+
+**WHY IT BINDS HERE IN PARTICULAR, and this is the transferable part.** This same slice's finding was
+[[A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS UNTIL A MUTATION CONFIRMS IT]] — **an assertion that
+PASSED while asserting nothing.** Trusting a check's colour after finding that would have been **the identical
+mistake one layer up**: accepting a summarised verdict in place of the thing it summarises.
+
+**THE RULE. A SESSION THAT HAS JUST FOUND A VACUOUS CHECK MUST ASSUME ITS OTHER CHECKS ARE VACUOUS UNTIL READ.**
+The finding is not a one-off to be logged and moved past — **it is evidence about the reliability of every
+summarised signal in the same session**, and the cheapest response is to open the underlying data once.
