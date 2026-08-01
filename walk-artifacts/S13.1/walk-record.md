@@ -1041,3 +1041,80 @@ this epic can claim the gone-gate is understood.
 authenticate."* That is true of a **handshake** and false of a **connection**, and nothing in two review passes
 or a rehearsal run distinguished them, because every prior test restarted the agent — which is precisely the
 action that forces a new handshake. **§A's stop-then-start manufactured the very condition that hid this.**
+
+
+# WF-S13-10 (HIGH) — THE RENEWAL ANCHOR IS APPLIED ONCE AND NEVER RE-APPLIED
+
+**The silence has a mechanism, and it is not boot-only recovery.** Established from the live process before the
+restart destroyed it, on [founder] instruction to read first. This is a **different defect from WF-S13-6**.
+
+## The code
+
+`renewLoop` (`apps/node/cmd/agent/main.go:526`), `renewEvery` default **24h** (`main.go:360`,
+`TUNNEX_AGENT_RENEW_INTERVAL`):
+
+```go
+next := every                                       // 24h
+if left := time.Until(identity.NotAfter(certPEM)); left > 0 && left/2 < next {
+    next = left / 2                                 // ANCHORED — and only here, before the loop
+    if next < time.Minute { next = time.Minute }
+    logger.Info("agent_renew_scheduled_from_cert")
+}
+t := time.NewTimer(next)
+for {
+  case <-t.C:
+      t.Reset(every)                                // ← ALWAYS the fixed interval. Never re-anchored.
+      certPEM, keyPEM, err := client.Renew(...)
+      ...
+      logger.Info("agent_cert_renewed")
+}
+```
+
+**The certificate anchor is computed ONCE, at loop entry.** After a successful renewal the timer resets to the
+fixed `every` — **the newly issued certificate's remaining life is never consulted.** The function's own doc
+comment explains why anchoring matters and the loop then discards the anchor on its first tick.
+
+## The trace it produced, exactly
+
+| time | event |
+|---|---|
+| 03:17:23 | container start; cert had ~5m left → first attempt scheduled at `left/2` |
+| 03:22:24.428 | `agent_cert_renewed` — new cert, `notAfter 03:32:24` |
+| 03:22:24.496 | CP: `TLS handshake error from 15.135.130.96: EOF` — the reconnect after the renewal |
+| 03:22:50 | `reconcile_after_push_failed: desired-state status 401` — **the last credential-related line** |
+| 03:32:24 | certificate expires |
+| **2026-08-02 03:22** | **the next renewal attempt.** 24h after the last tick |
+
+**644 `k8s_resolve_begin` lines in the same window** prove the process is alive and looping. The renew timer is
+armed and will not fire for another 22 hours. Nothing is broken enough to log.
+
+## PRODUCTION vs THE RIG — and this is the part that matters for §C
+
+**In production the defect does not fire.** TTL 48h, `every` 24h: `left/2 = 24h` is not `< 24h`, so the anchor
+never engages at all, and a fixed 24h tick against a 48h certificate self-sustains forever.
+
+**It fires whenever the issued TTL drops at or below the agent's hardcoded 24h** — which the rig does
+deliberately (`TUNNEX_AGENT_CERT_TTL=10m`). **There is NO coupling between the CP's issued lifetime and the
+agent's renewal interval.** A control plane that shortens certificate TTL — an ordinary security decision, taken
+CP-side, with no agent change — **silently bricks every gateway in the fleet after exactly one renewal.** That is
+a real defect, not a test artifact, and its blast radius is fleet-wide.
+
+## WHAT THIS COSTS THE WALK — stated plainly rather than buried
+
+**§C's whole purpose is "prove the shortening knob did not change behaviour." Here is a proven case where it
+does.** §A and §B both ran at `TTL=10m`, so **every stuck-agent observation on this rig was reached by a path
+production would not take.**
+
+**WF-S13-6 is NOT invalidated** — "recovery is boot-only" is established by reading `attemptRekey`'s single
+caller, independently of any rig, and the original incident was a real 48h production gateway. **But the rig's
+reproductions of it were manufactured by WF-S13-10, not by WF-S13-6's mechanism.** Instances 2, 3 and 4 all show
+an agent that stopped renewing because its timer was 24h away — not one that tried and was refused.
+
+**This is the fixture-fidelity law at rig scale** (`docs/laws.md`): the shortened TTL is a FIXTURE, and it
+diverged from production in a way that produced the very symptom under study. **A runsheet that manufactures a
+state must say how production reaches that state** — pass 1 already minted that sentence for the `certexpiry`
+shortcut, and this is its second and larger instance.
+
+**OWED, and it is a decide-item for the founder, not a fold:** whether `every` must be re-derived from each
+newly issued certificate (the obvious fix, and the one the function's own comment argues for), and whether §A's
+and §B's renewal-dependent observations need re-reading in that light. **Not touched during the walk.**

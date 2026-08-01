@@ -551,6 +551,36 @@ agent every time, which manufactured a boot with an expired certificate — the 
 **in place** — same node id, same `site_id`, same devices — and the CP shows a new `cert_not_after` with
 `cert_delivered` observed flipping `f` → `t`.
 
+## ⛔ C-LEG-0 AMENDMENT — THE SOCKET STATE IS PART OF THE LEG (added 2026-08-01, WF-S13-9)
+
+**Without this the leg cannot distinguish "the remedy worked" from "the connection dropped and we retested the
+boot path §A already covered."**
+
+WF-S13-9 established that an expired client certificate **keeps authenticating for as long as its TCP connection
+survives** — `tls.RequireAndVerifyClientCert` enforces `NotAfter` at the HANDSHAKE, and HTTP keep-alive never
+re-handshakes. B′ was observed calling `DesiredState` continuously 1h51m after its certificate expired.
+
+So a §C run has two very different shapes, and they are **indistinguishable in the CP's record**:
+
+- **connection SURVIVES the expiry** → the agent experiences no failure at all; a recovery here proves
+  `identityWatchLoop` fired on **local inputs**, which is the actual claim under test;
+- **connection DROPS** (network blip, CP restart, idle timeout) → the next handshake is refused, and recovery
+  proves only the reconnect path — **which §A already covered by stopping and starting the agent.**
+
+**CAPTURE `ss -tnpo` AGAINST `:8443` AT THREE POINTS. All three go in the record.**
+
+```bash
+# [gateway] at SETUP (cert valid), at EXPIRY (cert_not_after passed), at RECOVERY (agent_rekeyed)
+sudo ss -tnpo | grep :8443
+```
+
+**Record the socket's local port at setup and compare it at recovery.** A CHANGED port means the connection was
+re-established and the leg is the weaker shape; the SAME port through all three means the transport never broke
+and the recovery is attributable to the timer alone.
+
+**A §C run without these three captures is INCONCLUSIVE, not a pass** — the same standing rule as a
+session-limited review.
+
 **Record the container's start time and the recovery time in the same table.** A restart between them, from any
 cause, voids the leg — that is the entire point of it.
 
