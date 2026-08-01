@@ -35,7 +35,13 @@ test("the baseline set is EXACTLY what is expected — no additions, no silent d
     .filter((f) => f.endsWith(".png"))
     // Playwright suffixes baselines with the platform (…-linux.png). The census is about WHICH images exist,
     // not which platform produced them.
-    .map((f) => f.replace(/-(linux|darwin|win32)\.png$/, ".png"))
+    // Playwright suffixes with PROJECT and PLATFORM (…-chromium-linux.png).
+    .map((f) =>
+      f.replace(
+        /-(chromium|firefox|webkit)-(linux|darwin|win32)\.png$/,
+        ".png",
+      ),
+    )
     .sort();
 
   expect(

@@ -37,3 +37,25 @@ for (const w of WIDTHS) {
     });
   });
 }
+
+// The same geometric invariant on the real screen — this is where it actually fired.
+for (const w of WIDTHS) {
+  test(`overview has no horizontal overflow @ ${w.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: w.width, height: w.height });
+    await stabilise(page);
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(OWNER.email);
+    await page.getByLabel("Password").fill(OWNER.pass);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    const overflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    );
+    expect(
+      overflow,
+      `Overview is ${overflow}px wider than the ${w.name}px viewport`,
+    ).toBeLessThanOrEqual(0);
+  });
+}

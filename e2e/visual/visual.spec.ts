@@ -54,3 +54,31 @@ test.describe("visual — the shared surface", () => {
     });
   }
 });
+
+// ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
+//
+// This assertion exists because the FIRST baseline run produced a 455px-wide capture from a 390px viewport —
+// the page scrolled sideways, and the image would have BAKED THE DEFECT IN as the expected appearance.
+//
+// A snapshot cannot catch this on its own: it records what the page looks like, including looking wrong. So
+// the geometric invariant is asserted SEPARATELY and in numbers, where a human does not have to notice a
+// 65px difference between two images they have never seen before.
+test.describe("no page scrolls sideways", () => {
+  for (const w of WIDTHS) {
+    test(`gallery has no horizontal overflow @ ${w.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: w.width, height: w.height });
+      await stabilise(page);
+      await page.goto("/__visual");
+      await expect(page.locator("[data-visual-gallery]")).toBeVisible();
+      const overflow = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      );
+      expect(
+        overflow,
+        `the page is ${overflow}px wider than the viewport`,
+      ).toBeLessThanOrEqual(0);
+    });
+  }
+});

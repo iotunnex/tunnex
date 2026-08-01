@@ -297,11 +297,12 @@ export default function Dashboard() {
                     in a stat row reads as a card that failed to render rather than as a capability the org
                     does not have. Absence should be invisible when the thing absent was never offered.
                     Six cards -> span 2 each. Five -> the row is a 5-column grid. Either way it fills. */}
+                {/* ⛔ THE ROW RE-SPANS TO FILL, AND IT COLLAPSES BEFORE IT OVERFLOWS.
+                    Six (or five) fixed columns at 390px gives ~60px per card and the page scrolls sideways —
+                    which the viewport leg caught on its FIRST baseline (390px viewport, 455px capture).
+                    The edition-dependent count only applies once there is room for it. */}
                 <div
-                  className="grid gap-3"
-                  style={{
-                    gridTemplateColumns: `repeat(${enterprise ? 6 : 5}, minmax(0, 1fr))`,
-                  }}
+                  className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${enterprise ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}
                 >
                   <Stat
                     label="Members"
@@ -411,8 +412,10 @@ export default function Dashboard() {
                       Alerts               — composed from sources this screen does not own; Access Events' job
                       Fleet risk           — Tier-3, not built */}
                 {/* README panel spans on the 12-column base: rows 4+4+4, 4+4+4, 8+4. */}
-                <div className="grid grid-cols-12 gap-3">
-                  <Panel title="Peer Connection Status" className="col-span-4">
+                {/* One column until there is room for twelve. A `col-span-4` panel on a 12-column grid at
+                    390px is ~100px wide, and a 120px donut inside it pushes the page sideways. */}
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+                  <Panel title="Peer Connection Status" className="lg:col-span-4">
                     {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
                         than the one the panel is named for. A chart can be perfectly honest about the wrong
                         denominator, and nothing in the render would look wrong. */}
@@ -433,7 +436,7 @@ export default function Dashboard() {
                     </p>
                   </Panel>
 
-                  <Panel title="Gateway Health" className="col-span-4">
+                  <Panel title="Gateway Health" className="lg:col-span-4">
                     {nodesRes === null ? (
                       <Loading />
                     ) : !nodesRes.ok ? (
@@ -470,7 +473,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Recent Activity" className="col-span-4">
+                  <Panel title="Recent Activity" className="lg:col-span-4">
                     {data.recent_activity.length === 0 ? (
                       <EmptyState>No activity yet.</EmptyState>
                     ) : (
@@ -491,7 +494,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Site-Link Traffic" className="col-span-4">
+                  <Panel title="Site-Link Traffic" className="lg:col-span-4">
                     {/* ⛔ THE PANEL IS CATEGORY ONE. THE WIREFRAME'S CHART IS CATEGORY TWO.
                         The counters exist; the TIME SERIES does not. `rx_bytes` is "a raw gauge since the
                         last handshake (display only, never summed as monotonic)" — it RESETS at every
@@ -553,7 +556,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Device Posture" className="col-span-4">
+                  <Panel title="Device Posture" className="lg:col-span-4">
                     {devicesRes === null ? (
                       <Loading />
                     ) : !devicesRes.ok ? (
@@ -612,7 +615,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="HA Hub Set" className="col-span-4">
+                  <Panel title="HA Hub Set" className="lg:col-span-4">
                     {/* ⚠ THIS PANEL WAS CUT ON A WRONG MEASUREMENT. The audit checked the `Site` schema for
                         hub/generation/pin fields, found none, and declared the data absent — but the hub set
                         is its OWN endpoint and schema, and `hubsetview.ts` already projects it. An absence
@@ -679,7 +682,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Network map" className="col-span-4">
+                  <Panel title="Network map" className="lg:col-span-4">
                     {/* ⚠ ALSO A RETRACTED CUT. Cut as "no SiteLink schema" — true, and beside the point:
                         `assembleTopology()` already projects sites + their gateways from data this screen
                         fetches. CATEGORY ONE, not category three: the capability exists and has no data yet,
@@ -712,7 +715,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Needs Attention" className="col-span-4">
+                  <Panel title="Needs Attention" className="lg:col-span-4">
                     {attention === null ? (
                       <Loading />
                     ) : attention.length === 0 ? (
@@ -742,7 +745,7 @@ export default function Dashboard() {
                     </p>
                   </Panel>
 
-                  <Panel title="System Health" className="col-span-4">
+                  <Panel title="System Health" className="lg:col-span-4">
                     <List label="System health">
                       <ListItem>
                         <span className="flex items-center justify-between gap-2">
