@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { GLASS } from "../components/ui";
+import { isEnterprise, type Edition } from "../lib/edition";
 import { HealthStatus } from "../components/HealthStatus";
+import { hubSetView } from "../lib/hubsetview";
 import { Donut } from "../components/viz";
 import { Link } from "react-router-dom";
 import {
@@ -14,6 +16,7 @@ import {
   type OrgOverview,
   type Site,
   type Meta,
+  type HubSet,
   type PolicyRule,
   type ZeroTrustMode,
 } from "../lib/api";
@@ -31,6 +34,8 @@ import { policyHealthBadge } from "../lib/healthview";
 import {
   isFreshOrg,
   sortGateways,
+  peerSlices,
+  postureSplit,
   statFrom,
   statText,
   type GatewayRow,
@@ -56,10 +61,12 @@ export default function Dashboard() {
   const [pendingRes, setPendingRes] = useState<Loaded<Device[]> | null>(null);
   const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
+  const [devicesRes, setDevicesRes] = useState<Loaded<Device[]> | null>(null);
+  const [hubSetRes, setHubSetRes] = useState<Loaded<HubSet> | null>(null);
   const [ztRes, setZtRes] = useState<Loaded<ZeroTrustMode> | null>(null);
   // THE ONE GATING SEAM. `/meta`'s edition is the same value that decides whether every other enterprise
   // surface exists — read here, never re-derived from an error.
-  const [edition, setEdition] = useState<string | null>(null);
+  const [edition, setEdition] = useState<Edition>("unknown");
 
   useEffect(() => {
     let cancelled = false;
@@ -89,9 +96,39 @@ export default function Dashboard() {
             apiErrorMessage(ovErr, "Could not load the overview."),
           );
         setData(ov);
-        void loadOne(() => api.GET("/api/v1/meta")).then(
-          (r) => !cancelled && r.ok && setEdition((r.data as Meta).edition),
-        );
+
+        // ⛔ THE SEAM, AND IT DECIDES BEFORE IT FETCHES. Edition first; gated endpoints are called ONLY when
+        // the edition has them. An open-edition org therefore never issues a request that can 403, so there
+        // is no failure to mis-interpret — the render decision is taken at the seam rather than recovered
+        // from an error at the call site. The interpretation is what drifted, twice.
+        const metaRes = (await loadOne(() =>
+          api.GET("/api/v1/meta"),
+        )) as Loaded<Meta>;
+        if (cancelled) return;
+        const ed: Edition = metaRes.ok
+          ? metaRes.data.edition === "enterprise"
+            ? "enterprise"
+            : "open"
+          : "unknown";
+        setEdition(ed);
+
+        if (isEnterprise(ed)) {
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/devices/pending", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setPendingRes(r as Loaded<Device[]>));
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/policies", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setRulesRes(r as Loaded<PolicyRule[]>));
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setZtRes(r as Loaded<ZeroTrustMode>));
+        }
         // Fired together, awaited independently: each sets its own state, so one failure degrades one card.
         void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/sites", {
@@ -99,25 +136,17 @@ export default function Dashboard() {
           }),
         ).then((r) => !cancelled && setSitesRes(r as Loaded<Site[]>));
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/devices/pending", {
-            params: { path: { orgId: org.id } },
-          }),
-        ).then((r) => !cancelled && setPendingRes(r as Loaded<Device[]>));
-        void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/nodes", {
             params: { path: { orgId: org.id } },
           }),
         ).then((r) => !cancelled && setNodesRes(r as Loaded<Node[]>));
+        // Both OPEN endpoints — no gate needed, and the audit that cut them was wrong about the data.
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/policies", {
-            params: { path: { orgId: org.id } },
-          }),
-        ).then((r) => !cancelled && setRulesRes(r as Loaded<PolicyRule[]>));
+          api.GET("/api/v1/organizations/{orgId}/devices", { params: { path: { orgId: org.id } } }),
+        ).then((r) => !cancelled && setDevicesRes(r as Loaded<Device[]>));
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", {
-            params: { path: { orgId: org.id } },
-          }),
-        ).then((r) => !cancelled && setZtRes(r as Loaded<ZeroTrustMode>));
+          api.GET("/api/v1/organizations/{orgId}/hub-set", { params: { path: { orgId: org.id } } }),
+        ).then((r) => !cancelled && setHubSetRes(r as Loaded<HubSet>));
       } catch {
         if (!cancelled) setError("Could not reach the API.");
       }
@@ -186,7 +215,7 @@ export default function Dashboard() {
             const rules = statFrom(rulesRes, (r: PolicyRule[]) => r.length);
             // Edition is UNKNOWN until /meta answers; treat unknown as not-enterprise so a slow load never
             // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
-            const isEnterprise = edition === "enterprise";
+            const enterprise = isEnterprise(edition);
 
             // NEEDS ATTENTION is COMPOSED, not fetched — every item names the source that produced it, and an
             // item appears only when its source has been READ. A source still loading contributes nothing;
@@ -209,9 +238,7 @@ export default function Dashboard() {
                           to: "/sites",
                         }))
                     : []),
-                  ...(isEnterprise &&
-                  pendingRes?.ok &&
-                  pendingRes.data.length > 0
+                  ...(enterprise && pendingRes?.ok && pendingRes.data.length > 0
                     ? [
                         {
                           key: "pending-devices",
@@ -297,15 +324,21 @@ export default function Dashboard() {
                     value={sites}
                     sub={siteSub}
                   />
-                  <Stat
-                    label="Access Rules"
-                    icon="shield"
-                    value={rules}
-                    sub={zeroTrust === null ? null : zeroTrust}
-                  />
+                  {/* ⛔ ENTERPRISE. `/policies` and `/zero-trust-mode` are both gated, so on the open edition
+                      this card is ABSENT — not "0", not "could not load" in red. It was the SECOND instance of
+                      the same conflation in this slice, still live after the first was fixed at one call
+                      site: only an enumeration finds the rest (src/lib/edition.ts). */}
+                  {enterprise && (
+                    <Stat
+                      label="Access Rules"
+                      icon="shield"
+                      value={rules}
+                      sub={zeroTrust === null ? null : zeroTrust}
+                    />
+                  )}
                   {/* Sixth card only where the capability exists. On the open edition the row is five wide —
                       which is the honest layout, not a gap where a broken card used to be. */}
-                  {isEnterprise && (
+                  {enterprise && (
                     <Stat
                       label="Pending approvals"
                       icon="user-plus"
@@ -351,25 +384,15 @@ export default function Dashboard() {
                       Fleet risk           — Tier-3, not built */}
                 <div className="grid grid-cols-12 gap-12">
                   <Panel title="Peer Connection Status" className="col-span-4">
+                    {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
+                        than the one the panel is named for. A chart can be perfectly honest about the wrong
+                        denominator, and nothing in the render would look wrong. */}
                     <Donut
-                      label="Gateway liveness"
-                      source={{
-                        endpoint: "/api/v1/organizations/{orgId}/overview",
-                      }}
-                      failed={error != null}
-                      slices={[
-                        {
-                          label: "seen in last 3 min",
-                          value: data.online,
-                          tone: "ok",
-                        },
-                        {
-                          label: "not seen recently",
-                          value: Math.max(0, data.nodes - data.online),
-                          tone: "neutral",
-                        },
-                      ]}
-                      empty="No gateways enrolled yet."
+                      label="Peer connection status"
+                      source={{ endpoint: "/api/v1/organizations/{orgId}/devices" }}
+                      failed={devicesRes !== null && !devicesRes.ok}
+                      slices={devicesRes?.ok ? peerSlices(devicesRes.data) : []}
+                      empty="No devices enrolled yet."
                     />
                     {/* The design's caption, verbatim — it states the product's rule, not a decoration. */}
                     <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
@@ -433,6 +456,97 @@ export default function Dashboard() {
                           </ListItem>
                         ))}
                       </List>
+                    )}
+                  </Panel>
+
+                  <Panel title="Device Posture" className="col-span-4">
+                    {devicesRes === null ? (
+                      <Loading />
+                    ) : !devicesRes.ok ? (
+                      <ErrorText>Device posture is unavailable.</ErrorText>
+                    ) : (
+                      (() => {
+                        const ps = postureSplit(devicesRes.data);
+                        return (
+                          <>
+                            <p className="text-stat font-bold leading-none text-ink-heading">
+                              {/* ⛔ NULL, NOT 0. With nothing reported there is no percentage to state: 0%
+                                  would claim total non-compliance and 100% the opposite, and neither was
+                                  measured. */}
+                              {ps.percent === null ? "n/a" : `${ps.percent}%`}
+                            </p>
+                            <ul className="mt-10 space-y-6 text-cell">
+                              <li className="text-ink-body">
+                                <span className="text-ink-primary">{ps.compliant}</span> compliant
+                              </li>
+                              <li className="text-ink-body">
+                                <span className="text-ink-primary">{ps.blocked}</span> blocked
+                              </li>
+                              <li className="text-ink-body">
+                                <span className="text-ink-primary">{ps.unknown}</span> unknown
+                              </li>
+                            </ul>
+                            {/* The design's caption, and it is the rule this panel is built on. */}
+                            <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                              Client-reported, not attestation. Absence is not compliance. Unknown is its own
+                              state, and it is excluded from the percentage.
+                            </p>
+                          </>
+                        );
+                      })()
+                    )}
+                  </Panel>
+
+                  <Panel title="HA Hub Set" className="col-span-4">
+                    {/* ⚠ THIS PANEL WAS CUT ON A WRONG MEASUREMENT. The audit checked the `Site` schema for
+                        hub/generation/pin fields, found none, and declared the data absent — but the hub set
+                        is its OWN endpoint and schema, and `hubsetview.ts` already projects it. An absence
+                        found by looking in one place is not an absence (docs/laws.md). */}
+                    {hubSetRes === null ? (
+                      <Loading />
+                    ) : !hubSetRes.ok ? (
+                      <ErrorText>The hub set is unavailable.</ErrorText>
+                    ) : (
+                      (() => {
+                        // Defensive: a served object without `members` must not throw the whole screen. One panel's
+                        // bad shape taking the page down is a blast radius nobody chose.
+                        const hv = hubSetRes.data?.members ? hubSetView(hubSetRes.data, Date.now()) : null;
+                        if (!hv) return <EmptyState>No HA hub set. Pin two or more gateways to create one.</EmptyState>;
+                        return (
+                          <>
+                            <Badge tone="neutral">GEN {hv.generation}</Badge>
+                            <List label="Hub set">
+                              {hv.members.map((m) => {
+                                // The row carries a nodeId; the NAME lives on /nodes, so the two are joined
+                                // here. An unjoinable id renders as the id rather than as a blank — an
+                                // unnamed member is still a member, and hiding it would understate the set.
+                                const node = nodesRes?.ok ? nodesRes.data.find((n) => n.id === m.nodeId) : undefined;
+                                return (
+                                  <ListItem key={m.nodeId}>
+                                    <span className="flex items-center justify-between gap-8">
+                                      <span className="truncate font-mono text-mono text-ink-primary">
+                                        {node?.name ?? m.nodeId.slice(0, 8)}
+                                      </span>
+                                      <span className="shrink-0 text-micro text-ink-tertiary">
+                                        {m.demoted ? "demoted" : m.role}
+                                        {/* `hubsetview` returns a dash glyph for "not reporting". Rendering
+                                            that would be both an em-dash and a silence where the honest word
+                                            exists — and "absent metrics is not an idle link" is this panel's
+                                            own rule. */}
+                                        {m.handshakeAge === "—" ? " · not reporting" : ` · hs ${m.handshakeAge}`}
+                                      </span>
+                                    </span>
+                                  </ListItem>
+                                );
+                              })}
+                            </List>
+                            <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                              Pinned gateways form the hub set. members[0] is the acting primary, and the
+                              generation bumps on every promotion. Absent metrics are not an idle link.
+                            </p>
+                          </>
+                        );
+                      })()
                     )}
                   </Panel>
 

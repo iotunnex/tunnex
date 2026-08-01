@@ -54,6 +54,11 @@ vi.mock("../src/lib/api", async () => {
             ? { data: undefined, ...err }
             : { data: empty ? [] : [{ id: "s1" }] };
         if (path.endsWith("/devices/pending")) return { data: [] };
+        if (path.endsWith("/devices")) return { data: [] };
+        // The hub-set endpoint returns an OBJECT, not a list. The catch-all `{ data: [] }` below fed an array
+        // into hubSetView and threw — which surfaced as "cannot find Members", i.e. the whole page failing to
+        // render. A catch-all mock is a fixture that answers questions it was never asked.
+        if (path.endsWith("/hub-set")) return { data: { generation: 1, members: [] } };
         if (path.endsWith("/nodes"))
           return nodesFail
             ? { data: undefined, ...err }

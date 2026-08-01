@@ -34,7 +34,10 @@ describe("accessibility floor — WCAG 2.1 AA, COMPUTED not reviewed", () => {
         // `solid()` composites a translucent surface to the colour it actually renders as. The glass is
         // rgba by design, and a ratio computed from an alpha value is NaN — which FAILS, correctly, but for
         // the wrong reason. Resolving first means the assertion measures what the eye sees.
-        const ratio = contrastRatio(solid(theme, pair.fg), solid(theme, pair.bg));
+        const ratio = contrastRatio(
+          solid(theme, pair.fg),
+          solid(theme, pair.bg),
+        );
         expect(
           ratio,
           `${pair.fg} (${solid(theme, pair.fg)}) on ${pair.bg} (${solid(theme, pair.bg)}) = ${ratio.toFixed(2)}:1, floor ${pair.floor}:1`,

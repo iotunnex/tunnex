@@ -344,3 +344,40 @@ the section protocol exists to prevent. **Each screen's section clears its own**
 that section's definition of done.
 
 **Overview is clear as of `S14.4`.**
+
+# ⛔ THE THREE-WAY TEST — every panel, every screen (founder-ruled 2026-08-01)
+
+> ## **A CARD WITH AN EMPTY STATE PROMISES THAT DATA WILL FILL IT.**
+> ## **A CAPABILITY THAT DOES NOT EXIST MUST NOT MAKE THAT PROMISE.**
+
+| the panel's situation | verdict |
+|---|---|
+| **endpoint exists, no data yet** | **BUILD IT, with an empty state.** The empty state is honest: it says the capability is there and waiting. |
+| **endpoint exists, the SPEC FORBIDS the use** | **ABSENT, with the reason recorded on the panel grid.** |
+| **no endpoint, no capability** | **ABSENT, marked roadmap.** |
+
+**WHY THE MIDDLE ROW IS NOT THE FIRST ROW, using the case that forced the rule.** *Site-Link Throughput* is
+**not a built feature awaiting data.** `openapi.yaml` describes the byte fields as *"a raw gauge since the last
+handshake, display only, never summed as monotonic."* **A 7-day rate series drawn from a counter that RESETS
+ON EVERY HANDSHAKE would look like throughput and not be throughput — at any data volume, forever.** An empty
+card would tell the reader to wait for something that is never coming. **Absent is honest; an empty promise is
+not.** Time-series is S11.1's job and needs an endpoint that does not exist.
+
+## ⚠ RE-CLASSIFICATION — TWO CUTS WERE CATEGORY ONE WEARING CATEGORY THREE'S LABEL
+
+| panel | was cut as | **actually** | now |
+|---|---|---|---|
+| **HA Hub Set** | *"no hub/generation/pin field exists"* | **`GET /hub-set` + `HubSet{generation, members[]}` exist; `hubsetview.ts` already projects primary/standby, pins and handshake age** | **BUILT, empty state** |
+| **Network map** | *"no `SiteLink` schema"* | true, **and `assembleTopology()` already exists** in `sitesview.ts` | **BUILD, empty state** |
+| **Device Posture** | *"deferred to the Devices section"* | **`Device` carries `health_state` / `health_blocked` / `health_reported_at` today** | **BUILT** |
+| Peer Connection Status | built from **nodes** | the panel counts **devices** — a different, larger population | **RE-SOURCED** |
+| Site-Link Throughput | no endpoint | **category two** — the field exists and its own description forbids the reading | **ABSENT, reason recorded** |
+| Fleet risk | Tier-3, not built | **category three** | **ABSENT, roadmap** |
+| Alerts | *"composed from sources this screen does not own"* | **category one** — node health kinds and `/audit-logs` both exist | **RE-OPENED, owed** |
+
+**THE CAUSE OF THE MIS-CLASSIFICATION, recorded because it is the third instance in one day: AN ABSENCE FOUND
+BY LOOKING IN ONE PLACE.** The `Site` schema was searched for hub fields, none were found, and the capability
+was declared missing — **while the hub set was its own endpoint and its own schema all along.** The first two
+instances were caught by the assistant; **this one the founder caught**, which is worse.
+
+**BINDING: every cut on every screen is re-checked against the three-way test before that screen ships.**

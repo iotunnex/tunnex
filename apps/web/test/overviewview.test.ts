@@ -4,6 +4,8 @@ import {
   sortGateways,
   statFrom,
   statText,
+  peerSlices,
+  postureSplit,
   type GatewayRow,
 } from "../src/lib/overviewview";
 import { FAILED, LOADING, ok } from "../src/lib/navcounts";
@@ -86,5 +88,61 @@ describe("statFrom / statText", () => {
     expect(
       statText(statFrom({ ok: true, data: [] }, (a: number[]) => a.length)),
     ).toBe("0");
+  });
+});
+
+describe("peerSlices — the donut counts DEVICES, and the buckets are disjoint", () => {
+  // ⚠ The first build counted GATEWAYS. The panel is "Peer Connection Status" and peers are devices — a
+  // different, larger population. A chart can be perfectly honest about the wrong denominator.
+  const D = (o: Partial<Record<string, unknown>>) => o as never;
+
+  it("every device lands in exactly one bucket", () => {
+    const devices = [
+      D({ status: "active", online: true }),
+      D({ status: "active", online: false }),
+      D({ status: "active", online: true, health_blocked: true }),
+      D({ status: "revoked", online: false }),
+    ];
+    const s = peerSlices(devices);
+    expect(s.reduce((t, x) => t + x.value, 0)).toBe(devices.length);
+    expect(s.map((x) => [x.label, x.value])).toEqual([
+      ["Connected", 1],
+      ["Idle", 1],
+      ["Posture-blocked", 1],
+      ["Revoked / offline", 1],
+    ]);
+  });
+
+  it("precedence: a revoked device is NOT idle, and a blocked device is NOT connected", () => {
+    // Both would otherwise be double-counted into the reassuring bucket.
+    expect(peerSlices([D({ status: "revoked", online: true })])[0]!.value).toBe(0);
+    expect(peerSlices([D({ status: "active", online: true, health_blocked: true })])[0]!.value).toBe(0);
+  });
+});
+
+describe("postureSplit — UNKNOWN is its own state and is excluded from the percentage", () => {
+  const D = (o: Partial<Record<string, unknown>>) => o as never;
+
+  it("never-reported devices are unknown, not compliant", () => {
+    // Counting them compliant is the reassuring-empty defect with a denominator. The design says it too:
+    // "Absence ≠ compliance — unknown is its own state."
+    const s = postureSplit([D({ status: "active" }), D({ status: "active", health_state: "ok" })]);
+    expect(s.unknown).toBe(1);
+    expect(s.compliant).toBe(1);
+    expect(s.percent).toBe(100); // 1 of 1 REPORTED, not 1 of 2 total
+  });
+
+  it("percent is null when nothing has reported — not 0, and not 100", () => {
+    // 0% would claim total non-compliance; 100% would claim the opposite. Neither was measured.
+    expect(postureSplit([D({ status: "active" })]).percent).toBeNull();
+  });
+
+  it("revoked devices are excluded entirely", () => {
+    expect(postureSplit([D({ status: "revoked", health_state: "ok" })])).toEqual({
+      compliant: 0,
+      blocked: 0,
+      unknown: 0,
+      percent: null,
+    });
   });
 });
