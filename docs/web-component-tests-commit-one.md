@@ -1,3 +1,105 @@
+# ⛔ HANDOFF — READ THIS BEFORE OPENING THE REDESIGN BRANCH
+
+**The component test tier is COMPLETE and CI-GREEN. This section is the contract it hands forward.** Everything
+below binds the redesign; the rest of this paper is how it was decided.
+
+## CI GREEN AT `00a736d` (PR #44, 2026-08-01)
+
+**Recorded with the sha and every job, because "gate green" without a sha is the class this project has already
+ruled against** (`GATE-REPORT-NEEDS-SHA`).
+
+| workflow | jobs | conclusion |
+|---|---|---|
+| **CI** | `gates` · `client (macos-latest)` · `client (windows-latest)` · `e2e` · `e2e-enterprise` | **all success** |
+| **Security** | `gofmt + vet parity` · `govulncheck` ×5 (api·node·cli·helper·operator) · `CodeQL` ×2 (go·js-ts) · `Trivy` | **all success** |
+
+**Re-earned by any further commit.** And note *why* the PR exists at all: `ci.yml` fires on `pull_request` only
+(WF-S13-11), so a story branch has **no CI signal** until one is opened. `make web-gate` passing locally is
+**not** the gate.
+
+## 1. THE FIVE QUERY RULES — the binding contract
+
+1. **QUERY BY ROLE + ACCESSIBLE NAME.** Never test-ids, class names, or DOM structure. **A redesign that breaks
+   these has broken accessibility too — a finding, not test debt.**
+2. **MOCK AT THE NETWORK BOUNDARY** (`api.GET`/`api.POST`), never the component boundary. That layer does not
+   change in a redesign.
+3. **ASSERT DECISIONS, NOT RENDERING.**
+4. **NO TEST MAY ASSUME A VIEWPORT** — no dependence on layout, column order, or width-conditional visibility.
+   The responsive item introduces five widths.
+5. **A `waitFor` MUST COVER EVERY ELEMENT THE ASSERTIONS TOUCH** — never the first that appears. *Two tests over
+   the same elements disagreeing is the tell.*
+
+**`getByText` is permitted ONLY for content carrying no role today, and every such use is a MARKER that the
+element should gain `role="status"`/`role="alert"` in the redesign** — a finding-generator, not an exemption.
+
+## 2. THE CENSUS — `COVERED 8 · EXEMPT 11 · PENDING 0`, accountable total **8**
+
+`test/screencensus.test.ts`. **Enumerated from `src/pages/*.tsx`** so it cannot go stale; exemptions are an
+explicit allow-list and **every one carries its reason inline** — an unreasoned exemption is how the list
+quietly becomes the codebase.
+
+**Asserted with `toBe`, never `>=`.** A floor is satisfied forever from screen 2 onward. **Equality means screen
+19 fails the census BY NAME and the number must be MOVED DELIBERATELY** — a visible, reviewable edit. That is
+what makes it a ledger rather than a floor.
+
+**PENDING stays at zero rather than being deleted:** an empty backlog is a state, not a reason to remove the
+mechanism.
+
+## 3. THE CEILING — the number is a LEDGER OF TODAY, not a target
+
+**~13 accountable screens after the redesign.** Six wireframe screens have no current equivalent:
+`subnets` · `cli` (both extractions) · `flows` (a registered gap that never had a UI) · `ops` · `license` ·
+`onboarding`. **Re-baselining the totals is a deliberate reviewable edit — the property the equals-the-total
+form was chosen for.** A `>=` floor would have absorbed the growth silently.
+
+## 4. THE SHEDDER CONSTRAINTS
+
+| screen | keeps | sheds to |
+|---|---|---|
+| **`Sites.tsx`** | `sites` | **`subnets`** (routed ranges) |
+| **`Settings.tsx`** | `settings` | **`cli`** (machine credentials) · **`license`** (edition) |
+
+**Their tests assert the DECISION and NAME THE DESTINATION**, so they travel through the split.
+*"A routed range that fails to load is surfaced, not rendered as none"* travels. *"The Sites page shows a
+routed-range list"* does not.
+
+## 5. ⛔ THE TIER'S PURPOSE — THE REDESIGN IS A REFACTOR UNDER A GREEN SUITE
+
+**Perform the redesign with these tests PASSING THROUGHOUT. Do not rewrite them and re-test afterwards.**
+
+The tier then proves the redesign **did not change BEHAVIOUR while changing everything else.**
+
+> **A TEST THAT HAS TO BE REWRITTEN TO PASS IS A SIGNAL THAT THE REDESIGN CHANGED A DECISION** — either a bug,
+> or a deliberate change that must be RECORDED. **It is not test debt.** Rewriting it destroys the only signal
+> that says so.
+
+**This inverts the tier's value:** it is not insurance against breakage. It is the instrument that makes a
+re-architecture **reviewable at all.**
+
+## 6. THE `Loaded<T>` CONTRACT — and what widening it costs silently
+
+`src/lib/loadedcontract.ts` asserts at the type level that `Loaded<T>` discriminates, that the error branch
+carries **no `data` key**, and that `data` is **required** on the success branch.
+
+**`Loaded<T> = { ok: true; data: T } | { ok: false; error: string }` makes the `loadOne` law unwritable to
+violate:** `.data` is unreachable without narrowing `.ok`, so the naive mutation produces a **compile error**,
+not a wrong render.
+
+**WIDENING IT TO `{ ok: boolean; data?: T; error?: string }` — the shape a hurried refactor reaches for because
+it is easier to construct — CONVERTS A COMPILE-TIME GUARANTEE INTO A DISCIPLINE NOBODY AUDITS.** Nothing fails.
+No test goes red. The guard simply stops existing, and its absence looks like ordinary code. **The redesign
+touches every load path. Do not loosen it.** (The contract lives in `src/` deliberately: `tsconfig` now includes
+`test`, but a contract placed there would once have been a check that cannot fail.)
+
+## 7. TWO FINDINGS THIS BRANCH PRODUCED
+
+| finding | status |
+|---|---|
+| **Sites revoked-badge** — `GatewayRow` rendered health badges on revoked rows; WF-S11-10's **third surface** | **FIXED**, under the branch's ONE named product exception. One line restoring a guard `Devices.tsx` already had |
+| **SSO failed load** — `SsoConfig.load()` collapses **every** error to `setConfigured(false)`, so a transient 500 on an org that HAS SSO renders *"Configure"* with the config hidden and no failure shown | **REGISTERED, NOT FIXED. Ranked ABOVE the Sites finding.** It is **DESTRUCTIVE, not misinforming**: an admin who reconfigures from scratch against a live IdP may **overwrite a working SSO configuration**. `loadOne`'s sharpest instance — the law was minted for reassuring-empty **lists**; this is reassuring-empty **config on the auth surface**. Structurally present, unconfirmed on the wire. **The decision owed:** what the panel does on a non-404 failure |
+
+---
+
 # `story/web-component-tests` — COMMIT-ONE
 
 **PAPER. NOTHING BUILT.** Branch cut from `main`, component test tier ONLY, no redesign.
