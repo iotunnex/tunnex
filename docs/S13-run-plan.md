@@ -88,9 +88,26 @@ Everything committed between §A's run and §B is **documentation plus two dev s
 # [azure-cp] pull the docs; the image is already correct
 cd ~/tunnex && git merge --ff-only origin/story/S13.1-gateway-recovery
 git log --oneline -1                                     # 779f1a0 or later
-git diff --name-only c417c85..HEAD | grep -vE '^(docs/|walk-artifacts/|scripts/)' || echo "DOCS ONLY — no rebuild"
+git diff --name-only c417c85..HEAD | grep -vE '^(docs/|walk-artifacts/|scripts/)' | wc -l   # NON-ZERO now — see below
 sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -tAc "SELECT max(version) FROM schema_migrations;"   # 64
 ```
+
+> ### AMENDED 2026-08-01 — the checkout now contains AGENT CODE, and §B still must not rebuild
+>
+> When this section was written the checkout was ahead of the image by documentation only, and the provenance
+> check printed `DOCS ONLY`. **It no longer does**, and a fresh session reading the old instruction would see a
+> list of twelve Go files and reasonably conclude the rig was stale.
+>
+> **It is not stale — it is deliberately split.** The checkout carries the pass-3 fold (`63afd7e`, `fa35e63`,
+> `7d5f7ca`, `b152c27`): the widened identity gate, `identityWatchLoop`, the throttle rotation, the golden
+> vector. **None of that is §B's subject.** §B tests CONTROL-PLANE behaviour — site binding survival, the
+> `cert_delivered` flip, recorded prior status, F3's residual, refusal timing — against the SAME binary §A used,
+> which is what makes the two runs comparable.
+>
+> **The agent fixes are §C's subject**, and §C is where they get their rebuilt image (see §C PREREQUISITES).
+>
+> **So: `make up-enterprise` must still NOT run for §B.** The rule is unchanged; only its reason is. It used to be
+> "nothing has changed." It is now "what changed belongs to the next run."
 
 **RECORD THREE SHAS, not one.** The running api image is built from **`c417c85`**; the checkout is **`5249aa9`**;
 the diff between them is **docs + `scripts/` only — no `apps/` code, no migrations**. All three go in the walk
