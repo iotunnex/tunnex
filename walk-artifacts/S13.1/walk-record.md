@@ -1272,6 +1272,27 @@ walk step happened to need the binary.
 
 **RAISED TO THE SAME STANDING AS THE OTHER THREE MERGE PRECONDITIONS** (`docs/S13.1-review-state.md`).
 
+### THE ROOT IS NOT AN S13 ACCIDENT — IT IS HOW EVERY STORY IN THIS REPO HAS BEEN BUILT
+
+The trigger set is `push: branches: [main]`, `tags: ["v*"]`, and `pull_request`. **No story branch has ever
+received CI during its own construction.** Not this epic — *every* epic. S6 through S13 were all built on
+branches that ran zero checks until the PR.
+
+**CI HAS ALWAYS BEEN A MERGE GATE, NEVER A DEVELOPMENT SIGNAL.** The consequence, stated so it is not softened
+later: **a defect introduced at commit-one is only findable at the end.** Every slice, every review pass, every
+walk leg runs against code no automated check has touched. The gates are real and correct — they simply do not
+exist yet when the work is being done, which is the only time acting on them is cheap.
+
+**And it is measurable here, not theoretical:** `make test-cli` was ADDED at S11-2 *specifically* to catch the
+generator-collision class, it CAUGHT it then, and it **sat silent through an entire epic** while a third
+instance of that exact class shipped into Slice 7. The guard did not fail. Nothing asked it.
+
+**REGISTERED, NOT FOLDED.** The fix is small — add `story/*` (or `'**'`) to the `push` trigger. **It is
+deliberately NOT done on this branch**: this branch already carries 20+ folded fixes and an unverified gate, and
+**a change to CI would land unverified by the CI it changes** — the same circularity that produced the problem.
+
+**TRIGGER: the next change to `.github/workflows/`, OR S11-class gate hardening — whichever lands first.**
+
 **Disposition on the CLI break itself is a decide-item, not a fold**, and the fix is one line with a precedent
 in the same file: `x-go-name: RestoreDevicesResult` (mirroring `CreateDeviceResponse`'s
 `x-go-name: CreateDeviceResult`) plus `make generate`. **Not touched during the walk.**
@@ -1314,3 +1335,13 @@ minting.
 **Recorded as NOT OBSERVED rather than passed.** To catch it the poller must sample at ~200ms across a re-key —
 and re-key is the only trigger, since `RenewNodeCert` does not touch the marker (`nodes.sql:75-77`). **B2 is
 OWED**, and it needs one more stop/start with a fast poller, which is a mutation and a separate yes.
+
+**FILED UNDER THE DETECTOR, not merely as a missed observation** (`docs/laws.md`): this is the **FIFTH
+vacuous-check mechanism — SAMPLED-SLOWER-THAN-THE-EVENT.** It is distinct from the other four because it
+*passes* their diagnostic: an input that would falsify B2 is trivial to name (a re-key that never re-delivers).
+The defect is not in the assertion, it is in **the sampling rate**, and no amount of reasoning about the
+assertion surfaces it. **The diagnostic that does: state the event's LIFETIME and the observer's INTERVAL as two
+numbers and compare them** — here 2s against 7s. Read the lifetime out of the code, not out of an estimate.
+
+**FOLDED INTO THE RESTORE WINDOW** ([founder]-ruled): the restore path re-keys, so the flip recurs there and the
+fast poller rides step 10 rather than costing its own stop/start.

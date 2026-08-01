@@ -136,6 +136,33 @@ surfaced only because the two mutations were run SEPARATELY. Combined, the packa
 and one failing test name, and that reads as success for both reds — the passing one hidden behind the failing
 one. A combined mutation run can prove *at least one* red works; it can never prove that each does.
 
+### FIFTH MECHANISM — SAMPLED-SLOWER-THAN-THE-EVENT (EPIC 13 box-walk, 2026-08-01)
+
+**The observation window is coarser than the state it observes, so the check reports the steady state and
+never the transition.** The property may well hold; the check could not have seen it either way.
+
+| mechanism | what fails |
+|---|---|
+| **SAMPLED-SLOWER-THAN-THE-EVENT** | the observer's interval exceeds the state's lifetime |
+
+**THE INSTANCE.** §B's B2 asserts that `nodes.cert_delivered` flips `f` → `t` across a re-key. The walk polled
+it **twelve times at ~7-second intervals and read `t` every time**, including 3 seconds after the recovery. The
+window is bounded by the code: `RekeyNode` clears the marker in the same statement that rotates the serial
+(`nodes.sql:319-326`), and `nodes.sql:49` sets it back on the agent's first authenticated call — here
+`06:22:17.246` → `06:22:19.262`, **about two seconds.** A 7-second poll against a 2-second window **cannot
+fail.** Twelve green samples, zero information.
+
+**It passes the TRUE-BY-STRUCTURE diagnostic and fails anyway**, which is why it is a separate mechanism: an
+input that falsifies the assertion is easy to name (a re-key that never re-delivers). The defect is not in the
+assertion — **it is in the sampling rate**, and no amount of reasoning about the assertion surfaces it.
+
+**THE DIAGNOSTIC: state the event's LIFETIME and the observer's INTERVAL as two numbers, and compare them.** If
+the interval is not comfortably smaller than the lifetime, the check is decorative. For a transition bounded by
+two code paths, read the lifetime out of the code rather than estimating it.
+
+**Recorded as NOT OBSERVED, never as passed.** The distinction is the whole point: a walk that logs "B2 green"
+on twelve blind samples has manufactured evidence.
+
 ## DOES THE REMEDY ADDRESS THE DEFECT, OR ITS NEIGHBOURHOOD? (founder-ratified 2026-08-01, EPIC 13, three instances in one epic)
 
 **A fold is not closed because an edit landed near the defect. Ask of every remedy: does this make the NAMED
