@@ -942,3 +942,28 @@ is what the mutation proofs are for. **Three legs, three questions:**
 **Filed beside the `NOT Playwright` rule because it is the same failure one level down:** the first said the
 gate omits a leg people assume is there; **this says the legs it DOES have are not interchangeable, so "some of
 it passed" is not "it passed."**
+
+## A CORRECTNESS IMPROVEMENT CAN BREAK A TEST THAT DEPENDED ON THE DEFECT (2026-08-01, S14.3 slice C)
+
+**THE INSTANCE.** `Donut`'s `<svg>` gained an accessible `<title>` — a strict improvement, since a graphic with
+no name is unannounced. **`getByLabelText("Gateway liveness")` immediately failed: *"Found multiple elements."***
+
+**The test had been passing BECAUSE THE ACCESSIBLE NAMING WAS ABSENT.** One element carried that name only
+because the other one did not carry it yet. **The query was never specific — it was unique by accident**, and
+the accident was the missing accessibility.
+
+**THE RULE.** When adding semantics breaks a query:
+
+> ## **THE BREAK IS A SIGNAL THE QUERY WAS WEAK — NOT THAT THE IMPROVEMENT WAS WRONG.**
+
+The reflex is to narrow the *fix* (add a `data-testid`, scope to a container, take `[0]`). **All three preserve
+the weak query and discard the signal.** The right move is the one the rules already require: **query by ROLE +
+accessible name** (`getByRole("figure", { name })`), which is unambiguous precisely *because* it engages the
+semantics that just improved.
+
+**WHY THIS MATTERS FOR THE WHOLE EPIC, and it is the reason this is filed rather than fixed and forgotten:**
+**S14.4+ adds semantics to THIRTEEN more screens.** Every one of these breaks will look like a regression and
+be **evidence of a pre-existing weak assertion**. **Expect them, welcome them, and fix the QUERY.**
+
+**A test that breaks when the product gets more correct was testing the wrong thing** — and it was green the
+entire time it was wrong, which is why nothing found it earlier.
