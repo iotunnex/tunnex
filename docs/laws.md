@@ -2,6 +2,38 @@
 
 Laws minted across stories, previously scattered in `docs/S*-decisions.md`. New laws land here; existing ones get lifted over time. A law is a rule the review probes for and the build must not regress.
 
+# ⭐ A CORRECT CAVEAT DOES NOT MAKE AN INADEQUATE CHECK ADEQUATE. IT ONLY MAKES THE INADEQUACY HONEST.
+
+**(2026-08-01, S14.4 — the sharpest finding of the day, and it leads this file for that reason.)**
+
+**THE FOUNDER COMMISSIONED A CHECK FOR A SPECIFIC QUESTION:** a shared `Card` primitive had changed, twelve
+screens consume it, *"is any of them now visibly broken — overlapping, unreadable, or losing content?"*
+
+**THE CHECK WAS RUN.** Nine screens rendered through their existing wiring tests with content asserted; the
+other three got a smoke mount. **It reported "nothing is broken", and it carried an accurate caveat:**
+
+> *"This gates crashes and content loss. It CANNOT see overlap, truncation or unreadable contrast, because
+> jsdom has no layout engine."*
+
+**AND `backdrop-filter` HAD ALREADY BROKEN FIVE MODALS ACROSS FOUR SCREENS** — by making `Card` the containing
+block for `position: fixed`, so every nested overlay was clipped to the card with the card's own body over its
+buttons. **Playwright found it. The commissioned check could not have.**
+
+## THE HEDGE IS NOT THE FAILURE
+
+**The caveat was correct, specific, and written into the test file itself.** It named the exact limitation that
+mattered. **Both the author and the founder read the hedged green as reassurance anyway** — because a green
+result answers *some* question, and under time pressure the question it answers silently becomes the question
+that was asked.
+
+> **THE FAILURE IS TREATING THE CHECK AS AN ANSWER TO THE QUESTION IT WAS COMMISSIONED FOR, WHEN ITS OWN
+> CAVEAT SAYS IT IS NOT.**
+
+**SO THE RULE HAS A PROCEDURAL HALF: WHEN A CHECK CANNOT ANSWER THE QUESTION IT WAS ASKED, THE REPORT LEADS
+WITH THAT — NOT WITH THE RESULT.** *"I cannot answer this; here is what I could measure"* is a different
+message from *"nothing is broken (caveat)"*, and only the first survives being skimmed.
+
+
 ## ZERO-TOUCH GATEWAY LAW (founder-ratified 2026-07-18) — S8.2c acceptance bar
 **A gateway is brought online by pasting the ONE install command the dashboard emits — and nothing else.** Sites, subnets, enforcing mode, the site→site grant, and a genuinely-separate host *behind* the gateway reaching a far site are ALL achieved by clicking in the dashboard — never by SSH'ing the gateway to add networking. **Any manual networking step on the gateway is a DEFECT, not a runbook line:** no hand-added `--network host`, no `TUNNEX_WG_BACKEND` flag, no `src`-hint on a route, no forward rule, no `ip route` edit. The cross-cloud demo (`walk-artifacts/cross-cloud-demo/`) re-runs clean under this bar — fresh org, two cloud VMs, the only terminal action a pasted join command — and THAT re-run is S8.2c's box-walk.
 **BOUNDARY CLAUSE (S8.2c D3):** the law's boundary is the **gateway VM itself** — zero SSH to the gateway after join stands. The **cloud console gets ONE named, guided visit per side** (Azure UDR, AWS route-table + src/dst-check) — un-codeable fabric routing that the site/subnet UI SURFACES as detected/declared, copy-paste snippets + doc links. Guided ≠ manual-gateway-touch; the boundary holds.
@@ -1261,3 +1293,61 @@ reads as decoration and behaves as positioning. **The same is true of `transform
 `will-change`** — every one of them is reached for as a visual tweak and every one silently re-parents fixed
 descendants. **When adding any of them to a SHARED component, enumerate the fixed-position elements that could
 end up inside it.**
+
+## ⛔ DURING VISUAL ITERATION, REPORT CI STATE ON EVERY PUSH — EVEN WHEN IT IS "STILL RUNNING" (2026-08-01, founder-ruled)
+
+**THE INSTANCE, AND IT IS WORSE THAN THE BUG IT HID.** Four consecutive pushes were reported as
+*"`make web-gate` green, IN SYNC"* while **CI had been RED since `1307948` at 16:08Z.** The branch stayed red
+for four rounds and would have been merged on the founder's word had the word not arrived with a re-check
+attached.
+
+**THE GATE-COMPOSITION RULE WAS MINTED THE SAME MORNING** — *"`make web-gate` = typecheck + vitest + build,
+NOT Playwright; e2e runs in CI only"* — **and stopped being applied during the screenshot iteration.**
+
+**WHICH IS PRECISELY WHEN IT MATTERED MOST.** Design changes break exactly what Playwright sees and the local
+gate cannot: **nav labels, DOM order, click targets, containing blocks.** Of the four e2e failures, **all four**
+were caused by the visual work — renamed nav links, a reordered stat card, and a modal re-parented by
+`backdrop-filter`. **The local gate was green for every one of them.**
+
+> ### **A PUSH WITH NO CI LINE IS A PUSH WITH AN UNKNOWN STATE, AND A STRING OF THEM IS HOW A BRANCH STAYS RED
+> ### FOR FOUR ROUNDS.**
+
+**THE RULE:**
+
+- **Every push during visual iteration carries a CI line** — `green at <sha>` · `running` · `RED: <job>`.
+- **If CI is red, that is the FIRST line of the report**, before anything about what was built. A red branch
+  is the most important fact on the page and it must not sit under a description of new panels.
+- **"Still running" is a valid and required answer.** The failure mode is silence, not uncertainty.
+
+## THE THIRD TIME ADDING SEMANTICS BROKE A PASSING QUERY — AND IT IS NOT A COINCIDENCE (2026-08-01, EPIC 14)
+
+| # | what was added | what broke |
+|---|---|---|
+| 1 | real `<table>`/`role="row"` on three screens | unit tier matching row content as **free text**; e2e selecting rows via `main ul > li` |
+| 2 | an accessible `<title>` on the donut SVG | `getByLabelText` matching **two** elements |
+| 3 | `role="group"` + `aria-label` on the stat card | e2e reading a value via **`xpath=preceding-sibling`** |
+
+> ## **THE TESTS WERE COUPLED TO INCIDENTAL STRUCTURE BECAUSE THE PRODUCT HAD NO SEMANTIC STRUCTURE TO COUPLE
+> ## TO.**
+
+**Every one of those queries was the best available at the time it was written.** There was no `role="table"`
+to ask for, no accessible name on the graphic, no named group around the stat — **so each test reached for
+position, text, or DOM shape, and each was correct until the product acquired the thing it should have been
+asking for all along.**
+
+**THE CONSEQUENCE FOR THE TWELVE REMAINING SCREENS: EXPECT THIS EVERY TIME, AND WELCOME IT.** A query that
+breaks when the product becomes more semantic **was testing the wrong thing and was green the entire time it
+was wrong.** Fix the query, never the semantics — and never by narrowing to a test-id.
+
+## ADDING A VISUAL EFFECT CAN CHANGE A LAYOUT CONTRACT (2026-08-01, S14.4)
+
+**`backdrop-filter`, `transform`, `filter`, `perspective` and `will-change` ALL READ AS DECORATION AND BEHAVE
+AS POSITIONING.** Each makes its element the containing block for `position: fixed` descendants.
+
+**BEFORE ADDING ANY OF THEM TO A SHARED COMPONENT, ENUMERATE THE FIXED-POSITION ELEMENTS THAT COULD END UP
+INSIDE IT.** For `Card` the answer was **five modals across four screens**, and nothing in the type system, the
+component tier, or a deliberate click-through could see it.
+
+**AND THE STRUCTURAL FIX BEATS THE INSTANCE FIX: AN OVERLAY'S POSITION MUST NEVER DEPEND ON WHERE IN THE TREE
+IT RENDERS.** `createPortal(…, document.body)` closes the containing-block trap and every other nesting trap at
+once, rather than treating the one that happened to be found.
