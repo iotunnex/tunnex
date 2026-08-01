@@ -13,7 +13,7 @@ import {
   FAILED,
   INITIAL_NAV_COUNTS,
   NAV_COUNT_REFRESH_MS,
-  ok,
+  countFrom,
   type NavCounts,
 } from "./navcounts";
 
@@ -73,12 +73,10 @@ export function useNavCounts(): NavCounts {
     ]);
 
     setCounts({
-      gatewaysTotal: nodes.ok ? ok(nodes.data.length) : FAILED,
-      gatewaysOnline: nodes.ok
-        ? ok(nodes.data.filter(isOnline).length)
-        : FAILED,
-      sites: sites.ok ? ok(sites.data.length) : FAILED,
-      devices: devices.ok ? ok(devices.data.length) : FAILED,
+      gatewaysTotal: countFrom(nodes, (n) => n.length),
+      gatewaysOnline: countFrom(nodes, (n) => n.filter(isOnline).length),
+      sites: countFrom(sites, (r) => r.length),
+      devices: countFrom(devices, (r) => r.length),
     });
   }, []);
 

@@ -52,6 +52,25 @@ export function gatewayBadgeText(
   return `${online.value}/${total.value}`;
 }
 
+/**
+ * ⛔ THE Loaded<T> -> NavCount MAPPING, EXTRACTED SO IT CAN BE TESTED.
+ *
+ * FOUND BY A MUTATION THAT PASSED. The pure `badgeText`/`gatewayBadgeText` layer was gated and the WIRING was
+ * not: rewriting `sites.ok ? ok(len) : FAILED` into `ok(sites.ok ? len : 0)` — the classic route to a false
+ * count — went green, because no test looked at the hook that performs the mapping.
+ *
+ * The three-layer shape this project already uses says the DECISION must be pure and unit-tested, and the
+ * component must only render it. This mapping WAS the decision, and it was living in a `useEffect`.
+ */
+export function countFrom<T>(
+  res: { ok: true; data: T } | { ok: false },
+  project: (t: T) => number,
+): NavCount {
+  // `.data` is unreachable without narrowing `.ok`, so there is no branch in which a failure can produce a
+  // number — the Loaded<T> contract doing its job one layer further out.
+  return res.ok ? ok(project(res.data)) : FAILED;
+}
+
 /** Every count starts unknown. There is no zero-valued initial state to leak. */
 export interface NavCounts {
   gatewaysOnline: NavCount;

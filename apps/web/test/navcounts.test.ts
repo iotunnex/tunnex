@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { badgeText, gatewayBadgeText, FAILED, LOADING, ok, INITIAL_NAV_COUNTS, NAV_COUNT_REFRESH_MS } from "../src/lib/navcounts";
+import {
+  badgeText,
+  countFrom,
+  gatewayBadgeText,
+  FAILED,
+  LOADING,
+  ok,
+  INITIAL_NAV_COUNTS,
+  NAV_COUNT_REFRESH_MS,
+} from "../src/lib/navcounts";
 
 // S14.4 — THE STRICTEST DATA SURFACE IN THE PRODUCT.
 //
@@ -21,10 +30,14 @@ describe("badgeText — absent until loaded, absent on failure, never 0", () => 
 });
 
 describe("gatewayBadgeText — a PARTIAL answer is worse than none", () => {
-  it("both known renders n/m", () => expect(gatewayBadgeText(ok(3), ok(7))).toBe("3/7"));
-  it("online unknown renders NOTHING — not ?/7", () => expect(gatewayBadgeText(FAILED, ok(7))).toBeNull());
-  it("total unknown renders NOTHING — not 3/?", () => expect(gatewayBadgeText(ok(3), FAILED)).toBeNull());
-  it("either still loading renders NOTHING", () => expect(gatewayBadgeText(LOADING, ok(7))).toBeNull());
+  it("both known renders n/m", () =>
+    expect(gatewayBadgeText(ok(3), ok(7))).toBe("3/7"));
+  it("online unknown renders NOTHING — not ?/7", () =>
+    expect(gatewayBadgeText(FAILED, ok(7))).toBeNull());
+  it("total unknown renders NOTHING — not 3/?", () =>
+    expect(gatewayBadgeText(ok(3), FAILED)).toBeNull());
+  it("either still loading renders NOTHING", () =>
+    expect(gatewayBadgeText(LOADING, ok(7))).toBeNull());
   // `3/?` asserts one half as fact while implying the other is momentarily missing — and the reader has no
   // way to know which half is real, which is strictly worse than an absent badge.
 });
@@ -44,5 +57,30 @@ describe("the refresh cadence is slow on purpose", () => {
     // badge. A fast poll is four requests on a timer for a number the user glances at. Route-change covers
     // the case that actually matters.
     expect(NAV_COUNT_REFRESH_MS).toBeGreaterThanOrEqual(30_000);
+  });
+});
+
+describe("countFrom — the Loaded<T> mapping, gated after a mutation exposed it as unguarded", () => {
+  // ⚠ THIS BLOCK EXISTS BECAUSE A MUTATION PASSED. Rewriting the hook's mapping to
+  // `ok(res.ok ? len : 0)` — a failed fetch degrading to a length of zero — went GREEN, because every
+  // assertion above tested the PURE layer and nothing tested the WIRING that produces its input.
+  //
+  // The decision was living in a useEffect. This project's own three-layer shape says a decision must be pure
+  // and unit-tested; the mapping IS the decision.
+  it("a successful load projects the number", () => {
+    expect(countFrom({ ok: true, data: [1, 2, 3] }, (a) => a.length)).toEqual({
+      state: "ok",
+      value: 3,
+    });
+  });
+  it("a FAILED load is FAILED — never a zero-length degradation", () => {
+    expect(countFrom({ ok: false }, (a: number[]) => a.length)).toEqual({
+      state: "failed",
+    });
+  });
+  it("a successful load of an EMPTY list is a true zero", () => {
+    expect(
+      countFrom({ ok: true, data: [] }, (a: number[]) => a.length),
+    ).toEqual({ state: "ok", value: 0 });
   });
 });
