@@ -74,8 +74,19 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
 
     // The decision: pending means ADVERTISED BUT NOT ROUTED. If both rendered identically an admin would read
     // an unapproved LAN as reachable — or, inverted, treat a routed one as still waiting.
-    expect(screen.getByText(/10\.50\.0\.0\/16\s*·\s*pending/)).toBeTruthy();
-    expect(screen.getByText(/172\.31\.0\.0\/16/).textContent).not.toMatch(/pending/);
+    //
+    // Queried BY TITLE (the accessible name), not by a regex spanning sibling text nodes. The first draft did
+    // the latter and passed locally while FAILING IN THE GATE'S CONTAINER: `{s.cidr}` and `" · pending"` are
+    // separate JSX children, so matching across them depends on how a given @testing-library/dom build
+    // normalizes whitespace between nodes. That is a DOM-STRUCTURE dependency, which query rule 1 forbids —
+    // and the gate caught it, which is the argument for running the gate's own command.
+    const pendingEl = screen.getByTitle("Pending approval — not yet routed");
+    expect(pendingEl.textContent).toContain("10.50.0.0/16");
+    expect(pendingEl.textContent).toContain("pending");
+
+    const approvedEl = screen.getByTitle("Approved — routed");
+    expect(approvedEl.textContent).toContain("172.31.0.0/16");
+    expect(approvedEl.textContent).not.toContain("pending");
   });
 
   it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
