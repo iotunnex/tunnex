@@ -25,3 +25,34 @@ body {
 .tnx-page {
   background: var(--tnx-bg-page);
 }
+
+/* ⛔ THE FLOWING LINK — the handoff's `.tnx-edge`, verbatim geometry (dc.html L64).
+ *
+ * A short dash pattern crawling along a LINKED edge. It is the design's one piece of continuous motion and
+ * it earns its place: on a static diagram "linked" and "drawn but dead" look identical, and the crawl is the
+ * cheapest honest signal that the tunnel is current.
+ *
+ * ⚠ IT ENCODES *LINKED*, NOT THROUGHPUT — and the distinction has to be stated because the rendering does
+ * not carry it. A crawling dash reads as TRAFFIC to most people, and a linked-but-idle tunnel has none. The
+ * fact behind it is a FRESH HANDSHAKE, nothing more. The map's footnote says so in words; the animation
+ * alone must never be read as bytes moving.
+ *
+ * MOTION GATE: killed outright under `prefers-reduced-motion`. Per lib/motion.ts this is a GATE, not a
+ * courtesy — and it is done in CSS rather than JS because the platform already answers the question here,
+ * with no matchMedia call and no chance of failing open on a typo'd query string.
+ */
+@keyframes tnxFlow {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+.tnx-edge {
+  stroke-dasharray: 2 8;
+  stroke-linecap: round;
+  animation: tnxFlow 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tnx-edge {
+    animation: none;
+  }
+}

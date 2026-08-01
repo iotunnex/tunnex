@@ -255,7 +255,8 @@ export default function Sites() {
                 />
                 <p className="text-micro text-ink-faint">
                   Link state is derived from the WireGuard handshake. A down site
-                  bridge is never shown as healthy.
+                  bridge is never shown as healthy. The moving line means the
+                  handshake is current, not that traffic is flowing.
                 </p>
               </Panel>
 
