@@ -142,10 +142,21 @@ describe("RESPONSIVE MAY RE-ARRANGE, NEVER REMOVE", () => {
 describe("COMPOSITION IS ABSENT BELOW THE FLOOR — asserted BY ROLE, so `display:none` FAILS", () => {
   // This is the assertion the whole gate exists for, and its FORM is the point.
   //
-  // `queryByRole` finds an element hidden with `display:none` — testing-library's accessibility tree includes
-  // it unless it is `hidden`/`aria-hidden`. So an implementation that merely styled the rule builder away at
-  // narrow widths would FAIL this test rather than pass it. That is deliberate: the test distinguishes HIDDEN
-  // from ABSENT, and a control that grants access, present to a keyboard and gone only to a sighted mouse
+  // ⚠ `hidden: true` IS LOAD-BEARING, AND IT IS THERE BECAUSE THE MUTATION PROOF CAUGHT ITS ABSENCE.
+  //
+  // The first version of this test used a plain `queryByRole`, with a comment claiming it "finds a hidden
+  // element, so a display:none implementation fails". THAT CLAIM IS FALSE. testing-library defaults to
+  // `hidden: false` and runs `isInaccessible`, which jsdom evaluates against inline styles — so an element
+  // with `display:none` is EXCLUDED from the query, `queryByRole` returns null, and the assertion passes.
+  //
+  // Mutation 1 (implement the gate as `display:none`) PASSED under that assertion. The test asserted
+  // "not in the accessible tree" while its comment claimed "not in the DOM" — and those two differ on exactly
+  // the failure mode being guarded against. It is the same family the repo already has a law for: an
+  // assertion that checks a different event than the one it claims to check.
+  //
+  // With `hidden: true` the query searches the whole DOM regardless of visibility, so ABSENCE is what is
+  // asserted, the mutation goes red, and the test finally distinguishes HIDDEN from ABSENT — which is the
+  // whole point, since a control that grants access, present to a keyboard and gone only to a sighted mouse
   // user, is a security-adjacent surface failing open (docs/laws.md — INVISIBLE IS NOT ABSENT).
   function renderAccess(intent: LayoutIntent) {
     return render(
@@ -171,7 +182,9 @@ describe("COMPOSITION IS ABSENT BELOW THE FLOOR — asserted BY ROLE, so `displa
     // Wait on the surface being loaded before asserting an absence — asserting "not there" against a screen
     // that has not finished loading passes for the wrong reason (docs/laws.md, the vacuous-check family).
     await waitFor(() => expect(screen.getByText(/Allow rules:/)).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /add rule/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /add rule/i, hidden: true }),
+    ).toBeNull();
   });
 
   it("[triage] the honest line stands WHERE the builder was — never a blank space", async () => {
