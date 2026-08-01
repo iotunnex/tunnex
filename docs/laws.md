@@ -1476,3 +1476,26 @@ NUMBER IN A CONFIG THAT SILENTLY COVERS EVERYTHING.** One says *"this region is 
 **GENERALLY: BEFORE ADDING TOLERANCE, ASK WHAT IS ACTUALLY VARYING AND EXCLUDE THAT.** Tolerance is what gets
 reached for when the answer is unknown — and the cost of not knowing is paid by every future regression that
 fits under the number.
+
+## MASK WHAT CANNOT BE DETERMINISTIC. **WAIT** FOR WHAT HAS MERELY NOT SETTLED. (2026-08-02, S14 viewport leg)
+
+**TWO VISUAL DIFFS, ONE AFTER THE OTHER, THAT LOOKED IDENTICAL AND NEEDED OPPOSITE FIXES.**
+
+| diff | cause | correct fix |
+|---|---|---|
+| 118 px, scattered | `relativeAge` over a `created_at` written at SEED time — **varies every run, forever** | **MASK** — it cannot be made deterministic |
+| 621 px, one 40px band | `HealthStatus` renders `checking…` then `operational` when `/healthz` answers — **the shot raced the transition** | **WAIT** — the settled state is perfectly deterministic |
+
+**HAD THE SECOND BEEN MASKED — the reflex, since the first one was — A REAL SURFACE WOULD HAVE BEEN EXCLUDED
+FROM THE SNAPSHOT PERMANENTLY**, and the control-plane health indicator would never again have been visually
+asserted. **The suite would have kept its green and quietly stopped covering a thing it was built to cover.**
+
+> ## **A COMPONENT THAT *CHANGES* IS NOT A COMPONENT THAT IS *VOLATILE*.**
+
+**THE DIAGNOSTIC THAT SEPARATED THEM: LOCALISE THE DIFF BEFORE EXPLAINING IT.** Decoding the diff PNG and
+counting changed pixels per row put the entire 621 in `y 921–960` — one band, one component. **A scattered
+diff and a banded diff have different causes, and the pixel positions say which** before any hypothesis is
+formed. Guessing from "it changed again" would have produced a second mask.
+
+**AND THE COST ASYMMETRY IS WHY THE DEFAULT MUST BE `WAIT`:** an unnecessary wait costs milliseconds; an
+unnecessary mask costs a permanently unasserted region that nothing will ever flag.
