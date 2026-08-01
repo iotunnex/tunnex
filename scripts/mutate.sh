@@ -20,6 +20,18 @@
 # The anchor and replacement are read from FILES, never from argv, so no shell escaping can corrupt them.
 set -euo pipefail
 
+# ---------------------------------------------------------------------------------------------------------------
+# DIRTY-FILE REFUSAL (added 2026-08-01 after a near-miss). If the target has UNCOMMITTED changes, then the fix
+# under test is not in git — and `git checkout <file>` would discard the FIX along with the mutation. That is
+# exactly what happened while proving #43's golden vector: two test files were left calling a function that no
+# longer existed. Restoration is FROM THE BACKUP, never from git, and this states so where it will be read.
+# ---------------------------------------------------------------------------------------------------------------
+if ! git diff --quiet -- "$file" 2>/dev/null; then
+  echo "NOTE: $file has UNCOMMITTED changes — the fix under test is not in git."
+  echo "      Restore is from this script's backup copy ONLY. Do NOT run 'git checkout $file': it would discard"
+  echo "      the uncommitted fix together with the mutation and leave callers referencing removed code."
+fi
+
 file=$1; anchor_f=$2; repl_f=$3; shift 3
 [ -f "$file" ] || { echo "MUTATE: no such file: $file" >&2; exit 2; }
 
@@ -64,4 +76,24 @@ if [ $rc -eq 0 ]; then
   echo "MUTATE: *** THE TEST PASSED UNDER THE MUTATION *** — the guard does not cover this behaviour." >&2
   exit 5
 fi
+
+# POST-RESTORE VERIFICATION. A restore that silently failed leaves a mutated tree that later reads as green, and
+# `go test` will serve a CACHED pass for content it has seen before — so the check must be forced.
+restore_and_verify() {
+  cp "$backup" "$file"
+  if ! cmp -s "$backup" "$file"; then
+    echo "RESTORE FAILED — $file does not match the pristine copy at $backup. Do not commit." >&2
+    exit 7
+  fi
+  echo "RESTORE: file matches the pristine copy"
+  echo "RESTORE: re-running the test UNCACHED (-count=1) to prove the tree is green again —"
+  if ! GOFLAGS="${GOFLAGS:-} -count=1" "$@" >/dev/null 2>&1; then
+    echo "RESTORE: the test does NOT pass on the restored tree. The restore is incomplete or the tree was" >&2
+    echo "         already broken before this run. Do not commit." >&2
+    exit 8
+  fi
+  echo "RESTORE: verified green, uncached."
+}
+
 echo "MUTATE: test failed under the mutation, as required. Restoring."
+restore_and_verify "$@"
