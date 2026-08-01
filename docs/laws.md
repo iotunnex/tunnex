@@ -1113,3 +1113,38 @@ invisible to every gate**, because the gate only ever saw the first one.
 **SIBLING OF `APPLY-THE-DETECTOR-TO-THE-MEASUREMENT`:** there, the measurement needed checking as much as the
 thing measured. **Here, the TRANSCRIPTION needs checking as much as the measurement** — it is one more link in
 the chain, and it is the only link no tool observes.
+
+## ⛔ VERIFYING IS NOT DELIVERING — AND THIS SESSION PRODUCED THREE INSTANCES (2026-08-01)
+
+**THE THIRD AND WORST INSTANCE.** The S14.4 redesign was built, `make web-gate` ran green at **401 tests**, the
+drift guard passed — **and the eight commits were never pushed.** The founder was told to review it on
+localhost, pulled, and got *"Already up to date"* — **truthfully**. Docker reported
+`CACHED [web build 10/10]` — **correctly**, because nothing in their clone had changed.
+
+> ## **EVERY SIGNAL IN THE CHAIN WAS HONEST. THE ONLY FALSE STATEMENT WAS "GO AND LOOK AT IT."**
+
+### THE FAMILY, IN ONE SESSION
+
+| # | what was VERIFIED | what was DELIVERED | caught by |
+|---|---|---|---|
+| 1 | `git rebase` exited 0 | a branch with **1 of 6** commits replayed | a later tree diff |
+| 2 | `make -n seed NET=…` proved the override works | the instruction written in the form that **silently ignores it** | the founder's failed run |
+| 3 | **401 tests green locally** | **nothing — the commits never left the machine** | **the founder losing twenty minutes** |
+
+**THE PROGRESSION IS THE POINT: each was caught later and cost more, and each time the verification itself was
+sound.** A green gate says something true about a working tree. **It says NOTHING about whether that working
+tree is reachable by anyone else.**
+
+### THE RULE
+
+> **BEFORE TELLING ANYONE TO LOOK AT SOMETHING, VERIFY IT FROM WHERE THEY WILL LOOK.**
+
+Not "did it build" — **"is it where they will fetch it from"**:
+
+```bash
+git fetch origin && git rev-parse HEAD && git rev-parse origin/<branch>   # must be equal
+```
+
+**A HANDOFF IS AN ACT, NOT A CONSEQUENCE.** Building, testing, committing and pushing are four separate
+things, and only the fourth makes the other three visible. **The gate cannot notice the missing one, because
+the gate runs on the side where the work already is.**
