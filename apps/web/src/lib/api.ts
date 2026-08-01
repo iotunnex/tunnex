@@ -40,6 +40,7 @@ export type HealthCheck = components["schemas"]["HealthCheck"];
 export type Site = components["schemas"]["Site"];
 export type SiteSubnet = components["schemas"]["SiteSubnet"];
 export type SiteReferences = components["schemas"]["SiteReferences"];
+export type DNSForward = components["schemas"]["DNSForward"];
 // S10.3 — Kubernetes cluster/Service connectivity.
 export type K8sCluster = components["schemas"]["K8sCluster"];
 export type K8sService = components["schemas"]["K8sService"];
