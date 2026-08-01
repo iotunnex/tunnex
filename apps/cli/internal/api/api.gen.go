@@ -1359,8 +1359,8 @@ type RestoreNodeDevicesRequest struct {
 	TargetNodeId openapi_types.UUID `json:"target_node_id"`
 }
 
-// RestoreNodeDevicesResponse defines model for RestoreNodeDevicesResponse.
-type RestoreNodeDevicesResponse struct {
+// RestoreDevicesResult defines model for RestoreNodeDevicesResponse.
+type RestoreDevicesResult struct {
 	Devices []struct {
 		AssignedIp         string             `json:"assigned_ip"`
 		Id                 openapi_types.UUID `json:"id"`
@@ -12190,7 +12190,7 @@ func (r SetHubPriorityResponse) StatusCode() int {
 type RestoreNodeDevicesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *RestoreNodeDevicesResponse
+	JSON200      *RestoreDevicesResult
 	JSONDefault  *Error
 }
 
@@ -17242,7 +17242,7 @@ func ParseRestoreNodeDevicesResponse(rsp *http.Response) (*RestoreNodeDevicesRes
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest RestoreNodeDevicesResponse
+		var dest RestoreDevicesResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -163,6 +163,46 @@ two code paths, read the lifetime out of the code rather than estimating it.
 **Recorded as NOT OBSERVED, never as passed.** The distinction is the whole point: a walk that logs "B2 green"
 on twelve blind samples has manufactured evidence.
 
+### SIXTH MECHANISM — ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON (EPIC 13, 2026-08-01). THE MIRROR OF THE OTHER FIVE.
+
+**The check waits for event A and asserts property B, where B happens strictly after A and nothing synchronises
+them. It fails for a reason unrelated to its subject.**
+
+| mechanism | what fails |
+|---|---|
+| **ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON** | the wait and the assertion are about different moments |
+
+**THIS ONE INVERTS THE FAMILY.** The other five all answer *"could this check have failed for the RIGHT
+reason?"* — they are green when they should be silent. This one is the mirror: it goes **red for the WRONG
+reason.** And the consequence is symmetric, which is the part worth internalising: **a check that can fail
+spuriously is exactly as uninformative as one that cannot fail at all.** In both cases the colour carries no
+information about the subject.
+
+**THE INSTANCE.** `TestExpiryWhileRUNNINGRecoversWithoutARestart` — `identityWatchLoop`'s acceptance red, and
+EPIC 13's **first merge precondition**. It waited on `issued`, a counter incremented inside the fake control
+plane's HANDLER (*"the CP produced a response"*), then called `cancel()`, then asserted the AGENT'S DISK
+(*"the recovery was promoted"*). The disk write happens strictly after the response. A fast machine won the
+race; a contended CI runner lost it — and did, on the very first CI run this branch ever received.
+
+**WHY IT MATTERS MORE ON A GATE.** On merge day a red here is indistinguishable from a real regression, and a
+green proves only that the runner was fast. **A flaky acceptance test cannot carry a merge precondition** — it
+converts the gate into a coin toss whose outcome gets argued about rather than trusted.
+
+**THE DIAGNOSTIC: name the event the test WAITS for and the property it ASSERTS, in that order, and check they
+are the same moment.** If the assertion is downstream of the wait, the test is racing its own subject. **The fix
+is never "wait longer" — it is to wait for the asserted property itself.**
+
+**PROVEN BY TWO MUTATIONS, because "wait longer" and "wait for the right thing" are indistinguishable from a
+single green:**
+
+| mutation | expected | observed |
+|---|---|---|
+| promotion silently skipped (`saveCredsFn` → no-op returning nil) | FAIL | **FAIL at 15.11s**, `issued=749`, disk still expired |
+| write delayed 3s then genuine | PASS | **PASS at 3.18s** |
+
+The first proves the longer wait still bites on a real non-recovery; the second is the case the old wait lost.
+**One mutation would have proven neither.**
+
 ## DOES THE REMEDY ADDRESS THE DEFECT, OR ITS NEIGHBOURHOOD? (founder-ratified 2026-08-01, EPIC 13, three instances in one epic)
 
 **A fold is not closed because an edit landed near the defect. Ask of every remedy: does this make the NAMED

@@ -26,14 +26,18 @@ set -euo pipefail
 # exactly what happened while proving #43's golden vector: two test files were left calling a function that no
 # longer existed. Restoration is FROM THE BACKUP, never from git, and this states so where it will be read.
 # ---------------------------------------------------------------------------------------------------------------
+# ORDERING FIX (2026-08-01). This block used to sit ABOVE the assignment below and referenced $file before it
+# existed — with `set -u` that is an unbound-variable abort, so the script exited on line 1 of its real work
+# EVERY TIME IT WAS INVOKED. The mechanization added to make mutation proofs safe could not run at all. It is the
+# same class it was written to prevent: a guard that cannot execute is indistinguishable from a guard that passes.
+file=$1; anchor_f=$2; repl_f=$3; shift 3
+[ -f "$file" ] || { echo "MUTATE: no such file: $file" >&2; exit 2; }
+
 if ! git diff --quiet -- "$file" 2>/dev/null; then
   echo "NOTE: $file has UNCOMMITTED changes — the fix under test is not in git."
   echo "      Restore is from this script's backup copy ONLY. Do NOT run 'git checkout $file': it would discard"
   echo "      the uncommitted fix together with the mutation and leave callers referencing removed code."
 fi
-
-file=$1; anchor_f=$2; repl_f=$3; shift 3
-[ -f "$file" ] || { echo "MUTATE: no such file: $file" >&2; exit 2; }
 
 backup=$(mktemp); cp "$file" "$backup"
 restore() { cp "$backup" "$file"; rm -f "$backup"; }

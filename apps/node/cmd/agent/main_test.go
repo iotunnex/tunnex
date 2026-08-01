@@ -582,8 +582,25 @@ func TestExpiryWhileRUNNINGRecoversWithoutARestart(t *testing.T) {
 		close(done)
 	}()
 
+	// WAIT FOR THE ASSERTED PROPERTY, NOT FOR A PROXY FOR IT.
+	//
+	// This loop used to spin on `issued == 0`. That counter is incremented inside the fake control plane's
+	// HANDLER (fakeCP), so it means "the CP produced a response" — an event that STRICTLY PRECEDES the agent
+	// receiving it and writing it to disk. The assertion below is about the DISK. Between the two the test calls
+	// cancel(). So the test raced the agent's write with nothing synchronising them: a fast machine won, a
+	// contended CI runner lost, and it lost on 2026-08-01 in PR #43 — the first time CI ever ran on this branch.
+	//
+	// The property under test is that the recovery LANDED, so that is what is waited for. A test that waits on
+	// one event and asserts another can fail for a reason unrelated to its subject, which is as uninformative as
+	// a check that cannot fail at all — and this one carries a merge precondition, where a spurious red is
+	// indistinguishable from a regression and a green proves only that the runner was fast.
 	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && issued == 0 {
+	promoted := false
+	for time.Now().Before(deadline) {
+		if identity.NotAfter(loadStored(dir).CertPEM).After(time.Now()) {
+			promoted = true
+			break
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
@@ -594,10 +611,11 @@ func TestExpiryWhileRUNNINGRecoversWithoutARestart(t *testing.T) {
 			"reachable only from a cold boot, which is WF-S13-6. No restart happened in this test and none may: " +
 			"the whole claim of the epic is that a gateway comes back by itself")
 	}
-	// And the recovery must have LANDED on disk, not merely been requested.
-	if got := loadStored(dir); identity.NotAfter(got.CertPEM).Before(time.Now()) {
-		t.Errorf("re-key was attempted and the state directory still holds an expired certificate (NotAfter %s) — "+
-			"the recovery was not promoted", identity.NotAfter(got.CertPEM))
+	// And the recovery must have LANDED on disk, not merely been requested. `promoted` is the loop's own verdict:
+	// re-read here so the failure message reports what is actually on disk at the end.
+	if !promoted {
+		t.Errorf("re-key was attempted (issued=%d) and the state directory still holds an expired certificate "+
+			"(NotAfter %s) — the recovery was not promoted", issued, identity.NotAfter(loadStored(dir).CertPEM))
 	}
 }
 

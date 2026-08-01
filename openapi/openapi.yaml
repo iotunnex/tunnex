@@ -3146,6 +3146,15 @@ components:
           description: "The LIVE gateway the restored devices are homed to. Required rather than defaulted: a revoked gateway is never active again, so there is no sane default, and silently restoring onto the dead node would produce active devices pointing at a gateway that will never serve them."
 
     RestoreNodeDevicesResponse:
+      # THIRD INSTANCE of the generator-collision class, and the first one the guard did not catch in time.
+      # oapi-codegen derives a response wrapper named <operationId>Response, so this schema collided with the
+      # wrapper for operationId `restoreNodeDevices` and apps/cli would not compile. `make test-cli` was added at
+      # S11-2 for exactly this and CAUGHT it — but CI never ran on a story branch (ci.yml fires on push:[main],
+      # tags and pull_request), so it stayed silent through the whole epic until a draft PR was opened.
+      # A SWEEP OF EVERY SCHEMA AGAINST EVERY DERIVED WRAPPER NAME (2026-08-01) found SIX collisions; the other
+      # five — CliAuthorizeResponse, CliDeviceStartResponse, CliTokenResponse, CreateDeviceResponse,
+      # ExportOVPNProfileResponse — already carry x-go-name. This was the only one missing it.
+      x-go-name: RestoreDevicesResult
       type: object
       required: [restored, readdressed, devices]
       additionalProperties: false
