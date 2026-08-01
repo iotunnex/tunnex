@@ -448,3 +448,65 @@ guard protects should be reasoning about the second.
 
 **NOT FIXED — registered as a repo-wide property. TRIGGER: the next change to `make generate-check`, or a
 finding that depends on artifact tampering being detected.**
+
+## INTERNAL USE AND REDISTRIBUTION ARE DIFFERENT LICENCE QUESTIONS — AND A SELF-HOSTED PRODUCT IS ALWAYS THE SECOND (2026-08-01, EPIC 14)
+
+**"Free for commercial use" answers the wrong question for this product.**
+
+**Tunnex SHIPS A BUILT BUNDLE to customers who run it themselves.** That is **redistribution** of every
+dependency's compiled code — not internal use on a site we operate. The two permissions are granted separately
+and a licence may grant one without the other.
+
+**THE INSTANCE.** GSAP 3.15.0 is genuinely free for commercial use. Its licence field is
+`"Standard 'no charge' license: https://gsap.com/standard-license"` — **a custom URL, neither SPDX nor
+OSI-approved** — and it forbids reverse-engineering and altering notices. **The open edition is Apache-2.0 with
+a NOTICE file, and Apache-2.0 grants modification.** A recipient of an Apache-2.0 artifact would not receive,
+for the GSAP portion, the freedoms the surrounding licence advertises. **Not adopted. Motion (MIT) instead.**
+
+**THE QUESTION TO ASK OF EVERY DEPENDENCY, in this order:** may we USE it · may we REDISTRIBUTE it · is its
+licence COMPATIBLE with the licence of the artifact we redistribute it inside · does NOTICE need an entry.
+**Answering only the first is how a licence conflict ships.**
+
+*(Repo precedent: S6.3 pinned wireguard-go as MIT and recorded Wintun's redistribution terms in NOTICE — the
+second and fourth questions, asked at the time.)*
+
+## INVISIBLE IS NOT ABSENT — THIRD INSTANCE, NOW IN RESPONSIVE (2026-08-01, S14.2)
+
+**`display:none` leaves an element FOCUSABLE, ANNOUNCED and SUBMITTABLE.** It is gone to a sighted mouse user
+and present to everyone else.
+
+**Three instances of one shape, now across three mechanisms:**
+
+| mechanism | the failure |
+|---|---|
+| **edition gating by style** | an enterprise control coloured away is still in the DOM — a licence boundary that fails open |
+| **responsive hiding** | the **access-rule builder** hidden below `compose` is still keyboard-reachable — **a security surface where a mis-tap grants access**, decided by viewport |
+| **nav hiding** | a destination hidden by CSS is a navigation surface that exists for some users and not others, **decided by VIEWPORT rather than by PERMISSION** |
+
+**THE RULE: PERMISSION IS A RENDER DECISION. WIDTH NEVER IS.**
+
+- **Composition below `compose` is ABSENT**, not hidden — `ComposeGate` does not render the editor at all.
+- **Nav may RE-ARRANGE, never REMOVE** — every destination is in the DOM at every width; only presentation
+  collapses.
+
+**AND THE TEST MUST ASSERT ABSENCE BY ROLE**, which is what makes a `display:none` implementation **fail**
+rather than pass: `queryByRole` finds a hidden element, so an assertion written against roles distinguishes
+*hidden* from *absent* where a visual check cannot.
+
+### DETECTOR'S FOURTH PROSPECTIVE CATCH — jsdom HAS NO LAYOUT ENGINE
+
+**A "responsive test" written in vitest would assert NOTHING and pass at EVERY width.** jsdom does not evaluate
+media queries, compute widths, or lay anything out. **That is not a query-rule-4 violation — it is a check that
+CANNOT FAIL**, and it was caught **before the test was written**.
+
+| # | instance | when caught |
+|---|---|---|
+| 1 | B2's 7-second poller vs a 272 ms window | after twelve green samples |
+| 2 | the acceptance test waiting on `issued` | after CI went red |
+| 3 | the restore-window poller for an event `restore.go` cannot produce | **before it was written** |
+| **4** | **a jsdom "responsive" test at five widths** | **before it was written** |
+
+**The three-layer answer is right precisely because it never asks jsdom a question jsdom cannot answer:** a
+**pure** `layoutIntent(width)` unit-tested at boundaries · a component tier that stays **width-blind** (and *a
+test that needs a viewport to pass IS the finding*) · a responsive contract asserting **absence by role** with
+capability **injected, never measured**.
