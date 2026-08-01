@@ -1297,6 +1297,32 @@ the dashboard) · **no mobile posture reporting** · **no client-side mobile kil
 (small, rides an existing walk): the dashboard QR flow works end-to-end on the official WG mobile apps — one
 leg; if a gap surfaces it is a small story, NOT EPIC M.**
 
+## REGISTERED — UI REDESIGN + DESKTOP-CLIENT SPLIT (2026-08-01, founder-directed; PAPER ONLY, NOT STARTED)
+
+**Full registration: `docs/UI-REDESIGN-registration.md`.** Source artifact = the Claude Design wireframe (12
+dashboard screens + a desktop-client section), held by the founder, not in this repo.
+
+- **ITEM A — the desktop client as a SEPARATE UI. REVERSES A LOCKED DECISION** (the "same bundle reused by the
+  Electron renderer" lock below in EPIC 6). Recorded as a **decide-item, not a ruling.** The case: a desktop VPN
+  client and a multi-tenant admin console are different products, and today a user installs a VPN app and gets
+  an admin console with a Connect button in it. The wireframe already specifies the client in full (10-state
+  taxonomy, tray vocabulary, handshake-derived status, MFA-by-browser-only). **Three open questions and a real
+  refactor cost (`packages/shared` is generated types only) are listed in the paper.** **MUST BE RULED BEFORE
+  the redesign's screen list is fixed** — else screens get designed twice.
+- **ITEM B — the dashboard redesign, its own epic, arc-sized.** Faithful to the plan (it renders shipped laws as
+  UI) and **closes four registered gaps**: domain capture · CLI-sessions panel · flow-log viewer (S7.5.1b) ·
+  group-member surface (Deck-D). **Six commit-one decide-items in constraining order** — re-skin vs
+  re-architecture · **component test tier lands FIRST or same-story, never after** (S11: zero component coverage,
+  4 of 15 walk findings there) · per-screen render-floor audit (**two known violations already: "Fleet risk" is
+  an unbuilt Tier-3 name; "Site-Link Throughput" is a rate time-series where S8.3 ruled L1 cumulative-only**) ·
+  bulk destructive verbs · theme×palette×density · **edition gating behind ONE seam** so S12.1 rewrites a hook
+  and nothing else.
+- **ONE COPY FIX recorded now:** the wireframe's `'Free plan · cloud-hosted'` is wrong — **both editions are
+  self-hosted**, the difference is features. It contradicts the wedge and would reach a launch screenshot.
+- **SEQUENCING (founder-ruled):** EPIC 13 merge → **Item A ruling** → UI redesign → EPIC 11 remainder / BETA
+  BUNDLE → S12.1 → beta. The redesign does NOT wait for S12.1. **Content-freeze interaction:** site screenshots
+  come from this UI, so redesigning BEFORE the joint launch beats after.
+
 ## BETA BUNDLE — the pre-public-beta gate (a workstream bundle, joint launch with the site)
 
 The set that must all land before PUBLIC BETA; the site goes live ONCE, synchronized (single complete launch).
