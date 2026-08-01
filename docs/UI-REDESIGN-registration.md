@@ -13,9 +13,16 @@
 > Electron renderer"*). It was recorded as a decide-item first and argued on paper before being ruled, which is
 > the required order for reversing a lock.
 
-**SOURCE ARTIFACT:** the Claude Design wireframe — 12 dashboard screens plus a desktop-client section — **held by
-the founder**, not in this repo. Anything below that cannot be traced to the wireframe or to shipped code is
-noted as such.
+**SOURCE ARTIFACT — NOW COMMITTED: `docs/design/TUNNEX-wireframe-v2.html`** (2.9 MB). 12 dashboard screens plus
+a desktop-client section. **It is the specification for an entire epic and previously existed in exactly one
+place outside version control.**
+
+> **IT IS A CLAUDE DESIGN EXPORT.** A **VISUAL SPECIFICATION** — not editable source, and **not a markup
+> specification.** It is rendered HTML embedded in JavaScript (`className=` 0, `class=` 109, all styling inline
+> and escaped), so it cannot be imported, extended, or refactored into the app. **It can only be read as a
+> picture.** Take its LAYOUT, HIERARCHY and COPY. Take none of its DOM — see consequence 1.
+
+Anything below that cannot be traced to the wireframe or to shipped code is noted as such.
 
 **SEQUENCING (founder-ruled):** EPIC 13 merge → **Item A ruling** → UI redesign → EPIC 11 remainder / BETA
 BUNDLE → S12.1 → beta.
@@ -170,18 +177,37 @@ This is the reason it is worth building from rather than restarting:
 
 ### ✅ 1. RULED 2026-08-01 — **IT IS A RE-ARCHITECTURE, NOT A RE-SKIN**
 
-**Measured from the wireframe bundle, not judged by eye:**
+**Measured from the committed artifact, not judged by eye — and RE-MEASURED in-repo rather than accepted.**
+A decide-item ruled on numbers the repo cannot check is the same class as *"CI green"* with no sha, which this
+project has already ruled against.
 
-| measure | count |
-|---|---|
-| `<div>` | **1,015** |
-| inline `style` attributes | **2,129** |
-| `<button>` | **1** |
-| `<table>` · `<label>` · `<nav>` · `<select>` | **0 · 0 · 0 · 0** |
-| `aria-` attributes anywhere in the bundle | **0** |
-| `backdrop-filter` declarations | **241** — layered glassmorphism, a RENDERING MODEL, not a colour choice |
-| custom-typography references (Instrument Sans, JetBrains Mono) | **890** |
-| screens | **12**, against the current **18** pages — a **CONSOLIDATION**, not a restyle |
+**METHOD (it matters here):** the file is **2.9 MB in 405 lines**, so `grep -c` — which counts *lines*
+containing a match — undercounts by orders of magnitude. All figures below are **occurrence** counts
+(`grep -o <pattern> | wc -l`).
+
+| measure | as ruled | **measured** | note |
+|---|---|---|---|
+| `<div` | 1,015 | **1,018** | |
+| inline `style` attributes | 2,129 | **2,134** | `style=`, almost all **escaped** (`style=\"`) — the HTML is embedded inside JS string literals, which is why a naive `style="` search returns **1** |
+| `<button` | 1 | **1** | ✅ exact |
+| `<table` | 0 | **0** | ✅ exact |
+| `<label` | 0 | **0** | ✅ exact |
+| `<nav` | 0 | **0** | ✅ exact |
+| `<select` | 0 | **0** | ✅ exact |
+| **`aria-` anywhere** | 0 | **0** | ✅ exact |
+| `backdrop-filter` | 241 | **242** | layered glassmorphism — a RENDERING MODEL, not a colour choice |
+| custom typography | 890 | **961** | Instrument Sans **542** + JetBrains Mono **419** |
+| screens | 12 | *(not machine-countable)* | against the current **18** pages — a **CONSOLIDATION**, not a restyle |
+
+**THE CORRECTIONS DO NOT MOVE THE RULING, AND THE LOAD-BEARING FIGURES ARE EXACT.** Every count that carries
+the accessibility argument — the four zeros, the zero `aria-`, and the single `<button>` — matched exactly. The
+three that drifted (1,015→1,018 · 241→242 · 890→961) differ by under 8% and change nothing: **the ruling stands
+on the shape, not the arithmetic.**
+
+**Two further facts the re-measurement surfaced:** `className=` is **0** and `class=` is **109**, with **5**
+`<style>` blocks — so this is **rendered HTML embedded in JavaScript**, not React source. It cannot be imported,
+extended, or refactored into the app. **It can only be read as a picture**, which is the strongest possible
+argument for the visual-specification-not-markup-specification ruling below.
 
 **And components that do not exist in the product AT ALL:**
 
