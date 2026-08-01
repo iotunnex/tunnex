@@ -142,9 +142,20 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold text-white">Overview</h1>
-      <p className="text-sm text-slate-400">{orgName || "…"}</p>
+    // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
+    // ZERO spacing — the stat row touched Get started, which touched the panel row.
+    //
+    // The shell's `<main>` already sets `flex flex-col gap-14` (the README's page-body rhythm), but a flex gap
+    // reaches only DIRECT children, and the whole page is a single child of main. The gap was correct and
+    // applied to exactly one element. Every screen root must therefore repeat this — see docs/S14.4.
+    <div className="flex flex-col gap-14">
+      {/* README: PAGE HEADER = title + subtitle, its own block above the body. */}
+      <div>
+        <h1 className="text-[22px] font-semibold leading-tight text-ink-heading">
+          Overview
+        </h1>
+        <p className="mt-4 text-cell text-ink-secondary">{orgName || "…"}</p>
+      </div>
       <ErrorText>{error}</ErrorText>
 
       {/* Desktop only: the VPN connect surface (no-op/hidden in the browser). */}
@@ -230,7 +241,9 @@ export default function Dashboard() {
             const fresh = isFreshOrg(gateways, devices, members);
 
             return (
-              <>
+              // The same reason, one level down: these three sections are siblings and need the page rhythm
+              // between them, not zero.
+              <div className="flex flex-col gap-14">
                 {/* README: the Overview stat row is `repeat(12,1fr)` gap 12 — SIX cards at span 2.
                     Settled from the SOURCE prototype, not from the README's generic "4-up" sentence (which
                     describes the other screens) and not from the screenshot alone. */}
@@ -302,8 +315,9 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {/* Not in a grid — a sibling in the page column, so a `col-span-*` here would be a dead class. */}
                 {fresh && (
-                  <Panel title="Get started" className="col-span-12">
+                  <Panel title="Get started">
                     {/* The floating "Get started" widget is CUT — it becomes this. Rendered only when we KNOW
                         the org is empty: showing it because a fetch failed would tell a founder with a working
                         fleet that they have nothing. */}
@@ -475,7 +489,7 @@ export default function Dashboard() {
                     </p>
                   </Panel>
                 </div>
-              </>
+              </div>
             );
           })()}
         </>
