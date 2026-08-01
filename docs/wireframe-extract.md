@@ -241,5 +241,17 @@ Dependabot. **Adding a runtime dependency into an unscanned surface is a decisio
 alternative is vendoring the designer's 40 paths as a local TSX module: **~7 KB, zero dependency, zero
 supply-chain surface** — at the cost of owning them and drifting from upstream Lucide.
 
-**NOT DECIDED — the founder rules.** Building the nav with an icon *slot* either way, so the choice is a
-one-file change rather than a refactor.
+## ⚖ RULED — **VENDOR THE 40 PATHS. NOT THE DEPENDENCY.**
+
+- **This week's OpenSSF baseline established the JS dependency surface has NO scanning at all** — no
+  `npm`/`pnpm audit`, no `osv-scanner`, no Dependabot; Trivy covers only the Go API image. **Adding a RUNTIME
+  dependency into an unscanned surface is a decision in the wrong direction — and it would be the first one
+  made after measuring the gap.**
+- **7 KB of static SVG paths has no supply-chain surface.** Nothing to scan, nothing to update, nothing to
+  reach a CVE feed about.
+- **THE ICON SELECTION IS THE DESIGNER'S CONTRIBUTION; THE DELIVERY MECHANISM IS OURS.** Vendoring keeps the
+  first and drops the second.
+- ⛔ **ISC IS CLEAN — THIS IS NOT A LICENCE REFUSAL.** Recorded explicitly so nobody re-litigates it as one.
+  **Lucide is attributed in `NOTICE` anyway**, because the paths are theirs.
+
+**COST ACCEPTED: we own them.** They do not change, and a new icon is a copy-paste.

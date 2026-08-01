@@ -1044,7 +1044,7 @@ session after. **Nothing expires an instruction; it has to be revisited.** When 
 earlier constraint should lift, **say so and ask** — a contradiction between two instructions is a fork, and
 forks halt and surface.
 
-## SEARCHING FOR ONE REPRESENTATION AND CONCLUDING ABSENCE (2026-08-01, EPIC 14)
+# ⭐ AN ABSENCE FOUND BY ONE ENCODING IS NOT AN ABSENCE (2026-08-01, EPIC 14 — founder-ranked the best finding of this stretch)
 
 **THE INSTANCE.** A design file was scanned for colours with `#[0-9a-fA-F]{6}` and the report read: **"there is
 no violet anywhere."** The design's accent is `#7C5CFC`, and the founder was about to rule a correction —
@@ -1070,3 +1070,24 @@ because there is nothing to point at, so there is nothing to check.
 **WHAT CAUGHT IT: a second, independent artifact** — the designer's README — **saying something different.**
 Not a better search. **When a measurement drives a large decision, seek a source that could DISAGREE with it**;
 re-running the same query more carefully cannot.
+
+**SECOND TIME THIS SESSION A CLAIM OF MINE WAS REFUTED BY MEASUREMENT RATHER THAN ARGUMENT** — the first was
+the cherry-pick that reported success while dropping 400 lines, caught by a tree diff. **Founder-recorded as
+the process working, not a setback.** Both were caught the same way: **an artifact that could disagree**, not a
+more careful re-reading of the one already trusted.
+
+## EAGER OR LAZY IS DECIDED BY WHETHER THE ABSENCE IS VISIBLE MID-RENDER — NOT BY PRECEDENT (2026-08-01, EPIC 14)
+
+**TWO ASSET DECISIONS, ONE WEEK APART, SAME QUESTION, OPPOSITE ANSWERS:**
+
+| asset | ruling | why |
+|---|---|---|
+| **Motion** (animation) | **LAZY, never critical path** | **a missing animation is INVISIBLE.** Nothing renders wrong; the page is simply still. |
+| **Lucide icons** (nav) | **EAGER, must be in the initial bundle** | **a nav that renders iconless and then REFLOWS is worse than one that never had them.** The absence is visible, and then the arrival moves the page under the reader. |
+
+> ## **THE DISCRIMINATOR: IS THE ABSENCE VISIBLE MID-RENDER?**
+> **If yes, ship it eagerly. If no, defer it.**
+
+**STATED AS A RULE SO THE NEXT ASSET IS NOT DECIDED BY PRECEDENT.** *"We lazy-loaded the last one"* is not an
+argument — **the two rulings above would be inconsistent under any precedent-based reading, and they are both
+correct.** Ask the question, not the history.
