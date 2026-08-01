@@ -811,6 +811,45 @@ domain over: **nonsense is self-announcing; plausibility is camouflage.** So whe
 under a refactor — what counts as a row, a cell, a match — **state the new convention IN the assertion**, so
 the next red is read as a convention question rather than a product one.
 
+# ⑨ ONE-SIDED OBSERVATION (minted 2026-08-02, S14.5 — founder-filed as the family's cleanest form)
+
+> ## **A TEST THAT ONLY EVER OBSERVES ONE VALUE OF A TWO-VALUED THING CANNOT TELL THE VARIABLE FROM THE CONSTANT.**
+
+**IT IS NOT WRONG. IT IS HALF-WRITTEN — which is why it survives review and why it survived a mutation round.**
+
+## The instance
+
+`NodeLink` gained a selection with `aria-pressed={isSel}`. The test rendered a node, asserted
+`aria-pressed === "false"`, clicked it, and asserted the handler fired. **Green, and it looked complete.**
+
+**MUTATION: hard-code the attribute to `false`** — deleting the selection state from the announcement
+entirely, so no assistive technology could ever learn which node is selected.
+
+**THE TEST PASSED.** `false` is exactly what it expected. It had never once observed `true`, so the constant
+and the variable were indistinguishable to it.
+
+## ⛔ THE DIAGNOSTIC
+
+> **FOR EVERY BOOLEAN OR ENUM ASSERTION: DOES THE TEST OBSERVE *BOTH* STATES? IF IT ONLY EVER SEES ONE, IT IS
+> ASSERTING A CONSTANT.**
+
+**EXPECT THIS ON THE REMAINING SCREENS.** One-sided observation is the DEFAULT SHAPE when a test is written
+from a happy path: you render the common case, assert what it shows, and the other branch is never
+instantiated. It takes a deliberate second render to make the assertion mean anything.
+
+## ⚠ AND THE PART THAT MAKES IT WORSE THAN IT LOOKS
+
+**IT CAUGHT ITSELF ONLY BECAUSE THE MUTATION HAPPENED TO TARGET THE CONSTANT SIDE.**
+
+A mutation that changed the **true** branch — `aria-pressed={isSel ? undefined : false}`, or inverting to
+`aria-pressed={!isSel}` — **would ALSO have passed**, for the same reason. So the mutation round did not
+demonstrate that the technique finds this class. **It demonstrated one lucky hit.** A one-sided test has a
+one-sided blind spot, and a single mutation samples one side of it.
+
+**COROLLARY, and the reason this is filed rather than fixed-and-forgotten: MUTATION TESTING INHERITS THE
+TEST'S BLIND SPOT.** Mutating a branch that the test never instantiates cannot fail. **"The mutation was
+caught" is evidence about the mutation, not about the test's coverage of the other state.**
+
 # ⑧ THE SUBJECT AND ITS CHECK VANISHING TOGETHER (minted 2026-08-01, EPIC 14 merge)
 
 > ## **THE OTHER SEVEN MECHANISMS ALL ASSUME THE SUBJECT IS PRESENT. THIS ONE IS THE SUBJECT AND ITS GUARD DISAPPEARING IN THE SAME MOVE, SO NOTHING REMAINS TO DISAGREE.**

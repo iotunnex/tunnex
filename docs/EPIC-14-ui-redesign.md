@@ -483,3 +483,36 @@ It is deterministic — same viewport height every run — so it neither flakes 
 
 **Two anomalies in one image, one real and one not.** Reading the image is what separated them; the suite would
 have committed both without comment.
+
+## ⚠ REGISTERED — THE PLAN-POINTER PUSH BYPASSES BRANCH PROTECTION, AND IT HAS NOW DONE SO TWICE
+
+**Founder-filed 2026-08-02: *"a recurring bypass is a convention about to stop being one."***
+
+Both occurrences were the same act — updating PLAN.md's re-entry checkpoint directly on `main` after a merge,
+which the story protocol explicitly permits for process/docs corrections. Both were reported at the time.
+**The reporting is not the issue; the recurrence is.**
+
+```
+remote: Bypassed rule violations for refs/heads/main:
+remote: - 3 of 3 required status checks are expected.
+```
+
+**WHY IT IS WORTH A RULING RATHER THAN A HABIT.** The bypass works because `enforce_admins` is `false`. So
+the protection that exists for everyone is, in practice, advisory for the one account that does the merges —
+and *"docs-only"* is a judgement made by the pusher, in the moment, with nothing checking it. **The exact
+push above could have carried product code and the output would have read identically.** That is the gap: not
+that this push was dangerous, but that **nothing distinguishes a safe bypass from an unsafe one except the
+intent of whoever typed it.**
+
+**TWO DISPOSITIONS, NEITHER TAKEN NOW (founder: *"do not decide it now"*):**
+
+**(a) GIVE THE POINTER A PATH THAT DOES NOT BYPASS** — either a docs-only CI path that satisfies the required
+contexts, or land the pointer **inside the next PR** instead of directly. The second costs nothing and
+removes the bypass entirely; its only downside is that the pointer lags a merge by one PR, which is precisely
+the staleness the re-entry rule exists to prevent.
+
+**(b) WRITE THE BYPASS INTO THE PROTOCOL AS A NAMED EXCEPTION**, with its rationale and its limits stated
+(which files, which branch, what may never ride along). **If it is going to keep happening, it should be a
+rule rather than a repeated judgement call.**
+
+**TRIGGER: the next branch-protection change.**
