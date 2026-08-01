@@ -43,6 +43,7 @@ const COVERED: Record<string, string> = {
   "Gateways.tsx": "test/gatewayswiring.test.tsx — revoke wiring + revoked-suppression + failed-revoke surfaced",
   "Devices.tsx": "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
   "Kubernetes.tsx": "test/kuberneteswiring.test.tsx — health-kind mirror census (WF-S11-7) + withheld destructive control + LoadRetry reached",
+  "Access.tsx": "test/accesswiring.test.tsx — enforcement posture cannot be claimed without being read (both directions) + disabled rules shown + failed load never renders a count",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -57,7 +58,6 @@ const COVERED: Record<string, string> = {
 // THE ORDER IS THE COMMIT-ONE ORDER, and the reason is recorded with it: surfaces are ranked by where
 // disagreement with the backend is most consequential, not by size.
 const PENDING: Record<string, string> = {
-  "Access.tsx": "after Devices — a rule shown active but not compiled is a silent authorization gap",
   // ⚠ SHEDDER — the redesign SPLITS this screen. Sites keeps `sites` and sheds ROUTED RANGES to a new
   // `subnets` screen. Its tests MUST assert the DECISION and NAME THE DESTINATION: "a routed range that fails
   // to load is surfaced, not rendered as none" travels to whichever screen renders it; "the Sites page shows a
@@ -104,11 +104,11 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(3);
+    expect(Object.keys(COVERED).length).toBe(4);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(6);
+    expect(Object.keys(PENDING).length).toBe(5);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
