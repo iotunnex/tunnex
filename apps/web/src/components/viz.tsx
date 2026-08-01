@@ -400,33 +400,48 @@ export function NodeLink({
   // A LAYOUT DERIVED FROM A POPULATED EXAMPLE MUST BE CHECKED AT N=1. A design shows every diagram at its
   // most interesting size, which is the size it will almost never have on a customer's first day.
   //
-  // So: place on an ellipse whose radii SHRINK with small counts, angle the first spoke to the RIGHT (a
-  // relationship reads left-to-right, where straight-up reads as a stack), then FIT THE VIEWBOX to what was
-  // actually placed. The frame follows the content instead of the content rattling inside the frame.
-  const HUB = { x: 0, y: 0 };
+  // ⚠ AND THE FIRST FIX FOR THAT WAS ALSO WRONG, IN THE EXACT OPPOSITE DIRECTION. Fitting the viewBox to
+  // the placed nodes removed the empty space by MAGNIFYING everything: a two-node bounding box stretched to
+  // the panel width rendered 150px rings and oversized labels.
+  //
+  // THE SCALE IS A CONTRACT. The design's svg is `viewBox 0 0 600 320` at `height: 320px`, so ONE USER UNIT
+  // IS ONE PIXEL and a hub ring is 68px ON PURPOSE. Fitting the box breaks that silently, because the shapes
+  // stay in proportion to EACH OTHER while every one of them is the wrong size — nothing looks distorted, it
+  // is just all wrong together, which is the hardest kind to notice.
+  //
+  // SO: the FRAME stays fixed, the PLACEMENT adapts to the count, and the content is TRANSLATED to centre.
+  // Sparse then reads as sparse — airy and balanced — rather than as broken or as zoomed.
+  const HUB = { x: 300, y: 162 };
   const k = spokes.length;
   if (hub) pos.set(hub.id, HUB);
   if (!hub && k === 1) {
     pos.set(spokes[0]!.id, HUB);
   } else {
-    // One spoke needs no orbit, only distance. Two want opposite sides. Three or more want a ring.
-    const rx = k <= 1 ? 150 : k === 2 ? 175 : 200;
+    // One spoke needs distance, not an orbit. Two want opposite sides. Three or more want a ring.
+    const rx = k <= 1 ? 155 : k === 2 ? 185 : 200;
     const ry = k <= 2 ? 0 : 105;
     spokes.forEach((sp, i) => {
-      const a = k === 1 ? 0 : (i / k) * Math.PI * 2;
-      pos.set(sp.id, { x: HUB.x + Math.cos(a) * rx, y: HUB.y + Math.sin(a) * ry });
+      // Twelve o'clock first for a real ring; a LONE spoke goes RIGHT, because a relationship reads
+      // left-to-right and straight-up reads as a stack.
+      const a = k === 1 ? 0 : (i / k) * Math.PI * 2 - Math.PI / 2;
+      pos.set(sp.id, {
+        x: HUB.x + Math.cos(a) * rx,
+        y: HUB.y + Math.sin(a) * ry,
+      });
     });
   }
 
-  // Fit the viewBox to the placed nodes. PAD generously below: the label and sub-line are drawn UNDER each
-  // ring (r + 27), and a box fitted to the circles alone clips the text that carries the meaning.
+  // Centre what was placed WITHOUT rescaling it. With few nodes the arrangement is lopsided about the hub (a
+  // lone spoke sits entirely to one side), and a diagram pinned to one edge of its panel reads as an error
+  // even when every node is exactly where it belongs.
   const pts = [...pos.values()];
-  const R = 40; // largest ring + its selection halo
-  const minX = Math.min(...pts.map((p) => p.x)) - R - 30;
-  const maxX = Math.max(...pts.map((p) => p.x)) + R + 30;
-  const minY = Math.min(...pts.map((p) => p.y)) - R - 12;
-  const maxY = Math.max(...pts.map((p) => p.y)) + R + 34;
-  const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+  if (pts.length > 0) {
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const dx = HUB.x - (Math.min(...xs) + Math.max(...xs)) / 2;
+    const dy = HUB.y - (Math.min(...ys) + Math.max(...ys)) / 2;
+    for (const [id, p] of pos) pos.set(id, { x: p.x + dx, y: p.y + dy });
+  }
 
   const interactive = onSelect != null;
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
@@ -446,9 +461,9 @@ export function NodeLink({
           `w-80`, where the same element is a tidy 192px and a solid dot reads as a deliberate dot.
           A COMPONENT CONSTRAINED BY ITS HARNESS IS NOT A COMPONENT THAT HAS BEEN TESTED AT SIZE. */}
       <svg
-        viewBox={viewBox}
+        viewBox="0 0 600 320"
         preserveAspectRatio="xMidYMid meet"
-        className="h-[260px] w-full"
+        className="h-[320px] w-full"
         role="presentation"
       >
         {links.map((l) => {
@@ -594,11 +609,22 @@ export function NodeLink({
           ))}
       </ul>
       {interactive && (
-        <p className="mt-2 text-micro text-ink-faint">
-          {selected
-            ? `${selected.label}. ${selected.sub ?? "no further detail served"}`
-            : "Select a site to scope the actions panel."}
-        </p>
+        // ⛔ THE SELECTED-NODE READOUT, as its own bordered box rather than a loose paragraph.
+        //
+        // IT OCCUPIES THE SPACE WHETHER OR NOT ANYTHING IS SELECTED, on purpose: a readout that APPEARS on
+        // selection shifts every element beneath it, and a diagram that reflows the page when you click it
+        // feels broken even though nothing is wrong. The unselected state is a real state with real copy,
+        // not a gap waiting to be filled.
+        <div className="mt-2 flex items-center gap-2.5 self-start rounded-lg border border-line bg-ink-800 px-3 py-1.5">
+          <span className="whitespace-nowrap text-cell font-semibold text-ink-emphasis">
+            {selected ? selected.label : "No node selected"}
+          </span>
+          <span className="truncate font-mono text-micro text-ink-secondary">
+            {selected
+              ? (selected.sub ?? "no further detail served")
+              : "Click a node to inspect"}
+          </span>
+        </div>
       )}
     </VizFrame>
   );
