@@ -24,6 +24,7 @@ import {
 import { useAuth } from "../lib/auth";
 import { portLabel } from "../lib/k8sview";
 import { Button, Card, ErrorText, Field, Input, Modal, Select } from "../components/ui";
+import { ComposeGate } from "../components/ComposeGate";
 import { LoadRetry } from "../components/LoadRetry";
 import {
   accessView,
@@ -362,10 +363,15 @@ function RulesSection({ orgId, canManage, subjectsRev }: { orgId: string; canMan
     <Card className="mt-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Rules</h2>
+        {/* TWO seams, both producing ABSENCE, and the ORDER is the decision (S14.2 D3):
+            PERMISSION first, WIDTH second. A member who may not manage rules sees nothing — never
+            "read-only on this screen size", which would imply a wider window grants what their role does not. */}
         {canManage && !view.showRetry && (
-          <Button onClick={() => setCreating(true)} disabled={groups.length === 0 && sites.length === 0}>
-            Add rule
-          </Button>
+          <ComposeGate surface="Access rules">
+            <Button onClick={() => setCreating(true)} disabled={groups.length === 0 && sites.length === 0}>
+              Add rule
+            </Button>
+          </ComposeGate>
         )}
       </div>
       <p className="mt-1 text-xs text-slate-500">Allow rules: a source group may reach a destination group or resource.</p>

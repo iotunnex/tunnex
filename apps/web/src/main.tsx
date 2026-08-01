@@ -7,6 +7,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { desktop } from "./lib/desktop";
+import { LayoutCapabilityProvider } from "./components/ComposeGate";
 // S14.1: the design tokens' CSS custom properties. GENERATED from packages/shared/src/tokens.ts by
 // `make generate` and drift-guarded by `make generate-check`. Imported FIRST so `:root` carries the variables
 // before any Tailwind utility resolves them.
@@ -30,7 +31,11 @@ async function boot() {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <BrowserRouter>
-        <App />
+        {/* S14.2: the viewport is measured ONCE, here, and handed down as a CAPABILITY. No screen reads a
+            pixel width; screens declare what they compose and let the gate decide. */}
+        <LayoutCapabilityProvider>
+          <App />
+        </LayoutCapabilityProvider>
       </BrowserRouter>
     </React.StrictMode>,
   );

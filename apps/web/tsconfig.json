@@ -24,6 +24,6 @@
   // tier. Five slices were written and reported green against a check that never looked at them. Found while
   // deciding where to put the Loaded<T> contract: placing it in test/ would have made it a check that cannot
   // fail, inside the artifact written to prevent checks that cannot fail.
-  "include": ["src", "test"],
+  "include": ["src", "test"], // config files belong to tsconfig.node.json (composite); listing them here too is TS6305
   "references": [{ "path": "./tsconfig.node.json" }]
 }
