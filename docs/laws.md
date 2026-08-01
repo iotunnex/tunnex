@@ -1876,3 +1876,64 @@ read.** Every image must earn its place; one isolating the container-derived-geo
 **1440 ONLY.** At 390 there is no wide column, so a wide specimen is the narrow one again — **it would test
 nothing while costing a baseline and a re-harvest on every change.** The reason is written into the census's
 expectation list itself, where someone reaching to add the 390 counterpart for symmetry will read it.
+
+# ⭐ A LAYOUT DERIVED FROM A POPULATED EXAMPLE MUST BE CHECKED AT N=1 (2026-08-02, S14.5, founder-ruled)
+
+**A DESIGN SHOWS EVERY DIAGRAM AT ITS MOST INTERESTING SIZE — WHICH IS THE SIZE IT WILL ALMOST NEVER HAVE ON
+A CUSTOMER'S FIRST DAY.**
+
+The wireframe's network map places **five spokes at fixed coordinates in a 600×320 frame**, and it reads
+beautifully because five spokes FILL that frame. I took the frame and the ring radius verbatim.
+
+**WITH ONE SITE IT RENDERED AS A COLUMN OF TWO CIRCLES WITH THE LEFT TWO-THIRDS OF THE PANEL EMPTY** —
+because a lone spoke at −90° sits directly above the hub. **It read as a BROKEN diagram, not a sparse one**,
+and that distinction is the whole finding: sparse is a fact about the customer, broken is a claim about us.
+
+## ⛔ THE FIX IS STRUCTURAL, NOT A SPECIAL CASE
+
+Not `if (n === 1) …`. **The frame follows the content:**
+
+- radii **shrink** with the count (one spoke needs distance, not an orbit; two want opposite sides)
+- the first spoke goes **RIGHT**, because a relationship reads left-to-right — **straight up reads as a stack**
+- the **viewBox is FITTED to what was actually placed**, padded for the labels drawn beneath each ring
+
+**So the content stops rattling inside a frame sized for a different dataset.**
+
+## THE GENERAL FORM
+
+> ## **EVERY LAYOUT TAKEN FROM A DESIGN IS A LAYOUT TUNED FOR THE DESIGNER'S SAMPLE DATA. THE SAMPLE IS
+> ## ALWAYS THE FLATTERING CASE.**
+
+**CHECK EVERY BORROWED LAYOUT AT: ZERO · ONE · TWO · AND FAR MORE THAN THE SAMPLE.** The design shows you
+exactly one of those four, and it is never the one a new customer sees.
+
+**SIBLING:** *the harness is part of the specimen.* Both are the same error — **reasoning about a component
+from a single instance of its context** — one in width, one in cardinality.
+
+# ⭐ WHEN A CONTROL IS MEANINGLESS AT CURRENT SCALE (2026-08-02, S14.5, founder-ruled for every screen)
+
+> ## **RENDER THE PANEL WITH AN EMPTY STATE THAT NAMES THE PRECONDITION AND THE ACTION THAT CROSSES IT.**
+> ## **NEVER THE CONTROL. NEVER DISABLED-WITHOUT-REASON. NEVER ABSENT.**
+
+**THE INSTANCE.** *Hub high-availability* offered **`pin as primary`** beside a **single** gateway, under copy
+about failing transit over to a standby if the primary goes stale. **There is nothing to fail over to.** A
+control for multi-gateway transit, offered on a one-gateway stack.
+
+## Why each alternative is wrong, in order of temptation
+
+**NOT ABSENT.** **Scale is a state the operator MOVES THROUGH; an edition boundary is a purchase.** That is
+the distinction from the four-way panel test, which says *absent* for capabilities that do not exist. HA
+exists and is **one gateway away** — hiding it means they never learn it is there nor what unlocks it.
+
+**NOT DISABLED.** A greyed control states that something is unavailable **without saying why or what to do**.
+The reassuring-empty shape, in control form.
+
+**NOT OFFERED-WITH-EXPLANATION** — which is what shipped, and it is the expensive one, because it looks the
+most helpful. **It cost a real question from the founder: *"when will connectivity start?"***
+
+## ⛔ AND THE BOUNDARY CONDITION THAT IS EASY TO GET WRONG
+
+**AN ALREADY-CONFIGURED SET STILL RENDERS IN FULL, EVEN BELOW THE THRESHOLD.** If an org drops from two
+gateways to one (a revoke), the panel must show **the hub set that is still configured** — not hide it behind
+a precondition notice. **The precondition governs OFFERING the capability, never DISCLOSING existing state.**
+Suppressing real configuration because a count dipped is how an operator loses track of what is live.
