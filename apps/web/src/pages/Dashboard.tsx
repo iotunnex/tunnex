@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../components/Icon";
+import { GLASS } from "../components/ui";
 import { HealthStatus } from "../components/HealthStatus";
 import { Donut } from "../components/viz";
 import { Link } from "react-router-dom";
@@ -477,74 +478,6 @@ export default function Dashboard() {
               </>
             );
           })()}
-
-          {/* S14.3 slice C — the gateway liveness donut. THE FIRST VIZ CONSUMER, wired in the same slice as
-              the primitive, because a viz primitive with no consumer is dormant machinery and this epic has
-              already ruled that dormant machinery cannot be proven.
-
-              SOURCE: /api/v1/organizations/{orgId}/overview — a CURRENT-STATE PROPORTION, which is the only
-              reading this data permits. It is deliberately NOT a trend: there is no time-series endpoint in
-              the API, and `rx_bytes`/`tx_bytes` are described by the spec itself as "raw gauge since the last
-              handshake (display only, never summed as monotonic)". The field exists and its own description
-              forbids the chart — which is why the Overview area chart is ROADMAP, not built.
-
-              `failed` carries the load state so a failed fetch draws NOTHING — never a zero baseline, which
-              would render "we could not read it" identically to "nothing is online". */}
-          <div className="grid grid-cols-12 gap-12">
-            <Panel title="Peer Connection Status" className="col-span-5">
-              <Donut
-                label="Gateway liveness"
-                source={{ endpoint: "/api/v1/organizations/{orgId}/overview" }}
-                failed={error != null}
-                slices={[
-                  {
-                    label: "seen in last 3 min",
-                    value: data.online,
-                    tone: "ok",
-                  },
-                  {
-                    label: "not seen recently",
-                    value: Math.max(0, data.nodes - data.online),
-                    tone: "neutral",
-                  },
-                ]}
-                empty="No gateways enrolled yet."
-              />
-              {/* The design's own caption, kept verbatim — it states the product's rule, not a decoration. */}
-              <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                Status derived from WireGuard handshake liveness — never
-                green-while-dead.
-              </p>
-            </Panel>
-
-            <Panel title="Recent Activity" className="col-span-7">
-              {data.recent_activity.length === 0 ? (
-                <EmptyState>No activity yet.</EmptyState>
-              ) : (
-                <List label="Recent activity">
-                  {data.recent_activity.map((a, i) => (
-                    <ListItem key={i}>
-                      <span className="flex items-center justify-between">
-                        <span className="text-sm text-slate-300">
-                          <span className="font-mono text-xs text-slate-400">
-                            {a.action}
-                          </span>
-                          {a.target_type && (
-                            <span className="ml-2 text-xs text-slate-500">
-                              {a.target_type}
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          {relativeAge(a.created_at)}
-                        </span>
-                      </span>
-                    </ListItem>
-                  ))}
-                </List>
-              )}
-            </Panel>
-          </div>
         </>
       )}
     </div>
@@ -582,7 +515,9 @@ function Stat({
 }) {
   const text = statText(value);
   return (
-    <div className="col-span-2 flex flex-col gap-8 rounded-card border border-line bg-surface p-14 shadow-card backdrop-blur-[24px] backdrop-saturate-[1.4]">
+    // Composes GLASS rather than restating it — the divergence between this card and Panel is exactly what
+    // produced a screenshot with glass stat cards above flat panels.
+    <div className={`${GLASS} col-span-2 flex flex-col gap-8 p-14`}>
       <div className="flex items-center gap-9">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-inset border border-white/[.2] bg-white/[.09] text-ink-emphasis">
           <Icon name={icon} size={15} />

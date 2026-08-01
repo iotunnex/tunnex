@@ -11,6 +11,23 @@ import type {
 // consistently without a heavyweight component library. Colors come only from the
 // theme tokens (accent/ink/slate), so a palette swap restyles everything.
 
+/**
+ * ⛔ THE GLASS RECIPE, IN ONE PLACE. Every surface in the product composes from this constant.
+ *
+ * It was previously spelled out on `Stat` and NOT on `Panel`, so the stat row rendered as glass and every
+ * panel below it rendered as flat plastic — in the same screenshot. A material defined per-component is a
+ * material that WILL be half-applied, and the half that is missing reads as a rendering bug rather than a
+ * missing class.
+ *
+ * `bg-surface` is TRANSLUCENT (`rgba(31,31,31,.72)`), and the blur needs the page's radial field behind it to
+ * refract (index.css). Opaque fill or flat backdrop and the effect disappears entirely.
+ *
+ * NO INSET WHITE HIGHLIGHT LINE — the designer removed it explicitly. Do not reintroduce
+ * `inset 0 1px 0 rgba(255,255,255,…)`.
+ */
+export const GLASS =
+  "rounded-card border border-white/[.14] bg-surface shadow-card backdrop-blur-[24px] backdrop-saturate-[1.4]";
+
 export function Button({
   variant = "primary",
   className = "",
@@ -40,13 +57,7 @@ export function Card({
   className?: string;
   children: ReactNode;
 }) {
-  return (
-    <div
-      className={`rounded-xl border border-white/5 bg-ink-800 p-5 ${className}`}
-    >
-      {children}
-    </div>
-  );
+  return <div className={`${GLASS} p-16 ${className}`}>{children}</div>;
 }
 
 export function Field({
@@ -188,17 +199,21 @@ export function Panel({
 }) {
   const id = useId();
   return (
+    // README: card padding 16, internal gap 10, title 600 13.5px. `flex-col` with the body in a `flex-1`
+    // wrapper keeps every panel in a row the same height WITHOUT centring its content — the row stretches,
+    // the content stays top-aligned. Centred content in a stretched panel is what makes a bento look
+    // "overlapped": each panel floats its text at a different vertical position.
     <section
       aria-labelledby={id}
-      className={`rounded-xl border border-white/5 bg-ink-800 p-5 ${className}`}
+      className={`${GLASS} flex flex-col gap-10 p-16 ${className}`}
     >
-      <div className="flex items-center justify-between">
-        <h2 id={id} className="text-sm font-semibold text-slate-300">
+      <div className="flex items-center justify-between gap-8">
+        <h2 id={id} className="text-title font-semibold text-ink-heading">
           {title}
         </h2>
         {actions}
       </div>
-      {children}
+      <div className="flex-1">{children}</div>
     </section>
   );
 }
@@ -251,8 +266,8 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="py-6 text-center">
-      <p className="text-sm text-slate-500">{children}</p>
+    <div className="py-10">
+      <p className="text-cell text-ink-tertiary">{children}</p>
       {action && <div className="mt-3">{action}</div>}
     </div>
   );
@@ -261,7 +276,7 @@ export function EmptyState({
 /** In-flight state. Announced, not merely drawn: a spinner nothing announces is invisible to a screen reader. */
 export function Loading({ label = "Loading…" }: { label?: string }) {
   return (
-    <p role="status" className="py-6 text-center text-sm text-slate-500">
+    <p role="status" className="py-10 text-cell text-ink-tertiary">
       {label}
     </p>
   );
