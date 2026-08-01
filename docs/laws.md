@@ -230,6 +230,13 @@ file, or by knowing the harness.
 deleted by whoever is tidying imports; a line that says why it exists does not. **A tier convention, adopted
 before the second screen was written rather than after a false green shipped.**
 
+**THE ASYNC FORM (added 2026-08-01):** the same defect arrives without any leak when a test asserts against a
+tree it has **not finished waiting for**. Sites' first test waited on the PENDING chip and asserted the APPROVED
+one, which renders later; its sibling test, over the SAME two elements, passed only because it happened to wait
+on the later one. **Two tests over the same elements disagreeing is the tell.** Both forms are one sentence: **a
+correct assertion made against a tree that is not yet — or no longer — the tree it describes.** Guard: a
+`waitFor` must cover EVERY element the assertions touch (tier query rule 5).
+
 **GENERALISED, past React:** any harness where one case can leave state the next case reads — a shared temp
 dir, a package-level fixture, a module-level cache, a database not rolled back — has this shape available to
 it. **The question is not "is my assertion right" but "what did the previous test leave behind that my
