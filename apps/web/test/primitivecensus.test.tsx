@@ -66,6 +66,11 @@ describe("every structural primitive is queryable by ROLE and NAME", () => {
     expect(screen.getByRole("dialog", { name: "Revoke device" })).toBeTruthy();
   });
 
+  it("EmptyState says what is empty — and is DISTINCT from a failure, which must never reach it", () => {
+    render(<EmptyState>No devices yet.</EmptyState>);
+    expect(screen.getByText("No devices yet.")).toBeTruthy();
+  });
+
   it("Badge carries its status as TEXT — colour is an accelerant, never the carrier", () => {
     // Three failures with one cause if this regresses: unreadable to a colour-blind user, invisible to a
     // screen reader, unqueryable by the tier. Which is why `children` is required rather than optional.
