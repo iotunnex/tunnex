@@ -29,6 +29,16 @@ for (const w of WIDTHS) {
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     // Wait for the independently-resolving cards, or the shot races the slowest fetch.
     await expect(page.getByRole("group", { name: "Members" })).toBeVisible();
+    // ⛔ WAIT FOR ASYNC STATE TO SETTLE, DO NOT MASK IT.
+    //
+    // `HealthStatus` renders "checking…" then flips to "operational" when /healthz answers. The screenshot
+    // raced that transition: the diff was 621 pixels confined to a single 40px band at y 921–960, which is
+    // exactly where it sits. A component that CHANGES is not a component that is volatile — the settled state
+    // is deterministic and worth asserting, so this waits for it rather than excluding it.
+    //
+    // Masking here would have hidden a real surface. The distinction: mask what CANNOT be made deterministic
+    // (a wall-clock age); WAIT for what merely has not settled yet.
+    await expect(page.getByText(/control plane operational/)).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expect(page).toHaveScreenshot(`overview-${w.name}.png`, {
       fullPage: true,
