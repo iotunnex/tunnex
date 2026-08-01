@@ -24,6 +24,13 @@ export const ENTERPRISE_PATHS: readonly string[] = [
   "/api/v1/organizations/{orgId}/access-log/health",
   "/api/v1/organizations/{orgId}/device-approval",
   "/api/v1/organizations/{orgId}/devices/pending",
+  // ⛔ ADDED S14.5 BY A WIDENED CENSUS. These three were enterprise on the SERVER all along —
+  // `ApproveDevice`/`RejectDevice` call `deviceApprovalEditionRequired()` and `ReportDeviceHealth` gates on
+  // `deviceHealthEnabled` — and were missed here because the census matched `(enterprise)` alone while their
+  // summaries read `(…, enterprise)`. The gate existed; the client did not know about it.
+  "/api/v1/organizations/{orgId}/devices/{deviceId}/approve",
+  "/api/v1/organizations/{orgId}/devices/{deviceId}/health",
+  "/api/v1/organizations/{orgId}/devices/{deviceId}/reject",
   "/api/v1/organizations/{orgId}/domains",
   "/api/v1/organizations/{orgId}/domains/verify",
   "/api/v1/organizations/{orgId}/groups",

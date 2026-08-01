@@ -34,52 +34,54 @@ const subnet = (
   status: SiteSubnet["status"],
 ): SiteSubnet => ({ id, site_id, cidr, status });
 
-describe("siteGate — enterprise page, member sees topology, manage needs site:manage + verified", () => {
-  it("non-enterprise → not viewable (upsell)", () => {
-    const g = siteGate({ role: "owner", emailVerified: true, edition: "open" });
-    expect(g.isEnterprise).toBe(false);
-    expect(g.canView).toBe(false);
-    expect(g.canManage).toBe(false);
+describe("siteGate — EVERY EDITION, member sees topology, manage needs site:manage + verified", () => {
+  // ⛔ THESE ASSERTIONS WERE INVERTED UNTIL S14.5, AND THAT IS THE POINT WORTH KEEPING.
+  //
+  // The suite asserted `edition: "open"` → `canView: false`, so the defect was not merely unguarded — it was
+  // GUARDED THE WRONG WAY. A test can hold a client-invented rule in place just as firmly as a real one,
+  // and this one made the upsell look deliberate to anyone who read the tests for intent.
+  //
+  // A test is only evidence about the product when the rule it encodes came from the product. This one came
+  // from the page it was testing. Server truth: site_handlers.go:19/95/280, all-editions core (D11).
+  it("an OPEN-edition owner can view AND manage — there is no edition term left to fail on", () => {
+    const g = siteGate({ role: "owner", emailVerified: true });
+    expect(g.canView).toBe(true);
+    expect(g.canManage).toBe(true);
   });
-  it("enterprise member → sees topology (canView) but cannot manage", () => {
-    const g = siteGate({
-      role: "member",
-      emailVerified: true,
-      edition: "enterprise",
-    });
+  it("a member sees the topology (D5 read-only) but cannot manage", () => {
+    const g = siteGate({ role: "member", emailVerified: true });
     expect(g.canView).toBe(true);
     expect(g.canManage).toBe(false); // member lacks site:manage
   });
-  it("enterprise admin + verified → can manage", () => {
-    expect(
-      siteGate({ role: "admin", emailVerified: true, edition: "enterprise" })
-        .canManage,
-    ).toBe(true);
+  it("admin + verified → can manage", () => {
+    expect(siteGate({ role: "admin", emailVerified: true }).canManage).toBe(
+      true,
+    );
   });
   it("manage requires a verified email (mirrors the server)", () => {
-    expect(
-      siteGate({ role: "owner", emailVerified: false, edition: "enterprise" })
-        .canManage,
-    ).toBe(false);
+    expect(siteGate({ role: "owner", emailVerified: false }).canManage).toBe(
+      false,
+    );
+  });
+  it("canView is TRUE even with no role at all — reading is not a privilege here", () => {
+    // Both sides of the two-valued thing (mechanism 9): canManage varies, canView does not, and that is
+    // asserted rather than assumed.
+    const g = siteGate({ role: undefined, emailVerified: false });
+    expect(g.canView).toBe(true);
+    expect(g.canManage).toBe(false);
   });
 });
 
-describe("sitesView — no member_gate (a member SEES the topology)", () => {
+describe("sitesView — three states, and 'upsell' is no longer one of them", () => {
   it("load error → retry (never a reassuring empty topology)", () => {
-    expect(
-      sitesView({ editionReady: true, loadError: true, isEnterprise: true }),
-    ).toBe("load_retry");
+    expect(sitesView({ ready: true, loadError: true })).toBe("load_retry");
   });
-  it("not ready → loading; non-enterprise → upsell; else body", () => {
-    expect(
-      sitesView({ editionReady: false, loadError: false, isEnterprise: false }),
-    ).toBe("loading");
-    expect(
-      sitesView({ editionReady: true, loadError: false, isEnterprise: false }),
-    ).toBe("upsell");
-    expect(
-      sitesView({ editionReady: true, loadError: false, isEnterprise: true }),
-    ).toBe("body");
+  it("not ready → loading; ready → body", () => {
+    expect(sitesView({ ready: false, loadError: false })).toBe("loading");
+    expect(sitesView({ ready: true, loadError: false })).toBe("body");
+  });
+  it("a load error OUTRANKS not-ready — a failure is never shown as a spinner", () => {
+    expect(sitesView({ ready: false, loadError: true })).toBe("load_retry");
   });
 });
 

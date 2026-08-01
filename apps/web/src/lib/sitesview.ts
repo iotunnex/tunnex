@@ -22,37 +22,53 @@ import { relativeAge } from "./format";
 // email (mirrors the server). A member (no site:manage) sees topology but NOT the pending queue (D5:
 // the queue is an action surface — visible-but-inert is the B6 cousin).
 export interface SiteGate {
-  isEnterprise: boolean;
-  canView: boolean; // enterprise member+ → read-only topology
+  canView: boolean; // every member → read-only topology, every edition
   canManage: boolean; // owner/admin + verified → mutations + queue
 }
 
+/**
+ * ⛔ NO EDITION TERM. FOUNDER-RULED 2026-08-02 — THE GATE WAS THE BUG.
+ *
+ * This read `edition === "enterprise"` and the page rendered an UPSELL to everyone else. The server
+ * disagrees, in writing, three times:
+ *
+ *   apps/api/internal/http/site_handlers.go:19   "(all editions, D11)"
+ *   :95                                          "site:manage (all-editions core, D11)"
+ *   :280                                         "All-editions core ... (authorize FIRST, no edition gate)"
+ *
+ * `ListSites` authorizes on `org:view` alone, NO site endpoint returns `edition_required`, and `/sites` is
+ * absent from `ENTERPRISE_PATHS`. So an open-edition org could drive the whole site model through the CLI
+ * and the API while this screen asked it to buy enterprise.
+ *
+ * ⛔ THE ONE-TRUTH RULE, STATED SO THE NEXT SCREEN INHERITS IT:
+ *
+ *     THE SERVER OWNS THE EDITION DECISION. THE CLIENT CONSUMES IT.
+ *     A CLIENT-SIDE EDITION BRANCH THAT IS NOT DERIVED FROM THE SEAM IS A SECOND SOURCE OF TRUTH.
+ *
+ * The seam is `ENTERPRISE_PATHS` + `gate()` in `src/lib/edition.ts`, which is held to the spec by a census.
+ * An edition branch written by hand, as this one was, is exactly the drift the census cannot see — because
+ * it never passes through the seam at all.
+ */
 export function siteGate(input: {
   role: Role | undefined;
   emailVerified: boolean;
-  edition: string | undefined;
 }): SiteGate {
-  const isEnterprise = input.edition === "enterprise";
   return {
-    isEnterprise,
-    canView: isEnterprise, // any enterprise member sees the topology (read-only)
-    canManage:
-      isEnterprise && input.emailVerified && can(input.role, "site:manage"),
+    canView: true, // every member reads the topology their traffic traverses (D5), in every edition
+    canManage: input.emailVerified && can(input.role, "site:manage"),
   };
 }
 
 // sitesView decides the page's top-level render. No "member_gate" — unlike Access, a member SEES the
-// topology (D5 read-only), so the only non-body states are load/retry/upsell.
-export type SitesViewState = "loading" | "load_retry" | "upsell" | "body";
+// topology (D5 read-only). No "upsell" either, as of S14.5: there is nothing to sell.
+export type SitesViewState = "loading" | "load_retry" | "body";
 
 export function sitesView(i: {
-  editionReady: boolean;
+  ready: boolean;
   loadError: boolean;
-  isEnterprise: boolean;
 }): SitesViewState {
   if (i.loadError) return "load_retry";
-  if (!i.editionReady) return "loading";
-  if (!i.isEnterprise) return "upsell";
+  if (!i.ready) return "loading";
   return "body";
 }
 
