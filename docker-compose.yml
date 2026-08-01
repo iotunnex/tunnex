@@ -130,6 +130,10 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/web.Dockerfile
+      args:
+        # Empty unless the visual job (or `make visual`) sets it. A build-time flag, not a runtime one:
+        # Vite bakes import.meta.env into the bundle, so a container env var arrives after the decision.
+        VITE_VISUAL_GALLERY: ${VITE_VISUAL_GALLERY:-}
     restart: unless-stopped
 
   nginx:

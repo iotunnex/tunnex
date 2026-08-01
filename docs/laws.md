@@ -1398,3 +1398,30 @@ CI run** and committing the artifacts, rather than producing them locally in one
 **SAME FAMILY AS *"run the command the gate runs, from where the gate runs it."*** Both say: a check's answer
 is a property of its ENVIRONMENT as much as its logic, and a result obtained somewhere else is a result about
 somewhere else.
+
+## A BUILD-TIME FLAG DELIVERED AT RUNTIME ARRIVES AFTER THE DECISION (2026-08-01, S14 viewport leg)
+
+**THE INSTANCE.** The visual gallery is gated by `import.meta.env.VITE_VISUAL_GALLERY`. The CI job set it in
+`.env` — which reaches **compose** and the **running container**, and never reaches the **image build**.
+
+**Vite bakes `import.meta.env` into the bundle at BUILD time.** The route was dead-code-eliminated before the
+variable existed. The container then started with the flag set, serving a bundle that had never contained the
+route.
+
+**IT FAILED IN THE MOST MISLEADING WAY AVAILABLE:** `toBeVisible` timed out on an element that had never been
+compiled in. **Nothing said "the flag did not apply."** The symptom was a missing element, which reads as a
+rendering bug, a timing bug, or a bad selector — three wrong places to look.
+
+**THE FIX IS STRUCTURAL: a build-time flag travels as a BUILD ARG**, declared in the Dockerfile and passed
+through compose, so the value is present when the decision is made.
+
+> ## **THE RULE: FOR ANY FLAG, ASK *WHEN IS THE DECISION TAKEN?* AND DELIVER IT BEFORE THAT MOMENT.**
+> **Build-time, boot-time and request-time flags look identical in a config file and are not interchangeable.**
+
+**AND THE PROCESS POINT THAT CAUGHT IT: THE JOB WAS EXPECTED TO FAIL, AND THE FAILURE WAS STILL READ.** The
+first run was *designed* to fail with *"snapshot doesn't exist"* so the baselines could be harvested. **Two of
+the five failures were that. Two were this.** Had the log been skimmed for "did it fail? yes, as planned",
+the broken gallery specs would have shipped with baselines harvested from a page that never rendered.
+
+**AN EXPECTED FAILURE IS STILL A FAILURE THAT MUST BE READ.** *"It failed as predicted"* is a claim about the
+REASON, not the outcome — and the reason is the only part that was predicted.
