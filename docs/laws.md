@@ -1449,3 +1449,30 @@ in the styling says so.
 **AND THE DIAGNOSTIC RULE, WHICH IS THE TRANSFERABLE PART: WHEN A FIX LEAVES A MEASURED NUMBER UNCHANGED,
 THE HYPOTHESIS IS WRONG — NOT INSUFFICIENT.** The temptation is to add a second fix on top of the first. **The
 measurement was already telling us the first fix addressed nothing.**
+
+## FREEZING THE CLOCK FIXES A VARIABLE *NOW*. IT DOES NOTHING ABOUT VARIABLE *DATA*. (2026-08-01, S14 viewport leg)
+
+**THE INSTANCE.** The viewport leg's determinism plan named `relativeAge` — *"3s ago" / "12m ago"* — as the
+largest source of false diffs, and prescribed **freezing the browser clock**. That was implemented, and the
+Overview snapshot still diverged by **118 pixels** on the next run.
+
+**BECAUSE THE VARIABLE WAS NEVER `Date.now()`. IT WAS `created_at`.** The seed writes its audit rows at SEED
+time, which differs every CI run. `frozen_now − varying_created_at` varies, so *"2m ago"* becomes *"5m ago"*
+and the image diverges forever.
+
+> ## **A RELATIVE VALUE HAS TWO OPERANDS. PINNING ONE PINS NOTHING.**
+
+**THE FIX AND THE ANTI-FIX, because the wrong one is easier and looks reasonable:**
+
+| | |
+|---|---|
+| ❌ **`maxDiffPixelRatio: 0.01`** | passes this diff **and every real regression smaller than it**. A threshold is how a visual suite stops meaning anything, and it is the move a red-nobody-can-explain always invites. |
+| ✅ **`mask: [page.locator("[data-volatile]")]`** | excludes a **named** region. The snapshot covers LAYOUT; the timestamp VALUE is unit-tested in `relativeAge`. |
+
+**THE DISTINCTION THAT MATTERS: A MASK IS DECLARED IN THE MARKUP AND VISIBLE IN THE IMAGE; A THRESHOLD IS A
+NUMBER IN A CONFIG THAT SILENTLY COVERS EVERYTHING.** One says *"this region is not asserted"*; the other says
+*"some unspecified amount of anything may change"*. **Both reduce coverage. Only one tells you where.**
+
+**GENERALLY: BEFORE ADDING TOLERANCE, ASK WHAT IS ACTUALLY VARYING AND EXCLUDE THAT.** Tolerance is what gets
+reached for when the answer is unknown — and the cost of not knowing is paid by every future regression that
+fits under the number.

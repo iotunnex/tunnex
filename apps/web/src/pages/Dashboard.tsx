@@ -415,7 +415,10 @@ export default function Dashboard() {
                 {/* One column until there is room for twelve. A `col-span-4` panel on a 12-column grid at
                     390px is ~100px wide, and a 120px donut inside it pushes the page sideways. */}
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
-                  <Panel title="Peer Connection Status" className="lg:col-span-4">
+                  <Panel
+                    title="Peer Connection Status"
+                    className="lg:col-span-4"
+                  >
                     {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
                         than the one the panel is named for. A chart can be perfectly honest about the wrong
                         denominator, and nothing in the render would look wrong. */}
@@ -484,7 +487,16 @@ export default function Dashboard() {
                               <span className="truncate font-mono text-mono text-ink-primary">
                                 {a.action}
                               </span>
-                              <span className="shrink-0 text-micro text-ink-tertiary">
+                              {/* `data-volatile` marks content DERIVED FROM WALL-CLOCK TIME, so the visual
+                                  suite can mask it. Freezing the browser clock is not enough: the seed writes
+                                  these rows at SEED time, which differs every CI run, so "2m ago" becomes
+                                  "5m ago" and the snapshot diffs by a few hundred pixels forever.
+                                  The value itself is unit-tested (`relativeAge`); the snapshot's job is the
+                                  LAYOUT around it. */}
+                              <span
+                                data-volatile
+                                className="shrink-0 text-micro text-ink-tertiary"
+                              >
                                 {relativeAge(a.created_at)}
                               </span>
                             </span>

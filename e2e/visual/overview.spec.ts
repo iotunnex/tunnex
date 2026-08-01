@@ -34,6 +34,16 @@ for (const w of WIDTHS) {
       fullPage: true,
       maxDiffPixelRatio: 0,
       animations: "disabled",
+      // ⛔ MASK WALL-CLOCK-DERIVED TEXT, DO NOT WIDEN THE THRESHOLD.
+      //
+      // Freezing the browser clock fixes a variable NOW; it does nothing about variable DATA. The seed writes
+      // its audit rows at SEED time, which differs every CI run, so "2m ago" becomes "5m ago" and the image
+      // diverges by ~118px forever. The first instinct is maxDiffPixelRatio — and a threshold is exactly how
+      // a visual suite stops meaning anything, because it then also passes the real regressions beneath it.
+      //
+      // Masking is narrower and honest: this snapshot covers LAYOUT, and the timestamp VALUE is unit-tested
+      // in `relativeAge`. What is excluded is named in the markup (`data-volatile`), not hidden in a number.
+      mask: [page.locator("[data-volatile]")],
     });
   });
 }
