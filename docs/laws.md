@@ -632,18 +632,38 @@ field used in a way its definition rules out** — the audit's own evidence argu
 both known violations in this repo are charts, and why `VizSource` is a REQUIRED PROP: **a chart that does not
 name its source does not typecheck**, which moves the question from "did anyone check?" to "does it build?".
 
-## A MISSING PRIMITIVE WEAKENS THE TESTS, NOT ONLY THE UI (2026-08-01, S14.3)
+## A MISSING PRIMITIVE COUPLES **EVERY** TEST LAYER TO MARKUP — AND LIFTING THE WORKAROUND IN ONE LAYER LEAVES THE OTHERS (2026-08-01, S14.3; widened after shipping)
 
-**Measured: ZERO `<table>` elements in the entire web app. Thirty-seven `.map()` calls render `<div>` rows.**
+**Measured: ZERO `<table>` elements in the entire web app. Thirty-seven `.map()` calls rendered `<div>` rows.**
 
-The consequence is not cosmetic. Query rule 1 says query by **role**, and `role="table"` / `row` / `cell`
-**do not exist anywhere to query** — so every wiring test in the component tier works around the gap by
-**matching text**. Text matching is the most brittle query there is and the first thing a redesign breaks.
+**THE SHARED ROOT: with no `<table>` anywhere, there was NO ROLE TO ASK FOR.** Query rule 1 binds the project
+to role + accessible name, and `role="table"` / `row` / `cell` did not exist. So **every** layer that needed to
+identify a row invented its own workaround — **independently, and none of them could see the others doing it.**
 
-**THE RULE. A MISSING SEMANTIC PRIMITIVE COMPOUNDS: it degrades the UI once and the TESTS OF THAT UI a second
-time** — and **the second cost is invisible from either side.** Reading the tests shows queries that work.
-Reading the components shows markup that renders. **Only measuring the semantics across both shows that the
-tier is guarding text instead of structure.**
+| layer | the workaround it invented | why it looked fine |
+|---|---|---|
+| **unit tier** (vitest) | `getByText("old-laptop")` — matching row content as **free text** | passes; reads like a normal query |
+| **e2e specs** (Playwright) | `page.locator("main ul > li")`, `locator("li", { hasText })` — **DOM structure** | passes; reads like a normal locator |
+
+**THE PART THAT WAS LEARNED BY SHIPPING.** This law was first minted from the unit tier alone. Slice A
+converted three screens, re-pointed the unit tier at roles, ran `make web-gate` **green** — **and CI's `e2e`
+job went red**, because the Playwright specs were coupled for the *same* reason and had not been touched.
+**Lifting the workaround in one layer left the other, and the one left behind was the one the local gate does
+not run.**
+
+### THE DIAGNOSTIC — enumerate, do not read
+
+> **WHEN A PRIMITIVE LANDS, ENUMERATE EVERY CONSUMER ACROSS EVERY TEST TIER BEFORE DECLARING IT LANDED.**
+
+**Reading is not enough, and the reason is precise:**
+
+- **reading one tier** shows queries that **work** — they pass, so nothing draws the eye;
+- **reading the components** shows markup that **renders** — it looks correct, because it is;
+- **only the ENUMERATION** shows the workaround — because a workaround is only visible as *the gap between what
+  a layer asks for and what it could have asked for*, and that gap exists in neither artifact alone.
+
+**A primitive that ships while ANY consumer keeps the workaround has only half landed** — and the half left
+behind is invisible from both of the places you would naturally look.
 
 ## ⑦ THE SEVENTH VACUITY MECHANISM — **AN UNCHECKED CLAIM** (minted 2026-08-01, S14.1 → S14.3)
 
@@ -711,3 +731,50 @@ one it was.**
 appear", exact-match against an empty expectation — **all pass on nothing.** Any check reading an external
 artifact needs a **non-triviality assertion on the artifact itself**, and it belongs beside the check, not in
 the author's head.
+
+## NAME A GATE WITH ITS COMPOSITION, ALWAYS — A PHRASE MUST NOT CARRY MORE WEIGHT THAN ITS TARGET (2026-08-01, founder-ruled)
+
+> ## **`make web-gate` (typecheck + vitest + build — NOT Playwright; e2e runs in CI only)**
+
+**That parenthetical is MANDATORY wherever the target is named**, in papers, commit messages and reports, and
+it was **applied retroactively** to the S14.1 / S14.2 / S14.3 papers rather than only going forward.
+
+**THE INSTANCE.** Slice A was reported as *"`make web-gate` GREEN"* — true — and was **broken**, because
+`e2e` is not in it. Three Playwright specs selected rows by DOM structure and died the moment the lists became
+tables. **The claim was accurate and the sentence was not**, because "the gate" sounds total and the target is
+partial.
+
+**THIS PROJECT HAS A DOCUMENTED HISTORY OF EXACTLY THIS CLASS, and the members should be read together:**
+
+| phrase | what it sounds like | what it actually is |
+|---|---|---|
+| *"CI is green"* | everything ran and passed | **[[CI GREEN BY ABSENCE]]** — a job that never fired reports nothing, and nothing looks like success |
+| *"`generate-check` guards the artifacts"* | tampering is detected | **it protects the SOURCE↔ARTIFACT RELATIONSHIP** — a hand-edit is regenerated away and the check goes green |
+| *"`mutate.sh` printed `Restoring`"* | the file is back | **restoration is from the BACKUP**, and only the target file — a generated artifact stays mutated |
+| *"`make web-gate` passed"* | the web surface is gated | **typecheck + vitest + build. NOT Playwright.** |
+
+**THE RULE. A GATE'S NAME IS A CLAIM ABOUT COVERAGE, AND AN UNQUALIFIED NAME OVERSTATES IT** — not through
+dishonesty but through **compression**: the short form survives into summaries, handoffs and re-entry, while
+the composition stays behind in the Makefile. **The parenthetical travels; the Makefile does not.**
+
+**AND THE COST IS ASYMMETRIC.** Overstating coverage produces confident wrong decisions — *"the gate passed,
+ship it"*. Stating it precisely costs eight words.
+
+## AN OFF-BY-ONE THAT RESEMBLES A PLAUSIBLE PRODUCT DEFECT COSTS MORE TO DIAGNOSE THAN ONE THAT LOOKS ABSURD (2026-08-01, S14.3)
+
+**THE INSTANCE.** Re-pointing `audit.spec.ts` from `main ul > li` to `getByRole("row")` changed what "a row"
+means: **`role="row"` INCLUDES THE HEADER.** Both counts needed `+1` (50 → 51, 53 → 54).
+
+**The second one was nearly missed — and it would have failed IN THE SAFE-LOOKING DIRECTION.** That spec
+asserts keyset paging stitches 53 events with **no overlap and no gap**. A count of 53-where-54-is-expected
+does not read as *"the test counts the header now"*. **It reads as a re-served or dropped row — a paging bug**,
+which is a real defect this suite exists to catch, in a subsystem where such bugs genuinely occur.
+
+**THE RULE. THE DANGEROUS FAILURE IS THE ONE THAT LOOKS LIKE A BUG YOU BELIEVE IN.** An absurd red (`expected
+54, got 0`) is diagnosed in seconds. A **plausible** red sends someone into the paging logic — the code that is
+correct — and the longer they look, the more likely they are to "fix" it there.
+
+**SIBLING OF THE MEASUREMENT-ERROR LAW: a plausible finding is more dangerous than nonsense.** Same shape, one
+domain over: **nonsense is self-announcing; plausibility is camouflage.** So when a query's *semantics* change
+under a refactor — what counts as a row, a cell, a match — **state the new convention IN the assertion**, so
+the next red is read as a convention question rather than a product one.
