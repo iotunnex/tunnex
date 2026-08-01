@@ -427,3 +427,46 @@ above the token, printed at the moment it matters.
 | A1′ node id | `019fbb50-47c3-7581-a35a-d2825c95a605` |
 | status | active, `key_recorded=t`, `cert_delivered=t` |
 | site_id | NULL (required for B4 — a hub-set member would self-heal the device and fake the pass) |
+
+## §B — B4 precondition, B1 SATISFIED, and WF-S13-6's THIRD instance (unattended)
+
+**B4 precondition asserted and recorded:** `org_hub_set` contains A1′ (`019fbb50…`) in neither `configured` nor
+`demoted` — **zero rows**. A hub-set member would re-point managed devices through the dial channel, so B4's
+device would self-heal and read "no badge", the PASS string, for the wrong reason.
+
+**B′ IS BOUND TO `azure-site`** (`019f8e4b…`), not aws-site. Deliberate to record: B1's claim is that `site_id`
+SURVIVES recovery, so any non-NULL binding tests it. The site's identity is not the subject.
+
+### WF-S13-6, THIRD WIRE INSTANCE — and the first that nobody staged
+
+| event | time (UTC) |
+|---|---|
+| B′ recovered by hand (instance 2) | Jul 31 15:41:11 |
+| renewed ONCE, to | Jul 31 15:56:11 |
+| **expired, and stayed expired** | Jul 31 15:56:11 |
+| manual `docker restart` | **Aug 1 03:17:22** |
+| `agent_rekeyed` — same node, same identity | **Aug 1 03:17:24** |
+| **STUCK** | **11h 21m** |
+| **recovery once reachable** | **~1.7s** |
+
+**Nobody arranged this one.** Instances 1 and 2 were found while staging; this happened overnight on an idle rig,
+which is precisely how it will happen to an operator.
+
+**It also confirms the failure needs only ONE missed renewal.** B′ renewed once at 15:45-ish and then stopped.
+`renewLoop` retries on its own interval, and any retry landing after `NotAfter` hits an endpoint that requires
+the certificate that just expired. One miss locks the agent out, and boot-only recovery means nothing reopens it.
+The agent is running `9f7c56f`, which predates `fa35e63`'s `identityWatchLoop` — so this is the LAST fleet state
+in which this can happen, and it happened.
+
+### B1 — SATISFIED. A site-bound gateway recovers IN PLACE.
+
+| field | before | after |
+|---|---|---|
+| node id | `019fb892…` | **`019fb892…` (same)** |
+| `site_id` | `019f8e4b…` | **`019f8e4b…` (UNCHANGED)** |
+| `cert_not_after` | Jul 31 15:56:11 (expired) | Aug 1 03:27:24 |
+| `cert_delivered` | t | t |
+
+**§A could not test this.** Its Leg 1 asserted "`site_id` unchanged across recovery" against a node whose
+`site_id` was NULL — trivially true, therefore untested, and it is one of the epic's headline claims. **B1 is the
+first time the claim was made against a node that had something to lose.**
