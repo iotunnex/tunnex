@@ -87,6 +87,23 @@ against that case.** If the check cannot tell that case apart from the others, i
    a deliberate **injected-duplicate probe**: feed the check a case that must produce a different answer and
    require it to. The probe proved the counting method sound while the path construction was broken.
 
+3. **`ok … [no tests to run]`** — a green with NOTHING EXECUTED, byte-indistinguishable in a scrollback from a
+   green with everything passing. Produced by running a `//go:build enterprise` test file without the tag.
+
+**CAN A GATE PRODUCE THAT SHAPE? Checked, and the answer is a qualified YES — which makes it a gate hole, not
+just a local footgun.**
+
+- If **every** file in a package is excluded by a build tag, `go test` reports **`FAIL … [setup failed]`**. Loud,
+  and safe.
+- But if **some** files are excluded and others are not, the package runs the survivors and prints **`ok`**. The
+  excluded tests are invisible, and nothing in the output distinguishes "these tests passed" from "these tests
+  were never compiled."
+
+**Live instance in this repo:** `apps/api/internal/devices/restore.go` is **untagged** — it ships in BOTH
+editions — while its only test file, `restore_integration_test.go`, is `//go:build enterprise`. So
+`make test-editions`' open pass compiles the restore path, tests none of it, and reports `ok` for the package.
+Registered as a finding in `docs/S13.1-pass3-triage.md`.
+
 **Instance 2 is the form to copy.** Do not merely inspect a check; **feed it a case it must fail on.** A check
 that has never once produced a different answer has not been shown to be capable of one.
 

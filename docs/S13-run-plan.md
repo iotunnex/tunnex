@@ -412,6 +412,40 @@ registered either way — but registered **with measurements** rather than with 
 > says it will), but it is no longer why §C exists. **§C does not run until the remedy has landed** — before
 > that, its result is known in advance, and a run whose outcome is known proves nothing.
 
+## §C PREREQUISITES — establish these BEFORE the clock, not on the day
+
+**1. THE RIG NEEDS A REBUILT AGENT IMAGE.** §C proves `identityWatchLoop`, which **does not exist** in the
+images on the rig — they are built from `c417c85`. §C needs an agent image carrying **`fa35e63` or later**.
+This is the one place the same-binary provenance rule is deliberately broken: §A and §B share `c417c85` so they
+are comparable; §C tests code neither of them contains.
+
+**2. THE SUBJECT IS THE `k8s` ROW, via Helm.** §B's subjects (aws-gw-2 and the re-enrolled aws-gw-1) are stopped,
+revoked and restored during §B, so neither can hold a 48-hour clock. `azure-gw` cannot host a second agent
+(`wg0` contention). That leaves the in-cluster agent — and its image must be imported with
+**`k3s ctr images import`, NOT `docker load`** (`docs/infra-inventory.md`).
+
+**3. DELETE THE TTL LINE — DO NOT OVERRIDE IT.**
+
+```bash
+# [azure-cp] the knob must be GONE, not shadowed by a second line
+grep -n TUNNEX_AGENT_CERT_TTL .env          # note the line number
+# DELETE that line. Do NOT append TUNNEX_AGENT_CERT_TTL=48h — a later duplicate wins in some loaders and not
+# others, and which one wins is exactly the thing this run must not have to reason about.
+grep -c TUNNEX_AGENT_CERT_TTL .env          # MUST print 0
+make up-enterprise                           # restart the CP so the removal takes effect
+```
+
+**4. CONFIRM THE SHORTENING IS ABSENT FROM THE LOG BEFORE THE CLOCK STARTS.**
+
+```bash
+# [azure-cp] the knob logs itself when active. Its ABSENCE is the precondition.
+sudo docker compose logs api --since 5m 2>&1 | grep -c agent_cert_ttl_shortened   # MUST print 0
+```
+
+**A non-zero count means the clock has not started** — whatever the wall clock says. §C's entire subject is that
+the shortening knob did not change behaviour, so a §C run at a shortened TTL proves nothing and cannot be
+salvaged after the fact.
+
 ## C-LEG-0 — THE ACCEPTANCE LEG. No restart. No operator action.
 
 **This leg exists in no other section, and its absence is why the defect shipped.** §A stopped-then-started the
