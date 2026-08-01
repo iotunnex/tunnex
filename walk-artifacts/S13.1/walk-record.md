@@ -1212,3 +1212,105 @@ files before they were handed over (`grep -c "^DNS"` → `0`). **WF-S13-8 has no
 
 **A ruling made against one artifact does not survive the artifact changing.** The earlier decision was correct
 for static exports and wrong for these, and nothing but re-reading the actual files would have caught it.
+
+
+# WF-S13-11 (HIGH) — A PURPOSE-BUILT GUARD, WORKING AS DESIGNED, SILENT FOR AN ENTIRE EPIC
+
+## The defect it failed to catch
+
+**`apps/cli` does not compile on this branch.**
+
+```
+internal/api/api.gen.go:12208:12: r.HTTPResponse undefined (type RestoreNodeDevicesResponse has no field or method HTTPResponse)
+```
+
+Slice 7 defines a schema `RestoreNodeDevicesResponse` (`openapi.yaml:3148`) alongside
+`operationId: restoreNodeDevices` (`:668`). oapi-codegen names an operation's response wrapper
+`<operationId>Response`, so two `type RestoreNodeDevicesResponse struct` land in one package
+(`api.gen.go:1363` and `:12190`) and the generated client cannot build.
+
+## THIS CLASS WAS KNOWN, AND THE GUARD FOR IT ALREADY EXISTED
+
+The spec says so, in a comment written to prevent exactly this, on the schema right next door:
+
+> `RekeyNonce` — *"NAMED TO AVOID A GENERATOR COLLISION. oapi-codegen derives a response wrapper called
+> `<operationId>Response`, so a schema named `RekeyChallengeResponse` collides with the wrapper for operationId
+> `rekeyChallenge` and breaks the Go CLI client's compilation. **Second instance of this class: S11-2 hit it with
+> `MintMachineCredentialResponse`, and `make test-cli` was added THEN to catch exactly this — it did.**"*
+
+So: **third instance. The class was documented. The guard was purpose-built. The guard is correct. It never ran.**
+
+`make generate-check` cannot substitute — it detects DRIFT, not compilation, and the committed file is
+byte-identical to what regeneration produces. Both are broken.
+
+## WHY IT NEVER RAN — structural, not an accident
+
+```
+gh run list --branch story/S13.1-gateway-recovery  →  []
+```
+
+Zero runs, before and after a successful push (`47cf32b..37f67d4`). `.github/workflows/ci.yml`:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+```
+
+**A push to a story branch triggers nothing.** CI runs on `main` and on pull requests — and the PR is the LAST
+step before merge. So for the entire life of a story branch, through commit-one, every slice, three review
+passes and the whole box-walk, **there is no CI signal at all.** The first execution of `make test-cli` on this
+epic's code will be whenever a PR is opened.
+
+**This is green-by-ABSENCE, the branch-protection class applied to CI.** The merge gate reads *"CI green on
+`gates` + `client (macos-latest)` + `client (windows-latest)`."* On this branch that precondition is not
+merely unmet — **it is unverified**, and behind it sit 20+ folded fixes, migrations 0054-0064, both editions,
+and all of Slice 7. **Nobody knows what else is red.** The CLI break is simply the one that surfaced because a
+walk step happened to need the binary.
+
+**RAISED TO THE SAME STANDING AS THE OTHER THREE MERGE PRECONDITIONS** (`docs/S13.1-review-state.md`).
+
+**Disposition on the CLI break itself is a decide-item, not a fold**, and the fix is one line with a precedent
+in the same file: `x-go-name: RestoreDevicesResult` (mirroring `CreateDeviceResponse`'s
+`x-go-name: CreateDeviceResult`) plus `make generate`. **Not touched during the walk.**
+
+
+# §B step 8 / LEG 1 — RECOVERY IN PLACE, PASS. And B2 was NOT observed — the poller could not have seen it.
+
+**[agent]-run**, `06:22:16Z`.
+
+| field | before (expired) | after |
+|---|---|---|
+| `cert_serial` | `c2f1e85a…` | **`cbe23edf…`** |
+| `cert_not_after` | 06:18:04 (**expired**) | **06:32:17** |
+| `site_id` | `019f8e4b…` | **`019f8e4b…` UNCHANGED** |
+| `status` | active | active |
+| node id | `019fb892…` | **same** |
+| socket | none (stopped) | `39180`/`39190`, pid 205031 — **new handshake** |
+
+```
+06:22:17.246  agent_rekeyed  old_cert_serial=c2f1e85a…  "recovered by proof of possession — same node, same identity, new key"
+06:22:19.262  agent_ready
+```
+
+**Recovery: ~1.0s from container start to `agent_rekeyed`, ~3s to ready.** Same node, same site binding, no
+operator action beyond the start. **Leg 1 PASSES**, and this is the fourth independent D3 confirmation.
+
+## ⚠ B2 IS NOT PROVEN — AND THE CHECK AS RUN WAS VACUOUS
+
+B2's claim is that **`cert_delivered` flips `f` → `t`**. The poller sampled it **twelve times at ~7s intervals
+and read `t` every time**, including the sample 3 seconds after the start. **That is not evidence the flip
+happened; it is evidence the poller never looked during the window.**
+
+The window is bounded by the code: `RekeyNode` clears the marker in the same statement that rotates the serial
+(`nodes.sql:319-326`, *"cert_delivered_at IS CLEARED IN THIS SAME STATEMENT (S13.1 D3 condition 1), not in a
+follow-up write"*), and `nodes.sql:49` sets it back the first time the agent authenticates with the new
+certificate. **Between those two events: `06:22:17.246` → `06:22:19.262`, about two seconds.** A 7-second poll
+against a 2-second window **cannot fail**, which makes it the census-needs-censusing shape this epic keeps
+minting.
+
+**Recorded as NOT OBSERVED rather than passed.** To catch it the poller must sample at ~200ms across a re-key —
+and re-key is the only trigger, since `RenewNodeCert` does not touch the marker (`nodes.sql:75-77`). **B2 is
+OWED**, and it needs one more stop/start with a fast poller, which is a mutation and a separate yes.
