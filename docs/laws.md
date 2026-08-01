@@ -1781,3 +1781,77 @@ it.**
 
 **Recorded because it is the only instance so far where following one rule required rewriting how another one
 was expressed**, and the reflex in that moment is to claim an exemption for the older rule.
+
+# ⭐ AN APPROVAL PROVES WHAT WAS LOOKED AT, UNDER THE CONDITIONS IT WAS LOOKED AT (2026-08-02, S14.5 — founder-filed on his own approval)
+
+**`--tnx-ink-600` DOES NOT EXIST.** The Donut's `neutral` slice referenced it, so **every neutral slice has
+rendered BLACK since S14.3** — on **Overview**, a screen the founder reviewed on localhost and passed.
+
+**THE HUMAN GATE HAS THE SAME SHAPE OF BLIND SPOT AS THE AUTOMATED ONES.** A black arc segment on a
+near-black panel is **not distinguishable by eye from a deliberate dark tone**. There was nothing to notice:
+no error, no gap, no obviously-wrong colour — just a slice quieter than intended, on a palette full of
+quiet things.
+
+> ## **THE FOUNDER'S REVIEW IS NECESSARY AND IT IS NOT OMNISCIENT. IT PROVES WHAT WAS VISIBLE UNDER THE
+> ## CONDITIONS OF LOOKING — NOT THAT THE SCREEN IS CORRECT.**
+
+**THIS DOES NOT WEAKEN THE SECTION PROTOCOL. IT BOUNDS IT.** The human gate catches what no test can (*"it
+does not look like the design"*). It cannot catch a value that is wrong in a direction the eye reads as a
+choice. **The two gates fail differently, which is the whole argument for having both** — and it means a
+passed review is not a reason to stop building mechanical guards for the same screen.
+
+**MECHANISM MINTED: `test/tokenrefs.test.ts`** enumerates every `var(--tnx-*)` in `src` against the generated
+token set. CSS does not error on an undefined custom property — `var()` with no fallback resolves to the
+INITIAL value — so this class is silent by construction and needs an enumeration, not an eye.
+
+# ⭐ A COMPONENT CONSTRAINED BY ITS HARNESS IS NOT A COMPONENT THAT HAS BEEN TESTED AT SIZE (2026-08-02, S14.5)
+
+**FIXTURE-FIDELITY APPLIED TO A HARNESS — and the failure runs the OPPOSITE way from the known one.**
+
+The known trap is a double that **OUT-capabilities** the substrate: a fake that answers what the real thing
+refuses, so the test passes and production fails. **This is the inverse: the harness UNDER-capabilities it.**
+
+Every gallery specimen renders inside `w-80` — 320px. `NodeLink` has `viewBox 200x120` and `w-full`, so its
+height derives from its width:
+
+| context | rendered height |
+|---|---|
+| gallery, `w-80` | **192px — tidy, correct-looking** |
+| Sites, 8fr column at 1440 | **~750px, with two enormous discs floating in it** |
+
+**AND THE DIFFERENCE IS INVISIBLE BECAUSE BOTH LOOK CORRECT.** The gallery image was not subtly wrong; it was
+right, at a width no screen gives that component.
+
+> ## **A HARNESS THAT CONSTRAINS ITS SPECIMENS TESTS THE HARNESS.**
+
+**THE GENERAL FORM: ANY PROPERTY DERIVED FROM AVAILABLE SPACE IS UNTESTED BY A FIXED-WIDTH HARNESS** —
+aspect-ratio heights, wrap points, truncation, column counts, `min-width:auto` overflow. All of them are
+**functions of the container**, and a harness that pins the container pins the function's only input.
+
+# ⭐ RECESSION IS THE HONEST ENCODING FOR A DEGRADED STATE — every diagram, from here (2026-08-02, S14.5, founder-ruled)
+
+**I DREW THE MESH'S LINK STATES AS GREEN / AMBER / RED. THE DESIGN IS NEAR-MONOCHROME** — `linked` is light
+grey, `degraded` and `down` are progressively DARKER greys separated by a dash pattern, and **only the status
+dot carries a hue**. The founder's rendering was right and mine was the reflex.
+
+> ## **A FIVE-NODE MESH WITH THREE RED EDGES READS AS AN EMERGENCY EVEN WHEN ONE SPOKE IS MERELY UNREACHABLE.**
+
+**A failure tone SHOUTS, and shouting does not scale with the number of things in the picture.** Three reds
+in a five-node diagram is a crisis; three reds in a fifty-node diagram is Tuesday — but the eye cannot tell
+which it is looking at, because red does not encode proportion.
+
+**RECESSION DOES.** A degraded edge that RETREATS stays legible at any node count: the healthy structure
+remains readable, and the faults are the gaps in it. **The words in the list below carry the actual claim**,
+which is where a claim belongs.
+
+## ⛔ AND THE REASON THIS NEEDS TO BE A LAW RATHER THAN A PREFERENCE
+
+**THE FAILURE TONE WILL ALWAYS LOOK MORE INFORMATIVE WHILE YOU ARE BUILDING IT.** A grey diagram looks
+under-built; a red one looks like the UI is working hard. That pressure is constant and it points the wrong
+way every time.
+
+**SPEND COLOUR WHERE IT IS SCARCE.** One hue, on one element, means something. Three hues on every edge mean
+the diagram has a palette.
+
+**SIBLING:** *absence of a relationship is drawn as absence of an edge.* Same family — both are cases where
+the quieter rendering is the true one and the louder one is a claim nobody measured.
