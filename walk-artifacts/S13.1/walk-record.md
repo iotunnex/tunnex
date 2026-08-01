@@ -1505,3 +1505,104 @@ reading the UI would believe otherwise, because the CP shows every row as `revok
 
 **It does not block step 10** — the restore re-homes these devices onto A1′ and is unaffected — so §B continues
 with this recorded.
+
+## RAISED TO A MERGE DECIDE-ITEM ([founder], 2026-08-01) — it must be DECIDED, not registered by default
+
+*"Revoke a gateway"* is an operator action offered in the UI **whose wire effect is nothing until a human SSHes
+to the box.** That is **S11's finding-underneath-the-findings, third instance in this epic**: a mechanism that
+works, a procedure around it that does not, and documentation asserting the procedure. WF-S13-7 was the same
+shape one layer down (the install command that does not carry the recovery it documents).
+
+**Whether it blocks the merge is the founder's call. What is settled is that it goes to the merge conversation
+rather than into the registered-findings pile.**
+
+## A THIRD OPTION for the eventual fix — recorded, NOT built
+
+Weighed against *fail-static-forever* (today) and *fail-closed-on-401* (disconnects the fleet on a CP bug):
+
+**The agent already distinguishes its own credential state LOCALLY.** `identity.Decide` takes no network
+argument by construction — that is D1's whole point. So a **persistent 401 on a channel whose STORED CERTIFICATE
+IS STILL VALID** is locally distinguishable from both an expired-cert 401 and a transient CP fault. Valid
+credential + sustained refusal is the signature of *"the control plane has made a decision about me"*, and it is
+the only one of the three cases where tearing down is the right answer.
+
+**Narrower than `401 → tear down`, and it does not hand fleet liveness to a single status code.** Recorded as an
+option for whoever rules on this; nothing built.
+
+## ITEM 3 — WHAT THE REVOKED GATEWAY WAS STILL ENFORCING (read before the restore destroyed the state)
+
+**The artifact persists, and here it happens to be maximally restrictive.** `nft list table ip tunnex` on B′,
+after revocation:
+
+```
+chain forward {
+    type filter hook forward priority filter; policy drop;
+    ct state established,related accept
+    ct state invalid counter drop        comment "tunnex_ct_invalid_drop"
+    iifname {wg0,tunnex-ovpn} oifname {wg0,tunnex-ovpn} tcp flags syn tcp option maxseg size set rt mtu
+    counter packets 0 bytes 0            comment "tunnex_default_drop"
+}
+```
+
+**Default-deny with ZERO grant rules.** So on this fleet no stale grant survived the revocation — because none
+existed to survive. The `ping 10.99.0.1` that succeeded is the gateway's own interface (input path), not a
+forwarded destination, and `tunnex_default_drop` shows **0 packets**.
+
+**STATED AS A LIMIT, NOT AS A CLEAN RESULT:** this proves the last-fetched artifact PERSISTS, and that in this
+configuration it fails safe. **It does NOT prove that a gateway holding real grants would fail safe** — that is
+the dangerous case and it is untested, because the artifact this gateway held had nothing to leak. **The general
+question stands open. TRIGGER: the next walk on a fleet with live policy rules.**
+
+**One residual that IS visible here:** `ct state established,related accept`. New flows are dropped, but any
+flow already established at the moment of revocation continues, and nothing flushed conntrack — the agent never
+learned of the revocation, so the `conntrack_flush` path (S8.7) was never invoked. No entries were found for the
+revoked addresses at the time of reading, so the effect is real in principle and unobserved in this instance.
+
+
+# §B step 10 — RESTORE. B3 and B4 both PASS. (2026-08-01 07:56:18Z, [agent])
+
+Request schema verified first (`RestoreNodeDevicesRequest`, `required: [target_node_id]`). Source = B′ (revoked),
+target = A1′ (`019fbb50…`, live).
+
+```json
+{"restored": 3, "readdressed": 0,
+ "devices": [{"name":"b3-pending","assigned_ip":"10.99.0.2","kept_address":true},
+             {"name":"b3-active", "assigned_ip":"10.99.0.3","kept_address":true},
+             {"name":"b4-managed","assigned_ip":"10.99.0.4","kept_address":true}]}
+```
+
+| assertion | leg | result |
+|---|---|---|
+| `b3-pending` returns **as pending**, not active | B3 | **PASS** — `pending` |
+| `b3-active` returns as active | B3 | **PASS** |
+| addresses **reclaimed**, not reallocated | B4 | **PASS** — `kept_address: true` ×3, `readdressed: 0` |
+| gateway moved to A1′ | B4 | **PASS** — all three `node_id = 019fbb50…` |
+| managed device shows **NO** stale badge | B4 | **PASS** — `needs_reexport: false` |
+| the data plane actually receives them | — | **PASS** — A1′'s `wg0` carries `10.99.0.3` and `10.99.0.4`; `10.99.0.2` correctly absent (a pending device gets no peer) |
+
+`revoked_prev_status` and `revoked_cause` are **cleared** by the restore — the columns are consumed, so the
+restore is not idempotently repeatable and the history lives in the audit log (`node.devices_restored`), not the
+row. Consistent with the Option-A delete-on-sweep precedent.
+
+## B2 WAS NOT RUN HERE, AND THE REASON IS THE POINT
+
+The plan folded B2's 200 ms poller into this window on the expectation that *"the restore re-keys."* **It does
+not.** `restore.go` reads the target node (`GetNodeForOrgForUpdate:81`) and re-homes devices; it never touches
+`cert_delivered` and never calls `RekeyNode`. **A poller run here would have watched for an event the code cannot
+produce** — the same vacuous shape minted twice today, and the third time it was caught BEFORE running rather
+than after. **B2 still needs a node re-key**, which means its own window and its own mutation.
+
+## THE RESTORE TARGET'S VALIDATION IS `active`, AND THAT IS WF-S13-1's PREDICATE AGAIN
+
+**A1′'s certificate expired at `03:28:48` — four hours twenty-seven minutes before the restore — and its row
+reads `active`.** The restore accepted it, and it worked. It worked because of WF-S13-9: A1′'s connection
+predates its expiry and still authenticates, so the desired-state push landed and `wg0` got the peers.
+
+**Had that connection dropped, the restore would have been a database-only success onto a gateway that could not
+serve** — which is verbatim what the endpoint's own description says it exists to prevent: *"silently restoring
+onto the dead node would produce active devices pointing at a gateway that will never serve them."*
+
+**The guard covers a REVOKED target. It does not cover an ACTIVE-but-locked-out one.** Fourth surface for
+*`active` is the wrong test*, and it reinforces the same one-truth slice: the API already computes a usable
+predicate (endpoint + key + reachable) and the consumers test `status` instead. **Noted here rather than filed
+separately — it is WF-S13-1, not a new finding.**
