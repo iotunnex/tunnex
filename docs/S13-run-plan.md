@@ -321,7 +321,17 @@ Either way it is **measured, not asserted** — the same standard §A applied to
 
 ## B7 — THE THROTTLE. REFRAMED 2026-08-01: an ACCEPTANCE TEST, not a throughput check.
 
-> **B7 MUST NOT RUN UNTIL THE THROTTLE FIX LANDS.** As designed, B7 drives the agent into a permanent 429 — and
+> ### ✅ PRECONDITION SATISFIED 2026-08-01 — the throttle fix LANDED (`7d5f7ca`)
+>
+> B7 is UNGATED. The agent now rotates its identity on a throttled break (#34) and escalates after five
+> consecutive 429s without spending the identity (claims 9/14). **B7's PASS condition 3 is narrowed accordingly:**
+> a throttle was already structurally unable to spend the join token, so observing the same node id proves the
+> ESCALATION and the rotation, not the absence of a fallback that could never have fired.
+>
+> **What B7 must now show:** saturate → back off → `agent_rekey_throttled_persistently` appears → both identity
+> kinds appear across attempts → recovery completes with the SAME node id.
+>
+> **(Historical, kept because the gating mattered:)** **B7 MUST NOT RUN UNTIL THE THROTTLE FIX LANDS.** As designed, B7 drives the agent into a permanent 429 — and
 > that is a **known-broken branch**: pass-3 claims 9/14 plus #34, still owed. The throttled path `continue`s
 > without incrementing `refusals`, so an indefinite 429 is an indefinite stall with no escalation and no
 > fallback, and #34's `break` leaves the identity loop at the fingerprint every time. Running B7 before the fix

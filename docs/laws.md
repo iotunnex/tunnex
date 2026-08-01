@@ -61,6 +61,35 @@ other, and the note that proves the guarantee is the natural place to notice the
 `tunnex-unit-tests-prove-behaviour-not-reachability` — name the trigger, then check the caller can co-occur with
 it.
 
+## TRUE-BY-STRUCTURE — the FOURTH way a green check means nothing (EPIC 13, 2026-08-01)
+
+**The assertion is guaranteed by code the fix never touched, so no mutation of the fix can break it.** The red is
+about a real property, the property genuinely holds, and the test says nothing whatever about the change it was
+written for.
+
+**Four mechanisms now, and they are distinct:**
+
+| mechanism | what fails |
+|---|---|
+| **half-fold** | the remedy addresses the defect's NEIGHBOURHOOD, not the defect |
+| **tautological guard** | the expectation DERIVES from the artifact under test |
+| **fixture restates production** | the DOUBLE stands in for the thing being tested |
+| **TRUE-BY-STRUCTURE** | the assertion is held up by code the fix never touched |
+
+**THE DIAGNOSTIC: if you cannot describe an INPUT that would make the assertion false, it is not a test of the
+fix.** Not "can I imagine the code being wrong" — name the input. If the only way to falsify the assertion is to
+edit a different function than the one under test, the red belongs to that other function, or to nothing.
+
+**THE INSTANCE.** A red asserted that sustained throttling never reaches the join token. It PASSED with
+`refusals++` injected directly into the throttle branch — because the exhaustion check lives inside the
+`ErrRekeyRefused` case and the throttle branch returns before reaching it. **A throttle cannot spend the token
+regardless of any fix**, so the assertion was unfalsifiable by construction.
+
+**THE PROCEDURAL CAUSE, AND THE RULE IT MAKES: ONE MUTATION AT A TIME. Not a preference — the rule.** This
+surfaced only because the two mutations were run SEPARATELY. Combined, the package would have shown ONE `FAIL`
+and one failing test name, and that reads as success for both reds — the passing one hidden behind the failing
+one. A combined mutation run can prove *at least one* red works; it can never prove that each does.
+
 ## DOES THE REMEDY ADDRESS THE DEFECT, OR ITS NEIGHBOURHOOD? (founder-ratified 2026-08-01, EPIC 13, three instances in one epic)
 
 **A fold is not closed because an edit landed near the defect. Ask of every remedy: does this make the NAMED
