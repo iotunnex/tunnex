@@ -327,3 +327,20 @@ of failure, and it is therefore a REQUIRED GATE.**
 **A slice is NOT complete until the founder has seen it running and said GO.** Gate green, CI green and
 mutation proofs are **necessary and not sufficient** — the same relationship `make web-gate` has to `e2e`, one
 level further out.
+
+## ⛔ NO EM-DASHES IN RENDERED COPY (founder-ruled 2026-08-01)
+
+**It reads as AI slop.** Use a full stop, a colon, or a comma. Applies to every user-facing string: labels,
+captions, empty states, error messages, confirm dialogs, toasts.
+
+**Also not a placeholder glyph** — a failed stat reads `n/a`, never `—`.
+
+**Comments are exempt** (they are not rendered), but rendered copy is scanned per section.
+
+**SCOPE, stated honestly: 163 rendered em-dashes remain across 16 screens** that predate this ruling —
+`policyview` 23 · `Sites` 21 · `Access` 20 · `Gateways` 9 · `TunnelControl` 9, and a long tail. **They are NOT
+swept globally**: a mass rewrite of copy across screens nobody is looking at is exactly the unreviewable change
+the section protocol exists to prevent. **Each screen's section clears its own**, and clearing them is part of
+that section's definition of done.
+
+**Overview is clear as of `S14.4`.**

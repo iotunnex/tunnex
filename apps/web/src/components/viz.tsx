@@ -73,7 +73,7 @@ export function VizFrame({
         role="note"
         className="rounded-md border border-white/5 bg-ink-800 px-3 py-2 text-xs text-slate-400"
       >
-        {label} isn&rsquo;t available yet — {source.why}
+        {label} isn&rsquo;t available yet. {source.why}
       </p>
     );
   }

@@ -373,8 +373,8 @@ export default function Dashboard() {
                     />
                     {/* The design's caption, verbatim — it states the product's rule, not a decoration. */}
                     <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                      Status derived from WireGuard handshake liveness — never
-                      green-while-dead.
+                      Status derived from WireGuard handshake liveness. Never
+                      green while dead.
                     </p>
                   </Panel>
 
@@ -461,7 +461,7 @@ export default function Dashboard() {
                       </List>
                     )}
                     <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                      Server refusals shown verbatim — no client-side
+                      Server refusals are shown verbatim. No client-side
                       re-validation.
                     </p>
                   </Panel>
@@ -484,7 +484,7 @@ export default function Dashboard() {
                         the render-floor violation in its most dangerous form. IdP Sync and Access-log
                         retention are enterprise-only and absent on this edition. */}
                     <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                      Liveness only — the control plane does not probe its
+                      Liveness only. The control plane does not probe its
                       dependencies, so nothing else is claimed here.
                     </p>
                   </Panel>
@@ -547,7 +547,7 @@ function Stat({
             value.state === "failed" ? "Could not load this count." : "Loading…"
           }
         >
-          {value.state === "failed" ? "—" : "…"}
+          {value.state === "failed" ? "n/a" : "…"}
         </span>
       ) : (
         <span

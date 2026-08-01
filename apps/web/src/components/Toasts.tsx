@@ -111,7 +111,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 ...x,
                 kind: "error",
                 undoState: "failed",
-                message: `Couldn't undo — ${x.message.toLowerCase()}`,
+                message: `Couldn't undo. ${x.message}`,
               }
             : x,
         ),
