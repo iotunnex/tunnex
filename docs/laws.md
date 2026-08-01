@@ -423,3 +423,28 @@ build, Node 20 container). `vitest` passing in a developer shell is a useful sig
 **THE SHARPEST FRAMING:** the tier exists to catch defects a surface's own tests cannot see — **and its first
 five slices carried a defect its own gate could not see.** That is not irony. It is the evidence that *"the gate
 is the authority"* has to mean **the gate as CI runs it, on every slice.**
+
+## A DRIFT GUARD PROTECTS THE SOURCE↔ARTIFACT RELATIONSHIP, NOT THE ARTIFACT FROM TAMPERING (2026-08-01, S14.1)
+
+**`make generate-check` depends on `make generate`.** So it REGENERATES before it diffs — and a hand-edit of an
+emitted artifact is **silently overwritten**, leaving a clean tree and a **green** check.
+
+```
+hand-edit the emitted file  →  generate-check  →  generate overwrites it  →  diff clean  →  GREEN
+```
+
+**A HAND-EDIT IS SELF-HEALING, NOT DETECTED.**
+
+**What the guard DOES catch is a STALE COMMIT:** source changed, artifact not regenerated. Proven by editing
+`packages/shared/src/tokens.ts` without regenerating — the guard printed the before/after lines and failed.
+
+**THIS IS TRUE OF EVERY GENERATED ARTIFACT IN THIS REPO** — `api.d.ts`, `rbac-policy.json`, the sqlc output,
+the RBAC mirror. The property is the same for all of them because the target is the same shape.
+
+**Why it matters even though it is arguably fine:** the edit cannot survive the next `make generate`, and CI
+runs the check on every PR, so tampering never reaches `main`. **But "the artifact is guarded" and "the artifact
+matches its source" are different claims**, and only the second is true. Anyone reasoning about what the drift
+guard protects should be reasoning about the second.
+
+**NOT FIXED — registered as a repo-wide property. TRIGGER: the next change to `make generate-check`, or a
+finding that depends on artifact tampering being detected.**
