@@ -1,5 +1,11 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  within,
+  fireEvent,
+} from "@testing-library/react";
 import { Donut, Histogram, NodeLink } from "../src/components/viz";
 
 // S14.3 SLICE C — THE VISUALIZATION CONTRACT.
@@ -164,9 +170,19 @@ describe("THE NUMBERS ARE TEXT, NOT ONLY GEOMETRY", () => {
     expect(screen.getByText(/a to b: subnet unreachable/)).toBeTruthy();
   });
 
-  // The diagram is operable by KEYBOARD or it is not operable. An SVG <circle> is not focusable and
-  // announces nothing, so selection lives on the list's buttons.
-  it("[NodeLink] selection is a real button with a pressed state, not a click target on an SVG shape", async () => {
+  // The diagram is operable by KEYBOARD or it is not operable.
+  //
+  // ⛔ REWRITTEN, not patched — the premise changed and the old title asserted the implementation.
+  //
+  // It read "not a click target on an SVG shape", because selection lived on <button> rows beneath the
+  // diagram. Those rows were never in the design (the handoff's are an `sc-for extraSites`), so selection
+  // moved ONTO the nodes. The requirement never was "must be an HTML button": it is that the control is
+  // REACHABLE BY KEYBOARD and ANNOUNCES ITS STATE. An <svg><g> with role, tabIndex, aria-pressed and a key
+  // handler satisfies that; `getByRole` finding it is the proof.
+  //
+  // A TEST THAT NAMES THE ELEMENT TYPE INSTEAD OF THE CAPABILITY BLOCKS A CORRECT REFACTOR AND CALLS IT A
+  // REGRESSION. Same family as an assertion derived from the implementation.
+  it("[NodeLink] the node is a keyboard-reachable control that announces its pressed state", async () => {
     const picked: (string | null)[] = [];
     render(
       <NodeLink
@@ -185,8 +201,12 @@ describe("THE NUMBERS ARE TEXT, NOT ONLY GEOMETRY", () => {
     );
     const btn = screen.getByRole("button", { name: /spoke-wus/ });
     expect(btn.getAttribute("aria-pressed")).toBe("false");
-    btn.click();
+    expect(btn.getAttribute("tabindex")).toBe("0"); // reachable by Tab, not only by mouse
+    fireEvent.click(btn);
     expect(picked).toEqual(["b"]);
+    // And by KEYBOARD, which is the half a click test never covers.
+    fireEvent.keyDown(btn, { key: "Enter" });
+    expect(picked).toEqual(["b", "b"]);
   });
 
   // ⛔ THE PRESSED STATE NEEDS BOTH HALVES, AND THE MUTATION PROVED IT.
@@ -239,7 +259,7 @@ describe("THE NUMBERS ARE TEXT, NOT ONLY GEOMETRY", () => {
         empty="none"
       />,
     );
-    screen.getByRole("button", { name: /spoke-wus/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /spoke-wus/ }));
     expect(picked).toEqual([null]);
   });
 

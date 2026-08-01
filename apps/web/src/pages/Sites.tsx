@@ -30,7 +30,7 @@ import {
   Panel,
   Select,
 } from "../components/ui";
-import { LINK_DASH, LINK_STROKE, NodeLink } from "../components/viz";
+import { NodeLink } from "../components/viz";
 import { LoadRetry } from "../components/LoadRetry";
 import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
@@ -237,8 +237,11 @@ export default function Sites() {
                   </span>
                 }
               >
-                <p className="text-micro text-ink-faint">
-                  Select a site to inspect it. The hub is derived by the backend.
+                {/* The handoff puts the hint INLINE beside the title (dc.html L454). Ours drops "hover to
+                    trace a link" because we do not implement hover tracing — describing an interaction the
+                    component does not have is the same class of lie as a chart with no source. */}
+                <p className="-mt-1.5 text-micro text-ink-faint">
+                  Click a node to inspect · the hub is derived by the backend
                 </p>
                 <NodeLink
                   label="Site topology"
@@ -250,39 +253,6 @@ export default function Sites() {
                   onSelect={setSelectedSiteId}
                   empty="Route a LAN to draw your first site here."
                 />
-                {/* ⛔ SWATCHES, NOT GLYPHS, and only when there is a diagram to key.
-                    It was `━ ╌ ┄` — box-drawing characters that render as dashes at this size and read as
-                    the em-dash the copy rule bans. The wireframe uses CSS rules (18x2px bars), which is both
-                    the honest encoding and immune to the font deciding what a glyph looks like.
-                    And it renders only when links exist: a key to a picture that is not there is noise that
-                    claims a picture is coming. */}
-                {mesh.links.length > 0 && (
-                  <ul className="flex flex-wrap items-center gap-4 font-mono text-micro text-ink-tertiary">
-                    {(
-                      [
-                        ["linked", "linked"],
-                        ["degraded", "degraded"],
-                        ["down", "down"],
-                      ] as const
-                    ).map(([tone, word]) => (
-                      <li key={tone} className="flex items-center gap-1.5">
-                        <span
-                          aria-hidden
-                          className="inline-block h-[2px] w-[18px] rounded-sm"
-                          style={
-                            LINK_DASH[tone]
-                              ? {
-                                  borderTop: `2px dashed ${LINK_STROKE[tone]}`,
-                                  height: 0,
-                                }
-                              : { background: LINK_STROKE[tone] }
-                          }
-                        />
-                        {word}
-                      </li>
-                    ))}
-                  </ul>
-                )}
                 <p className="text-micro text-ink-faint">
                   Link state is derived from the WireGuard handshake. A down site
                   bridge is never shown as healthy.
