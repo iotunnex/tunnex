@@ -313,7 +313,25 @@ export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
     const gw = c.gateways.find((g) => g.status === "active");
     const kind = gw?.health?.label ?? null;
     const down = kind != null && /hub down|link down/i.test(kind);
-    const tone: VizLink["tone"] = down ? "down" : kind ? "degraded" : "linked";
+
+    // ⛔ WHETHER A LINK EXISTS AT ALL IS DECIDED *BEFORE* ITS STATE — and getting that order wrong is how the
+    // law this file already states got broken one line later.
+    //
+    // The first version drew no EDGE when there was no link (correct) and then still stamped the NODE with
+    // the failure tone from the gateway's health badge. So a lone gateway that is its own hub rendered with
+    // NO line and a `down` pill: the map silently repeated the same claim — that a link failed — that the
+    // health badge beside it was already making wrongly.
+    //
+    // ABSENCE OF A RELATIONSHIP IS ABSENCE, IN EVERY ENCODING THAT DESCRIBES IT. An edge, a colour, a pill,
+    // a dot: if the thing was never attempted, none of them may say it failed.
+    const linked = hubNode != null && gw != null && gw.id !== hubNode.id;
+    const tone: VizLink["tone"] | undefined = !linked
+      ? undefined // no link exists → no link STATE exists either
+      : down
+        ? "down"
+        : kind
+          ? "degraded"
+          : "linked";
 
     out.nodes.push({
       id: c.id,
@@ -322,11 +340,13 @@ export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
       sub,
       value: gwCount,
       tone,
+      // The honest word for the no-link case, so the row still says something true rather than nothing.
+      note: linked ? undefined : gw ? "no site link" : "no gateway bound",
     });
 
-    // No hub, no gateway, or this site's gateway IS the hub → NO EDGE. A drawn edge in a failure tone claims
-    // a link was attempted and failed; none of these three is that.
-    if (!hubNode || !gw || gw.id === hubNode.id) continue;
+    // `linked` is exactly the condition under which `tone` was assigned, so this narrowing is the same fact
+    // stated for the compiler rather than a second decision.
+    if (!linked || !tone) continue;
     out.links.push({ from: "__hub", to: c.id, tone, note: kind ?? undefined });
   }
   return out;
