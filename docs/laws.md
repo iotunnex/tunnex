@@ -1043,3 +1043,30 @@ The prohibition on reading the design file was correct for the session it was wr
 session after. **Nothing expires an instruction; it has to be revisited.** When a later ruling *implies* an
 earlier constraint should lift, **say so and ask** — a contradiction between two instructions is a fork, and
 forks halt and surface.
+
+## SEARCHING FOR ONE REPRESENTATION AND CONCLUDING ABSENCE (2026-08-01, EPIC 14)
+
+**THE INSTANCE.** A design file was scanned for colours with `#[0-9a-fA-F]{6}` and the report read: **"there is
+no violet anywhere."** The design's accent is `#7C5CFC`, and the founder was about to rule a correction —
+re-pointing the entire token set — on the strength of that sentence.
+
+**Two things were true and neither was what the report said:** the prototype ships **two palettes** with
+**mono as the default**, so the rendered file genuinely contains no violet; and the accent, where it *is* used,
+appears as **`rgba(124,92,252,…)`** — an **rgb() form a hex scan cannot match.**
+
+**THE REPORT WAS ACCURATE ABOUT THE FILE AND WRONG AS A CLAIM ABOUT THE DESIGN.** The gap between those two is
+where the damage was.
+
+**THE RULE. AN ABSENCE FOUND BY ONE ENCODING IS NOT AN ABSENCE.** Colours are `#rgb`, `#rrggbb`, `rgb()`,
+`rgba()`, `hsl()`, and named. Paths are absolute, relative, and symlinked. Versions are `v1.2.3` and `1.2.3`.
+**Before reporting "X is not present", enumerate the ways X could be spelled and search for each — or report
+"not found as <encoding>", which is a different and honest claim.**
+
+**AND THE SHARPER HALF, because it is what nearly caused the damage: A NEGATIVE FINDING DRIVES BIGGER
+DECISIONS THAN A POSITIVE ONE.** *"The accent is X"* invites a look. *"There is no accent"* invites a rewrite.
+**Absence claims should therefore carry MORE evidence than presence claims, and habitually carry less** —
+because there is nothing to point at, so there is nothing to check.
+
+**WHAT CAUGHT IT: a second, independent artifact** — the designer's README — **saying something different.**
+Not a better search. **When a measurement drives a large decision, seek a source that could DISAGREE with it**;
+re-running the same query more carefully cannot.

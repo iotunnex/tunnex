@@ -1,202 +1,245 @@
-# THE WIREFRAME, EXTRACTED — the visual specification for EPIC 14
+# THE DESIGN SPECIFICATION — sourced from the handoff README
 
-**Source: `docs/design/TUNNEX-wireframe-v2.html.txt`. Extracted 2026-08-01 by shell, never by dumping the file
-into context.**
+> ## **SOURCE OF TRUTH: `~/Downloads/design_handoff_tunnex_dashboard/README.md`**
+> **28 KB, authored by the designer, with an exact token table. It SUPERSEDES the reverse-engineering that
+> produced the first version of this file.**
 
-## ⚠ HOW THIS DOCUMENT CAME TO EXIST, RECORDED ACCURATELY
+**The handoff contains three things that matter and one that does not:**
 
-**The founder wrote *"do not read the wireframe's contents for design detail"* scoped to the registration
-session, then later ruled *"KEEP the palette, glassmorphism, card-and-panel, sectioned nav, THE COPY
-verbatim"* — which requires reading it. THE STALE INSTRUCTION WAS CARRIED FORWARD, and the founder has
-recorded that as their own, not the assistant's.**
-
-**LIFTED PERMANENTLY:** read the wireframe for design detail on every screen slice, **by extraction**.
-
-> ## ⛔ ITS DOM IS **NOT** A MARKUP SPECIFICATION.
-> **Take layout, hierarchy, spacing, colour and copy. Take NONE of its structure.**
-
-The artifact is a **bundler output**: 426 lines, 3.04 MB, of which one line is a 2.5 MB asset map and another
-is the rendered document as a JSON-escaped string. It is **inline-styled with no utility classes and no CSS
-custom properties** — so there is nothing to copy structurally even if we wanted to.
-
-**Extraction recipe (re-runnable):**
-
-```python
-line = open(W).read().split('\n')[423]     # the rendered document, JSON-escaped
-html = json.loads(line)                     # ~498 KB of real markup
-```
-
----
-
-# 1. PALETTE — **WARM MONOCHROME. NOT THE VIOLET ACCENT CURRENTLY SHIPPING.**
-
-**This is the single largest visual divergence and it is not a nuance.** S14.1 copied the *existing app's*
-violet (`#7c5cff`) forward. **The wireframe has no violet at all.**
-
-| role | value | uses |
+| file | what it is | usable? |
 |---|---|---|
-| text primary | `#F5F5F5` | 151 |
-| text secondary | `#A9A9A6` | **384** |
-| text muted | `#858582` | 326 |
-| text dim | `#5E5E5B` | 241 |
-| surface base | `#1A1A1A` | 240 |
-| surface raised | `#2E2E2E` | 228 |
-| page background | `#101010` | 37 |
-| **accent (muted green)** | **`#6E9C7C`** | 33 |
-| borders | `rgba(255,255,255,0.14)` (186×) · `rgba(255,255,255,0.09)` (57×) | |
+| `README.md` | **the specification** — tokens, layout, screens, interaction contract | **YES — source of truth** |
+| `Tunnex Wireframes.dc.html` | the **unbundled source prototype**, 412 KB, all 18 screens + logic | **reference only** |
+| `TUNNEX Wireframe.html` | self-contained bundle — **byte-identical (md5) to `docs/design/TUNNEX-wireframe-v2.html.txt`** | **reference only** |
+| `support.js` | 69 KB generated `dc-runtime`, *"do not edit"* | **NO — prototype scaffolding** |
 
-**Status hues** (badges): `#c77474`/`#9a5757` red family · `#c39a4e`/`#cbae72` amber family · `#6e9c7c` green ·
-`#1c7c3f` deep green. **Every one is desaturated** — there is no pure `#22c55e` or `#ef4444` anywhere.
+## ⚠ HOW THIS FILE CAME TO EXIST — kept, because the failure it records is the point
+
+**Four slices were built from a SUMMARY of the wireframe rather than the wireframe**, because a
+session-scoped founder instruction (*"do not read it for design detail"*) was never lifted after a later ruling
+required reading it. **The result passed every automated gate — 388 tests, green CI, mutation proofs — and did
+not look like the design.** That produced the SECTION PROTOCOL (`docs/EPIC-14-ui-redesign.md`).
+
+**The first version of this file was reverse-engineered from the bundle.** It got the layout, glass recipe and
+type scale right, and got **two things wrong** that the README corrects — both recorded below rather than
+quietly overwritten.
 
 ---
 
-# 2. THE GLASS SURFACE — one recipe, used everywhere
+# ⚠ TWO CORRECTIONS TO THE REVERSE-ENGINEERED VERSION
 
-```css
-background: rgba(31,31,31,.72);
-backdrop-filter: blur(24px) saturate(140%);
--webkit-backdrop-filter: blur(16px);
-border: 1px solid rgba(255,255,255,0.14);
-border-radius: 14px;
-box-shadow: 0 10px 30px rgba(0,0,0,.3);
-padding: 14px;        /* stat cards */   16px /* panels */
-display: flex; flex-direction: column; gap: 8px;   /* 10px on panels */
+## 1. `#6E9C7C` IS NOT "THE ACCENT" — it is the `ok` STATUS COLOUR
+
+The status set is **deliberately desaturated**: `#6E9C7C` ok · `#C39A4E` warn · `#C77474` error · `#858582`
+neutral/unknown. **Mislabelling it as the accent would have made every "live" indicator the brand colour** —
+which is the `ok`-reservation violation (S4.4 decision f) arriving through a palette rather than a use-site.
+
+## 2. **THERE ARE TWO PALETTES. THE VIOLET WAS NEVER A MISTAKE.**
+
+The source prototype's own state:
+
+```js
+pal: (['mono','violet'].includes(localStorage.getItem('tnx-pal')) ? … : 'mono')
 ```
 
-**Radii in use:** `14px` (cards/panels, 18×) · `99px` (pills, 24×) · `8px`/`9px` (icon chips) · `7px`/`6px`.
+**MONO IS THE DEFAULT**, which is why the rendered bundle contains no violet and the reverse-engineered scan
+found none. The README documents the **violet** as the accent: **`#7C5CFC`**, used for nav-active (13% alpha),
+row selection (14%), row hover (6%), focus ring `#A78BFA`.
+
+### ⛔ AND THE APP ALREADY SHIPS `#7c5cff` — ONE HEX DIGIT FROM THE DESIGN'S `#7C5CFC`
+
+**FOUNDER'S CORRECTION TO THEIR OWN FRAMING, RECORDED AS RULED:** S14.1 did **not** carry a wrong colour
+forward. **It shipped the design's violet, near-exactly, out of the old config by coincidence.**
+
+> **Two things being right for the wrong reason is still worth writing down.** The token set matched the
+> specification while nobody had read the specification — so the match was luck, and luck is not a property.
+> Had the design's accent been anything else, the same process would have produced the same confident result.
 
 ---
 
-# 3. TYPOGRAPHY — `Instrument Sans`, and the scale is COMPACT
+# ⚖ RULING 1 — **MONO IS THE DEFAULT THEME. VIOLET IS THE SECOND.**
+
+Both are faithful; **Mono is the prototype's own default and the palette every screenshot has been judged
+against.** S14.1 already built the n-theme mechanism with two themes shipping — **this is exactly the seam it
+was built for, so it costs nothing structural.**
+
+**The violet theme cites the README: `#7c5cff` → `#7C5CFC`.** One digit — and the token set now cites the
+design instead of resembling it.
+
+---
+
+# 1. COLOUR — dark (default), from the README's table
+
+| role | value |
+|---|---|
+| app background | **`#0A0A0A`** |
+| card surface | `rgba(31,31,31,.72)` + `blur(24px) saturate(140%)` |
+| card border | `rgba(255,255,255,0.14)` |
+| inset / sub-panel | `rgba(18,18,18,.72)`, border `rgba(255,255,255,0.09)` |
+| code block | `#101010`, border `#2E2E2E` |
+| badge background | `#1A1A1A`, border `#2E2E2E` |
+| row divider | `#1A1A1A` · header divider `#1E1E1E` |
+| light-mode background | `#EEEEF1` |
+
+**Text ramp (8 named tones):** `#F5F5F5` headings · `#EDEDEB` primary · `#D6D6D2` emphasis · `#A9A9A6` body ·
+`#858582` secondary · `#5E5E5B` tertiary · `#4A4A48` faint · `#454542` disabled.
+
+**Status:** `#6E9C7C` ok · `#C39A4E` warn · `#C77474` error · `#858582` neutral. **Never saturated alert
+colours.**
+
+**Mono interaction colours** (measured from the source): focus ring `2px solid #C9C9C4` at 2px offset ·
+nav-active `rgba(255,255,255,.12)`.
+
+## ⚖ RULING 2 — CONTRAST: TERTIARY AND FAINT COLLAPSE TO `#858582`
+
+**Measured with S14.1's own gate against the composited card surface (`rgba(31,31,31,.72)` over `#0A0A0A`):**
+
+| tone | ratio | verdict |
+|---|---|---|
+| `#F5F5F5` … `#A9A9A6` | 15.8 … 7.3 | PASS |
+| `#858582` secondary | **4.65** | PASS — barely |
+| **`#5E5E5B` tertiary** | **2.65** | ⛔ **FAIL → `#858582`** |
+| **`#4A4A48` faint** | **1.94** | ⛔ **FAIL → `#858582`** |
+| `#454542` **disabled** | 1.85 | **EXEMPT — WCAG does not require contrast for disabled controls** |
+| all four status tones | 3.15 – 8.91 | PASS at the 3:1 UI floor |
+
+**Minimum warm grey clearing 4.5:1 on the card is `#838380`** — so **only three text levels survive**, and the
+remaining hierarchy is carried by **weight and size**, which the README specifies in full (`700 26px` /
+`600 13.5px` / `500 12.5px` / `500 11px` / `9px` / `600 9px` mono).
+
+**DARKENING THE SURFACE TO BUY MORE TONES IS REFUSED — the glass recipe is the identity.**
+
+## ⚠ FIFTH RENDER-FLOOR-CLASS FINDING — **THE DESIGN SETS ITS OWN HONESTY CAPTIONS IN ITS LEAST READABLE TONE**
+
+`#4A4A48`, at **1.94:1**, carries:
+
+> *"'Failed' is never rendered as a reassuring empty state."*
+> *"Sync freshness: ok → degraded → escalated."*
+
+**A colour that cannot be read is a value the interface claims to show and does not.** The first four findings
+were charts and a noun; this one is a *colour*. **The artifact is a VISUAL specification, not an ACCESSIBILITY
+specification** — the README itself asks us to add the semantics the prototype lacks.
+
+---
+
+# 2. TYPOGRAPHY — two families
+
+**Instrument Sans** (400/500/600/700) for UI · **JetBrains Mono** (400/500/600) for **identifiers, addresses,
+error codes, metric names, and TABLE HEADERS**.
 
 | use | spec |
 |---|---|
-| stat number | `700 26px` `#F5F5F5` |
-| panel title | `600 13.5px` `#F5F5F5` |
-| stat label | `500 11px` `#858582` |
-| **stat sub-line** | `500 10px` `#5E5E5B` or `#A9A9A6` |
-| section label | `10px`, `letter-spacing: .4px`, uppercase |
-
-**`10px` is the most common size in the document (90×).** The design is **denser than what currently ships** —
-our `text-sm`/`text-xs` defaults are larger than the artifact.
-
----
-
-# 4. LAYOUT GRID — measured, not guessed
-
-| grid | uses | meaning |
-|---|---|---|
-| **`8fr 4fr`, gap 12px** | **6×** | **THE DOMINANT PAGE LAYOUT** — main column + right rail |
-| `repeat(4,1fr)`, gap 12px | 3× | stat rows |
-| `repeat(12,1fr)`, gap 12px | 1× | the 12-column base; panels span (`grid-column: span 3`) |
-| `1fr 1fr` gap 12px · `repeat(3,1fr)` gap 10px · `7fr 5fr` · `1.15fr 400px` | | panel pairs / trios |
-
-**Gap is `12px` almost everywhere, `10px` inside dense panels.** There is **no `max-width` container** on the
-dashboard — it fills the viewport.
+| stat number | `700 26px` Sans |
+| card title | `600 13.5px` Sans |
+| nav item | `500 12.5px` Sans |
+| table cell | `500 11px` Sans |
+| **table header** | **`600 9px` Mono, `letter-spacing:.1em`** |
+| **sidebar section** | **`600 9px` Mono, `letter-spacing:.16em`** |
+| badge | `600 8.5px` Mono |
+| row sub-line | `9px` |
+| explainer body | `400 9.5px/1.55` Sans |
+| mono inline value | `10px` Mono |
 
 ---
 
-# 5. THE STAT CARD — exact composition
+# 3. LAYOUT
 
 ```
-┌ glass card, padding 14px, gap 8px ─────────────┐
-│  [icon chip 30×30, r8, bg white/.09, border]   │  ← flex row, gap 9px
-│  LABEL   500 11px #858582                      │
-│                                                 │
-│  VALUE   700 26px #F5F5F5   (+ "/ 6" 600 13px #5E5E5B for ratios)
-│                                                 │
-│  SUB-LINE  500 10px #5E5E5B                    │
-└────────────────────────────────────────────────┘
+┌────────────┬──────────────────────────────────────────┐
+│  SIDEBAR   │  TOP BAR                         h:56px  │
+│   228px    ├──────────────────────────────────────────┤
+│ (64px      │  PAGE HEADER (title + subtitle)          │
+│  collapsed)│  PAGE BODY  padding 20px 24px 28px       │
+│            │  flex column · gap 14px                   │
+└────────────┴──────────────────────────────────────────┘
 ```
 
-**THE SUB-LINE IS STRUCTURAL, NOT DECORATION.** Every card has one, and it carries the *qualification*:
+**App shell** `display:flex`, **`min-width:1280px`**, full viewport height. **No page-body max width — grids
+fill available width.**
 
-| card | label | value | **sub-line** |
-|---|---|---|---|
-| Members | Members | 48 | `↑4 vs last 7 days` |
-| Devices | Devices | 129 | `3 awaiting approval` |
-| Gateways | Gateways | `6 / 6` | `4 reporting degraded kinds` |
-| **Online Peers** | Online Peers | 83 | **`seen in last {{ liveWindow }} min`** |
-| Sites | Sites | 4 | `1 link down` |
-| Access Rules | Access Rules | 27 | `enforcing · 2 temp grants` |
+**Spacing scale:** 4 · 6 · 7 · 8 · 9 · 10 · 12 · 14 · 16 · 20 · 24. Gaps **12px** (cards) / **14px** (page
+sections). Card padding **16px**.
 
-## ⚠ AND THIS CHANGES THE "PEERS ONLINE" RULING — RAISING IT RATHER THAN OVERRIDING IT
+**Radius:** `99px` pills · `14px` cards · `13px` floating bars · `9px` nav/buttons · `8px` inset · `7px`
+inputs/code · `6px` chips.
 
-**The wireframe puts the honest qualifier in the SUB-LINE**: label `Online Peers`, sub-line
-`seen in last N min`. **That composition is arguably honest** — the claim and its basis are adjacent, and the
-sub-line is a template placeholder, so the author intended it live.
+**Elevation:** card `0 10px 30px rgba(0,0,0,.3)` · floating bar `0 20px 50px rgba(0,0,0,.5)` · modal
+`0 24px 60px rgba(0,0,0,.45)` · drawer `-24px 0 60px rgba(0,0,0,.5)` · input inset
+`inset 0 1px 3px rgba(0,0,0,.22)`.
 
-**The current ruling is to keep `Seen in last 3 min` as the LABEL.** That remains in force and is *safer*.
-**But the wireframe's shape is not the violation I described it as** — it qualifies in the line below rather
-than not at all. **Founder's call; I am not changing it unilaterally.**
+> ## ⛔ **LIQUID GLASS, NOT GLOSSY. NO INSET WHITE HIGHLIGHT LINES** — explicitly removed by the designer.
+> **Do not reintroduce `inset 0 1px 0 rgba(255,255,255,…)`.**
+
+**Z-index:** 110 checklist · 115 bulk bar · 120 drawer · 130 palette · 9999 toast.
+
+## ⚖ RULING 3 — THE RESPONSIVE GAP IS FILLED BY A **FOUNDER DECISION**, NOT BY THE ARTIFACT
+
+The README states plainly:
+
+> *"The prototype is **desktop-only** (min-width 1280px, no responsive breakpoints authored). Responsive
+> behavior is a **design gap, not a design decision** — flag it before implementing."*
+
+**FLAGGED AND RULED: S14.2's FIVE BREAKPOINTS AND THE TRIAGE-SUBSET RULING STAND.** They are the **founder's**
+decisions, made deliberately, filling a gap the designer explicitly declared and asked to be told about.
+
+> ## **RECORDED SO NO LATER READER ATTRIBUTES THEM TO THE ARTIFACT: WHERE THE DESIGN AUTHORED NOTHING, OUR
+> RULES GOVERN. WHERE IT AUTHORED SOMETHING, IT GOVERNS.**
 
 ---
 
-# 6. WHAT THE DASHBOARD ACTUALLY CONTAINS — verified present in the artifact
+# 4. OVERVIEW — the reconciliation, and what is being built
 
-`Site-Link Throughput` · `Peer Connection Status` · `Recent Activity` · `Device Posture` · `Needs Attention` ·
-`System Health` · `Network map` · `HA Hub Set` · `Access Rules` · `Online Peers` — **all confirmed by offset,
-not from memory.**
+**THE README SAYS "4-up stat row → `8fr 4fr`". THE SCREENSHOT SHOWS SIX CARDS. THE SOURCE SETTLES IT:**
+
+```
+display:grid; grid-template-columns:repeat(12,1fr); gap:12px      ← the Overview stat row
+```
+
+**Six cards, each spanning 2 of 12.** The README's *"4-up"* describes the **standard page composition** used by
+the other screens (`repeat(4,1fr)`); **Overview is the exception and uses the 12-column base**, which is also
+how its panels are placed (`span 6` / `span 3`).
+
+**BUILDING: six cards on a 12-column grid.** Source and screenshot agree; the README's generic sentence does
+not override the screen's own markup.
+
+**Panels, with their spans:** Site-Link Throughput `6` · Peer Connection Status `3` · Recent Activity `3` ·
+Gateway Health `3` · Device Posture `3` · Needs Attention `3` · System Health `3` · Network map `6` ·
+HA Hub Set `3` · Alerts `3`.
 
 ---
 
-# 7. ⛔ UNBUILT **LAYOUT** vs UNBUILT **PRODUCT** — so the next comparison does not re-raise it
+# 5. ASSETS — REPORTED BEFORE USE, per the founder rule
 
-**Founder-ruled: state which is which. A destination drawn for a capability that is not there is the same
-violation as a chart drawn for an endpoint that is not there.**
-
-| wireframe element | endpoint / screen exists? | verdict |
+| asset | measured | verdict |
 |---|---|---|
-| stat cards, sub-lines, icons | yes | **UNBUILT LAYOUT — mine to close now** |
-| `8fr 4fr` grid, glass, palette, type scale | n/a | **UNBUILT LAYOUT** |
-| System Health panel | `/healthz` | **UNBUILT LAYOUT** |
-| Device Posture donut | `/health-checks`, device posture fields | **UNBUILT LAYOUT** |
-| Needs Attention | composed from pending/subnets/nodes | **UNBUILT LAYOUT** |
-| Network map | `/sites` + `siteLinkGraph` | **UNBUILT LAYOUT** (S14.4-Sites slice) |
-| HA Hub Set | `/sites`, hub fields | **UNBUILT LAYOUT** |
-| nav: Routed Ranges | `/routed-ranges` ✓ screen ✗ | **UNBUILT PRODUCT — later story** |
-| nav: Groups | `/groups` ✓ screen ✗ | **UNBUILT PRODUCT** |
-| nav: Access Events | `/access-events` ✓ screen ✗ | **UNBUILT PRODUCT** |
-| **nav: Operations** | **neither** | **UNBUILT PRODUCT — drawing it is a render-floor violation** |
-| Site-Link Throughput | **spec forbids the field's use this way** | **ROADMAP — never build** |
-| Fleet risk | Tier-3, not built | **ROADMAP** |
+| **`lucide-icons.js`** | 7,241 B · **40 icons** · raw 24×24 path data on a `window.LUCIDE_PATHS` global | **the designer's ICON SELECTION is authoritative; the FILE is scaffolding** (a window global). Do not port as-is. |
+| **`lucide-react`** | **v1.28.0 · ISC · `sideEffects:false` · ESM** · 31 MB *unpacked in node_modules* | **usable — see the ruling below** |
+| `tunnex-logo.svg` | 2,822 B · 577×551 · **no `<script>`, no `href`, no `<image>`** | **clean, usable** |
+| `tunnex-wordmark.svg` / `-light.svg` | 2,457 B each · 792×120 · same checks clean | **clean, usable** |
+| **`support.js`** | 69 KB · *"GENERATED from dc-runtime — do not edit"* | ⛔ **NOT USED — prototype scaffolding, on the README's explicit do-not-port list** |
 
----
+## THE LUCIDE QUESTION, CHECKED THE WAY GSAP WAS
 
-# 8. WHAT THIS MEANS FOR THE TOKEN SET
+**LICENCE: ISC.** Permissive, functionally equivalent to MIT/BSD-2. **Compatible with the Apache-2.0 open core
+AND the proprietary enterprise build.** Requires the copyright notice be retained → **NOTICE attribution
+needed**, same as any vendored dependency. *(Contrast with GSAP, which was refused: its "standard no-charge
+licence" is not an OSS licence and a self-hosted product is redistribution.)*
 
-**S14.1's `dark` theme is the OLD app's palette, not the wireframe's.** Adopting the wireframe means either a
-third theme or re-pointing `dark`. **That is a decide-item, not a fold** — it changes every rendered colour in
-the product, and S14.1's contrast gate must be re-run against the new values (the warm greys are lower-contrast
-than the current set and **may not clear 4.5:1** on some pairs).
+**BUNDLE COST: paid per icon, not per package.** `sideEffects:false` + ESM means the 31 MB is **install size,
+not ship size**; only imported icons are bundled. Each icon is ~300 B of path data, so **~40 icons ≈ 12 KB raw
+/ ~4 KB gzip** against a current 352 KB bundle.
 
----
+**CRITICAL PATH: YES — and that is a constraint, not a disqualifier.** Nav icons are above the fold, so they
+**must be in the initial bundle, never lazy-loaded** — a nav that renders without its icons and then reflows is
+worse than one that never had them. *(This is the opposite of the Motion ruling, where lazy was the point.)*
 
-# 9. ⛔ THE WIREFRAME'S DIMMEST TEXT **FAILS THE ACCESSIBILITY GATE WE ALREADY BUILT AND PROVED**
+**RECOMMENDED: `lucide-react`, per the README's own instruction, pinned, with NOTICE attribution.**
 
-**Measured with S14.1's own `contrastRatio()` against the extracted values:**
+**⚠ ONE THING THE FOUNDER SHOULD WEIGH, because it is this week's finding:** the OpenSSF baseline established
+that **this repo has NO JavaScript dependency scanning at all** — no `npm audit`, no `osv-scanner`, no
+Dependabot. **Adding a runtime dependency into an unscanned surface is a decision, not a default.** The
+alternative is vendoring the designer's 40 paths as a local TSX module: **~7 KB, zero dependency, zero
+supply-chain surface** — at the cost of owning them and drifting from upstream Lucide.
 
-| pair | ratio | floor | verdict |
-|---|---|---|---|
-| `#F5F5F5` primary on card | 15.96 | 4.5 | PASS |
-| `#A9A9A6` secondary on card | 7.39 | 4.5 | PASS |
-| `#858582` stat **label** on card | **4.70** | 4.5 | PASS — *barely* |
-| **`#5E5E5B` stat SUB-LINE on card** | **2.68** | **4.5** | ⛔ **FAILS** |
-| `#6E9C7C` / `#C39A4E` / `#C77474` badges | 5.56 / 6.67 / 5.12 | 3.0 | PASS |
-
-**TWO STANDING RULINGS COLLIDE HERE, and neither yields quietly:**
-
-- *"KEEP the wireframe's look and feel"*
-- *"WCAG 2.1 AA is the floor; the contrast test **fails the build**, it does not warn"* — a gate that is
-  already mutation-proven.
-
-**Adopting `#5E5E5B` for sub-lines verbatim would require weakening a gate we deliberately made unweakenable.**
-And the sub-line is not decoration — §5 shows it carries the *qualification* (`seen in last N min`,
-`3 awaiting approval`), which is precisely the text that must remain readable.
-
-**RECOMMENDED, for the founder's ruling: raise the dimmest tone to the minimum that clears 4.5:1** and keep
-everything else verbatim. `#858582` already clears at 4.70. **The visual delta is one step of grey; the
-alternative is shipping unreadable qualifiers or disarming an accessibility gate.**
-
-**NOT DECIDED UNILATERALLY. Building with the raised tone and flagging it here, so a side-by-side against the
-artifact shows one intentional difference rather than an unexplained one.**
+**NOT DECIDED — the founder rules.** Building the nav with an icon *slot* either way, so the choice is a
+one-file change rather than a refactor.
