@@ -34,6 +34,115 @@ else): **THE SEAM MUST BE A RENDER DECISION, NEVER A STYLE.** A hook that return
 correct; a hook that returns a class name, an opacity, or a theme variant is the same defect wearing the seam's
 name.
 
+
+## ⛔ WIREFRAME ADAPTATION — founder-ruled 2026-08-01. KEEP the identity, EDIT the content.
+
+**The visual identity is kept; the content is edited to what the product can BACK and an operator can ACT on.**
+
+### KEEP — non-negotiable
+
+- **dark palette, layered surfaces, the glassmorphism treatment**
+- **Instrument Sans + JetBrains Mono**, with **mono RESERVED for technical values** — IPs, CIDRs, serials,
+  commands, error codes. **That convention is doing real work** and is now a token-level rule, not a preference.
+- **card-and-panel composition · the sectioned icon nav** (NETWORK / ACCESS / OBSERVE / OPERATE / SETTINGS) ·
+  the page-header pattern with subtitle + control-plane health
+- **THE COPY — carried VERBATIM.** It is the best part of the artifact, and it **states the product's laws in
+  the interface**: *"Client-reported, not attestation"* · *"never green while dead"* · *"Failed — retry, never
+  No rules"* · *"the destructive control is withheld, not fake — edit the CR"* · *"shown once, never again"* ·
+  verbatim server refusals.
+
+### CUT — with reasons recorded, so nobody re-adds them
+
+| cut | reason |
+|---|---|
+| **Fleet risk** (Gateways) | risk scoring is an **unbuilt Tier-3 name** in the competitive ledger. Replaced by a **health-grouped gateway list** — same information, legible at a glance |
+| **Site-Link Throughput as a rate time-series** (Overview) | S8.3 ruled metrics **L1 cumulative-since-handshake ONLY**, *"no rate graphs, no sampling implied."* Time-series is **S11.1's** job. Render **cumulative counters labelled as exactly that** |
+| **FREE/ENTERPRISE and ADMIN/USER toggles** | wireframe demo controls. **A user cannot switch their own edition or role.** READ-ONLY BADGES, and the edition badge routes through **the ONE gating seam** |
+| **Density (Cozy/Compact)** | cut per the earlier ruling — ship one density, keep the spacing scale so it could return |
+| **The date-range picker** on screens that do not filter by date | it appears on nearly every screen and most ignore it. **Keep it ONLY where the data is time-ranged** — Access Events, Audit Log |
+| **The floating action button** | purpose unclear; every screen already has a primary action in its header |
+| **"Get started 2 of 4" as a persistent floating widget** | **make it part of the Overview EMPTY STATE.** A checklist that follows an established admin around is noise |
+
+### REDUCE — the real risk in this design is DENSITY OF EXPLANATION
+
+Nearly every screen carries **a chart PLUS a table PLUS two or three explanatory side panels.** That reads
+beautifully and **can overwhelm at 3am when a gateway is down and someone needs one number.** S11's walk found a
+lost gateway cost **four hand-run steps** — the UI's job there is to make **the next action obvious**, not to
+explain the architecture.
+
+**RULE, applied per screen at its commit-one:**
+
+> **IS THIS SURFACE FOR UNDERSTANDING THE SYSTEM, OR FOR ACTING ON IT?**
+
+- **ACTING** (Gateways · Devices · Access · Sites) — **the primary action and the thing that is wrong come
+  first.** Explanatory panels collapse, or move to a details drawer.
+- **UNDERSTANDING** (Overview · Operations · Edition · Audit Log) — keep the fuller treatment.
+
+**DO NOT REMOVE the explanatory copy. MOVE it, so it is available and not in the way.**
+
+### VISUALIZATIONS — keep the ones that carry meaning
+
+**KEEP:** peer/device **donuts** (a proportion, read instantly) · **verdict-timeline histogram** (a rate over
+time, which is what it says) · **sync-freshness bars** (a clock made visible) · **network map** (topology is
+genuinely spatial).
+
+**RE-EXAMINE at their screen's commit-one:** address-space heatmap · role pyramid · access-flow bipartite
+curves · radial device fabric. **Each must answer: what question does this answer FASTER than a table? If the
+answer is "none", it is a table.**
+
+**EVERY SURVIVING PANEL STILL NAMES ITS ENDPOINT OR IS MARKED ROADMAP.** The render-floor audit applies to the
+**reduced** set, not the original.
+
+## ⛔ ANIMATION LIBRARY — GSAP IS **NOT** ADOPTED. Use **Motion (MIT)**. Ruled on measured licence facts.
+
+**MEASURED, not recalled** (npm registry, 2026-08-01):
+
+| | GSAP | Motion |
+|---|---|---|
+| version | **3.15.0** | **12.43.0** |
+| `license` field | **`"Standard 'no charge' license: https://gsap.com/standard-license"`** | **`MIT`** |
+| SPDX / OSI | **neither — a custom licence URL** | standard SPDX, OSI-approved |
+| unpacked size | **6,111 KB** | **667 KB** (9× smaller) |
+
+**Commercial use IS free** — that part of the founder's understanding is correct. **The problem is
+REDISTRIBUTION, which is what this product does.**
+
+1. **Tunnex is SELF-HOSTED. We ship a built bundle to customers who run it themselves — that is redistribution
+   of GSAP's compiled code**, not internal use on a site we operate.
+2. **The open edition is Apache-2.0 with a NOTICE file.** Embedding a **non-OSI, custom-licensed** dependency in
+   an Apache-2.0 artifact means the recipient does **not** receive, for that portion, the freedoms the licence
+   around it advertises. The GSAP terms forbid reverse-engineering and altering notices; Apache-2.0 grants
+   modification. **They are not aligned.**
+3. **The licence carries a COMPETITIVE-USE restriction** (tools that assist in building visual animations
+   competing with Webflow). Tunnex is a VPN admin console, so it is **not triggered today** — but it is a
+   custom clause requiring ongoing legal judgement, on a term the licensor can revise.
+
+**THE FOUNDER'S OWN INSTRUCTION APPLIES: "if there is any doubt, name the alternative rather than proceeding."
+The doubt is concrete, not theoretical. RULED: Motion (MIT), pinned. GSAP is not adopted.**
+
+*(Repo precedent for this check: S6.3 pinned wireguard-go as MIT and recorded Wintun's redistribution terms in
+NOTICE. Motion being MIT means **no NOTICE entry is strictly required**, but one will be added anyway for the
+same reason Wintun's was — the NOTICE file is where a self-hoster looks.)*
+
+### AND: THE ANIMATION LIBRARY IS **NEVER IN THE CRITICAL PATH**
+
+**A dashboard that cannot render until an animation library loads is a regression on a surface admins open
+during incidents.** Ruled:
+
+- **CSS-first.** Transitions and simple motion use CSS, which costs nothing and needs no JS.
+- **The library is LAZY-LOADED**, never imported by the app shell or any first-paint route.
+- **Every animation degrades to "no animation"** if the library never loads. Nothing may depend on it to be
+  legible, reachable, or actionable.
+
+## ⛔ `prefers-reduced-motion` IS A GATE, NOT A COURTESY
+
+**The wireframe's ONE media query is `prefers-reduced-motion`** — the artifact already respects it, and **an
+animation library plus a re-architecture is exactly where that gets dropped.**
+
+**ASSERT IT: with the preference set, animations must not run.** Gated as a test that fails, and **proven to
+reject** — enable an animation under the preference and show the check go red. Same standard as the contrast
+floor and the `ok` reservation in S14.1.
+
 ## THE MEASUREMENTS THAT SETTLED IT — re-recorded so the epic stands alone
 
 From `docs/design/TUNNEX-wireframe-v2.html` (2.9 MB, committed), counted by occurrence (`grep -o | wc -l`),
@@ -65,7 +174,7 @@ artifact; it is **positively excluded**. Every screen's breakpoint behaviour is 
 |---|---|---|
 | **S14.1** | design tokens · theme system · accessibility foundations | **NO** |
 | **S14.2** | layout shell — nav, responsive grid, breakpoints | **NO** |
-| **S14.3** | primitives THAT DO NOT EXIST YET — command palette + keyboard routing, toasts with undo, density (if it survives), table/list primitives with semantic markup | **NO** |
+| **S14.3** | primitives THAT DO NOT EXIST YET — command palette + keyboard routing, toasts with undo, table/list primitives with semantic markup, **and DATA VISUALIZATION (see below)**. Density is CUT | **NO** |
 | **S14.4+** | screens, in an order argued at the time | **YES** |
 
 **WHY THIS ORDER.** S14.1-S14.3 import **no generated types**, so they cannot conflict with S13.1. Screens do —
@@ -74,6 +183,30 @@ and by the time S14.4 starts, S13.1 is merged.
 **THE DEPENDENCY WAS NEVER THE CLOCK.** It is that **both branches edit `apps/web`**, and **S13.1 changes the
 types `apps/web` imports**. Sequencing the type-free slices first removes the conflict entirely rather than
 scheduling around it.
+
+## DATA VISUALIZATION IS A SLICE, NOT A PER-SCREEN DETAIL — added to S14.3 (founder-directed)
+
+**Counted across the 17 screens: roughly TEN distinct visualization types, none of them cards or tables.**
+Discovering this per-screen would mean **ten independent decisions**, each made by whoever happened to build
+that screen — which is how a design system acquires four charting libraries.
+
+fleet-risk bubble plot (Gateways) · force-directed network map (Sites) · address-space heatmap grid (Routed
+Ranges) · access-flow bipartite curves (Access) · radial device fabric (Devices) · role pyramid + MFA donut
+(Users) · sync-freshness bars (Groups) · verdict-timeline histogram (Access Events) · actor-swimlane stream
+(Audit Log) · peer donut + area chart (Overview)
+
+**DECIDE AT S14.3's COMMIT-ONE:** charting library vs hand-rolled SVG · whether ONE primitive set covers all
+ten or whether some are genuinely bespoke.
+
+> **⛔ BINDING: EVERY VISUALIZATION IS SUBJECT TO THE RENDER-FLOOR AUDIT.**
+>
+> **A chart is the easiest place in a UI to draw a capability that does not exist.** *"Fleet risk"* and
+> *"Site-Link Throughput"* are **already two known violations, and both are charts** — that is not a
+> coincidence, it is the pattern. **Each visualization NAMES ITS ENDPOINT or is marked roadmap.**
+
+**The adaptation ruling above already reduces this set** — four are KEPT outright, four are RE-EXAMINED against
+*"what question does this answer faster than a table?"*, and two are CUT. **S14.3 decides the primitives for
+what survives, not for the original ten.**
 
 # TWO DECIDE-ITEMS THE FOUNDER OWES — they gate S14.2/S14.3, NOT S14.1
 
