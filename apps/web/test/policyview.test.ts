@@ -484,7 +484,10 @@ describe("canEditRuleInModal — site rules are NOT editable in the group/resour
   });
 });
 
-import { ruleRow } from "../src/lib/policyview";
+// (The duplicate `import { ruleRow }` that stood here was removed 2026-08-01: it re-imported the SAME symbol
+// already imported at the top of this file, from the same module. A genuine TS2300 that no gate had ever seen,
+// because tsconfig included only `src`. Behaviourally benign — both bindings resolved to production `ruleRow`,
+// so these assertions were exercising production all along.)
 
 describe("ruleRow — a site-dst rule renders as a site, NEVER a broken 'deleted resource' (S8.1 #2)", () => {
   it("dst_kind='site' → site label, state ok, not broken", () => {

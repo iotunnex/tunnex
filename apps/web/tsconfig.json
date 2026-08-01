@@ -17,6 +17,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  // test/ IS IN SCOPE DELIBERATELY. It was `["src"]` until 2026-08-01, which meant `tsc --noEmit` — the gate
+  // behind `pnpm --filter @tunnex/web typecheck` — had NEVER typechecked a single file in the component test
+  // tier. Five slices were written and reported green against a check that never looked at them. Found while
+  // deciding where to put the Loaded<T> contract: placing it in test/ would have made it a check that cannot
+  // fail, inside the artifact written to prevent checks that cannot fail.
+  "include": ["src", "test"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

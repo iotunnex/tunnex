@@ -342,3 +342,45 @@ anyone noticing, because its absence looks like ordinary code.
 
 **GENERALISED:** when a law can be encoded in a type, encode it there. A rule enforced by review is enforced
 until the reviewer is busy; a rule enforced by the compiler is enforced at 3am by someone who never read the law.
+
+## A COMMAND THAT PRODUCES OUTPUT BUT NOT ITS EFFECT READS AS GREEN IN EVERY LOG (minted 2026-08-01)
+
+**TWO TOOLS, SAME SHAPE: each ANNOUNCED SUCCESS WITHOUT DOING ITS WORK, and each was believed.**
+
+1. **`mutate.sh` printed `Restoring.` and did not restore** (`3c9c16f`). Every run left the mutated file in the
+   tree while claiming it had been put back.
+2. **`npx tsc --noEmit` run from the REPO ROOT** resolved to a different package, which prints
+   *"This is not the tsc command you are looking for"* and exits. **Four slices were reported "typecheck
+   clean" on that output.** Nothing was checked. Nothing said so.
+
+**THE SHARED SHAPE: output is not effect.** A log line proves a command RAN. It proves nothing about what it
+DID, and a human scanning for red sees neither.
+
+**THE DIAGNOSTIC: RUN THE COMMAND THE GATE RUNS, FROM WHERE THE GATE RUNS IT — never a convenient equivalent.**
+`npx tsc` from the repo root is not `pnpm --filter @tunnex/web typecheck`. `vitest --root apps/web` from the
+root is not `vitest` from `apps/web` — that one broke a relative mock path and produced a **false mutation
+verdict** the same day. The convenient equivalent is where the difference hides.
+
+### THIRD INSTANCE OF THE MEASUREMENT CLASS — and it compounds with the first two
+
+With `grep -c` on a 405-line file and `grep -o '[a-z_]*'` excluding digits, this makes **three measurement
+errors in one session**, all of which produced a **plausible** answer. See *APPLY THE DETECTOR TO THE
+MEASUREMENT* above: nonsense gets re-run; a plausible answer gets written down.
+
+### THE SHARPEST INSTANCE — the near-miss that found all of it
+
+**`tsconfig.json` included only `src`.** So `tsc --noEmit` — the gate behind
+`pnpm --filter @tunnex/web typecheck` — **had never typechecked a single file in the component test tier.**
+Five slices were written and reported green against a check that never looked at them.
+
+**It was found by asking WHERE THE ASSERTION WOULD ACTUALLY RUN, not by reading anything.** The `Loaded<T>`
+contract was about to be placed in `test/`, where it would have been **a check that cannot fail — inside the
+artifact written to prevent checks that cannot fail.** One question ("does the gate see this directory?")
+caught the contract's placement, the tier's missing type coverage, and the vacuous `tsc` invocation together.
+
+**WHAT THE FIX FOUND, stated plainly rather than assumed:** scoping `test/` in and running the gate's own
+command surfaced **exactly two errors, neither in the new tier** — a duplicate `import { ruleRow }` in
+`test/policyview.test.ts` re-importing a symbol already imported at the top of the same file. **Behaviourally
+benign** (both bindings resolved to production), **genuinely a TS2300**, and **invisible to every gate for as
+long as it has existed.** The five slices were **clean once scoped correctly — which is a different statement
+from "assumed clean", and only one of them was ever true.**
