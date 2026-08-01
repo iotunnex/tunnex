@@ -399,3 +399,31 @@ gateway from the UI command alone and observing recovery.
 **§B step 1 is REDONE with `tunnex-node-agent:9f7c56f`** — the image §A used — preserving the same-binary
 provenance §B depends on. The ghcr-based container is discarded. The state volume is untouched, so the redo
 starts from exactly the state step 1 intended.
+
+## §B step 1 — COMPLETE. A1′ = `019fbb50-47c3-7581-a35a-d2825c95a605`
+
+Run on the CORRECT image (`tunnex-node-agent:9f7c56f`) after WF-S13-7. Two results §A could not produce:
+
+**WF-S11-8a PROVEN ON THE WIRE — first time.** The node enrolled as `aws-gw-1` while **two revoked rows already
+held that name**, with no `409 node_exists`. §A's only name collision was against an ACTIVE row (correctly
+refused), so the merged S11 partial unique index — `nodes_org_id_name_active_key … WHERE revoked_at IS NULL` —
+had never been exercised by a walk. It works.
+
+**Finding #5 re-proven on a second gateway, and the ordering held.** `identities_tried: 2` from attempt ONE (the
+pending key was already on disk, so finding #6's per-pass rebuild had both identities available immediately) →
+three refusals → `agent_rekey_exhausted` → `agent_falling_back_to_join_token` → `agent_enrolled`. **No operator
+action between boot and recovery.**
+
+The refusals were CORRECT: `019fb18b` is revoked, and D3 forbids re-keying a revoked node. Expiry authorizes;
+revocation does not. The agent cannot know which locally — hence the uniform refusal and the honest
+`most_likely_cause` naming both possibilities.
+
+The fallback warning states its own cost without being asked: *"This creates a NEW node: its site binding must be
+re-applied and devices homed on the old node need re-issuing."* That is the whole argument for ranking re-key
+above the token, printed at the moment it matters.
+
+| field | value |
+|---|---|
+| A1′ node id | `019fbb50-47c3-7581-a35a-d2825c95a605` |
+| status | active, `key_recorded=t`, `cert_delivered=t` |
+| site_id | NULL (required for B4 — a hub-set member would self-heal the device and fake the pass) |
