@@ -1293,6 +1293,72 @@ deliberately NOT done on this branch**: this branch already carries 20+ folded f
 
 **TRIGGER: the next change to `.github/workflows/`, OR S11-class gate hardening — whichever lands first.**
 
+## CI'S FIRST-EVER RUN ON THIS BRANCH — RESULTS (PR #43, draft, `3144d88`, 2026-08-01)
+
+**Both workflows RED. Two independent causes, and only one of them was predicted.**
+
+| workflow / job | result |
+|---|---|
+| CI · `gates` | **FAILURE** — `make test-node` |
+| CI · `client (macos-latest)` · `client (windows-latest)` · `e2e` · `e2e-enterprise` | **PASS** |
+| Security · `govulncheck (apps/cli)` · `gofmt + vet parity` | **FAILURE** |
+| Security · CodeQL (go + js/ts) · Trivy · govulncheck (api, node, helper, operator) | **PASS** |
+
+### Failure 1 — WF-S13-11, exactly as filed
+
+```
+apps/cli/internal/api/api.gen.go:1363:6:   other declaration of RestoreNodeDevicesResponse
+apps/cli/internal/api/api.gen.go:12208:12: r.HTTPResponse undefined ...
+```
+
+Both Security jobs fail for one reason: **the package does not compile**, so `vet` cannot build it and
+`govulncheck` cannot analyse it. **The guard caught it on its first opportunity to run.** Nothing new — it
+confirms the finding and dates it.
+
+### Failure 2 — NOT PREDICTED, and it is merge precondition #1's own acceptance test
+
+```
+--- FAIL: TestExpiryWhileRUNNINGRecoversWithoutARestart (0.17s)
+    main_test.go:599: re-key was attempted and the state directory still holds an expired certificate
+                      (NotAfter 2026-08-01 05:35:57 +0000 UTC) — the recovery was not promoted
+```
+
+**That is `identityWatchLoop`'s red — the proof that WF-S13-6's remedy works**, and it is the first merge
+precondition.
+
+**DIAGNOSED: a race in the TEST, not a regression in the product.**
+
+```go
+for time.Now().Before(deadline) && issued == 0 {   // waits for the SERVER-side counter
+	time.Sleep(20 * time.Millisecond)
+}
+cancel()
+<-done
+if got := loadStored(dir); identity.NotAfter(got.CertPEM).Before(time.Now()) {   // asserts the CLIENT's DISK
+```
+
+`issued` is incremented inside the fake control plane's handler (`main_test.go:215`) and means *"the CP produced
+a response."* The assertion is about *"the agent persisted it"* — an event that happens **strictly after** — and
+between the two the test calls `cancel()`. **The test waits on a proxy event that precedes the one it asserts,
+with nothing synchronising them.** A fast machine wins the write race; a contended CI runner loses it.
+
+**Evidence for the diagnosis, both directions:** the same test passes in isolation, and the full package passes
+**3/3 locally at 89.5s / 89.6s / 89.8s** — while CI failed at **90.2s**. Neither result alone settles it; the
+code does.
+
+**THE PROPERTY IS RIGHT AND THE WAIT IS WRONG.** *"the recovery must have LANDED on disk, not merely been
+requested"* is precisely what the remedy must prove — the fold was written against exactly the failure mode where
+a re-key is attempted and never promoted. The fix is to poll **for the asserted property itself** (a stored
+certificate whose `NotAfter` is in the future) instead of for `issued`.
+
+**THIS IS THE SAME FAMILY AS B2's VACUOUS POLLER, ONE STEP OVER.** B2 sampled slower than the event's lifetime;
+this waits for a *different* event than the one it checks. Both are **the observation not being of the thing
+claimed** — and both were invisible while green.
+
+**A FLAKY ACCEPTANCE TEST CANNOT CARRY A MERGE PRECONDITION.** On the day the merge question arrives, a red here
+would be indistinguishable from a real regression, and a green would prove only that the runner was fast.
+**Decide-item, not folded during the walk.**
+
 **Disposition on the CLI break itself is a decide-item, not a fold**, and the fix is one line with a precedent
 in the same file: `x-go-name: RestoreDevicesResult` (mirroring `CreateDeviceResponse`'s
 `x-go-name: CreateDeviceResult`) plus `make generate`. **Not touched during the walk.**
