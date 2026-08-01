@@ -1,6 +1,18 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 
+// QUERY STRATEGY (ruled 2026-08-01, docs/UI-REDESIGN-registration.md consequence 2). Every interactive control
+// is queried BY ROLE + ACCESSIBLE NAME — never a test-id, a class name, or DOM structure. That is the most
+// rewrite-resistant selector there is: it survives any markup change that preserves semantics, and a redesign
+// that breaks it has broken accessibility too, which is a finding rather than test debt. Mocking is at the
+// NETWORK boundary (api.GET/api.POST) for the same reason — that layer does not change in a redesign.
+//
+// getByText appears below ONLY for content that carries no role today: status badges and empty states are
+// <span>s, so they are unreachable by role. Each such use is a MARKER, not an exemption — those elements should
+// gain role="status" / role="alert" in the redesign, at which point these queries convert and the tier gets
+// stricter for free. (The redesign was ruled a RE-ARCHITECTURE on evidence including 0 aria- attributes and one
+// <button> among 1,015 divs; this file is one of the reasons semantic markup is now a hard requirement.)
+//
 // EXPLICIT CLEANUP, and it is a tier convention rather than boilerplate. vitest.config.ts sets no
 // `globals: true` and no setup file, so @testing-library's automatic afterEach cleanup NEVER REGISTERS —
 // renders accumulate in one document across tests in a file. The S13.1 foothold never hit this because it

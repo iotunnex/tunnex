@@ -168,10 +168,103 @@ This is the reason it is worth building from rather than restarting:
 
 ## COMMIT-ONE DECIDE-ITEMS — in the order they constrain each other
 
-### 1. RE-SKIN or RE-ARCHITECTURE
+### ✅ 1. RULED 2026-08-01 — **IT IS A RE-ARCHITECTURE, NOT A RE-SKIN**
 
-New tokens over existing components, or a new component model? **Tenfold cost difference, and it decides
-everything below it.** Rule this first.
+**Measured from the wireframe bundle, not judged by eye:**
+
+| measure | count |
+|---|---|
+| `<div>` | **1,015** |
+| inline `style` attributes | **2,129** |
+| `<button>` | **1** |
+| `<table>` · `<label>` · `<nav>` · `<select>` | **0 · 0 · 0 · 0** |
+| `aria-` attributes anywhere in the bundle | **0** |
+| `backdrop-filter` declarations | **241** — layered glassmorphism, a RENDERING MODEL, not a colour choice |
+| custom-typography references (Instrument Sans, JetBrains Mono) | **890** |
+| screens | **12**, against the current **18** pages — a **CONSOLIDATION**, not a restyle |
+
+**And components that do not exist in the product AT ALL:**
+
+- a **command palette** (`cmdk`, with `g-o` / `g-g` / `g-s` keyboard routing)
+- **density modes** (cozy / compact) — every list and table gains a size axis
+- **theme × palette toggles** (dark / mono / violet)
+- **toasts with UNDO** — an action-reversal pattern nothing in the product has
+
+**Each is a new component model, not a variant of an existing one.** That settles decide-item 1 on the
+**tenfold** branch.
+
+---
+
+## CONSEQUENCE 1 — A HARD REQUIREMENT: **THE REDESIGNED UI MUST SHIP SEMANTIC, ACCESSIBLE MARKUP**
+
+**Buttons are `<button>`. Tables are `<table>`. Inputs have `<label>`. Navigation is `<nav>`. Interactive
+elements carry accessible names.**
+
+**Two reasons, and the second is not optional:**
+
+**(a) THE COMPONENT TEST TIER QUERIES BY ROLE AND ACCESSIBLE NAME.** In a markup model with **one `<button>`
+among 1,015 divs** there are no roles to query, and **every test in the tier becomes UNWRITABLE — not broken,
+unwritable.** The tier cannot be ported to div soup; it can only be deleted.
+
+**(b) 0 `aria-` attributes and 0 semantic landmarks is a WCAG 2.1 AA failure on its face.** Keyboard
+navigation, screen readers and focus order all depend on the elements the wireframe replaced with divs.
+**Shipping it as drawn would make the product LESS ACCESSIBLE THAN IT IS TODAY** — a regression delivered as an
+improvement.
+
+> ### THE WIREFRAME IS A VISUAL SPECIFICATION, NOT A MARKUP SPECIFICATION.
+>
+> Its inline-styled div soup is a **Claude Design output artifact**. **Take the LAYOUT, the HIERARCHY and the
+> COPY from it. Take NONE of its DOM.**
+
+**ACCESSIBILITY GATE IN THE DEFINITION OF DONE**, using the `design:accessibility-review` skill. **A screen that
+cannot be tested by role is not done.**
+
+## CONSEQUENCE 2 — THE TIER'S QUERY STRATEGY, DECIDED NOW (binds `story/web-component-tests` from slice 1)
+
+1. **QUERY BY ROLE + ACCESSIBLE NAME.** Never test-ids, never class names, never DOM structure. **It is the
+   most rewrite-resistant selector that exists:** it survives any markup change that preserves semantics, and
+   **a redesign that breaks it has broken accessibility too — which is a finding, not test debt.**
+2. **MOCK AT THE NETWORK BOUNDARY** (`api.GET` / `api.POST`), never at the component boundary. **That layer
+   does not change in a redesign.**
+3. **ASSERT DECISIONS, NOT RENDERING** — the D1 ruling, restated here because it is what makes the tier survive
+   a re-architecture at all.
+
+### THE BOUNDARY, FOUND BY AUDITING SLICE 1 AGAINST THIS RULE
+
+Slice 1 uses **5 role queries — all compliant** (every interactive control). It also uses **11 text queries**,
+for badges, status labels and empty states. **None is a test-id, class name or DOM assertion** — they assert
+user-visible copy, which is rewrite-resistant for the same reason.
+
+**But they are not role-based, and the reason is exactly consequence 1: those elements carry NO ROLE TODAY.**
+A `<span>` holding "revoked" or "certificate expired — re-enroll this gateway" is unreachable by role because
+the current markup gives it none.
+
+**RULING: `getByText` is permitted ONLY for content that carries no role, and every such use is a MARKER that
+the element should gain one in the redesign** — `role="status"` for badges, `role="alert"` for error text.
+**It is a finding-generator, not an exemption.** When the redesign gives those elements roles, the queries
+convert and the tier gets stricter for free.
+
+## CONSEQUENCE 3 — **THE REDESIGN IS A REFACTOR UNDER A GREEN SUITE.** This is the tier's PURPOSE.
+
+**The redesign must be performed with the component tests PASSING THROUGHOUT — not rewritten and re-tested
+afterwards.**
+
+The tier then proves the redesign **did not change BEHAVIOUR while changing everything else.**
+
+**A test that has to be rewritten to pass is a SIGNAL that the redesign changed a decision** — which is either
+a bug, or a deliberate change that needs recording. Either way it is information, and rewriting the test
+destroys it.
+
+**This inverts the tier's value:** it is not insurance against the redesign breaking things. It is the
+instrument that makes a re-architecture *reviewable at all*.
+
+## CONSEQUENCE 4 — SIZING, STATED HONESTLY
+
+**The redesign is an EPIC, comparable to S8.2's arc — not a story.** Re-architecture is the tenfold branch of
+decide-item 1 and the estimate must say so out loud.
+
+**And the component test tier is now LOAD-BEARING rather than prudent.** A re-architecture with no behavioural
+guard on **the least-guarded surface in the repo** is how **4-of-15 findings becomes 15-of-15.**
 
 ### 2. COMPONENT TEST TIER — lands FIRST or in the same story, NEVER after
 
