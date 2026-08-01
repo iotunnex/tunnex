@@ -29,10 +29,25 @@ function specEnterprisePaths(): Set<string> {
   const flush = () => {
     if (inOp && path) {
       const blk = buf.join("\n");
-      if (
-        blk.includes("edition_required") ||
-        /summary:.*\(enterprise\)/i.test(blk)
-      )
+      // ⛔ WIDENED, S14.5 — AND THE NARROW VERSION MISSED THREE GENUINELY-GATED ENDPOINTS.
+      //
+      // It was `/summary:.*\(enterprise\)/`, which requires the word ALONE inside its parentheses. The spec
+      // does not consistently write it that way:
+      //
+      //   "Approve a pending device (peer + grants land org-wide within seconds, enterprise)"
+      //   "Reject a pending device (revoked, tunnel address freed, enterprise)"
+      //   "Self-report device posture facts (owner only; server evaluates, enterprise)"
+      //
+      // All three call `deviceApprovalEditionRequired()` / gate on `deviceHealthEnabled` in the handler —
+      // they are REALLY enterprise — and none was registered, because the parenthetical carried other words.
+      //
+      // THIS IS THE CENSUS FAILING ITS OWN LAW: *an absence found by one encoding is not an absence.* The
+      // instrument built to stop the edition class had the edition class inside it.
+      //
+      // Now: the word `enterprise` anywhere in the summary, on a word boundary. Wider means occasional false
+      // positives, which are visible and cheap (a red naming a path), against silent false negatives, which
+      // are the entire failure mode.
+      if (blk.includes("edition_required") || /summary:.*\benterprise\b/i.test(blk))
         out.add(path);
     }
     inOp = false;

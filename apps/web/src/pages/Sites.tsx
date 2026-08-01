@@ -86,7 +86,6 @@ export default function Sites() {
     )) as Loaded<Member[]>;
     setMyRole(roleFromMembers(memRes, myId).role);
 
-    if ((mRes.data as Meta).edition !== "enterprise") return;
     const sRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/sites", {
         params: { path: { orgId: first.id } },
@@ -134,15 +133,10 @@ export default function Sites() {
     reload();
   }, [reload]);
 
-  const gate = siteGate({
-    role: myRole,
-    emailVerified,
-    edition: meta?.edition,
-  });
+  const gate = siteGate({ role: myRole, emailVerified });
   const view = sitesView({
-    editionReady: meta != null && org != null,
+    ready: meta != null && org != null,
     loadError: loadError != null,
-    isEnterprise: gate.isEnterprise,
   });
 
   const cards: SiteCard[] = useMemo(
@@ -190,18 +184,6 @@ export default function Sites() {
       )}
       {view === "loading" && (
         <p className="mt-6 text-sm text-slate-500">Loading…</p>
-      )}
-
-      {view === "upsell" && (
-        <Card className="mt-6">
-          <h2 className="text-sm font-semibold text-slate-300">
-            Site-to-site networking
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Connecting your sites and routing traffic between them is a Tunnex
-            Enterprise feature.
-          </p>
-        </Card>
       )}
 
       {view === "body" && raw != null && org != null && (
