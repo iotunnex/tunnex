@@ -22,14 +22,34 @@ import { render, screen, cleanup } from "@testing-library/react";
 
 afterEach(cleanup); // see docs/laws.md — no globals/setup file, so auto-cleanup never registers
 
+// Mocked at the NETWORK boundary (consequence 2), so the Devices page below mounts as the real component.
+const POSTURE_FLEET = [
+  { id: "dr", name: "dev-revoked", status: "revoked", assigned_ip: "10.99.0.9", health_state: "noncompliant", health_blocked: true },
+  { id: "da", name: "dev-active", status: "active", assigned_ip: "10.99.0.3", health_state: "noncompliant", health_blocked: true },
+];
+
 vi.mock("../src/lib/api", async () => {
   const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
-  return { ...actual, apiErrorMessage: (_e: unknown, f: string) => f, api: { GET: vi.fn(async () => ({ data: undefined })), POST: vi.fn(async () => ({ data: {} })) } };
+  return {
+    ...actual,
+    apiErrorMessage: (_e: unknown, f: string) => f,
+    api: {
+      GET: vi.fn(async (path: string) => {
+        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path.endsWith("/devices")) return { data: POSTURE_FLEET };
+        if (path.endsWith("/nodes")) return { data: [] };
+        return { data: [] };
+      }),
+      POST: vi.fn(async () => ({ data: {} })),
+    },
+  };
 });
 
 import { Gateways } from "../src/components/Gateways";
 import { GatewayRow } from "../src/pages/Sites";
+import Devices from "../src/pages/Devices";
 import { policyHealthBadge } from "../src/lib/healthview";
+import { postureBadge } from "../src/lib/postureview";
 
 const org = { id: "org-1", name: "Acme" } as never;
 
@@ -82,5 +102,31 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
       </ul>,
     );
     expect(screen.getByText(badge!.label)).toBeTruthy();
+  });
+
+  // THE THIRD PARTY, AND THE REFERENCE IMPLEMENTATION. Devices has ALWAYS carried this guard — it is the
+  // surface Gateways was measured against when WF-S11-10 was diagnosed, and the one Sites was measured against
+  // on this branch. Its badge producer is DIFFERENT (postureBadge, not policyHealthBadge), which is precisely
+  // why the concept has to be asserted rather than the label: the rule is "a revoked row carries no
+  // health/status/instruction badge", and it holds across surfaces that compute their badges differently.
+  //
+  // READ FROM THE SAME SOURCE OF TRUTH, NOT RESTATED. The expected label comes from postureBadge() itself — the
+  // function the component calls — so a fixture cannot drift from production. A hardcoded "posture blocked"
+  // would test the restatement, which is WF-S13-3's class exactly.
+  it("Devices: the rule holds on the surface that always had it, via a DIFFERENT badge producer", async () => {
+    const posture = postureBadge({ health_state: "noncompliant", health_blocked: true } as never);
+    expect(posture, "fixture must genuinely produce a badge, or the assertion below is vacuous").not.toBeNull();
+
+    // THE REAL PAGE, not a stand-in. The first draft of this test rendered a three-line `DeviceRowProbe` that
+    // re-encoded `status !== "revoked" && <badge>` — which would have PASSED FOREVER even if Devices.tsx lost
+    // its guard, because the assertion would have been reading the test's own copy of the rule. That is
+    // fixture-restates-production (WF-S13-3's class) inside the very check written to prevent it. Caught before
+    // it was committed; recorded here because the near-miss is the lesson.
+    render(<Devices />);
+    await screen.findByText("dev-revoked");
+
+    // One badge for two posture-blocked devices: the active one. Same arithmetic as the Gateways case above —
+    // one rule, three surfaces, asserted identically, each against its own real component.
+    expect(screen.getAllByText(posture!.label)).toHaveLength(1);
   });
 });

@@ -41,6 +41,7 @@ const EXEMPT: Record<string, string> = {
 // COVERED — a screen enters this list when it has BOTH a wiring test and a failure-path test.
 const COVERED: Record<string, string> = {
   "Gateways.tsx": "test/gatewayswiring.test.tsx — revoke wiring + revoked-suppression + failed-revoke surfaced",
+  "Devices.tsx": "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -55,7 +56,6 @@ const COVERED: Record<string, string> = {
 // THE ORDER IS THE COMMIT-ONE ORDER, and the reason is recorded with it: surfaces are ranked by where
 // disagreement with the backend is most consequential, not by size.
 const PENDING: Record<string, string> = {
-  "Devices.tsx": "next — the sibling that got revoked-suppression RIGHT, so it is Gateways' reference implementation",
   "Access.tsx": "after Devices — a rule shown active but not compiled is a silent authorization gap",
   "Kubernetes.tsx": "after Access — WF-S11-7's own territory (the unrendered health kind)",
   "Sites.tsx": "carries the D4 three-way assertion already (test/siblingconsistency.test.tsx); still owes its own wiring + failure-path pair",
@@ -97,10 +97,10 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(1);
+    expect(Object.keys(COVERED).length).toBe(2);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(8);
+    expect(Object.keys(PENDING).length).toBe(7);
   });
 });
