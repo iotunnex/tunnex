@@ -505,11 +505,23 @@ CANNOT FAIL**, and it was caught **before the test was written**.
 | 2 | the acceptance test waiting on `issued` | after CI went red |
 | 3 | the restore-window poller for an event `restore.go` cannot produce | **before it was written** |
 | **4** | **a jsdom "responsive" test at five widths** | **before it was written** |
+| **5** | **a `prefers-reduced-motion` test in jsdom** — `window.matchMedia` **is not implemented**, so the test would throw or silently no-op | **before the motion gate was written** |
 
 **The three-layer answer is right precisely because it never asks jsdom a question jsdom cannot answer:** a
 **pure** `layoutIntent(width)` unit-tested at boundaries · a component tier that stays **width-blind** (and *a
 test that needs a viewport to pass IS the finding*) · a responsive contract asserting **absence by role** with
 capability **injected, never measured**.
+
+**CATCH 5 IS THE SAME SHAPE ONE MEDIA QUERY OVER, and it is why the shape is worth naming rather than the
+instance.** `prefers-reduced-motion` is a **gate, not a courtesy** — so a test of it that quietly no-ops is a
+gate that certifies an accessibility property nobody checked. **Found before the motion gate was written, not
+after it silently passed**, and answered the same way: a **pure `motionAllowed(prefersReducedMotion)`**
+decision, the preference read **once at the app edge**, and the CSS half emitted **unconditionally** as
+`@media (prefers-reduced-motion: reduce)` zeroing every duration token — **so a component that forgets to check
+still animates for zero milliseconds.**
+
+**THREE OF THE FIVE WERE CAUGHT BEFORE THE CHECK WAS WRITTEN.** That is the detector paying for itself: the
+first two cost a green run each; the last three cost a question.
 
 ## A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS UNTIL A MUTATION CONFIRMS IT (2026-08-01, S14.2)
 
