@@ -55,6 +55,31 @@ test.describe("visual — the shared surface", () => {
   }
 });
 
+// ⛔ THE WIDTH-SENSITIVE CLASS, CAPTURED SEPARATELY AND AT 1440 ONLY (founder-ruled 2026-08-02).
+//
+// SEPARATE, not appended to the gallery image: diff legibility is the point of a small suite. Appending
+// would roughly double the page and spread any change across more pixels — making a real regression harder
+// to see in the very image a human is meant to read. Every image must EARN ITS PLACE, and one that isolates
+// the class where a component's geometry derives from its CONTAINER earns it.
+//
+// ⛔ 1440 ONLY, AND THAT IS NOT AN OVERSIGHT. At 390 there is no wide column, so a "wide specimen" is just
+// the narrow one again — it would test nothing while costing a baseline and a re-harvest on every change.
+// This note exists so nobody adds `gallery-wide-390.png` for symmetry.
+test.describe("width-sensitive specimens at full column width", () => {
+  test("wide specimens @ 1440", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await stabilise(page);
+    await page.goto("/__visual");
+    const wide = page.locator("[data-wide-specimens]");
+    await expect(wide).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await expect(wide).toHaveScreenshot("gallery-wide-1440.png", {
+      maxDiffPixelRatio: 0,
+      animations: "disabled",
+    });
+  });
+});
+
 // ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
 //
 // This assertion exists because the FIRST baseline run produced a 455px-wide capture from a 390px viewport —
