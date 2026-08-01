@@ -778,3 +778,99 @@ correct — and the longer they look, the more likely they are to "fix" it there
 domain over: **nonsense is self-announcing; plausibility is camouflage.** So when a query's *semantics* change
 under a refactor — what counts as a row, a cell, a match — **state the new convention IN the assertion**, so
 the next red is read as a convention question rather than a product one.
+
+# ⑧ THE SUBJECT AND ITS CHECK VANISHING TOGETHER (minted 2026-08-01, EPIC 14 merge)
+
+> ## **THE OTHER SEVEN MECHANISMS ALL ASSUME THE SUBJECT IS PRESENT. THIS ONE IS THE SUBJECT AND ITS GUARD DISAPPEARING IN THE SAME MOVE, SO NOTHING REMAINS TO DISAGREE.**
+
+**FILED ABOVE THE REST OF ITS FAMILY. It is the sharpest instance this project has produced.**
+
+**THE INSTANCE.** Rebuilding `story/S14.2-layout-shell` on the new `main` meant cherry-picking its own commits.
+The sequence **reported success**. **The commit count agreed.** A repo-wide conflict-marker scan was **clean**.
+Every exit code was **0**.
+
+**And 400+ lines of S14.2's product code were missing** — `ComposeGate.tsx`, `layout.ts`, the grouped `AppShell`
+nav, the `Access`/`main` wiring. They had originally landed inside `1843df9`, a **merge commit that also
+carried uncommitted working-tree files**; replaying only non-merge commits dropped the payload.
+
+## WHY THIS IS NOT MERELY A VACUOUS CHECK
+
+**Had it shipped, CI WOULD LIKELY HAVE PASSED** — because `responsivecontract.test.tsx` and `layout.test.ts`
+were dropped **in the same payload**. The feature and its evidence were one commit.
+
+**A vacuous check is a guard pointed at the wrong thing while the subject is still there to be examined.**
+Every one of the other seven has that structure — a poller that samples too slowly, an assertion that waits on
+a different event, a claim nothing compares, a fixture restating production. **In all of them the subject
+exists and something could, in principle, notice.**
+
+**Here there was nothing left to notice with.** The suite would have gone green over a smaller universe and
+reported the same word. **Green is a statement about what ran, and a shrinking denominator is invisible in it.**
+
+## THE DIAGNOSTIC THAT CAUGHT IT
+
+> ### **COMPARE THE RESULT TO THE INTENT — NEVER THE PROCESS TO ITS EXIT CODE.**
+
+`git diff --stat backup/S14.2-prerebase HEAD`. **That is what found it.** Commit counts, exit codes and marker
+scans **all agreed with each other and all described the process**, not the outcome. Only an artifact-to-artifact
+comparison against a known-good reference could see a hole, because **a hole has no representation in any
+process signal.**
+
+## PROCEDURAL, NOT ADVISORY
+
+> **ANY REBASE OR REBUILD OF A BRANCH WHOSE CI IS ALREADY GREEN MUST END WITH A TREE DIFF AGAINST THE
+> CI-VERIFIED TIP, ASSERTED EMPTY. TAKE THE BACKUP REF BEFORE STARTING. ALWAYS.**
+
+```bash
+git branch -f backup/<branch>-prerebase <branch>     # BEFORE anything
+…                                                     # rebase / rebuild
+git diff --stat backup/<branch>-prerebase HEAD        # MUST be empty
+```
+
+**The backup ref costs nothing and is the only thing that makes the assertion possible.** Without it there is
+no known-good reference, and the rebuild can only be compared to itself.
+
+## A COMMAND THAT STOPS FOR INPUT IS NOT A COMMAND THAT FAILED — AND `&&` CANNOT TELL THEM APART
+
+**`git rebase` EXITS 0 WHEN IT STOPS ON A CONFLICT.** So `git rebase … && git push --force-with-lease …`
+**pushed a branch with 1 of 6 commits replayed.**
+
+**RECORDED AS LUCK, NOT DESIGN:** the truncated state was never consumed. Nothing read it, `main` was
+untouched, and the completed rebase restored all six. **That is an outcome, not a safeguard**, and a lucky
+escape written up as a designed one teaches the wrong lesson.
+
+**REBASES RUN UNCHAINED FROM THEIR PUSH. PERMANENTLY.**
+
+**AND NOTE THE PAIR, ONE SESSION APART AND ONE LAYER APART:**
+
+| command | exits `0` while… |
+|---|---|
+| `git rebase` | **incomplete** — stopped mid-sequence awaiting a human |
+| `git cherry-pick <list>` | **dropping a payload** — a merge commit's content silently skipped |
+
+**Both are "success" by exit code. Both are only visible by comparing the RESULT to the INTENT.**
+
+# THE FAST-FORWARD PUSH IS THE STANDARD MERGE ROUTE, AND THE REASON IS A PROPERTY WORTH KEEPING (2026-08-01)
+
+**GitHub REFUSES the merge-commit route under `required_linear_history`:**
+
+```
+GraphQL: Merge commits are not allowed on this repository. (mergePullRequest)
+```
+
+**`gh pr merge --rebase` would work — and it REWRITES the shas**, server-side, producing commits **CI has never
+seen**. The recorded green sha and the merged sha would then be different objects, and every *"CI green at
+`X`"* line in every paper would refer to something that is not what landed.
+
+**A TRUE FAST-FORWARD PUSH PRESERVES THE EXACT SHAS CI VERIFIED:**
+
+```bash
+git push origin origin/story/<branch>:main     # ff only; refused if not a descendant
+```
+
+**THE PROPERTY: the sha in the paper, the sha CI checked, and the sha on `main` are ONE OBJECT.** That is what
+makes `GATE-REPORT-NEEDS-SHA` mean anything after the merge rather than only before it — and it is what let
+this session detect that #44's recorded green had gone stale, because the recorded sha was still findable.
+
+**It also cannot silently succeed on the wrong thing:** a non-descendant is **refused by git**, which is how
+#45 and #46 were caught needing a rebase rather than being quietly rewritten onto the new base. **GitHub closes
+the PR as MERGED on its own once the head sha becomes an ancestor of `main`.**
