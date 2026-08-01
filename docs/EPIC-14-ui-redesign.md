@@ -436,9 +436,44 @@ elements).
 **NOT RESOLVED IN THE VIEWPORT LEG.** A visual suite must not become the place where product decisions get made
 quietly — the test is scoped to the panel and the duplication is registered.
 
-**THE LIKELY ANSWER, for the founder to rule:** the README's layout is **sidebar + topbar + page body, with no
-footer at all**, and System Health is the designed home for this value. So the footer indicator is probably
-redundant. **But removing it is a SHELL change touching all 18 screens**, and the shell's footer is also where
-`e2e` asserts the SPA issues `GET /healthz` — so it needs its own disposition, not a drive-by deletion.
+**THE LIKELY ANSWER, founder-confirmed as the reasoning but NOT as the disposition:** the README's layout is
+**sidebar + topbar + page body, with no footer at all**, and System Health is the designed home for this value.
+So the footer indicator is probably redundant. **But removing it is a SHELL change touching all 18 screens**,
+and the shell's footer is also where `e2e` asserts the SPA issues `GET /healthz` — so it needs its own
+disposition, not a drive-by deletion.
 
-**TRIGGER: the next shell-touching section, or S14.5's review.**
+**FOUNDER RULING (2026-08-02): REGISTER, DO NOT RESOLVE.** *"It is a product decision, not a test fix, and a
+visual suite must never be the place a product decision gets made quietly."*
+
+**TRIGGER: the next shell-touching section.**
+
+## ⚠ REGISTERED — THE DRAWER `Menu` BUTTON OVERLAPS THE PAGE HEADING AT 390
+
+**Found by reading the harvested 390 baseline before committing it.** The button is
+`absolute left-4 top-4` (`AppShell.tsx:156`), positioned over the page body rather than reserving space in it.
+At drawer width it lands **on top of the `<h1>`** — on Overview the word `Menu` sits across `Overview`.
+
+**IT IS ON EVERY SCREEN AT PHONE WIDTH**, like the 65px header overflow, and like that one it has been live
+since S14.2. This is the leg's **third** pre-existing main defect.
+
+**NOT FIXED IN THE LEG** — the founder's last round was funded for *harvest, land, green*, and a shell fix is
+neither. **The 390 baseline is therefore committed WITH THE DEFECT VISIBLE IN IT**, which is correct: a
+baseline's job is to detect CHANGE, not to certify correctness. Freezing a registered defect is honest;
+freezing an unregistered one is the trap.
+
+> **A BASELINE IS NOT A STATEMENT THAT THE IMAGE IS RIGHT. IT IS A STATEMENT THAT THIS IS WHAT WE HAVE.
+> THE DIFFERENCE ONLY HOLDS IF WHAT IS WRONG IN IT IS WRITTEN DOWN.**
+
+**When it is fixed, the 390 baseline must be re-harvested in the same commit** — the diff is the proof.
+
+**TRIGGER: the same one as the duplicated indicator — the next shell-touching section.**
+
+### ✅ RULED OUT, and worth recording as the thing it was NOT
+
+The 390 baseline also shows the **triage bottom bar rendered mid-page**, around y≈1176. That one is a
+**FULL-PAGE CAPTURE ARTIFACT, not a defect**: `TriageBar` is `sticky bottom-0` (`AppShell.tsx:197`), so it
+sticks to the viewport bottom in a real browser and renders at its flow position in a stitched full-page shot.
+It is deterministic — same viewport height every run — so it neither flakes nor needs masking.
+
+**Two anomalies in one image, one real and one not.** Reading the image is what separated them; the suite would
+have committed both without comment.
