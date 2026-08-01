@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../components/Icon";
+import { HealthStatus } from "../components/HealthStatus";
 import { Donut } from "../components/viz";
 import { Link } from "react-router-dom";
 import {
@@ -175,6 +176,40 @@ export default function Dashboard() {
             // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
             const isEnterprise = edition === "enterprise";
 
+            // NEEDS ATTENTION is COMPOSED, not fetched — every item names the source that produced it, and an
+            // item appears only when its source has been READ. A source still loading contributes nothing;
+            // a source that FAILED contributes nothing either, because "nothing needs attention" and "we could
+            // not check" must not render identically. The panel says "loading" until every source has answered.
+            const sources = [nodesRes, pendingRes] as const;
+            const attention: Array<{
+              key: string;
+              text: string;
+              to: string;
+            }> | null = sources.some((r) => r === null)
+              ? null
+              : [
+                  ...(nodesRes?.ok
+                    ? nodesRes.data
+                        .filter((n) => n.policy_degraded)
+                        .map((n) => ({
+                          key: `gw-${n.id}`,
+                          text: `${n.name}: ${policyHealthBadge(n)?.label ?? "degraded"}`,
+                          to: "/sites",
+                        }))
+                    : []),
+                  ...(isEnterprise &&
+                  pendingRes?.ok &&
+                  pendingRes.data.length > 0
+                    ? [
+                        {
+                          key: "pending-devices",
+                          text: `${pendingRes.data.length} device${pendingRes.data.length === 1 ? "" : "s"} awaiting approval`,
+                          to: "/devices",
+                        },
+                      ]
+                    : []),
+                ];
+
             // Sub-lines are QUALIFICATIONS, and each is `null` when there is nothing honest to say. A sub-line
             // is never filler: an unqualified number is a smaller claim than a wrongly-qualified one.
             const degraded = nodesRes?.ok
@@ -287,10 +322,47 @@ export default function Dashboard() {
                   </Panel>
                 )}
 
-                {/* README panel spans on the 12-col base: Peer Connection Status 3 · Gateway Health 3 ·
-                    Recent Activity 3. Site-Link Throughput (6), Device Posture, Needs Attention, System
-                    Health, Network map, HA Hub Set and Alerts are CUT or DEFERRED — see docs/S14.4. */}
+                {/* ⛔ THE BENTO: ONE grid, and EVERY ROW SUMS TO 12. A ragged row is the tell that a panel
+                    was placed rather than composed — the design has no row that does not fill.
+
+                    Row 2: Peer Connection Status 4 · Gateway Health 4 · Recent Activity 4
+                    Row 3: Needs Attention 8 · System Health 4
+
+                    CUT from the design, each with its reason (docs/S14.4-commit-one.md):
+                      Site-Link Throughput — the spec forbids the field's use as a rate series
+                      Device Posture       — deferred to the Devices section, which owns the posture vocabulary
+                      Network map / HA Hub Set — no hub, generation, pin or handshake-age field exists on Site
+                      Alerts               — composed from sources this screen does not own; Access Events' job
+                      Fleet risk           — Tier-3, not built */}
                 <div className="grid grid-cols-12 gap-12">
+                  <Panel title="Peer Connection Status" className="col-span-4">
+                    <Donut
+                      label="Gateway liveness"
+                      source={{
+                        endpoint: "/api/v1/organizations/{orgId}/overview",
+                      }}
+                      failed={error != null}
+                      slices={[
+                        {
+                          label: "seen in last 3 min",
+                          value: data.online,
+                          tone: "ok",
+                        },
+                        {
+                          label: "not seen recently",
+                          value: Math.max(0, data.nodes - data.online),
+                          tone: "neutral",
+                        },
+                      ]}
+                      empty="No gateways enrolled yet."
+                    />
+                    {/* The design's caption, verbatim — it states the product's rule, not a decoration. */}
+                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                      Status derived from WireGuard handshake liveness — never
+                      green-while-dead.
+                    </p>
+                  </Panel>
+
                   <Panel title="Gateway Health" className="col-span-4">
                     {nodesRes === null ? (
                       <Loading />
@@ -300,9 +372,6 @@ export default function Dashboard() {
                       <EmptyState>No gateway enrolled yet.</EmptyState>
                     ) : (
                       <List label="Gateway health">
-                        {/* ONE interpreter for the 14-value policy_degraded_kind enum: policyHealthBadge, the
-                          existing tested view-model. A second copy of the health vocabulary is how the two
-                          drift, and the drift would be invisible because both would still render. */}
                         {sortGateways(
                           nodesRes.data.map((n): GatewayRow => {
                             const b = policyHealthBadge(n);
@@ -319,8 +388,8 @@ export default function Dashboard() {
                           }),
                         ).map((g) => (
                           <ListItem key={g.id}>
-                            <span className="flex items-center justify-between">
-                              <span className="text-sm text-slate-200">
+                            <span className="flex items-center justify-between gap-8">
+                              <span className="truncate font-mono text-mono text-ink-primary">
                                 {g.name}
                               </span>
                               <Badge tone={g.tone}>{g.label}</Badge>
@@ -329,6 +398,80 @@ export default function Dashboard() {
                         ))}
                       </List>
                     )}
+                  </Panel>
+
+                  <Panel title="Recent Activity" className="col-span-4">
+                    {data.recent_activity.length === 0 ? (
+                      <EmptyState>No activity yet.</EmptyState>
+                    ) : (
+                      <List label="Recent activity">
+                        {data.recent_activity.slice(0, 6).map((a, i) => (
+                          <ListItem key={i}>
+                            <span className="flex items-baseline justify-between gap-8">
+                              <span className="truncate font-mono text-mono text-ink-primary">
+                                {a.action}
+                              </span>
+                              <span className="shrink-0 text-micro text-ink-tertiary">
+                                {relativeAge(a.created_at)}
+                              </span>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Panel>
+
+                  <Panel title="Needs Attention" className="col-span-8">
+                    {attention === null ? (
+                      <Loading />
+                    ) : attention.length === 0 ? (
+                      <EmptyState>Nothing needs attention.</EmptyState>
+                    ) : (
+                      <List label="Needs attention">
+                        {attention.map((a) => (
+                          <ListItem key={a.key}>
+                            <span className="flex items-center justify-between gap-8">
+                              <span className="text-cell text-ink-body">
+                                {a.text}
+                              </span>
+                              <Link
+                                to={a.to}
+                                className="shrink-0 text-mono text-ink-emphasis hover:text-ink-heading"
+                              >
+                                Review
+                              </Link>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                      Server refusals shown verbatim — no client-side
+                      re-validation.
+                    </p>
+                  </Panel>
+
+                  <Panel title="System Health" className="col-span-4">
+                    <List label="System health">
+                      <ListItem>
+                        <span className="flex items-center justify-between gap-8">
+                          <span className="text-cell text-ink-body">
+                            Control Plane
+                          </span>
+                          <HealthStatus />
+                        </span>
+                      </ListItem>
+                    </List>
+                    {/* ⛔ ONE ROW, NOT FIVE. The design lists Control Plane · Database · WireGuard Service ·
+                        IdP Sync · Access-log retention. `/healthz` says of itself: "Reports process liveness.
+                        NO EXTERNAL DEPENDENCIES ARE CHECKED." Rendering "Database ● Healthy" from it would
+                        claim a check that never ran — a green light for a thing nobody looked at, which is
+                        the render-floor violation in its most dangerous form. IdP Sync and Access-log
+                        retention are enterprise-only and absent on this edition. */}
+                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                      Liveness only — the control plane does not probe its
+                      dependencies, so nothing else is claimed here.
+                    </p>
                   </Panel>
                 </div>
               </>

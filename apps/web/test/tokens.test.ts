@@ -10,6 +10,7 @@ import {
   THEMES,
   TOKEN_NAMES,
   contrastRatio,
+  solid,
   tailwindColors,
   themeCss,
 } from "../../../packages/shared/src/tokens";
@@ -30,10 +31,13 @@ describe("accessibility floor — WCAG 2.1 AA, COMPUTED not reviewed", () => {
     for (const pair of CONTRAST_PAIRS) {
       it(`[${themeName}] ${pair.fg} on ${pair.bg} meets ${pair.floor}:1 — ${pair.why}`, () => {
         const theme = THEMES[themeName]!;
-        const ratio = contrastRatio(theme[pair.fg], theme[pair.bg]);
+        // `solid()` composites a translucent surface to the colour it actually renders as. The glass is
+        // rgba by design, and a ratio computed from an alpha value is NaN — which FAILS, correctly, but for
+        // the wrong reason. Resolving first means the assertion measures what the eye sees.
+        const ratio = contrastRatio(solid(theme, pair.fg), solid(theme, pair.bg));
         expect(
           ratio,
-          `${pair.fg} (${theme[pair.fg]}) on ${pair.bg} (${theme[pair.bg]}) = ${ratio.toFixed(2)}:1, floor ${pair.floor}:1`,
+          `${pair.fg} (${solid(theme, pair.fg)}) on ${pair.bg} (${solid(theme, pair.bg)}) = ${ratio.toFixed(2)}:1, floor ${pair.floor}:1`,
         ).toBeGreaterThanOrEqual(pair.floor);
       });
     }

@@ -50,6 +50,10 @@ export const RESERVATIONS: Record<
 export const TOKEN_NAMES = [
   // surfaces — README "Color — dark (default)"
   "bg", // app background
+  // The two backdrops the glass refracts. NOT colours — CSS background shorthands, which custom properties
+  // carry perfectly well. They are tokens because the glass is meaningless without them.
+  "bg-glow", // <body> ambient glow, fixed attachment
+  "bg-page", // the content area's radial field
   "surface", // card fill (translucent; the glass recipe composes it)
   "surface-inset", // inset / sub-panel
   "code", // code block
@@ -94,8 +98,17 @@ export type Theme = Record<TokenName, string>;
  */
 const mono: Theme = {
   bg: "#0A0A0A",
-  surface: "#1B1B1B", // rgba(31,31,31,.72) composited over bg — the literal alpha lives in the glass recipe
-  "surface-inset": "#161616", // rgba(18,18,18,.72) over bg
+  // The two backdrops the glass needs SOMETHING to refract. Without them a translucent card sits on a flat
+  // field and looks identical to an opaque one — the effect is in the CONTRAST BEHIND, not in the blur.
+  "bg-glow":
+    "radial-gradient(1200px 700px at 80% -10%,rgba(255,255,255,.03),transparent 62%),#0A0A0A",
+  "bg-page":
+    "radial-gradient(130% 120% at 12% -5%,#1C1C1C 0%,#141414 48%,#0D0D0D 100%)",
+  // ⛔ TRANSLUCENT, NOT COMPOSITED. A first pass set these to the composited hex (#1B1B1B) "because the alpha
+  // lives in the glass recipe" — which made every card OPAQUE, so `backdrop-filter` had nothing to see through
+  // and the liquid glass rendered as flat plastic. The alpha IS the material.
+  surface: "rgba(31,31,31,.72)",
+  "surface-inset": "rgba(18,18,18,.72)",
   code: "#101010",
   "badge-bg": "#1A1A1A",
   border: "#2E2E2E",
@@ -422,6 +435,25 @@ function srgbToLinear(c: number): number {
 }
 
 /** WCAG 2.1 relative luminance. */
+/**
+ * The solid colour a TRANSLUCENT surface composites to over the page background.
+ *
+ * ⛔ CONTRAST IS COMPUTED AGAINST THIS, NOT AGAINST THE `rgba()` STRING. A ratio computed from an alpha value
+ * is `NaN`, and `NaN >= 4.5` is FALSE — so the gate fails loudly rather than certifying an unreadable pair.
+ * That is the safe direction, and it is why the resolver lives here rather than in the test: a consumer that
+ * needs "what colour is this really" must not each invent its own answer.
+ */
+export const COMPOSITED: Record<string, string> = {
+  surface: "#1B1B1B", // rgba(31,31,31,.72) over #0A0A0A
+  "surface-inset": "#161616", // rgba(18,18,18,.72) over #0A0A0A
+};
+
+/** Resolve a token to the solid colour it actually renders as. Hex passes through; translucency composites. */
+export function solid(theme: Theme, name: TokenName): string {
+  const v = theme[name];
+  return v.startsWith("#") ? v : (COMPOSITED[name] ?? v);
+}
+
 export function luminance(hex: string): number {
   const h = hex.replace("#", "");
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));

@@ -230,7 +230,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex min-h-full flex-col bg-transparent">
       {/* Mounted on the SHELL, not per screen: ⌘K must work wherever the user is. */}
       <CommandPalette />
       {/* README: TOP BAR, h:56px — search (opens the palette), spacer, then identity. */}
@@ -274,7 +274,7 @@ export function AppShell() {
             computed, asserted, and never consumable — dormant machinery in our own new code (docs/laws.md).
             Padding and gap are the README's: 20px 24px 28px, flex column, gap 14. */}
         <main
-          className="flex flex-1 flex-col gap-14 px-24 pb-[28px] pt-20"
+          className="tnx-page flex flex-1 flex-col gap-14 px-24 pb-[30px] pt-[34px]"
           data-columns={columns}
         >
           {/* data-columns publishes the column BUDGET so a page grid can consume it — which nothing could do
