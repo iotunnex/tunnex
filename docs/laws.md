@@ -874,3 +874,71 @@ this session detect that #44's recorded green had gone stale, because the record
 **It also cannot silently succeed on the wrong thing:** a non-descendant is **refused by git**, which is how
 #45 and #46 were caught needing a rebase rather than being quietly rewritten onto the new base. **GitHub closes
 the PR as MERGED on its own once the head sha becomes an ancestor of `main`.**
+
+## A COMMENT THAT **BECAME CODE** — THE COMMENT-VOUCHING FAMILY, INVERTED (2026-08-01, S14.3 slice B)
+
+**THE INSTANCE.** A `@ts-expect-error` directive was removed because it was unused (`TS2578`). The removal was
+explained in a `//` comment that **named the directive**. **`tsc` reported `TS2578` again — on the comment.**
+
+**TypeScript reads the TOKEN, not the sentence around it.** Writing the literal text of a suppression directive
+in a line comment **creates a suppression directive**, regardless of the prose wrapped around it.
+
+### WHY THIS IS A NEW MEMBER RATHER THAN ANOTHER INSTANCE — THE MECHANISM IS INVERTED
+
+| | the usual shape | **this one** |
+|---|---|---|
+| the comment | makes a **FALSE CLAIM** about code | **BECAME code** |
+| the claim | asserted by a human, unchecked | **REAL, and asserted by nobody** |
+| discovered by | a mutation, or an incident | **the compiler, immediately** |
+
+[[A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS UNTIL A MUTATION CONFIRMS IT]] and
+[[⑦ THE SEVENTH VACUITY MECHANISM]] both describe **prose that says something untrue about the system**. Here
+the prose **entered the system** and said something **true that nobody meant to say**. It is the same seam —
+the boundary between commentary and code — **crossed in the opposite direction.**
+
+### THE DURABLE HALF, WHICH IS ABOUT SUPPRESSIONS GENERALLY
+
+> ## **A STALE SUPPRESSION IS A STANDING ASSERTION THAT A TYPE ERROR EXISTS — AND IT GOES STALE IN SILENCE.**
+
+`@ts-expect-error` claims *"the next line does not compile."* **When the underlying error is fixed, NOTHING
+FAILS** in most configurations — the directive simply outlives its reason, **indefinitely**, and the next
+reader takes it as evidence of a problem that no longer exists. TypeScript's `TS2578` is unusually good
+behaviour here precisely *because* it makes the stale case loud; **most suppression mechanisms
+(`eslint-disable`, `//nolint`, `# type: ignore`) do not.**
+
+### THE PRACTICAL RULE
+
+> **NEVER WRITE A DIRECTIVE'S LITERAL TEXT IN PROSE. REFER TO IT BY DESCRIPTION.**
+
+*"the suppression directive that used to sit here"* — not the token. **A block comment is not a fix; it is a
+workaround for one language's lexer.** The rule is general because the failure is: **any tool that scans
+comments for magic tokens cannot distinguish an instruction from a discussion of that instruction.**
+
+## THE GATE IS **THREE LEGS**, AND EACH ANSWERS A QUESTION THE OTHERS STRUCTURALLY CANNOT (2026-08-01, S14.3)
+
+**`make web-gate` = `typecheck` + `vitest` + `build`. NOT Playwright; e2e runs in CI only.**
+
+**THE `typecheck` LEG IS NOT REDUNDANT WITH THE `vitest` LEG, and this story produced THREE proofs in a row:**
+
+| # | what `tsc` caught | what `vitest` said |
+|---|---|---|
+| 1 | `TS6133` — an unused import in the **primitive census** | **13 tests green**, watched pass |
+| 2 | `TS2578` — the comment that **became a directive** | **347 tests green** |
+| 3 | `TS6133` — an unused `vi` import | **347 tests green** |
+
+**THE REASON IS STRUCTURAL, not a configuration accident: VITEST TRANSPILES PER FILE AND NEVER TYPECHECKS.**
+esbuild strips types without checking them, so a test file can be **type-incoherent and behaviourally correct
+at the same time** — and the suite reports the second while saying nothing about the first.
+
+**AND THE CONVERSE HOLDS:** `tsc` cannot tell whether a correct-typed assertion asserts anything at all — that
+is what the mutation proofs are for. **Three legs, three questions:**
+
+- **`typecheck`** — *is it coherent?*
+- **`vitest`** — *does it behave?*
+- **`build`** — *does it assemble?* (and `e2e`, **in CI only** — *does it work end to end?*)
+
+> **NAMING A COMPOSITE GATE AS ONE THING IS WHAT LET *"the gate is green"* MEAN LESS THAN IT SOUNDED.**
+
+**Filed beside the `NOT Playwright` rule because it is the same failure one level down:** the first said the
+gate omits a leg people assume is there; **this says the legs it DOES have are not interchangeable, so "some of
+it passed" is not "it passed."**
