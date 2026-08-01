@@ -6,8 +6,11 @@ import { desktop } from "../lib/desktop";
 import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
+import { IdentityBadges } from "./IdentityBadges";
 import { useLayoutCapability } from "./ComposeGate";
 import { CommandPalette } from "./CommandPalette";
+import { useNavCounts } from "../lib/useNavCounts";
+import { badgeText, gatewayBadgeText, type NavCounts } from "../lib/navcounts";
 
 // S14.2 — THE NAV, GROUPED. The wireframe groups destinations NETWORK / ACCESS / OBSERVE / OPERATE / SETTINGS,
 // and that grouping is preserved at EVERY width; only its PRESENTATION changes.
@@ -48,7 +51,27 @@ export const NAV_DESTINATIONS = NAV_GROUPS.flatMap((g) => g.items);
 /** The triage set — the surfaces mobile exists FOR (read health, work the approval queue, act on devices). */
 const TRIAGE_SET = ["/dashboard", "/devices", "/access"];
 
-function NavGroups({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * The badge for a destination, or `null`.
+ *
+ * ⛔ `null` MEANS RENDER NOTHING. Not an empty string, not a dash, and never `0` — see lib/navcounts.ts for
+ * why this surface is stricter than any other in the app.
+ */
+function badgeFor(to: string, c: NavCounts): string | null {
+  if (to === "/dashboard")
+    return gatewayBadgeText(c.gatewaysOnline, c.gatewaysTotal);
+  if (to === "/sites") return badgeText(c.sites);
+  if (to === "/devices") return badgeText(c.devices);
+  return null;
+}
+
+function NavGroups({
+  onNavigate,
+  counts,
+}: {
+  onNavigate?: () => void;
+  counts: NavCounts;
+}) {
   return (
     <>
       {NAV_GROUPS.map((g) => (
@@ -73,6 +96,14 @@ function NavGroups({ onNavigate }: { onNavigate?: () => void }) {
                   }
                 >
                   {item.label}
+                  {/* The DESTINATION never depends on the count loading — S14.2's nav rule still binds, so
+                      the link and its label are always present and only the badge is conditional. */}
+                  {(() => {
+                    const b = badgeFor(item.to, counts);
+                    return b === null ? null : (
+                      <span className="ml-2 text-xs text-slate-500">{b}</span>
+                    );
+                  })()}
                 </NavLink>
               </li>
             ))}
@@ -96,6 +127,7 @@ function NavGroups({ onNavigate }: { onNavigate?: () => void }) {
  */
 function SidebarNav() {
   const { navMode } = useLayoutCapability();
+  const counts = useNavCounts();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   if (navMode === "drawer") {
@@ -116,7 +148,7 @@ function SidebarNav() {
           hidden={!drawerOpen}
           className="absolute inset-y-0 left-0 z-20 w-56 border-r border-white/5 bg-ink-950 p-4"
         >
-          <NavGroups onNavigate={() => setDrawerOpen(false)} />
+          <NavGroups onNavigate={() => setDrawerOpen(false)} counts={counts} />
         </nav>
       </>
     );
@@ -129,7 +161,7 @@ function SidebarNav() {
       aria-label="Main"
       className={`shrink-0 border-r border-white/5 p-4 ${navMode === "rail" ? "w-40" : "w-48"}`}
     >
-      <NavGroups />
+      <NavGroups counts={counts} />
     </nav>
   );
 }
@@ -187,6 +219,8 @@ export function AppShell() {
       <header className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <Logo />
         <div className="flex items-center gap-4">
+          {/* Read-only, ruled: a user cannot switch their own edition or role. */}
+          <IdentityBadges />
           <span className="text-sm text-slate-400">{email}</span>
           <Button variant="ghost" onClick={onLogout}>
             Log out
