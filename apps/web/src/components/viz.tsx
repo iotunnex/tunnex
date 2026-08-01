@@ -485,24 +485,47 @@ export function NodeLink({
         className="w-full"
         role="presentation"
       >
+        {/* The gradient the flowing overlay rides on, per the handoff's `tnxMeshEdge` def. */}
+        <defs>
+          <linearGradient id="tnxMeshEdge" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#D6D6D2" />
+            <stop offset="1" stopColor="#C9C9C4" />
+          </linearGradient>
+        </defs>
         {links.map((l) => {
           const a = pos.get(l.from);
           const b = pos.get(l.to);
           if (!a || !b) return null;
           const touches = selectedId === l.from || selectedId === l.to;
+          const w = touches ? 2.5 : 1.5;
+          const dim = selectedId && !touches ? 0.18 : 1;
           return (
-            <line
-              key={`${l.from}-${l.to}`}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
-              stroke={LINK_STROKE[l.tone]}
-              strokeDasharray={LINK_DASH[l.tone]}
-              strokeWidth={touches ? 2.5 : 1.5}
-              strokeLinecap="round"
-              opacity={selectedId && !touches ? 0.18 : 1}
-            />
+            <g key={`${l.from}-${l.to}`} opacity={dim}>
+              <line
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={LINK_STROKE[l.tone]}
+                strokeDasharray={LINK_DASH[l.tone]}
+                strokeWidth={w}
+                strokeLinecap="round"
+              />
+              {/* ⛔ ONLY A `linked` EDGE FLOWS. A crawling dash on a degraded or down link would animate a
+                  fault as if it were alive — the loudest possible version of the reassuring-green defect.
+                  Motion is reserved for the one state that is genuinely current. */}
+              {l.tone === "linked" && (
+                <line
+                  className="tnx-edge"
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="url(#tnxMeshEdge)"
+                  strokeWidth={w}
+                />
+              )}
+            </g>
           );
         })}
         {nodes.map((n) => {

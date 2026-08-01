@@ -350,8 +350,6 @@ export default function VisualGallery() {
               { from: "h", to: "b", tone: "degraded", note: "subnet unreachable" },
               { from: "h", to: "c", tone: "down", note: "no fresh handshake to the hub" },
             ]}
-            selectedId="b"
-            onSelect={() => {}}
             empty="none"
           />
         </Panel>
