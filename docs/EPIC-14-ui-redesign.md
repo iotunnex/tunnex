@@ -291,6 +291,11 @@ and accessible name, never by narrowing to a test-id (docs/laws.md).
 
 > ## **1. READ THE WIREFRAME FIRST** — `docs/design/TUNNEX-wireframe-v2.html.txt`, for that specific section,
 > ## **by extraction. Not a summary. Not memory. Not a previous session's notes.**
+> ## ⛔ **AND AGAIN BEFORE EVERY CORRECTION — NEVER FROM A SCREENSHOT.** *A screenshot shows what is
+> ## wrong; only the source says what is right.* **Measured cost of the alternative: SIX ROUNDS on the
+> ## Sites network map**, where every correction made from an image was wrong or half-right and every
+> ## correction made from the file was right (`docs/laws.md`). **The same error as building from a
+> ## summary — working from a derived artifact while the original sits on disk.**
 > ## **2. REMOVE WHAT IS NOT APPLICABLE** — no endpoint, no capability, or no screen behind it → **CUT IT AND
 > ## SAY SO, WITH THE REASON. Cutting is a decision that gets RECORDED, never a silence.**
 > ## **3. DESIGN THE SECTION** against what the wireframe actually shows — spacing, hierarchy, columns,
