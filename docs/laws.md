@@ -513,7 +513,10 @@ capability **injected, never measured**.
 
 ## A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS UNTIL A MUTATION CONFIRMS IT (2026-08-01, S14.2)
 
-**THE INSTANCE.** The responsive contract's central assertion — the one the whole compose-gate exists for —
+**THE SESSION'S RESULT. Filed at the top of the [[COULD THIS CHECK HAVE FAILED?]] family because of what it
+nearly cost, not because of what it was.**
+
+**THE INSTANCE.** The responsive contract's central assertion — the one the entire compose gate exists for —
 was written as:
 
 ```tsx
@@ -523,18 +526,32 @@ expect(screen.queryByRole("button", { name: /add rule/i })).toBeNull();
 
 **The comment is wrong.** testing-library defaults to `hidden: false` and runs `isInaccessible`, which jsdom
 evaluates against inline styles. A `display:none` element is **excluded** from the query — so `queryByRole`
-returns `null` and the assertion **passes**. Mutation 1 (reimplement the gate as `display:none`) **passed**.
+returns `null` and the assertion **passes**. Mutation 1 (reimplement the gate as `display:none`) **PASSED**.
 
 **The assertion checked "not in the ACCESSIBLE TREE"; the comment claimed "not in the DOM".** Those two differ
-on *exactly* the failure mode being guarded against — a control that grants access, present to a keyboard and
-gone only to a sighted mouse user. **A member of the [[ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON]] family, and
-the sharpest one so far, because the false claim was written INSIDE the comment explaining why the assertion
-was rigorous.**
+on *exactly* the failure mode being guarded against. A member of the
+[[ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON]] family, and the sharpest so far, because **the false claim was
+written INSIDE the comment explaining why the assertion was rigorous.**
+
+## ⚠ WHAT IT NEARLY COST — the near miss is the point, and it is worth stating plainly
+
+**Had `ComposeGate` shipped as `display:none`, the access-rule builder below 768px would have been
+KEYBOARD-REACHABLE and SCREEN-READER-ANNOUNCED while invisible — and this test would have CERTIFIED IT
+ABSENT.**
+
+A control that grants access, present to a keyboard and gone only to a sighted mouse user, is
+[[INVISIBLE IS NOT ABSENT]] — the law this epic had already minted twice. **So the near miss happened inside
+the guard written to prevent it.** The guard was not weak; it was *aimed one layer off*, and the comment made
+the misaim read as rigour.
 
 **THE RULE. A CLAIM ABOUT A LIBRARY'S SEMANTICS IS A HYPOTHESIS. THE MUTATION IS THE EXPERIMENT.** Where an
 assertion's rigour depends on what a matcher *includes* — visibility, disabled state, `aria-hidden`, shadow
-roots, portals — **write the mutation that the claim says would be caught, and run it.** Prose confidence about
-a third-party default is not evidence, and it reads exactly like evidence.
+roots, portals — **write the mutation the claim says would be caught, and run it.** Prose confidence about a
+third-party default is not evidence, and it reads exactly like evidence.
+
+**THE COROLLARY, which is the transferable part: THE MORE CONFIDENT THE COMMENT, THE MORE IT NEEDS THE
+MUTATION.** A hedged comment invites scrutiny. A comment that explains why an assertion is rigorous *suppresses*
+it — from the author first, then from every reviewer after.
 
 **The fix is a flag, not a rewrite:** `{ hidden: true }` searches the whole DOM regardless of visibility, and
 the same mutation then goes red. **The cost of finding this was one mutation. The cost of not finding it was a
