@@ -30,7 +30,7 @@ import {
   Panel,
   Select,
 } from "../components/ui";
-import { NodeLink } from "../components/viz";
+import { LINK_DASH, LINK_STROKE, NodeLink } from "../components/viz";
 import { LoadRetry } from "../components/LoadRetry";
 import { badgeClass } from "../lib/healthview";
 import { roleFromMembers } from "../lib/policyview";
@@ -248,19 +248,41 @@ export default function Sites() {
                   links={mesh.links}
                   selectedId={selectedSiteId}
                   onSelect={setSelectedSiteId}
-                  empty="No sites yet. Route a LAN to create the first one."
+                  empty="Route a LAN to draw your first site here."
                 />
-                <ul className="flex flex-wrap gap-3 text-micro text-ink-tertiary">
-                  <li>
-                    <span className="mr-1 text-ok">━</span>linked
-                  </li>
-                  <li>
-                    <span className="mr-1 text-warn">╌</span>degraded
-                  </li>
-                  <li>
-                    <span className="mr-1 text-danger">┄</span>down
-                  </li>
-                </ul>
+                {/* ⛔ SWATCHES, NOT GLYPHS, and only when there is a diagram to key.
+                    It was `━ ╌ ┄` — box-drawing characters that render as dashes at this size and read as
+                    the em-dash the copy rule bans. The wireframe uses CSS rules (18x2px bars), which is both
+                    the honest encoding and immune to the font deciding what a glyph looks like.
+                    And it renders only when links exist: a key to a picture that is not there is noise that
+                    claims a picture is coming. */}
+                {mesh.links.length > 0 && (
+                  <ul className="flex flex-wrap items-center gap-4 font-mono text-micro text-ink-tertiary">
+                    {(
+                      [
+                        ["linked", "linked"],
+                        ["degraded", "degraded"],
+                        ["down", "down"],
+                      ] as const
+                    ).map(([tone, word]) => (
+                      <li key={tone} className="flex items-center gap-1.5">
+                        <span
+                          aria-hidden
+                          className="inline-block h-[2px] w-[18px] rounded-sm"
+                          style={
+                            LINK_DASH[tone]
+                              ? {
+                                  borderTop: `2px dashed ${LINK_STROKE[tone]}`,
+                                  height: 0,
+                                }
+                              : { background: LINK_STROKE[tone] }
+                          }
+                        />
+                        {word}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <p className="text-micro text-ink-faint">
                   Link state is derived from the WireGuard handshake. A down site
                   bridge is never shown as healthy.
@@ -370,9 +392,7 @@ function DNSForwardsPanel({
       )}
 
       {siteCount === 0 ? (
-        <EmptyState>
-          No sites yet, so there is nothing to forward between.
-        </EmptyState>
+        <EmptyState>Nothing to forward between yet.</EmptyState>
       ) : view.rows.length === 0 ? (
         <EmptyState>
           {view.conflictsAreComplete
@@ -449,9 +469,7 @@ function SiteActionsPanel({
   return (
     <Panel title={card ? `Site actions: ${card.name}` : "Site actions"}>
       {!hasSites ? (
-        <EmptyState>
-          No sites yet. Route a LAN to create one, then its actions appear here.
-        </EmptyState>
+        <EmptyState>Actions appear here once a site exists.</EmptyState>
       ) : !card ? (
         <EmptyState>Select a site in the network map to act on it.</EmptyState>
       ) : !canManage ? (
@@ -801,8 +819,8 @@ function Topology({
         <p className="text-sm text-slate-400">
           No sites yet.
           {canManage
-            ? " Register a site to connect a gateway."
-            : " An owner or admin can register one."}
+            ? " Use Route a LAN above, or Add site for an empty one."
+            : " An owner or admin can add one."}
         </p>
       </Card>
     );
