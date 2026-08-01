@@ -293,8 +293,16 @@ export interface Node {
    * "the number is zero" are different and only one of them is a fact about the network.
    */
   value?: number | string;
-  /** The node's own worst link state, for the status dot. Absent reads as `linked`. */
+  /**
+   * The node's own link state, for the ring and the status dot.
+   *
+   * ⛔ ABSENT MEANS "NO LINK EXISTS", NOT "HEALTHY". A site with no gateway bound, or whose gateway IS the
+   * hub, has no site link at all — so it has no link STATE either, and must not be tinted as if it did.
+   * The neutral rendering is the honest one; `note` says why in words.
+   */
   tone?: LinkTone;
+  /** Why there is no link, or what is wrong with it. Rendered verbatim; never inferred from the tone. */
+  note?: string;
 }
 
 /**
@@ -521,8 +529,8 @@ export function NodeLink({
                 cx={p.x}
                 cy={p.y}
                 r={r}
-                fill={isHub ? "#1F1F1F" : NODE_FILL[n.tone ?? "linked"]}
-                stroke={isHub ? "#C9C9C4" : NODE_RING[n.tone ?? "linked"]}
+                fill={isHub ? "#1F1F1F" : n.tone ? NODE_FILL[n.tone] : "#171717"}
+                stroke={isHub ? "#C9C9C4" : n.tone ? NODE_RING[n.tone] : "#3A3A3A"}
                 strokeWidth="1.6"
               />
               {/* The status dot at upper-right, coloured by the node's own worst link. Carried in the list
@@ -531,7 +539,7 @@ export function NodeLink({
                 cx={p.x + r * 0.66}
                 cy={p.y - r * 0.66}
                 r={4}
-                fill={NODE_DOT[n.tone ?? "linked"]}
+                fill={n.tone ? NODE_DOT[n.tone] : "#5E5E5B"}
                 stroke="var(--tnx-bg)"
                 strokeWidth="1.5"
               />
@@ -583,7 +591,6 @@ export function NodeLink({
       <ul className="mt-2 flex flex-col gap-1.5 text-cell">
         {nodes.map((n) => {
           const isSel = n.id === selectedId;
-          const tone = n.tone ?? "linked";
           const body = (
             <>
               <span className="font-mono text-ink-primary">{n.label}</span>
@@ -591,12 +598,17 @@ export function NodeLink({
                 <span className="rounded-full border border-line px-1.5 py-px font-mono text-micro text-ink-body">
                   HUB
                 </span>
-              ) : (
+              ) : n.tone ? (
                 <span
                   className="rounded-full border px-1.5 py-px font-mono text-micro"
-                  style={{ color: NODE_DOT[tone], borderColor: NODE_DOT[tone] }}
+                  style={{ color: NODE_DOT[n.tone], borderColor: NODE_DOT[n.tone] }}
                 >
-                  {tone}
+                  {n.tone}
+                </span>
+              ) : (
+                // NO PILL WHEN NO LINK EXISTS. A pill is a claim about a state, and there is no state here.
+                <span className="font-mono text-micro text-ink-faint">
+                  {n.note ?? "no link"}
                 </span>
               )}
               {n.sub && (

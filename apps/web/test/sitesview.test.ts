@@ -382,3 +382,59 @@ describe("meshFrom — the sparse cases the wireframe never draws", () => {
     expect(m.nodes).toHaveLength(2); // the hub AND the site, both present
   });
 });
+
+describe("meshFrom — a node with no link has no link STATE either", () => {
+  const mk = (id: string, name: string, gateways: unknown[]) =>
+    ({
+      id,
+      name,
+      gateways,
+      subnets: [{ id: "x", cidr: "10.1.0.0/24", status: "approved" }],
+    }) as never;
+
+  it("a lone gateway that IS the hub leaves the site's tone UNSET, not 'down'", () => {
+    // ⛔ THE DEFECT THIS PINS. The edge was correctly omitted (no link exists) and the NODE was still stamped
+    // `down` from the gateway's health badge — so the map repeated the very claim the badge beside it was
+    // already making wrongly: that a link failed. Absence of a relationship is absence in EVERY encoding
+    // that describes it: an edge, a colour, a pill, a dot.
+    const gw = {
+      id: "h",
+      name: "gw-local-1",
+      status: "active",
+      health: { label: "site link down", tone: "danger" },
+    } as never;
+    const m = meshFrom(
+      [mk("a", "hq-lan", [gw])],
+      [
+        {
+          id: "h",
+          name: "gw-local-1",
+          status: "active",
+          is_site_hub: true,
+        } as Node,
+      ],
+    );
+    const site = m.nodes.find((n) => n.label === "hq-lan")!;
+    expect(m.links).toEqual([]);
+    expect(site.tone).toBeUndefined();
+    expect(site.note).toBe("no site link");
+  });
+
+  it("a REAL degraded link still carries its tone — the other half of the two-valued thing", () => {
+    // Mechanism 9: if `tone` were only ever observed undefined, the test could not tell it from a constant.
+    const spokeGw = {
+      id: "g2",
+      name: "gw-branch",
+      status: "active",
+      health: { label: "site link down", tone: "danger" },
+    } as never;
+    const m = meshFrom(
+      [mk("a", "branch-lan", [spokeGw])],
+      [
+        { id: "h", name: "gw-hub", status: "active", is_site_hub: true } as Node,
+      ],
+    );
+    expect(m.nodes.find((n) => n.label === "branch-lan")?.tone).toBe("down");
+    expect(m.links).toHaveLength(1);
+  });
+});
