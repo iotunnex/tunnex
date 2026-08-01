@@ -284,3 +284,46 @@ already spent.
 **Adding semantics to a screen WILL break queries that were passing.** Thirteen screens remain.
 **Each break is evidence of a pre-existing weak assertion, not of a bad improvement** — fix the QUERY, by role
 and accessible name, never by narrowing to a test-id (docs/laws.md).
+
+---
+
+# ⛔ THE SECTION PROTOCOL — FOUNDER-RULED 2026-08-01. BINDING ON EVERY REMAINING SLICE. NO EXCEPTIONS.
+
+> ## **1. READ THE WIREFRAME FIRST** — `docs/design/TUNNEX-wireframe-v2.html.txt`, for that specific section,
+> ## **by extraction. Not a summary. Not memory. Not a previous session's notes.**
+> ## **2. REMOVE WHAT IS NOT APPLICABLE** — no endpoint, no capability, or no screen behind it → **CUT IT AND
+> ## SAY SO, WITH THE REASON. Cutting is a decision that gets RECORDED, never a silence.**
+> ## **3. DESIGN THE SECTION** against what the wireframe actually shows — spacing, hierarchy, columns,
+> ## chrome, copy. **Take layout and copy. Take none of its DOM.**
+> ## **4. CODE IT.**
+> ## **5. BRING IT FOR REVIEW** — the founder checks it on localhost, against the wireframe, before anything
+> ## merges.
+> ## **6. THE FOUNDER GIVES THE GO-AHEAD. Only then does the next section start.**
+
+## WHY THIS RULE EXISTS — recorded plainly, because the reason is the whole point
+
+**FOUR SLICES WERE BUILT FROM A SUMMARY OF THE WIREFRAME RATHER THAN THE WIREFRAME**, because a
+session-scoped instruction of the founder's — *"do not read it for design detail"* — was never lifted and was
+carried forward stale.
+
+**THE RESULT PASSED EVERY AUTOMATED GATE:**
+
+- **388 tests, 31 files, green**
+- **CI green at a named sha**, e2e included
+- **mutation-proven** — including three mutations that found real missing guards
+- typecheck, build, drift guard, contrast gate, coverage census, all green
+
+**AND IT DID NOT LOOK LIKE THE DESIGN.**
+
+> ## **NO TEST IN THIS EPIC CAN CATCH THAT.**
+
+Every gate we built asks *"is this correct, honest, and non-vacuous?"* — and every one answered **yes**.
+**None of them can ask "does this look like the thing we are trying to build?"** jsdom has no layout engine, no
+viewport, no eye. **The founder on localhost is not a courtesy review. It is the ONLY check for an entire class
+of failure, and it is therefore a REQUIRED GATE.**
+
+## DEFINITION OF DONE — AMENDED FOR EVERY SCREEN SLICE
+
+**A slice is NOT complete until the founder has seen it running and said GO.** Gate green, CI green and
+mutation proofs are **necessary and not sufficient** — the same relationship `make web-gate` has to `e2e`, one
+level further out.

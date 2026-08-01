@@ -1017,3 +1017,29 @@ harmless one. **`403 edition_required` is nearest to "error" in shape and furthe
 
 **THE CHECK: for every load, ask what a SUCCESSFUL REFUSAL looks like** — 403 by edition, 403 by permission,
 404 by scope. **Each is a real answer. None of them is a failure.**
+
+## A GATE SUITE CAN BE COMPLETE, GREEN, AND BLIND TO THE ONLY QUESTION THAT MATTERED (2026-08-01, EPIC 14, founder-ruled)
+
+**THE INSTANCE.** Four slices of a UI redesign shipped with **388 passing tests, green CI, mutation proofs that
+found three real defects, a contrast gate, a coverage census, and a drift guard** — and **did not look like the
+design.**
+
+**Every gate asked a question and answered it correctly.** *Is this correct? Is it honest? Could this check
+have failed? Does the claim have a check?* **All yes.** Not one of them could ask:
+
+> ## **DOES THIS LOOK LIKE THE THING WE ARE TRYING TO BUILD?**
+
+**THE RULE. WHEN A DELIVERABLE HAS A PROPERTY NO AUTOMATED CHECK CAN EVALUATE, THE HUMAN REVIEW IS NOT A
+COURTESY — IT IS THE GATE FOR THAT PROPERTY, AND IT IS REQUIRED.** Naming it as optional is how it gets skipped
+under time pressure, and the skip is invisible because everything else is green.
+
+**AND THE SHARPER HALF: A COMPREHENSIVE GREEN SUITE MAKES THIS FAILURE MORE LIKELY, NOT LESS.** The more gates
+that pass, the more confident the report, and the more the unmeasured dimension looks like it must have been
+covered by *something*. **Rigour on the measurable dimensions is not evidence about the unmeasurable ones — but
+it reads exactly like it.**
+
+**RELATED, AND THE ROOT CAUSE HERE: A SESSION-SCOPED INSTRUCTION THAT IS NEVER LIFTED BECOMES A PERMANENT ONE.**
+The prohibition on reading the design file was correct for the session it was written in and wrong for every
+session after. **Nothing expires an instruction; it has to be revisited.** When a later ruling *implies* an
+earlier constraint should lift, **say so and ask** — a contradiction between two instructions is a fork, and
+forks halt and surface.
