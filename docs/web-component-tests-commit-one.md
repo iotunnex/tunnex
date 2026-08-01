@@ -233,3 +233,51 @@ correct outcome is one assertion**, not a framework with one user.
 - **No `openapi/openapi.yaml` change.** That is S13.1's file until EPIC 13 merges.
 - **No `apps/client` work.** Item A ruled the client gets its own components; its test tier is that story's
   problem, not this one's.
+
+---
+
+# NAMED EXCEPTION — THIS TESTS-ONLY BRANCH MAKES ONE PRODUCT FIX (founder-ruled 2026-08-01)
+
+**Tests-only is the right default. This is the exception, and it is named so the branch cannot drift into a fix
+branch without anyone noticing.**
+
+**THE FIX:** `Sites.tsx`'s `GatewayRow` gains the revoked-suppression guard on the health badge —
+`{g.status !== "revoked" && g.health && …}`.
+
+**WHY IT BELONGS HERE:** this branch exists **because untested surfaces disagree with each other**, and this is
+that disagreement sitting in the file. The fix is one guard; the test is D4's three-way assertion, **which was
+already owed**. Splitting them means a second branch touching `Sites.tsx` for a one-line change.
+
+**A SECOND CHANGE, DISCLOSED:** `GatewayRow` is now `export`ed. It is not a behaviour change — the assertion
+has to reach the row, and a per-screen test cannot see a cross-surface disagreement by construction. Recorded
+rather than slipped in.
+
+**⛔ IF A SECOND PRODUCT FIX APPEARS, STOP AND ASK.** A tests-only branch making one named product fix is fine.
+A tests-only branch that quietly becomes a fix branch is not.
+
+## THE FINDING'S STATUS AND ITS SHAPE
+
+**STRUCTURALLY PRESENT, UNCONFIRMED ON THE WIRE.** Not a sighting. `policyHealthBadge` keys only on
+`policy_degraded` + kind, and neither `GatewayRow` nor `sitesview.ts` filtered revoked — so a revoked degraded
+gateway would render *"revoked"* beside *"certificate expired — re-enroll this gateway"*. **§C's fleet would
+confirm it for free if a revoked gateway there carries degraded health — but nothing waits for that.**
+
+**THE SHAPE, which is the argument for D4 in one sentence: WF-S11-10 was fixed on ONE surface while a THIRD
+rendered the same concept with the same defect — and it was found by asking WHO ELSE RENDERS THIS, not by
+walking the UI.**
+
+# THE CENSUS GAINED A THIRD LIST — PENDING — AND THE REASON IS A DEFECT IN THE FIRST DESIGN
+
+**Running it revealed the flaw immediately:** a census that knows only COVERED and EXEMPT **lands RED on day
+one**, naming all eight uncovered screens. It would then either block the branch or be skipped — **and a
+skipped gate is a vacuous gate wearing a different hat.**
+
+**PENDING is the backlog stated out loud.** It does not weaken the ledger:
+
+- a **NEW** screen still fails **by name** — it is in none of the three lists
+- the eight known-uncovered screens are **visible and counted**, not hidden behind a red the reader learns to ignore
+- **both totals are asserted with `toBe`**, so covering a screen means moving it between lists **and editing two
+  numbers** — one reviewable diff, no drift
+- the lists are asserted **disjoint**, so a screen cannot be quietly covered and pending at once
+
+**Proven to bite:** creating `src/pages/NewThing.tsx` fails the census by name; removing it restores green.

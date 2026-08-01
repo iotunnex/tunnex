@@ -540,7 +540,10 @@ function SiteCardView({
   );
 }
 
-function GatewayRow({ g }: { g: GatewayView }) {
+// EXPORTED FOR THE SIBLING-CONSISTENCY TEST (D4), not for reuse. The revoked-suppression rule is rendered by
+// THREE surfaces — this row, Gateways.tsx and Devices.tsx — and a per-screen test passes on all three while
+// they disagree, which is exactly how WF-S11-10 survived on this one. The assertion has to reach the row.
+export function GatewayRow({ g }: { g: GatewayView }) {
   // S8.4 rider (VERIFY-0): render the last-seen FACT + an OFFLINE badge when stale, so a stopped gateway no
   // longer reads healthy on the site surface. Extends the S8.3 badge system — no third health vocabulary.
   const live = gatewayLiveness(g.lastSeenAt, Date.now());
@@ -553,7 +556,16 @@ function GatewayRow({ g }: { g: GatewayView }) {
       {g.isHub && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-sky-300">hub</span>}
       {g.status === "revoked" && <span className="text-xs text-rose-400">revoked</span>}
       {live.offline && <span className={`text-xs ${badgeClass("danger")}`}>offline</span>}
-      {g.health && <span className={`text-xs ${badgeClass(g.health.tone)}`}>{g.health.label}</span>}
+      {/* WF-S11-10, THIRD SURFACE. The fix landed on Gateways.tsx and Devices.tsx already suppressed health on
+          revoked rows — this list rendered the same concept with the same defect, so a revoked gateway could
+          read "revoked" beside "certificate expired — re-enroll this gateway": two labels contradicting each
+          other, the instructional one telling an operator to UNDO a deliberate security action. `offline` stays
+          unguarded on purpose — it is a liveness FACT, not an instruction, and a revoked gateway genuinely is
+          offline. It is the health/instruction vocabulary that must not describe a gateway no longer meant to
+          work. Found by asking who ELSE renders this concept, not by walking the UI. */}
+      {g.status !== "revoked" && g.health && (
+        <span className={`text-xs ${badgeClass(g.health.tone)}`}>{g.health.label}</span>
+      )}
       {online && <span className="text-xs text-emerald-400">online</span>}
       {/* WF-B: the SUBORDINATE site-link note — a demoted-dead peer while transit is healthy. A distinct
           muted line item naming the peer + "(demoted)", NEVER the headline (a healthy failover reads
