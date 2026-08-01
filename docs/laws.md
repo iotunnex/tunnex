@@ -203,6 +203,66 @@ single green:**
 The first proves the longer wait still bites on a real non-recovery; the second is the case the old wait lost.
 **One mutation would have proven neither.**
 
+## THE TOOLS WRITTEN TO CATCH VACUITY WERE THEMSELVES VACUOUS — TWICE, IN ONE DAY, SILENTLY (2026-08-01)
+
+**A SCRIPT'S OWN EXECUTION IS AN UNCHECKED ASSUMPTION.** A tool that has only ever been INVOKED cannot be
+distinguished from one that WORKS. Both "ran"; only one did anything.
+
+**Two instances, and the second was introduced by the fix for the first:**
+
+1. **`mutate.sh` printed `Restoring.` and did not restore** (`3c9c16f`). Every run left the mutated file in the
+   tree while announcing a restoration it had not performed. *The tool built to prevent false claims was making
+   one about itself.*
+2. **The fix for (1) added a DIRTY-FILE REFUSAL that referenced `$file` above the line assigning it.** Under
+   `set -euo pipefail` that is an unbound-variable abort, so the script **exited before any work, on every
+   invocation, from the moment the safety feature landed** — and the same block was copy-pasted into
+   `prove-fix.sh`, killing both. Neither announced it; the caller saw a non-zero exit indistinguishable from a
+   tool that ran and disagreed.
+
+**NEITHER FAILURE ANNOUNCED ITSELF, and that is the whole pattern.** A vacuous CHECK is green when it should be
+silent; a vacuous TOOL is silent when it should be either. Both are read as "we verified this."
+
+**THE GUARD THIS EARNED — `scripts/toolselftest.sh`, wired as `--self-test` on both scripts.** Each tool is run
+against a **known-good** and a **known-bad** case and the verdict is asserted:
+
+| tool | known-good | known-bad |
+|---|---|---|
+| `mutate.sh` | a red that goes RED under the mutation → accepted | a test passing regardless of the mutation → refused · a non-matching anchor → refused |
+| `prove-fix.sh` | red fails before the edit, passes after → accepted | an ALREADY-GREEN red → refused |
+| both | the target is byte-restored afterwards | |
+
+**The self-test caught its own author on the first run** — the initial `mutate.sh` known-good asserted the
+MUTATED token, which passes under the mutation, and the tool correctly refused it. That is the argument for
+having one in the sentence.
+
+**WHAT IS AND IS NOT INVALIDATED, stated plainly.** Mutations run after `3c9c16f` were performed **by hand** —
+which is how they were performed before the script existed. **So no mutation proof is void. But none was
+protected either**, and the difference matters only in what can be claimed: those proofs rest on the operator
+having done the three assertions manually, not on a tool having enforced them.
+
+**RULE: a tool that enforces a verification discipline must itself be verified against a case whose answer is
+known in advance, and that self-test must be runnable in one command.**
+
+## ANY CHANGE TO GENERATED CODE OR A SHARED TYPE RUNS THE FULL GATE SET, NEVER A SUBSET (2026-08-01)
+
+**THE INSTANCE.** Adding `x-go-name: RestoreDevicesResult` renamed a generated type. `make generate-check` and
+`make test-node` were run and treated as sufficient; **`make build-editions` and `make test-editions` were
+skipped.** `apps/api/internal/http/node_handlers.go:156` still constructed the old name, so `apps/api` stopped
+compiling and CI went red across `gates`, `e2e`, `e2e-enterprise`, `govulncheck(apps/api)`, `gofmt + vet parity`
+and the Trivy image build — **while the fix's own target, `govulncheck(apps/cli)`, went green.**
+
+**A rename is the change whose blast radius a single-package check cannot see, by definition.** The gate that
+would have caught it existed and was listed in CLAUDE.md; running a subset was a choice, not an oversight in the
+tooling.
+
+**THE RULE: generated code, shared types, and anything crossing a module boundary run the FULL gate set.** For
+this repo that is `generate-check` · `migrate` · `test-editions` · `build-editions` · `test-node` ·
+`test-helper` · `helper-crosscompile` · the web trio. Not the two that seem related.
+
+**AND THE STRUCTURAL FIX IS THE SAME ONE WF-S13-11 REGISTERED:** CI on story branches makes this impossible to
+get wrong, because the full set runs whether or not the author remembered it. Every argument for that change
+gained an instance here.
+
 ## DOES THE REMEDY ADDRESS THE DEFECT, OR ITS NEIGHBOURHOOD? (founder-ratified 2026-08-01, EPIC 13, three instances in one epic)
 
 **A fold is not closed because an edit landed near the defect. Ask of every remedy: does this make the NAMED

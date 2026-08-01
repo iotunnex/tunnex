@@ -32,14 +32,21 @@ set -euo pipefail
 # exactly what happened while proving #43's golden vector: two test files were left calling a function that no
 # longer existed. Restoration is FROM THE BACKUP, never from git, and this states so where it will be read.
 # ---------------------------------------------------------------------------------------------------------------
+if [ "${1:-}" = "--self-test" ]; then
+  exec bash "$(dirname "$0")/toolselftest.sh" prove-fix
+fi
+
+# ORDERING FIX (2026-08-01) — SAME DEFECT AS mutate.sh, from the same copy-pasted block. This referenced $file
+# ABOVE the assignment below; with `set -u` that aborts before any work, so this script has never run since the
+# dirty-file refusal was added. Run `scripts/prove-fix.sh --self-test` to prove it works.
+file=$1; anchor_f=$2; repl_f=$3; shift 3
+[ -f "$file" ] || { echo "PROVE-FIX: no such file: $file" >&2; exit 2; }
+
 if ! git diff --quiet -- "$file" 2>/dev/null; then
   echo "NOTE: $file has UNCOMMITTED changes — the fix under test is not in git."
   echo "      Restore is from this script's backup copy ONLY. Do NOT run 'git checkout $file': it would discard"
   echo "      the uncommitted fix together with the mutation and leave callers referencing removed code."
 fi
-
-file=$1; anchor_f=$2; repl_f=$3; shift 3
-[ -f "$file" ] || { echo "PROVE-FIX: no such file: $file" >&2; exit 2; }
 
 echo "PROVE-FIX (1/4): the red must FAIL before the fix —"
 set +e; "$@" >/dev/null 2>&1; pre=$?; set -e
