@@ -71,7 +71,6 @@ export function sortGateways(rows: GatewayRow[]): GatewayRow[] {
   );
 }
 
-
 // ── S14.4 corrected audit — panels whose data DOES exist ────────────────────────────────────────────────────
 //
 // ⚠ THESE WERE CUT ON A WRONG MEASUREMENT. The cut list said "no hub, generation, pin or handshake-age field
@@ -146,5 +145,10 @@ export function postureSplit(devices: Device[]): PostureSplit {
     else compliant++;
   }
   const reported = compliant + blocked;
-  return { compliant, blocked, unknown, percent: reported === 0 ? null : Math.round((compliant / reported) * 100) };
+  return {
+    compliant,
+    blocked,
+    unknown,
+    percent: reported === 0 ? null : Math.round((compliant / reported) * 100),
+  };
 }

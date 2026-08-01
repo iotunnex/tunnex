@@ -4,7 +4,8 @@ import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
 import { HealthStatus } from "../components/HealthStatus";
 import { hubSetView } from "../lib/hubsetview";
-import { Donut } from "../components/viz";
+import { assembleTopology } from "../lib/sitesview";
+import { Donut, NodeLink } from "../components/viz";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -142,10 +143,14 @@ export default function Dashboard() {
         ).then((r) => !cancelled && setNodesRes(r as Loaded<Node[]>));
         // Both OPEN endpoints — no gate needed, and the audit that cut them was wrong about the data.
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/devices", { params: { path: { orgId: org.id } } }),
+          api.GET("/api/v1/organizations/{orgId}/devices", {
+            params: { path: { orgId: org.id } },
+          }),
         ).then((r) => !cancelled && setDevicesRes(r as Loaded<Device[]>));
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/hub-set", { params: { path: { orgId: org.id } } }),
+          api.GET("/api/v1/organizations/{orgId}/hub-set", {
+            params: { path: { orgId: org.id } },
+          }),
         ).then((r) => !cancelled && setHubSetRes(r as Loaded<HubSet>));
       } catch {
         if (!cancelled) setError("Could not reach the API.");
@@ -389,7 +394,9 @@ export default function Dashboard() {
                         denominator, and nothing in the render would look wrong. */}
                     <Donut
                       label="Peer connection status"
-                      source={{ endpoint: "/api/v1/organizations/{orgId}/devices" }}
+                      source={{
+                        endpoint: "/api/v1/organizations/{orgId}/devices",
+                      }}
                       failed={devicesRes !== null && !devicesRes.ok}
                       slices={devicesRes?.ok ? peerSlices(devicesRes.data) : []}
                       empty="No devices enrolled yet."
@@ -477,19 +484,29 @@ export default function Dashboard() {
                             </p>
                             <ul className="mt-10 space-y-6 text-cell">
                               <li className="text-ink-body">
-                                <span className="text-ink-primary">{ps.compliant}</span> compliant
+                                <span className="text-ink-primary">
+                                  {ps.compliant}
+                                </span>{" "}
+                                compliant
                               </li>
                               <li className="text-ink-body">
-                                <span className="text-ink-primary">{ps.blocked}</span> blocked
+                                <span className="text-ink-primary">
+                                  {ps.blocked}
+                                </span>{" "}
+                                blocked
                               </li>
                               <li className="text-ink-body">
-                                <span className="text-ink-primary">{ps.unknown}</span> unknown
+                                <span className="text-ink-primary">
+                                  {ps.unknown}
+                                </span>{" "}
+                                unknown
                               </li>
                             </ul>
                             {/* The design's caption, and it is the rule this panel is built on. */}
                             <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                              Client-reported, not attestation. Absence is not compliance. Unknown is its own
-                              state, and it is excluded from the percentage.
+                              Client-reported, not attestation. Absence is not
+                              compliance. Unknown is its own state, and it is
+                              excluded from the percentage.
                             </p>
                           </>
                         );
@@ -510,8 +527,16 @@ export default function Dashboard() {
                       (() => {
                         // Defensive: a served object without `members` must not throw the whole screen. One panel's
                         // bad shape taking the page down is a blast radius nobody chose.
-                        const hv = hubSetRes.data?.members ? hubSetView(hubSetRes.data, Date.now()) : null;
-                        if (!hv) return <EmptyState>No HA hub set. Pin two or more gateways to create one.</EmptyState>;
+                        const hv = hubSetRes.data?.members
+                          ? hubSetView(hubSetRes.data, Date.now())
+                          : null;
+                        if (!hv)
+                          return (
+                            <EmptyState>
+                              No HA hub set. Pin two or more gateways to create
+                              one.
+                            </EmptyState>
+                          );
                         return (
                           <>
                             <Badge tone="neutral">GEN {hv.generation}</Badge>
@@ -520,7 +545,9 @@ export default function Dashboard() {
                                 // The row carries a nodeId; the NAME lives on /nodes, so the two are joined
                                 // here. An unjoinable id renders as the id rather than as a blank — an
                                 // unnamed member is still a member, and hiding it would understate the set.
-                                const node = nodesRes?.ok ? nodesRes.data.find((n) => n.id === m.nodeId) : undefined;
+                                const node = nodesRes?.ok
+                                  ? nodesRes.data.find((n) => n.id === m.nodeId)
+                                  : undefined;
                                 return (
                                   <ListItem key={m.nodeId}>
                                     <span className="flex items-center justify-between gap-8">
@@ -533,7 +560,9 @@ export default function Dashboard() {
                                             that would be both an em-dash and a silence where the honest word
                                             exists — and "absent metrics is not an idle link" is this panel's
                                             own rule. */}
-                                        {m.handshakeAge === "—" ? " · not reporting" : ` · hs ${m.handshakeAge}`}
+                                        {m.handshakeAge === "—"
+                                          ? " · not reporting"
+                                          : ` · hs ${m.handshakeAge}`}
                                       </span>
                                     </span>
                                   </ListItem>
@@ -541,12 +570,47 @@ export default function Dashboard() {
                               })}
                             </List>
                             <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                              Pinned gateways form the hub set. members[0] is the acting primary, and the
-                              generation bumps on every promotion. Absent metrics are not an idle link.
+                              Pinned gateways form the hub set. members[0] is
+                              the acting primary, and the generation bumps on
+                              every promotion. Absent metrics are not an idle
+                              link.
                             </p>
                           </>
                         );
                       })()
+                    )}
+                  </Panel>
+
+                  <Panel title="Network map" className="col-span-4">
+                    {/* ⚠ ALSO A RETRACTED CUT. Cut as "no SiteLink schema" — true, and beside the point:
+                        `assembleTopology()` already projects sites + their gateways from data this screen
+                        fetches. CATEGORY ONE, not category three: the capability exists and has no data yet,
+                        so it gets an EMPTY STATE rather than absence (docs/EPIC-14, the three-way test). */}
+                    {sitesRes === null || nodesRes === null ? (
+                      <Loading />
+                    ) : !sitesRes.ok || !nodesRes.ok ? (
+                      <ErrorText>The topology is unavailable.</ErrorText>
+                    ) : (
+                      <NodeLink
+                        label="Site topology"
+                        source={{
+                          endpoint: "/api/v1/organizations/{orgId}/sites",
+                        }}
+                        failed={false}
+                        nodes={assembleTopology(
+                          sitesRes.data,
+                          {},
+                          nodesRes.data,
+                        ).map((c) => ({
+                          id: c.id,
+                          label: c.name,
+                          kind: c.gateways.some((g) => g.isHub)
+                            ? ("hub" as const)
+                            : ("spoke" as const),
+                        }))}
+                        links={[]}
+                        empty="No sites configured yet. Bind a gateway to a site to build the mesh."
+                      />
                     )}
                   </Panel>
 
