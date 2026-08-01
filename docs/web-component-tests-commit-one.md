@@ -115,6 +115,10 @@ what counts.**
 
 **Users / Audit / Settings and the rest follow, ordered the same way, at the paper's discretion.**
 
+**ORDER ACCEPTED 2026-08-01 with its reasoning recorded:** Gateways first because **three of the four findings
+landed there**; Devices second because it is **the sibling that got revoked-suppression RIGHT**, which makes it
+screen 1's reference implementation — and D4's first sibling assertion is exactly that pair.
+
 ---
 
 # D3 — GATING: **A CENSUS, NEVER A PERCENTAGE**
@@ -135,15 +139,82 @@ screen 19 is added  →  the census fails BY NAME  →  nobody has to remember
 **THE LIST IS THE ARTIFACT.** Adding a screen without a test is a **red**, not a lint warning and not a drop in
 a number.
 
-**Two things the paper must settle:**
+## ✅ D3(a) RULED — **ENUMERATE `src/pages/*.tsx` + A PRINTED ALLOW-LIST, AND EVERY EXEMPTION CARRIES A REASON**
 
-- **the list's source of truth** — enumerate `src/pages/*.tsx` at test time, or maintain an explicit list? The
-  first cannot go stale but catches non-screens; the second is honest but must itself be guarded from
-  forgetting. **Recommend: enumerate, with an explicit allow-list of non-screens (`Login`, `Signup`,
-  `VerifyEmail`, `AcceptInvite`, …) that the census prints so an exemption is visible rather than silent.**
-- **the tier's own vacuity guard** — a census that passes because it enumerates zero screens is the third
-  instance of today's class. **The census must assert a MINIMUM COUNT it knows independently**, so an empty
-  enumeration fails.
+Enumeration **cannot go stale**. The allow-list makes exemptions **visible**.
+
+**EVERY ALLOW-LIST ENTRY CARRIES ITS REASON INLINE.** Not in a comment above the list, not in this paper — in
+the entry itself, printed by the census when it runs.
+
+```ts
+// Shape, not final content. The REASON is part of the datum, not documentation about it.
+const EXEMPT: Record<string, string> = {
+  "Login.tsx":  "unauthenticated shell — no backend concept to disagree about",
+  "Signup.tsx": "unauthenticated shell — no backend concept to disagree about",
+  // …
+}
+```
+
+**An unreasoned exemption is how the list quietly becomes the codebase.** A name with no reason is
+indistinguishable from a name someone added to make the census pass, and six months later nobody can tell which
+it was.
+
+## ✅ D3(b) RULED — **THE COUNT MUST EQUAL THE SCREEN TOTAL. A LEDGER, NOT A FLOOR.**
+
+**Rejected: `expect(covered).toBeGreaterThanOrEqual(1)`.** A minimum count is **satisfied forever by a lazy
+floor** — it passes on screen 2 and on screen 19 alike, which is the gameable-number failure in a different
+costume.
+
+**Ruled: assert the covered count EQUALS the current screen total.**
+
+```
+screen 19 is added  →  the census fails BY NAME  →  the number must be MOVED DELIBERATELY
+```
+
+Moving the number is a visible, reviewable edit. **That is what makes it a ledger rather than a floor:** the
+artifact records what is covered *now*, and growing it is an act, not a drift.
+
+### THIS IS THE DETECTOR'S THIRD PROSPECTIVE APPLICATION — recorded as such
+
+| # | instance | when caught |
+|---|---|---|
+| 1 | B2's 7-second poller vs a ~272ms window | **after** twelve green samples |
+| 2 | `TestExpiryWhileRUNNING…` waiting on `issued` | **after** CI went red |
+| 3 | the restore-window poller for an event `restore.go` cannot produce | **before** it was written |
+| **4** | **this census, had it been written with a `>= 1` floor** | **before it was written** |
+
+The question that catches all four is the same one: ***can this check fail for the reason it exists?*** A `>= 1`
+floor cannot, from screen 2 onward.
+
+---
+
+# D4 — **SIBLING-CONSISTENCY**, from WF-S11-10's own shape (founder-added)
+
+## THE GAP THE PER-SCREEN CENSUS CANNOT SEE, BY CONSTRUCTION
+
+WF-S11-10's root was **`Gateways.tsx` never suppressing health badges for revoked rows THE WAY `Devices.tsx`
+ALWAYS HAS** (`d.status !== "revoked" && …`).
+
+**Two components disagreeing with each other about the same backend concept.**
+
+**A per-screen wiring test passes on BOTH while they disagree.** Each screen is internally consistent; each
+renders what it believes; neither test has any reason to mention the other. **The census counts two covered
+screens and the defect survives** — which is the shared-territory version of the vacuous check.
+
+## THE RULE
+
+**For each backend concept rendered by MORE THAN ONE surface, one assertion that the surfaces AGREE.**
+
+**Known instance: revoked-row suppression** — `Gateways.tsx` vs `Devices.tsx`.
+
+**The paper must ENUMERATE the others before writing any of them.** Candidates to check, not to assume:
+health-kind badging · online/liveness derivation · edition gating · the failed-load triad itself.
+
+## SCOPE — CONCEPTS THAT ALREADY EXIST. DO NOT INVENT A FRAMEWORK.
+
+**This is an enumeration of what is already rendered twice, not an abstraction layer for what might be.** If a
+concept has one surface, it has no sibling test. If the enumeration finds only one genuine instance, **the
+correct outcome is one assertion**, not a framework with one user.
 
 ---
 
