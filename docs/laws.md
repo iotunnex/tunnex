@@ -1684,3 +1684,48 @@ only way to tell is to read the other side** — which is why this sweep had to 
 **COROLLARY: the census cannot see either.** A hand-written branch never passes through the seam, so the
 enumeration that guards the seam is structurally blind to it. **`grep` for the branches; read the handlers
 for the truth; the census only keeps the registered set honest.**
+
+# ⭐ THE MORE A VIEW EXISTS TO SURFACE A PROBLEM, THE MORE DANGEROUS ITS EMPTY STATE IS (2026-08-02, S14.5)
+
+**Founder-filed as `loadOne`'s sharpest instance since the SSO panel.**
+
+The cross-site DNS view exists for ONE reason: to show that a zone resolves differently depending on the
+site (`409 dns_domain_conflict` — one zone maps to one resolver ORG-WIDE). It is built from an **N+1**, one
+`listSiteDNSForwards` per site.
+
+**A SINGLE FAILED FETCH SHORTENS THE LIST. AND A SHORT LIST ON A CONFLICT VIEW READS AS "NO CONFLICT."**
+
+The failure lands as reassurance **aimed precisely at the thing the view was built to reveal** — and the
+missing site is exactly where the other half of a conflicting pair would live.
+
+## ⛔ THE SHAPE, WHICH GENERALISES
+
+> ## **AN EMPTY STATE IS READ AS AN ANSWER TO THE VIEW'S PURPOSE. THE STRONGER THAT PURPOSE, THE MORE
+> ## CONFIDENTLY A FAILURE GETS READ AS GOOD NEWS.**
+
+An empty **device list** reads as "no devices" — mildly wrong. An empty **conflict list**, an empty
+**pending-approvals queue**, an empty **needs-attention panel**, an empty **failed-login log** all read as
+**"you are fine"**. Same defect, escalating consequence, and the escalation tracks how much the operator
+WANTS the empty answer.
+
+**THE MECHANISM: `mergeOrgForwards` returns `conflictsAreComplete`, and the panel may not print a clean
+verdict while it is false.** Two claims, kept apart by construction:
+
+| claim | when |
+|---|---|
+| **nothing was found** | always sayable |
+| **nothing is there** | only when every source answered |
+
+**AND THE BANNER RENDERS ABOVE THE ROWS IT QUALIFIES, NOT BELOW.** Beneath them it is read after the list
+has already been believed.
+
+**THE DIAGNOSTIC, for every remaining screen: ASK WHAT THIS PANEL'S EMPTY STATE WOULD MEAN TO SOMEONE WHO
+WANTS GOOD NEWS. If the answer is "all clear", the empty and the failed states must be visibly different,
+and partial reads must say so.**
+
+## SIBLING, and the reason both are worth stating together
+
+**`DataTable`'s required `failed` prop** solves this for ONE source: empty and failed cannot be conflated
+because the type will not let you. **This is the N-source version** — every source individually succeeded or
+failed, and the aggregate needs its own honesty field, because no single call's `failed` flag describes the
+whole.
