@@ -10,6 +10,7 @@ import { IdentityBadges } from "./IdentityBadges";
 import { useLayoutCapability } from "./ComposeGate";
 import { CommandPalette } from "./CommandPalette";
 import { useNavCounts } from "../lib/useNavCounts";
+import { Icon, type IconName } from "./Icon";
 import { badgeText, gatewayBadgeText, type NavCounts } from "../lib/navcounts";
 
 // S14.2 — THE NAV, GROUPED. The wireframe groups destinations NETWORK / ACCESS / OBSERVE / OPERATE / SETTINGS,
@@ -23,26 +24,35 @@ import { badgeText, gatewayBadgeText, type NavCounts } from "../lib/navcounts";
 // precedent, D5), so a non-enterprise org sees the entry and a clear explanation rather than a dead link.
 export const NAV_GROUPS: Array<{
   group: string;
-  items: Array<{ to: string; label: string }>;
+  items: Array<{ to: string; label: string; icon: IconName }>;
 }> = [
-  { group: "", items: [{ to: "/dashboard", label: "Dashboard" }] },
+  {
+    group: "",
+    items: [{ to: "/dashboard", label: "Overview", icon: "layout-dashboard" }],
+  },
   {
     group: "NETWORK",
     items: [
-      { to: "/sites", label: "Sites" },
-      { to: "/kubernetes", label: "Kubernetes" },
+      { to: "/sites", label: "Sites", icon: "network" },
+      { to: "/kubernetes", label: "Kubernetes", icon: "boxes" },
     ],
   },
   {
     group: "ACCESS",
     items: [
-      { to: "/access", label: "Access" },
-      { to: "/devices", label: "Devices" },
-      { to: "/users", label: "Users" },
+      { to: "/access", label: "Access Policies", icon: "shield" },
+      { to: "/devices", label: "Devices", icon: "laptop" },
+      { to: "/users", label: "Users & Roles", icon: "users" },
     ],
   },
-  { group: "OBSERVE", items: [{ to: "/audit", label: "Audit log" }] },
-  { group: "SETTINGS", items: [{ to: "/settings", label: "Settings" }] },
+  {
+    group: "OBSERVE",
+    items: [{ to: "/audit", label: "Audit Log", icon: "file-text" }],
+  },
+  {
+    group: "SETTINGS",
+    items: [{ to: "/settings", label: "Org Settings", icon: "settings" }],
+  },
 ];
 
 /** Flat destination list — the invariant the responsive contract asserts is identical at every width. */
@@ -88,20 +98,25 @@ function NavGroups({
                   to={item.to}
                   onClick={onNavigate}
                   className={({ isActive }) =>
-                    `block rounded-md px-3 py-2 text-sm ${
+                    // README: nav item = flex, gap 10, padding 7px 12px, radius 9, 14px icon + 12.5px label,
+                    // right-aligned badge. Active = accent at 13%; hover nudges 2px right.
+                    `flex items-center gap-10 rounded-nav px-12 py-7 text-nav transition-colors ${
                       isActive
-                        ? "bg-white/5 text-white"
-                        : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                        ? "bg-white/[.12] text-ink-heading"
+                        : "text-ink-body hover:translate-x-[2px] hover:bg-white/[.06] hover:text-ink-primary"
                     }`
                   }
                 >
-                  {item.label}
-                  {/* The DESTINATION never depends on the count loading — S14.2's nav rule still binds, so
-                      the link and its label are always present and only the badge is conditional. */}
+                  <Icon name={item.icon} size={14} className="shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                  {/* ⛔ The badge is RIGHT-ALIGNED and CONDITIONAL; the destination never is. `null` means
+                      render nothing — never 0, never a dash (lib/navcounts.ts). */}
                   {(() => {
                     const b = badgeFor(item.to, counts);
                     return b === null ? null : (
-                      <span className="ml-2 text-xs text-slate-500">{b}</span>
+                      <span className="ml-auto font-mono text-badge tracking-[.1em] text-ink-secondary">
+                        {b}
+                      </span>
                     );
                   })()}
                 </NavLink>
@@ -146,7 +161,7 @@ function SidebarNav() {
           id="main-nav"
           aria-label="Main"
           hidden={!drawerOpen}
-          className="absolute inset-y-0 left-0 z-20 w-56 border-r border-white/5 bg-ink-950 p-4"
+          className="absolute inset-y-0 left-0 z-20 w-[228px] border-r border-line bg-bg p-10"
         >
           <NavGroups onNavigate={() => setDrawerOpen(false)} counts={counts} />
         </nav>
@@ -159,7 +174,9 @@ function SidebarNav() {
     <nav
       id="main-nav"
       aria-label="Main"
-      className={`shrink-0 border-r border-white/5 p-4 ${navMode === "rail" ? "w-40" : "w-48"}`}
+      // README: 228px, collapsing to 64px. `rail` is our narrow-viewport mode — the designer authored no
+      // breakpoints, so the collapsed width is ours (founder-ruled), the 228px is theirs.
+      className={`shrink-0 border-r border-line p-10 ${navMode === "rail" ? "w-[64px]" : "w-[228px]"}`}
     >
       <NavGroups counts={counts} />
     </nav>
@@ -216,12 +233,33 @@ export function AppShell() {
     <div className="flex min-h-full flex-col">
       {/* Mounted on the SHELL, not per screen: ⌘K must work wherever the user is. */}
       <CommandPalette />
-      <header className="flex items-center justify-between border-b border-white/5 px-6 py-4">
+      {/* README: TOP BAR, h:56px — search (opens the palette), spacer, then identity. */}
+      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-line px-16">
         <Logo />
-        <div className="flex items-center gap-4">
-          {/* Read-only, ruled: a user cannot switch their own edition or role. */}
+        <div className="flex items-center gap-12">
+          {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
+              discoverable entry point, since a shortcut nobody sees is a shortcut nobody uses). */}
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new KeyboardEvent("keydown", {
+                  key: "k",
+                  metaKey: true,
+                  bubbles: true,
+                }),
+              )
+            }
+            className="hidden items-center gap-8 rounded-input border border-line bg-surface-inset px-12 py-7 text-cell text-ink-secondary hover:text-ink-body md:flex"
+          >
+            <Icon name="search" size={13} />
+            <span>Search users, devices, gateways, sites…</span>
+            <span className="ml-8 font-mono text-badge text-ink-secondary">
+              ⌘K
+            </span>
+          </button>
           <IdentityBadges />
-          <span className="text-sm text-slate-400">{email}</span>
+          <span className="text-cell text-ink-body">{email}</span>
           <Button variant="ghost" onClick={onLogout}>
             Log out
           </Button>
@@ -231,15 +269,20 @@ export function AppShell() {
       <div className="relative flex flex-1">
         <SidebarNav />
 
-        <main className="flex-1 px-6 py-8" data-columns={columns}>
-          {/* data-columns publishes the column BUDGET for the page grid to consume. `max` clamps rather than
-              stretching: the content max-width holds and the extra space becomes margin. */}
-          <div className="mx-auto w-full max-w-3xl">
-            {state.status === "authed" && !state.user.email_verified && (
-              <VerifyEmailBanner />
-            )}
-            <Outlet />
-          </div>
+        {/* ⛔ NO max-width. README: "Page body max content width: none — grids fill available width."
+            The previous `max-w-3xl` capped EVERY screen at 768px, which is why S14.2's `columns` budget was
+            computed, asserted, and never consumable — dormant machinery in our own new code (docs/laws.md).
+            Padding and gap are the README's: 20px 24px 28px, flex column, gap 14. */}
+        <main
+          className="flex flex-1 flex-col gap-14 px-24 pb-[28px] pt-20"
+          data-columns={columns}
+        >
+          {/* data-columns publishes the column BUDGET so a page grid can consume it — which nothing could do
+              while this element capped the width at 768px. */}
+          {state.status === "authed" && !state.user.email_verified && (
+            <VerifyEmailBanner />
+          )}
+          <Outlet />
         </main>
       </div>
 

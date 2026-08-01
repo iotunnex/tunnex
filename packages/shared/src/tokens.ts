@@ -26,11 +26,21 @@ export type Tone = "ok" | "warn" | "danger";
  * generic "success" colour, every screen still renders, nothing looks wrong, and the one place that recorded
  * the rule was a comment in a config file that got rewritten. `tokens.test.ts` asserts it.
  */
-export const RESERVATIONS: Record<Tone, { meaning: string; forbiddenUses: string[] }> = {
+export const RESERVATIONS: Record<
+  Tone,
+  { meaning: string; forbiddenUses: string[] }
+> = {
   ok: {
     meaning: "LIVENESS ONLY — alive right now (online peer, healthy check).",
     // If any of these appear as a use-site for `ok`, the reservation has been broken.
-    forbiddenUses: ["success", "saved", "sent", "created", "confirmed", "role changed"],
+    forbiddenUses: [
+      "success",
+      "saved",
+      "sent",
+      "created",
+      "confirmed",
+      "role changed",
+    ],
   },
   warn: { meaning: "caution / one-time secret.", forbiddenUses: [] },
   danger: { meaning: "revoked / error.", forbiddenUses: [] },
@@ -38,19 +48,33 @@ export const RESERVATIONS: Record<Tone, { meaning: string; forbiddenUses: string
 
 /** Every token name the system defines. A theme MUST supply all of them — see `assertThemeComplete`. */
 export const TOKEN_NAMES = [
-  "ink-950",
-  "ink-900",
-  "ink-800",
-  "ink-700",
-  "ink-600",
-  "accent-400",
-  "accent-500",
-  "accent-600",
+  // surfaces — README "Color — dark (default)"
+  "bg", // app background
+  "surface", // card fill (translucent; the glass recipe composes it)
+  "surface-inset", // inset / sub-panel
+  "code", // code block
+  "badge-bg", // badge background
+  "border", // card border
+  "border-inset", // inset border
+  "divider", // row divider
+  "divider-head", // header divider
+  // text ramp — EIGHT NAMED TONES (README), two of which are contrast-corrected below
+  "text-heading",
+  "text-primary",
+  "text-emphasis",
+  "text-body",
+  "text-secondary",
+  "text-tertiary",
+  "text-faint",
+  "text-disabled",
+  // status — deliberately DESATURATED, never saturated alert colours
   "ok",
   "warn",
   "danger",
-  "text-primary",
-  "text-muted",
+  "neutral",
+  // interaction
+  "accent", // nav-active / selection / hover base
+  "focus", // focus-visible ring
 ] as const;
 export type TokenName = (typeof TOKEN_NAMES)[number];
 
@@ -61,46 +85,85 @@ export type Theme = Record<TokenName, string>;
  * the pre-existing tailwind config rather than re-picked — a re-pick would make the slice a visual change
  * wearing an infrastructure slice's name.
  */
-const dark: Theme = {
-  "ink-950": "#08080d",
-  "ink-900": "#0b0b12",
-  "ink-800": "#12121c",
-  "ink-700": "#1a1a28",
-  "ink-600": "#232335",
-  "accent-400": "#9b84ff",
-  "accent-500": "#7c5cff",
-  "accent-600": "#6344e6",
-  ok: "#2ecc8f",
-  warn: "#fbbf24",
-  danger: "#fb7185",
-  "text-primary": "#ffffff",
-  "text-muted": "#94a3b8",
+/**
+ * `mono` — THE DEFAULT, and the prototype's own default (`pal: 'mono'`).
+ *
+ * Every value cites the handoff README's token table (docs/wireframe-extract.md), except the TWO recorded
+ * contrast corrections below. This is not a re-pick: the previous `dark` was the OLD APP'S palette, shipped
+ * before the specification had been read.
+ */
+const mono: Theme = {
+  bg: "#0A0A0A",
+  surface: "#1B1B1B", // rgba(31,31,31,.72) composited over bg — the literal alpha lives in the glass recipe
+  "surface-inset": "#161616", // rgba(18,18,18,.72) over bg
+  code: "#101010",
+  "badge-bg": "#1A1A1A",
+  border: "#2E2E2E",
+  "border-inset": "#242424",
+  divider: "#1A1A1A",
+  "divider-head": "#1E1E1E",
+
+  "text-heading": "#F5F5F5",
+  "text-primary": "#EDEDEB",
+  "text-emphasis": "#D6D6D2",
+  "text-body": "#A9A9A6",
+  "text-secondary": "#858582",
+  // ⛔ TWO CONTRAST CORRECTIONS, FOUNDER-RULED. The README's tertiary #5E5E5B (2.65:1) and faint #4A4A48
+  // (1.94:1) FAIL the WCAG AA 4.5:1 floor that S14.1 built and mutation-proved. The minimum warm grey that
+  // clears it on this surface is #838380, so both collapse to #858582 and the hierarchy is carried by WEIGHT
+  // and SIZE instead — which the README specifies in full.
+  //
+  // Recorded rather than silently applied: the design sets its own honesty captions ("'Failed' is never
+  // rendered as a reassuring empty state") in its least readable tone. A colour that cannot be read is a
+  // value the interface claims to show and does not.
+  "text-tertiary": "#858582", // README: #5E5E5B — raised
+  "text-faint": "#858582", // README: #4A4A48 — raised
+  // Disabled is EXEMPT: WCAG does not require contrast for disabled controls, so this stays verbatim.
+  "text-disabled": "#454542",
+
+  ok: "#6E9C7C",
+  warn: "#C39A4E",
+  danger: "#C77474",
+  neutral: "#858582",
+
+  // Mono's interaction colours, measured from the source prototype rather than the README's violet row.
+  accent: "#C9C9C4",
+  focus: "#C9C9C4",
 };
 
 /** `mono` — the second theme, present to PROVE the mechanism is n-theme. Hue stripped, contrast preserved. */
-const mono: Theme = {
-  "ink-950": "#0a0a0a",
-  "ink-900": "#101010",
-  "ink-800": "#181818",
-  "ink-700": "#222222",
-  "ink-600": "#2e2e2e",
-  "accent-400": "#d4d4d4",
-  "accent-500": "#a3a3a3",
-  "accent-600": "#7a7a7a",
-  ok: "#2ecc8f",
-  warn: "#fbbf24",
-  danger: "#fb7185",
-  "text-primary": "#ffffff",
-  "text-muted": "#a1a1aa",
+/**
+ * `violet` — the prototype's SECOND palette. Same surfaces and ramp; the accent becomes the brand violet.
+ *
+ * The app shipped `#7c5cff` before the specification was read — ONE HEX DIGIT from the README's `#7C5CFC`.
+ * It was never a mistake; it was right by coincidence. The value now CITES the design rather than resembling it.
+ */
+const violet: Theme = {
+  ...mono,
+  accent: "#7C5CFC",
+  focus: "#A78BFA",
 };
 
-export const THEMES: Record<string, Theme> = { dark, mono };
-export const DEFAULT_THEME = "dark";
+export const THEMES: Record<string, Theme> = { mono, violet };
+export const DEFAULT_THEME = "mono";
 
 /** Typography + spacing travel as tokens now; ADOPTION is S14.2, so this slice cannot alter rendering. */
 export const TYPOGRAPHY = {
-  sans: ['"Inter Variable"', "ui-sans-serif", "system-ui", "Segoe UI", "Roboto", "sans-serif"],
-  mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+  sans: [
+    '"Inter Variable"',
+    "ui-sans-serif",
+    "system-ui",
+    "Segoe UI",
+    "Roboto",
+    "sans-serif",
+  ],
+  mono: [
+    '"JetBrains Mono Variable"',
+    "ui-monospace",
+    "SFMono-Regular",
+    "Menlo",
+    "monospace",
+  ],
 } as const;
 
 // ── S14.3 SLICE 0 — THE SCALES S14.1'S PAPER CLAIMED AND ITS ARTIFACT DID NOT CARRY ──────────────────────────
@@ -121,38 +184,63 @@ export const TYPOGRAPHY = {
 
 /** Spacing scale. One scale, so a gap is a decision rather than a number someone typed. */
 export const SPACING = {
-  0: "0",
-  1: "0.25rem",
-  2: "0.5rem",
-  3: "0.75rem",
-  4: "1rem",
-  6: "1.5rem",
-  8: "2rem",
-  12: "3rem",
-  16: "4rem",
+  // The README's scale, VERBATIM and keyed by its own px values — 4 · 6 · 7 · 8 · 9 · 10 · 12 · 14 · 16 · 20 · 24.
+  //
+  // Keyed by px rather than by a t-shirt or step index on purpose: the design is specified in px, and every
+  // other naming scheme requires a translation table that nobody maintains. `--tnx-space-7` IS 7px.
+  // (A first attempt used fractional step keys, which emit `--tnx-space-1.5` — legal CSS, but the coverage
+  // census could not match it and went red. The census caught a naming choice, which is what it is for.)
+  4: "4px",
+  6: "6px",
+  7: "7px",
+  8: "8px",
+  9: "9px",
+  10: "10px",
+  12: "12px",
+  14: "14px",
+  16: "16px",
+  20: "20px",
+  24: "24px",
 } as const;
 
 /** Type scale. Sizes only — families are TYPOGRAPHY, and the two are separate so a theme may re-scale without re-picking a face. */
 export const TYPE_SCALE = {
-  xs: "0.75rem",
-  sm: "0.875rem",
-  base: "1rem",
-  lg: "1.125rem",
-  xl: "1.375rem",
-  "2xl": "1.75rem",
+  // The README's scale, in px, because the design is specified in px and a rem conversion would drift.
+  badge: "8.5px",
+  micro: "9px",
+  explainer: "9.5px",
+  mono: "10px",
+  cell: "11px",
+  nav: "12.5px",
+  title: "13.5px",
+  stat: "26px",
 } as const;
 
-export const RADIUS = { none: "0", sm: "0.25rem", md: "0.5rem", lg: "0.75rem", full: "9999px" } as const;
+export const RADIUS = {
+  chip: "6px",
+  input: "7px",
+  inset: "8px",
+  nav: "9px",
+  bar: "13px",
+  card: "14px",
+  pill: "99px",
+} as const;
 
 /**
  * Elevation. The wireframe's glassmorphism layer model lives HERE rather than as inline `backdrop-filter`
  * declarations across the app — the artifact carries 242 of those, which is 242 places for one of them to drift.
  */
+/**
+ * ⛔ LIQUID GLASS, NOT GLOSSY. The README is explicit: the inset white highlight lines were REMOVED, and
+ * `inset 0 1px 0 rgba(255,255,255,…)` must not be reintroduced.
+ */
 export const ELEVATION = {
-  0: "none",
-  1: "0 1px 2px rgb(0 0 0 / 0.4)",
-  2: "0 4px 12px rgb(0 0 0 / 0.45)",
-  3: "0 12px 32px rgb(0 0 0 / 0.5)",
+  none: "none",
+  card: "0 10px 30px rgba(0,0,0,.3)",
+  bar: "0 20px 50px rgba(0,0,0,.5)",
+  modal: "0 24px 60px rgba(0,0,0,.45)",
+  drawer: "-24px 0 60px rgba(0,0,0,.5)",
+  "input-inset": "inset 0 1px 3px rgba(0,0,0,.22)",
 } as const;
 
 /**
@@ -184,13 +272,49 @@ export const MOTION = {
  * ⛔ ADDING A CATEGORY HERE WITHOUT EMITTING IT GOES RED. That is the whole point — the failure mode being
  * guarded is a paper (or this list) growing a promise the artifact never grew.
  */
-export const CLAIMED_COVERAGE: Array<{ category: string; claim: string; prefix: string; minCount: number }> = [
-  { category: "colour", claim: "ink surfaces, accent, semantic ok/warn/danger, text", prefix: "", minCount: 13 },
-  { category: "typography", claim: "a size scale (families ship in the palette JSON)", prefix: "text-", minCount: 6 },
-  { category: "spacing", claim: "one spacing scale", prefix: "space-", minCount: 9 },
-  { category: "radius", claim: "border radius scale", prefix: "radius-", minCount: 5 },
-  { category: "elevation", claim: "the layer/glassmorphism model, as tokens not 242 inline declarations", prefix: "elevation-", minCount: 4 },
-  { category: "motion", claim: "duration + easing, with prefers-reduced-motion honoured", prefix: "duration-", minCount: 4 },
+export const CLAIMED_COVERAGE: Array<{
+  category: string;
+  claim: string;
+  prefix: string;
+  minCount: number;
+}> = [
+  {
+    category: "colour",
+    claim: "ink surfaces, accent, semantic ok/warn/danger, text",
+    prefix: "",
+    minCount: 13,
+  },
+  {
+    category: "typography",
+    claim: "a size scale (families ship in the palette JSON)",
+    prefix: "text-",
+    minCount: 6,
+  },
+  {
+    category: "spacing",
+    claim: "one spacing scale",
+    prefix: "space-",
+    minCount: 9,
+  },
+  {
+    category: "radius",
+    claim: "border radius scale",
+    prefix: "radius-",
+    minCount: 5,
+  },
+  {
+    category: "elevation",
+    claim:
+      "the layer/glassmorphism model, as tokens not 242 inline declarations",
+    prefix: "elevation-",
+    minCount: 4,
+  },
+  {
+    category: "motion",
+    claim: "duration + easing, with prefers-reduced-motion honoured",
+    prefix: "duration-",
+    minCount: 4,
+  },
   { category: "motion", claim: "easing curves", prefix: "ease-", minCount: 3 },
 ];
 
@@ -202,11 +326,51 @@ const cssVar = (n: TokenName) => `--tnx-${n}`;
 export function tailwindColors() {
   const ref = (n: TokenName) => `var(${cssVar(n)})`;
   return {
-    ink: { 950: ref("ink-950"), 900: ref("ink-900"), 800: ref("ink-800"), 700: ref("ink-700"), 600: ref("ink-600") },
-    accent: { 400: ref("accent-400"), 500: ref("accent-500"), 600: ref("accent-600") },
+    bg: ref("bg"),
+    surface: {
+      DEFAULT: ref("surface"),
+      inset: ref("surface-inset"),
+      code: ref("code"),
+      badge: ref("badge-bg"),
+    },
+    line: {
+      DEFAULT: ref("border"),
+      inset: ref("border-inset"),
+      row: ref("divider"),
+      head: ref("divider-head"),
+    },
     ok: ref("ok"),
     warn: ref("warn"),
     danger: ref("danger"),
+    neutral: ref("neutral"),
+    accent: {
+      DEFAULT: ref("accent"),
+      // ⛔ MIGRATION BRIDGE — the OLD token names, kept alive so the sixteen screens that have not had their
+      // section pass yet keep rendering. Tailwind DROPS unknown classes SILENTLY: removing these names would
+      // not fail the build, it would blank half the product's surfaces and nothing would go red.
+      //
+      // Each entry disappears when its screen's section lands. See docs/EPIC-14-ui-redesign.md.
+      400: ref("accent"),
+      500: ref("accent"),
+      600: ref("accent"),
+    },
+    focus: ref("focus"),
+    ink: {
+      heading: ref("text-heading"),
+      primary: ref("text-primary"),
+      emphasis: ref("text-emphasis"),
+      body: ref("text-body"),
+      secondary: ref("text-secondary"),
+      tertiary: ref("text-tertiary"),
+      faint: ref("text-faint"),
+      disabled: ref("text-disabled"),
+      // MIGRATION BRIDGE, same reason: ink-950..600 were SURFACES in the old set, not text.
+      950: ref("bg"),
+      900: ref("bg"),
+      800: ref("surface"),
+      700: ref("surface-inset"),
+      600: ref("border"),
+    },
   };
 }
 
@@ -223,7 +387,9 @@ export function scaleCss(): string {
     ...Object.entries(SPACING).map(([k, v]) => `--tnx-space-${k}:${v}`),
     ...Object.entries(RADIUS).map(([k, v]) => `--tnx-radius-${k}:${v}`),
     ...Object.entries(ELEVATION).map(([k, v]) => `--tnx-elevation-${k}:${v}`),
-    ...Object.entries(MOTION.duration).map(([k, v]) => `--tnx-duration-${k}:${v}`),
+    ...Object.entries(MOTION.duration).map(
+      ([k, v]) => `--tnx-duration-${k}:${v}`,
+    ),
     ...Object.entries(MOTION.easing).map(([k, v]) => `--tnx-ease-${k}:${v}`),
   ];
   // The CSS half of the motion gate. Unconditional: nothing has to remember to check.
@@ -242,7 +408,9 @@ export function themeCss(): string {
     `${sel}{${TOKEN_NAMES.map((n) => `${cssVar(n)}:${t[n]}`).join(";")}}`;
   return [
     block(":root", THEMES[DEFAULT_THEME]),
-    ...Object.entries(THEMES).map(([name, t]) => block(`[data-theme="${name}"]`, t)),
+    ...Object.entries(THEMES).map(([name, t]) =>
+      block(`[data-theme="${name}"]`, t),
+    ),
   ].join("\n");
 }
 
@@ -257,7 +425,11 @@ function srgbToLinear(c: number): number {
 export function luminance(hex: string): number {
   const h = hex.replace("#", "");
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
-  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+  return (
+    0.2126 * srgbToLinear(r) +
+    0.7152 * srgbToLinear(g) +
+    0.0722 * srgbToLinear(b)
+  );
 }
 
 /** WCAG 2.1 contrast ratio, 1..21. */
@@ -273,14 +445,61 @@ export function contrastRatio(a: string, b: string): number {
  *
  * AA floors: 4.5:1 for body text, 3:1 for large text and for UI/graphical boundaries.
  */
-export const CONTRAST_PAIRS: Array<{ fg: TokenName; bg: TokenName; floor: number; why: string }> = [
-  { fg: "text-primary", bg: "ink-900", floor: 4.5, why: "body text on the app background" },
-  { fg: "text-primary", bg: "ink-800", floor: 4.5, why: "body text on a card" },
-  { fg: "text-primary", bg: "ink-700", floor: 4.5, why: "body text on a raised control" },
-  { fg: "text-muted", bg: "ink-900", floor: 4.5, why: "secondary text on the app background" },
-  { fg: "text-muted", bg: "ink-800", floor: 4.5, why: "secondary text on a card" },
-  { fg: "ok", bg: "ink-900", floor: 3, why: "liveness badge — a UI boundary, not body text" },
-  { fg: "warn", bg: "ink-900", floor: 3, why: "caution badge" },
-  { fg: "danger", bg: "ink-900", floor: 3, why: "revoked/error badge" },
-  { fg: "accent-400", bg: "ink-900", floor: 3, why: "link/hover affordance" },
+export const CONTRAST_PAIRS: Array<{
+  fg: TokenName;
+  bg: TokenName;
+  floor: number;
+  why: string;
+}> = [
+  {
+    fg: "text-heading",
+    bg: "bg",
+    floor: 4.5,
+    why: "headings on the app background",
+  },
+  { fg: "text-heading", bg: "surface", floor: 4.5, why: "headings on a card" },
+  {
+    fg: "text-primary",
+    bg: "surface",
+    floor: 4.5,
+    why: "primary text on a card",
+  },
+  { fg: "text-emphasis", bg: "surface", floor: 4.5, why: "emphasis on a card" },
+  { fg: "text-body", bg: "surface", floor: 4.5, why: "body text on a card" },
+  { fg: "text-secondary", bg: "surface", floor: 4.5, why: "labels on a card" },
+  // The two CORRECTED tones. They are asserted at the SAME floor as body text precisely because the README's
+  // originals failed it — if a future edit re-points them at the design's literal values, this goes red.
+  {
+    fg: "text-tertiary",
+    bg: "surface",
+    floor: 4.5,
+    why: "sub-lines — README's #5E5E5B failed at 2.65:1",
+  },
+  {
+    fg: "text-faint",
+    bg: "surface",
+    floor: 4.5,
+    why: "explainer captions — README's #4A4A48 failed at 1.94:1",
+  },
+  {
+    fg: "text-secondary",
+    bg: "surface-inset",
+    floor: 4.5,
+    why: "labels on an inset panel",
+  },
+  {
+    fg: "ok",
+    bg: "surface",
+    floor: 3,
+    why: "liveness badge — a UI boundary, not body text",
+  },
+  { fg: "warn", bg: "surface", floor: 3, why: "caution badge" },
+  { fg: "danger", bg: "surface", floor: 3, why: "error badge" },
+  { fg: "neutral", bg: "surface", floor: 3, why: "unknown/neutral badge" },
+  {
+    fg: "accent",
+    bg: "surface",
+    floor: 3,
+    why: "focus ring / active affordance",
+  },
 ];

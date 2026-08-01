@@ -1,21 +1,45 @@
 {
   "_generated": "from packages/shared/src/tokens.ts — DO NOT EDIT",
   "colors": {
-    "ink": {
-      "600": "var(--tnx-ink-600)",
-      "700": "var(--tnx-ink-700)",
-      "800": "var(--tnx-ink-800)",
-      "900": "var(--tnx-ink-900)",
-      "950": "var(--tnx-ink-950)"
+    "bg": "var(--tnx-bg)",
+    "surface": {
+      "DEFAULT": "var(--tnx-surface)",
+      "inset": "var(--tnx-surface-inset)",
+      "code": "var(--tnx-code)",
+      "badge": "var(--tnx-badge-bg)"
     },
-    "accent": {
-      "400": "var(--tnx-accent-400)",
-      "500": "var(--tnx-accent-500)",
-      "600": "var(--tnx-accent-600)"
+    "line": {
+      "DEFAULT": "var(--tnx-border)",
+      "inset": "var(--tnx-border-inset)",
+      "row": "var(--tnx-divider)",
+      "head": "var(--tnx-divider-head)"
     },
     "ok": "var(--tnx-ok)",
     "warn": "var(--tnx-warn)",
-    "danger": "var(--tnx-danger)"
+    "danger": "var(--tnx-danger)",
+    "neutral": "var(--tnx-neutral)",
+    "accent": {
+      "400": "var(--tnx-accent)",
+      "500": "var(--tnx-accent)",
+      "600": "var(--tnx-accent)",
+      "DEFAULT": "var(--tnx-accent)"
+    },
+    "focus": "var(--tnx-focus)",
+    "ink": {
+      "600": "var(--tnx-border)",
+      "700": "var(--tnx-surface-inset)",
+      "800": "var(--tnx-surface)",
+      "900": "var(--tnx-bg)",
+      "950": "var(--tnx-bg)",
+      "heading": "var(--tnx-text-heading)",
+      "primary": "var(--tnx-text-primary)",
+      "emphasis": "var(--tnx-text-emphasis)",
+      "body": "var(--tnx-text-body)",
+      "secondary": "var(--tnx-text-secondary)",
+      "tertiary": "var(--tnx-text-tertiary)",
+      "faint": "var(--tnx-text-faint)",
+      "disabled": "var(--tnx-text-disabled)"
+    }
   },
   "fontFamily": {
     "sans": [
@@ -35,36 +59,44 @@
     ]
   },
   "spacing": {
-    "0": "0",
-    "1": "0.25rem",
-    "2": "0.5rem",
-    "3": "0.75rem",
-    "4": "1rem",
-    "6": "1.5rem",
-    "8": "2rem",
-    "12": "3rem",
-    "16": "4rem"
+    "4": "4px",
+    "6": "6px",
+    "7": "7px",
+    "8": "8px",
+    "9": "9px",
+    "10": "10px",
+    "12": "12px",
+    "14": "14px",
+    "16": "16px",
+    "20": "20px",
+    "24": "24px"
   },
   "fontSize": {
-    "xs": "0.75rem",
-    "sm": "0.875rem",
-    "base": "1rem",
-    "lg": "1.125rem",
-    "xl": "1.375rem",
-    "2xl": "1.75rem"
+    "badge": "8.5px",
+    "micro": "9px",
+    "explainer": "9.5px",
+    "mono": "10px",
+    "cell": "11px",
+    "nav": "12.5px",
+    "title": "13.5px",
+    "stat": "26px"
   },
   "borderRadius": {
-    "none": "0",
-    "sm": "0.25rem",
-    "md": "0.5rem",
-    "lg": "0.75rem",
-    "full": "9999px"
+    "chip": "6px",
+    "input": "7px",
+    "inset": "8px",
+    "nav": "9px",
+    "bar": "13px",
+    "card": "14px",
+    "pill": "99px"
   },
   "boxShadow": {
-    "0": "none",
-    "1": "0 1px 2px rgb(0 0 0 / 0.4)",
-    "2": "0 4px 12px rgb(0 0 0 / 0.45)",
-    "3": "0 12px 32px rgb(0 0 0 / 0.5)"
+    "none": "none",
+    "card": "0 10px 30px rgba(0,0,0,.3)",
+    "bar": "0 20px 50px rgba(0,0,0,.5)",
+    "modal": "0 24px 60px rgba(0,0,0,.45)",
+    "drawer": "-24px 0 60px rgba(0,0,0,.5)",
+    "input-inset": "inset 0 1px 3px rgba(0,0,0,.22)"
   },
   "transitionDuration": {
     "instant": "0ms",

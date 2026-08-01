@@ -106,7 +106,7 @@ describe("the six cards resolve INDEPENDENTLY — one failure degrades one card"
     await waitFor(() => expect(screen.getByText("Members")).toBeTruthy());
     expect(screen.getByText("4")).toBeTruthy(); // members still resolved
     expect(screen.getByText("7")).toBeTruthy(); // devices still resolved
-    expect(screen.getAllByText("unavailable").length).toBe(1); // exactly one card degraded
+    expect(screen.getAllByText("could not load").length).toBe(1); // exactly one card degraded
   });
 });
 
@@ -115,7 +115,9 @@ describe("⛔ A FAILED COUNT NEVER RENDERS AS ZERO", () => {
     sitesFail = true;
     show();
     await waitFor(() => expect(screen.getByText("Sites")).toBeTruthy());
-    await waitFor(() => expect(screen.getByText("unavailable")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("could not load")).toBeTruthy(),
+    );
 
     // ⚠ THE ASSERTION HAD TO BE SHARPENED, AND THE FIRST VERSION WAS WRONG IN AN INSTRUCTIVE WAY.
     //
@@ -127,6 +129,7 @@ describe("⛔ A FAILED COUNT NEVER RENDERS AS ZERO", () => {
     // text query cannot tell those apart, because on screen they are the same character. So the assertion is
     // scoped to the FAILED card, which is the only place the distinction lives.
     const sitesCard = screen.getByText("Sites").closest("div")!.parentElement!;
+    // (copy changed with the design pass; the ASSERTION is unchanged — a failed card must not show a number)
     expect(within(sitesCard).queryByText("0")).toBeNull();
   });
 

@@ -14,6 +14,19 @@ import tokens from "../../packages/shared/generated/tokens.palette.json" with { 
 // exactly how such a rule dies during a migration.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: { extend: { colors: tokens.colors, fontFamily: tokens.fontFamily } },
+  theme: {
+    extend: {
+      colors: tokens.colors,
+      fontFamily: tokens.fontFamily,
+      // S14.4: the design's scales, all GENERATED — spacing/radius/elevation/type keyed by the README's own
+      // px values, so `p-16` is 16px and `rounded-card` is the card radius. No translation table to maintain.
+      spacing: tokens.spacing,
+      borderRadius: tokens.borderRadius,
+      boxShadow: tokens.boxShadow,
+      fontSize: tokens.fontSize,
+      transitionDuration: tokens.transitionDuration,
+      transitionTimingFunction: tokens.transitionTimingFunction,
+    },
+  },
   plugins: [],
 };
