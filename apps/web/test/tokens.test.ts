@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
+  CLAIMED_COVERAGE,
   CONTRAST_PAIRS,
   DEFAULT_THEME,
+  MOTION,
   RESERVATIONS,
   THEMES,
   TOKEN_NAMES,
@@ -97,5 +101,68 @@ describe("theme completeness — a theme that omits a token renders a broken var
     const flat = JSON.stringify(tailwindColors());
     expect(flat).not.toMatch(/#[0-9a-f]{3,8}/i);
     expect(flat).toContain("var(--tnx-");
+  });
+});
+
+describe("COVERAGE CENSUS — the CLAIM compared to the ARTIFACT (S14.3 slice 0)", () => {
+  // ⚠ THE ASSERTION THAT DID NOT EXIST, AND THE REASON THE DEFECT SHIPPED.
+  //
+  // S14.1's paper claimed five covered groups — colour, typography, spacing, radius/elevation, motion. The
+  // emitted set was thirteen names and every one was a colour. EVERY GATE PASSED, because every gate was
+  // aimed at the names that existed and none at the ones the paper promised: theme completeness compares each
+  // theme to TOKEN_NAMES, contrast compares colours to colours, the reservation scan compares source to a
+  // rule. Nothing compared the CLAIM to the ARTIFACT.
+  //
+  // A paper vouching for a property the artifact lacks is the same class as a comment vouching for absent
+  // code, which this repo paid for once already in S14.2's mutation 1.
+  //
+  // The claim is hand-authored (CLAIMED_COVERAGE) and the artifact is generated, so the two are independent.
+  // Deriving the claim from the scales would compare the token set to itself and pass by construction.
+  // ⚠ READ FROM DISK, NOT VIA `?raw`. The obvious route — `import css from "…/tokens.css?raw"` — returns an
+  // EMPTY STRING under vitest: CSS processing is disabled by default, and the raw query is swallowed with it.
+  // It failed loudly here only because the assertions below are lower-bounds (0 < 13). Had any of them been an
+  // "and nothing unexpected" check, an empty artifact would have satisfied it VACUOUSLY. The guard three tests
+  // down exists for that reason and is what identified the empty.
+  const css = readFileSync(
+    fileURLToPath(new URL("../../../packages/shared/generated/tokens.css", import.meta.url)),
+    "utf8",
+  );
+
+  for (const c of CLAIMED_COVERAGE) {
+    it(`[${c.category}] emits ≥${c.minCount} variables — claim: ${c.claim}`, () => {
+      const names = new Set(
+        [...css.matchAll(/--tnx-([a-z0-9-]+)\s*:/g)]
+          .map((m) => m[1]!)
+          .filter((n) => (c.prefix ? n.startsWith(c.prefix) : true)),
+      );
+      expect(
+        names.size,
+        `"${c.category}" claims ${c.claim} but the emitted CSS carries ${names.size} matching variable(s) ` +
+          `for prefix "${c.prefix}" — a claim with nothing behind it.`,
+      ).toBeGreaterThanOrEqual(c.minCount);
+    });
+  }
+
+  it("the coverage list is non-empty — a census over zero claims cannot fail", () => {
+    expect(CLAIMED_COVERAGE.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("the emitted CSS was actually read — an empty artifact would satisfy nothing above", () => {
+    // The vacuity guard that matters most here: if the raw import silently resolved to "", every prefix would
+    // match zero names and every assertion would fail loudly — which is the safe direction. This asserts the
+    // opposite risk, that the file is real, so a passing run means the comparison happened.
+    expect(css.length).toBeGreaterThan(200);
+    expect(css).toContain("--tnx-");
+  });
+
+  it("prefers-reduced-motion is honoured in the ARTIFACT, unconditionally — not left to each component", () => {
+    // The CSS half of the motion gate. It needs no JavaScript and nothing has to remember to check: a
+    // component that forgets the preference still animates for zero milliseconds.
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+    for (const k of Object.keys(MOTION.duration)) {
+      expect(css, `--tnx-duration-${k} is not zeroed under reduced motion`).toMatch(
+        new RegExp(`--tnx-duration-${k}\\s*:\\s*0ms`),
+      );
+    }
   });
 });

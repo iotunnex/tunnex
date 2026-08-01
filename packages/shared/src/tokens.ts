@@ -103,6 +103,97 @@ export const TYPOGRAPHY = {
   mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
 } as const;
 
+// ── S14.3 SLICE 0 — THE SCALES S14.1'S PAPER CLAIMED AND ITS ARTIFACT DID NOT CARRY ──────────────────────────
+//
+// ⚠ THIS IS A DEFECT BEING CORRECTED, NOT A GAP BEING FILLED (founder-ruled).
+//
+// S14.1's commit-one listed FIVE covered groups — colour, typography, spacing, radius/border/elevation, motion.
+// The emitted set was THIRTEEN NAMES AND EVERY ONE WAS A COLOUR. Font FAMILIES shipped (TYPOGRAPHY above, into
+// the palette JSON); a size scale, a spacing scale, radius, elevation and motion did not.
+//
+// A PAPER VOUCHING FOR A PROPERTY THE ARTIFACT LACKS IS THE SAME CLASS AS A COMMENT VOUCHING FOR ABSENT CODE —
+// and this repo has just paid for that class once, in S14.2's mutation 1.
+//
+// WHY S14.1'S OWN GATES MISSED IT, which is the part worth fixing: `tokens.test.ts` asserted theme
+// COMPLETENESS (every theme supplies every token NAME) and contrast and the `ok` reservation. NOTHING ASSERTED
+// THE EMITTED SET AGAINST THE CLAIMED COVERAGE. Every gate passed because every gate was aimed at the names
+// that existed, never at the ones the paper promised. See CLAIMED_COVERAGE below — that assertion now exists.
+
+/** Spacing scale. One scale, so a gap is a decision rather than a number someone typed. */
+export const SPACING = {
+  0: "0",
+  1: "0.25rem",
+  2: "0.5rem",
+  3: "0.75rem",
+  4: "1rem",
+  6: "1.5rem",
+  8: "2rem",
+  12: "3rem",
+  16: "4rem",
+} as const;
+
+/** Type scale. Sizes only — families are TYPOGRAPHY, and the two are separate so a theme may re-scale without re-picking a face. */
+export const TYPE_SCALE = {
+  xs: "0.75rem",
+  sm: "0.875rem",
+  base: "1rem",
+  lg: "1.125rem",
+  xl: "1.375rem",
+  "2xl": "1.75rem",
+} as const;
+
+export const RADIUS = { none: "0", sm: "0.25rem", md: "0.5rem", lg: "0.75rem", full: "9999px" } as const;
+
+/**
+ * Elevation. The wireframe's glassmorphism layer model lives HERE rather than as inline `backdrop-filter`
+ * declarations across the app — the artifact carries 242 of those, which is 242 places for one of them to drift.
+ */
+export const ELEVATION = {
+  0: "none",
+  1: "0 1px 2px rgb(0 0 0 / 0.4)",
+  2: "0 4px 12px rgb(0 0 0 / 0.45)",
+  3: "0 12px 32px rgb(0 0 0 / 0.5)",
+} as const;
+
+/**
+ * Motion. Durations and easings, so an animation is a token rather than a number chosen per component.
+ *
+ * ⛔ `prefers-reduced-motion` IS A GATE, NOT A COURTESY (founder-ruled), and the CSS-first half of that gate is
+ * emitted alongside these values: a media block that re-points every duration to `0ms`. That means the
+ * REDUCTION IS UNCONDITIONAL AND NEEDS NO JAVASCRIPT — a component that forgets to check the preference still
+ * animates for zero milliseconds. The JS half (the pure `motionAllowed` decision) is slice B, and it gates the
+ * animations CSS cannot reach.
+ */
+export const MOTION = {
+  duration: { instant: "0ms", fast: "120ms", normal: "200ms", slow: "320ms" },
+  easing: {
+    standard: "cubic-bezier(0.2, 0, 0, 1)",
+    decelerate: "cubic-bezier(0, 0, 0, 1)",
+    accelerate: "cubic-bezier(0.3, 0, 1, 1)",
+  },
+} as const;
+
+/**
+ * THE CLAIM, AS DATA — hand-authored to mirror what the PAPER promises, and deliberately NOT derived from the
+ * scales above.
+ *
+ * A derived list would compare the token set to itself and pass by construction: the fixture-restates-production
+ * shape, which is exactly how S14.1's coverage claim survived unchallenged. This list is the CLAIM; the emitted
+ * CSS is the ARTIFACT; the census in `tokens.test.ts` compares one to the other.
+ *
+ * ⛔ ADDING A CATEGORY HERE WITHOUT EMITTING IT GOES RED. That is the whole point — the failure mode being
+ * guarded is a paper (or this list) growing a promise the artifact never grew.
+ */
+export const CLAIMED_COVERAGE: Array<{ category: string; claim: string; prefix: string; minCount: number }> = [
+  { category: "colour", claim: "ink surfaces, accent, semantic ok/warn/danger, text", prefix: "", minCount: 13 },
+  { category: "typography", claim: "a size scale (families ship in the palette JSON)", prefix: "text-", minCount: 6 },
+  { category: "spacing", claim: "one spacing scale", prefix: "space-", minCount: 9 },
+  { category: "radius", claim: "border radius scale", prefix: "radius-", minCount: 5 },
+  { category: "elevation", claim: "the layer/glassmorphism model, as tokens not 242 inline declarations", prefix: "elevation-", minCount: 4 },
+  { category: "motion", claim: "duration + easing, with prefers-reduced-motion honoured", prefix: "duration-", minCount: 4 },
+  { category: "motion", claim: "easing curves", prefix: "ease-", minCount: 3 },
+];
+
 // ── emitters ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const cssVar = (n: TokenName) => `--tnx-${n}`;
@@ -117,6 +208,32 @@ export function tailwindColors() {
     warn: ref("warn"),
     danger: ref("danger"),
   };
+}
+
+/**
+ * The non-colour scales, emitted as `:root` variables — plus the reduced-motion media block.
+ *
+ * Colour is per-theme; these are NOT. A theme changes what the product looks like, never how far apart things
+ * sit or how long a transition runs; making spacing themeable would let a theme change layout, which is a
+ * different decision wearing a palette's name.
+ */
+export function scaleCss(): string {
+  const decls = [
+    ...Object.entries(TYPE_SCALE).map(([k, v]) => `--tnx-text-${k}:${v}`),
+    ...Object.entries(SPACING).map(([k, v]) => `--tnx-space-${k}:${v}`),
+    ...Object.entries(RADIUS).map(([k, v]) => `--tnx-radius-${k}:${v}`),
+    ...Object.entries(ELEVATION).map(([k, v]) => `--tnx-elevation-${k}:${v}`),
+    ...Object.entries(MOTION.duration).map(([k, v]) => `--tnx-duration-${k}:${v}`),
+    ...Object.entries(MOTION.easing).map(([k, v]) => `--tnx-ease-${k}:${v}`),
+  ];
+  // The CSS half of the motion gate. Unconditional: nothing has to remember to check.
+  const reduced = Object.keys(MOTION.duration)
+    .map((k) => `--tnx-duration-${k}:0ms`)
+    .join(";");
+  return [
+    `:root{${decls.join(";")}}`,
+    `@media (prefers-reduced-motion: reduce){:root{${reduced}}}`,
+  ].join("\n");
 }
 
 /** `:root` carries the default theme; `[data-theme="x"]` re-points the same names. One attribute, no rebuild. */
