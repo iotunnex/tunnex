@@ -431,17 +431,27 @@ export function NodeLink({
     });
   }
 
-  // Centre what was placed WITHOUT rescaling it. With few nodes the arrangement is lopsided about the hub (a
-  // lone spoke sits entirely to one side), and a diagram pinned to one edge of its panel reads as an error
-  // even when every node is exactly where it belongs.
+  // ⛔ FIT THE BOX *AND* THE PIXEL HEIGHT TO THE SAME NUMBER — that is what keeps the scale at 1:1.
+  //
+  // Fitting the viewBox ALONE magnified everything (attempt 2). Pinning a 600x320 box ALONE left a 320px-tall
+  // panel with two small rings adrift in it (attempt 3). Both were half the answer.
+  //
+  // `preserveAspectRatio="xMidYMid meet"` scales to fit the TIGHTER of the two axes. So if the viewBox height
+  // in USER UNITS equals the element height in PIXELS, the scale is exactly 1 — the design's contract, a 68px
+  // hub ring — and the horizontal remainder is simply empty space, centred. The frame follows the content in
+  // SIZE without ever changing its SCALE.
   const pts = [...pos.values()];
-  if (pts.length > 0) {
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const dx = HUB.x - (Math.min(...xs) + Math.max(...xs)) / 2;
-    const dy = HUB.y - (Math.min(...ys) + Math.max(...ys)) / 2;
-    for (const [id, p] of pos) pos.set(id, { x: p.x + dx, y: p.y + dy });
-  }
+  const PAD_X = 34 + 42; // widest ring + room for the label, which is wider than its circle
+  const PAD_TOP = 34 + 14;
+  const PAD_BOTTOM = 34 + 34; // label at r+15 and sub-line at r+27 are drawn BELOW the ring
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const boxX = pts.length ? Math.min(...xs) - PAD_X : 0;
+  const boxY = pts.length ? Math.min(...ys) - PAD_TOP : 0;
+  const boxW = pts.length ? Math.max(...xs) - Math.min(...xs) + PAD_X * 2 : 600;
+  const boxH = pts.length
+    ? Math.max(...ys) - Math.min(...ys) + PAD_TOP + PAD_BOTTOM
+    : 320;
 
   const interactive = onSelect != null;
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
@@ -461,9 +471,10 @@ export function NodeLink({
           `w-80`, where the same element is a tidy 192px and a solid dot reads as a deliberate dot.
           A COMPONENT CONSTRAINED BY ITS HARNESS IS NOT A COMPONENT THAT HAS BEEN TESTED AT SIZE. */}
       <svg
-        viewBox="0 0 600 320"
+        viewBox={`${boxX} ${boxY} ${boxW} ${boxH}`}
         preserveAspectRatio="xMidYMid meet"
-        className="h-[320px] w-full"
+        style={{ height: `${boxH}px` }}
+        className="w-full"
         role="presentation"
       >
         {links.map((l) => {
@@ -566,18 +577,37 @@ export function NodeLink({
           not reachable by keyboard, and announces nothing. Clicking a circle is a shortcut for people who
           can see and aim; the list is the interface. Link state is stated in WORDS, so "down" is never
           carried by a red line alone. */}
-      <ul className="mt-2 space-y-1 text-xs">
+      {/* ROW SPEC TAKEN FROM THE HANDOFF, not from a screenshot: inset surface, 1px hairline, radius 8,
+          padding 9/11, MONO name, a pill for the state, the range in a muted grey, the note pushed right.
+          It was bare text under the diagram, which read as debug output beside a designed panel. */}
+      <ul className="mt-2 flex flex-col gap-1.5 text-cell">
         {nodes.map((n) => {
           const isSel = n.id === selectedId;
+          const tone = n.tone ?? "linked";
           const body = (
             <>
-              {n.label}
-              {n.kind === "hub" && (
-                <span className="ml-1 text-ink-faint">(hub)</span>
+              <span className="font-mono text-ink-primary">{n.label}</span>
+              {n.kind === "hub" ? (
+                <span className="rounded-full border border-line px-1.5 py-px font-mono text-micro text-ink-body">
+                  HUB
+                </span>
+              ) : (
+                <span
+                  className="rounded-full border px-1.5 py-px font-mono text-micro"
+                  style={{ color: NODE_DOT[tone], borderColor: NODE_DOT[tone] }}
+                >
+                  {tone}
+                </span>
               )}
-              {n.sub && <span className="ml-1 text-ink-faint">{n.sub}</span>}
+              {n.sub && (
+                <span className="truncate text-micro text-ink-tertiary">
+                  {n.sub}
+                </span>
+              )}
             </>
           );
+          const rowClass =
+            "flex w-full items-center gap-2.5 rounded-lg border border-line bg-ink-800 px-2.5 py-2 text-left";
           return (
             <li key={n.id}>
               {interactive ? (
@@ -585,14 +615,12 @@ export function NodeLink({
                   type="button"
                   aria-pressed={isSel}
                   onClick={() => onSelect(isSel ? null : n.id)}
-                  className={`w-full rounded px-1 text-left ${
-                    isSel ? "bg-white/10 text-ink-heading" : "text-ink-body"
-                  }`}
+                  className={`${rowClass} ${isSel ? "ring-1 ring-white/25" : ""}`}
                 >
                   {body}
                 </button>
               ) : (
-                <span className="text-ink-body">{body}</span>
+                <span className={rowClass}>{body}</span>
               )}
             </li>
           );
