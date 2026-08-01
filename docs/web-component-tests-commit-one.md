@@ -14,7 +14,7 @@ ruled against** (`GATE-REPORT-NEEDS-SHA`).
 | **Security** | `gofmt + vet parity` · `govulncheck` ×5 (api·node·cli·helper·operator) · `CodeQL` ×2 (go·js-ts) · `Trivy` | **all success** |
 
 **Re-earned by any further commit.** And note *why* the PR exists at all: `ci.yml` fires on `pull_request` only
-(WF-S13-11), so a story branch has **no CI signal** until one is opened. `make web-gate` passing locally is
+(WF-S13-11), so a story branch has **no CI signal** until one is opened. `make web-gate` (typecheck + vitest + build — NOT Playwright; e2e runs in CI only) passing locally is
 **not** the gate.
 
 ## ⚠ CORRECTION — AND THE CORRECTION IS THE SHA DISCIPLINE WORKING, NOT A NUMBER BEING AMENDED
@@ -517,7 +517,7 @@ run at all.**
 **Do not read the earlier "217 tests green" reports as CI evidence.** They were `vitest` in a developer shell.
 
 **DECLARED AND LOCKED 2026-08-01**, and verified by running the gate itself. Slices 1-5 are clean — but the
-statement that makes them clean is *"`make web-gate` passes"*, not *"the suite passed here"*, and only the
+statement that makes them clean is *"`make web-gate` (typecheck + vitest + build — NOT Playwright; e2e runs in CI only) passes"*, not *"the suite passed here"*, and only the
 second was ever said before today.
 
 **Two other defects the same verification surfaced**, both invisible to every gate until then:
@@ -527,7 +527,7 @@ second was ever said before today.
 
 ## STANDING RULE, from here
 
-> ### A SLICE IS NOT GREEN UNTIL `make web-gate` PASSES.
+> ### A SLICE IS NOT GREEN UNTIL `make web-gate` (typecheck + vitest + build — NOT Playwright; e2e runs in CI only) PASSES.
 >
 > Not until the suite passes locally. **Every slice reports the GATE's result, not `vitest`'s** — typecheck,
 > test and build, in the Node 20 container that mirrors CI.
