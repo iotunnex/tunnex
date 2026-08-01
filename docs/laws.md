@@ -644,3 +644,70 @@ The consequence is not cosmetic. Query rule 1 says query by **role**, and `role=
 time** — and **the second cost is invisible from either side.** Reading the tests shows queries that work.
 Reading the components shows markup that renders. **Only measuring the semantics across both shows that the
 tier is guarding text instead of structure.**
+
+## ⑦ THE SEVENTH VACUITY MECHANISM — **AN UNCHECKED CLAIM** (minted 2026-08-01, S14.1 → S14.3)
+
+> ## **A PROMISE WITH NO GATE READS EXACTLY LIKE A PROMISE THAT IS KEPT, BECAUSE EVERYTHING IT IS MEASURED AGAINST AGREES WITH IT.**
+
+**THE OTHER SIX ASK WHETHER A CHECK COULD FAIL. THIS ONE ASKS WHETHER A CLAIM IS CHECKED AT ALL** — and that
+is why none of the other six can see it. Every existing member starts from a check and interrogates it. **Here
+there is no check to interrogate.** The claim lives in a paper, a README, a coverage table, an interface
+comment; the gates that exist are all sound; and the claim is simply **outside the set of things anything
+compares.**
+
+**THE INSTANCE.** S14.1's commit-one claimed five covered token groups — colour, typography, spacing,
+radius/elevation, motion. The artifact carried **thirteen variables, all colour**. The slice shipped CI-green
+with three gates, **all of them correct**:
+
+| gate | what it compared | why it could not see the defect |
+|---|---|---|
+| theme completeness | each theme → `TOKEN_NAMES` | **compares themes to the names that EXIST** |
+| contrast floor | colour pairs → WCAG ratios | **compares colours to colours** |
+| `ok` reservation scan | source use-sites → a rule | **compares source to a rule** |
+
+**Every gate internally consistent. Every gate aimed at what was there. None at what was promised.**
+
+### THE DIAGNOSTIC — the question to ask of a paper, and it is one line
+
+> **For every claim a paper makes ABOUT AN ARTIFACT, name the check that would FAIL if the claim became false.**
+> **If there is none, the claim is prose.**
+
+Prose is not worthless — but it must be **read as prose**, and a coverage table read as a guarantee is the
+whole failure. **The tell is that nothing has to change for the claim to become false**: a promise nothing
+measures cannot be broken, only discovered.
+
+### THE FIX'S LOAD-BEARING PROPERTY: **`CLAIMED_COVERAGE` IS HAND-AUTHORED, NOT DERIVED**
+
+**This is the part that does the work, and it looks like duplication.** `CLAIMED_COVERAGE` mirrors the paper by
+hand. Deriving it from the scales it describes would make the census **compare the token set to itself** — it
+would pass for every possible token set, including the thirteen-colour one. **That is exactly how the original
+claim survived: everything that looked at it was downstream of it.**
+
+**SAME FAMILY AS TWO EXISTING RULINGS, and the family is worth naming:** the **mirror census as a deliberate
+literal** and the **D10 golden vector**. In all three, **an INDEPENDENT restatement is the mechanism** — and in
+all three the instinct to "just derive it, so it can't drift" would destroy the only property that matters.
+**A check must be able to DISAGREE with the thing it checks. Derivation removes that ability while looking
+like rigour.**
+
+## THE `?raw` ESCAPE WAS LUCK, NOT DESIGN — AND RECORDING IT AS DESIGN WOULD TEACH THE WRONG LESSON (2026-08-01, S14.3)
+
+**`import css from "…/tokens.css?raw"` returns an EMPTY STRING under vitest** — CSS processing is off by
+default and the raw query is swallowed with it. The coverage census read `""` and went red.
+
+**IT WENT RED ONLY BECAUSE EVERY COVERAGE ASSERTION IS A LOWER BOUND** (`0 >= 13` is false). **Had one been an
+"and nothing unexpected" check — a set difference, a "no extra variables", an exact-match — an empty string
+would have satisfied it PERFECTLY**, and the census would have certified an artifact it never read.
+
+**THAT WAS LUCK.** The assertions were written as lower bounds because lower bounds fit the question, not
+because anyone had considered an empty artifact. **The guard that asserts the artifact is non-trivial is what
+converts the luck into a property** — after it, the direction of the assertions stops mattering.
+
+**THE RULE, and it is about the write-up as much as the code: A LUCKY ESCAPE RECORDED AS A DESIGNED ONE TEACHES
+THE WRONG LESSON.** It says *"our assertions are robust"* when the truth is *"our assertions happened to point
+the safe way this time."* The first invites the next author to rely on a property nobody built. **Name which
+one it was.**
+
+**GENERALLY: AN EMPTY FIXTURE SATISFIES EVERY UNIVERSAL CLAIM.** `every`, `all`, set-difference, "none of these
+appear", exact-match against an empty expectation — **all pass on nothing.** Any check reading an external
+artifact needs a **non-triviality assertion on the artifact itself**, and it belongs beside the check, not in
+the author's head.
