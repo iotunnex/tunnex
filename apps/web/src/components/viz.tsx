@@ -93,7 +93,7 @@ const TONE_VAR: Record<Slice["tone"], string> = {
   ok: "var(--tnx-ok)",
   warn: "var(--tnx-warn)",
   danger: "var(--tnx-danger)",
-  neutral: "var(--tnx-ink-600)",
+  neutral: "var(--tnx-neutral)",
 };
 
 /**
@@ -284,6 +284,17 @@ export interface Node {
   kind: "hub" | "spoke";
   /** One line of true facts under the label. The wireframe's `kind · ip · status`, minus the ip we do not serve. */
   sub?: string;
+  /**
+   * The number inside the ring.
+   *
+   * ⛔ The wireframe puts a SITE COUNT here because its nodes are regions. Ours are sites, so there is no
+   * count of that kind — this carries whatever real number the caller has (Sites passes the site's bound
+   * gateway count). Omitted renders an empty ring rather than a zero, because "no number to show" and
+   * "the number is zero" are different and only one of them is a fact about the network.
+   */
+  value?: number | string;
+  /** The node's own worst link state, for the status dot. Absent reads as `linked`. */
+  tone?: LinkTone;
 }
 
 /**
@@ -306,16 +317,43 @@ export interface Link {
   note?: string;
 }
 
-const LINK_STROKE: Record<LinkTone, string> = {
-  linked: "var(--tnx-ok)",
-  degraded: "var(--tnx-warn)",
-  down: "var(--tnx-danger)",
+// ⛔ TONES TAKEN FROM THE WIREFRAME'S OWN `TONE` MAP, NOT INVENTED.
+//
+// I had these as ok/warn/danger — a green, an amber and a red. The design is NEAR-MONOCHROME: an `ok` edge
+// is light grey, and degraded/down are progressively DARKER greys, distinguished by a DASH PATTERN. Only the
+// status dot carries a hue, and only for `degraded`.
+//
+// That is the better call and it is worth stating why, because "add colour" is the reflex. A five-node mesh
+// with three red edges reads as an emergency at a glance even when one spoke is merely unreachable. Recession
+// is the honest encoding for a degraded link: it RETREATS rather than shouting, and the words in the list
+// below carry the actual claim. Colour is spent where it is scarce and therefore meaningful.
+export const LINK_STROKE: Record<LinkTone, string> = {
+  linked: "#C9C9C4",
+  degraded: "#3A3A3A",
+  down: "#303030",
 };
 // `down` is dashed as well as red, so the state survives a monochrome print and a red-green viewer.
-const LINK_DASH: Record<LinkTone, string | undefined> = {
+export const LINK_DASH: Record<LinkTone, string | undefined> = {
   linked: undefined,
-  degraded: "4 3",
-  down: "2 3",
+  degraded: "6 7",
+  down: "6 7",
+};
+
+// ring / fill / dot per tone — the wireframe's TONE map, verbatim.
+const NODE_RING: Record<LinkTone, string> = {
+  linked: "#C9C9C4",
+  degraded: "#3A3A3A",
+  down: "#303030",
+};
+const NODE_FILL: Record<LinkTone, string> = {
+  linked: "#171717",
+  degraded: "#161616",
+  down: "#101010",
+};
+const NODE_DOT: Record<LinkTone, string> = {
+  linked: "#D6D6D2",
+  degraded: "#C39A4E", // the ONE hue in the diagram
+  down: "#5E5E5B",
 };
 
 /**
@@ -349,10 +387,17 @@ export function NodeLink({
   const hub = nodes.find((n) => n.kind === "hub");
   const spokes = nodes.filter((n) => n.kind !== "hub");
   const pos = new Map<string, { x: number; y: number }>();
-  if (hub) pos.set(hub.id, { x: 100, y: 60 });
-  spokes.forEach((s, i) => {
-    const a = (i / Math.max(1, spokes.length)) * Math.PI * 2;
-    pos.set(s.id, { x: 100 + Math.cos(a) * 70, y: 60 + Math.sin(a) * 45 });
+  // The wireframe's frame: 600x320, hub dead centre at (300,162). Spokes ring it. Starting at -90° puts
+  // the first spoke at twelve o'clock, which is where a reader looks first; a lone spoke then sits ABOVE the
+  // hub rather than at an arbitrary angle.
+  const HUB = { x: 300, y: 162 };
+  if (hub) pos.set(hub.id, HUB);
+  // A single spoke with NO hub has nothing to orbit, so it takes the centre. Orbiting an absent centre
+  // leaves a hole where the reader looks first and implies something belongs there.
+  if (!hub && spokes.length === 1) pos.set(spokes[0].id, HUB);
+  else spokes.forEach((s, i) => {
+    const a = (i / Math.max(1, spokes.length)) * Math.PI * 2 - Math.PI / 2;
+    pos.set(s.id, { x: HUB.x + Math.cos(a) * 200, y: HUB.y + Math.sin(a) * 105 });
   });
 
   const interactive = onSelect != null;
@@ -366,7 +411,18 @@ export function NodeLink({
       isEmpty={nodes.length === 0}
       empty={empty}
     >
-      <svg viewBox="0 0 200 120" className="w-full" role="presentation">
+      {/* ⛔ GEOMETRY TAKEN FROM THE WIREFRAME, NOT INVENTED: viewBox 600x320, hub at (300,162).
+          The earlier version was a 200x120 box of FILLED discs and it was wrong twice over — `w-full` with
+          no height made it ~750px tall in an 8fr column, and the nodes were solid where the design has
+          HOLLOW RINGS on a dark fill. The gallery could not catch either: it renders every specimen inside
+          `w-80`, where the same element is a tidy 192px and a solid dot reads as a deliberate dot.
+          A COMPONENT CONSTRAINED BY ITS HARNESS IS NOT A COMPONENT THAT HAS BEEN TESTED AT SIZE. */}
+      <svg
+        viewBox="0 0 600 320"
+        preserveAspectRatio="xMidYMid meet"
+        className="h-[300px] w-full"
+        role="presentation"
+      >
         {links.map((l) => {
           const a = pos.get(l.from);
           const b = pos.get(l.to);
@@ -381,25 +437,84 @@ export function NodeLink({
               y2={b.y}
               stroke={LINK_STROKE[l.tone]}
               strokeDasharray={LINK_DASH[l.tone]}
-              strokeWidth={touches ? 2 : 1}
-              opacity={selectedId && !touches ? 0.25 : 1}
+              strokeWidth={touches ? 2.5 : 1.5}
+              strokeLinecap="round"
+              opacity={selectedId && !touches ? 0.18 : 1}
             />
           );
         })}
         {nodes.map((n) => {
           const p = pos.get(n.id)!;
           const isSel = n.id === selectedId;
+          const isHub = n.kind === "hub";
+          const r = isHub ? 34 : 26;
+          const dim = selectedId && !isSel ? 0.3 : 1;
           return (
-            <circle
-              key={n.id}
-              cx={p.x}
-              cy={p.y}
-              r={n.kind === "hub" ? 6 : 4}
-              fill="var(--tnx-accent-500)"
-              stroke={isSel ? "var(--tnx-ink-heading)" : "none"}
-              strokeWidth={isSel ? 1.5 : 0}
-              opacity={selectedId && !isSel ? 0.4 : 1}
-            />
+            <g key={n.id} opacity={dim}>
+              {isSel && (
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={r + 6}
+                  fill="none"
+                  stroke="var(--tnx-text-heading)"
+                  strokeWidth="1.5"
+                  opacity="0.55"
+                />
+              )}
+              {/* The RING. Dark fill + light stroke, per the design — not a solid disc. */}
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={r}
+                fill={isHub ? "#1F1F1F" : NODE_FILL[n.tone ?? "linked"]}
+                stroke={isHub ? "#C9C9C4" : NODE_RING[n.tone ?? "linked"]}
+                strokeWidth="1.6"
+              />
+              {/* The status dot at upper-right, coloured by the node's own worst link. Carried in the list
+                  as words too — a dot alone states nothing to a screen reader. */}
+              <circle
+                cx={p.x + r * 0.66}
+                cy={p.y - r * 0.66}
+                r={4}
+                fill={NODE_DOT[n.tone ?? "linked"]}
+                stroke="var(--tnx-bg)"
+                strokeWidth="1.5"
+              />
+              <text
+                x={p.x}
+                y={p.y + (isHub ? 4 : 5)}
+                textAnchor="middle"
+                fill="var(--tnx-text-heading)"
+                fontSize={isHub ? 11 : 15}
+                fontWeight="700"
+                fontFamily={isHub ? "JetBrains Mono, monospace" : "inherit"}
+              >
+                {isHub ? "HUB" : (n.value ?? "")}
+              </text>
+              <text
+                x={p.x}
+                y={p.y + r + 15}
+                textAnchor="middle"
+                fill="var(--tnx-text-primary)"
+                fontSize="10.5"
+                fontWeight="600"
+              >
+                {n.label}
+              </text>
+              {n.sub && (
+                <text
+                  x={p.x}
+                  y={p.y + r + 27}
+                  textAnchor="middle"
+                  fill="var(--tnx-text-secondary)"
+                  fontSize="8"
+                  fontFamily="JetBrains Mono, monospace"
+                >
+                  {n.sub}
+                </text>
+              )}
+            </g>
           );
         })}
       </svg>

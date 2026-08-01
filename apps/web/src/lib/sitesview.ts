@@ -303,22 +303,31 @@ export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
     const sub = approved.length
       ? "· " + approved.map((s) => s.cidr).join(", ")
       : "· no approved subnet";
-    out.nodes.push({ id: c.id, label: c.name, kind: "spoke", sub });
+    // `value` = the site's bound gateway count. The wireframe puts a SITE COUNT inside the ring because its
+    // nodes are regions; ours are sites, so the honest analogue is how many gateways front this one. Zero is
+    // a real fact here (a site with no gateway bound), unlike an absent count.
+    const gwCount = c.gateways.filter((g) => g.status === "active").length;
 
     // No gateway bound → no site link exists yet. An absent edge, never a red one: "not connected" and
     // "connection failed" are different facts and only one of them is a fault.
     const gw = c.gateways.find((g) => g.status === "active");
-    if (!hubNode || !gw || gw.id === hubNode.id) continue;
+    const kind = gw?.health?.label ?? null;
+    const down = kind != null && /hub down|link down/i.test(kind);
+    const tone: VizLink["tone"] = down ? "down" : kind ? "degraded" : "linked";
 
-    const kind = gw.health?.label ?? null;
-    const down =
-      kind != null && /hub down|link down/i.test(kind);
-    out.links.push({
-      from: "__hub",
-      to: c.id,
-      tone: down ? "down" : kind ? "degraded" : "linked",
-      note: kind ?? undefined,
+    out.nodes.push({
+      id: c.id,
+      label: c.name,
+      kind: "spoke",
+      sub,
+      value: gwCount,
+      tone,
     });
+
+    // No hub, no gateway, or this site's gateway IS the hub → NO EDGE. A drawn edge in a failure tone claims
+    // a link was attempted and failed; none of these three is that.
+    if (!hubNode || !gw || gw.id === hubNode.id) continue;
+    out.links.push({ from: "__hub", to: c.id, tone, note: kind ?? undefined });
   }
   return out;
 }
