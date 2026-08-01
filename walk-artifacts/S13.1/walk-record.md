@@ -968,3 +968,76 @@ with no product surface). Both were honest *because who ran them was written dow
 **Retroactively, for this session:** the CP-identity probes, the device list/revoke/create/approve calls, and the
 config inspection above were **[agent]**, run against the API with the founder's browser session cookie. Everything
 on a rig HOST — the `azure-gw` revoke SQL, §A's device revokes, B′'s restarts — was **[founder]**.
+
+
+# WF-S13-9 (HIGH) — AN EXPIRED AGENT CERTIFICATE KEEPS AUTHENTICATING UNTIL THE CONNECTION BREAKS
+
+**Found 2026-08-01 05:22 by [agent] reads, while confirming B′'s stuck state before proposing a restart. It was
+not looked for.** It is inside EPIC 13's surface — the epic's premise is what it contradicts.
+
+## The measurement
+
+| fact | value | source |
+|---|---|---|
+| B′'s certificate | `notBefore 03:21:24`, **`notAfter 03:32:24`**, serial `A853ACB5…` | `openssl x509` on the box |
+| CP's record | same serial, same `cert_not_after` | `nodes` row |
+| `last_seen_at` | **advancing every 10-30s**, sampled 3× over 60s | CP, `05:22:15 → 05:22:24 → 05:22:54` |
+| what advances it | `TouchNodeSeen`, called from **`DesiredState`** (`nodes/service.go:365`) | code |
+| where `DesiredState` lives | **behind the mTLS agent channel**, `ClientAuth: tls.RequireAndVerifyClientCert` (`http/agentchannel.go:55`) | code |
+| the transport | **two `ESTAB` sockets to `:8443`**, owned by the agent pid, TCP-keepalive timers running | `ss -tnpo` |
+| container start | `03:17:23` — so the handshake happened at ~03:21, **while the certificate was valid** | `docker inspect` |
+
+**An agent whose certificate expired 1h51m ago is successfully calling an endpoint that requires a verified
+client certificate, right now, continuously.**
+
+## Why — and it is not a bug in the verification
+
+`tls.RequireAndVerifyClientCert` **does** enforce `NotAfter`. It enforces it **at the handshake**. HTTP
+keep-alive reuses an established connection indefinitely and never re-handshakes, so the certificate is checked
+once, at connection time, and never again for the life of that socket. Nothing re-evaluates it.
+
+## Three consequences, and the third is the one that matters today
+
+**1. THE FAILURE IS LATENT, AND THAT IS WHY THE ORIGINAL INCIDENT LOOKED THE WAY IT DID.** The epic opened
+because *"an AWS gateway went offline past its 48h cert lifetime and could not come back."* This explains the
+shape precisely: expiry alone does nothing. **Going offline is what breaks the connection**, and the lockout
+lands on the *reconnect* — which is why it presents as "it was fine, then it went away and never returned."
+The certificate died silently hours or days before anyone noticed.
+
+**2. IT SHARPENS WF-S13-6 INTO ITS CLEAREST FORM.** B′ has a WORKING, AUTHENTICATED transport to the control
+plane at this moment, and `/agent/renew` is on the other end of it. It renewed once at `03:22:24`, took one
+`reconcile_after_push_failed / desired-state status 401` at `03:22:50`, and **has logged nothing about its own
+credential in the 2 hours since** — no renewal attempt, no transport error, no re-key. Instances 2 and 3 at
+least looped `tls: expired certificate`. **This one is silent, and the door is open the entire time.** The agent
+is not locked out. It is not trying.
+
+**3. IT THREATENS §C's ACCEPTANCE LEG, AND IT WAS FOUND BEFORE THE 48-HOUR CLOCK.** C-LEG-0 is *"a gateway,
+agent running, certificate valid, left alone"* → expiry underneath the running process → recovery unaided. **If
+the connection survives the expiry, the agent experiences NO failure at all.** The remedy is built to survive
+this — `identityWatchLoop` decides on a timer over LOCAL inputs, so it inspects its own certificate rather than
+waiting for a transport error — but that is now a **property the leg must assert, not assume.** A §C run where
+the transport happens to stay up and the agent happens to re-key proves the remedy; a §C run where the transport
+happens to DROP proves only the boot path §A already covered. **The leg cannot tell those apart unless it
+records the socket state.**
+
+**AMENDMENT OWED TO §C, before the clock starts:** C-LEG-0 must capture `ss -tnpo` against `:8443` at setup,
+at expiry, and at recovery — so the record shows whether the connection survived. Without it the leg's result is
+ambiguous in exactly the direction the leg exists to resolve.
+
+## What is NOT yet established — stated so it is not assumed either way
+
+- **Revocation.** Whether a REVOKED node's established connection keeps serving `DesiredState` was not tested.
+  `DesiredState` re-reads the node row per request, so a status check may cover it — **unverified, and it is the
+  security-relevant half.** If revocation also only bites at reconnect, a revoked gateway keeps receiving desired
+  state until its socket drops.
+- **Why `renewLoop` stopped.** The renew should fire well before `NotAfter`. It fired once and then went quiet
+  with the transport healthy. **That is the actual WF-S13-6 mechanism and it is still not explained.**
+
+**RANK: HIGH. In scope. Not merge-blocking on its own** — the remedy (`identityWatchLoop`) is local-input-driven
+and unaffected — **but the §C amendment IS owed before the clock**, and the revocation question is owed before
+this epic can claim the gone-gate is understood.
+
+**The lesson, for the class this epic keeps producing:** the epic was built on *"an expired certificate cannot
+authenticate."* That is true of a **handshake** and false of a **connection**, and nothing in two review passes
+or a rehearsal run distinguished them, because every prior test restarted the agent — which is precisely the
+action that forces a new handshake. **§A's stop-then-start manufactured the very condition that hid this.**
