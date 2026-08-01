@@ -1425,3 +1425,27 @@ the broken gallery specs would have shipped with baselines harvested from a page
 
 **AN EXPECTED FAILURE IS STILL A FAILURE THAT MUST BE READ.** *"It failed as predicted"* is a claim about the
 REASON, not the outcome — and the reason is the only part that was predicted.
+
+## `min-width: auto` IS WHY FLEX ROWS OVERFLOW, AND THE SYMPTOM POINTS AT THE WRONG ELEMENT (2026-08-01, S14 viewport leg)
+
+**Flex items default to `min-width: auto`** — they refuse to shrink below their content. A single long string in
+a row (an email address, a hostname, a UUID) therefore pushes the row past the viewport, and **the whole PAGE
+scrolls sideways**.
+
+**THE INSTANCE, AND THE DIAGNOSTIC ERROR IT PRODUCED.** Overview measured **65px wider than a 390px viewport**.
+The first hypothesis was the panel grid — plausible: a `col-span-4` panel at 390px is ~100px and holds a 120px
+donut. **The grid was collapsed responsively and the overflow stayed at EXACTLY 65px.**
+
+> **A FIX THAT CHANGES THE NUMBER BY ZERO DID NOT ADDRESS THE CAUSE. THE CONSTANT IS THE EVIDENCE.**
+
+The real source was the **shell header** — an untruncated email in a flex row. It was identifiable in one step
+from a fact already in hand: **the gallery passed at 390 and renders OUTSIDE `AppShell`; Overview failed and
+renders inside it.** The difference between the passing and failing surface was the shell, not the page.
+
+**THE RULE, PRACTICAL:** any flex row containing user-supplied text needs **`min-w-0` on the shrinking child
+and `truncate` on the text**. Absent both, the row's width is set by its longest content forever, and nothing
+in the styling says so.
+
+**AND THE DIAGNOSTIC RULE, WHICH IS THE TRANSFERABLE PART: WHEN A FIX LEAVES A MEASURED NUMBER UNCHANGED,
+THE HYPOTHESIS IS WRONG — NOT INSUFFICIENT.** The temptation is to add a second fix on top of the first. **The
+measurement was already telling us the first fix addressed nothing.**

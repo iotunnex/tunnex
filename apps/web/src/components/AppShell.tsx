@@ -234,9 +234,17 @@ export function AppShell() {
       {/* Mounted on the SHELL, not per screen: ⌘K must work wherever the user is. */}
       <CommandPalette />
       {/* README: TOP BAR, h:56px — search (opens the palette), spacer, then identity. */}
-      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-line px-4">
-        <Logo />
-        <div className="flex items-center gap-3">
+      {/* README: TOP BAR, h:56px. `min-w-0` on both children and `truncate` on the email are load-bearing:
+          without them a long address (owner@demo.tunnex.local) pushes the row past the viewport and the whole
+          PAGE scrolls sideways — the overflow the viewport leg caught at 390px, 65px wide and constant.
+          Flex items default to `min-width: auto`, so they refuse to shrink below their content. That is the
+          single most common cause of horizontal overflow in a flex row, and it is invisible until something
+          inside is long enough. */}
+      <header className="flex h-[56px] shrink-0 items-center justify-between gap-2 border-b border-line px-4">
+        <div className="min-w-0 shrink-0">
+          <Logo />
+        </div>
+        <div className="flex min-w-0 items-center gap-3">
           {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
               discoverable entry point, since a shortcut nobody sees is a shortcut nobody uses). */}
           <button
@@ -258,9 +266,16 @@ export function AppShell() {
               ⌘K
             </span>
           </button>
-          <IdentityBadges />
-          <span className="text-cell text-ink-body">{email}</span>
-          <Button variant="ghost" onClick={onLogout}>
+          {/* Badges and the address are IDENTITY CONTEXT, not controls. Below `sm` the row belongs to the
+              action, so they step aside rather than squeezing it — the destination is never removed, only the
+              decoration around it (S14.2's rule, applied to the top bar). */}
+          <span className="hidden sm:flex">
+            <IdentityBadges />
+          </span>
+          <span className="hidden min-w-0 truncate text-cell text-ink-body sm:block">
+            {email}
+          </span>
+          <Button variant="ghost" className="shrink-0" onClick={onLogout}>
             Log out
           </Button>
         </div>
