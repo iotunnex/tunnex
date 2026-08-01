@@ -1599,3 +1599,88 @@ protect — and the three findings above all arrived by other means while the pi
 **committed into the `overview-390` baseline** — frozen, visible, written down. Dropping that baseline means
 **the defect is now registered in prose only, and no artifact holds it.** Reducing scope removed real
 coverage. That is the correct trade here, and it is not a free one.
+
+# ⭐ A GUARD CAN CONTAIN THE CLASS IT GUARDS AGAINST (2026-08-02, S14.5 — the sweep's headline)
+
+**THE ABSENCE-BY-ONE-ENCODING LAW, APPLIED TO A GUARD RATHER THAN TO A SEARCH.**
+
+`ENTERPRISE_PATHS` exists because the edition-vs-failure defect was fixed at one call site and was still live
+two cards over. The lesson taken was *only an enumeration finds the rest*, and a census was built to hold the
+enumeration to the spec. **That census then walked past three genuinely enterprise-gated endpoints for a
+regex detail:**
+
+```
+/summary:.*\(enterprise\)/i          ← the word ALONE inside its parentheses
+```
+
+```
+"Approve a pending device (peer + grants land org-wide within seconds, enterprise)"
+"Reject a pending device (revoked, tunnel address freed, enterprise)"
+"Self-report device posture facts (owner only; server evaluates, enterprise)"
+```
+
+All three call `deviceApprovalEditionRequired()` or gate on `deviceHealthEnabled`. **The gate existed on the
+server. The client did not know about it, and the instrument whose entire job was to notice reported clean.**
+
+> ## **THE INSTRUMENT BUILT TO STOP THE CLASS HAD THE CLASS INSIDE IT.**
+
+## ⛔ THE TRADE, AND WHY IT IS NOT SYMMETRIC
+
+Widening to `\benterprise\b` admits false positives — a path named that is not really gated.
+
+| error | what it costs |
+|---|---|
+| **false positive** | a RED naming a path. **Visible, cheap, and self-correcting** — someone reads the name and removes it. |
+| **false negative** | **nothing at all.** The census stays green, the endpoint stays unregistered, and the defect ships. |
+
+> ## **A GUARD TUNED FOR PRECISION OVER RECALL IS TUNED FOR SILENCE.**
+
+**So a census's regex is a SAFETY setting, not a style choice.** When in doubt, match more: the noise is
+reviewable and the silence is not.
+
+# ⭐ AN ASSERTION DERIVED FROM THE IMPLEMENTATION — *fixture-restates-production, one level up* (2026-08-02, S14.5)
+
+> ## **A TEST IS ONLY EVIDENCE ABOUT THE PRODUCT WHEN THE RULE IT ENCODES CAME FROM THE PRODUCT. THIS ONE CAME FROM THE PAGE IT WAS TESTING.**
+
+**THE KNOWN MECHANISM is a FIXTURE that restates production, so the test compares production to itself. This
+is one level up: THE ASSERTION ITSELF is derived from the implementation.**
+
+`sitesview.test.ts` asserted:
+
+```ts
+const g = siteGate({ role: "owner", emailVerified: true, edition: "open" });
+expect(g.canView).toBe(false);          // ← the client-invented rule, pinned
+```
+
+The server says the site model is **all-editions core (D11)**, three times, and gates none of it. **So the
+suite was not missing a test. It was holding the WRONG RULE IN PLACE, confidently, with a green tick.**
+
+## ⛔ WHY THIS IS WORSE THAN NO TEST AT ALL
+
+**AN ABSENT TEST INVITES SCRUTINY. A WRONG-BUT-CONFIDENT TEST FORECLOSES IT.**
+
+Anyone who opened that file to ask *"is the upsell intentional?"* found an explicit, named, passing assertion
+saying yes. **The test did not merely fail to catch the defect — it actively defended it**, and it would have
+gone on doing so through every future review of that screen.
+
+**THE DIAGNOSTIC: FOR ANY ASSERTION ABOUT A RULE, NAME THE RULE'S SOURCE.** A spec line, a handler, a
+migration, a founder ruling. **If the only place the rule exists is the code under test, the test is a mirror.**
+
+# ⭐ THE INVERSE PAIR — the diagnostic for every remaining screen (2026-08-02, S14.5)
+
+**TWO DEFECTS, ONE ROOT, OPPOSITE SIGNS. Both were found in the same sweep and neither was findable alone.**
+
+| | direction | symptom |
+|---|---|---|
+| **Sites** | the client **INVENTED** a boundary the server does not have | an **upsell** for a shipped capability |
+| **`ENTERPRISE_PATHS`** | the client **MISSED** a boundary the server does have | a `403` rendered as a **failure** |
+
+> ## **NEITHER DIRECTION IS FINDABLE FROM INSIDE THE CLIENT ALONE.**
+
+A client-side edition branch looks equally deliberate whether or not a server gate stands behind it. **The
+only way to tell is to read the other side** — which is why this sweep had to open `site_handlers.go` and
+`device_posture_handlers.go`, not merely grep for `edition ===`.
+
+**COROLLARY: the census cannot see either.** A hand-written branch never passes through the seam, so the
+enumeration that guards the seam is structurally blind to it. **`grep` for the branches; read the handlers
+for the truth; the census only keeps the registered set honest.**
