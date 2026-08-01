@@ -345,3 +345,57 @@ already knows how to make.
 `agent_renew_scheduled_from_cert`: `cert_expires_in=9m0s`, `first_attempt_in=4m0s`. The renew loop is anchored to
 remaining life and will keep B′ alive at the 10-minute TTL — so B′ stays a valid staging subject and will not
 expire again unless deliberately stopped.
+
+---
+
+# §B step 1 — WF-S13-7: THE UI'S ENROL COMMAND INSTALLS A PRE-S13.1 AGENT
+
+**Found 2026-08-01 03:06 UTC, re-enrolling aws-gw-1. Not a code defect — a RELEASE-COUPLING one.**
+
+## What happened
+
+The enrol command emitted by the UI pins a published digest:
+
+```
+ghcr.io/iotunnex/tunnex-node-agent@sha256:de8c9cefb614981c26b157ad1c76d2768794157df7d8f6fe93e49c1c0e22f114
+```
+
+That image **predates S13.1**. Booted against a state volume holding a certificate expired 12.5 hours earlier
+(`CN=aws-gw-1`, serial `9B3DB4F7…`, `notAfter Jul 31 14:40:07`, plus a `rekey-pending-key.pem` from 14:41), it
+logged `agent_reusing_stored_identity` — the `UseStored` branch — and then looped
+`remote error: tls: expired certificate` indefinitely. **Zero `agent_rekey_*` lines. The join token was never
+spent. No new node row was created.**
+
+That is **WF-S11-11's original symptom, verbatim**: prefer the stored identity, ignore the token the operator just
+supplied, loop forever on the one error that certificate can produce.
+
+## Why it looked like a new defect and is not
+
+The SAME volume, four hours earlier, took `Recover` and ran the full refusal chain. The variable was the image:
+
+| host | image | outcome |
+|---|---|---|
+| aws-gw-2 | `tunnex-node-agent:9f7c56f` (locally built, `sha256:dd4443ed…`) | **recovered by proof of possession** |
+| aws-gw-1 | `ghcr.io/…@sha256:de8c9ce…` (published) | `UseStored`, looped forever |
+
+**§A's walk ran the LOCALLY BUILT image on every gateway.** The published one has never carried this epic's code.
+
+## The finding that outlives this walk
+
+**When S13.1 merges, the UI's emitted install command must be re-pinned to an image containing it.** Until then,
+every gateway installed by the documented zero-touch procedure gets an agent that **cannot recover from
+certificate expiry** — and its failure mode is silent-looking: liveness up, readiness false, one warning at boot,
+then an unbounded stream of transport errors that never mentions re-key.
+
+The digest pin is correct by design (S8.2c zero-touch reproducibility). **What is missing is the coupling between
+"this epic shipped" and "the thing operators install contains it."** A merge that does not move the pin ships the
+feature and not the fix.
+
+**Registered as a MERGE PRECONDITION, not a trigger:** re-pin the UI's emitted digest, and verify by enrolling a
+gateway from the UI command alone and observing recovery.
+
+## Walk consequence
+
+**§B step 1 is REDONE with `tunnex-node-agent:9f7c56f`** — the image §A used — preserving the same-binary
+provenance §B depends on. The ghcr-based container is discarded. The state volume is untouched, so the redo
+starts from exactly the state step 1 intended.
