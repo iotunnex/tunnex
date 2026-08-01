@@ -967,3 +967,53 @@ be **evidence of a pre-existing weak assertion**. **Expect them, welcome them, a
 
 **A test that breaks when the product gets more correct was testing the wrong thing** — and it was green the
 entire time it was wrong, which is why nothing found it earlier.
+
+## DORMANT MACHINERY IN OUR OWN NEW CODE, ONE SLICE AFTER MINTING THE LAW (2026-08-01, S14.2 → S14.4)
+
+**S14.2 shipped `LayoutCapability.columns` — a 1/2/3/4 budget derived from viewport width, unit-tested,
+mutation-proven, and published to the DOM as `data-columns`.**
+
+**NOTHING CONSUMED IT.** Every screen stayed inside `max-w-3xl` — a 768px cap — so there was never any width
+for a second column. **The capability was computed, asserted, and ignored.**
+
+**THE UNCOMFORTABLE PART: this epic had already ruled on dormant machinery** (S8.4's round-3 HALT ripped out a
+dormant resolver rider), **re-stated it for the viz primitives**, and **wrote it into the EPIC 14 paper as an
+enforceable obligation** — and then produced a fresh instance two slices later, in code written by the same
+hand that wrote the rule.
+
+**WHY THE TESTS DID NOT CATCH IT, and this is the transferable part: the tests asserted the DECISION, and the
+decision was correct.** `capabilityFor("wide").columns === 4` is true and always was. **No assertion asked
+whether anything READ it.** A value can be perfectly computed and perfectly tested while being perfectly
+inert.
+
+> ## **A PRODUCER-WITHOUT-A-CONSUMER PASSES EVERY TEST OF THE PRODUCER.**
+
+**The repo already has the standing probe for exactly this** — *"for every new channel field, name its consumer
+and cite the reading line"* — minted after three producer-without-consumer instances in one epic.
+**IT WAS NOT APPLIED TO UI STATE, only to the agent channel.** It applies to any value crossing any seam:
+**name the consumer, cite the line, or do not ship the producer.**
+
+## AN EDITION-GATED CAPABILITY IS A FOURTH STATE, AND FOLDING IT INTO `failed` SHOWS AN ERROR FOR A FEATURE NEVER SOLD (2026-08-01, S14.4)
+
+**THE INSTANCE.** The Overview's *Pending approvals* card reads **`— unavailable`** in red on the **open**
+edition. `/devices/pending` is enterprise-only, so it answers `403 edition_required`, `loadOne` reports a
+failure, and the card renders the failure treatment.
+
+**S14.4 carefully separated three states — `loading` / `failed` / `ok` — and then folded a FOURTH into
+`failed`:**
+
+> ### **THIS CAPABILITY DOES NOT EXIST FOR YOUR EDITION.**
+
+**That is not a failure to learn something. It is a correct, successful answer** — and the product renders it
+as breakage to the exact users who were never sold the feature.
+
+**EPIC 14 ALREADY RULED THIS: edition gating is a RENDER decision — the surface is ABSENT, not styled away,
+not degraded, and NEVER AN ERROR.** It routes through the one gating seam. The rule existed; the fourth state
+was simply not noticed while building the other three.
+
+**THE GENERAL SHAPE:** when a design carefully enumerates states, **the danger moves to the state that was not
+enumerated** — and it will be absorbed by whichever existing state is nearest, which is almost never the
+harmless one. **`403 edition_required` is nearest to "error" in shape and furthest from it in meaning.**
+
+**THE CHECK: for every load, ask what a SUCCESSFUL REFUSAL looks like** — 403 by edition, 403 by permission,
+404 by scope. **Each is a real answer. None of them is a failure.**

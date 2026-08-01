@@ -271,3 +271,28 @@ path is reachable. **The same gap between "it is present" and "it is reached", r
 - **THE UNCHECKED PREMISE (what actually ships)** — build the SPA, enumerate the production bundle's real
   module graph, intersect with the 15 advisory-bearing packages. **Same trigger.** Until it runs, *"not
   shipped"* is an assumption wearing a fact's clothing.
+
+---
+
+# ⚠ UNRELATED, REGISTERED HERE BECAUSE IT WAS FOUND THE SAME DAY — THE `NET` DEFECT IN THE MAKEFILE
+
+**`Makefile:80` is `NET := tunnex_default`, HARDCODED**, while the same targets invoke `$(COMPOSE)`, which
+**does** respect `COMPOSE_PROJECT_NAME`.
+
+**SO ONE TARGET ADDRESSES TWO STACKS.** Running `COMPOSE_PROJECT_NAME=tunnex-s141 make seed`:
+
+```
+docker compose up -d --wait postgres     -> tunnex-s141-postgres-1   ✅ right project
+docker run --network tunnex_default ...  -> tunnex-postgres-1        ❌ the OTHER project's database
+```
+
+**The output shows the RIGHT container going healthy while the work happens on the wrong one.** Same class as
+everything else in this session: **the visible signal describes one thing and the operation touches another.**
+
+**FOUND LIVE:** a seed run against a two-stack machine hit the wrong database and was stopped only by the
+seeder's own `seed_refused` guard (`real_orgs: 6690`). **The guard held — against the wrong database.**
+
+**WORKAROUND (verified with `make -n`):** `NET=tunnex-s141_default` on the command line overrides it.
+**FIX:** `NET := $(or $(COMPOSE_PROJECT_NAME),tunnex)_default`.
+
+**NOT FIXED — registered. TRIGGER: the next Makefile change, or the next time a second stack is needed.**
