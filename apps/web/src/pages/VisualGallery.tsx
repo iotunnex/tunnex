@@ -322,6 +322,72 @@ export default function VisualGallery() {
         </Card>
       </Section>
 
+      {/* ⛔ FULL COLUMN WIDTH — THE HARNESS IS PART OF THE SPECIMEN.
+          ════════════════════════════════════════════════════════════════════════════════════════════════
+          EVERY SPECIMEN ABOVE RENDERS INSIDE `w-80`. That is a real context and it is not the only one.
+          `NodeLink` has a viewBox and `w-full`, so its HEIGHT DERIVES FROM ITS WIDTH: 192px at 320, and
+          ~750px in an 8fr column at 1440 — where it shipped, with two enormous discs floating in it.
+          THE GALLERY COULD NOT SEE IT, because the gallery had pinned the only input to the function.
+          A HARNESS THAT CONSTRAINS ITS SPECIMENS TESTS THE HARNESS.
+          BOTH WIDTHS STAY. Neither alone is the component — that is the finding, not a compromise. */}
+      <section className="flex flex-col gap-2" data-wide-specimens>
+        <h2 className="font-mono text-micro font-semibold uppercase tracking-[.16em] text-ink-secondary">
+          At full column width — the width-sensitive class
+        </h2>
+        <Panel title="Node link at column width">
+          <NodeLink
+            label="Topology"
+            source={{ endpoint: "/x" }}
+            failed={false}
+            nodes={[
+              { id: "h", label: "us-east hub", kind: "hub", sub: "· transit hub" },
+              { id: "a", label: "eu-lan", kind: "spoke", sub: "· 10.2.0.0/16", value: 2, tone: "linked" },
+              { id: "b", label: "ap-lan", kind: "spoke", sub: "· 10.3.0.0/16", value: 1, tone: "degraded" },
+              { id: "c", label: "sa-lan", kind: "spoke", sub: "· 10.4.0.0/16", value: 1, tone: "down" },
+            ]}
+            links={[
+              { from: "h", to: "a", tone: "linked" },
+              { from: "h", to: "b", tone: "degraded", note: "subnet unreachable" },
+              { from: "h", to: "c", tone: "down", note: "no fresh handshake to the hub" },
+            ]}
+            selectedId="b"
+            onSelect={() => {}}
+            empty="none"
+          />
+        </Panel>
+        <Panel title="Histogram at column width">
+          <Histogram
+            label="Verdicts"
+            source={{ endpoint: "/x" }}
+            failed={false}
+            bins={[
+              { label: "09", value: 5 },
+              { label: "10", value: 12 },
+              { label: "11", value: 0, gap: true },
+              { label: "12", value: 9 },
+              { label: "13", value: 2 },
+              { label: "14", value: 0 },
+            ]}
+            empty="none"
+          />
+        </Panel>
+        <Panel title="Donut at column width">
+          <Donut
+            label="Peer status"
+            source={{ endpoint: "/x" }}
+            failed={false}
+            centreLabel="devices"
+            slices={[
+              { label: "Connected", value: 83, tone: "ok" },
+              { label: "Idle", value: 23, tone: "neutral" },
+              { label: "Blocked", value: 9, tone: "warn" },
+              { label: "Revoked", value: 14, tone: "danger" },
+            ]}
+            empty="none"
+          />
+        </Panel>
+      </section>
+
       <Section title="Icons">
         <div className="flex flex-wrap gap-3">
           {(Object.keys(ICON_PATHS) as IconName[]).map((n) => (

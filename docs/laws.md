@@ -1855,3 +1855,24 @@ the diagram has a palette.
 
 **SIBLING:** *absence of a relationship is drawn as absence of an edge.* Same family — both are cases where
 the quieter rendering is the true one and the louder one is a claim nobody measured.
+
+## ⛔ COROLLARY, founder-ruled 2026-08-02: THE HARNESS IS PART OF THE SPECIMEN
+
+**KEEP BOTH WIDTHS. THAT IS THE FINDING, NOT A COMPROMISE.**
+
+The instinct after the 750px discovery is to *move* the gallery to full width — swapping one pinned container
+for another. **`w-80` is a real context too**: it is what a card, a modal body and a right-hand rail give a
+component, and defects live there as well.
+
+> ## **NEITHER WIDTH ALONE IS THE COMPONENT. A SPECIMEN IS A COMPONENT *PLUS* THE SPACE IT WAS GIVEN.**
+
+**MECHANISM (S14.5):** a `[data-wide-specimens]` section renders the width-sensitive primitives unconstrained,
+captured as its OWN baseline — `gallery-wide-1440.png`, census 2 → 3.
+
+**SEPARATE RATHER THAN APPENDED, and the reason is the suite's whole purpose:** appending doubles the page and
+spreads any change over more pixels, **making a real regression harder to see in the image a human is meant to
+read.** Every image must earn its place; one isolating the container-derived-geometry class earns it.
+
+**1440 ONLY.** At 390 there is no wide column, so a wide specimen is the narrow one again — **it would test
+nothing while costing a baseline and a re-harvest on every change.** The reason is written into the census's
+expectation list itself, where someone reaching to add the 390 counterpart for symmetry will read it.

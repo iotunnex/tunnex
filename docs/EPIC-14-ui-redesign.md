@@ -516,3 +516,26 @@ the staleness the re-entry rule exists to prevent.
 rule rather than a repeated judgement call.**
 
 **TRIGGER: the next branch-protection change.**
+
+## ⚠ OWED — OVERVIEW NEEDS A RE-LOOK WITH SEEDED DATA (deferred 2026-08-02, NOT waived)
+
+**THE FOUNDER APPROVED A DEFECTIVE RENDERING, AND THE CORRECTION HAS NOT BEEN SEEN BY ANYONE.**
+
+`Donut`'s `neutral` slice referenced `var(--tnx-ink-600)`, which **does not exist**. CSS resolves an
+undefined custom property to the INITIAL value, so **every neutral slice has rendered BLACK since S14.3** —
+including on Overview, reviewed on localhost and passed.
+
+**THE FIX IS BOUNDED, AND THE BOUND IS WHY THIS IS A DEFERRAL AND NOT A BLOCKER:**
+
+- `--tnx-ink-600` had **exactly one** reference in the codebase: `TONE_VAR.neutral` in `viz.tsx`
+- `TONE_VAR` has **exactly two** consumers, both inside `Donut`: the arc `stroke` and the legend swatch
+- **so the entire delta is: neutral donut slices change from black to `#858582`.** Nothing else moves
+- `test/tokenrefs.test.ts` now proves no fourth reference exists
+
+**WHY DEFERRED RATHER THAN CLOSED:** the founder's stack has **zero devices**, so the Peer Connection Status
+donut renders its EMPTY STATE, not an arc. **He would be looking for a difference that cannot appear.**
+
+**TRIGGER: the next review that has seeded data.** Fold it in there rather than scheduling a look that
+cannot see anything.
+
+> **A BOUNDED FIX IS STILL AN UNREVIEWED CHANGE. THE BOUND SAYS HOW MUCH TO RE-LOOK AT — NOT WHETHER TO.**

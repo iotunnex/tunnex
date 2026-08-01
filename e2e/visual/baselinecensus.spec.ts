@@ -27,7 +27,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // This is the distinction the census exists to enforce: a baseline removed by a ruling, in a diff, with the
 // count edited alongside it, is not the same act as a baseline deleted to silence a red check. The census
 // cannot tell those apart on its own — it forces the second one to LOOK like the first, in public.
-const EXPECTED_SNAPSHOTS = ["gallery-1440.png", "gallery-390.png"] as const;
+const EXPECTED_SNAPSHOTS = [
+  "gallery-1440.png",
+  "gallery-390.png",
+  // ⛔ NO `gallery-wide-390.png`, AND THIS LINE IS WHY.
+  //
+  // The wide specimen isolates the class where a component's geometry derives from its CONTAINER — the
+  // defect that shipped a 750px-tall diagram because the gallery pinned every specimen to `w-80`. At 390
+  // THERE IS NO WIDE COLUMN, so a wide specimen at phone width is just the narrow one again: it would test
+  // nothing while costing a baseline and a re-harvest on every change.
+  //
+  // Symmetry is not a reason. If you are here to add the 390 counterpart, this is the argument against it.
+  "gallery-wide-1440.png",
+] as const;
 
 test("the baseline set is EXACTLY what is expected — no additions, no silent deletions", () => {
   const dir = join(HERE, "visual.spec.ts-snapshots");
@@ -58,5 +70,5 @@ test("the expectation list is not empty — a census over zero baselines cannot 
   // A FLOOR ON THE FLOOR. The count above is allowed to move, so this guards the move: it may be reduced by
   // a ruling, but never to nothing. An empty EXPECTED_SNAPSHOTS makes the census above pass over an empty
   // directory — the subject and its check vanishing together, which is the mechanism this file is named for.
-  expect(EXPECTED_SNAPSHOTS.length).toBeGreaterThanOrEqual(2);
+  expect(EXPECTED_SNAPSHOTS.length).toBeGreaterThanOrEqual(3);
 });
