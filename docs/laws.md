@@ -266,3 +266,46 @@ with a deliberately broken command.
 **THE PATTERN ACROSS BOTH TOOL DEFECTS THIS WEEK:** the `set -u` abort and this false verdict were **both found
 by USING the tool, neither by reading it.** A self-test proves a tool runs; **only a real subject proves it
 concludes correctly.** Keep the self-tests, and keep distrusting a green verdict whose baseline nobody checked.
+
+## APPLY THE DETECTOR TO THE MEASUREMENT (minted 2026-08-01, EPIC 13 + web tier)
+
+**A MEASUREMENT ERROR THAT PRODUCES A PLAUSIBLE FINDING IS MORE DANGEROUS THAN ONE THAT PRODUCES NONSENSE.**
+Nonsense gets re-run. **A plausible finding gets written down and acted on.**
+
+**Two instances in one day, and BOTH failed in the dangerous direction — plausibly:**
+
+1. **`grep -c` on a 2.9 MB file of 405 lines**, counting `<div`. It counts **LINES containing a match**, not
+   occurrences, so it undercounts by orders of magnitude — **uniformly**, which is what makes it dangerous.
+   Nothing looks anomalous; every figure is simply small. The correct measure (`grep -o … | wc -l`) returned
+   **1,018**.
+2. **`grep -o 'case "[a-z_]*"'` excluding DIGITS**, so `k8s_endpoints_unavailable` did not match. The conclusion
+   available from that output was *"WF-S11-7's kind is unrendered on main"* — **a live regression of a
+   named, famous finding.** It is handled (`healthview.ts:44`). **The pattern was wrong, and the wrong answer
+   was the interesting one.**
+
+**THE DIAGNOSTIC: before reporting anything a grep found, verify the PATTERN against an input whose answer is
+already known.** The detector this repo applies to checks applies to measurements: *could this measurement have
+produced a different answer for a reason unrelated to its subject?*
+
+**Neither instance reached a claim.** Both were caught by re-measuring before writing — instance 1 by asking why
+a 2.9 MB file would hold so few divs, instance 2 by reading the source at the line the count implied was empty.
+**Recorded because they were caught, not because they were harmless: the same error one step later is a false
+finding in a walk record.**
+
+**THE POSITIVE FORM, from the same session:** the responsive audit counted **`min-width:0` = 104
+SEPARATELY** — a number taken **deliberately so it could not be misread as responsiveness** (it is the flexbox
+min-content idiom). **Measuring the thing that would produce a wrong reading, in order to exclude it, is the
+same care in its constructive direction.**
+
+### POSITIVE INSTANCES — two seams where fixture-restates-production was AVOIDED (web tier slice 3)
+
+**1. THE MIRROR CENSUS AS A DELIBERATE LITERAL.** `test/kuberneteswiring.test.tsx` lists every
+`policy_degraded_kind` the contract allows **as a hand-maintained literal**, and asserts each reaches a
+renderer. **Deriving that list from the generated type would prove nothing** — it would compare the source to
+itself and pass by construction. **Two lists, maintained separately, shown to agree.** Same family as D10's
+golden vector and the twin canonical-hash goldens: *the coupling is asserted, not assumed.*
+
+**2. THE REAL `AuthProvider`, NOT A STUB.** The Kubernetes screen reads `useAuth()` for its role gate. Stubbing
+the context would put **the test's copy of the gate** under assertion instead of **the product's** — 
+fixture-restates-production **at the seam where it is easiest to fall into**, because stubbing a context is the
+obvious move and the test still goes green.
