@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  within,
+} from "@testing-library/react";
 
 // SLICE 7 — Users. Ranked here on the CONSEQUENCE criterion, and the founder's correction stands: this screen
 // is not read-only in either sense. It renders roles and it CHANGES what people can do.
@@ -20,22 +26,43 @@ afterEach(cleanup); // docs/laws.md — no globals/setup file, so auto-cleanup n
 
 let membersFail = false;
 let roster = [
-  { user_id: "u1", email: "owner@acme.test", role: "owner", email_verified: true, active: true },
-  { user_id: "u2", email: "admin@acme.test", role: "admin", email_verified: true, active: true },
+  {
+    user_id: "u1",
+    email: "owner@acme.test",
+    role: "owner",
+    email_verified: true,
+    active: true,
+  },
+  {
+    user_id: "u2",
+    email: "admin@acme.test",
+    role: "admin",
+    email_verified: true,
+    active: true,
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "owner@acme.test", email_verified: true } };
+        if (path === "/api/v1/auth/me")
+          return {
+            data: { id: "u1", email: "owner@acme.test", email_verified: true },
+          };
         if (path === "/api/v1/meta") return { data: { edition: "enterprise" } };
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
         if (path.endsWith("/members")) {
-          if (membersFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          if (membersFail)
+            return {
+              data: undefined,
+              error: { error: { code: "boom", message: "nope" } },
+            };
           return { data: roster };
         }
         return { data: [] };
@@ -50,13 +77,26 @@ import Users from "../src/pages/Users";
 import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider — stubbing puts the TEST's role gate under assertion, not the PRODUCT's.
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   membersFail = false;
   roster = [
-    { user_id: "u1", email: "owner@acme.test", role: "owner", email_verified: true, active: true },
-    { user_id: "u2", email: "admin@acme.test", role: "admin", email_verified: true, active: true },
+    {
+      user_id: "u1",
+      email: "owner@acme.test",
+      role: "owner",
+      email_verified: true,
+      active: true,
+    },
+    {
+      user_id: "u2",
+      email: "admin@acme.test",
+      role: "admin",
+      email_verified: true,
+      active: true,
+    },
   ];
 });
 
@@ -76,15 +116,47 @@ describe("Users — wiring: the last owner cannot be demoted", () => {
     // The negative half. Without it, disabling every role control satisfies the assertion above while making
     // the screen useless — and a lockout guard that never lets anyone change a role is its own outage.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", role: "owner", email_verified: true, active: true },
-      { user_id: "u2", email: "second@acme.test", role: "owner", email_verified: true, active: true },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        role: "owner",
+        email_verified: true,
+        active: true,
+      },
+      {
+        user_id: "u2",
+        email: "second@acme.test",
+        role: "owner",
+        email_verified: true,
+        active: true,
+      },
     ];
     withAuth(<Users />);
     // An ABSENCE assertion needs a POSITIVE anchor proving the roster rendered, or it is trivially true against
     // a tree that has not finished — the async form (docs/laws.md). Anchor on the second owner's row.
-    await waitFor(() => expect(screen.getAllByText("second@acme.test").length).toBeGreaterThan(0));
+    // RE-POINTED IN S14.3 SLICE A. `getAllByText(email).length > 0` passed if the address appeared anywhere
+    // and said nothing about WHOSE row the role control belonged to. Now the member is a row, and the role
+    // control is asserted INSIDE it — which is the assertion the screen actually needs, since a role select
+    // wired to the wrong member is the failure that matters here.
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Members" }),
+    );
+    const row = within(table)
+      .getAllByRole("row")
+      // queryAllByText, not queryByText: a member with no display name renders the email TWICE in its own
+      // cell (as the name and as the address), and `queryBy*` throws on multiple matches. The row predicate
+      // only needs "does this row mention them", so the count is irrelevant.
+      .find((r) => within(r).queryAllByText("second@acme.test").length > 0)!;
+    expect(row, "no row for second@acme.test").toBeTruthy();
+    expect(
+      within(row).getByRole("combobox", { name: "Role for second@acme.test" }),
+    ).toBeTruthy();
 
-    expect(screen.queryByTitle("An organization must always have at least one owner.")).toBeNull();
+    expect(
+      screen.queryByTitle(
+        "An organization must always have at least one owner.",
+      ),
+    ).toBeNull();
   });
 });
 
@@ -98,5 +170,11 @@ describe("Users — failure path", () => {
 
     await waitFor(() => screen.getByText("Could not load members."));
     expect(screen.queryByText("No members yet.")).toBeNull();
+    // AND the table itself is absent, not merely empty. This is the assertion that would have caught the
+    // defect this slice introduced and the tier found: converting the roster to a table dropped the page's
+    // `&& !error` guard, so a failed load rendered "No members yet." — a claim about who can administer the
+    // org, made by a screen that never read anything. `failed` is now a REQUIRED prop on DataTable, so
+    // forgetting it is a compile error rather than a review note.
+    expect(screen.queryByRole("table", { name: "Members" })).toBeNull();
   });
 });

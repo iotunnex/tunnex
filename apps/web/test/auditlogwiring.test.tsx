@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  cleanup,
+} from "@testing-library/react";
 
 // SLICE 8 — AuditLog, and the last of the tier's accountable screens.
 //
@@ -34,23 +40,38 @@ const ENTRY = (id: string) => ({
 });
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
-      GET: vi.fn(async (path: string, opts?: { params?: { query?: Record<string, unknown> } }) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
-        if (path.endsWith("/members")) return { data: [{ user_id: "u1", email: "a@b.c", role: "owner" }] };
-        if (path.endsWith("/audit-logs")) {
-          queries.push(opts?.params?.query ?? {});
-          if (logFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
-          // PAGE+1 rows so the has-more probe trips and "Load more" is offered.
-          return { data: Array.from({ length: 51 }, (_, i) => ENTRY(String(i))) };
-        }
-        return { data: [] };
-      }),
+      GET: vi.fn(
+        async (
+          path: string,
+          opts?: { params?: { query?: Record<string, unknown> } },
+        ) => {
+          if (path === "/api/v1/auth/me")
+            return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+          if (path === "/api/v1/organizations")
+            return { data: [{ id: "org-1", name: "Acme" }] };
+          if (path.endsWith("/members"))
+            return { data: [{ user_id: "u1", email: "a@b.c", role: "owner" }] };
+          if (path.endsWith("/audit-logs")) {
+            queries.push(opts?.params?.query ?? {});
+            if (logFail)
+              return {
+                data: undefined,
+                error: { error: { code: "boom", message: "nope" } },
+              };
+            // PAGE+1 rows so the has-more probe trips and "Load more" is offered.
+            return {
+              data: Array.from({ length: 51 }, (_, i) => ENTRY(String(i))),
+            };
+          }
+          return { data: [] };
+        },
+      ),
       POST: vi.fn(async () => ({ data: {} })),
     },
   };
@@ -59,7 +80,8 @@ vi.mock("../src/lib/api", async () => {
 import AuditLog from "../src/pages/AuditLog";
 import { AuthProvider } from "../src/lib/auth";
 
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   queries.length = 0;
@@ -70,11 +92,15 @@ describe("AuditLog — wiring: paging must use the APPLIED filter set, not the o
   it("'Load more' pages with the filters that produced the list, ignoring an un-applied edit", async () => {
     withAuth(<AuditLog />);
 
-    const loadMore = await waitFor(() => screen.getByRole("button", { name: "Load more" }));
+    const loadMore = await waitFor(() =>
+      screen.getByRole("button", { name: "Load more" }),
+    );
     expect(queries.at(-1)?.action).toBeUndefined(); // the initial page: no filters applied
 
     // Edit a filter WITHOUT applying it. This is the mid-edit state the comment warns about.
-    fireEvent.change(screen.getByPlaceholderText("e.g. device.created"), { target: { value: "policy.rule_enabled" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. device.created"), {
+      target: { value: "policy.rule_enabled" },
+    });
 
     fireEvent.click(loadMore);
 

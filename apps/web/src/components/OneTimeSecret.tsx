@@ -109,13 +109,20 @@ export function OneTimeSecretModal({
         <div className="mt-4 flex items-center justify-between">
           <div className="flex gap-2">
             {downloadFilename && (
-              <Button variant="ghost" onClick={() => downloadText(downloadFilename, secret)}>
+              <Button
+                variant="ghost"
+                onClick={() => downloadText(downloadFilename, secret)}
+              >
                 Download
               </Button>
             )}
             {leadingActions}
             <Button variant="ghost" onClick={copy}>
-              {copied ? "Copied" : copyFailed ? "Select + ⌘C to copy" : copyLabel}
+              {copied
+                ? "Copied"
+                : copyFailed
+                  ? "Select + ⌘C to copy"
+                  : copyLabel}
             </Button>
           </div>
           <Button variant="ghost" onClick={onDismiss}>

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, apiErrorMessage, type Node, type Org, type Meta } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  type Node,
+  type Org,
+  type Meta,
+} from "../lib/api";
 import { policyHealthBadge, badgeClass } from "../lib/healthview";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
@@ -10,8 +16,13 @@ import { OneTimeSecretModal } from "./OneTimeSecret";
 // full `docker compose … up -d --force-recreate node-agent` — the piece a POC operator had to know
 // by heart. A pinned node_name is shell-quoted (arbitrary charset) so a space can't silently
 // truncate it and resurrect the node_name_mismatch loop.
-export function enrollCommand(token: string, pinnedName: string | null): string {
-  const name = pinnedName ? ` TUNNEX_NODE_NAME="${pinnedName.replace(/(["\\$`])/g, "\\$1")}"` : "";
+export function enrollCommand(
+  token: string,
+  pinnedName: string | null,
+): string {
+  const name = pinnedName
+    ? ` TUNNEX_NODE_NAME="${pinnedName.replace(/(["\\$`])/g, "\\$1")}"`
+    : "";
   return `TUNNEX_JOIN_TOKEN=${token}${name} docker compose -f tunnex.yml up -d --force-recreate node-agent`;
 }
 
@@ -41,7 +52,9 @@ const q = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
 
 export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
   const nameEnv = o.name ? ` -e TUNNEX_NODE_NAME=${q(o.name)}` : "";
-  const endpointEnv = o.endpoint ? ` -e TUNNEX_NODE_ENDPOINT=${q(o.endpoint)}` : "";
+  const endpointEnv = o.endpoint
+    ? ` -e TUNNEX_NODE_ENDPOINT=${q(o.endpoint)}`
+    : "";
   return (
     `docker run -d --name tunnex-node --restart unless-stopped --network host ` +
     `--cap-add NET_ADMIN --device /dev/net/tun -v tunnex_node_state:/var/lib/tunnex-node ` +
@@ -59,7 +72,13 @@ export function remoteEnrollCommand(o: RemoteEnrollOpts): string {
 //                   BLOCKS token mint on this (a one-time token minted against a broken url is worse than the
 //                   block) and surfaces `reason`.
 export type CpEndpoints =
-  | { ok: true; apiURL: string; agentURL: string; serverName: string; usedFallback: boolean }
+  | {
+      ok: true;
+      apiURL: string;
+      agentURL: string;
+      serverName: string;
+      usedFallback: boolean;
+    }
   | { ok: false; reason: string };
 
 // cpEndpoints derives the public CP urls the remote agent dials from the CP's OWN configured public base URL
@@ -67,8 +86,12 @@ export type CpEndpoints =
 // happened to use (a tunnel / internal alias / bare IP), which would bake an unreachable endpoint into the
 // pasted command. Falls back to the dashboard origin ONLY when the CP didn't configure a public url. REST
 // rides the origin (nginx); the agent TLS channel is :8443 with the standard cert SAN. PURE.
-export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: string): CpEndpoints {
-  const configured = publicBaseURL && publicBaseURL.trim() ? publicBaseURL.trim() : "";
+export function cpEndpoints(
+  publicBaseURL: string | undefined,
+  fallbackOrigin: string,
+): CpEndpoints {
+  const configured =
+    publicBaseURL && publicBaseURL.trim() ? publicBaseURL.trim() : "";
   const usedFallback = configured === "";
   const base = configured || fallbackOrigin;
   let u: URL;
@@ -76,10 +99,23 @@ export function cpEndpoints(publicBaseURL: string | undefined, fallbackOrigin: s
     u = new URL(base);
   } catch {
     // Only a CONFIGURED url reaches here (the browser origin always parses) → an operator APP_BASE_URL typo.
-    return { ok: false, reason: `The control plane's configured public URL (${base}) is not a valid URL.` };
+    return {
+      ok: false,
+      reason: `The control plane's configured public URL (${base}) is not a valid URL.`,
+    };
   }
-  if (!u.hostname) return { ok: false, reason: `The control plane's configured public URL (${base}) has no host.` };
-  return { ok: true, apiURL: u.origin, agentURL: `https://${u.hostname}:8443`, serverName: "tunnex-control", usedFallback };
+  if (!u.hostname)
+    return {
+      ok: false,
+      reason: `The control plane's configured public URL (${base}) has no host.`,
+    };
+  return {
+    ok: true,
+    apiURL: u.origin,
+    agentURL: `https://${u.hostname}:8443`,
+    serverName: "tunnex-control",
+    usedFallback,
+  };
 }
 
 /**
@@ -125,8 +161,12 @@ export function Gateways({
   // fallback — minting THEN would either strand the token (a late-arriving broken URL flips ep.ok false and
   // hides the modal) or silently bake the browser origin. Gate the mint on metaLoaded so the emitted command
   // is only ever built from a SETTLED CP address — the whole in-flight window becomes a disabled button.
-  const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(undefined);
-  const [nodeAgentImage, setNodeAgentImage] = useState<string | undefined>(undefined); // WF-2: CP-configured (digest-pinnable) agent image
+  const [publicBaseURL, setPublicBaseURL] = useState<string | undefined>(
+    undefined,
+  );
+  const [nodeAgentImage, setNodeAgentImage] = useState<string | undefined>(
+    undefined,
+  ); // WF-2: CP-configured (digest-pinnable) agent image
   const [metaError, setMetaError] = useState(false);
   const [metaLoaded, setMetaLoaded] = useState(false);
   useEffect(() => {
@@ -148,11 +188,14 @@ export function Gateways({
     setError(null);
     const pinned = nodeName.trim() || null;
     try {
-      const { data, error } = await api.POST("/api/v1/organizations/{orgId}/nodes/join-token", {
-        params: { path: { orgId: org.id } },
-        // node_name is optional; only send it when the user named the gateway.
-        body: pinned ? { node_name: pinned } : {},
-      });
+      const { data, error } = await api.POST(
+        "/api/v1/organizations/{orgId}/nodes/join-token",
+        {
+          params: { path: { orgId: org.id } },
+          // node_name is optional; only send it when the user named the gateway.
+          body: pinned ? { node_name: pinned } : {},
+        },
+      );
       if (error || !data) {
         setError(apiErrorMessage(error, "Could not issue a join token."));
         return;
@@ -180,9 +223,12 @@ export function Gateways({
     setError(null);
     setRevoking(nodeId);
     try {
-      const { error: e } = await api.POST("/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke", {
-        params: { path: { orgId: org.id, nodeId } },
-      });
+      const { error: e } = await api.POST(
+        "/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke",
+        {
+          params: { path: { orgId: org.id, nodeId } },
+        },
+      );
       if (e) {
         setError(apiErrorMessage(e, "Could not revoke the gateway."));
         return;
@@ -209,16 +255,30 @@ export function Gateways({
         <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-white/5 pt-3">
           <div className="min-w-[12rem] flex-1">
             <Field label="Gateway name (optional)">
-              <Input value={nodeName} onChange={(e) => setNodeName(e.target.value)} placeholder="office-gw" maxLength={100} />
+              <Input
+                value={nodeName}
+                onChange={(e) => setNodeName(e.target.value)}
+                placeholder="office-gw"
+                maxLength={100}
+              />
             </Field>
           </div>
           <div className="min-w-[12rem] flex-1">
             <Field label="Public endpoint (optional — ip:port peers dial)">
-              <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="203.0.113.7:51820" maxLength={100} />
+              <Input
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder="203.0.113.7:51820"
+                maxLength={100}
+              />
             </Field>
           </div>
           <Button onClick={issue} disabled={busy || !metaLoaded || !ep.ok}>
-            {busy ? "Generating…" : !metaLoaded ? "Checking control plane…" : "Generate join token"}
+            {busy
+              ? "Generating…"
+              : !metaLoaded
+                ? "Checking control plane…"
+                : "Generate join token"}
           </Button>
         </div>
       )}
@@ -227,12 +287,16 @@ export function Gateways({
           token minted against a broken URL is worse than refusing. The remedy is operator-side (APP_BASE_URL).
           Only judged once meta has SETTLED (metaLoaded) — an in-flight fetch isn't an error. */}
       {open && metaLoaded && !ep.ok && (
-        <ErrorText>{ep.reason} Fix the control plane's public address (APP_BASE_URL) before enrolling a gateway.</ErrorText>
+        <ErrorText>
+          {ep.reason} Fix the control plane's public address (APP_BASE_URL)
+          before enrolling a gateway.
+        </ErrorText>
       )}
       {open && ep.ok && ep.usedFallback && metaError && (
         <p className="mt-2 text-xs text-amber-400">
-          Couldn't confirm the control plane's public URL (metadata unavailable) — the command below uses this
-          dashboard's origin. Verify the gateway can reach <span className="font-mono">{ep.apiURL}</span>.
+          Couldn't confirm the control plane's public URL (metadata unavailable)
+          — the command below uses this dashboard's origin. Verify the gateway
+          can reach <span className="font-mono">{ep.apiURL}</span>.
         </p>
       )}
 
@@ -240,11 +304,18 @@ export function Gateways({
 
       <ul className="mt-3 space-y-2">
         {nodes.map((n) => (
-          <li key={n.id} className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-900 px-4 py-2.5">
+          <li
+            key={n.id}
+            className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-900 px-4 py-2.5"
+          >
             <div>
               <span className="text-sm text-white">{n.name}</span>
-              <span className="ml-2 font-mono text-xs text-slate-500">{n.agent_version}</span>
-              {n.status === "revoked" && <span className="ml-2 text-xs text-rose-400">revoked</span>}
+              <span className="ml-2 font-mono text-xs text-slate-500">
+                {n.agent_version}
+              </span>
+              {n.status === "revoked" && (
+                <span className="ml-2 text-xs text-rose-400">revoked</span>
+              )}
               {/* WF-S11-10: no health badge on a revoked gateway — `revoked` IS its state, and a degradation
                   badge beside it describes a gateway that is no longer meant to work. Matches the same
                   suppression Devices.tsx has always applied to device rows; this list never had it, which stayed
@@ -252,12 +323,19 @@ export function Gateways({
               {n.status !== "revoked" &&
                 (() => {
                   const b = policyHealthBadge(n);
-                  return b ? <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>{b.label}</span> : null;
+                  return b ? (
+                    <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>
+                      {b.label}
+                    </span>
+                  ) : null;
                 })()}
               {/* S9.1 4d: OpenVPN refuse-loudly surfaced (a different axis from policy health) — an
                   OVPN-enabled gateway missing its material/binary shows WHY, and keeps serving WireGuard. */}
               {n.ovpn_health && (
-                <span className="ml-2 text-xs text-amber-400" title="This gateway has OpenVPN enabled but isn't serving it — resolves on its own once the material/binary/config is corrected.">
+                <span
+                  className="ml-2 text-xs text-amber-400"
+                  title="This gateway has OpenVPN enabled but isn't serving it — resolves on its own once the material/binary/config is corrected."
+                >
                   {n.ovpn_health === "ovpn_binary_absent"
                     ? "OpenVPN: binary missing"
                     : n.ovpn_health === "ovpn_transit_conflict"
@@ -268,7 +346,9 @@ export function Gateways({
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-500">
-                {n.last_seen_at ? `last seen ${relativeAge(n.last_seen_at)}` : "never connected"}
+                {n.last_seen_at
+                  ? `last seen ${relativeAge(n.last_seen_at)}`
+                  : "never connected"}
               </span>
               {/* WF-S11-9. Two-step, because this is irreversible AND wider than it looks: revoking a gateway
                   refuses its cert renewal, so every device homed there loses its tunnel and any site transit
@@ -278,17 +358,29 @@ export function Gateways({
                 (confirmRevoke === n.id ? (
                   <span className="flex items-center gap-2">
                     <span className="text-xs text-rose-300">
-                      Revoke {n.name}? Devices homed here lose their tunnel. This cannot be undone.
+                      Revoke {n.name}? Devices homed here lose their tunnel.
+                      This cannot be undone.
                     </span>
-                    <Button variant="danger" onClick={() => revoke(n.id)} disabled={revoking === n.id}>
+                    <Button
+                      variant="danger"
+                      onClick={() => revoke(n.id)}
+                      disabled={revoking === n.id}
+                    >
                       {revoking === n.id ? "Revoking…" : "Confirm revoke"}
                     </Button>
-                    <Button variant="ghost" onClick={() => setConfirmRevoke(null)} disabled={revoking === n.id}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setConfirmRevoke(null)}
+                      disabled={revoking === n.id}
+                    >
                       Cancel
                     </Button>
                   </span>
                 ) : (
-                  <Button variant="ghost" onClick={() => setConfirmRevoke(n.id)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setConfirmRevoke(n.id)}
+                  >
                     Revoke
                   </Button>
                 ))}
@@ -297,7 +389,8 @@ export function Gateways({
         ))}
         {nodes.length === 0 && (
           <li className="text-sm text-slate-500">
-            No gateway enrolled yet. Enroll one to start serving WireGuard peers.
+            No gateway enrolled yet. Enroll one to start serving WireGuard
+            peers.
           </li>
         )}
       </ul>
@@ -311,27 +404,31 @@ export function Gateways({
           title="Enroll your gateway — run this once"
           caption={
             <>
-              Paste this <span className="font-semibold">single command</span> on the gateway VM (Docker installed) to
-              bring it online — it pulls the agent and comes up on real WireGuard with{" "}
-              <span className="font-semibold">no edits</span>. Shown <span className="font-semibold">exactly once</span>,
-              single-use — copy it now.
+              Paste this <span className="font-semibold">single command</span>{" "}
+              on the gateway VM (Docker installed) to bring it online — it pulls
+              the agent and comes up on real WireGuard with{" "}
+              <span className="font-semibold">no edits</span>. Shown{" "}
+              <span className="font-semibold">exactly once</span>, single-use —
+              copy it now.
               {pinnedName && (
                 <>
                   {" "}
-                  Pinned to the name <span className="font-mono">{pinnedName}</span> — the agent enrolls under exactly
-                  that or the server refuses it.
+                  Pinned to the name{" "}
+                  <span className="font-mono">{pinnedName}</span> — the agent
+                  enrolls under exactly that or the server refuses it.
                 </>
               )}
               {!pinnedEndpoint && (
                 <>
                   {" "}
-                  No public endpoint set → this gateway is treated as a <span className="font-semibold">NAT'd spoke</span>{" "}
-                  (it dials the hub; other peers can't dial it).
+                  No public endpoint set → this gateway is treated as a{" "}
+                  <span className="font-semibold">NAT'd spoke</span> (it dials
+                  the hub; other peers can't dial it).
                 </>
               )}{" "}
               (Installing on the SAME host as the control plane? See{" "}
-              <span className="font-mono">docs/deploy-cloud-gateway.md</span> for the co-located compose form —
-              it carries this same token.)
+              <span className="font-mono">docs/deploy-cloud-gateway.md</span>{" "}
+              for the co-located compose form — it carries this same token.)
             </>
           }
           // D4: the ONE true remote-gateway docker run — single line, host networking + wgctrl baked in.
@@ -343,7 +440,10 @@ export function Gateways({
             apiURL: ep.apiURL,
             agentURL: ep.agentURL,
             serverName: ep.serverName,
-            image: nodeAgentImage && nodeAgentImage.trim() ? nodeAgentImage.trim() : GATEWAY_IMAGE, // WF-2: CP-pinned, else default
+            image:
+              nodeAgentImage && nodeAgentImage.trim()
+                ? nodeAgentImage.trim()
+                : GATEWAY_IMAGE, // WF-2: CP-pinned, else default
           })}
           copyLabel="Copy command"
           onDismiss={() => {

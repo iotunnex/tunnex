@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, apiErrorMessage, type Member, type Org, type Role } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  type Member,
+  type Org,
+  type Role,
+} from "../lib/api";
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
-import { Button, Card, ErrorText, Field, Input, Modal } from "../components/ui";
+import {
+  Button,
+  Card,
+  DataTable,
+  ErrorText,
+  Field,
+  Input,
+  Modal,
+} from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 const ROLES: Role[] = ["owner", "admin", "member"];
@@ -25,13 +39,23 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
 
   // My role in this org comes from my own row in the roster — no extra endpoint.
-  const myRole = useMemo(() => members.find((m) => m.user_id === myId)?.role, [members, myId]);
+  const myRole = useMemo(
+    () => members.find((m) => m.user_id === myId)?.role,
+    [members, myId],
+  );
   // Owner count drives the last-owner disable (mirrors the server's CountOwners).
-  const ownerCount = useMemo(() => members.filter((m) => m.role === "owner").length, [members]);
+  const ownerCount = useMemo(
+    () => members.filter((m) => m.role === "owner").length,
+    [members],
+  );
 
   async function loadMembers(orgId: string) {
-    const { data, error } = await api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } });
-    if (error) return setError(apiErrorMessage(error, "Could not load members."));
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/members",
+      { params: { path: { orgId } } },
+    );
+    if (error)
+      return setError(apiErrorMessage(error, "Could not load members."));
     setMembers(data ?? []);
   }
 
@@ -39,11 +63,17 @@ export default function Users() {
     let cancelled = false;
     (async () => {
       try {
-        const { data: orgs, error: orgErr } = await api.GET("/api/v1/organizations");
+        const { data: orgs, error: orgErr } = await api.GET(
+          "/api/v1/organizations",
+        );
         if (cancelled) return;
-        if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
+        if (orgErr)
+          return setError(
+            apiErrorMessage(orgErr, "Could not load your organizations."),
+          );
         const first = orgs?.[0];
-        if (!first) return setError("You are not a member of any organization yet.");
+        if (!first)
+          return setError("You are not a member of any organization yet.");
         setOrg(first);
         if (!cancelled) await loadMembers(first.id);
       } catch {
@@ -61,7 +91,10 @@ export default function Users() {
   // which self-corrects a stale roster after a lost race.
   const isSoleOwner = (m: Member) => m.role === "owner" && ownerCount <= 1;
 
-  async function mutate(fn: () => Promise<{ error?: unknown }>, fallback: string) {
+  async function mutate(
+    fn: () => Promise<{ error?: unknown }>,
+    fallback: string,
+  ) {
     if (!org) return;
     setError(null);
     const { error } = await fn();
@@ -83,13 +116,23 @@ export default function Users() {
     );
 
   const setActive = (m: Member, activate: boolean) => {
-    const path = { params: { path: { orgId: org!.id, userId: m.user_id } } } as const;
+    const path = {
+      params: { path: { orgId: org!.id, userId: m.user_id } },
+    } as const;
     return mutate(
       () =>
         activate
-          ? api.POST("/api/v1/organizations/{orgId}/members/{userId}/reactivate", path)
-          : api.POST("/api/v1/organizations/{orgId}/members/{userId}/deactivate", path),
-      activate ? "Could not reactivate the member." : "Could not deactivate the member.",
+          ? api.POST(
+              "/api/v1/organizations/{orgId}/members/{userId}/reactivate",
+              path,
+            )
+          : api.POST(
+              "/api/v1/organizations/{orgId}/members/{userId}/deactivate",
+              path,
+            ),
+      activate
+        ? "Could not reactivate the member."
+        : "Could not deactivate the member.",
     );
   };
 
@@ -99,36 +142,80 @@ export default function Users() {
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
 
-      {can(myRole, "member:invite") && emailVerified && org && <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />}
+      {can(myRole, "member:invite") && emailVerified && org && (
+        <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />
+      )}
 
-      <ul className="mt-6 space-y-2">
-        {members.map((m) => {
-          const isSelf = m.user_id === myId;
-          // Role is editable on any target the actor may manage — INCLUDING self
-          // (an owner handing off ownership). Deactivate is never offered on self
-          // (it would log you out — a footgun, not a feature). The last-owner
-          // disable therefore surfaces on the sole owner's OWN role control.
-          const canManage = emailVerified && canManageMembership(myRole, m.role, "");
-          const assignable = ROLES.filter((r) => canManageMembership(myRole, m.role, r));
-          return (
-            <li key={m.user_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-800 px-4 py-3">
-              <div className="min-w-0">
-                <span className="text-sm text-white">{m.name || m.email}</span>
-                {isSelf && <span className="ml-2 text-xs text-slate-500">(you)</span>}
-                <span className="ml-2 font-mono text-xs text-slate-500">{m.email}</span>
-                {m.status === "deactivated" && <span className="ml-2 text-xs text-warn">deactivated</span>}
-                {!m.email_verified && m.status === "active" && <span className="ml-2 text-xs text-slate-600">unverified</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Role: editable only for a manageable target and only among
-                    roles the actor may assign; disabled when it would demote the
-                    sole owner. Otherwise a static label. */}
-                {canManage && assignable.length > 0 ? (
+      {/* S14.3 slice A: a real <table>. The roster is tabular — person, role, state, actions per row — and as
+          <li> blocks the tier could only find a member by matching their email as free text. The role control
+          and the action buttons keep their own accessible names, so they stay queryable INSIDE a cell. */}
+      <div className="mt-6">
+        <DataTable
+          caption="Members"
+          rows={members}
+          rowKey={(m) => m.user_id}
+          empty="No members yet."
+          failed={error != null}
+          columns={[
+            {
+              key: "person",
+              header: "Member",
+              cell: (m) => (
+                <>
+                  <span className="text-sm text-white">
+                    {m.name || m.email}
+                  </span>
+                  {m.user_id === myId && (
+                    <span className="ml-2 text-xs text-slate-500">(you)</span>
+                  )}
+                  <span className="ml-2 font-mono text-xs text-slate-500">
+                    {m.email}
+                  </span>
+                </>
+              ),
+            },
+            {
+              key: "state",
+              header: "State",
+              cell: (m) => (
+                <>
+                  {m.status === "deactivated" && (
+                    <span className="text-xs text-warn">deactivated</span>
+                  )}
+                  {!m.email_verified && m.status === "active" && (
+                    <span className="text-xs text-slate-600">unverified</span>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: "role",
+              header: "Role",
+              cell: (m) => {
+                // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
+                // ownership). The last-owner disable therefore surfaces on the sole owner's OWN role control.
+                const canManage =
+                  emailVerified && canManageMembership(myRole, m.role, "");
+                const assignable = ROLES.filter((r) =>
+                  canManageMembership(myRole, m.role, r),
+                );
+                if (!canManage || assignable.length === 0)
+                  return (
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      {m.role}
+                    </span>
+                  );
+                return (
                   <select
                     className={selectCls}
+                    aria-label={`Role for ${m.email}`}
                     value={m.role}
                     disabled={isSoleOwner(m)}
-                    title={isSoleOwner(m) ? "An organization must always have at least one owner." : undefined}
+                    title={
+                      isSoleOwner(m)
+                        ? "An organization must always have at least one owner."
+                        : undefined
+                    }
                     onChange={(e) => changeRole(m, e.target.value as Role)}
                   >
                     {assignable.map((r) => (
@@ -137,39 +224,54 @@ export default function Users() {
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <span className="text-xs uppercase tracking-wide text-slate-400">{m.role}</span>
-                )}
-
-                {canManage && !isSelf &&
-                  (m.status === "active" ? (
-                    <Button
-                      variant="danger"
-                      onClick={() => setActive(m, false)}
-                      disabled={isSoleOwner(m)}
-                      title={isSoleOwner(m) ? "An organization must always have at least one owner." : undefined}
-                    >
-                      Deactivate
+                );
+              },
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              numeric: true,
+              cell: (m) => {
+                const canManage =
+                  emailVerified && canManageMembership(myRole, m.role, "");
+                const isSelf = m.user_id === myId;
+                // Deactivate is never offered on self — it would log you out, which is a footgun, not a feature.
+                if (!canManage || isSelf) return null;
+                return (
+                  <span className="inline-flex items-center gap-2">
+                    {m.status === "active" ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => setActive(m, false)}
+                        disabled={isSoleOwner(m)}
+                        title={
+                          isSoleOwner(m)
+                            ? "An organization must always have at least one owner."
+                            : undefined
+                        }
+                      >
+                        Deactivate
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        onClick={() => setActive(m, true)}
+                      >
+                        Reactivate
+                      </Button>
+                    )}
+                    {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
+                        it clears the member's 2FA, never signs in as them. */}
+                    <Button variant="ghost" onClick={() => setResetTarget(m)}>
+                      Reset 2FA
                     </Button>
-                  ) : (
-                    <Button variant="ghost" onClick={() => setActive(m, true)}>
-                      Reactivate
-                    </Button>
-                  ))}
-
-                {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
-                    it clears the member's 2FA, never signs in as them. */}
-                {canManage && !isSelf && (
-                  <Button variant="ghost" onClick={() => setResetTarget(m)}>
-                    Reset 2FA
-                  </Button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-        {members.length === 0 && !error && <li className="text-sm text-slate-500">No members yet.</li>}
-      </ul>
+                  </span>
+                );
+              },
+            },
+          ]}
+        />
+      </div>
       {resetTarget && (
         <Modal
           title="Reset two-factor authentication"
@@ -187,12 +289,14 @@ export default function Users() {
           }
         >
           <p className="text-sm text-slate-300">
-            Remove two-factor authentication for <span className="font-semibold">{resetTarget.email}</span>?
+            Remove two-factor authentication for{" "}
+            <span className="font-semibold">{resetTarget.email}</span>?
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Their 2FA and recovery codes are cleared and they will be notified by email. If your organization
-            requires MFA, they will be asked to set it up again at their next sign-in. This does not sign you in
-            as them.
+            Their 2FA and recovery codes are cleared and they will be notified
+            by email. If your organization requires MFA, they will be asked to
+            set it up again at their next sign-in. This does not sign you in as
+            them.
           </p>
         </Modal>
       )}
@@ -220,7 +324,13 @@ export default function Users() {
 // account, and we render one fixed confirmation regardless. Reactivating a
 // frozen member is a DIFFERENT verb (the row's Reactivate button) — invite is
 // only ever for bringing in a new address.
-function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void }) {
+function InviteForm({
+  orgId,
+  onInvited,
+}: {
+  orgId: string;
+  onInvited: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [busy, setBusy] = useState(false);
@@ -231,17 +341,23 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
     e.preventDefault();
     setBusy(true);
     setErr(null);
-    const { data, error } = await api.POST("/api/v1/organizations/{orgId}/invitations", {
-      params: { path: { orgId } },
-      body: { email, role },
-    });
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/invitations",
+      {
+        params: { path: { orgId } },
+        body: { email, role },
+      },
+    );
     setBusy(false);
-    if (error || !data) return setErr(apiErrorMessage(error, "Could not create the invitation."));
+    if (error || !data)
+      return setErr(apiErrorMessage(error, "Could not create the invitation."));
     setEmail("");
     // Build the accept link from THIS origin (correct host regardless of the API's
     // APP_BASE_URL) and show it once for the admin to copy + hand to the invitee —
     // the delivery path when email isn't configured. The email is best-effort on top.
-    setInviteLink(`${window.location.origin}/accept-invite?token=${data.invite_token}`);
+    setInviteLink(
+      `${window.location.origin}/accept-invite?token=${data.invite_token}`,
+    );
     onInvited();
   }
 
@@ -260,7 +376,12 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
               />
             </Field>
           </div>
-          <select className={selectCls} value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
+          <select
+            className={selectCls}
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+            aria-label="Role"
+          >
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {r}

@@ -42,9 +42,30 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/login" element={<AnonOnly><Login /></AnonOnly>} />
-        <Route path="/signup" element={<AnonOnly><Signup /></AnonOnly>} />
-        <Route path="/forgot-password" element={<AnonOnly><ForgotPassword /></AnonOnly>} />
+        <Route
+          path="/login"
+          element={
+            <AnonOnly>
+              <Login />
+            </AnonOnly>
+          }
+        />
+        <Route
+          path="/signup"
+          element={
+            <AnonOnly>
+              <Signup />
+            </AnonOnly>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <AnonOnly>
+              <ForgotPassword />
+            </AnonOnly>
+          }
+        />
         {/* Reset + verify are reached from emailed links; usable while logged out
             and harmless while logged in, so they are not auth-gated. */}
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -54,7 +75,14 @@ export default function App() {
             the shell: /create-org and /verify-pending are reachable while
             authenticated with no org yet; the shell itself is gated by RequireOrg. */}
         <Route element={<RequireAuth />}>
-          <Route path="/create-org" element={<RequireNoOrg><CreateOrg /></RequireNoOrg>} />
+          <Route
+            path="/create-org"
+            element={
+              <RequireNoOrg>
+                <CreateOrg />
+              </RequireNoOrg>
+            }
+          />
           <Route path="/verify-pending" element={<VerifyPending />} />
           {/* S5.1 CLI auth: the browser consent leg (`tunnex login`) and the
               device-code approval page. Authenticated but org-independent. */}
@@ -63,7 +91,13 @@ export default function App() {
           {/* S7.5.5 D8: a MFA-enforcement-gated user (org requires 2FA, none set up) is routed here
               by RequireAuth — enrollment only, until they confirm a TOTP. Org-independent. */}
           <Route path="/enroll-mfa" element={<ForcedEnroll />} />
-          <Route element={<RequireOrg><AppShell /></RequireOrg>}>
+          <Route
+            element={
+              <RequireOrg>
+                <AppShell />
+              </RequireOrg>
+            }
+          >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
             <Route path="/sites" element={<Sites />} />
@@ -101,7 +135,10 @@ function RequireAuth() {
   // (default-deny middleware, typed mfa_enrollment_required 403); this is the client routing so the
   // user lands on the ceremony rather than hitting dead 403s. Decision is a pure fn (authroute.ts),
   // table-pinned in BOTH directions (resolveMfaGateRoute).
-  const gateRoute = resolveMfaGateRoute(Boolean(state.user.mfa_enrollment_required), location.pathname);
+  const gateRoute = resolveMfaGateRoute(
+    Boolean(state.user.mfa_enrollment_required),
+    location.pathname,
+  );
   if (gateRoute) {
     return <Navigate to={gateRoute} replace />;
   }
@@ -115,12 +152,20 @@ function ForcedEnroll() {
   const { logout } = useAuth();
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Set up two-factor authentication</h1>
-      <p className="mt-1 text-sm text-slate-400">Your organization requires 2FA. Finish setup to continue to Tunnex.</p>
+      <h1 className="text-xl font-semibold text-white">
+        Set up two-factor authentication
+      </h1>
+      <p className="mt-1 text-sm text-slate-400">
+        Your organization requires 2FA. Finish setup to continue to Tunnex.
+      </p>
       <div className="mt-5">
         <MfaSettings />
       </div>
-      <button type="button" className="mt-4 text-xs text-slate-400 underline hover:text-slate-200" onClick={logout}>
+      <button
+        type="button"
+        className="mt-4 text-xs text-slate-400 underline hover:text-slate-200"
+        onClick={logout}
+      >
         Sign out
       </button>
     </AuthLayout>
@@ -202,7 +247,9 @@ function RequireOrg({ children }: { children: React.ReactNode }) {
   if (status === "loading") return <FullScreenLoading />;
   if (status === "none") {
     const unverified = state.status === "authed" && !state.user.email_verified;
-    return <Navigate to={unverified ? "/verify-pending" : "/create-org"} replace />;
+    return (
+      <Navigate to={unverified ? "/verify-pending" : "/create-org"} replace />
+    );
   }
   return <>{children}</>;
 }
@@ -216,5 +263,9 @@ function AnonOnly({ children }: { children: React.ReactNode }) {
 }
 
 function FullScreenLoading() {
-  return <div className="grid min-h-full place-items-center text-sm text-slate-500">Loading…</div>;
+  return (
+    <div className="grid min-h-full place-items-center text-sm text-slate-500">
+      Loading…
+    </div>
+  );
 }

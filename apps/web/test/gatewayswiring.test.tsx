@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  cleanup,
+} from "@testing-library/react";
 
 // QUERY STRATEGY (ruled 2026-08-01, docs/UI-REDESIGN-registration.md consequence 2). Every interactive control
 // is queried BY ROLE + ACCESSIBLE NAME — never a test-id, a class name, or DOM structure. That is the most
@@ -37,20 +43,28 @@ const posts: Array<{ path: string; nodeId?: string }> = [];
 let revokeFails = false;
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, fallback: string) => fallback,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/meta") return { data: { public_base_url: "https://cp.example.com" } };
+        if (path === "/api/v1/meta")
+          return { data: { public_base_url: "https://cp.example.com" } };
         return { data: undefined, error: undefined };
       }),
-      POST: vi.fn(async (path: string, opts: { params?: { path?: Record<string, string> } }) => {
-        posts.push({ path, nodeId: opts?.params?.path?.nodeId });
-        if (path.endsWith("/revoke") && revokeFails) return { error: { error: { code: "boom", message: "nope" } } };
-        return { data: {}, error: undefined };
-      }),
+      POST: vi.fn(
+        async (
+          path: string,
+          opts: { params?: { path?: Record<string, string> } },
+        ) => {
+          posts.push({ path, nodeId: opts?.params?.path?.nodeId });
+          if (path.endsWith("/revoke") && revokeFails)
+            return { error: { error: { code: "boom", message: "nope" } } };
+          return { data: {}, error: undefined };
+        },
+      ),
     },
   };
 });
@@ -70,7 +84,13 @@ const NODES = [
     policy_degraded: true,
     policy_degraded_kind: "cert_expired_cannot_reconnect",
   },
-  { id: "gw-live", name: "aws-gw-2", status: "active", agent_version: "0.1.0", policy_degraded: false },
+  {
+    id: "gw-live",
+    name: "aws-gw-2",
+    status: "active",
+    agent_version: "0.1.0",
+    policy_degraded: false,
+  },
 ] as never[];
 
 beforeEach(() => {
@@ -101,10 +121,14 @@ describe("Gateways — wiring", () => {
     // Two-step: the first click must NOT have called anything. A one-click danger control next to a
     // "last seen" label is a misclick away from an outage.
     expect(posts.filter((p) => p.path.endsWith("/revoke"))).toHaveLength(0);
-    expect(screen.getByText(/Devices homed here lose their tunnel/)).toBeTruthy();
+    expect(
+      screen.getByText(/Devices homed here lose their tunnel/),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm revoke" }));
-    await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/revoke"))).toHaveLength(1));
+    await waitFor(() =>
+      expect(posts.filter((p) => p.path.endsWith("/revoke"))).toHaveLength(1),
+    );
     expect(posts.at(-1)!.nodeId).toBe("gw-live");
   });
 
@@ -127,7 +151,9 @@ describe("Gateways — failure path", () => {
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm revoke" }));
 
-    await waitFor(() => expect(screen.getByText("Could not revoke the gateway.")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Could not revoke the gateway.")).toBeTruthy(),
+    );
     // And the row must NOT have quietly re-rendered as though it worked.
     expect(screen.getByText("aws-gw-2")).toBeTruthy();
   });

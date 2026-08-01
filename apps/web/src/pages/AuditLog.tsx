@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, apiErrorMessage, type AuditLogEntry, type Member, type Org } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  type AuditLogEntry,
+  type Member,
+  type Org,
+} from "../lib/api";
 import { relativeAge } from "../lib/format";
-import { Button, Card, ErrorText, Field, Input } from "../components/ui";
+import {
+  Button,
+  Card,
+  DataTable,
+  ErrorText,
+  Field,
+  Input,
+} from "../components/ui";
 
 const PAGE = 50;
 
@@ -41,23 +54,27 @@ export default function AuditLog() {
   async function fetchPage(orgId: string, f: Filters, cursor?: AuditLogEntry) {
     const seq = ++reqSeq.current;
     setBusy(true);
-    const { data, error } = await api.GET("/api/v1/organizations/{orgId}/audit-logs", {
-      params: {
-        path: { orgId },
-        query: {
-          actor: f.actor || undefined,
-          action: f.action || undefined,
-          from: f.from ? dayStart(f.from) : undefined,
-          to: f.to ? dayEnd(f.to) : undefined,
-          cursor_ts: cursor?.created_at,
-          cursor_id: cursor?.id,
-          limit: PAGE + 1,
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/audit-logs",
+      {
+        params: {
+          path: { orgId },
+          query: {
+            actor: f.actor || undefined,
+            action: f.action || undefined,
+            from: f.from ? dayStart(f.from) : undefined,
+            to: f.to ? dayEnd(f.to) : undefined,
+            cursor_ts: cursor?.created_at,
+            cursor_id: cursor?.id,
+            limit: PAGE + 1,
+          },
         },
       },
-    });
+    );
     if (seq !== reqSeq.current) return; // superseded by a newer fetch / unmounted
     setBusy(false);
-    if (error) return setError(apiErrorMessage(error, "Could not load the audit log."));
+    if (error)
+      return setError(apiErrorMessage(error, "Could not load the audit log."));
     const fetched = data ?? [];
     const page = fetched.slice(0, PAGE); // drop the has-more probe row
     setEntries((prev) => (cursor ? [...prev, ...page] : page));
@@ -69,15 +86,24 @@ export default function AuditLog() {
     reqSeq.current++; // invalidate any in-flight fetch on unmount
     let cancelled = false;
     (async () => {
-      const { data: orgs, error: orgErr } = await api.GET("/api/v1/organizations");
+      const { data: orgs, error: orgErr } = await api.GET(
+        "/api/v1/organizations",
+      );
       if (cancelled) return;
-      if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
+      if (orgErr)
+        return setError(
+          apiErrorMessage(orgErr, "Could not load your organizations."),
+        );
       const first = orgs?.[0];
-      if (!first) return setError("You are not a member of any organization yet.");
+      if (!first)
+        return setError("You are not a member of any organization yet.");
       setOrg(first);
       // Actor filter is org-scoped BY CONSTRUCTION: the dropdown offers only this
       // org's members (the server enforces org-scoping too).
-      const { data: ms } = await api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId: first.id } } });
+      const { data: ms } = await api.GET(
+        "/api/v1/organizations/{orgId}/members",
+        { params: { path: { orgId: first.id } } },
+      );
       if (!cancelled) setMembers(ms ?? []);
       if (!cancelled) await fetchPage(first.id, NO_FILTERS);
     })();
@@ -104,7 +130,13 @@ export default function AuditLog() {
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm text-slate-300">
               <span className="block text-xs text-slate-500">Actor</span>
-              <select className={`mt-1 ${selectCls}`} value={filters.actor} onChange={(e) => setFilters((f) => ({ ...f, actor: e.target.value }))}>
+              <select
+                className={`mt-1 ${selectCls}`}
+                value={filters.actor}
+                onChange={(e) =>
+                  setFilters((f) => ({ ...f, actor: e.target.value }))
+                }
+              >
                 <option value="">Anyone</option>
                 {members.map((m) => (
                   <option key={m.user_id} value={m.user_id}>
@@ -115,16 +147,36 @@ export default function AuditLog() {
             </label>
             <div className="w-40">
               <Field label="Action">
-                <Input value={filters.action} onChange={(e) => setFilters((f) => ({ ...f, action: e.target.value }))} placeholder="e.g. device.created" />
+                <Input
+                  value={filters.action}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, action: e.target.value }))
+                  }
+                  placeholder="e.g. device.created"
+                />
               </Field>
             </div>
             <label className="text-sm text-slate-300">
               <span className="block text-xs text-slate-500">From</span>
-              <input type="date" className={`mt-1 ${selectCls}`} value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} />
+              <input
+                type="date"
+                className={`mt-1 ${selectCls}`}
+                value={filters.from}
+                onChange={(e) =>
+                  setFilters((f) => ({ ...f, from: e.target.value }))
+                }
+              />
             </label>
             <label className="text-sm text-slate-300">
               <span className="block text-xs text-slate-500">To</span>
-              <input type="date" className={`mt-1 ${selectCls}`} value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
+              <input
+                type="date"
+                className={`mt-1 ${selectCls}`}
+                value={filters.to}
+                onChange={(e) =>
+                  setFilters((f) => ({ ...f, to: e.target.value }))
+                }
+              />
             </label>
             <Button type="submit" disabled={busy}>
               Apply
@@ -133,28 +185,72 @@ export default function AuditLog() {
         </Card>
       </form>
 
-      <ul className="mt-4 space-y-2">
-        {entries.map((a) => (
-          <li key={a.id} className="rounded-lg border border-white/5 bg-ink-800 px-4 py-2.5">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs text-slate-300">{a.action}</span>
-              <span className="text-xs text-slate-500">{relativeAge(a.created_at)}</span>
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              {a.actor_id ? `actor ${actorName(members, a.actor_id)}` : "system"}
-              {a.target_type && <span className="ml-2">· {a.target_type}</span>}
-              {a.details && Object.keys(a.details).length > 0 && (
-                <span className="ml-2 font-mono text-slate-600">{JSON.stringify(a.details)}</span>
-              )}
-            </div>
-          </li>
-        ))}
-        {entries.length === 0 && !error && <li className="text-sm text-slate-500">No audit events yet.</li>}
-      </ul>
+      {/* S14.3 slice A: a real <table>. The audit log IS tabular — action, actor, target, age are the same
+          four facts on every row — and rendering it as <li> blocks meant the tier could only find rows by
+          matching their text. Now: getByRole("table", { name: "Audit events" }) and getAllByRole("row"). */}
+      <div className="mt-4">
+        <DataTable
+          caption="Audit events"
+          rows={entries}
+          rowKey={(a) => a.id}
+          empty="No audit events yet."
+          failed={error != null}
+          columns={[
+            {
+              key: "action",
+              header: "Action",
+              cell: (a) => (
+                <span className="font-mono text-xs text-slate-300">
+                  {a.action}
+                </span>
+              ),
+            },
+            {
+              key: "actor",
+              header: "Actor",
+              cell: (a) => (
+                <span className="text-xs text-slate-500">
+                  {a.actor_id ? actorName(members, a.actor_id) : "system"}
+                </span>
+              ),
+            },
+            {
+              key: "target",
+              header: "Target",
+              cell: (a) => (
+                <span className="text-xs text-slate-500">
+                  {a.target_type ?? "—"}
+                  {a.details && Object.keys(a.details).length > 0 && (
+                    <span className="ml-2 font-mono text-slate-600">
+                      {JSON.stringify(a.details)}
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              key: "age",
+              header: "When",
+              numeric: true,
+              cell: (a) => (
+                <span className="text-xs text-slate-500">
+                  {relativeAge(a.created_at)}
+                </span>
+              ),
+            },
+          ]}
+        />
+      </div>
 
       {more && (
         <div className="mt-4">
-          <Button variant="ghost" disabled={busy} onClick={() => org && fetchPage(org.id, applied, entries[entries.length - 1])}>
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() =>
+              org && fetchPage(org.id, applied, entries[entries.length - 1])
+            }
+          >
             {busy ? "Loading…" : "Load more"}
           </Button>
         </div>

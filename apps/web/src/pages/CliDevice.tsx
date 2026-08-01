@@ -26,7 +26,8 @@ export default function CliDevice() {
       body: { user_code: userCode.trim() },
     });
     setBusy(false);
-    if (error || !data) return setError(apiErrorMessage(error, "Could not approve that code."));
+    if (error || !data)
+      return setError(apiErrorMessage(error, "Could not approve that code."));
     setDone(true);
   }
 
@@ -37,7 +38,8 @@ export default function CliDevice() {
       <AuthLayout>
         <h1 className="text-xl font-semibold text-white">CLI approved</h1>
         <p className="mt-2 text-sm text-slate-400">
-          Return to your terminal — the Tunnex CLI now has its credential. You can close this page.
+          Return to your terminal — the Tunnex CLI now has its credential. You
+          can close this page.
         </p>
       </AuthLayout>
     );
@@ -45,23 +47,38 @@ export default function CliDevice() {
 
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Approve a CLI sign-in</h1>
+      <h1 className="text-xl font-semibold text-white">
+        Approve a CLI sign-in
+      </h1>
       <p className="mt-2 text-sm text-slate-400">
-        Signed in as <span className="text-slate-200">{email}</span>. Enter the code shown by{" "}
-        <span className="font-mono">tunnex login --device</span> to grant it a credential.
+        Signed in as <span className="text-slate-200">{email}</span>. Enter the
+        code shown by <span className="font-mono">tunnex login --device</span>{" "}
+        to grant it a credential.
       </p>
       {/* Anti-phishing (device-flow's inherent risk): approving binds a credential
           to YOUR identity for whoever is polling that code. */}
       <p className="mt-3 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-xs text-slate-300">
-        Only enter a code you started yourself on this or another of your machines. If someone asked you to enter a
-        code here, stop — approving it would give <span className="font-semibold">them</span> access to your account.
+        Only enter a code you started yourself on this or another of your
+        machines. If someone asked you to enter a code here, stop — approving it
+        would give <span className="font-semibold">them</span> access to your
+        account.
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Device code">
-          <Input value={userCode} onChange={(e) => setUserCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" required autoFocus />
+          <Input
+            value={userCode}
+            onChange={(e) => setUserCode(e.target.value.toUpperCase())}
+            placeholder="XXXX-XXXX"
+            required
+            autoFocus
+          />
         </Field>
         <ErrorText>{error}</ErrorText>
-        <Button type="submit" disabled={busy || !userCode.trim()} className="w-full">
+        <Button
+          type="submit"
+          disabled={busy || !userCode.trim()}
+          className="w-full"
+        >
           {busy ? "Approving…" : "Approve this device"}
         </Button>
       </form>

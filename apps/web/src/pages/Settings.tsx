@@ -1,5 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, apiErrorMessage, type Meta, type Org, type Member, type Role, type SsoConfigView, type ResizeConflict } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  type Meta,
+  type Org,
+  type Member,
+  type Role,
+  type SsoConfigView,
+  type ResizeConflict,
+} from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
@@ -31,15 +40,26 @@ export default function Settings() {
         ]);
         if (cancelled) return;
         if (m) setMeta(m);
-        if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
+        if (orgErr)
+          return setError(
+            apiErrorMessage(orgErr, "Could not load your organizations."),
+          );
         const first = orgs?.[0];
-        if (!first) return setError("You are not a member of any organization yet.");
+        if (!first)
+          return setError("You are not a member of any organization yet.");
         setOrg(first);
         // My role comes from my own row in the roster (no dedicated endpoint yet).
-        const { data: members } = await api.GET("/api/v1/organizations/{orgId}/members", {
-          params: { path: { orgId: first.id } },
-        });
-        if (!cancelled) setMyRole((members as Member[] | undefined)?.find((mm) => mm.user_id === myId)?.role);
+        const { data: members } = await api.GET(
+          "/api/v1/organizations/{orgId}/members",
+          {
+            params: { path: { orgId: first.id } },
+          },
+        );
+        if (!cancelled)
+          setMyRole(
+            (members as Member[] | undefined)?.find((mm) => mm.user_id === myId)
+              ?.role,
+          );
       } catch {
         if (!cancelled) setError("Could not reach the API.");
       }
@@ -71,34 +91,56 @@ export default function Settings() {
 
       {org && !isAdmin && (
         <Card className="mt-6">
-          <p className="text-sm text-slate-400">Organization settings are managed by owners and admins.</p>
+          <p className="text-sm text-slate-400">
+            Organization settings are managed by owners and admins.
+          </p>
         </Card>
       )}
 
       {org && isAdmin && (
         <>
-          <OrgSection org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
-          <PoolSection org={org} canEdit={emailVerified} onResized={(o) => setOrg(o)} />
+          <OrgSection
+            org={org}
+            canEdit={emailVerified}
+            onSaved={(o) => setOrg(o)}
+          />
+          <PoolSection
+            org={org}
+            canEdit={emailVerified}
+            onResized={(o) => setOrg(o)}
+          />
           {/* SSO config is enterprise-only; hidden in the open edition per /meta
               (watch-item b), with a muted note rather than a dead form. */}
           {meta?.edition === "enterprise" ? (
             <SsoSettings orgId={org.id} canEdit={emailVerified} />
           ) : (
             <Card className="mt-4">
-              <h2 className="text-sm font-semibold text-slate-300">Single sign-on</h2>
-              <p className="mt-1 text-xs text-slate-500">SSO (Google / Microsoft) is a Tunnex Enterprise feature.</p>
+              <h2 className="text-sm font-semibold text-slate-300">
+                Single sign-on
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                SSO (Google / Microsoft) is a Tunnex Enterprise feature.
+              </p>
             </Card>
           )}
           {meta?.edition === "enterprise" ? (
             <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
           ) : (
             <Card className="mt-4">
-              <h2 className="text-sm font-semibold text-slate-300">Require two-factor authentication</h2>
-              <p className="mt-1 text-xs text-slate-500">Org-wide MFA enforcement is a Tunnex Enterprise feature.</p>
+              <h2 className="text-sm font-semibold text-slate-300">
+                Require two-factor authentication
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Org-wide MFA enforcement is a Tunnex Enterprise feature.
+              </p>
             </Card>
           )}
           {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
-          <OrgOVPNToggle org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
+          <OrgOVPNToggle
+            org={org}
+            canEdit={emailVerified}
+            onSaved={(o) => setOrg(o)}
+          />
           {/* GitOps operator credentials — owner-only (machine:manage). S10.2 registered follow-up. */}
           {canMachines && (
             <div className="mt-4">
@@ -113,7 +155,13 @@ export default function Settings() {
 
 // OrgMfaEnforce — org-level MFA mandate (enterprise, S7.5.5). Unlock-then-opt-in: default OFF; on
 // toggle, unenrolled password users are prompted to enroll at their next sign-in (never locked out).
-function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
+function OrgMfaEnforce({
+  orgId,
+  canEdit,
+}: {
+  orgId: string;
+  canEdit: boolean;
+}) {
   const [enforce, setEnforce] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +169,9 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
   useEffect(() => {
     let cancelled = false;
     api
-      .GET("/api/v1/organizations/{orgId}/mfa-enforce", { params: { path: { orgId } } })
+      .GET("/api/v1/organizations/{orgId}/mfa-enforce", {
+        params: { path: { orgId } },
+      })
       .then(({ data }) => {
         if (!cancelled && data) setEnforce(data.enforce);
       })
@@ -136,10 +186,13 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
   async function toggle(next: boolean) {
     setBusy(true);
     setError(null);
-    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/mfa-enforce", {
-      params: { path: { orgId } },
-      body: { enforce: next },
-    });
+    const { data, error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/mfa-enforce",
+      {
+        params: { path: { orgId } },
+        body: { enforce: next },
+      },
+    );
     setBusy(false);
     if (error || !data) {
       setError(apiErrorMessage(error, "Could not update MFA enforcement."));
@@ -150,15 +203,19 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
 
   return (
     <Card className="mt-4">
-      <h2 className="text-sm font-semibold text-slate-300">Require two-factor authentication</h2>
+      <h2 className="text-sm font-semibold text-slate-300">
+        Require two-factor authentication
+      </h2>
       <p className="mt-1 text-xs text-slate-400">
-        When on, members who sign in with a password must have 2FA — anyone without it is prompted to set it
-        up at their next sign-in (no one is locked out). SSO sign-ins are governed by your identity provider.
+        When on, members who sign in with a password must have 2FA — anyone
+        without it is prompted to set it up at their next sign-in (no one is
+        locked out). SSO sign-ins are governed by your identity provider.
       </p>
       {/* D8 honesty: enforcement is a forward gate, not retroactive. */}
       <p className="mt-1 text-xs text-slate-500">
-        Enforcement applies at sign-in, not to sessions already open — pre-existing sessions remain valid
-        until they expire naturally. To end current sessions immediately, deactivate the member.
+        Enforcement applies at sign-in, not to sessions already open —
+        pre-existing sessions remain valid until they expire naturally. To end
+        current sessions immediately, deactivate the member.
       </p>
       {error && (
         <div className="mt-2">
@@ -169,8 +226,16 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
         {enforce === null ? (
           <p className="text-xs text-slate-500">Loading…</p>
         ) : (
-          <Button variant="ghost" disabled={busy || !canEdit} onClick={() => toggle(!enforce)}>
-            {busy ? "Saving…" : enforce ? "Disable requirement" : "Require MFA for password sign-ins"}
+          <Button
+            variant="ghost"
+            disabled={busy || !canEdit}
+            onClick={() => toggle(!enforce)}
+          >
+            {busy
+              ? "Saving…"
+              : enforce
+                ? "Disable requirement"
+                : "Require MFA for password sign-ins"}
           </Button>
         )}
       </div>
@@ -182,7 +247,15 @@ function OrgMfaEnforce({ orgId, canEdit }: { orgId: string; canEdit: boolean }) 
 // default. This is the operator's on-switch for the whole feature (unlock-then-opt-in): enabling makes
 // the OpenVPN capability available on the org's gateways + surfaces the OpenVPN device type in the
 // export ceremony. The initial state comes from the org (no separate GET); PUT flips it.
-function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onSaved: (o: Org) => void }) {
+function OrgOVPNToggle({
+  org,
+  canEdit,
+  onSaved,
+}: {
+  org: Org;
+  canEdit: boolean;
+  onSaved: (o: Org) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const enabled = org.ovpn_enabled === true;
@@ -190,10 +263,13 @@ function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; 
   async function toggle(next: boolean) {
     setBusy(true);
     setError(null);
-    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/ovpn-settings", {
-      params: { path: { orgId: org.id } },
-      body: { enabled: next },
-    });
+    const { data, error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/ovpn-settings",
+      {
+        params: { path: { orgId: org.id } },
+        body: { enabled: next },
+      },
+    );
     setBusy(false);
     if (error || !data) {
       setError(apiErrorMessage(error, "Could not update OpenVPN."));
@@ -206,13 +282,15 @@ function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; 
     <Card className="mt-4">
       <h2 className="text-sm font-semibold text-slate-300">OpenVPN</h2>
       <p className="mt-1 text-xs text-slate-400">
-        OpenVPN is <span className="text-slate-300">off by default</span>. Enable it where you&rsquo;re migrating
-        an existing OpenVPN fleet — devices can then be exported as standard <code className="text-slate-300">.ovpn</code>{" "}
-        profiles for the official OpenVPN clients. WireGuard is unaffected.
+        OpenVPN is <span className="text-slate-300">off by default</span>.
+        Enable it where you&rsquo;re migrating an existing OpenVPN fleet —
+        devices can then be exported as standard{" "}
+        <code className="text-slate-300">.ovpn</code> profiles for the official
+        OpenVPN clients. WireGuard is unaffected.
       </p>
       <p className="mt-1 text-xs text-slate-500">
-        Turning it off stops the OpenVPN servers on your gateways; issued client profiles are not revoked and
-        work again if you re-enable.
+        Turning it off stops the OpenVPN servers on your gateways; issued client
+        profiles are not revoked and work again if you re-enable.
       </p>
       {error && (
         <div className="mt-2">
@@ -220,7 +298,11 @@ function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; 
         </div>
       )}
       <div className="mt-3">
-        <Button variant="ghost" disabled={busy || !canEdit} onClick={() => toggle(!enabled)}>
+        <Button
+          variant="ghost"
+          disabled={busy || !canEdit}
+          onClick={() => toggle(!enabled)}
+        >
           {busy ? "Saving…" : enabled ? "Disable OpenVPN" : "Enable OpenVPN"}
         </Button>
       </div>
@@ -231,10 +313,20 @@ function OrgOVPNToggle({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; 
 // isResizeConflict narrows a resize error to the structured 409 (orphan list),
 // distinguishing it from the generic error envelope.
 function isResizeConflict(e: unknown): e is ResizeConflict {
-  return typeof e === "object" && e !== null && "orphans" in e && "orphan_count" in e;
+  return (
+    typeof e === "object" && e !== null && "orphans" in e && "orphan_count" in e
+  );
 }
 
-function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; onResized: (o: Org) => void }) {
+function PoolSection({
+  org,
+  canEdit,
+  onResized,
+}: {
+  org: Org;
+  canEdit: boolean;
+  onResized: (o: Org) => void;
+}) {
   const [cidr, setCidr] = useState(org.pool_cidr);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -247,10 +339,13 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
     setErr(null);
     setConflict(null);
     setDone(false);
-    const { data, error } = await api.PUT("/api/v1/organizations/{orgId}/pool-cidr", {
-      params: { path: { orgId: org.id } },
-      body: { cidr },
-    });
+    const { data, error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/pool-cidr",
+      {
+        params: { path: { orgId: org.id } },
+        body: { cidr },
+      },
+    );
     setBusy(false);
     if (error) {
       // A shrink that would strand devices comes back as the structured 409:
@@ -270,15 +365,29 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
       <Card>
         <h2 className="text-sm font-semibold text-slate-300">Address pool</h2>
         <p className="mt-1 text-xs text-slate-500">
-          The WireGuard address range devices are assigned from. Grow to add capacity; shrink only within the current range.
+          The WireGuard address range devices are assigned from. Grow to add
+          capacity; shrink only within the current range.
         </p>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <div className="min-w-[12rem] flex-1">
             <Field label="Pool CIDR">
-              <Input value={cidr} onChange={(e) => { setCidr(e.target.value); setDone(false); setConflict(null); }} required disabled={!canEdit} placeholder="10.0.0.0/24" />
+              <Input
+                value={cidr}
+                onChange={(e) => {
+                  setCidr(e.target.value);
+                  setDone(false);
+                  setConflict(null);
+                }}
+                required
+                disabled={!canEdit}
+                placeholder="10.0.0.0/24"
+              />
             </Field>
           </div>
-          <Button type="submit" disabled={busy || !canEdit || cidr === org.pool_cidr}>
+          <Button
+            type="submit"
+            disabled={busy || !canEdit || cidr === org.pool_cidr}
+          >
             {busy ? "Resizing…" : "Resize pool"}
           </Button>
         </div>
@@ -287,8 +396,10 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
             configs embed the old range and are one-time — they can't be re-served. */}
         {done && (
           <p className="mt-3 text-xs text-accent-400">
-            Pool resized to <span className="font-mono">{cidr}</span>. Existing devices keep their current addresses — to reach
-            addresses in the new range, re-issue their configs (revoke + recreate; configs are shown once and can’t be re-sent).
+            Pool resized to <span className="font-mono">{cidr}</span>. Existing
+            devices keep their current addresses — to reach addresses in the new
+            range, re-issue their configs (revoke + recreate; configs are shown
+            once and can’t be re-sent).
           </p>
         )}
 
@@ -296,24 +407,32 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
         {conflict && (
           <div className="mt-3 rounded-lg border border-danger/40 bg-danger/5 p-3">
             <p className="text-sm text-slate-300">
-              Can’t shrink: {conflict.orphan_count} device{conflict.orphan_count === 1 ? "" : "s"} must be removed or renumbered
-              first.
+              Can’t shrink: {conflict.orphan_count} device
+              {conflict.orphan_count === 1 ? "" : "s"} must be removed or
+              renumbered first.
             </p>
             <ul className="mt-2 space-y-1">
               {conflict.orphans.map((o) => (
-                <li key={o.device_id} className="flex items-center justify-between text-xs">
+                <li
+                  key={o.device_id}
+                  className="flex items-center justify-between text-xs"
+                >
                   <span className="text-slate-300">{o.name}</span>
                   <span className="font-mono text-slate-500">
                     {o.assigned_ip}
                     <span className="ml-2 text-slate-600">
-                      {o.reason === "reserved_collision" ? "collides with a reserved address" : "outside the new range"}
+                      {o.reason === "reserved_collision"
+                        ? "collides with a reserved address"
+                        : "outside the new range"}
                     </span>
                   </span>
                 </li>
               ))}
             </ul>
             {conflict.orphan_count > conflict.orphans.length && (
-              <p className="mt-1 text-xs text-slate-600">…and {conflict.orphan_count - conflict.orphans.length} more.</p>
+              <p className="mt-1 text-xs text-slate-600">
+                …and {conflict.orphan_count - conflict.orphans.length} more.
+              </p>
             )}
           </div>
         )}
@@ -323,7 +442,15 @@ function PoolSection({ org, canEdit, onResized }: { org: Org; canEdit: boolean; 
   );
 }
 
-function OrgSection({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onSaved: (o: Org) => void }) {
+function OrgSection({
+  org,
+  canEdit,
+  onSaved,
+}: {
+  org: Org;
+  canEdit: boolean;
+  onSaved: (o: Org) => void;
+}) {
   const [name, setName] = useState(org.name);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -339,7 +466,8 @@ function OrgSection({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onS
       body: { name },
     });
     setBusy(false);
-    if (error || !data) return setErr(apiErrorMessage(error, "Could not save."));
+    if (error || !data)
+      return setErr(apiErrorMessage(error, "Could not save."));
     setSaved(true);
     onSaved(data);
   }
@@ -351,15 +479,28 @@ function OrgSection({ org, canEdit, onSaved }: { org: Org; canEdit: boolean; onS
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <div className="min-w-[14rem] flex-1">
             <Field label="Name">
-              <Input value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} required disabled={!canEdit} />
+              <Input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setSaved(false);
+                }}
+                required
+                disabled={!canEdit}
+              />
             </Field>
           </div>
-          <Button type="submit" disabled={busy || !canEdit || name === org.name}>
+          <Button
+            type="submit"
+            disabled={busy || !canEdit || name === org.name}
+          >
             {busy ? "Saving…" : "Save"}
           </Button>
         </div>
         {/* Slug is immutable (identity); shown read-only. */}
-        <p className="mt-2 font-mono text-xs text-slate-500">slug: {org.slug}</p>
+        <p className="mt-2 font-mono text-xs text-slate-500">
+          slug: {org.slug}
+        </p>
         {saved && <p className="mt-2 text-xs text-accent-400">Saved.</p>}
         <ErrorText>{err}</ErrorText>
       </Card>
@@ -378,7 +519,15 @@ function SsoSettings({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
   );
 }
 
-function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Provider; canEdit: boolean }) {
+function SsoProvider({
+  orgId,
+  provider,
+  canEdit,
+}: {
+  orgId: string;
+  provider: Provider;
+  canEdit: boolean;
+}) {
   const [view, setView] = useState<SsoView | null>(null);
   const [configured, setConfigured] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -393,9 +542,12 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
   // normal "no config yet" state, not an error. Guarded against setState after
   // unmount via the cancelled flag the caller passes.
   async function load(isCancelled: () => boolean) {
-    const { data, error } = await api.GET("/api/v1/organizations/{orgId}/sso/{provider}", {
-      params: { path: { orgId, provider } },
-    });
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/sso/{provider}",
+      {
+        params: { path: { orgId, provider } },
+      },
+    );
     if (isCancelled()) return;
     if (error || !data) {
       setConfigured(false);
@@ -421,12 +573,21 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
     setBusy(true);
     setErr(null);
     setSaved(false);
-    const { error } = await api.PUT("/api/v1/organizations/{orgId}/sso/{provider}", {
-      params: { path: { orgId, provider } },
-      body: { client_id: clientId, client_secret: clientSecret, tenant_id: tenantId || undefined, enabled },
-    });
+    const { error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/sso/{provider}",
+      {
+        params: { path: { orgId, provider } },
+        body: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          tenant_id: tenantId || undefined,
+          enabled,
+        },
+      },
+    );
     setBusy(false);
-    if (error) return setErr(apiErrorMessage(error, "Could not save the SSO config."));
+    if (error)
+      return setErr(apiErrorMessage(error, "Could not save the SSO config."));
     setClientSecret(""); // never keep the secret in page state after save
     setSaved(true);
     await load(() => false); // refresh to pick up the new fingerprint
@@ -439,10 +600,13 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
     <form onSubmit={submit}>
       <Card>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-white capitalize">{provider}</h3>
+          <h3 className="text-sm font-medium text-white capitalize">
+            {provider}
+          </h3>
           {configured && view && (
             <span className="text-xs text-slate-500">
-              {view.enabled ? "enabled" : "disabled"} · updated {relativeAge(view.updated_at)}
+              {view.enabled ? "enabled" : "disabled"} · updated{" "}
+              {relativeAge(view.updated_at)}
             </span>
           )}
         </div>
@@ -451,13 +615,24 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
               "Client ID" would put two controls with the SAME accessible name on the Settings page — a
               screen reader announces them identically and a label-navigating user cannot tell them apart. */}
           <Field label={`${providerName} client ID`}>
-            <Input value={clientId} onChange={(e) => setClientId(e.target.value)} required disabled={!canEdit} />
+            <Input
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              required
+              disabled={!canEdit}
+            />
           </Field>
           {/* WRITE-ONLY secret: the current secret is NEVER fetched or shown. We
               display only its keyed fingerprint as proof-of-storage, and the
               input is a "replace" affordance (blank = leave unchanged is not
               supported by the API, so a save requires re-entering it). */}
-          <Field label={configured ? `${providerName} client secret (enter to replace)` : `${providerName} client secret`}>
+          <Field
+            label={
+              configured
+                ? `${providerName} client secret (enter to replace)`
+                : `${providerName} client secret`
+            }
+          >
             <Input
               type="password"
               value={clientSecret}
@@ -468,15 +643,26 @@ function SsoProvider({ orgId, provider, canEdit }: { orgId: string; provider: Pr
             />
           </Field>
           {configured && view?.secret_fingerprint && (
-            <p className="font-mono text-xs text-slate-500">stored secret fingerprint: {view.secret_fingerprint}</p>
+            <p className="font-mono text-xs text-slate-500">
+              stored secret fingerprint: {view.secret_fingerprint}
+            </p>
           )}
           {provider === "microsoft" && (
             <Field label="Tenant ID (Entra)">
-              <Input value={tenantId} onChange={(e) => setTenantId(e.target.value)} disabled={!canEdit} />
+              <Input
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                disabled={!canEdit}
+              />
             </Field>
           )}
           <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={!canEdit} />
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              disabled={!canEdit}
+            />
             Enabled
           </label>
         </div>

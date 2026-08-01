@@ -26,24 +26,48 @@ let mode: "off" | "enforcing" = "enforcing";
 let rulesFail = false;
 
 const RULES = [
-  { id: "r-enabled", enabled: true, src_kind: "group", dst_kind: "resource", src_group_id: "g1", dst_resource_id: "res1" },
-  { id: "r-disabled", enabled: false, src_kind: "group", dst_kind: "resource", src_group_id: "g1", dst_resource_id: "res1" },
+  {
+    id: "r-enabled",
+    enabled: true,
+    src_kind: "group",
+    dst_kind: "resource",
+    src_group_id: "g1",
+    dst_resource_id: "res1",
+  },
+  {
+    id: "r-disabled",
+    enabled: false,
+    src_kind: "group",
+    dst_kind: "resource",
+    src_group_id: "g1",
+    dst_resource_id: "res1",
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+        if (path === "/api/v1/auth/me")
+          return { data: { id: "u1", email: "a@b.c", email_verified: true } };
         if (path === "/api/v1/meta") return { data: { edition: "enterprise" } };
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
-        if (path.endsWith("/members")) return { data: [{ user_id: "u1", role: "admin", email_verified: true }] };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path.endsWith("/members"))
+          return {
+            data: [{ user_id: "u1", role: "admin", email_verified: true }],
+          };
         if (path.endsWith("/zero-trust-mode")) return { data: { mode } };
         if (path.endsWith("/policies")) {
-          if (rulesFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          if (rulesFail)
+            return {
+              data: undefined,
+              error: { error: { code: "boom", message: "nope" } },
+            };
           return { data: RULES };
         }
         return { data: [] };
@@ -60,7 +84,8 @@ import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider. Stubbing the context would put the TEST's copy of the role gate under assertion
 // instead of the PRODUCT's — fixture-restates-production at the seam that most invites it (docs/laws.md).
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   mode = "enforcing";
@@ -74,14 +99,18 @@ describe("Access — wiring: the screen must not claim enforcement it does not h
 
     // The gap in direction (a): two rules exist and are listed, but nothing is enforcing them. The screen has
     // to say so, or an admin reads a rule list as an access-control posture that the gateway is not applying.
-    await waitFor(() => expect(screen.getByText("Policy not enforced — open mesh.")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Policy not enforced — open mesh.")).toBeTruthy(),
+    );
     expect(screen.queryByText(/default-deny active/)).toBeNull();
   });
 
   it("with mode ENFORCING, the posture names default-deny", async () => {
     mode = "enforcing";
     withAuth(<Access />);
-    await waitFor(() => expect(screen.getByText(/default-deny active/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/default-deny active/)).toBeTruthy(),
+    );
   });
 
   it("a DISABLED rule is shown distinctly, never hidden — the list must not lie about what is enforcing", async () => {
@@ -101,14 +130,20 @@ describe("Access — failure path: the most consequential one in the product", (
     rulesFail = true;
     withAuth(<Access />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy(),
+    );
   });
 
   it("a failed load never renders a defaulted rule COUNT — it says the status is unavailable", async () => {
     rulesFail = true;
     withAuth(<Access />);
 
-    await waitFor(() => expect(screen.getByText("Rule status unavailable — refresh.")).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByText("Rule status unavailable — refresh."),
+      ).toBeTruthy(),
+    );
     // The specific lie this prevents: "0 rules — ALL traffic denied." on a load that never returned. A count
     // derived from a failure is an authorization claim invented by the client.
     expect(screen.queryByText(/ALL traffic denied/)).toBeNull();

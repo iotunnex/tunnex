@@ -11,11 +11,15 @@ import { Button, ErrorText, Field, Input } from "../components/ui";
 const SSO_ERRORS: Record<string, string> = {
   unverified_local_exists:
     "An account with this email already exists. Sign in with your password first, then link SSO from settings.",
-  idp_email_unverified: "Your identity provider hasn't verified this email address. Verify it there and try again.",
+  idp_email_unverified:
+    "Your identity provider hasn't verified this email address. Verify it there and try again.",
   edition_required: "SSO is not enabled on this deployment.",
 };
 function ssoErrorText(code: string): string {
-  return SSO_ERRORS[code] ?? "Single sign-on failed. Please try again or sign in with your password.";
+  return (
+    SSO_ERRORS[code] ??
+    "Single sign-on failed. Please try again or sign in with your password."
+  );
 }
 
 export default function Login() {
@@ -45,7 +49,8 @@ function DesktopLogin() {
     <AuthLayout>
       <h1 className="text-xl font-semibold text-white">Sign in</h1>
       <p className="mt-1 text-sm text-slate-400">
-        Tunnex opens your browser to sign in — your password is never entered in this app.
+        Tunnex opens your browser to sign in — your password is never entered in
+        this app.
       </p>
       <ErrorText>{error}</ErrorText>
       <Button onClick={signIn} disabled={busy} className="mt-5 w-full">
@@ -61,7 +66,9 @@ function BrowserLogin() {
   const [params] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(params.get("sso_error") ? ssoErrorText(params.get("sso_error")!) : null);
+  const [error, setError] = useState<string | null>(
+    params.get("sso_error") ? ssoErrorText(params.get("sso_error")!) : null,
+  );
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState<Meta | null>(null);
   // S7.5.5: an MFA-pending login carries a challenge token (NOT a session) — the code step
@@ -88,7 +95,9 @@ function BrowserLogin() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { data, error } = await api.POST("/api/v1/auth/login", { body: { email, password } });
+    const { data, error } = await api.POST("/api/v1/auth/login", {
+      body: { email, password },
+    });
     setBusy(false);
     if (error || !data) {
       // The server keeps invalid-credentials generic and account_deactivated
@@ -110,7 +119,10 @@ function BrowserLogin() {
   // can never become an open redirect to another origin.
   function finish() {
     const next = params.get("next");
-    const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+    const dest =
+      next && next.startsWith("/") && !next.startsWith("//")
+        ? next
+        : "/dashboard";
     navigate(dest, { replace: true });
   }
 
@@ -119,13 +131,16 @@ function BrowserLogin() {
     if (!challenge) return;
     setBusy(true);
     setError(null);
-    const { data, error } = await api.POST("/api/v1/auth/mfa/verify", { body: { challenge, code } });
+    const { data, error } = await api.POST("/api/v1/auth/mfa/verify", {
+      body: { challenge, code },
+    });
     setBusy(false);
     if (error || !data) {
       // Legibility (loadOne): each failure is a distinct, named state — never a blank or a
       // reassuring default. A capped-out or burned/expired challenge is DEAD (D7's cap is
       // per-challenge), so route back to the password step; a wrong code stays on the code form.
-      const code = (error as { error?: { code?: string } } | undefined)?.error?.code;
+      const code = (error as { error?: { code?: string } } | undefined)?.error
+        ?.code;
       if (code === "mfa_challenge_exhausted") {
         setChallenge(null);
         setCode("");
@@ -138,7 +153,12 @@ function BrowserLogin() {
         setError("This sign-in has expired. Please sign in again.");
         return;
       }
-      setError(apiErrorMessage(error, "That code is not valid — check your authenticator app or use a recovery code."));
+      setError(
+        apiErrorMessage(
+          error,
+          "That code is not valid — check your authenticator app or use a recovery code.",
+        ),
+      );
       return;
     }
     setUser(data);
@@ -148,11 +168,22 @@ function BrowserLogin() {
   if (challenge) {
     return (
       <AuthLayout>
-        <h1 className="text-xl font-semibold text-white">Two-factor authentication</h1>
-        <p className="mt-1 text-sm text-slate-400">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+        <h1 className="text-xl font-semibold text-white">
+          Two-factor authentication
+        </h1>
+        <p className="mt-1 text-sm text-slate-400">
+          Enter the 6-digit code from your authenticator app, or a recovery
+          code.
+        </p>
         <form onSubmit={verify} className="mt-5 space-y-4">
           <Field label="Code">
-            <Input value={code} onChange={(e) => setCode(e.target.value)} required autoFocus autoComplete="one-time-code" />
+            <Input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+              autoFocus
+              autoComplete="one-time-code"
+            />
           </Field>
           <ErrorText>{error}</ErrorText>
           <Button type="submit" disabled={busy} className="w-full">
@@ -166,13 +197,26 @@ function BrowserLogin() {
   return (
     <AuthLayout>
       <h1 className="text-xl font-semibold text-white">Sign in</h1>
-      <p className="mt-1 text-sm text-slate-400">Access your devices and WireGuard configs.</p>
+      <p className="mt-1 text-sm text-slate-400">
+        Access your devices and WireGuard configs.
+      </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Email">
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoFocus
+          />
         </Field>
         <Field label="Password">
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
         </Field>
         <ErrorText>{error}</ErrorText>
         <Button type="submit" disabled={busy} className="w-full">
@@ -180,7 +224,9 @@ function BrowserLogin() {
         </Button>
       </form>
 
-      {meta && meta.sso_providers.length > 0 && <SsoSection providers={meta.sso_providers} onError={setError} />}
+      {meta && meta.sso_providers.length > 0 && (
+        <SsoSection providers={meta.sso_providers} onError={setError} />
+      )}
 
       <div className="mt-5 flex justify-between text-xs text-slate-400">
         <Link to="/signup" className="hover:text-slate-200">
@@ -197,7 +243,13 @@ function BrowserLogin() {
 // SsoSection (enterprise only — hidden entirely in the open build via meta). SSO
 // is configured per-org, so the user names their organization, then picks a
 // provider; we redirect the browser to the IdP URL the API returns.
-function SsoSection({ providers, onError }: { providers: string[]; onError: (m: string) => void }) {
+function SsoSection({
+  providers,
+  onError,
+}: {
+  providers: string[];
+  onError: (m: string) => void;
+}) {
   const [org, setOrg] = useState("");
   async function start(provider: "google" | "microsoft") {
     if (!org) {
@@ -217,16 +269,28 @@ function SsoSection({ providers, onError }: { providers: string[]; onError: (m: 
     <div className="mt-6 border-t border-white/5 pt-5">
       <p className="text-xs text-slate-500">Or sign in with SSO</p>
       <Field label="Organization">
-        <Input value={org} onChange={(e) => setOrg(e.target.value)} placeholder="acme" />
+        <Input
+          value={org}
+          onChange={(e) => setOrg(e.target.value)}
+          placeholder="acme"
+        />
       </Field>
       <div className="mt-3 flex gap-2">
         {providers.includes("google") && (
-          <Button variant="ghost" className="flex-1" onClick={() => start("google")}>
+          <Button
+            variant="ghost"
+            className="flex-1"
+            onClick={() => start("google")}
+          >
             Google
           </Button>
         )}
         {providers.includes("microsoft") && (
-          <Button variant="ghost" className="flex-1" onClick={() => start("microsoft")}>
+          <Button
+            variant="ghost"
+            className="flex-1"
+            onClick={() => start("microsoft")}
+          >
             Microsoft
           </Button>
         )}

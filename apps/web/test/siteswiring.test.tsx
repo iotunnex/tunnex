@@ -24,23 +24,39 @@ let sitesFail = false;
 
 const SITES = [{ id: "s1", name: "aws-site" }];
 const SUBNETS = [
-  { id: "sub-approved", site_id: "s1", cidr: "172.31.0.0/16", status: "approved" },
+  {
+    id: "sub-approved",
+    site_id: "s1",
+    cidr: "172.31.0.0/16",
+    status: "approved",
+  },
   { id: "sub-pending", site_id: "s1", cidr: "10.50.0.0/16", status: "pending" },
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
-        if (path === "/api/v1/meta") return { data: { edition: "enterprise", protocol_version: 5 } };
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
-        if (path.endsWith("/members")) return { data: [{ user_id: "u1", role: "admin", email_verified: true }] };
+        if (path === "/api/v1/auth/me")
+          return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+        if (path === "/api/v1/meta")
+          return { data: { edition: "enterprise", protocol_version: 5 } };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path.endsWith("/members"))
+          return {
+            data: [{ user_id: "u1", role: "admin", email_verified: true }],
+          };
         if (path.endsWith("/sites")) {
-          if (sitesFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          if (sitesFail)
+            return {
+              data: undefined,
+              error: { error: { code: "boom", message: "nope" } },
+            };
           return { data: SITES };
         }
         if (path.endsWith("/nodes")) return { data: [] };
@@ -61,7 +77,8 @@ import { AuthProvider } from "../src/lib/auth";
 import { crossesMultiSiteThreshold } from "../src/lib/sitesview";
 
 // The REAL AuthProvider — stubbing the context puts the TEST's role gate under assertion, not the PRODUCT's.
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   sitesFail = false;
@@ -83,7 +100,10 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // tell. The rule generalises: a waitFor must cover EVERY element the assertions touch, not the first one
     // that happens to appear.
     const [pendingEl, approvedEl] = await waitFor(
-      () => [screen.getByTitle("Pending approval — not yet routed"), screen.getByTitle("Approved — routed")],
+      () => [
+        screen.getByTitle("Pending approval — not yet routed"),
+        screen.getByTitle("Approved — routed"),
+      ],
       { timeout: 5000 },
     );
 
@@ -132,6 +152,8 @@ describe("Sites — failure path", () => {
     sitesFail = true;
     withAuth(<Sites />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy(),
+    );
   });
 });

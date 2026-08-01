@@ -28,22 +28,36 @@ export default function VerifyPending() {
     <AuthLayout>
       <h1 className="text-xl font-semibold text-white">Verify your email</h1>
       <p className="mt-2 text-sm text-slate-400">
-        We sent a verification link to <span className="text-slate-200">{email}</span>. Follow it to finish setting up
-        your account, then you can create your organization.
+        We sent a verification link to{" "}
+        <span className="text-slate-200">{email}</span>. Follow it to finish
+        setting up your account, then you can create your organization.
       </p>
       {/* Success feedback uses the accent, not green: green is reserved for
           liveness, not "the action worked" (S4.4 decision f). */}
-      {resend === "sent" && <p className="mt-3 text-xs text-accent-400">Sent — check your inbox.</p>}
-      {resend === "error" && <p className="mt-3 text-xs text-danger">Couldn&rsquo;t send — try again.</p>}
+      {resend === "sent" && (
+        <p className="mt-3 text-xs text-accent-400">Sent — check your inbox.</p>
+      )}
+      {resend === "error" && (
+        <p className="mt-3 text-xs text-danger">
+          Couldn&rsquo;t send — try again.
+        </p>
+      )}
       <div className="mt-5 flex items-center justify-between">
         {resend !== "sent" ? (
-          <Button variant="ghost" onClick={onResend} disabled={resend === "busy"}>
+          <Button
+            variant="ghost"
+            onClick={onResend}
+            disabled={resend === "busy"}
+          >
             {resend === "busy" ? "Sending…" : "Resend link"}
           </Button>
         ) : (
           <span />
         )}
-        <button onClick={onLogout} className="text-xs text-slate-400 hover:text-slate-200">
+        <button
+          onClick={onLogout}
+          className="text-xs text-slate-400 hover:text-slate-200"
+        >
           Sign in as someone else
         </button>
       </div>

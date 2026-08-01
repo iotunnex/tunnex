@@ -24,18 +24,34 @@ afterEach(cleanup); // see docs/laws.md — no globals/setup file, so auto-clean
 
 // Mocked at the NETWORK boundary (consequence 2), so the Devices page below mounts as the real component.
 const POSTURE_FLEET = [
-  { id: "dr", name: "dev-revoked", status: "revoked", assigned_ip: "10.99.0.9", health_state: "noncompliant", health_blocked: true },
-  { id: "da", name: "dev-active", status: "active", assigned_ip: "10.99.0.3", health_state: "noncompliant", health_blocked: true },
+  {
+    id: "dr",
+    name: "dev-revoked",
+    status: "revoked",
+    assigned_ip: "10.99.0.9",
+    health_state: "noncompliant",
+    health_blocked: true,
+  },
+  {
+    id: "da",
+    name: "dev-active",
+    status: "active",
+    assigned_ip: "10.99.0.3",
+    health_state: "noncompliant",
+    health_blocked: true,
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
         if (path.endsWith("/devices")) return { data: POSTURE_FLEET };
         if (path.endsWith("/nodes")) return { data: [] };
         return { data: [] };
@@ -60,7 +76,10 @@ const DEGRADED_KIND = "cert_expired_cannot_reconnect";
 describe("sibling consistency — revoked rows carry NO health/instruction badge, on EVERY surface that renders one", () => {
   // The badge these surfaces would draw if unguarded. Asserting against the real label keeps this test honest:
   // if the vocabulary changes, this fails rather than silently checking for a string nobody renders any more.
-  const badge = policyHealthBadge({ policy_degraded: true, policy_degraded_kind: DEGRADED_KIND } as never);
+  const badge = policyHealthBadge({
+    policy_degraded: true,
+    policy_degraded_kind: DEGRADED_KIND,
+  } as never);
 
   it("the fixture is genuinely degraded — otherwise every assertion below is vacuous", () => {
     // WITHOUT THIS the whole file passes on a fixture that produces no badge at all, which is the
@@ -75,8 +94,22 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
         org={org}
         nodes={
           [
-            { id: "a", name: "gw-revoked", status: "revoked", agent_version: "0.1.0", policy_degraded: true, policy_degraded_kind: DEGRADED_KIND },
-            { id: "b", name: "gw-active", status: "active", agent_version: "0.1.0", policy_degraded: true, policy_degraded_kind: DEGRADED_KIND },
+            {
+              id: "a",
+              name: "gw-revoked",
+              status: "revoked",
+              agent_version: "0.1.0",
+              policy_degraded: true,
+              policy_degraded_kind: DEGRADED_KIND,
+            },
+            {
+              id: "b",
+              name: "gw-active",
+              status: "active",
+              agent_version: "0.1.0",
+              policy_degraded: true,
+              policy_degraded_kind: DEGRADED_KIND,
+            },
           ] as never[]
         }
       />,
@@ -88,7 +121,19 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
   it("Sites (GatewayRow): a revoked gateway shows no health badge — THE SURFACE THE FIX HAD NOT REACHED", () => {
     render(
       <ul>
-        <GatewayRow g={{ id: "a", name: "gw-revoked", status: "revoked", isHub: false, lastSeenAt: null, health: badge, siteLinkNote: null } as never} />
+        <GatewayRow
+          g={
+            {
+              id: "a",
+              name: "gw-revoked",
+              status: "revoked",
+              isHub: false,
+              lastSeenAt: null,
+              health: badge,
+              siteLinkNote: null,
+            } as never
+          }
+        />
       </ul>,
     );
     expect(screen.getByText("revoked")).toBeTruthy();
@@ -98,7 +143,19 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
   it("Sites (GatewayRow): an ACTIVE gateway still shows it — suppression must not become blanket removal", () => {
     render(
       <ul>
-        <GatewayRow g={{ id: "b", name: "gw-active", status: "active", isHub: false, lastSeenAt: null, health: badge, siteLinkNote: null } as never} />
+        <GatewayRow
+          g={
+            {
+              id: "b",
+              name: "gw-active",
+              status: "active",
+              isHub: false,
+              lastSeenAt: null,
+              health: badge,
+              siteLinkNote: null,
+            } as never
+          }
+        />
       </ul>,
     );
     expect(screen.getByText(badge!.label)).toBeTruthy();
@@ -114,8 +171,14 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
   // function the component calls — so a fixture cannot drift from production. A hardcoded "posture blocked"
   // would test the restatement, which is WF-S13-3's class exactly.
   it("Devices: the rule holds on the surface that always had it, via a DIFFERENT badge producer", async () => {
-    const posture = postureBadge({ health_state: "noncompliant", health_blocked: true } as never);
-    expect(posture, "fixture must genuinely produce a badge, or the assertion below is vacuous").not.toBeNull();
+    const posture = postureBadge({
+      health_state: "noncompliant",
+      health_blocked: true,
+    } as never);
+    expect(
+      posture,
+      "fixture must genuinely produce a badge, or the assertion below is vacuous",
+    ).not.toBeNull();
 
     // THE REAL PAGE, not a stand-in. The first draft of this test rendered a three-line `DeviceRowProbe` that
     // re-encoded `status !== "revoked" && <badge>` — which would have PASSED FOREVER even if Devices.tsx lost

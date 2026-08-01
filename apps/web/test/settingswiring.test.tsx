@@ -25,19 +25,37 @@ let edition: "open" | "enterprise" = "enterprise";
 let ovpnEnabled = false;
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+        if (path === "/api/v1/auth/me")
+          return { data: { id: "u1", email: "a@b.c", email_verified: true } };
         if (path === "/api/v1/meta") return { data: { edition } };
         if (path === "/api/v1/organizations") {
-          return { data: [{ id: "org-1", name: "Acme", ovpn_enabled: ovpnEnabled, mfa_required: false }] };
+          return {
+            data: [
+              {
+                id: "org-1",
+                name: "Acme",
+                ovpn_enabled: ovpnEnabled,
+                mfa_required: false,
+              },
+            ],
+          };
         }
-        if (path.endsWith("/members")) return { data: [{ user_id: "u1", role: "owner", email_verified: true }] };
-        if (path.includes("/sso/")) return { data: undefined, error: { error: { code: "sso_not_configured" } } };
+        if (path.endsWith("/members"))
+          return {
+            data: [{ user_id: "u1", role: "owner", email_verified: true }],
+          };
+        if (path.includes("/sso/"))
+          return {
+            data: undefined,
+            error: { error: { code: "sso_not_configured" } },
+          };
         return { data: [] };
       }),
       PUT: vi.fn(async () => ({ data: { enabled: true } })),
@@ -51,7 +69,8 @@ import Settings from "../src/pages/Settings";
 import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider — stubbing puts the TEST's role gate under assertion, not the PRODUCT's.
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   edition = "enterprise";
@@ -65,14 +84,24 @@ describe("Settings — wiring: the control must reflect the ORG'S state, not a d
   it("an org with OpenVPN OFF offers ENABLE", async () => {
     ovpnEnabled = false;
     withAuth(<Settings />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Enable OpenVPN" })).toBeTruthy());
-    expect(screen.queryByRole("button", { name: "Disable OpenVPN" })).toBeNull();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Enable OpenVPN" }),
+      ).toBeTruthy(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Disable OpenVPN" }),
+    ).toBeNull();
   });
 
   it("an org with OpenVPN ON offers DISABLE — the inverse, so a default cannot satisfy both", async () => {
     ovpnEnabled = true;
     withAuth(<Settings />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disable OpenVPN" })).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Disable OpenVPN" }),
+      ).toBeTruthy(),
+    );
     expect(screen.queryByRole("button", { name: "Enable OpenVPN" })).toBeNull();
   });
 });
@@ -93,7 +122,9 @@ describe("Settings — wiring: edition gating (destination: `license`)", () => {
     edition = "enterprise";
     withAuth(<Settings />);
     // The negative half. Without it, "hide everything always" satisfies the test above.
-    await waitFor(() => expect(screen.queryAllByText(/Entra|Google/i).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.queryAllByText(/Entra|Google/i).length).toBeGreaterThan(0),
+    );
   });
 });
 
@@ -102,16 +133,24 @@ describe("Settings — failure path", () => {
   // every enforcement control disabled on an org that has them ENABLED. The org load is the one that gates the
   // whole page, so its failure must be SAID, never absorbed into a page of default-looking toggles.
   it("a failed organization load is surfaced, not rendered as a page of defaults", async () => {
-    const api = (await import("../src/lib/api")).api as unknown as { GET: ReturnType<typeof vi.fn> };
+    const api = (await import("../src/lib/api")).api as unknown as {
+      GET: ReturnType<typeof vi.fn>;
+    };
     api.GET.mockImplementation(async (path: string) => {
-      if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+      if (path === "/api/v1/auth/me")
+        return { data: { id: "u1", email: "a@b.c", email_verified: true } };
       if (path === "/api/v1/meta") return { data: { edition: "enterprise" } };
-      if (path === "/api/v1/organizations") return { data: undefined, error: { error: { code: "boom" } } };
+      if (path === "/api/v1/organizations")
+        return { data: undefined, error: { error: { code: "boom" } } };
       return { data: [] };
     });
 
     withAuth(<Settings />);
-    await waitFor(() => expect(screen.getByText("Could not load your organizations.")).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByText("Could not load your organizations."),
+      ).toBeTruthy(),
+    );
     // And no enforcement control may be offered against an org that was never loaded.
     expect(screen.queryByRole("button", { name: /OpenVPN/ })).toBeNull();
   });

@@ -63,10 +63,17 @@ export function MfaSettings() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { data, error } = await api.POST("/api/v1/auth/mfa/enroll/confirm", { body: { code } });
+    const { data, error } = await api.POST("/api/v1/auth/mfa/enroll/confirm", {
+      body: { code },
+    });
     setBusy(false);
     if (error || !data) {
-      setError(apiErrorMessage(error, "That code is not valid — check your authenticator app and try again."));
+      setError(
+        apiErrorMessage(
+          error,
+          "That code is not valid — check your authenticator app and try again.",
+        ),
+      );
       return;
     }
     setRecovery(data.recovery_codes);
@@ -86,7 +93,9 @@ export function MfaSettings() {
     setBusy(false);
     setConfirmDisable(false);
     if (error) {
-      setError(apiErrorMessage(error, "Could not turn off two-factor authentication."));
+      setError(
+        apiErrorMessage(error, "Could not turn off two-factor authentication."),
+      );
       return;
     }
     void refresh();
@@ -95,12 +104,14 @@ export function MfaSettings() {
   return (
     <section className="rounded-xl border border-ink-700 bg-ink-800/40 p-5">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-slate-300">Two-factor authentication</h2>
+        <h2 className="text-sm font-semibold text-slate-300">
+          Two-factor authentication
+        </h2>
         {enrolled === true && <StatusDot tone="on" />}
       </div>
       <p className="mt-1 text-xs text-slate-400">
-        A time-based one-time code (TOTP) from an authenticator app, required at sign-in. Available on every
-        plan.
+        A time-based one-time code (TOTP) from an authenticator app, required at
+        sign-in. Available on every plan.
       </p>
 
       {error && (
@@ -109,7 +120,9 @@ export function MfaSettings() {
         </div>
       )}
 
-      {enrolled === null && <p className="mt-4 text-xs text-slate-500">Loading…</p>}
+      {enrolled === null && (
+        <p className="mt-4 text-xs text-slate-500">Loading…</p>
+      )}
 
       {enrolled === false && phase === "idle" && (
         <Button className="mt-4" onClick={start} disabled={busy}>
@@ -120,27 +133,44 @@ export function MfaSettings() {
       {phase === "enrolling" && (
         <div className="mt-4 space-y-4">
           <p className="text-xs text-slate-400">
-            Scan this with your authenticator app, then enter the 6-digit code it shows to finish.
+            Scan this with your authenticator app, then enter the 6-digit code
+            it shows to finish.
           </p>
           <div className="inline-block rounded-lg bg-white p-3">
             <QRCodeSVG value={otpauth} size={168} />
           </div>
           <div>
-            <button type="button" className="text-xs text-slate-400 underline hover:text-slate-200" onClick={() => setShowKey((v) => !v)}>
+            <button
+              type="button"
+              className="text-xs text-slate-400 underline hover:text-slate-200"
+              onClick={() => setShowKey((v) => !v)}
+            >
               {showKey ? "Hide manual key" : "Can’t scan? Enter a key manually"}
             </button>
             {showKey && (
-              <pre className="mt-2 select-all rounded-md bg-ink-950 p-2 font-mono text-xs text-slate-300">{manualKey}</pre>
+              <pre className="mt-2 select-all rounded-md bg-ink-950 p-2 font-mono text-xs text-slate-300">
+                {manualKey}
+              </pre>
             )}
           </div>
           <form onSubmit={confirm} className="flex items-end gap-2">
             <Field label="6-digit code">
-              <Input value={code} onChange={(e) => setCode(e.target.value)} required autoComplete="one-time-code" inputMode="numeric" />
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                autoComplete="one-time-code"
+                inputMode="numeric"
+              />
             </Field>
             <Button type="submit" disabled={busy}>
               {busy ? "Verifying…" : "Verify & turn on"}
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setPhase("idle")}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setPhase("idle")}
+            >
               Cancel
             </Button>
           </form>
@@ -149,7 +179,9 @@ export function MfaSettings() {
 
       {enrolled === true && phase === "idle" && (
         <div className="mt-4 space-y-3">
-          <p className="text-xs text-emerald-400">Two-factor authentication is on.</p>
+          <p className="text-xs text-emerald-400">
+            Two-factor authentication is on.
+          </p>
           {remaining !== undefined && remaining <= 3 && (
             <p className="text-xs text-warn">
               {remaining === 0
@@ -163,7 +195,9 @@ export function MfaSettings() {
             </Button>
           ) : (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Turn off 2FA? Your account will rely on your password alone.</span>
+              <span className="text-xs text-slate-400">
+                Turn off 2FA? Your account will rely on your password alone.
+              </span>
               <Button variant="ghost" onClick={disable} disabled={busy}>
                 {busy ? "Turning off…" : "Confirm"}
               </Button>

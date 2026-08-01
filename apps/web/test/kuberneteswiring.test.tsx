@@ -18,27 +18,47 @@ import { render, screen, waitFor, cleanup } from "@testing-library/react";
 afterEach(cleanup); // docs/laws.md — no globals/setup file, so auto-cleanup never registers
 
 let clustersFail = false;
-const CLUSTERS = [{ id: "c1", name: "prod-cluster", site_id: "s1", managed_by_operator: true }];
+const CLUSTERS = [
+  { id: "c1", name: "prod-cluster", site_id: "s1", managed_by_operator: true },
+];
 const SERVICES = [
-  { id: "sv1", cluster_id: "c1", namespace: "default", name: "api", managed_by_operator: true, vip: "100.64.0.5" },
+  {
+    id: "sv1",
+    cluster_id: "c1",
+    namespace: "default",
+    name: "api",
+    managed_by_operator: true,
+    vip: "100.64.0.5",
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
-        if (path.endsWith("/members")) return { data: [{ user_id: "u1", role: "admin", email_verified: true }] };
+        if (path === "/api/v1/auth/me")
+          return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path.endsWith("/members"))
+          return {
+            data: [{ user_id: "u1", role: "admin", email_verified: true }],
+          };
         if (path.endsWith("/k8s/clusters")) {
-          if (clustersFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          if (clustersFail)
+            return {
+              data: undefined,
+              error: { error: { code: "boom", message: "nope" } },
+            };
           return { data: CLUSTERS };
         }
         if (path.endsWith("/k8s/services")) return { data: SERVICES };
-        if (path.endsWith("/sites")) return { data: [{ id: "s1", name: "prod-site" }] };
+        if (path.endsWith("/sites"))
+          return { data: [{ id: "s1", name: "prod-site" }] };
         return { data: [] };
       }),
       POST: vi.fn(async () => ({ data: {} })),
@@ -54,7 +74,8 @@ import { AuthProvider } from "../src/lib/auth";
 // The REAL AuthProvider, not a stub. Kubernetes reads `useAuth()` for its role/verification gate, and stubbing
 // the context would put the test's copy of the gate under assertion instead of the product's — the
 // fixture-restates-production trap this branch already caught once (docs/laws.md).
-const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+const withAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
   clustersFail = false;
@@ -83,7 +104,11 @@ const CONTRACT_KINDS = [
 describe("health-kind mirror census — WF-S11-7's own check", () => {
   it("EVERY degraded kind the contract can emit reaches a renderer with a non-empty label", () => {
     const unrendered = CONTRACT_KINDS.filter(
-      (k) => policyHealthBadge({ policy_degraded: true, policy_degraded_kind: k } as never) === null,
+      (k) =>
+        policyHealthBadge({
+          policy_degraded: true,
+          policy_degraded_kind: k,
+        } as never) === null,
     );
     expect(
       unrendered,
@@ -94,7 +119,12 @@ describe("health-kind mirror census — WF-S11-7's own check", () => {
   it("`healthy` renders no badge — absence of degradation is not a badge", () => {
     // The negative half. Without it the census above is satisfiable by returning a badge for everything,
     // which would put a "degraded" label on healthy gateways — the inverse defect, equally wrong.
-    expect(policyHealthBadge({ policy_degraded: false, policy_degraded_kind: "healthy" } as never)).toBeNull();
+    expect(
+      policyHealthBadge({
+        policy_degraded: false,
+        policy_degraded_kind: "healthy",
+      } as never),
+    ).toBeNull();
   });
 });
 
@@ -108,7 +138,9 @@ describe("Kubernetes — wiring", () => {
     // Queried by ACCESSIBLE NAME (the aria-label carries the full guidance), not by the visible fragment.
     // The first draft used getAllByText("edit the CR") and raced the render — it passed locally and failed in
     // the gate's container. Rule 1 asked for the accessible name anyway; the gate is what made me use it.
-    await waitFor(() => screen.getAllByLabelText(/managed by the GitOps operator/i));
+    await waitFor(() =>
+      screen.getAllByLabelText(/managed by the GitOps operator/i),
+    );
 
     // The control is absent BY ROLE — the strongest form of this assertion.
     expect(screen.queryByRole("button", { name: "Unexpose" })).toBeNull();
@@ -123,6 +155,8 @@ describe("Kubernetes — failure path", () => {
     clustersFail = true;
     withAuth(<Kubernetes />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy(),
+    );
   });
 });

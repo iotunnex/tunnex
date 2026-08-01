@@ -57,18 +57,28 @@ export function DesktopSettings() {
   return (
     <Card className="mt-6">
       <h2 className="text-sm font-semibold text-slate-300">This device</h2>
-      <p className="mt-1 text-xs text-slate-500">Desktop client — server connection and session.</p>
+      <p className="mt-1 text-xs text-slate-500">
+        Desktop client — server connection and session.
+      </p>
 
       <form className="mt-4" onSubmit={changeServer}>
         <Field label="Tenant server">
-          <Input value={next} onChange={(e) => setNext(e.target.value)} placeholder="https://vpn.example.com" spellCheck={false} />
+          <Input
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            placeholder="https://vpn.example.com"
+            spellCheck={false}
+          />
         </Field>
         <p className="mt-1 text-xs text-slate-500">
-          Changing the server signs you out of the current one and clears its tunnel profile — a credential is never
-          reused across servers.
+          Changing the server signs you out of the current one and clears its
+          tunnel profile — a credential is never reused across servers.
         </p>
         <div className="mt-3">
-          <Button type="submit" disabled={busy !== "idle" || !next || next === server}>
+          <Button
+            type="submit"
+            disabled={busy !== "idle" || !next || next === server}
+          >
             {busy === "changing" ? "Switching…" : "Change server"}
           </Button>
         </div>
@@ -78,7 +88,10 @@ export function DesktopSettings() {
         <Button variant="ghost" onClick={signOut} disabled={busy !== "idle"}>
           {busy === "signout" ? "Signing out…" : "Sign out"}
         </Button>
-        <p className="mt-1 text-xs text-slate-500">Disconnects the tunnel, revokes this device, and clears the saved credential.</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Disconnects the tunnel, revokes this device, and clears the saved
+          credential.
+        </p>
       </div>
 
       <ErrorText>{error}</ErrorText>
@@ -88,7 +101,9 @@ export function DesktopSettings() {
 
 function friendly(msg?: string): string {
   const m = msg ?? "Could not change the server.";
-  if (m.includes("invalid server url")) return "That doesn't look like a valid server URL.";
-  if (m.includes("unreachable") || m.includes("healthz") || m.includes("fetch")) return "Couldn't reach that server. Check the URL and try again.";
+  if (m.includes("invalid server url"))
+    return "That doesn't look like a valid server URL.";
+  if (m.includes("unreachable") || m.includes("healthz") || m.includes("fetch"))
+    return "Couldn't reach that server. Check the URL and try again.";
   return m;
 }

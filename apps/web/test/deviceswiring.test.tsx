@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  within,
+} from "@testing-library/react";
 
 // SLICE 2 — Devices. It is the REFERENCE IMPLEMENTATION for revoked-suppression: the surface that always had
 // the guard (`d.status !== "revoked" && …`) while Gateways.tsx lacked it (WF-S11-10) and Sites.tsx still lacked
@@ -39,19 +45,35 @@ const DEVICES = [
 ];
 
 vi.mock("../src/lib/api", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  const actual =
+    await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
   return {
     ...actual,
     apiErrorMessage: (_e: unknown, fallback: string) => fallback,
     api: {
       GET: vi.fn(async (path: string) => {
-        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path === "/api/v1/organizations")
+          return { data: [{ id: "org-1", name: "Acme" }] };
         if (path.endsWith("/devices")) {
           // THE FAILURE PATH under test: the load REFUSES. The page must not render this as "no devices".
-          if (devicesFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          if (devicesFail)
+            return {
+              data: undefined,
+              error: { error: { code: "boom", message: "nope" } },
+            };
           return { data: DEVICES };
         }
-        if (path.endsWith("/nodes")) return { data: [{ id: "n-1", name: "gw", status: "active", agent_version: "0.1.0" }] };
+        if (path.endsWith("/nodes"))
+          return {
+            data: [
+              {
+                id: "n-1",
+                name: "gw",
+                status: "active",
+                agent_version: "0.1.0",
+              },
+            ],
+          };
         return { data: [] };
       }),
       POST: vi.fn(async () => ({ data: {} })),
@@ -65,25 +87,81 @@ beforeEach(() => {
   devicesFail = false;
 });
 
+// ⚠ RE-POINTED AT ROLES IN S14.3 SLICE A, and the re-pointing is half the slice.
+//
+// These assertions used to match device names as FREE TEXT, because until slice A there was no `<table>`
+// anywhere in the app and therefore no `role="row"` or `role="cell"` to ask for. The primitive's absence had
+// made the TESTS weaker, not only the UI — and a primitive that ships while its consumers keep the workaround
+// has only half landed (docs/laws.md).
+//
+// What changes materially: `getByText("old-laptop")` passes if that string appears ANYWHERE — a heading, a
+// tooltip, a modal, a toast. `within(row).getByText(...)` passes only if it is in THAT DEVICE'S ROW. The old
+// query could not tell "the revoked device shows a posture badge" from "a posture badge exists on the page".
+
+/** The row for a device, found by its name — the query that was impossible before slice A. */
+function rowFor(name: string): HTMLElement {
+  const table = screen.getByRole("table", { name: "Devices" });
+  const row = within(table)
+    .getAllByRole("row")
+    .find((r) => within(r).queryByText(name));
+  if (!row) throw new Error(`no row for device "${name}"`);
+  return row;
+}
+
 describe("Devices — wiring", () => {
   it("a REVOKED device carries no posture badge and no re-export instruction; an active one carries both", async () => {
     render(<Devices />);
-    await waitFor(() => expect(screen.getByText("old-laptop")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
+    );
 
     // Two devices are posture-blocked and both need re-export. Only the ACTIVE one may say so — the revoked
     // row's badges would describe a device that is no longer meant to work, and "re-export needed" would be an
     // instruction to act on a device that cannot come back.
-    expect(screen.getAllByText("posture blocked")).toHaveLength(1);
-    expect(screen.getAllByText("re-export needed")).toHaveLength(1);
+    //
+    // ASSERTED PER ROW, which is the upgrade. The old page-wide count would have passed even if both badges
+    // sat on the WRONG device, as long as there was one of each.
+    expect(
+      within(rowFor("work-laptop")).queryByText("posture blocked"),
+    ).toBeTruthy();
+    expect(
+      within(rowFor("work-laptop")).queryByText("re-export needed"),
+    ).toBeTruthy();
+    expect(
+      within(rowFor("old-laptop")).queryByText("posture blocked"),
+    ).toBeNull();
+    expect(
+      within(rowFor("old-laptop")).queryByText("re-export needed"),
+    ).toBeNull();
   });
 
   it("both devices are listed — suppression hides BADGES, never the row itself", async () => {
     render(<Devices />);
-    await waitFor(() => expect(screen.getByText("old-laptop")).toBeTruthy());
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Devices" }),
+    );
     // The distinction matters: an operator must still see a revoked device exists. Suppressing the row would
     // trade a wrong badge for a missing fact.
-    expect(screen.getByText("work-laptop")).toBeTruthy();
-    expect(screen.getByText("10.99.0.9")).toBeTruthy();
+    //
+    // 3 rows = 1 header + 2 devices. Counting rows is a stronger claim than "these two strings appear": it
+    // also fails if a THIRD device were rendered, which text matching could never notice.
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    // The address is asserted ON ITS OWN DEVICE'S ROW. Worth recording that this line caught a real error
+    // WHILE BEING WRITTEN: it was first written against `work-laptop`, and the per-row query rejected it
+    // because 10.99.0.9 belongs to `old-laptop`. The ORIGINAL page-wide `getByText("10.99.0.9")` could not
+    // have noticed — it only ever asked whether the string existed somewhere on the screen, which is exactly
+    // the class of mistake a device list must not make: an address attributed to the wrong machine.
+    expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
+  });
+
+  it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
+    render(<Devices />);
+    await waitFor(() =>
+      expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
+    );
+    for (const h of ["Device", "Address", "State", "Posture", "Actions"]) {
+      expect(screen.getByRole("columnheader", { name: h }), h).toBeTruthy();
+    }
   });
 });
 
@@ -95,19 +173,39 @@ describe("Devices — failure path", () => {
     devicesFail = true;
     render(<Devices />);
 
-    await waitFor(() => expect(screen.getByText("Could not load devices.")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Could not load devices.")).toBeTruthy(),
+    );
   });
 
   it("an empty-but-successful load says so in words", async () => {
     devicesFail = false;
     DEVICES.length = 0; // an org with no devices — a FACT, not a failure
     render(<Devices />);
-    await waitFor(() => expect(screen.getByText("No devices yet.")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("No devices yet.")).toBeTruthy(),
+    );
     // And with no failure, no error line is present — the two states must stay distinguishable.
     expect(screen.queryByText("Could not load devices.")).toBeNull();
     DEVICES.push(
-      { id: "d-revoked", name: "old-laptop", status: "revoked", assigned_ip: "10.99.0.9", health_state: "noncompliant", health_blocked: true, needs_reexport: true },
-      { id: "d-active", name: "work-laptop", status: "active", assigned_ip: "10.99.0.3", health_state: "noncompliant", health_blocked: true, needs_reexport: true },
+      {
+        id: "d-revoked",
+        name: "old-laptop",
+        status: "revoked",
+        assigned_ip: "10.99.0.9",
+        health_state: "noncompliant",
+        health_blocked: true,
+        needs_reexport: true,
+      },
+      {
+        id: "d-active",
+        name: "work-laptop",
+        status: "active",
+        assigned_ip: "10.99.0.3",
+        health_state: "noncompliant",
+        health_blocked: true,
+        needs_reexport: true,
+      },
     );
   });
 });
