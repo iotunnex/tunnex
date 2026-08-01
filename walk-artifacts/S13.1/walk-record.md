@@ -544,3 +544,46 @@ remaining leg was checked against it:**
 **Nothing depends on a state the product cannot create.** One second-order effect noted and dismissed:
 `azure-site` now has one live gateway instead of two, which changes site-link health rendering — no leg asserts
 on it.
+
+
+## B′'s FOUR PEERS — IDENTIFIED, benign, and they change the staging
+
+Cross-referenced by public key. All four are §A's devices, still `active` on B′:
+
+| peer key | device | address |
+|---|---|---|
+| `l+JwAP…` | `keeps` | 10.99.0.3 |
+| `BywML/…` | `contended` | 10.99.0.4 |
+| `su52Bj…` | `static-keeps` | 10.99.0.5 |
+| `7YINAv…` | `decoy-1` | 10.99.0.2 |
+
+**`latest-handshake 0` is explained:** B′'s agent was restarted three times overnight, so `wg0` was recreated and
+no client has dialled in since. The peers are configured correctly and nobody connected. **Nothing unexplained —
+no finding.**
+
+**But they would have broken §B:** revoking B′ at step 9 would cascade SEVEN devices, not three, and with
+`.2`-`.5` occupied a restore that cannot reclaim allocates fresh — **WF-S13-4's exact trigger**, which §B's
+staging note explicitly set out to avoid ("stage no decoy, so every device reclaims"). Revoked via the UI (a
+product action) before staging; their §A evidence is already recorded above.
+
+## VERIFIED-CORRECT: a re-enrolled gateway keeps its WireGuard key, and nothing resolves identity from it
+
+The revoked and active `aws-gw-2` rows share `wg_public_key LYO7iCch…`; both `aws-gw-1` rows share `zJYoUxPY…`.
+That is `loadOrCreateWGKey` persisting the data-plane identity across re-enrolment.
+
+**Checked rather than assumed, because two rows indistinguishable at the WireGuard layer WOULD be a real
+collision:**
+
+- **The only lookup BY pubkey is an EXISTS guard** (`nodes.sql:157`, `UpsertNodePeerStatus`) that asserts the key
+  belongs to *some other node in the org*. It does not resolve a node, and the row is stored keyed by
+  `(node_id, public_key)`.
+- **Every other use maps node-id → key**, never the reverse (`service.go:1159`, `:1785`, `failover.go:218`).
+- **All three consumers of `ListNodePeerStatusForOrg`** resolve by node id. **No reverse map keyed on a pubkey
+  exists in the package.**
+
+**Conclusion: verified correct.** A gateway re-enrolled on the same host keeps its data-plane key and gets a new
+control-plane identity, and no code path can confuse the old row with the new one.
+
+**One residual noted, not fixed:** that EXISTS guard has **no `status` filter**, so a REVOKED node's pubkey still
+admits peer telemetry. Harmless today (a revoked gateway neither reports nor is reported), and it is the same
+`active`-vs-usable shape as WF-S13-1. **Trigger: the next change to `node_peer_status` ingestion.**

@@ -165,6 +165,35 @@ defect's sentence are about different subjects, the fold is open however good th
 three passed. It cannot ask this one. **Sweeps verify presence; only reading the defect beside the remedy
 verifies closure.**
 
+## ONE-TRUTH — 6th instance (EPIC 13, 2026-08-01): TWO CLIENTS, ONE SERVER TRUTH, NEITHER CONSUMING IT
+
+**The server computes the correct predicate. Both clients independently reimplement a WRONG one and neither
+consumes the server's.** This is not a UI gap and the fix is not a dropdown.
+
+| layer | the predicate |
+|---|---|
+| **API — the truth** | a gateway is usable iff `endpoint != "" && wg_public_key != ""` (`devices/service.go:72`), enforced with `409 node_not_ready`. `Create` accepts `in.NodeID`, so choosing has ALWAYS been supported |
+| **web** | `nodepick.ts:30` — `selectableNodes(nodes)[0]`, filtering on `status == "active"` |
+| **CLI** | `device.go:43-52` — iterate, take the first `status == "active"`, `break`. **No flag exposes the choice** |
+
+**Two independent reimplementations of the same wrong test.** `status='active'` is a liveness claim; usability is
+`endpoint AND key`. A gateway can be active and unusable — `azure-gw` was, for six days — and both clients
+routed every device creation to it, producing `node_not_ready`, an error naming the OPERATOR'S agent
+configuration for a defect in client selection.
+
+**THE FIX IS TO EXPOSE THE API'S PREDICATE AND CONSUME IT**, not to add a picker to one surface. A picker over the
+same wrong list still offers a dead gateway; consuming the server's predicate fixes both clients and the default.
+
+**WHY NO TEST ON EITHER SIDE COULD CATCH IT.** Each client is INTERNALLY CONSISTENT — the web's tests pass against
+the web's rule, the CLI's against the CLI's, and the server's against the server's. **The defect exists only in
+the relationship between them**, which is precisely what a duplication hides. Note the surface: `apps/cli` had NO
+CI job at all until S11 slice 1, and this is that same surface producing a second defect — but **this one is not
+a coverage gap.** More tests on either client would have confirmed the wrong rule faster.
+
+**Generalised:** when a server enforces a predicate and clients must anticipate it, the predicate is a SHARED
+TRUTH and belongs in the contract (a field, or the generated types), never re-derived per client. Two
+re-derivations agreeing by luck is not a property; two re-derivations agreeing WRONGLY is what shipped.
+
 ## Prior laws (lifted from decision docs — pointers)
 - **Fixture-fidelity law** (S8.2): a test double must not be more capable than the real substrate (the fake stripped `SiteLink` on read). Contrapositive (S8.3): when the kernel genuinely reports a field, PARSE and COMPARE it (keepalive), so convergence is real not fixtured.
 - **Four-word reconcile model** (S8.2): {atomic fetch, fail-static, full-sweep, keep-last-value} — any deviation is a finding.
