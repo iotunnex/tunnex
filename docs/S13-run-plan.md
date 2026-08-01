@@ -533,6 +533,34 @@ the direction that matters. Running it first costs one minute and leaves the 48 
 The clock does not start until that probe passes; otherwise the first hours of C-LEG-0 run against a bucket B7
 emptied.
 
+## §C's WINDOW CARRIES OTHER WORK — it is WALL-CLOCK, NOT ATTENTION (founder-ruled 2026-08-01)
+
+**48 hours of waiting is not 48 hours of working.** Everything below is local or CP-side, needs no rig, and
+costs zero wall-clock because it runs while the clock ticks:
+
+| item | needs the rig? | status |
+|---|---|---|
+| **the clock itself** (C-LEG-0) | the subject only, untouched | the point of the window |
+| **B5 — Legs 7 and 8** | **no**, entirely local | **MOVED HERE** from §B (founder-ruled) |
+| **pass 2** — the cascade path, migrations 0054-0064, all of Slice 7 | no | **founder's ruling when the clock is running**, not before |
+
+### B5 — MOVED INTO THIS WINDOW. Staged here so it is not remembered.
+
+Legs 7 and 8 need a LOCAL stack, an enrolled local agent, a proxy that kills the connection after the CP
+commits, and a state directory that refuses a write. **None of it touches the rig, so it cannot disturb §C.**
+
+**Both legs already have reds** — `TestPendingKeyIsPersistedBeforeAnySubmit`,
+`TestTheLOSTRESPONSECaseUsesTheFingerprintOnItsNEXTPass` (agent-side, in-process, via the fingerprint identity),
+`TestLostResponseDoesNotBrickTheGateway` (CP-side undelivered predicate), and
+`TestSaveFailureAfterCommitRETRIESRatherThanLosingTheIdentity` (via the `saveCredsFn` seam). **Those SUBSTITUTE
+and do not SATISFY** — what B5 buys that they cannot is the part they fake: a real connection dying mid-response
+and a real filesystem refusing a write.
+
+**KNOWN BLOCKER, diagnose before staging:** the local Postgres holds an agent CA encrypted under a different
+secret (`decrypt CA key: cipher: message authentication failed` across `nodes` and `agentca` tests). Local
+enrolment will fail until that is resolved. **It is a local-environment fault, not a product one** — the same
+tests pass in CI.
+
 ## §C PREREQUISITES — establish these BEFORE the clock, not on the day
 
 **1. THE RIG NEEDS A REBUILT AGENT IMAGE.** §C proves `identityWatchLoop`, which **does not exist** in the

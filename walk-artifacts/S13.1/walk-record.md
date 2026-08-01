@@ -1680,3 +1680,45 @@ because nothing would ever call it.
 **`b3-pending` (10.99.0.2) is STILL `pending`.** Disabling the gate does not retroactively approve the rows it
 created — which is the downgrade-releases-enforcement posture holding, and it is why step 11 could safely run
 after B3 rather than before it.
+
+
+# B2 — SATISFIED. The `cert_delivered` flip CAUGHT on the wire. (2026-08-01 08:11:28Z, [agent])
+
+**Subject: A1′ (`aws-gw-1`, `019fbb50…`) — the only re-keyable node.** B′ is revoked, so D3 refuses it; `k8s`
+has `key_recorded = f`, so proof of possession is structurally impossible for it. Run **BEFORE §C staging**
+([founder] correction) so the re-key cannot disturb §C's clock.
+
+**Prospective vacuity check FIRST, before the poller was written:** does this path produce the event?
+`RekeyNode` (`nodes.sql:299`) sets `cert_delivered = false, cert_delivered_at = NULL` **in the same statement**
+that rotates the serial, called from `rekey.go:222`; `nodes.sql:49` sets it back on the first authenticated
+call. **Yes — a PoP re-key produces the flip.** A restart of an expired agent forces exactly that.
+
+## The measurement, 200 ms sampling on the CP itself
+
+```
+08:11:22.256   cert_delivered=t   serial 4acbcaf2…      old certificate, delivered
+08:11:28.849   cert_delivered=f   serial e84f6fc5…      RekeyNode cleared it, NEW serial
+08:11:29.121   cert_delivered=t   serial e84f6fc5…      first authenticated call set it
+```
+
+**`f` → `t` observed, on a new serial, with the node id and site binding unchanged.** The agent's own log:
+`agent_rekeyed old_cert_serial=4acbcaf2… "recovered by proof of possession — same node, same identity, new
+key"`. **Fifth independent D3 confirmation.**
+
+## THE WINDOW IS 272 ms — AND THAT NUMBER CORRECTS MY OWN CORRECTION
+
+**I estimated ~2 seconds**, from `agent_rekeyed 06:22:17.246` → `agent_ready 06:22:19.262`, and chose 200 ms
+against that. **The true window is `08:11:28.849` → `08:11:29.121` = 272 ms.**
+
+**So the margin was ~1 sample, not the ~10 I believed.** A window of 150 ms would have been missed and I would
+have had no way to tell that from a genuine absence.
+
+**The fifth mechanism's diagnostic says READ THE LIFETIME OUT OF THE CODE, NOT AN ESTIMATE. I read it out of the
+LOG — which is still an estimate**, and it was wrong by 7×, in the dangerous direction. `agent_ready` is not the
+bound; the bound is *RekeyNode commits* → *the next authenticated request lands*, and nothing in the log marks
+either edge directly.
+
+**The sharpened rule: when the two edges of a window are not both directly logged, the sampling interval must be
+chosen against the SHORTEST plausible bound, not the most visible one.** The original 7-second poller had a
+~4% chance per attempt of landing inside 272 ms — it was not merely coarse, it was hopeless, and twelve green
+samples said nothing at all.
