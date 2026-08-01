@@ -470,3 +470,56 @@ in which this can happen, and it happened.
 **§A could not test this.** Its Leg 1 asserted "`site_id` unchanged across recovery" against a node whose
 `site_id` was NULL — trivially true, therefore untested, and it is one of the epic's headline claims. **B1 is the
 first time the claim was made against a node that had something to lose.**
+
+## WF-S13-1 — WIRE INSTANCE, and it BLOCKED DEVICE CREATION (2026-08-01 03:2x)
+
+**Registered on a code read in §A with the trigger *"the first report of a device homed on a dead gateway."*
+This is that report, and it is worse than the trigger anticipated: the device could not be created at all.**
+
+Creating `b3-pending` from the UI failed with:
+
+> *the node has not reported its endpoint/key yet; ensure the agent is enrolled and TUNNEX_NODE_ENDPOINT is set*
+
+**The message blames the operator's agent configuration. The cause is a stale row the UI still offers.**
+
+| id | name | status | endpoint | key_recorded | last_seen |
+|---|---|---|---|---|---|
+| `019f8e46…` | **azure-gw** | **active** | *(empty)* | **f** | **2026-07-25** |
+| `019fa205…` | k8s | active | 52.190.140.51:51820 | **f** | now |
+| `019fb892…` | aws-gw-2 | active | 15.135.130.96:51820 | t | now |
+| `019fbb50…` | aws-gw-1 | active | 15.134.60.253:51820 | t | now |
+
+`azure-gw` is a leftover from a VM agent that no longer exists — the `k8s` row serves that host. It has been dead
+six days, has never reported an endpoint, and **because `status='active'` it remains a selectable device target.**
+That is WF-S13-1's sentence verbatim: **`active` is the wrong test.** Liveness and usability are different
+questions, and device placement asks only the first.
+
+### WALK SCAFFOLDING — a hand-written status change, recorded as such
+
+```sql
+UPDATE nodes SET status='revoked', revoked_at=now() WHERE id='019f8e46-…' AND status='active';   -- UPDATE 1
+```
+
+**This is NOT a product action and must not be read as one.** `nodes` has no `revoked_cause` column (that is on
+`devices`), so this is a bare status write. `devices_on_stale_row = 0` was confirmed FIRST, so nothing cascaded
+and nothing B3 later measures was disturbed.
+
+## §C's NAMED SUBJECT CANNOT SATISFY ITS OWN ACCEPTANCE LEG — found before the clock, not during
+
+**`k8s` has `key_recorded = f`.** It is live and reporting, but the control plane holds NO public key for it — so
+it **cannot recover by proof of possession at all**. Re-key would refuse it and the agent would correctly print
+*"enrolled before the control plane recorded agent public keys."*
+
+**§C names `k8s` as its subject.** C-LEG-0 would therefore fail for a reason unrelated to `identityWatchLoop`,
+after burning 48 hours. Only `aws-gw-2` and `aws-gw-1` have recorded keys, and both are §B's subjects — which is
+precisely why `k8s` was chosen.
+
+**HELD FOR RULING, two options that differ materially:**
+
+1. **Re-enrol `k8s`** so it gains a recorded key — creates a NEW node row, orphans the `k8s-site` binding, needs
+   the Helm image swap already planned. Cleanest subject, most setup.
+2. **Run §C on `aws-gw-1` after §B completes** — it has a recorded key, nothing else needs it once §B is done, and
+   it is the box whose real expiry opened EPIC 13. Needs its agent image rebuilt to carry `fa35e63`+.
+
+**Recommendation: option 2** — fewer moving parts, and the subject is the original incident. It changes §C's
+written staging, so it is a ruling, not a fold.
