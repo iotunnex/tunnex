@@ -228,7 +228,7 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
   await expect(page.getByText(token)).toHaveCount(0);
 
   // Audit: the issuance row exists and is secret-free (raw token nowhere on page).
-  await page.getByRole("link", { name: "Audit log" }).click();
+  await page.getByRole("link", { name: "Audit Log" }).click();
   await expect(page.getByText("node.token_issued")).toBeVisible();
   await expect(page.getByText(token)).toHaveCount(0);
   // RECORD (walk expects a fingerprint in the row): capture what details actually show.

@@ -24,7 +24,7 @@ async function loginAs(page: Page, who: { email: string; pass: string }) {
   await page.getByLabel("Password").fill(who.pass);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Users" }).click();
+  await page.getByRole("link", { name: "Users & Roles" }).click();
   await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
 }
 
@@ -163,7 +163,7 @@ test("a role change in the UI appears on the dashboard activity feed", async ({
     const memberRow = page.getByRole("row").filter({ hasText: MEMBER.email });
     await memberRow.locator("select").selectOption("admin");
 
-    await page.getByRole("link", { name: "Dashboard" }).click();
+    await page.getByRole("link", { name: "Overview" }).click();
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(page.getByText("member.role_changed").first()).toBeVisible();
   } finally {

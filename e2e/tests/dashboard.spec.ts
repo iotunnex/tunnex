@@ -18,12 +18,12 @@ test("dashboard renders real counts for the seeded org", async ({ page }) => {
   await login(page);
   // (Org name is asserted in settings.spec, not here — the settings edit test
   // renames+reverts the shared demo org, so an exact-name check would race it.)
-  // The Members stat is a live count: the label sits directly under its value.
-  const membersLabel = page.getByText("Members", { exact: true });
-  await expect(membersLabel).toBeVisible();
-  await expect(
-    membersLabel.locator("xpath=preceding-sibling::div[1]"),
-  ).toHaveText(/^\d+$/);
+  // RE-POINTED IN S14.4. This read the value as "the div BEFORE the label" — true of the old card, false the
+  // moment the design put the icon+label row first. A stat card is now a NAMED GROUP, so the query survives
+  // any internal rearrangement instead of encoding one.
+  const members = page.getByRole("group", { name: "Members" });
+  await expect(members).toBeVisible();
+  await expect(members.locator("span.font-bold")).toHaveText(/^\d+$/);
   // Honest online label from S3.6 (not a fabricated "online" claim).
   await expect(page.getByText("Seen in last 3 min")).toBeVisible();
 });
@@ -84,13 +84,13 @@ test("the reserved status-green appears only on the live liveness tile", async (
   await login(page);
 
   const onlineValue = page
-    .getByText("Seen in last 3 min")
-    .locator("xpath=preceding-sibling::div[1]");
+    .getByRole("group", { name: "Seen in last 3 min" })
+    .locator("span.font-bold");
   await expect(onlineValue).toHaveText("2");
   await expect(onlineValue).toHaveClass(/text-ok/);
   // The other tiles are neutral, never green — green is a status color, not brand.
   const membersValue = page
-    .getByText("Members", { exact: true })
-    .locator("xpath=preceding-sibling::div[1]");
+    .getByRole("group", { name: "Members" })
+    .locator("span.font-bold");
   await expect(membersValue).not.toHaveClass(/text-ok/);
 });

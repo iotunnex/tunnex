@@ -807,7 +807,21 @@ function Stat({
   return (
     // Composes GLASS rather than restating it — the divergence between this card and Panel is exactly what
     // produced a screenshot with glass stat cards above flat panels.
-    <div className={`${GLASS} flex flex-col gap-2 p-3.5`}>
+    // ⛔ role="group" + aria-label MAKES THE CARD ADDRESSABLE BY NAME.
+    //
+    // The e2e specs read a stat's value with `getByText('Members').locator('xpath=preceding-sibling::div[1]')`
+    // — the value happened to be the div BEFORE the label. The design puts the icon+label row first and the
+    // value second, so that xpath now points at nothing, and three specs failed on a layout change that was
+    // asked for.
+    //
+    // Re-pointing the xpath would preserve the coupling. A NAMED GROUP survives any internal rearrangement,
+    // which is the same fix the DataTable conversion needed and the same lesson: when adding semantics breaks
+    // a query, the query was weak (docs/laws.md).
+    <div
+      role="group"
+      aria-label={label}
+      className={`${GLASS} flex flex-col gap-2 p-3.5`}
+    >
       <div className="flex items-center gap-[9px]">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-inset border border-white/[.2] bg-white/[.09] text-ink-emphasis">
           <Icon name={icon} size={15} />

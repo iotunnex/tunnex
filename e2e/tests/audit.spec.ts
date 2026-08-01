@@ -15,7 +15,7 @@ async function login(page: Page) {
   await page.getByLabel("Password").fill(OWNER.pass);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Audit log" }).click();
+  await page.getByRole("link", { name: "Audit Log" }).click();
   await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
 }
 
