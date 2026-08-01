@@ -732,10 +732,10 @@ Bearer only — **no `X-Tunnex-CSRF` needed**: `csrfGuard` (`http/session.go:60`
 carries the session **cookie**, and a bearer curl carries none.
 
 ```bash
-ORG=<org uuid>
-NODE=019fb892-...            # B' (aws-gw-2) — the WHOLE POINT of the scaffolding
+API=http://104.45.208.156                                  # azure-cp, nginx host :80 -> container :8080
 TOKEN=$(jq -r .token ~/.config/tunnex/credential.json)     # or a browser session bearer
-API=https://<cp-host>
+ORG=$(curl -sS "$API/api/v1/organizations" -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id')
+NODE=019fb892-...            # B' (aws-gw-2) — the WHOLE POINT of the scaffolding
 
 for d in b3-pending b3-active b4-managed; do
   curl -sS -X POST "$API/api/v1/organizations/$ORG/devices" \
@@ -759,3 +759,48 @@ be free and the three should land low and contiguous.
 
 **Approval gate:** `device_approval` = `on` for staging (step 3), `off` after B3 (step 11). `b3-pending` is
 created and **left alone** — it is the only device in the walk whose value is in not being touched.
+
+## WF-S13-1 — THREE CONSEQUENCES NOW, and the third is the worst
+
+One finding, one sentence — ***`active` is the wrong test*** — and it has now produced three distinct failures on
+this walk. Recorded together because the *progression* is the argument for the slice, and no single instance
+makes it.
+
+| # | consequence | how it failed |
+|---|---|---|
+| **a** | **Blocked device creation** | `409 node_not_ready` — *"the node has not reported its endpoint/key yet; ensure the agent is enrolled and TUNNEX_NODE_ENDPOINT is set."* **The error blamed the operator's agent configuration.** The cause was a stale row the UI still offered |
+| **b** | **Made §B unstageable** | no shipped client sends `node_id`, so with the pick landing elsewhere there was **no product surface able to place the three devices on B′** at all |
+| **c** | **SILENTLY creates on the wrong gateway** | with `azure-gw` revoked the pick moves to `k8s`, which **passes** the readiness gate (`Endpoint` + `WgPublicKey`, `devices/service.go:230`) — so the create succeeds, on a gateway §B never chose, with nothing naming which gateway was used |
+
+**(c) is worse than (a), and the reason is the whole point.** (a) was loud: it stopped the walk, and the walk
+went and found the cause. (c) is silent — it would have staged B3 and B4 against the wrong subject and the legs
+would have "run", producing results about a gateway nobody meant to test. **A finding whose loud symptom is
+cleared while its cause survives has not improved; it has gone quiet.**
+
+Note the asymmetry that makes (c) possible: `key_recorded = f` disqualified `k8s` as §C's subject (no *agent*
+public key → PoP impossible) and does **not** disqualify it for device placement (which tests the *WireGuard*
+key). Two different keys, one row, two correct-but-opposite verdicts. Neither surface is wrong on its own.
+
+### THE SLICE IS A ONE-TRUTH FIX, NOT A DROPDOWN
+
+**Ruled 2026-08-01.** The temptation is to read (b) as "no picker" and ship a picker. That is the wrong shape and
+would leave the defect in place.
+
+**The API already knows which gateways can receive work.** `Create` validates `in.NodeID` through `GetOrgNode`
+plus the readiness gate — org-scoped, active, endpoint reported, WG key reported. **The clients do not consult
+that predicate; each reimplements a weaker one.** Web filters `status === "active"` (`nodepick.ts:30`); the CLI
+iterates and breaks on the first active row (`device.go:43-52`). Two independent reimplementations of a rule the
+server already owns, both wrong in the same direction, and **that is the one-truth violation** — not the missing
+UI control.
+
+**So the slice is: EXPOSE the API's predicate, and have both clients CONSUME it.** A visible gateway choice
+follows from that (defaulting to the current pick, so the common case is unchanged), but it is the *consequence*
+of the fix, not the fix. Shipping a dropdown over `status === "active"` would let an operator pick a gateway just
+as unusable as the one picked for them, and would leave the third consequence exactly where it is.
+
+**Refuted alternatives, kept so they are not re-proposed:** *mark-don't-narrow* (badging bad rows) helps neither
+instance — badging does not let an operator choose, and choosing is what both failures needed. *Make a node hub
+primary* is refuted by the finding itself — the rule is list order, not the hub set.
+
+**One-truth counter:** this is the epic's next instance and it is filed under the existing law
+(`docs/laws.md`), not as a new one.
