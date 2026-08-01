@@ -1729,3 +1729,55 @@ and partial reads must say so.**
 because the type will not let you. **This is the N-source version** — every source individually succeeded or
 failed, and the aggregate needs its own honesty field, because no single call's `failed` flag describes the
 whole.
+
+# ⭐ ABSENCE OF A RELATIONSHIP IS DRAWN AS ABSENCE OF AN EDGE — the render-floor rule, applied to a GRAPH (2026-08-02, S14.5)
+
+> ## **A DRAWN EDGE IN A FAILURE COLOUR CLAIMS A LINK WAS ATTEMPTED AND FAILED.**
+> ## **THAT IS A DIFFERENT FACT FROM NO LINK EXISTING, AND ONLY ONE OF THEM IS A FAULT.**
+
+The site mesh draws one node per site. A site with **no gateway bound** has no site-link at all — nothing has
+been attempted, nothing is broken, the operator simply has not bound a gateway yet.
+
+**THE TEMPTING RENDERING IS A RED OR DASHED EDGE**, because it is the more informative-looking one: it fills
+the diagram, it distinguishes that site from a healthy one, and it *looks* like the UI is telling you
+something. **It is telling you something false.** It puts an unconfigured site in the same visual class as a
+site whose tunnel is down, and sends an operator to debug a link that was never created.
+
+**THE HONEST RENDERING OF ABSENCE IS ABSENCE.** No edge.
+
+## ⛔ WHY THIS WILL RECUR, AND IN WHICH DIRECTION
+
+**EVERY REMAINING DIAGRAM FACES THE SAME CHOICE**, and the failure tone is *always* the more informative-looking
+option:
+
+| diagram | the absence | the tempting lie |
+|---|---|---|
+| access-flow (source → destination) | no rule connects them | a red "denied" edge |
+| address-space map | a range nobody has claimed | a "free" cell styled like a rejected one |
+| device fabric | a device that never enrolled | an offline spoke |
+| K8s service graph | a service with no backing endpoints | an unhealthy link |
+
+**In every row the honest rendering is quieter, and quiet reads as "the diagram is incomplete".** That
+pressure is the whole reason this needs to be a law rather than a preference.
+
+**THE DIAGNOSTIC: FOR EVERY EDGE YOU ARE ABOUT TO DRAW, ASK WHETHER THE SYSTEM EVER TRIED.** If it never
+tried, there is nothing to colour.
+
+**SIBLING:** the gap bin in `Histogram` — a window the agent did not observe is drawn as a GAP, never as a
+zero-height bar. Same rule, one dimension down: *we did not see* and *there were none* draw identically
+unless you make them not.
+
+# ⚠ WHEN ONE RULE REQUIRES REWRITING THE EXPRESSION OF ANOTHER (2026-08-02, S14.5 — one line, but the only case so far)
+
+**THE EM-DASH SWEEP HIT THE BANNED GLYPH ITSELF.** `hubsetview` rendered `"—"` as the placeholder for an
+absent metric — deliberately, under the honesty rule (*a member that is NOT reporting shows absent, NEVER
+`0`*). The COPY rule bans the em-dash as a placeholder glyph outright. **Both rules were right and they
+collided inside a single character.**
+
+**RESOLVED TO `n/a`, and the second reason is the better one:** an em-dash is not *read* as "we have no value"
+by anyone who has not been told that it means that. It reads as a dash, as a minus, or as **nothing at all**
+to a screen reader. **The honesty rule was not weakened by the copy rule — it was expressed better because of
+it.**
+
+**Recorded because it is the only instance so far where following one rule required rewriting how another one
+was expressed**, and the reflex in that moment is to claim an exemption for the older rule.
