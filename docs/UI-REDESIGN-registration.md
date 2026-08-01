@@ -7,9 +7,11 @@
 > Both items are **decide-items awaiting a commit-one**. Neither has been ruled. A future session reading this
 > file has a scope inventory and a question list — **it does not have permission to write code against it.**
 >
-> **Item A REVERSES A LOCKED DECISION** (`PLAN.md`: *"React + Vite + Tailwind SPA; same bundle reused by the
-> Electron renderer"*). It is recorded as a decide-item, **not as a ruling** — the founder wants the split
-> considered, and reversing a lock is exactly the kind of thing that must be argued on paper first.
+> **ITEM A IS NOW RULED (2026-08-01) — see its section. ITEM B REMAINS A DECIDE-ITEM.**
+>
+> Item A reversed a locked decision (`PLAN.md`: *"React + Vite + Tailwind SPA; same bundle reused by the
+> Electron renderer"*). It was recorded as a decide-item first and argued on paper before being ruled, which is
+> the required order for reversing a lock.
 
 **SOURCE ARTIFACT:** the Claude Design wireframe — 12 dashboard screens plus a desktop-client section — **held by
 the founder**, not in this repo. Anything below that cannot be traced to the wireframe or to shipped code is
@@ -80,22 +82,58 @@ Claimed backing: S6.3 (helper + kill-switch) · S6.4 (revocation-aware teardown,
 either cut or explicitly marked roadmap. A UI that can draw a state the product cannot produce is the
 render-floor violation this repo already has a law for.
 
-## OPEN QUESTIONS — the founder answers these at commit-one
+## ✅ RULED — 2026-08-01. THE THREE QUESTIONS ARE ANSWERED. THESE ARE DECISIONS, NOT OPTIONS.
 
-1. **Does the client show ANY admin surface, or is it connect-only?**
-2. **If an admin uses the desktop app, do they get the dashboard, or does it open the browser?**
-3. **Does the client keep the SPA's component library, or get its own?**
+### A1 — THE DESKTOP CLIENT IS **CONNECT-ONLY**
 
-## COST — price it before ruling
+A tray app plus a window: **connect / disconnect · tunnel status · assigned IP · split-tunnel · posture state**,
+and the ten-state taxonomy above.
 
-`packages/shared` holds **generated types only** today. Any screen both products need either **lives twice** or
-**moves into a shared package** — a real refactor, not a file move. Neither branch is free and the estimate
-belongs in the commit-one paper, not after.
+**NOT in the client: no audit viewer · no rule builder · no org settings · no K8s · no user management.**
 
-## ORDERING — why this is ruled FIRST
+**Two reasons, both recorded:**
 
-**Item A must be ruled BEFORE the redesign's screen list is fixed.** If the client splits, the dashboard
-redesign does not need to accommodate it — and **screens do not get designed twice.**
+1. **Every comparable product ships connect-only with a web console. The audiences barely overlap** — the person
+   who connects a laptop and the person who writes access rules are not usually the same person, and when they
+   are, they are not doing both at the same moment.
+2. **SECURITY, and this is the load-bearing half.** The client holds a `tnx_` bearer in the OS keychain, injected
+   by the main process. **Connect-only means an unlocked laptop exposes a VPN client. Admin-capable means an
+   unlocked laptop is a live admin console for the whole org.** The blast radius of a stolen unlocked machine is
+   decided entirely by this ruling.
+
+### A2 — ADMIN ACTIONS OPEN THE **SYSTEM BROWSER**. No dashboard is rendered in Electron.
+
+**This EXTENDS an existing rule rather than inventing one.** S5.1's `/cli-auth` already completes authentication
+in the system browser, and the wireframe already states that **MFA touches the client only via browser re-auth**
+— never an in-app password field.
+
+**One rule, no exceptions:** anything beyond connect-and-status leaves Electron and opens the browser.
+
+### A3 — **OWN COMPONENTS, SHARED TOKENS**
+
+The client gets **its own component set**: roughly five screens with a different interaction model, and the
+dashboard's tables, filters, modals and pickers would be **dead weight** in it.
+
+**Colours, typography and spacing move to `packages/shared`** so the two products read as one product.
+
+**Divergent components, single visual identity.**
+
+## CONSEQUENCE — the dashboard redesign's screen list SHRINKS
+
+**The redesign DROPS connect / tunnel / tray entirely.** Those screens belong to the client and are designed
+once, there.
+
+**The client build is small** — five screens, own components, shared tokens.
+
+**Neither product designs the other's screens. That was the whole reason Item A had to be ruled first**, and it
+is now discharged: Item B's screen list can be fixed without reserving space for a connect flow.
+
+## COST — now settled by A3
+
+`packages/shared` holds **generated types only** today. A3 rules that **design tokens** (colour, type, spacing)
+move there — a bounded, additive change — while **components deliberately do NOT**. That avoids the expensive
+branch (hoisting a shared component library serving two different interaction models) and accepts the cheap one
+(two component sets that look identical because they read the same tokens).
 
 ---
 
@@ -105,6 +143,9 @@ redesign does not need to accommodate it — and **screens do not get designed t
 
 **12 screens:** overview · gateways · sites · access · devices · users · flows · audit · cli · settings · k8s ·
 ops. **Plus:** a command palette · edition/role toggles · density modes · toasts with undo.
+
+**REDUCED BY ITEM A's RULING (2026-08-01): connect / tunnel / tray are NOT in this list.** They belong to the
+desktop client, which is connect-only and has its own components. The redesign reserves no space for them.
 
 ## IT IS FAITHFUL TO THE PLAN — it renders shipped laws as UI
 
