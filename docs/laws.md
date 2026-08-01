@@ -197,3 +197,45 @@ absent while a vacuous check is visibly **green** — and green is what people a
 **A check written in the same breath as its fix encodes the author's belief about the fix rather than the
 behaviour of the system.** Separating them costs a minute. Not separating them costs the first incident the
 check was supposed to prevent.
+
+## A CORRECT ASSERTION, SILENTLY INVERTED BY A PREVIOUS TEST'S STATE (minted 2026-08-01, web component tier slice 1)
+
+**Belongs to the [[COULD THIS CHECK HAVE FAILED?]] family, and it is DISTINCT from every member of it.** The
+others are bad assertions — they cannot fail, or they fail for the wrong reason. **This one is a CORRECT
+assertion, correctly written, whose verdict is inverted by state left behind by a test that already ran.**
+
+**THE INSTANCE.** `apps/web/vitest.config.ts` sets no `globals: true` and no setup file, so
+`@testing-library/react`'s automatic `afterEach` cleanup **never registers**. Renders accumulate in one
+document across every test in a file. The existing foothold never hit it because it renders exactly once; the
+first multi-render file hit it immediately.
+
+**And the direction it failed in is the whole point:**
+
+```
+it("offers no revoke control on an already-revoked gateway", …)
+  →  Found multiple elements with the role "button" and name "Revoke"
+```
+
+**An assertion about a button's ABSENCE became a false PRESENCE** — because a *previous* test's revoke button
+was still in the document. Reverse the leak and the same mechanism turns a genuine presence into a false
+absence. **Either way the test reports on a document nobody wrote.**
+
+**WHY IT IS INFRASTRUCTURE AND NOT AN AUTHORING ERROR: it cannot be caught by reading any single test.** Every
+test in the file is individually correct. The defect lives in what the harness does *between* them, which no
+amount of care inside one test can see. That is what distinguishes it from the rest of the family — those are
+found by reading the check and asking whether it can fail; this one is found only by running two checks in one
+file, or by knowing the harness.
+
+**THE GUARD: an explicit `afterEach(cleanup)` with its REASON INLINE**, not as boilerplate. Boilerplate gets
+deleted by whoever is tidying imports; a line that says why it exists does not. **A tier convention, adopted
+before the second screen was written rather than after a false green shipped.**
+
+**GENERALISED, past React:** any harness where one case can leave state the next case reads — a shared temp
+dir, a package-level fixture, a module-level cache, a database not rolled back — has this shape available to
+it. **The question is not "is my assertion right" but "what did the previous test leave behind that my
+assertion can read?"**
+
+*(The six other mechanisms in this family — half-fold, tautological guard, fixture-restates-production,
+TRUE-BY-STRUCTURE, SAMPLED-SLOWER-THAN-THE-EVENT, ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON — were minted
+during EPIC 13 and arrive on `main` with that epic's merge. This entry is written self-contained so it reads
+correctly before and after.)*
