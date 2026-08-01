@@ -153,7 +153,10 @@ func (s apiServer) RestoreNodeDevices(ctx context.Context, req api.RestoreNodeDe
 		return nil, err
 	}
 
-	body := api.RestoreNodeDevicesResponse{Restored: len(res)}
+	// api.RestoreDevicesResult — the schema is RestoreNodeDevicesResponse but carries x-go-name, because the
+	// bare name collides with the wrapper oapi-codegen derives for operationId `restoreNodeDevices` and broke
+	// apps/cli's compilation (2026-08-01). Five sibling schemas carry the same escape.
+	body := api.RestoreDevicesResult{Restored: len(res)}
 	for _, r := range res {
 		if !r.KeptAddress {
 			body.Readdressed++
