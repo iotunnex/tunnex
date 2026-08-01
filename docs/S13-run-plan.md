@@ -12,6 +12,39 @@ proved at ten minutes.
 
 ---
 
+# RIG ACCESS — THE STANDING RULE. Founder-ruled 2026-08-01. Read before running anything.
+
+The agent has **direct SSH to the rig** (`azure-cp`, `aws-gw-1`, `aws-gw-2` — aliases in `~/.ssh/config`, keys in
+`ssh-agent`). **The split is by EFFECT, not by host.**
+
+## FREELY — no asking. Everything that cannot change fleet or host state.
+
+`psql` SELECTs · `docker logs` · `docker ps` / `inspect` · `wg show` · `git` · file reads · `curl` GETs.
+
+## ASK FIRST — every time, with the EXACT command shown. Anything that MUTATES.
+
+`docker run` / `stop` / `restart` / `rm` · any `psql` INSERT/UPDATE/DELETE · **any API call that creates,
+revokes, approves or otherwise does what a UI button does** · `.env` edits · image builds or loads on a rig host.
+
+**Why this is not distrust, and why it must survive into future sessions.** Every fleet mutation before now went
+through the founder *because the agent could not execute one* — the `azure-gw` hand-revoke, §A's device revokes,
+the option-5 placement. **That gap is where the scaffolding-vs-product-action distinction got recorded**, and it
+is the reason the walk record can say honestly which states the product cannot produce. SSH removes the gap by
+accident. The rule keeps it **deliberately**.
+
+## Four more rules that ride with it
+
+1. **ALWAYS the SSH host ALIAS, never a raw IP.** The wrong-host paste cost an hour on 2026-08-01 (a credential
+   pointed at a decommissioned CP). The alias puts the target inside the command where it can be read.
+2. **Before any mutation on a gateway, ECHO the host and its expected ROLE** (A / B′ / A1′ / control). A mutation
+   whose target was never stated cannot be audited afterwards.
+3. **Timed sequences MAY be scripted end to end** — §B's expiry window, §C's clock. This is where direct access
+   genuinely beats pasting: a human-latency gap between steps changes what B6 measures.
+4. **RECORD which commands the agent ran directly and which the founder ran.** Provenance of the evidence matters
+   as much as the evidence. The walk record marks every block.
+
+---
+
 # §A — REHEARSAL #1 (COMPLETE)
 
 Ran 2026-07-31 at `TUNNEX_AGENT_CERT_TTL=10m`. CP `c417c85`, enterprise, schema 64. Full record:

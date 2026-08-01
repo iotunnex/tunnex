@@ -873,3 +873,98 @@ call, and the difference is three live rows.** Read the schema before the filter
 **Consequence still open:** the one-time `private_key` and `config` for the 03:59 set were returned once. Whether
 they were captured at 03:59 is unknown to this session — if they were not, `b3-active` and `b4-managed` cannot
 connect at step 5 and must be recreated (a one-time secret is never re-issued).
+
+### RESOLVED — the saved configs were for the WRONG generation, and step 5 could not have used them
+
+Two `.conf` files existed (`~/Downloads/b3-active.conf`, `b4-managed.conf`). **They belong to the k8s set, which
+is revoked.** Established from the files rather than from their names:
+
+| evidence | value | means |
+|---|---|---|
+| `Address` | `10.99.0.7/32`, `10.99.0.8/32` | the k8s gen-1 addresses, not B′'s `.3`/`.4` |
+| `Endpoint` | `52.190.140.51:51820` | the **k8s host**. B′ is `15.135.130.96:51820` |
+| file mtime | `03:30:54Z`, `03:31:13Z` | matches gen-1's creation (`03:30:53`, `03:31:12`) to the second |
+
+**A name is not provenance.** Both files are named exactly what the walk wanted; every field inside says
+otherwise. Connecting them would have dialled a revoked device against the wrong gateway, and the leg would have
+failed for a reason nothing in the file names could explain.
+
+**REMEDIATED (agent-run, via the API):** B′'s `b3-active` and `b4-managed` revoked, recreated as **managed**, and
+approved. Both **reclaimed `.3` and `.4`** — the revoke's address release working, incidentally the same
+mechanism B4 exists to measure. Envelopes captured this time (`private_key` and `config` both present) and
+written OUTSIDE the repo. `b3-pending` (`.2`) was **not touched** — it must stay untouched to be worth anything.
+
+| device | id | address | status |
+|---|---|---|---|
+| `b3-pending` | `019fbb79-d2ad…` | **10.99.0.2** | `pending`, unapproved — the original 03:59 row |
+| `b3-active` | `019fbbbc-afff…` | **10.99.0.3** | `active`, approved |
+| `b4-managed` | `019fbbbc-b209…` | **10.99.0.4** | `active`, approved |
+
+**B4's before-address is `10.99.0.4`.**
+
+**Managed was the right mode for the leg and it also avoids WF-S13-8** — see below: the DNS hijack is emitted for
+static exports only.
+
+
+## WF-S13-8 WIDENS — the DNS hijack is emitted BY THE PRODUCT, into a SPLIT-tunnel config
+
+**Filed narrow on 2026-08-01 as a `wg-quick` teardown fault whose product half was one silent-failure branch in
+`restoreDNS`. That framing was incomplete, and the operator's own incident is the counter-evidence.**
+
+The `.conf` the control plane issued contains:
+
+```
+DNS = 10.99.0.1
+AllowedIPs = 10.99.0.0/24, 10.0.0.0/16, 100.64.0.0/16, 172.31.0.0/16
+```
+
+`devices/service.go:396` — for `isStatic && !in.FullTunnel`, the export bakes the approved ranges **and points
+`DNS` at the pool gateway IP** so the gateway forwarder can do per-domain routing (the S8.4/S8.5 design). The
+intent is sound. The effect is that **a SPLIT-tunnel config, routing four private ranges, takes over ALL system
+name resolution.**
+
+Note the asymmetry with the path filed earlier: `dnsFor(fullTunnel)` returns `1.1.1.1` for full tunnel and
+**empty for split** — the comment says *"Split-tunnel clients keep their own DNS."* The static path then
+overrides exactly that, in the same package. **Two DNS decisions, opposite defaults, and the one that overrides
+is the one whose comment says it will not.**
+
+**Two distinct failures follow, and the operator hit both:**
+
+1. **WHILE CONNECTED** — every public name resolves through the gateway forwarder. If it does not recurse for
+   names outside the site domains, the user has no public DNS *while the tunnel is healthy*. Reported verbatim:
+   *"internet stopped working until I changed to 8.8.8.8."*
+2. **AFTER DISCONNECT** — the resolver stays behind, which is the residue this finding was originally filed for.
+
+**The desktop client and its privilege helper are NOT involved in either.** The earlier entry checked the helper
+carefully and concluded the product half was narrow. That conclusion was right about the helper and **wrong about
+the product**, because it never asked what the control plane WRITES INTO THE FILE. The path that produced the
+incident is one the helper never touches.
+
+**VERIFICATION, cheap and named:** connected to a static split-tunnel device, run `dig @10.99.0.1 example.com`.
+An answer means failure 1 does not exist and only the teardown residue does. `SERVFAIL`/`REFUSED`/timeout means
+**every static split-tunnel user loses public DNS while connected**, which is a shipped defect and not this
+epic's.
+
+**RE-RANK: MEDIUM → HIGH, pending that one query**, and the surface moves from `apps/helper` to
+`apps/api/internal/devices` + the S8.4/S8.5 resolver design. **Out of EPIC 13's scope either way — it does not
+gate this merge** — but it is no longer a client-side footnote. **TRIGGER unchanged in kind, widened in scope:
+the next change to the static export path OR to the gateway DNS forwarder, whichever lands first.**
+
+**The general lesson, which is the reusable part:** the first pass audited the code that *reacts to* the config
+and never read the code that *writes* it. **A finding about a file's effect is not investigated until you have
+read what emits the file.**
+
+
+# PROVENANCE OF COMMANDS — who ran what (convention adopted 2026-08-01)
+
+The agent has direct SSH to the rig from this point (`docs/S13-run-plan.md`, "RIG ACCESS": reads free, mutations
+ask-first with the exact command, alias never IP, echo the host and role before a gateway mutation).
+
+**Every command block from here is marked `[agent]` or `[founder]`.** Evidence whose executor is unrecorded
+cannot be audited later, and this walk has already turned on exactly that distinction twice — the `azure-gw`
+hand-revoke (SQL, a state the product cannot produce) and the option-5 device placement (API, a real code path
+with no product surface). Both were honest *because who ran them was written down.*
+
+**Retroactively, for this session:** the CP-identity probes, the device list/revoke/create/approve calls, and the
+config inspection above were **[agent]**, run against the API with the founder's browser session cookie. Everything
+on a rig HOST — the `azure-gw` revoke SQL, §A's device revokes, B′'s restarts — was **[founder]**.
