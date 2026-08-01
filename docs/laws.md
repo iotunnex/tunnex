@@ -579,3 +579,56 @@ mistake one layer up**: accepting a summarised verdict in place of the thing it 
 **THE RULE. A SESSION THAT HAS JUST FOUND A VACUOUS CHECK MUST ASSUME ITS OTHER CHECKS ARE VACUOUS UNTIL READ.**
 The finding is not a one-off to be logged and moved past — **it is evidence about the reliability of every
 summarised signal in the same session**, and the cheapest response is to open the underlying data once.
+
+## A PAPER THAT CLAIMS COVERAGE IS AN ASSERTION, AND IT NEEDS A GATE LIKE ANY OTHER (2026-08-01, S14.1 → S14.3)
+
+**THE INSTANCE.** S14.1's commit-one claimed five covered token groups. The emitted artifact carried **thirteen
+variables, all colour**. Typography scale, spacing, radius, elevation and motion were **claimed and never
+emitted**, and the slice shipped CI-green.
+
+**Its gates were not weak — the promise had NO gate.** Theme completeness compared each theme to the names that
+existed. Contrast compared colours to colours. The reservation scan compared source to a rule. **Every gate was
+aimed at what was there; none at what was promised.**
+
+**THE RULE. A COVERAGE CLAIM IS DATA, AND A CENSUS COMPARES IT TO THE ARTIFACT.** The claim is hand-authored to
+mirror the paper; the artifact is generated; **adding a claimed category without emitting it goes red.**
+Derive the claim from the implementation and it compares the system to itself and passes by construction —
+[[fixture-restates-production]], applied to a design system.
+
+**THE FAMILY THIS JOINS.** It is the [[A COMMENT THAT ASSERTS A LIBRARY'S BEHAVIOUR IS A GUESS]] shape one level
+up: **a comment vouching for absent code, and a paper vouching for an absent property, fail identically** — both
+read as evidence, both are unchecked prose, and **both are most convincing exactly where they are wrong.**
+
+**A promise with no gate reads exactly like a promise that is kept**, because everything it is measured against
+agrees with it.
+
+## THE RENDER-FLOOR AUDIT MUST READ THE SPEC'S SEMANTICS, NOT JUST CONFIRM AN ENDPOINT EXISTS (2026-08-01, S14.3)
+
+**The "Site-Link Throughput" chart is not merely unbacked. `openapi.yaml` describes the field it would draw as:**
+
+> *"Raw gauge since the last handshake **(display only, never summed as monotonic)**."*
+
+**The endpoint EXISTS. The field EXISTS. The spec FORBIDS the use.** A render-floor audit that asks only *"does
+an endpoint supply this?"* returns **yes** and lets the chart through.
+
+**THE RULE. THREE QUESTIONS, NOT ONE:** does the data exist · **does its own description permit this reading** ·
+and does the render survive absence (a failed load must show the retry, **never an empty axis**; zero data must
+say *"no data"*, **never a flat line at zero**).
+
+**THE UNBACKED CASE IS THE EASY ONE.** Nothing to point at, so the audit catches it. **The hard case is a real
+field used in a way its definition rules out** — the audit's own evidence argues *for* the chart. That is why
+both known violations in this repo are charts, and why `VizSource` is a REQUIRED PROP: **a chart that does not
+name its source does not typecheck**, which moves the question from "did anyone check?" to "does it build?".
+
+## A MISSING PRIMITIVE WEAKENS THE TESTS, NOT ONLY THE UI (2026-08-01, S14.3)
+
+**Measured: ZERO `<table>` elements in the entire web app. Thirty-seven `.map()` calls render `<div>` rows.**
+
+The consequence is not cosmetic. Query rule 1 says query by **role**, and `role="table"` / `row` / `cell`
+**do not exist anywhere to query** — so every wiring test in the component tier works around the gap by
+**matching text**. Text matching is the most brittle query there is and the first thing a redesign breaks.
+
+**THE RULE. A MISSING SEMANTIC PRIMITIVE COMPOUNDS: it degrades the UI once and the TESTS OF THAT UI a second
+time** — and **the second cost is invisible from either side.** Reading the tests shows queries that work.
+Reading the components shows markup that renders. **Only measuring the semantics across both shows that the
+tier is guarding text instead of structure.**
