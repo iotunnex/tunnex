@@ -320,6 +320,57 @@ dangerous.
 **AUDIT THE REST THE SAME WAY:** System Health · Peer Connection Status · Network map · HA Hub Set · the ops
 replica/leader/backup panels.
 
+### 7. RESPONSIVE UI — mobile · tablet · laptop · desktop · large (REGISTERED 2026-08-01, founder-directed)
+
+**The dashboard must work across five widths. NOT BUILT, NOT RULED — a decide-item.**
+
+#### THE PROBLEM, MEASURED — and it is worse than "underspecified"
+
+| measure | count | meaning |
+|---|---|---|
+| **`@media` in the whole 2.9 MB artifact** | **1** | and it is **`prefers-reduced-motion`** — **NOT A BREAKPOINT.** There are **ZERO width-based media queries** |
+| `min-width:1280px` on the ROOT layout | **1** | **a hard desktop floor, asserted positively** |
+| `grid-template` declarations | 21 | fixed column definitions, no responsive variants |
+| inline `style` attributes | 2,134 | **a `style` attribute CANNOT CARRY A MEDIA QUERY AT ALL** |
+| `clamp()` | **0** | no fluid typography or spacing anywhere |
+| `min-width:0` | 104 | the flexbox min-content idiom — **not** responsiveness; counted so it is not mistaken for it |
+
+**THE ARTIFACT DOES NOT MERELY OMIT RESPONSIVE BEHAVIOUR — IT DECLARES A 1280px MINIMUM WIDTH ON THE ROOT
+ELEMENT.** Below that it does not reflow; it overflows. That is a positive assertion of desktop-only, not a gap.
+
+**CONSEQUENCE: every screen's breakpoint behaviour is NEW DESIGN WORK, not an adaptation of what was drawn.**
+There is nothing to adapt. The wireframe cannot express a breakpoint through the mechanism it is built from.
+
+#### THE MULTIPLICATION — stated now so it is not discovered later
+
+**5 widths × 3 themes × 2 densities = 30 visual states per screen.** Across 17 screens that is **510 states**.
+
+**DECIDE-ITEM 5 (theme × palette × density) MUST NOW BE RULED TOGETHER WITH THIS ONE, not separately.** They
+multiply; ruling them apart prices neither correctly.
+
+**Founder's recommendation, to weigh at commit-one: CUT DENSITY.** At mobile width *compact* and *cozy* are the
+same decision made twice — the viewport has already made it.
+
+#### TWO QUESTIONS FOR THE FOUNDER AT COMMIT-ONE
+
+**1. Is mobile the FULL dashboard, or a SUBSET?** Approving a device queue and reading gateway health work on a
+phone. **An access-rule builder with source, destination, port scope and expiry does not — and a bad mobile rule
+builder is WORSE THAN NONE, because it is a security surface where a mis-tap grants access.**
+
+**2. Who is the mobile user?** If it is **on-call triage** — check health, approve a device, revoke one — that
+is a small, well-defined subset with real value. If it is **"the whole console, smaller,"** that is a much
+larger build for a use case **no prospect has asked for.**
+
+#### ⛔ THE BOUNDARY — THREE DIFFERENT THINGS ALL SAY "MOBILE". Name them separately.
+
+| | what it is | status |
+|---|---|---|
+| **THIS ITEM** | **DASHBOARD-ON-A-PHONE** — the admin console at narrow widths | **registered here, not ruled** |
+| **the desktop client** | Item A — **connect-only**, tray + window, own components | **RULED**, and it is not a browser surface |
+| **native mobile** | **EPIC M, PARKED.** Mobile *connectivity* ships via the official WireGuard apps | parked; positioning line already agreed |
+
+**Confusing them is how a registered admin-console breakpoint becomes an unplanned native app.**
+
 ### 4. BULK MULTI-SELECT ON DESTRUCTIVE VERBS
 
 **Bulk revoke is a different audit and confirmation problem than single revoke.** New security surface; needs
