@@ -719,3 +719,32 @@ resulting row is in the refusing state. If that test cannot fail, the encoding i
 **Related:** this is the schema-level sibling of *a determination of "gone" must prove the credential cannot work*
 and of the fail-closed direction in KILL-SWITCH-NO-UNBOUNDED-I/O. Same instinct, moved from code into DDL, where
 it cannot be refactored away.
+
+### SIBLING — A RECOVERY MECHANISM MUST NOT DESTROY ITS OWN INPUT (founder-ratified 2026-08-01, WF-S13-8)
+
+**A recovery path must not delete the record it needs, on the path where recovery is what failed. Discard the
+input only after the recovery it feeds has demonstrably succeeded.**
+
+ABSENCE MUST BE THE CLOSED STATE governs the value an unaware writer *supplies*. This governs the value a
+recovery path *destroys*. Both fail the same way — the safe state has to survive somebody not thinking about it —
+and both are by-construction, not checks.
+
+**The instance.** `restoreDNS` (`apps/helper/backend_darwin.go:672`) puts every macOS network service's DNS back
+from `/var/run/tunnex/dns.json` after a full tunnel hijacked it. Each restore is `_ = run("networksetup", …)` —
+the error discarded — and `os.Remove(dnsBackupPath)` then runs **unconditionally**, outside any success test. So
+a single failed restore strands that service on the tunnel resolver **and deletes the only record of what it
+should have been.** The startup `CleanStale` retry that exists for exactly this case becomes a permanent no-op,
+because its input is gone. **Total failure (no DNS), self-concealing (the tunnel is visibly down, so nobody
+inspects resolver settings), and self-destroying.**
+
+**The shape, stated so it is recognisable away from DNS:** *cleanup that runs unconditionally after a
+best-effort apply.* The apply swallows its errors, the cleanup does not read them, and the retry downstream is
+starved. Every teardown that persists state to undo itself has this shape available to it — the kill-switch pf
+token, the route belief, any owned-marker sweep.
+
+**The test that distinguishes application from restatement:** make the underlying command fail for ONE subject,
+then assert the record survives AND the next retry still repairs it. A test that only checks the happy path
+cannot fail in the direction this law protects.
+
+**Sibling of** ABSENCE MUST BE THE CLOSED STATE (above) and of the KEEP-LAST direction in the reconcile model:
+when the new value cannot be established, keep the old one — do not land on empty.

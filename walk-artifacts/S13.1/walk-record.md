@@ -664,3 +664,98 @@ not gate this merge.
 **TRIGGER: the next change to the macOS full-tunnel DNS path, OR the next client walk carrying a full-tunnel leg
 — whichever lands first.** The fix shape, when it runs, is one sentence: **restore must report its failures and
 must not delete the backup it failed to apply.**
+
+**FILED AS LAW 2026-08-01 (founder-ratified):** *A RECOVERY MECHANISM MUST NOT DESTROY ITS OWN INPUT* —
+`docs/laws.md`, entered as the sibling of ABSENCE MUST BE THE CLOSED STATE. Absence-must-be-closed governs the
+value an unaware writer supplies; this governs the value a recovery path destroys on the very path where recovery
+is what failed. Generalised away from DNS as *cleanup that runs unconditionally after a best-effort apply*, with
+the falsifying test named (fail ONE subject; assert the record survives and the next retry still repairs it).
+
+
+# §B step 4 — STAGING AMENDED before it ran, and the placement question ANSWERED
+
+## Amendment 1 — THREE devices, not four. The optional static is DROPPED.
+
+`b3-pending` · `b3-active` · `b4-managed`. **No static.**
+
+F3's static half is already covered — §A Leg 6 proved `static-keeps` badged with its address unchanged — and what
+`b4-managed` tests is the *managed, non-hub-set* residual, a different half. A fourth device would put another
+address in the pool for B4's reclaim to route around, which is **precisely the interference revoking §A's four
+peers just cleared.** Dropping it costs no coverage and protects the leg.
+
+## Amendment 2 — step 5's connect runs from a LINUX host, not the Mac
+
+WF-S13-8 is filed against exactly the macOS `wg-quick` teardown that would be re-triggered, and re-triggering a
+filed finding buys nothing. **If the Mac is unavoidable: record the current Wi-Fi DNS FIRST**
+(`networksetup -getdnsservers Wi-Fi`) so it can be restored by hand — the tool's own restore is the thing under
+suspicion.
+
+## THE PLACEMENT QUESTION — scaffolding IS still needed, and the failure mode has INVERTED
+
+**Asked before creating: does the picker now reach B′, since `azure-gw` is revoked?** Answered from the code, not
+from the guess:
+
+- **No client has a picker at all.** The API has taken `node_id` as an explicit input since S5.1
+  (`CreateDeviceRequest.required: [name, node_id]`), and **both clients compute it and hide it** — web at
+  `nodepick.ts:30` (`defaultDeviceNode = selectableNodes(nodes)[0]`), CLI independently at `device.go:43-52`.
+- **`selectableNodes` filters on `status === "active"` only**, and `ListNodes` is `ORDER BY created_at`
+  (`nodes.sql:67-70`). So the pick is *first active by creation time*.
+- **ULIDs order by creation:** `019f8e46` (azure-gw, now revoked) → `019fa205` (**k8s**) → `019fb892` (B′) →
+  `019fbb50` (A1′). **Revoking azure-gw moves the pick to `k8s`, not to B′.** The guess was right.
+
+**And the failure mode inverts, which is the part worth recording.** The API's readiness gate is
+`node.Endpoint == "" || node.WgPublicKey == ""` (`devices/service.go:230`) — the **WireGuard** key, NOT the agent
+identity key. `k8s` has `key_recorded = f` (no *agent* public key, which is why it was disqualified as §C's
+subject) but it is a live gateway with both an endpoint and a WG key. **So it passes.**
+
+| | before the azure-gw revoke | now |
+|---|---|---|
+| pick | `azure-gw` — dead, no endpoint | **`k8s`** — live, ready |
+| outcome | **LOUD**: `409 node_not_ready` | **SILENT SUCCESS on the wrong gateway** |
+
+The previous state refused and blamed the operator's agent config. This state accepts and homes all three devices
+on a gateway §B never intended, with **no product surface able to move them** and nothing in the UI naming which
+gateway was chosen. **`active` is the wrong test bites a second time, in the opposite direction** — and the
+silent one is worse, because the loud one at least stopped the walk.
+
+This is not a new finding: it is WF-S13-1's second consequence, already ranked and already argued into a slice
+(a gateway picker in BOTH clients, defaulting to the current pick, plus a selectability test that is not
+`status='active'`). Recorded here because the walk observed the inversion directly.
+
+**Consequence: step 4 stages via the API, recorded as WALK SCAFFOLDING VIA THE API** — the ruled form. It runs
+the real create path (validation, address allocation, config issuance, audit), unlike the SQL used for the
+azure-gw revoke, but it is **not a product action** and must not be read as one.
+
+### The scaffolding block, as run
+
+Bearer only — **no `X-Tunnex-CSRF` needed**: `csrfGuard` (`http/session.go:60`) fires only when the request
+carries the session **cookie**, and a bearer curl carries none.
+
+```bash
+ORG=<org uuid>
+NODE=019fb892-...            # B' (aws-gw-2) — the WHOLE POINT of the scaffolding
+TOKEN=$(jq -r .token ~/.config/tunnex/credential.json)     # or a browser session bearer
+API=https://<cp-host>
+
+for d in b3-pending b3-active b4-managed; do
+  curl -sS -X POST "$API/api/v1/organizations/$ORG/devices" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$d\",\"node_id\":\"$NODE\",\"provisioning\":\"managed\"}" \
+    | jq '{name, id, address, status, node_id}'
+done
+```
+
+`provisioning` defaults to `managed`; stated explicitly so the record shows it was chosen, not inherited.
+Omitting `public_key` has the server generate the keypair and return the private key **once** — that is the
+one-time secret, and the returned config is walk-time scratch: **gitignored at creation, never committed.**
+
+**Assert on the way past, before anything else runs:** every response carries `node_id` = B′. A create that
+succeeded against `k8s` is the silent-wrong-gateway outcome above and invalidates B3/B4 — it does not merely
+misplace a device, it stages the wrong subject for the leg.
+
+**Addresses: RECORD ALL THREE.** B4's whole assertion is that `b4-managed`'s address is **reclaimed** on restore,
+which is unprovable without the before-value. §A's four peers were revoked before staging, so `.2`–`.5` should
+be free and the three should land low and contiguous.
+
+**Approval gate:** `device_approval` = `on` for staging (step 3), `off` after B3 (step 11). `b3-pending` is
+created and **left alone** — it is the only device in the walk whose value is in not being touched.
