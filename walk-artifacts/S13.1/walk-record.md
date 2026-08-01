@@ -804,3 +804,72 @@ primary* is refuted by the finding itself — the rule is list order, not the hu
 
 **One-truth counter:** this is the epic's next instance and it is filed under the existing law
 (`docs/laws.md`), not as a new one.
+
+### CONSEQUENCE (c) IS NOT A PREDICTION — IT ALREADY HAPPENED, AT 03:30
+
+Written above as *"would silently create on the wrong gateway."* The device list shows it **already did**:
+
+| name | address | status | node | created |
+|---|---|---|---|---|
+| `b3-pending` | 10.99.0.6 | pending | **`019fa205…` = k8s** | 03:30:27Z |
+| `b3-active` | 10.99.0.7 | revoked | **k8s** | 03:30:53Z |
+| `b4-managed` | 10.99.0.8 | revoked | **k8s** | 03:31:12Z |
+
+Created from the UI, one at a time, each landing on `k8s` — **the silent pick, on the wire, with timestamps.**
+No error, no gateway named anywhere in the flow. They were then abandoned and recreated on B′ via the API
+scaffolding at 03:59. **`b3-pending` on k8s is still pending and still there** — a stray on the wrong gateway
+that nothing in the product would show as misplaced, because nothing shows placement at all.
+
+The prediction and the evidence were written 90 minutes apart, in the wrong order, from the same fleet.
+
+
+# CP IDENTITY — the credential pointed at a DEAD control plane. Third instance of the provenance hazard.
+
+**Found before step 4, not during.** The CLI credential (`~/.config/tunnex/credential.json`) named
+`http://40.65.63.141`. That host **times out**. The live CP is `http://104.45.208.156` (200, nginx/1.27.5),
+which is what `docs/infra-inventory.md` has recorded since 2026-07-31 — **the doc was right and the credential
+was stale.** Azure public IPs are not stable across a deallocate.
+
+**Identity CONFIRMED, not assumed:** the org (`019f8e44-8e63-7448-ac23-4059230f406e`) holds both
+`019fb892…` (B′) **and** `019fbb50…` (A1′, active). A1′ was enrolled during §B step 1 last night, so it exists
+only on the control plane this walk has been running against. Same CP, not a rebuild.
+
+**Third instance of the standing provenance hazard**, each in a different disguise: `git fetch` reporting
+success while seven commits behind · the rig on `5cf282f` while local was 24 ahead · **a credential authenticating
+to a host that no longer exists.** In all three, the failure presents as a *content* error somewhere downstream —
+here a `jq: Cannot index object with number` on what looked like a malformed list. **Check what you are talking
+to before debugging what it said.**
+
+
+# §B steps 3 + 4 — ALREADY COMPLETE at 03:59. Recorded, including the duplicate set that followed.
+
+**The gate is ON** (`GET /device-approval` → `{"mode":"on"}`), and B′ carries exactly the intended three:
+
+| device | address | status | approved | node |
+|---|---|---|---|---|
+| `b3-pending` | **10.99.0.2** | `pending` | `approved_by: null` — untouched, as required | B′ |
+| `b3-active` | **10.99.0.3** | `active` | approved | B′ |
+| `b4-managed` | **10.99.0.4** | `active` | approved | B′ |
+
+Contiguous `.2`-`.4`, which is what revoking §A's four peers was for. **B4's before-address is `10.99.0.4`** —
+the value its reclaim assertion is measured against.
+
+## SCAFFOLDING ERROR — a duplicate set created and revoked, recorded rather than quietly removed
+
+Not knowing steps 3-4 had already run, this session created a SECOND set at 04:59:50 — `b3-pending` `.5`,
+`b3-active` `.7`, `b4-managed` `.8`, all `pending` on B′. **All three revoked at 05:0x** (`204` × 3), releasing
+those addresses.
+
+**It mattered, and not for tidiness: `.5`/`.7`/`.8` occupied is WF-S13-4's exact trigger** — the interference
+that revoking §A's four peers was meant to clear. A restore that cannot reclaim allocates fresh, which is the
+finding B4 exists to measure. Leaving them would have staged the interference into the leg.
+
+**Two tool errors caused it, both the same shape and both worth naming.** The create response is
+`{device:{…}, private_key, config}` and the projection read TOP-LEVEL `.name`/`.id`/`.address`; the device
+address field is `assigned_ip`, not `address`. Both printed `null` for every field, which read as *"the call
+failed"* when the calls had in fact succeeded. **A null-valued projection is indistinguishable from a failed
+call, and the difference is three live rows.** Read the schema before the filter.
+
+**Consequence still open:** the one-time `private_key` and `config` for the 03:59 set were returned once. Whether
+they were captured at 03:59 is unknown to this session — if they were not, `b3-active` and `b4-managed` cannot
+connect at step 5 and must be recreated (a one-time secret is never re-issued).
