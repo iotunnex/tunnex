@@ -1351,3 +1351,50 @@ component tier, or a deliberate click-through could see it.
 **AND THE STRUCTURAL FIX BEATS THE INSTANCE FIX: AN OVERLAY'S POSITION MUST NEVER DEPEND ON WHERE IN THE TREE
 IT RENDERS.** `createPortal(…, document.body)` closes the containing-block trap and every other nesting trap at
 once, rather than treating the one that happened to be found.
+
+## ⭐ THE STRONGEST FORM OF PROVE-A-GUARD-REJECTS: A GUARD THAT FIRES ON ITS OWN AUTHOR, ON LIVE INPUT (2026-08-01, S14 viewport leg)
+
+**`PROVE-A-GUARD-REJECTS` normally means "break it deliberately and watch it go red".** That is good and it is
+the weaker form: **the input is chosen by the person who already knows the answer.**
+
+**THE STRONGER FORM HAPPENED HERE, UNPROMPTED.** `VisualGallery.tsx` was added, and the screen census failed
+**by name** in the same session it was written:
+
+```
+unaccounted screens (add a wiring+failure test, or a PENDING/EXEMPT entry WITH A REASON): VisualGallery.tsx
+```
+
+**Nobody set that up.** The census caught a file its author had not yet thought about — **a real omission, on
+live input, from the person who wrote the guard.** A mutation proves a guard *can* fire. **This proves it
+fires when nobody is watching for it**, which is the only condition that matters in six months.
+
+**AND THE EXEMPTION IT FORCED IS THE POINT, NOT A FORMALITY.** The census refuses a bare name; it demands a
+reason, inline, as data:
+
+> *"test fixture, build-flagged off; gated by the viewport leg and by the unshipped-route assertion"* —
+> **a fixture makes no decision, so a wiring test would assert that a fixture equals itself.**
+
+**Without the reason requirement the correct move (exempt) and the lazy move (exempt) are the same keystroke.**
+The reason is what makes the two distinguishable to a reader who was not there.
+
+## BASELINES ARE GENERATED WHERE THEY WILL BE COMPARED (2026-08-01, S14 viewport leg)
+
+**THE TEMPTATION IS OBVIOUS: a machine is right there, and `--update-snapshots` runs in seconds.**
+
+**THE PINNED PLAYWRIGHT IMAGE IS `linux/amd64`. EMULATED ON AN arm64 HOST, FONT RASTERISATION DIFFERS** — the
+same page, the same browser build, subtly different glyph edges. A baseline rendered on the host is red in CI
+on its first comparison.
+
+> ## ⛔ **THE DANGER IS NOT THE MISMATCH. IT IS THE ESCAPE.**
+>
+> **A red suite nobody can explain leaves exactly one exit: widen the threshold.** And a widened threshold is a
+> visual suite that has stopped meaning anything — it now passes the very class of change it was built to
+> catch, and reports green while doing so.
+
+**So the rule is about WHERE, not about care:** generate baselines in the same image, on the same architecture,
+against the same stack that CI will use. Here that meant **bootstrapping them from a deliberately-failed first
+CI run** and committing the artifacts, rather than producing them locally in one command.
+
+**SAME FAMILY AS *"run the command the gate runs, from where the gate runs it."*** Both say: a check's answer
+is a property of its ENVIRONMENT as much as its logic, and a result obtained somewhere else is a result about
+somewhere else.
