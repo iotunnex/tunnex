@@ -239,3 +239,30 @@ assertion can read?"**
 TRUE-BY-STRUCTURE, SAMPLED-SLOWER-THAN-THE-EVENT, ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON — were minted
 during EPIC 13 and arrive on `main` with that epic's merge. This entry is written self-contained so it reads
 correctly before and after.)*
+
+### TWO MORE INSTANCES, BOTH FOUND BY USING THE TOOL RATHER THAN READING IT (2026-08-01, web tier slice 2)
+
+**INSTANCE — fixture-restates-production, written INSIDE the check guarding against it.** D4's sibling
+assertion exists to prove three surfaces agree about revoked-row suppression. Its first draft covered the third
+surface with a three-line `DeviceRowProbe` that re-encoded the production guard
+(`status !== "revoked" && <badge>`) in the test file. **It would have passed forever even if `Devices.tsx` lost
+its guard**, because the assertion would have been reading the test's own copy of the rule. **Caught
+pre-commit** and replaced with the real page; **the near-miss is recorded in the test file itself**, not just in
+the commit, because the next author to reach for a probe will read the file and not the history.
+
+**INSTANCE — the SIXTH mechanism applied to the TOOL.** `mutate.sh` asserted *"the test failed"* and concluded
+*"the guard rejects the mutation."* A **broken test command fails identically.** It happened: invoked from the
+repo root as `vitest run --root apps/web test/x.test.tsx`, the relative path in `vi.mock("../src/lib/api")`
+stopped resolving, nothing was mocked, and **all four tests failed — including two the mutation cannot affect.**
+The script printed *"test failed under the mutation, as required."*
+
+That is **ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON** with the tool as subject: it waits on *exited non-zero*
+and asserts *the guard bit*.
+
+**THE FIX: re-run the command UNMUTATED and refuse if it also fails.** `prove-fix.sh` has always had the mirror
+of this — *"the red must FAIL before the edit"* — and **`mutate.sh` never had it.** Now it does, proven to bite
+with a deliberately broken command.
+
+**THE PATTERN ACROSS BOTH TOOL DEFECTS THIS WEEK:** the `set -u` abort and this false verdict were **both found
+by USING the tool, neither by reading it.** A self-test proves a tool runs; **only a real subject proves it
+concludes correctly.** Keep the self-tests, and keep distrusting a green verdict whose baseline nobody checked.
