@@ -7,7 +7,8 @@ import { test, expect, type Page } from "@playwright/test";
 // and the create response (so it returns a config) — no enrolled node needed.
 const OWNER_EMAIL = "owner@demo.tunnex.local";
 const OWNER_PASS = "tunnex-demo-password";
-const FAKE_CONFIG = "[Interface]\nPrivateKey = TEST_PRIVATE_KEY_SHOWN_ONCE\nAddress = 10.100.0.2/32\n\n[Peer]\nPublicKey = SERVERKEY\nEndpoint = vpn.example.com:51820\nAllowedIPs = 10.100.0.0/24";
+const FAKE_CONFIG =
+  "[Interface]\nPrivateKey = TEST_PRIVATE_KEY_SHOWN_ONCE\nAddress = 10.100.0.2/32\n\n[Peer]\nPublicKey = SERVERKEY\nEndpoint = vpn.example.com:51820\nAllowedIPs = 10.100.0.0/24";
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -17,7 +18,9 @@ async function login(page: Page) {
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 }
 
-test("the config-download ceremony renders once with the amber one-time callout and no route back", async ({ page }) => {
+test("the config-download ceremony renders once with the amber one-time callout and no route back", async ({
+  page,
+}) => {
   await login(page);
 
   // Mock the gateway list so the create form enables, and the create call so it
@@ -27,7 +30,13 @@ test("the config-download ceremony renders once with the amber one-time callout 
       status: 200,
       contentType: "application/json",
       body: JSON.stringify([
-        { id: "01900000-0000-7000-8000-0000000000aa", name: "gw-1", status: "active", agent_version: "test", enrolled_at: new Date(0).toISOString() },
+        {
+          id: "01900000-0000-7000-8000-0000000000aa",
+          name: "gw-1",
+          status: "active",
+          agent_version: "test",
+          enrolled_at: new Date(0).toISOString(),
+        },
       ]),
     }),
   );
@@ -36,10 +45,21 @@ test("the config-download ceremony renders once with the amber one-time callout 
       return route.fulfill({
         status: 201,
         contentType: "application/json",
-        body: JSON.stringify({ device: { id: "01900000-0000-7000-8000-0000000000bb", name: "my-laptop", status: "active" }, config: FAKE_CONFIG }),
+        body: JSON.stringify({
+          device: {
+            id: "01900000-0000-7000-8000-0000000000bb",
+            name: "my-laptop",
+            status: "active",
+          },
+          config: FAKE_CONFIG,
+        }),
       });
     }
-    return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "[]",
+    });
   });
 
   await page.getByRole("link", { name: "Devices" }).click();

@@ -2,7 +2,9 @@ import { test, expect } from "@playwright/test";
 
 test("SPA loads and reports the API operational", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("tunnex", { exact: false }).first()).toBeVisible();
+  await expect(
+    page.getByText("tunnex", { exact: false }).first(),
+  ).toBeVisible();
   // The health pill flips to "operational" once the SPA's /healthz call succeeds.
   await expect(page.getByText("operational")).toBeVisible();
 });

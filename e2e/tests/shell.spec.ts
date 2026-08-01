@@ -5,12 +5,16 @@ import { test, expect } from "@playwright/test";
 const OWNER_EMAIL = "owner@demo.tunnex.local";
 const OWNER_PASS = "tunnex-demo-password";
 
-test("unauthenticated visitors are gated to the login screen", async ({ page }) => {
+test("unauthenticated visitors are gated to the login screen", async ({
+  page,
+}) => {
   await page.goto("/devices"); // deep link into a gated route
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
-test("signing in reaches the app shell and the dashboard, then navigates to devices", async ({ page }) => {
+test("signing in reaches the app shell and the dashboard, then navigates to devices", async ({
+  page,
+}) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(OWNER_EMAIL);
   await page.getByLabel("Password").fill(OWNER_PASS);
@@ -25,7 +29,9 @@ test("signing in reaches the app shell and the dashboard, then navigates to devi
   // The sidebar links to Devices; the create-device form lives there.
   await page.getByRole("link", { name: "Devices" }).click();
   await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create device" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create device" }),
+  ).toBeVisible();
 
   // An authenticated user visiting /login is bounced back into the app (AnonOnly).
   await page.goto("/login");

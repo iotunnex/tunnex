@@ -4,7 +4,9 @@ import { test, expect } from "@playwright/test";
 // is a KNOWN-existing email for the enumeration-resistance check.
 const EXISTING_EMAIL = "owner@demo.tunnex.local";
 
-test("signup renders identically for a new vs an existing email (no enumeration tell)", async ({ page }) => {
+test("signup renders identically for a new vs an existing email (no enumeration tell)", async ({
+  page,
+}) => {
   const confirm = page.getByRole("heading", { name: "Check your email" });
 
   // New (almost certainly unregistered) email.
@@ -27,7 +29,9 @@ test("signup renders identically for a new vs an existing email (no enumeration 
   expect(existingBody).toBe(newBody);
 });
 
-test("login shows a generic invalid-credentials message (no account enumeration)", async ({ page }) => {
+test("login shows a generic invalid-credentials message (no account enumeration)", async ({
+  page,
+}) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(EXISTING_EMAIL);
   await page.getByLabel("Password").fill("definitely-the-wrong-password");
@@ -45,11 +49,17 @@ test("open edition hides SSO on the login page", async ({ page }) => {
 
 test("login links to signup and password reset", async ({ page }) => {
   await page.goto("/login");
-  await expect(page.getByRole("link", { name: "Create an account" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Forgot password?" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Create an account" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Forgot password?" }),
+  ).toBeVisible();
 });
 
-test("forgot-password renders identically for new vs existing email (no enumeration)", async ({ page }) => {
+test("forgot-password renders identically for new vs existing email (no enumeration)", async ({
+  page,
+}) => {
   const confirm = page.getByRole("heading", { name: "Check your email" });
   await page.goto("/forgot-password");
   await page.getByLabel("Email").fill(`nobody-${Date.now()}@example.com`);
@@ -64,14 +74,22 @@ test("forgot-password renders identically for new vs existing email (no enumerat
   expect(await page.locator("main p").first().textContent()).toBe(newBody);
 });
 
-test("verify-email with a bad token lands on a human-readable failure (not a raw error)", async ({ page }) => {
+test("verify-email with a bad token lands on a human-readable failure (not a raw error)", async ({
+  page,
+}) => {
   await page.goto("/verify-email?token=not-a-real-token");
-  await expect(page.getByRole("heading", { name: "Verification failed" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Verification failed" }),
+  ).toBeVisible();
   // The token is scrubbed from the URL after capture (not left in history).
   await expect(page).toHaveURL(/\/verify-email$/);
 });
 
-test("SSO callback failures land on a human-readable login message (watch-item d)", async ({ page }) => {
+test("SSO callback failures land on a human-readable login message (watch-item d)", async ({
+  page,
+}) => {
   await page.goto("/login?sso_error=unverified_local_exists");
-  await expect(page.getByText(/account with this email already exists/i)).toBeVisible();
+  await expect(
+    page.getByText(/account with this email already exists/i),
+  ).toBeVisible();
 });
