@@ -1,3 +1,24 @@
+<!--
+  THIS FILE IS A REFERENCE PICTURE, AND ITS EXTENSION IS DELIBERATE.
+
+  TO VIEW IT: copy it out and rename the copy to end in `.html`, then open that in a browser.
+    cp TUNNEX-wireframe-v2.html.txt /tmp/wireframe.html && open /tmp/wireframe.html
+
+  WHY `.html.txt` RATHER THAN `.html`. CodeQL classifies files by EXTENSION, so an `.html` file here was
+  scanned as JavaScript and raised five alerts (1 high `js/xss-through-dom`, 4 medium
+  `js/cross-window-information-leak`) against a file that is NEVER BUILT, NEVER SERVED, and IMPORTED BY NO
+  BUNDLE. The alerts were real findings about the code in this file and entirely irrelevant to the product,
+  and a permanently red security check trains people to ignore red security checks.
+
+  The two alternatives were both worse. Path-excluding `docs/**` from CodeQL is broader than the problem and
+  permanent — a guard-shaped hole nobody looks at again, which this repo has already paid for once: an
+  unanchored `secrets/` in .gitignore silently kept `apps/api/internal/secrets` OUT OF GIT, fine on the
+  machine that wrote it and broken on every fresh clone. Per-alert dismissal is honest but recurs on every
+  edit, and five "won't fix" clicks train the same reflex as a standing red.
+
+  RENAMING THE ARTIFACT REMOVES THE MISCLASSIFICATION AT ITS SOURCE. Nothing is excluded, nothing is
+  dismissed, and the scanner keeps its full scope over everything that ships.
+-->
 <!DOCTYPE html>
 <html>
 <head>

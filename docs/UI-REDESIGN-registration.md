@@ -13,7 +13,29 @@
 > Electron renderer"*). It was recorded as a decide-item first and argued on paper before being ruled, which is
 > the required order for reversing a lock.
 
-**SOURCE ARTIFACT — NOW COMMITTED: `docs/design/TUNNEX-wireframe-v2.html`** (2.9 MB). **17 declared screens** —
+**SOURCE ARTIFACT — NOW COMMITTED: `docs/design/TUNNEX-wireframe-v2.html.txt`** (2.9 MB).
+
+**⚠ THE `.txt` SUFFIX IS DELIBERATE — TO VIEW IT, COPY IT OUT AND RENAME THE COPY TO `.html`:**
+
+```
+cp docs/design/TUNNEX-wireframe-v2.html.txt /tmp/wireframe.html && open /tmp/wireframe.html
+```
+
+**WHY.** CodeQL classifies by EXTENSION, so as `.html` this file was scanned as JavaScript and raised five
+alerts (1 high `js/xss-through-dom`, 4 medium `js/cross-window-information-leak`) against an artifact that is
+**never built, never served, and imported by no bundle** — turning the code-scanning aggregate red on PR #44
+and, by stacking, #46. **A permanently red security check trains people to ignore red security checks.**
+
+**FOUNDER-RULED, and neither of the two options proposed.** Path-excluding `docs/**` is **broader than the
+problem and permanent — a guard-shaped hole nobody looks at again**, and this repo has paid for that shape
+once already: an unanchored `secrets/` in `.gitignore` silently kept `apps/api/internal/secrets` OUT OF GIT,
+fine on the machine that wrote it and broken on every fresh clone. Per-alert dismissal is honest but
+**recurs**, and five "won't fix" clicks train the same reflex as a standing red.
+
+**RENAMING REMOVES THE MISCLASSIFICATION AT ITS SOURCE.** Nothing excluded, nothing dismissed, and the scanner
+keeps full scope over everything that ships. **FALLBACK IF THE RENAME DOES NOT CLEAR IT: per-alert dismissal,
+stated as such — never the path exclusion.**
+ **17 declared screens** —
 13 main-nav plus a four-item `OTHER SCREENS` group (including the desktop-client reference). **It is the specification for an entire epic and previously existed in exactly one
 place outside version control.**
 

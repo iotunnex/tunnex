@@ -389,7 +389,7 @@ skipped gate is a vacuous gate wearing a different hat.**
 # CENSUS × WIREFRAME MAPPING — done BEFORE writing the next screen (founder-ruled 2026-08-01)
 
 **The redesign is a RE-ARCHITECTURE that consolidates. A wiring test for a screen that gets absorbed is
-throwaway work, so the mapping runs first.** Extracted from `docs/design/TUNNEX-wireframe-v2.html` by
+throwaway work, so the mapping runs first.** Extracted from `docs/design/TUNNEX-wireframe-v2.html.txt` by
 measurement — the nav is declared as `{ id, icon, label, admin }` objects and was read with a bounded `grep -o`,
 never by loading the file into context.
 
