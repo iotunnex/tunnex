@@ -261,6 +261,18 @@ cannot be tested by role is not done.**
    does not change in a redesign.**
 3. **ASSERT DECISIONS, NOT RENDERING** — the D1 ruling, restated here because it is what makes the tier survive
    a re-architecture at all.
+4. **NO TEST MAY ASSUME A VIEWPORT** (added with the responsive decide-item). **No assertion may depend on
+   layout, column order, or an element being visible only at one width.** The responsive item introduces five
+   widths; a test that breaks at a breakpoint **was testing the layout, not the decision** — and it would then
+   be rewritten to pass, destroying exactly the signal consequence 3 exists to preserve. Cheap, because a role
+   does not move when a column does.
+5. **A `waitFor` MUST COVER EVERY ELEMENT THE ASSERTIONS TOUCH** — never the first one that happens to appear.
+   **Earned by the gate on the first slice run under it:** Sites' test 1 waited on the PENDING chip and then
+   asserted the APPROVED one, which renders later, so it raced ahead and failed — while its SIBLING test, over
+   the *same two elements*, passed purely because it happened to wait on the later one. **TWO TESTS OVER THE
+   SAME ELEMENTS DISAGREEING IS THE TELL.** It is the **async form of the leaked-render mechanism**
+   (`docs/laws.md`): *a correct assertion made against a tree that is not yet — or no longer — the tree it
+   describes.*
 
 ### THE BOUNDARY, FOUND BY AUDITING SLICE 1 AGAINST THIS RULE
 

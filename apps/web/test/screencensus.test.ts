@@ -58,6 +58,8 @@ const COVERED: Record<string, string> = {
   "Sites.tsx": "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
   // SHEDDER: machine credentials -> cli, edition -> license. Assertions target the DECISION and name the
   // destination, so they travel through the split.
+  "Users.tsx": "test/userswiring.test.tsx — the sole owner cannot be demoted (lockout), both directions + failed roster surfaced, never 'no members yet'",
+  "AuditLog.tsx": "test/auditlogwiring.test.tsx — paging uses the APPLIED filter set, never a mid-edit one + failed load surfaced, never an empty history",
   "Settings.tsx": "test/settingswiring.test.tsx — the control reflects the ORG's opt-in state, not a default (misconfigure, stays in settings) + edition gating both directions (destination: license) + failed org load surfaced, no defaults offered",
 };
 
@@ -77,8 +79,6 @@ const PENDING: Record<string, string> = {
   // `subnets` screen. Its tests MUST assert the DECISION and NAME THE DESTINATION: "a routed range that fails
   // to load is surfaced, not rendered as none" travels to whichever screen renders it; "the Sites page shows a
   // routed-range list" does not, and becomes throwaway work the day the split lands.
-  "Users.tsx": "unranked backlog",
-  "AuditLog.tsx": "unranked backlog",
 };
 
 describe("screen census", () => {
@@ -113,11 +113,14 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(6);
+    expect(Object.keys(COVERED).length).toBe(8);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(2);
+    // ZERO. Every accountable screen is covered. The list stays, because a screen added tomorrow must land in
+    // one of the three lists or fail the census by name — an empty PENDING is a state, not a reason to delete
+    // the mechanism.
+    expect(Object.keys(PENDING).length).toBe(0);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
