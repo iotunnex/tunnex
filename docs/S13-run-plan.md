@@ -12,6 +12,47 @@ proved at ten minutes.
 
 ---
 
+# ⛔ A FIXTURE MUST PRESERVE THE RELATIONSHIP BETWEEN VALUES, NOT THEIR ABSOLUTE MAGNITUDES
+
+**Founder-ruled 2026-08-01, from WF-S13-10. This rule is why §A and §B ran a configuration production has never
+run, and it binds every future TTL shortening.**
+
+**Production holds an invariant: `renewEvery` (24h) `<` certificate TTL (48h).** The agent renews at a fixed 24h
+tick, comfortably inside a 48h certificate, forever.
+
+**The rig shortened the TTL to `10m` and left `renewEvery` at its 24h default — INVERTING the invariant.** The
+agent then renews **exactly once** (its first tick is anchored to the certificate's remaining life) and never
+again, because `renewLoop` resets to the fixed interval and never re-anchors to the certificate it just
+received. A gateway on this rig therefore dies ~10 minutes after every restart and stays dead for 24 hours.
+
+**THE RULE: when a walk shortens one side of a relationship, it MUST shorten the other side proportionally.**
+Shortening TTL to `10m` requires `TUNNEX_AGENT_RENEW_INTERVAL` well below `10m` (the rig uses `2m`). A fixture
+that changes one magnitude and not its counterpart is **not a faster production — it is a different system**, and
+what it proves does not transfer.
+
+## WHICH LEGS RAN UNDER THE INVERTED INVARIANT — so a reader knows what §A actually proved
+
+**§A (Legs 0-6, 2026-07-31) and §B (steps 1-4, 2026-08-01) both ran at `TTL=10m` with `renewEvery=24h`.**
+
+**UNAFFECTED — these do not depend on renewal at all, and they stand:**
+- the PoP re-key path, its refusals, and the uniform-refusal measurement (`403 / 178 bytes` × 8 inputs)
+- finding **#5** (three refusals → `exhausted` → fallback) and **#6** (`identities_tried` 1 → 2)
+- **F3** in isolation, specificity (`decoy-1` silent), **B1** (`site_id` survives recovery)
+- **WF-S11-8a** (the name freed by a revoke), the cascade/restore legs
+
+**AFFECTED — read these knowing the mechanism:** every observation of *"an agent whose certificate expired while
+it was running."* On this rig that state was reached because **the renewal timer was 24 hours away**, not because
+a renewal was attempted and refused. **WF-S13-6 is NOT invalidated** — boot-only recovery is established by
+reading `attemptRekey`'s single caller, and the incident that opened the epic was a real 48h production gateway —
+**but instances 2, 3 and 4 are WF-S13-10 reproductions, not WF-S13-6 reproductions.** They prove the agent does
+not recover while running; they do not prove how production gets there.
+
+**Second and larger instance of the fixture-fidelity rule pass 1 minted for the `certexpiry` shortcut:** *where a
+runsheet manufactures a state, it must say how production reaches that state, and whether the manufactured route
+differs.* Here the manufactured route differed, and the difference **was** a defect.
+
+---
+
 # RIG ACCESS — THE STANDING RULE. Founder-ruled 2026-08-01. Read before running anything.
 
 The agent has **direct SSH to the rig** (`azure-cp`, `aws-gw-1`, `aws-gw-2` — aliases in `~/.ssh/config`, keys in

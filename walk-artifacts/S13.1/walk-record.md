@@ -1118,3 +1118,56 @@ shortcut, and this is its second and larger instance.
 **OWED, and it is a decide-item for the founder, not a fold:** whether `every` must be re-derived from each
 newly issued certificate (the obvious fix, and the one the function's own comment argues for), and whether §A's
 and §B's renewal-dependent observations need re-reading in that light. **Not touched during the walk.**
+
+## WIRE-PROVEN BY A PREDICTION RECORDED IN ADVANCE — all four clauses
+
+**The prediction was written to disk at 05:31Z, BEFORE the fact**, with its own refutation condition
+(*"REFUTED if a second renewal appears before 05:50Z"*). [founder] ruled that it resolve before the fixture was
+repaired, because repairing the fixture destroys the proof.
+
+| clause | predicted | observed |
+|---|---|---|
+| renews exactly once | ~05:34:22 | **`agent_cert_renewed` 05:35:22.663** |
+| new certificate's life | expires ~05:44 | **`cert_not_after` 05:45:22** |
+| then goes silent | no second renewal | **count = 1**; nothing logged after 05:36:23 |
+| next attempt | 2026-08-02 | timer armed 24h out |
+
+**WF-S13-9 confirmed a SECOND time, independently, in the same window:** certificate expired 05:45:22; at
+05:51:12 `last_seen_at` read 05:50:53 — **still advancing 5m50s past expiry**, on a connection whose handshake
+predated it.
+
+### The 401 burst has a root, and it is WF-S13-9 seen from the other side
+
+`05:35:53` → `05:36:23`: `agent_status_report_failed`, `agent_report_key_failed`,
+`reconcile_interval_failed`, all `401`. The socket capture explains it — local ports moved
+`53808/53818` → `42530/60876` **under the same pid**. So for ~30s after the renewal the *old* connections were
+still presenting the **superseded** certificate; the CP validates the presented serial against the row, which
+now held the new one, and refused. Then the connections recycled, re-handshaked with the new certificate, and
+recovered.
+
+**A renewal writes a new credential to disk and does not recycle the connections still holding the old one.**
+Same root as WF-S13-9 — the connection outlives the credential decision — in both directions: an EXPIRED cert
+keeps working on an old connection, and a FRESH cert is ignored by one. **The identical 401 at `03:22:50` is
+now explained**, and it was the last credential-related line before the two-hour silence.
+
+## FIXTURE REPAIRED — option (b), and the repair is itself a proof
+
+**[agent], host `aws-gw-2`, role B′, [founder]-approved:** container recreated with
+`TUNNEX_AGENT_RENEW_INTERVAL=2m`, volume `tunnex_node_state` preserved (identity survives), every other env var,
+cap, device and the `restart=no` policy verbatim.
+
+**Result — renewals every 2 minutes, as designed:** `05:54:04`, `05:56:04`, `05:58:04`, with `cert_not_after`
+tracking ~10m ahead (`06:08:04`). B′ now sustains itself, and **the production invariant
+`renewEvery < TTL` is restored on the rig** (2m < 10m, mirroring 24h < 48h).
+
+**Two by-products worth recording:**
+
+1. The recreate re-keyed by proof of possession off the expired `ddf888…` (`agent_rekeyed` 05:52:04, same node,
+   same identity) — **a third independent D3 confirmation** that expiry authorizes.
+2. The post-renewal 401 window is now **reproducible on a 2-minute cycle** (`05:54:30`, `05:56:30` — ~26s after
+   each renewal). It was a once-an-incident curiosity; it is now a standing reproduction available to whoever
+   fixes it.
+
+**[agent]-run commands in this sequence:** the ss/log/psql/openssl reads, the `docker restart` (pre-approved
+experiment), the prediction watch, and the container recreate. **[founder]-run:** nothing in this sequence —
+this is the first block of the walk executed end to end by the agent.
