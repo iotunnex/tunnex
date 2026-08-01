@@ -366,3 +366,37 @@ one that survives intact and carries none.**
   (`k8s_endpoints_unavailable`), the canonical producer-without-consumer instance this repo cites everywhere.
 
 **By the stated criterion, `Kubernetes` outranks `Access`.** Recommended, not assumed — the founder rules.
+
+
+---
+
+# ⛔ CORRECTION TO THE RECORD — SLICES 1-5 (2026-08-01)
+
+**Every "green" reported for slices 1-5 before 2026-08-01 was LOCALLY TRUE AND GLOBALLY UNVERIFIED.**
+
+`@testing-library/react` and `jsdom` were **never declared** in `apps/web/package.json` and **never in
+`pnpm-lock.yaml`**. They resolved only from one machine's `node_modules`, installed while on the
+`story/S13.1-gateway-recovery` branch. **On a clean checkout or a CI runner, none of those tests could have
+run at all.**
+
+**Do not read the earlier "217 tests green" reports as CI evidence.** They were `vitest` in a developer shell.
+
+**DECLARED AND LOCKED 2026-08-01**, and verified by running the gate itself. Slices 1-5 are clean — but the
+statement that makes them clean is *"`make web-gate` passes"*, not *"the suite passed here"*, and only the
+second was ever said before today.
+
+**Two other defects the same verification surfaced**, both invisible to every gate until then:
+
+- `tsconfig.json` included only `src`, so **`tsc --noEmit` had never typechecked a single test file**
+- a duplicate `import { ruleRow }` in `test/policyview.test.ts` — a genuine `TS2300`, behaviourally benign
+
+## STANDING RULE, from here
+
+> ### A SLICE IS NOT GREEN UNTIL `make web-gate` PASSES.
+>
+> Not until the suite passes locally. **Every slice reports the GATE's result, not `vitest`'s** — typecheck,
+> test and build, in the Node 20 container that mirrors CI.
+
+**The framing worth keeping:** this tier exists to catch defects a surface's own tests cannot see, and **its
+first five slices carried a defect its own gate could not see.** That is why *"the gate is the authority"* must
+mean the gate **as CI runs it**, on every slice — not once at the end.

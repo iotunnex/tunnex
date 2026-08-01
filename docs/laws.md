@@ -384,3 +384,35 @@ command surfaced **exactly two errors, neither in the new tier** — a duplicate
 benign** (both bindings resolved to production), **genuinely a TS2300**, and **invisible to every gate for as
 long as it has existed.** The five slices were **clean once scoped correctly — which is a different statement
 from "assumed clean", and only one of them was ever true.**
+
+### FOURTH INSTANCE — A SUITE PASSING ON A PHANTOM DEPENDENCY (2026-08-01)
+
+`@testing-library/react` and `jsdom` were **not in `apps/web/package.json` and not in `pnpm-lock.yaml`**. They
+existed only physically in one machine's `node_modules`, installed while on a different branch. **Five slices of
+the component tier ran green on them.** On a clean checkout — or on CI — nothing would have resolved.
+
+**THE SHAPE ACROSS ALL FOUR, and it is one reading, not four:**
+
+| # | mechanism | the output |
+|---|---|---|
+| 1 | `mutate.sh` printed `Restoring.` and did not restore | a success line |
+| 2 | `npx tsc` from the repo root resolved to a different package | a banner, then exit |
+| 3 | `vitest --root apps/web` from the root broke the relative mock path | a red that meant nothing |
+| 4 | the suite resolved deps present on **one machine only** | 217 passing tests |
+
+**THE CHECK RAN. IT PRODUCED OUTPUT. THE OUTPUT DID NOT MEAN WHAT IT APPEARED TO MEAN.** Four different
+mechanisms, one reading — and in three of the four the output was *green*, which is the direction nobody
+re-examines.
+
+**THIS IS A REPEAT OF THIS REPO'S OWN HISTORY.** S6.0b: an unanchored `secrets/` in `.gitignore` kept
+`apps/api/internal/secrets` **out of git** — built fine locally, **broke every fresh clone**. Same class,
+already learned once, rediscovered here in a different costume. **A lesson learned in one toolchain does not
+transfer to another by itself; it has to be re-earned or encoded.**
+
+**THE RULE THIS EARNS: A SLICE IS NOT GREEN UNTIL THE GATE PASSES — the gate AS CI RUNS IT, not a local
+equivalent, and EVERY slice, not once at the end.** For this tier that is `make web-gate` (typecheck + test +
+build, Node 20 container). `vitest` passing in a developer shell is a useful signal and is **not** evidence.
+
+**THE SHARPEST FRAMING:** the tier exists to catch defects a surface's own tests cannot see — **and its first
+five slices carried a defect its own gate could not see.** That is not irony. It is the evidence that *"the gate
+is the authority"* has to mean **the gate as CI runs it, on every slice.**
