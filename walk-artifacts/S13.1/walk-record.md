@@ -1171,3 +1171,44 @@ tracking ~10m ahead (`06:08:04`). B′ now sustains itself, and **the production
 **[agent]-run commands in this sequence:** the ss/log/psql/openssl reads, the `docker restart` (pre-approved
 experiment), the prediction watch, and the container recreate. **[founder]-run:** nothing in this sequence —
 this is the first block of the walk executed end to end by the agent.
+
+
+# §B step 5 — COMPLETE. Both devices connected, proven from the GATEWAY side.
+
+**[founder]-run** (`sudo` on the Mac needs a password, so the connect could not be agent-driven);
+**[agent]-verified** on B′.
+
+```
+peer: MsYDXUktOuCfdihRP7T2kxl6jP0RWRejMWT+8wZv+E8=   allowed ips 10.99.0.3/32   b3-active
+  endpoint 119.252.205.29:32736   latest handshake 2m12s ago   308 B rx / 92 B tx
+peer: yEWUmXVmvF3fPky5T0n7kzOq8kHxQxczwYDQCCKUO38=   allowed ips 10.99.0.4/32   b4-managed
+  endpoint 119.252.205.29:23290   latest handshake 16s ago     180 B rx / 92 B tx
+```
+
+**Verified on the gateway, not on the client.** The client-side check (`wg show b3-active`) fails on macOS —
+`wg-quick` maps the config name onto a `utun` device (`utun4`) and `wg show` wants the kernel name. The gateway's
+own peer table is the better evidence anyway: it is what B3/B4 will later measure the ABSENCE against, so the
+before-value must come from the same source as the after-value.
+
+**Run SEQUENTIALLY, not concurrently** — both configs carry `AllowedIPs = 10.99.0.0/24`, so a second
+simultaneous `wg-quick up` collides on the route. Up → handshake → down → up the next.
+
+## THE CLIENT HOST DECISION WAS REVERSED ON EVIDENCE, and the reversal is the record
+
+Earlier in this walk the connect was ruled **"Linux host, not the Mac"**, to avoid re-triggering WF-S13-8. That
+ruling was made against the **static** exports, which bake `DNS = 10.99.0.1` and four private ranges. **The
+devices actually staged are MANAGED**, and `dnsFor` returns empty for split-tunnel while the range/DNS baking is
+`isStatic`-gated — so the configs carry **no `DNS` line at all** and route only `10.99.0.0/24`. Verified in the
+files before they were handed over (`grep -c "^DNS"` → `0`). **WF-S13-8 has no trigger on this path**, and
+`wg-quick down` left no resolver residue.
+
+**Every alternative host was rejected on a read, not on preference:**
+
+| host | why not |
+|---|---|
+| `aws-gw-1` | holds **`10.99.0.1`** — direct collision with the config's own `AllowedIPs`. Also A1′, a walk subject |
+| `azure-cp` | no `wg`/`wg-quick`; installing packages on the control plane mid-walk pollutes the run |
+| `aws-behind-host` | reachable from `aws-gw-1`, but needs a ProxyJump entry **and** a package install |
+
+**A ruling made against one artifact does not survive the artifact changing.** The earlier decision was correct
+for static exports and wrong for these, and nothing but re-reading the actual files would have caught it.
