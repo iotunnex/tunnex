@@ -18,6 +18,7 @@ let overviewFail = false;
 let sitesFail = false;
 let nodesFail = false;
 let empty = false;
+let edition: string | null = "enterprise";
 
 const OV = () => ({
   members: empty ? 0 : 4,
@@ -40,7 +41,10 @@ vi.mock("../src/lib/api", async () => {
       GET: vi.fn(async (path: string) => {
         if (path === "/api/v1/auth/me")
           return { data: { id: "u1", email: "a@b.c", email_verified: true } };
-        if (path === "/api/v1/meta") return { data: { edition: "enterprise" } };
+        if (path === "/api/v1/meta")
+          return edition === null
+            ? { data: undefined, ...err }
+            : { data: { edition } };
         if (path === "/api/v1/organizations")
           return { data: [{ id: "org-1", name: "Acme" }] };
         if (path.endsWith("/overview"))
@@ -92,6 +96,7 @@ const show = () =>
 
 beforeEach(() => {
   overviewFail = false;
+  edition = "enterprise";
   sitesFail = false;
   nodesFail = false;
   empty = false;
@@ -216,5 +221,38 @@ describe("the CUT panels are ABSENT, not hidden", () => {
       expect(screen.getByText("Seen in last 3 min")).toBeTruthy(),
     );
     expect(screen.queryByText(/online peers/i)).toBeNull();
+  });
+});
+
+describe("⛔ EDITION IS A FOURTH STATE — an enterprise-only card is ABSENT, never an error", () => {
+  // The defect this fixes: `/devices/pending` is enterprise-only, so the OPEN edition gets
+  // `403 edition_required` — a SUCCESSFUL REFUSAL. Read through loadOne alone it became `failed`, and the
+  // card rendered a red "could not load" for a feature the org was never sold.
+  //
+  // A design that carefully enumerates states pushes the danger onto the state nobody enumerated, and it gets
+  // absorbed by whichever existing state is nearest — which is almost never the harmless one.
+  it("[open edition] the Pending-approvals card is not rendered at all", async () => {
+    edition = "open";
+    show();
+    await waitFor(() => expect(screen.getByText("Members")).toBeTruthy());
+    expect(screen.queryByText("Pending approvals")).toBeNull();
+    // And no error treatment anywhere in its place.
+    expect(screen.queryByText("could not load")).toBeNull();
+  });
+
+  it("[enterprise] the card IS rendered", async () => {
+    edition = "enterprise";
+    show();
+    await waitFor(() =>
+      expect(screen.getByText("Pending approvals")).toBeTruthy(),
+    );
+  });
+
+  it("[edition still unknown] the card is absent — absent-until-known, never a flash", async () => {
+    // A slow /meta must not briefly render an enterprise surface to an open-edition org.
+    edition = null;
+    show();
+    await waitFor(() => expect(screen.getByText("Members")).toBeTruthy());
+    expect(screen.queryByText("Pending approvals")).toBeNull();
   });
 });

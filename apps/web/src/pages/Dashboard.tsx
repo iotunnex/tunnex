@@ -11,6 +11,7 @@ import {
   type Node,
   type OrgOverview,
   type Site,
+  type Meta,
   type PolicyRule,
   type ZeroTrustMode,
 } from "../lib/api";
@@ -54,6 +55,9 @@ export default function Dashboard() {
   const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
   const [ztRes, setZtRes] = useState<Loaded<ZeroTrustMode> | null>(null);
+  // THE ONE GATING SEAM. `/meta`'s edition is the same value that decides whether every other enterprise
+  // surface exists — read here, never re-derived from an error.
+  const [edition, setEdition] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +87,9 @@ export default function Dashboard() {
             apiErrorMessage(ovErr, "Could not load the overview."),
           );
         setData(ov);
+        void loadOne(() => api.GET("/api/v1/meta")).then(
+          (r) => !cancelled && r.ok && setEdition((r.data as Meta).edition),
+        );
         // Fired together, awaited independently: each sets its own state, so one failure degrades one card.
         void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/sites", {
@@ -164,6 +171,9 @@ export default function Dashboard() {
             const sites = statFrom(sitesRes, (r: Site[]) => r.length);
             const pending = statFrom(pendingRes, (r: Device[]) => r.length);
             const rules = statFrom(rulesRes, (r: PolicyRule[]) => r.length);
+            // Edition is UNKNOWN until /meta answers; treat unknown as not-enterprise so a slow load never
+            // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
+            const isEnterprise = edition === "enterprise";
 
             // Sub-lines are QUALIFICATIONS, and each is `null` when there is nothing honest to say. A sub-line
             // is never filler: an unqualified number is a smaller claim than a wrongly-qualified one.
@@ -244,6 +254,16 @@ export default function Dashboard() {
                     value={rules}
                     sub={zeroTrust === null ? null : zeroTrust}
                   />
+                  {/* Sixth card only where the capability exists. On the open edition the row is five wide —
+                      which is the honest layout, not a gap where a broken card used to be. */}
+                  {isEnterprise && (
+                    <Stat
+                      label="Pending approvals"
+                      icon="user-plus"
+                      value={pending}
+                      sub="awaiting an admin"
+                    />
+                  )}
                 </div>
 
                 {fresh && (
