@@ -257,3 +257,30 @@ exception).
 
 **Visual iteration belongs in Claude Design; implementation in Claude Code.** Iterating on renders inside Code
 burns budget on loops Design does natively. Bring a settled wireframe to the implementation session.
+
+---
+
+# ⛔ CARRIED OBLIGATIONS INTO S14.4+ — READ BEFORE WRITING ANY SCREEN COMMIT-ONE
+
+**Recorded HERE, in the epic paper, rather than only in S14.3's slice report. A primitive whose trigger lives
+in a transcript is dormant machinery with a story attached.**
+
+## TWO VIZ PRIMITIVES SHIPPED WITHOUT A CONSUMER, EACH WITH A NAMED TRIGGER
+
+| primitive | trigger | why it could not be wired in S14.3 |
+|---|---|---|
+| **`Histogram`** (binned count over discrete events) | **the screen that owns the window/filter controls — S14.4's ACCESS-EVENTS slice** | `/access-events` supplies `occurred_at` + `decision` (incl. `gap`), so the data exists. **The BINNING depends on a time window, and S14.3 had no basis to choose one.** Inventing a default would be a product decision made by an infrastructure slice. |
+| **`NodeLink`** (topology) | **S14.4's SITES slice** | `siteLinkGraph` (S8.2) already computes the deterministic hub-and-spoke. **S8.3's Sites markup is being replaced in S14.4**, and wiring a graph into markup about to be rewritten is work done twice. |
+
+**THE HONESTY GUARDS ARE ALREADY PROVEN ON BOTH** — failed-draws-nothing, gap-drawn-as-gap, roadmap-says-so,
+numbers-as-text — so the *properties* are gated today. **What is outstanding is a consumer, not a guarantee.**
+
+**⛔ IF EITHER SCREEN SLICE SHIPS WITHOUT WIRING ITS PRIMITIVE, THAT IS A FINDING, NOT A DEFERRAL** — the
+primitive would then have shipped twice-unconsumed, which is the dormant-machinery law with a second chance
+already spent.
+
+## AND THE STANDING EXPECTATION FOR EVERY REMAINING SCREEN
+
+**Adding semantics to a screen WILL break queries that were passing.** Thirteen screens remain.
+**Each break is evidence of a pre-existing weak assertion, not of a bad improvement** — fix the QUERY, by role
+and accessible name, never by narrowing to a test-id (docs/laws.md).
