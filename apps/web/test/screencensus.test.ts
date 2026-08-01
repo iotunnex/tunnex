@@ -42,6 +42,7 @@ const EXEMPT: Record<string, string> = {
 const COVERED: Record<string, string> = {
   "Gateways.tsx": "test/gatewayswiring.test.tsx — revoke wiring + revoked-suppression + failed-revoke surfaced",
   "Devices.tsx": "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
+  "Kubernetes.tsx": "test/kuberneteswiring.test.tsx — health-kind mirror census (WF-S11-7) + withheld destructive control + LoadRetry reached",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -57,11 +58,17 @@ const COVERED: Record<string, string> = {
 // disagreement with the backend is most consequential, not by size.
 const PENDING: Record<string, string> = {
   "Access.tsx": "after Devices — a rule shown active but not compiled is a silent authorization gap",
-  "Kubernetes.tsx": "after Access — WF-S11-7's own territory (the unrendered health kind)",
-  "Sites.tsx": "carries the D4 three-way assertion already (test/siblingconsistency.test.tsx); still owes its own wiring + failure-path pair",
+  // ⚠ SHEDDER — the redesign SPLITS this screen. Sites keeps `sites` and sheds ROUTED RANGES to a new
+  // `subnets` screen. Its tests MUST assert the DECISION and NAME THE DESTINATION: "a routed range that fails
+  // to load is surfaced, not rendered as none" travels to whichever screen renders it; "the Sites page shows a
+  // routed-range list" does not, and becomes throwaway work the day the split lands.
+  "Sites.tsx": "SHEDS routed ranges -> subnets. Assert the decision, name the destination. Carries the D4 three-way assertion already (test/siblingconsistency.test.tsx); still owes its own wiring + failure-path pair",
   "Users.tsx": "unranked backlog",
   "AuditLog.tsx": "unranked backlog",
-  "Settings.tsx": "unranked backlog",
+  // ⚠ SHEDDER — Settings keeps `settings` and sheds MACHINE CREDENTIALS to `cli` (MachineCredentials.tsx is
+  // rendered inside Settings today) and EDITION to `license` (no surface today). Same rule: assert the
+  // decision, name the destination.
+  "Settings.tsx": "SHEDS machine credentials -> cli, edition -> license. Assert the decision, name the destination",
   "Dashboard.tsx": "unranked backlog",
 };
 
@@ -97,10 +104,24 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(2);
+    expect(Object.keys(COVERED).length).toBe(3);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(7);
+    expect(Object.keys(PENDING).length).toBe(6);
+  });
+
+  // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
+  //
+  // The redesign is a re-architecture that CONSOLIDATES 18 pages into 17 declared screens, and it changes what
+  // is accountable here. Two of today's screens SHED sub-surfaces into new ones (Sites -> subnets,
+  // Settings -> cli + license), and four wireframe screens have no current equivalent at all: `flows` (a
+  // registered gap that never had a UI), `ops`, `license`, `onboarding`. Net, the tier's accountable total
+  // grows from 9 to roughly 13 once exemptions are re-applied.
+  //
+  // RE-BASELINING IS A DELIBERATE, REVIEWABLE EDIT — which is exactly the property the equals-the-total form
+  // was chosen for. A `>=` floor would have absorbed the growth silently and nobody would have had to look.
+  it("the ledger is a snapshot of today — 9 accountable screens, ceiling ~13 after the redesign", () => {
+    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(9);
   });
 });

@@ -13,8 +13,8 @@
 > Electron renderer"*). It was recorded as a decide-item first and argued on paper before being ruled, which is
 > the required order for reversing a lock.
 
-**SOURCE ARTIFACT — NOW COMMITTED: `docs/design/TUNNEX-wireframe-v2.html`** (2.9 MB). 12 dashboard screens plus
-a desktop-client section. **It is the specification for an entire epic and previously existed in exactly one
+**SOURCE ARTIFACT — NOW COMMITTED: `docs/design/TUNNEX-wireframe-v2.html`** (2.9 MB). **17 declared screens** —
+13 main-nav plus a four-item `OTHER SCREENS` group (including the desktop-client reference). **It is the specification for an entire epic and previously existed in exactly one
 place outside version control.**
 
 > **IT IS A CLAUDE DESIGN EXPORT.** A **VISUAL SPECIFICATION** — not editable source, and **not a markup
@@ -148,8 +148,15 @@ branch (hoisting a shared component library serving two different interaction mo
 
 ## Scope
 
-**12 screens:** overview · gateways · sites · access · devices · users · flows · audit · cli · settings · k8s ·
-ops. **Plus:** a command palette · edition/role toggles · density modes · toasts with undo.
+**17 screens, corrected by measurement** (the earlier figure of 12 came from the props script and omitted
+`subnets`):
+
+**MAIN NAV (13):** `overview` · `gateways` · `sites` · **`subnets` (Routed Ranges)** · `access` · `devices` ·
+`users` · `flows` (ENT) · `audit` · `cli` · `settings` · `k8s` (ENT) · `ops`
+
+**OTHER SCREENS (4):** `auth` · `desktop` · `license` · `onboarding`
+
+**Plus:** a command palette · edition/role toggles · density modes · toasts with undo.
 
 **REDUCED BY ITEM A's RULING (2026-08-01): connect / tunnel / tray are NOT in this list.** They belong to the
 desktop client, which is connect-only and has its own components. The redesign reserves no space for them.
@@ -197,7 +204,7 @@ containing a match — undercounts by orders of magnitude. All figures below are
 | **`aria-` anywhere** | 0 | **0** | ✅ exact |
 | `backdrop-filter` | 241 | **242** | layered glassmorphism — a RENDERING MODEL, not a colour choice |
 | custom typography | 890 | **961** | Instrument Sans **542** + JetBrains Mono **419** |
-| screens | 12 | *(not machine-countable)* | against the current **18** pages — a **CONSOLIDATION**, not a restyle |
+| screens | 12 | **17** | **CORRECTED BY MEASUREMENT** — 13 main-nav entries + a four-item `OTHER SCREENS` group. The "12" came from the props script and **omitted `subnets` (Routed Ranges) entirely**, which is a real main-nav screen. Still a **CONSOLIDATION** against the current 18 pages — the shape holds, the count did not |
 
 **THE CORRECTIONS DO NOT MOVE THE RULING, AND THE LOAD-BEARING FIGURES ARE EXACT.** Every count that carries
 the accessibility argument — the four zeros, the zero `aria-`, and the single `<button>` — matched exactly. The
