@@ -78,3 +78,6 @@ walk-artifacts/**/*.key
 # stray `go build ./cmd/...` outputs (S11)
 /apps/api/preflight
 /apps/api/backupctl
+
+# S14.1: emitted design tokens (built from packages/shared/src/tokens.ts by `build:tokens`)
+/packages/shared/dist/

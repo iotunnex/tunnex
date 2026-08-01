@@ -18,6 +18,22 @@ epic. Build starts now.**
 | **17 screens, not 12** | corrected by measurement |
 | **RESPONSIVE IS NEW DESIGN WORK** — there is nothing to adapt | measured |
 
+## ⛔ EPIC-LEVEL RULE — THEMING AND EDITION GATING ARE SEPARATE MECHANISMS AND MUST NEVER MERGE
+
+**Founder-ruled 2026-08-01. Every later slice inherits this.**
+
+**Theme answers *"what does this look like"*. Edition answers *"does this exist at all"*.**
+
+**A control hidden by COLOUR is rendered INVISIBLE rather than ABSENT** — still in the DOM, still announced to
+a screen reader, still reachable by keyboard, still submittable. **Gone only to a sighted mouse user.** That is
+a security-adjacent surface **failing open**, and the component tier would find it by role while a human review
+would not.
+
+**IT INTERACTS WITH DECIDE-ITEM 6** (edition gating behind ONE seam, so S12.1 rewrites a hook and nothing
+else): **THE SEAM MUST BE A RENDER DECISION, NEVER A STYLE.** A hook that returns "don't render this" is
+correct; a hook that returns a class name, an opacity, or a theme variant is the same defect wearing the seam's
+name.
+
 ## THE MEASUREMENTS THAT SETTLED IT — re-recorded so the epic stands alone
 
 From `docs/design/TUNNEX-wireframe-v2.html` (2.9 MB, committed), counted by occurrence (`grep -o | wc -l`),

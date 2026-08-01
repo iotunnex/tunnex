@@ -7,6 +7,9 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
 import { desktop } from "./lib/desktop";
+// S14.1: the design tokens' CSS custom properties, emitted from @tunnex/shared by the `tunnex-tokens` Vite
+// plugin. FIRST, so `:root` carries the variables before any Tailwind utility resolves them.
+import "virtual:tunnex-tokens.css";
 import "./index.css";
 
 // Desktop transport bootstrap (S6.2): before ANY request (the first is

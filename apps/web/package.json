@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "pnpm --filter @tunnex/shared build:tokens && tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @tunnex/shared build:tokens && tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
