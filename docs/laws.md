@@ -1937,3 +1937,52 @@ most helpful. **It cost a real question from the founder: *"when will connectivi
 gateways to one (a revoke), the panel must show **the hub set that is still configured** — not hide it behind
 a precondition notice. **The precondition governs OFFERING the capability, never DISCLOSING existing state.**
 Suppressing real configuration because a count dipped is how an operator loses track of what is live.
+
+# ⭐ A SCREENSHOT SHOWS WHAT IS WRONG. ONLY THE SOURCE SAYS WHAT IS RIGHT. (2026-08-02, S14.5, founder-ruled)
+
+**MEASURED COST: FOUR ROUNDS ON ONE PANEL**, plus two more after it, all on the Sites network map.
+
+| round | what I did | outcome |
+|---|---|---|
+| 1 | built from the handoff markup, took its five-spoke coordinates verbatim | N=1 rendered as a column, panel two-thirds empty |
+| 2 | **corrected from a screenshot** — fitted the viewBox to the nodes | whitespace gone, everything MAGNIFIED to 150px rings |
+| 3 | **corrected from a screenshot** — pinned `viewBox 0 0 600 320` | scale right, 320px of near-empty panel |
+| 4 | **re-opened the file**: `height: 320px` + fitted box together | correct |
+| 5 | founder asked twice more; **re-opened the file** | node rows were never in the design (`sc-for extraSites`) |
+| 6 | founder asked why the link does not flow; **re-opened the file** | `.tnx-edge` animation never implemented, never flagged |
+
+**EVERY CORRECTION MADE FROM AN IMAGE WAS WRONG OR HALF-RIGHT. EVERY CORRECTION MADE FROM THE FILE WAS
+RIGHT.** The source was on disk the entire time.
+
+## Why an image cannot answer the question
+
+**A screenshot is evidence of a DEFECT and evidence of nothing else.** It shows a symptom — too big, too
+empty, missing — and every symptom has several plausible causes. Choosing among them from the picture is
+guessing, and a plausible guess produces a fix that changes the symptom without touching the cause. **That is
+how round 2 turned a spacing failure into a scaling failure.**
+
+The source states the CONTRACT: `viewBox 0 0 600 320` at `height: 320px` means one user unit is one pixel.
+**No amount of looking at a rendering recovers that**, because a wrong scale looks exactly like a right scale
+when every shape moves together.
+
+## ⛔ THE STANDING CORRECTION — now part of the section protocol
+
+> **OPEN THE HANDOFF BLOCK AND DIFF IT STRUCTURALLY BEFORE WRITING THE COMPONENT — AND AGAIN BEFORE ANY
+> CORRECTION. NEVER AFTER A SCREENSHOT SAYS SOMETHING IS OFF.**
+
+**IT IS THE SAME ERROR AS BUILDING FOUR SLICES FROM A SUMMARY OF THE WIREFRAME**, one scale down: working
+from a derived artifact when the original is available. The first cost four slices; this cost six rounds.
+
+## ⚠ AND THE PART THAT IS NOT A CRITICISM OF THE LOOP (founder-ruled: keep both stories)
+
+**THE ROUNDS FOUND REAL DEFECTS, AND THEY NEEDED FINDING:**
+
+- **`--tnx-ink-600` does not exist** — every Donut neutral slice black since S14.3, live on `main`, on a
+  screen already reviewed and passed
+- **N=1 geometry** — a layout inherited from a populated example
+- **the scale contract** — understood only by reading the source
+- **a node wearing a `down` pill with no edge** — the map making the same claim I had told the founder the
+  card was wrong to make
+
+**THE LOOP WAS PRODUCTIVE AND THE METHOD WAS WRONG. Both are true, and recording only one of them would
+teach the wrong lesson** — the fix is not to iterate less, it is to iterate against the source.
