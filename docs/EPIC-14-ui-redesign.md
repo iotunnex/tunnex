@@ -145,7 +145,7 @@ floor and the `ok` reservation in S14.1.
 
 ## THE MEASUREMENTS THAT SETTLED IT — re-recorded so the epic stands alone
 
-From `docs/design/TUNNEX-wireframe-v2.html` (2.9 MB, committed), counted by occurrence (`grep -o | wc -l`),
+From `docs/design/TUNNEX-wireframe-v2.html.txt` (2.9 MB, committed), counted by occurrence (`grep -o | wc -l`),
 **not** `grep -c` — the file is 405 lines and line-counting undercounts by orders of magnitude:
 
 | measure | count | what it means |
