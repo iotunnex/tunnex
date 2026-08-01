@@ -466,10 +466,18 @@ images on the rig — they are built from `c417c85`. §C needs an agent image ca
 This is the one place the same-binary provenance rule is deliberately broken: §A and §B share `c417c85` so they
 are comparable; §C tests code neither of them contains.
 
-**2. THE SUBJECT IS THE `k8s` ROW, via Helm.** §B's subjects (aws-gw-2 and the re-enrolled aws-gw-1) are stopped,
-revoked and restored during §B, so neither can hold a 48-hour clock. `azure-gw` cannot host a second agent
-(`wg0` contention). That leaves the in-cluster agent — and its image must be imported with
-**`k3s ctr images import`, NOT `docker load`** (`docs/infra-inventory.md`).
+**2. THE SUBJECT IS `aws-gw-1` (`019fbb50…`), AFTER §B COMPLETES — via `docker load` on the VM.** Deploy the
+rebuilt agent image there and restart the container.
+
+> **CORRECTED 2026-08-01. This prerequisite used to read "THE SUBJECT IS THE `k8s` ROW, via Helm" — it
+> contradicted the §C STAGING ruling directly above it, and a fresh session reading top-down would have staged
+> the wrong host and burned 48 hours before finding out.** The struck text argued that §B stops, revokes and
+> restores both aws-gw rows, so neither can hold a 48-hour clock — true *during* §B, false *after* it, which is
+> when §C runs. **`k8s` is DISQUALIFIED: `key_recorded = f`**, so proof-of-possession recovery is structurally
+> impossible for it and C-LEG-0 would fail for a reason unrelated to `identityWatchLoop`. Kept rather than
+> deleted, because the k3s image-import trap below is real and a future in-cluster run still needs it:
+> **an image for the `k8s` row must be imported with `k3s ctr images import`, NOT `docker load`**
+> (`docs/infra-inventory.md`). `azure-gw` remains unusable as a second agent host (`wg0` contention).
 
 **3. DELETE THE TTL LINE — DO NOT OVERRIDE IT.**
 

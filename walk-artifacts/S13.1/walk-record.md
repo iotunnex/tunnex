@@ -587,3 +587,80 @@ control-plane identity, and no code path can confuse the old row with the new on
 **One residual noted, not fixed:** that EXISTS guard has **no `status` filter**, so a REVOKED node's pubkey still
 admits peer telemetry. Harmless today (a revoked gateway neither reports nor is reported), and it is the same
 `active`-vs-usable shape as WF-S13-1. **Trigger: the next change to `node_peer_status` ingestion.**
+
+
+# WF-S13-8 (MEDIUM) — a tunnel resolver left on the physical interface after the tunnel is gone
+
+**Raised 2026-08-01. Cost the walk a session.** Filed, ranked, **NOT fixed during the walk.**
+
+## What happened, on the operator's own machine
+
+A WireGuard device was connected and disconnected with **macOS `wg-quick`** (the standalone tool, not the Tunnex
+client). `wg-quick up` set the Wi-Fi service's DNS to the tunnel resolver **`10.99.0.1`**; `wg-quick down` did not
+put it back. Result: **no name resolution at all, and no indication why.** The tunnel is visibly down, so the
+tunnel is the last thing anyone suspects — resolver settings on the *physical* interface are not where you look
+when the thing you turned off is already off. macOS `wg-quick`'s restore path is a backgrounded route monitor;
+it did not fire here.
+
+**This is the WF-S13-6 shape, in a different subsystem:** a teardown that looks correct, leaves residue, and
+nothing that runs afterwards cleans it up. WF-S13-6's residue was an agent that never retried; this residue is a
+resolver pointing into a tunnel that no longer exists. Both are invisible until someone needs the thing.
+
+## The product half — CHECKED, NOT ASSUMED, and it is NARROWER than the incident
+
+The incident is a third-party tool. **The honest question is whether Tunnex has the same shape**, and the answer
+is mostly no. `apps/helper/backend_darwin.go`:
+
+- `applyDNS` (`:652`) writes **every** service's prior setting to `/var/run/tunnex/dns.json` **before** any
+  mutation, and only for a **full tunnel** (`:257`, `cfg.FullTunnel && len(cfg.DNS) > 0`). Split tunnel never
+  touches the system resolver.
+- `restoreDNS` (`:672`) is called from **three** places, which is the un-strand `wg-quick` lacks:
+  graceful `Down` (`:450`), helper-startup `CleanStale` (`:609`), and the **dead-man release** — `CheckDeadMan`
+  calls `s.be.Down()` (`state.go:204`) before its crash sweep, so a force-quit/crash restores DNS too.
+- A second `applyDNS` cannot poison the backup with the tunnel's own resolver: `Supervisor.Up` refuses a second
+  `Up` with `already_up` (`state.go:235`), so the re-entry that would record `10.99.0.1` as the "prior" setting is
+  unreachable.
+
+**So the incident does not reproduce through the Tunnex client.** What survives the check is smaller and real:
+
+**`restoreDNS` cannot fail loudly, and it destroys its own retry.** Every restore is `_ = run("networksetup", …)`
+(`:686`) — the error is discarded — and `os.Remove(dnsBackupPath)` (`:689`) runs **unconditionally**, outside any
+success test. One `networksetup` failure on one service therefore strands that service on the tunnel resolver,
+**deletes the record of what it should have been**, and makes the startup `CleanStale` retry a permanent no-op.
+Silent, unrecoverable, and it produces exactly the symptom above. Neither proven nor disproven on the wire —
+recorded as an unexercised branch, which is where this epic keeps finding things.
+
+## Adjacency to S8.4b — CHECKED, and the guess does not hold
+
+The suggestion on raising this was that it may be the trigger the S8.4b crash/owner-loss resolver sweep was
+waiting for. **It is not — that sweep already landed.** `Supervisor.SetOnCrashSweep` is wired in
+`apps/helper/cmd/tunnex-helper/main.go:96` and fires from the dead-man release (S8.5 Slice 1), which is the
+registered ordering precondition discharged on schedule. The trigger fired at S8.5; the work shipped.
+
+**The two are adjacent but not the same mechanism, and that is the useful part:**
+
+| | mechanism | teardown |
+|---|---|---|
+| S8.4b sweep | **domain-scoped `/etc/resolver` files** (owned-marker, full-sweep) | client `set_resolvers([])` on graceful down · `CleanStaleResolvers` at startup · **crash sweep on dead-man release** |
+| WF-S13-8 | **full-tunnel `networksetup` DNS on every physical service** | `restoreDNS` on Down · startup CleanStale · dead-man (via `Down`) |
+
+Same territory (macOS name resolution), two mechanisms, two independent teardowns — and the crash path sweeps one
+of them **by name** while the other rides `Down`. That asymmetry is visible at the call site and is worth stating
+even though both are in fact covered: the next person adding a resolver mechanism has two teardowns to wire and
+nothing tells them so. **This is a shared-territory instance (`docs/laws.md`), not a new law.**
+
+## RANK — MEDIUM. Registered with a trigger. Not merge-blocking on EPIC 13.
+
+**Why not higher:** the reproducing path is a third-party tool; the product's three restore paths cover the
+crash, quit and reboot cases; the surviving defect is a silent-failure branch with no evidence it has ever fired.
+
+**Why not lower:** the failure is total (no DNS), self-concealing (the tunnel is down, so nobody looks), and
+**self-destroying** (the backup is deleted, so the automatic retry that exists cannot help). It already cost one
+working session, which is more than most MEDIUMs can claim.
+
+**Out of EPIC 13's surface entirely** — the epic is gateway recovery; this is client/helper territory. It does
+not gate this merge.
+
+**TRIGGER: the next change to the macOS full-tunnel DNS path, OR the next client walk carrying a full-tunnel leg
+— whichever lands first.** The fix shape, when it runs, is one sentence: **restore must report its failures and
+must not delete the backup it failed to apply.**
