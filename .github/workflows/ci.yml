@@ -168,12 +168,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Bring up the stack + seed, with the gallery route enabled
+      - name: Bring up the stack + seed, with the gallery route COMPILED IN
+        # VITE_VISUAL_GALLERY must reach the web image's BUILD, not the running container: Vite bakes
+        # `import.meta.env` into the bundle, so a runtime env var arrives after the route has already been
+        # eliminated. The first run of this job failed exactly that way — the gallery specs timed out on an
+        # element that had never been compiled in, while the Overview specs failed correctly with
+        # "snapshot doesn't exist". Two different failures, one expected, one not.
         run: |
           cp .env.example .env
-          echo "VITE_VISUAL_GALLERY=1" >> .env
           docker compose up -d --build --wait
           make seed
+        env:
+          VITE_VISUAL_GALLERY: "1"
       - name: Playwright visual comparison
         run: |
           docker run --rm --network tunnex_default \

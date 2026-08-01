@@ -247,7 +247,7 @@ visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN 
 	# rasterisation and subpixel AA differ per platform, so the suite would be red on its first run and the
 	# only way out would be to widen the threshold — which is how a visual suite stops meaning anything.
 	# UPDATE a baseline with:  make visual-update
-	$(COMPOSE) up -d --wait
+	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
 	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
 
@@ -255,7 +255,7 @@ visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN 
 visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COMMIT, .png FILES ONLY.
 	# A baseline update mixed into a feature commit is unreviewable — "N images changed" has to be a fact
 	# someone can see, not something buried in a 40-file diff.
-	$(COMPOSE) up -d --wait
+	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
 	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --update-snapshots"
 

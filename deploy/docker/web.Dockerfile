@@ -13,6 +13,16 @@ RUN pnpm install --filter @tunnex/web... --no-frozen-lockfile
 
 COPY packages/shared/ packages/shared/
 COPY apps/web/ apps/web/
+
+# The visual-regression gallery is a BUILD-TIME flag, because Vite bakes `import.meta.env` into the bundle.
+# Unset here and in every production build, so the route is dead-code-eliminated. Only the `visual` CI job
+# (and `make visual` locally) passes 1.
+#
+# It has to be a BUILD ARG, not a container env var: putting it in .env reaches compose and the running
+# container, and arrives far too late — the bundle was already built without the route. That is exactly how
+# the first CI run failed, with the gallery specs timing out on an element that had never been compiled in.
+ARG VITE_VISUAL_GALLERY=""
+ENV VITE_VISUAL_GALLERY=$VITE_VISUAL_GALLERY
 RUN pnpm --filter @tunnex/web build
 
 # nginx-unprivileged runs as a non-root user and listens on 8080.
