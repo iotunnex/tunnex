@@ -309,3 +309,36 @@ golden vector and the twin canonical-hash goldens: *the coupling is asserted, no
 the context would put **the test's copy of the gate** under assertion instead of **the product's** — 
 fixture-restates-production **at the seam where it is easiest to fall into**, because stubbing a context is the
 obvious move and the test still goes green.
+
+## A GUARD ENFORCED BY TYPES BEATS ONE ENFORCED BY DISCIPLINE (minted 2026-08-01, web tier slice 4)
+
+**Discovered by trying to break it, which is the only way this is ever discovered.**
+
+The `loadOne` law says a failed load must never render as an empty or a defaulted value. On the Access screen
+that would be *"0 rules — ALL traffic denied."* on a load that never returned — **an authorization claim
+invented by the client.**
+
+**The naive mutation for it DOES NOT COMPILE.** `Loaded<T>` is a discriminated union:
+
+```ts
+export type Loaded<T> = { ok: true; data: T } | { ok: false; error: string };
+```
+
+**`.data` is unreachable without narrowing `.ok`.** Dropping the `!rulesResult.ok` check does not produce a
+wrong render — **it produces a type error.** The mutation had to attack the failed branch's *output* instead.
+
+**THE FINDING IS THE STRENGTH, NOT THE INCONVENIENCE.** The law is enforced **by construction** on this path:
+a future author cannot reintroduce the defect by forgetting a check, because the compiler will not let them
+read the value they forgot to check for.
+
+**THE STANDARD, AND THE REGRESSION RISK: `Loaded<T>` MUST NOT BE LOOSENED.** Widening it to
+`{ ok: boolean; data?: T; error?: string }` — the shape a hurried refactor reaches for, because it is easier to
+construct — **would silently convert a compile-time guarantee into a discipline nobody is auditing.** Nothing
+would fail. No test would go red. The guard would simply stop existing.
+
+**BINDING ON THE REDESIGN.** A re-architecture touches every screen's load path. **`Loaded<T>`'s discriminated
+shape is a thing the redesign must not regress**, and it is exactly the kind of guard that disappears without
+anyone noticing, because its absence looks like ordinary code.
+
+**GENERALISED:** when a law can be encoded in a type, encode it there. A rule enforced by review is enforced
+until the reviewer is busy; a rule enforced by the compiler is enforced at 3am by someone who never read the law.
