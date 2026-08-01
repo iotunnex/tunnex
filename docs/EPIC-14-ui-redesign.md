@@ -457,14 +457,20 @@ At drawer width it lands **on top of the `<h1>`** — on Overview the word `Menu
 since S14.2. This is the leg's **third** pre-existing main defect.
 
 **NOT FIXED IN THE LEG** — the founder's last round was funded for *harvest, land, green*, and a shell fix is
-neither. **The 390 baseline is therefore committed WITH THE DEFECT VISIBLE IN IT**, which is correct: a
-baseline's job is to detect CHANGE, not to certify correctness. Freezing a registered defect is honest;
-freezing an unregistered one is the trap.
+neither.
 
 > **A BASELINE IS NOT A STATEMENT THAT THE IMAGE IS RIGHT. IT IS A STATEMENT THAT THIS IS WHAT WE HAVE.
 > THE DIFFERENCE ONLY HOLDS IF WHAT IS WRONG IN IT IS WRITTEN DOWN.**
 
-**When it is fixed, the 390 baseline must be re-harvested in the same commit** — the diff is the proof.
+**⚠ UPDATED 2026-08-02, AND THE UPDATE IS A LOSS OF COVERAGE.** This defect *was* committed into the
+`overview-390` baseline — frozen, visible, and registered. **Both Overview baselines have since been dropped**
+(founder-ruled: the surface is data-determined and flaked at 621px across runs of identical code; see
+`docs/laws.md`). **So nothing now holds this defect but prose.** No artifact will notice if it changes, and
+nothing will fail if it is fixed silently or made worse.
+
+**That is the price of the reduction, and it is recorded rather than glossed.** The same sentence sits in
+`e2e/visual/visual.spec.ts-snapshots/README.md`, next to the baselines that remain, so a reader who never
+opens this file still meets it.
 
 **TRIGGER: the same one as the duplicated indicator — the next shell-touching section.**
 

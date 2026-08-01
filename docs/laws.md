@@ -1499,3 +1499,64 @@ formed. Guessing from "it changed again" would have produced a second mask.
 
 **AND THE COST ASYMMETRY IS WHY THE DEFAULT MUST BE `WAIT`:** an unnecessary wait costs milliseconds; an
 unnecessary mask costs a permanently unasserted region that nothing will ever flag.
+
+## ⚠ CORRECTION TO THE ROW ABOVE (2026-08-02) — THE WAIT DID NOT FIX THE 621
+
+**The table claims `WAIT` was the correct fix for the 621 px band. IT WAS NOT, and the entry is left standing
+with this correction rather than quietly edited, because the correction is the more useful artifact.**
+
+The wait was added. **The next run diffed by 621 pixels again — the same number.** By the law two sections
+down (*when a fix leaves a measured number unchanged, the hypothesis is wrong*), the race was never the
+cause. Confirmed by isolating the variable: the app was **byte-identical** between the run the baseline was
+harvested from and the run that rejected it. **Only docs and `.png` files moved. So it was run-to-run
+variance in rendering, not a transition being caught mid-flight.**
+
+**WHAT SURVIVES OF THE LAW:** the mask-versus-wait *distinction* is sound and the diagnostic (*localise the
+diff before explaining it*) is what produced every correct call in this arc. **WHAT DOES NOT SURVIVE:** the
+claim that the 621 was diagnosed and fixed. It was diagnosed twice, plausibly, and wrongly both times.
+
+> **A LAW MINTED FROM A FIX THAT WAS NEVER RE-MEASURED IS A HYPOTHESIS WEARING A LAW'S TYPOGRAPHY.**
+
+**The disposition was to remove the subject, not to keep explaining it** — see the law below.
+
+# ⭐ A VISUAL SUITE'S SUBJECT SHOULD BE THE SURFACE WHOSE OUTPUT IS DETERMINED BY CODE, NOT BY DATA
+
+**(2026-08-02, EPIC 14 viewport leg — founder-ruled after seven rounds, and the leg's most durable output.)**
+
+**THE GALLERY RENDERS FIXTURES. A SCREEN RENDERS A LIVE CONTROL PLANE:** panels that resolve in whatever
+order the API answers, rows stamped at seed time, health that arrives when `/healthz` arrives. **That is
+where the product is interesting and where a pixel diff is LEAST able to say anything.**
+
+Measured, over seven rounds of the same instrument:
+
+| subject | behaviour |
+|---|---|
+| `gallery-1440` / `gallery-390` (fixtures) | **stable across all 7 rounds** |
+| `overview-1440` (live control plane) | **621 px different across runs of IDENTICAL app code** |
+| `overview-390` (same code path) | passed twice — **luck, not a property** |
+
+**Keeping the 390 baseline because it happened to pass was considered and REJECTED.** It is the same code
+path that flakes at 1440. **Two passes is an absence of evidence of flake, not evidence of determinism** —
+the same shape as the absence law near the top of this file.
+
+## ⛔ THE COROLLARY, WHICH IS THE PART THAT ACTUALLY DECIDED IT
+
+**A suite earns its subjects. Count what each instrument has PAID.**
+
+| instrument | pre-existing `main` defects found |
+|---|---|
+| geometric assertion (`scrollWidth` vs `clientWidth`) | **1** — a 65px header overflow at 390, on every screen since S14.2 |
+| a human reading a harvested image | **1** — the drawer `Menu` button sitting on top of the page `<h1>` |
+| a strict-mode locator violation | **1** — the control-plane health indicator rendering twice on Overview |
+| **the full-page pixel diff of a live screen** | **0, in six rounds** |
+
+> ## **SCOPE THE SUITE TO WHAT HAS PAID, NOT TO WHAT LOOKS COMPREHENSIVE.**
+
+**The honest answer to persistent variance is often a SMALLER SUBJECT, not more determinism work.** Every
+round spent chasing the 621 was a round not spent on the screens the instrument had already proven it could
+protect — and the three findings above all arrived by other means while the pixel diff was being debugged.
+
+**⚠ AND THE COST OF THE REDUCTION, STATED RATHER THAN GLOSSED:** the `Menu`-over-`<h1>` overlap had been
+**committed into the `overview-390` baseline** — frozen, visible, written down. Dropping that baseline means
+**the defect is now registered in prose only, and no artifact holds it.** Reducing scope removed real
+coverage. That is the correct trade here, and it is not a free one.
