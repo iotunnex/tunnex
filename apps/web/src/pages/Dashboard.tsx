@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Donut } from "../components/viz";
 import { Link } from "react-router-dom";
 import { api, apiErrorMessage, type OrgOverview } from "../lib/api";
 import { relativeAge } from "../lib/format";
@@ -89,6 +90,44 @@ export default function Dashboard() {
               tone={data.online > 0 ? "ok" : undefined}
             />
           </div>
+
+          {/* S14.3 slice C — the gateway liveness donut. THE FIRST VIZ CONSUMER, wired in the same slice as
+              the primitive, because a viz primitive with no consumer is dormant machinery and this epic has
+              already ruled that dormant machinery cannot be proven.
+
+              SOURCE: /api/v1/organizations/{orgId}/overview — a CURRENT-STATE PROPORTION, which is the only
+              reading this data permits. It is deliberately NOT a trend: there is no time-series endpoint in
+              the API, and `rx_bytes`/`tx_bytes` are described by the spec itself as "raw gauge since the last
+              handshake (display only, never summed as monotonic)". The field exists and its own description
+              forbids the chart — which is why the Overview area chart is ROADMAP, not built.
+
+              `failed` carries the load state so a failed fetch draws NOTHING — never a zero baseline, which
+              would render "we could not read it" identically to "nothing is online". */}
+          <Card className="mt-4">
+            <h2 className="text-sm font-semibold text-slate-300">
+              Gateway liveness
+            </h2>
+            <div className="mt-3">
+              <Donut
+                label="Gateway liveness"
+                source={{ endpoint: "/api/v1/organizations/{orgId}/overview" }}
+                failed={error != null}
+                slices={[
+                  {
+                    label: "seen in last 3 min",
+                    value: data.online,
+                    tone: "ok",
+                  },
+                  {
+                    label: "not seen recently",
+                    value: Math.max(0, data.nodes - data.online),
+                    tone: "neutral",
+                  },
+                ]}
+                empty="No gateways enrolled yet."
+              />
+            </div>
+          </Card>
 
           {/* Empty states double as the onboarding funnel for a fresh org. */}
           {data.nodes === 0 && (
