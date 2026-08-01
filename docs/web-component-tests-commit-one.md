@@ -17,6 +17,27 @@ ruled against** (`GATE-REPORT-NEEDS-SHA`).
 (WF-S13-11), so a story branch has **no CI signal** until one is opened. `make web-gate` passing locally is
 **not** the gate.
 
+## ⚠ CORRECTION — AND THE CORRECTION IS THE SHA DISCIPLINE WORKING, NOT A NUMBER BEING AMENDED
+
+**The table above is TRUE AT `00a736d` AND IS NOT TRUE AT THE BRANCH HEAD.** Commits landed afterward — the
+wireframe artifact at `5b2f4f7` — and the plain `CodeQL` code-scanning aggregate **went red** on five alerts
+raised against that file (1 high `js/xss-through-dom`, 4 medium `js/cross-window-information-leak`). It was
+found while diagnosing the same red on the stacked PR #46.
+
+**STATE THE POINT, NOT JUST THE NUMBER.** A claim of "CI green" with no sha would have been **unfalsifiable** —
+it would have quietly meant "green at some moment", stayed on the page, and been read as a property of the
+branch forever. **Because the claim was DATED, it was CHECKABLE, and it got checked.** The report did not decay
+into a lie; it decayed into a *stale fact with a timestamp*, which is exactly what `GATE-REPORT-NEEDS-SHA` was
+minted to produce.
+
+**So this is not an erratum. It is the mechanism doing the one thing it exists to do.** The rule earns its
+keep at the moment a green goes stale — and the only way to notice that moment is for the green to have carried
+a sha in the first place.
+
+**DISPOSITION:** founder-ruled — the wireframe was **renamed** to `.html.txt` (CodeQL classifies by extension),
+not path-excluded and not dismissed. See `docs/UI-REDESIGN-registration.md`. **A fresh CI run and a fresh sha
+are owed for this branch, and this table is not re-asserted until then.**
+
 ## 1. THE FIVE QUERY RULES — the binding contract
 
 1. **QUERY BY ROLE + ACCESSIBLE NAME.** Never test-ids, class names, or DOM structure. **A redesign that breaks
