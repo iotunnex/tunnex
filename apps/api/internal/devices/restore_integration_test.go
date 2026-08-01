@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 )
 
@@ -520,5 +521,174 @@ func TestRestoreRevivesTheOVPNCERTIFICATEToo(t *testing.T) {
 	}
 	if revokedAt == nil {
 		t.Fatal("a certificate an operator revoked DELIBERATELY must never be revived by a gateway rebuild")
+	}
+}
+
+// TestRestoreREFUSESAnAddressOutsideTheCURRENTPool — review pass 1 #14, and the red that row never had.
+//
+// #14's fix (ipalloc.InPool at restore.go:157) has been in the tree since Batch C. Every OTHER restore-address
+// red covers TAKEN-ness — whether some live device now holds the address — and the decisions doc says plainly
+// that "taken-ness and validity are different questions and only one was being asked." Only one was being
+// TESTED, too: delete the InPool guard and every existing red stays green.
+//
+// THE SEQUENCE. A device is cascade-revoked with 10.99.0.200. The org's pool is then shrunk to 10.99.0.0/25,
+// which excludes it. The shrink is ALLOWED because the orphan guard inspects LIVE allocations and a revoked row
+// is not one — so the shrink cannot see the address it is stranding. On restore, the remembered address is free
+// (nothing holds it) and every taken-ness check says "reclaim it" — handing the user an address the gateway will
+// never route, while the device list, the config and the audit trail all read perfectly clean.
+func TestRestoreREFUSESAnAddressOutsideTheCURRENTPool(t *testing.T) {
+	f := seedRestoreFixture(t)
+	d := f.addDevice(t, "stranded", "10.99.0.200")
+	f.revokeGatewayCascade(t)
+
+	// The shrink the orphan guard permits: it cannot see the revoked row holding .200.
+	if _, err := f.pool.Exec(f.ctx, "UPDATE organizations SET pool_cidr='10.99.0.0/25' WHERE id=$1", f.org); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 restored, got %d", len(got))
+	}
+	if got[0].KeptAddress {
+		t.Fatal("restore reclaimed an address OUTSIDE the org's current pool. Nothing holds it, so every " +
+			"taken-ness check says it is free — but the gateway will never route it. The device comes back " +
+			"'active' with a config that cannot work, and no surface says otherwise")
+	}
+	if got[0].NewIP == "10.99.0.200" {
+		t.Fatalf("the fresh address must be inside the shrunken pool, got %q", got[0].NewIP)
+	}
+	if !ipalloc.InPool("10.99.0.0/25", got[0].NewIP) {
+		t.Fatalf("the replacement address %q is not inside the current pool 10.99.0.0/25", got[0].NewIP)
+	}
+	// NOT asserted: OldIP. The remedy clears `old` to force a fresh allocation (restore.go:158), so the
+	// out-of-pool path reports OldIP="" while the TAKEN path reports the previous address. That asymmetry is a
+	// real audit gap — a user whose address was stranded by a shrink gets no record of what they had — but it is
+	// NOT #14's subject, and encoding it here would make this red fail for a reason the remedy never promised to
+	// address. Registered instead; see docs/S13.1-pass3-triage.md.
+	if f.statusOf(t, d) != "active" {
+		t.Error("the device must still be restored — an out-of-pool address costs a re-import, not the device")
+	}
+}
+
+// TestRestoreSERIALIZESAgainstAConcurrentRevoke — review pass 1 #7, and the red that row never had.
+//
+// THE EXISTING RED IS SEQUENTIAL AND SAYS SO: TestRestoreRefusesWhenTheTargetWasREVOKEDUnderIt revokes the node
+// FIRST, "modelled by revoking it first, which is the state the restore will read." That proves the STATUS CHECK.
+// It cannot prove the FOR UPDATE lock, which is the half that addresses the actual defect — a restore authorized
+// by state read BEFORE the identity commit and applied AFTER it. Delete FOR UPDATE from restore.go:81 and the
+// sequential red stays green.
+//
+// THIS ONE IS DETERMINISTIC WITHOUT BEING SEQUENTIAL. A separate transaction takes the node's row lock and holds
+// it. The restore then starts and MUST BLOCK on GetNodeForOrgForUpdate. Only after the holder revokes the node
+// and commits does the restore proceed — and it must now see 'revoked' and refuse.
+//
+// WITHOUT THE LOCK the restore does not block: it reads the node while the revoke is still uncommitted, sees
+// 'active', and restores every cascaded device onto a gateway that is being revoked out from under it. That is
+// the device tier contradicting D3 while the node tier obeys it.
+func TestRestoreSERIALIZESAgainstAConcurrentRevoke(t *testing.T) {
+	f := seedRestoreFixture(t)
+	d := f.addDevice(t, "racer", "10.99.0.51")
+	f.revokeGatewayCascade(t)
+
+	holder, err := f.pool.Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(f.ctx) }()
+	if _, err := holder.Exec(f.ctx, "SELECT id FROM nodes WHERE id=$1 FOR UPDATE", f.node); err != nil {
+		t.Fatal(err)
+	}
+
+	type outcome struct {
+		res []RestoreResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, rerr := f.svc.RestoreCascadeRevokedDevices(context.Background(), f.org, f.node, f.node, nil)
+		done <- outcome{res, rerr}
+	}()
+
+	// The restore must still be BLOCKED on the row lock. If it has already finished, it never took the lock.
+	select {
+	case got := <-done:
+		t.Fatalf("the restore completed while another transaction held the node's row lock — it did not take "+
+			"FOR UPDATE, so it read the node's status without serializing against a concurrent revoke "+
+			"(err=%v, restored=%d)", got.err, len(got.res))
+	case <-time.After(700 * time.Millisecond):
+	}
+
+	// The concurrent revoke commits while the restore waits.
+	if _, err := holder.Exec(f.ctx, "UPDATE nodes SET status='revoked', revoked_at=now() WHERE id=$1", f.node); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-done:
+		if !errors.Is(got.err, ErrRestoreTargetUnusable) {
+			t.Fatalf("once the concurrent revoke committed, the restore must see it and refuse; got err=%v "+
+				"restored=%d", got.err, len(got.res))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the restore never unblocked after the lock holder committed")
+	}
+
+	if got := f.statusOf(t, d); got != "revoked" {
+		t.Fatalf("a restore refused because its target was revoked under it must change nothing; device is %q", got)
+	}
+}
+
+// TestRestoreREBUILDSTheCRL — review pass 1 #9, the third part of the sweep, which no red asserted.
+//
+// Revoking a gateway is a THREE-PART act: the devices, their OpenVPN certificates, and the org CRL. Restore
+// reversed the first two. TestRestoreRevivesTheOVPNCERTIFICATEToo proves the certificate tier — it revives
+// `cascade` certs and correctly leaves `deliberate` ones alone — and stops there.
+//
+// THE CRL IS WHAT THE DATA PLANE READS. A revived certificate whose serial is still on the CRL means the control
+// plane reports the device active, the operator sees green everywhere, and the OpenVPN server refuses the
+// connection. That is #9's defect verbatim: "green control plane, refusing data plane." Asserting the cert rows
+// without asserting the rebuild tests two thirds of a three-part sweep.
+func TestRestoreREBUILDSTheCRL(t *testing.T) {
+	f := seedRestoreFixture(t)
+	dev := f.addDevice(t, "ovpn-crl", "10.99.0.61")
+	if _, err := f.pool.Exec(f.ctx, "UPDATE devices SET transport='openvpn' WHERE id=$1", dev); err != nil {
+		t.Fatal(err)
+	}
+	serial := "crl-" + uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx,
+		`INSERT INTO ovpn_client_certs (org_id, device_id, serial, common_name, not_after)
+		 VALUES ($1,$2,$3,'cn',now()+interval '1 day')`, f.org, dev, serial); err != nil {
+		t.Fatal(err)
+	}
+	f.revokeGatewayCascade(t)
+	if _, err := f.pool.Exec(f.ctx,
+		`UPDATE ovpn_client_certs SET revoked_at=now(), revoked_cause='cascade' WHERE device_id=$1`, dev); err != nil {
+		t.Fatal(err)
+	}
+
+	var rebuilt []uuid.UUID
+	f.svc.rebuildCRL = func(ctx context.Context, org uuid.UUID) error {
+		rebuilt = append(rebuilt, org)
+		return nil
+	}
+
+	if _, err := f.svc.RestoreCascadeRevokedDevices(f.ctx, f.org, f.node, f.node, nil); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if len(rebuilt) == 0 {
+		t.Fatal("restore revived a cascade-revoked OpenVPN certificate and NEVER rebuilt the CRL. The control " +
+			"plane now reports the device active while its serial is still on the revocation list the OpenVPN " +
+			"server enforces — green control plane, refusing data plane, which is exactly the defect")
+	}
+	if rebuilt[0] != f.org {
+		t.Errorf("the CRL must be rebuilt for the device's own org; got %s want %s", rebuilt[0], f.org)
 	}
 }

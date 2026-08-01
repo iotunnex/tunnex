@@ -61,6 +61,35 @@ other, and the note that proves the guarantee is the natural place to notice the
 `tunnex-unit-tests-prove-behaviour-not-reachability` — name the trigger, then check the caller can co-occur with
 it.
 
+## THE VACUITY DETECTOR (founder-ratified 2026-08-01) — read this BEFORE the five mechanisms below
+
+**WHEN A CHECK REPORTS THE SAME VALUE FOR EVERY INPUT, VERIFY ONE INPUT INDEPENDENTLY.** A check that cannot
+distinguish its cases reports agreement — and agreement reads as success.
+
+The five mechanisms below name distinct ways a green result can mean nothing. **This is the PROCEDURE that
+catches all five**, and it is cheaper than diagnosing which one you are in:
+
+- a **half-fold** — every row reports "closed"
+- a **tautological guard** — every input satisfies the assertion
+- a **fixture that restates production** — every run agrees with itself
+- **true-by-structure** — every mutation of the fix leaves it green
+- **absence-means-permit** — every unset value reads as allowed
+
+**How to apply it, in one line: name a case whose answer you already know by other means, and check the check
+against that case.** If the check cannot tell that case apart from the others, it is measuring nothing.
+
+**TWO INSTANCES ON ONE DAY, both inside an audit that existed to detect vacuity:**
+
+1. **`git show` failing into `2>/dev/null`** so `grep -c` counted an empty stream. It returned `0` for every
+   commit — **including one whose true value was independently known to be `1`.** The uniform result across a
+   case with a different real answer was the entire tell; the tally itself looked like a clean audit.
+2. **zsh's `:a` history modifier ate a path** — `"$c:apps/..."` expands to `${c:a}` + `"pps/..."`. Caught ONLY by
+   a deliberate **injected-duplicate probe**: feed the check a case that must produce a different answer and
+   require it to. The probe proved the counting method sound while the path construction was broken.
+
+**Instance 2 is the form to copy.** Do not merely inspect a check; **feed it a case it must fail on.** A check
+that has never once produced a different answer has not been shown to be capable of one.
+
 ## TRUE-BY-STRUCTURE — the FOURTH way a green check means nothing (EPIC 13, 2026-08-01)
 
 **The assertion is guaranteed by code the fix never touched, so no mutation of the fix can break it.** The red is
