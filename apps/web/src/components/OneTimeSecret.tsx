@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useState, type ReactNode } from "react";
 import { Button, StatusDot } from "./ui";
 
@@ -94,7 +95,7 @@ export function OneTimeSecretModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/80 p-4">
       <div className="w-full max-w-lg rounded-xl border-2 border-warn/60 bg-ink-800 p-5 shadow-2xl">
         <div className="flex items-center gap-2">
@@ -130,6 +131,7 @@ export function OneTimeSecretModal({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

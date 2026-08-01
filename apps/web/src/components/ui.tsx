@@ -1,4 +1,5 @@
 import { cloneElement, isValidElement, useId } from "react";
+import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -146,7 +147,23 @@ export function Modal({
   // 3-finding churn (broken → too-global → focus-steal) on a nice-to-have that's also a
   // data-loss footgun on a form modal. If a11y later needs Esc, it returns as the full
   // designed dialog pattern (focus trap + first-field focus + panel listener), not a patch.
-  return (
+  //
+  // ⛔ PORTALLED TO <body>, AND THIS IS NOT COSMETIC.
+  //
+  // `position: fixed` is relative to the VIEWPORT — unless an ancestor has `filter`, `transform`,
+  // `perspective`, `will-change` or `backdrop-filter`, any of which makes that ancestor the containing block.
+  // S14.4 gave `Card` the glass recipe, which includes `backdrop-filter` — and FIVE modals across FOUR screens
+  // render inside a Card. Every one of them silently stopped being viewport-positioned: the overlay was
+  // clipped to the card, and the card's own body sat on top of the modal's buttons, so clicks never landed.
+  //
+  // It surfaced as ONE Playwright click timing out with a Card listed as the intercepting element. It did not
+  // surface in the component tier at all — jsdom has no layout engine, so a containing-block change is
+  // invisible there, and a click-through of all twelve screens reported "nothing broken" because nothing
+  // crashed and no content was lost.
+  //
+  // A portal is the correct fix independent of the cause: an overlay's position must never depend on WHERE IN
+  // THE TREE it happens to be rendered.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       role="dialog"
@@ -155,18 +172,19 @@ export function Modal({
       onClick={onDismiss}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-white/10 bg-ink-800 p-5 shadow-xl"
+        className="w-full max-w-md rounded-card border border-white/10 bg-surface p-4 shadow-modal backdrop-blur-[24px] backdrop-saturate-[1.4]"
         onClick={(e) => e.stopPropagation()}
       >
         <h2
-          className={`text-sm font-semibold ${danger ? "text-danger" : "text-white"}`}
+          className={`text-title font-semibold ${danger ? "text-danger" : "text-ink-heading"}`}
         >
           {title}
         </h2>
-        <div className="mt-3 text-sm text-slate-300">{children}</div>
+        <div className="mt-3 text-cell text-ink-body">{children}</div>
         <div className="mt-5 flex justify-end gap-2">{actions}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

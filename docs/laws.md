@@ -1224,3 +1224,40 @@ be in one place.
 
 **CONFINEMENT, CHECKED:** the override never reached `main` (`f9b2dfd`), so no other branch or session was
 affected — the blast radius was one branch and one reviewer's time.
+
+## `backdrop-filter` MAKES AN ANCESTOR THE CONTAINING BLOCK FOR `position: fixed` — AND jsdom CANNOT SEE IT (2026-08-01, S14.4)
+
+**THE INSTANCE.** `Card` gained the design's glass recipe, which includes `backdrop-filter: blur(24px)`.
+**Five modals across four screens render inside a `Card`.** Every one of them silently stopped being
+viewport-positioned: `position: fixed` resolves against the nearest ancestor with `filter`, `transform`,
+`perspective`, `will-change` **or `backdrop-filter`** — so the overlay was clipped to the card, and the card's
+own body sat on top of the modal's buttons. **Clicks never landed.**
+
+### HOW EACH LAYER OF THE GATE ANSWERED
+
+| gate | verdict |
+|---|---|
+| `tsc` | **clean** |
+| 422 component tests | **green** |
+| a deliberate click-through of all 12 `Card` consumers | **"nothing is broken"** |
+| Playwright `e2e` | ⛔ **ONE click timed out**, with a `Card` named as the intercepting element |
+
+**THE CLICK-THROUGH WAS RUN SPECIFICALLY TO CATCH THIS, AND IT COULD NOT.** It rendered every screen and
+asserted content — **jsdom has no layout engine, so a containing-block change is invisible there.** The report
+was hedged correctly (*"this gates crashes and content loss; it cannot see overlap"*) and was still, in
+substance, reassuring about something it had not measured.
+
+> ## **A CORRECT CAVEAT DOES NOT MAKE AN INADEQUATE CHECK ADEQUATE. IT ONLY MAKES THE INADEQUACY HONEST.**
+
+### THE RULE
+
+**AN OVERLAY'S POSITION MUST NEVER DEPEND ON WHERE IN THE TREE IT IS RENDERED.** `Modal` and
+`OneTimeSecretModal` now `createPortal(…, document.body)`. That is the correct fix **independently of the
+cause** — the containing-block trap is one of several ways a nested overlay breaks, and the portal closes all
+of them at once rather than treating this instance.
+
+**AND THE PROPERTY WORTH REMEMBERING: ADDING A VISUAL EFFECT CHANGED A LAYOUT CONTRACT.** `backdrop-filter`
+reads as decoration and behaves as positioning. **The same is true of `transform`, `filter`, `perspective` and
+`will-change`** — every one of them is reached for as a visual tweak and every one silently re-parents fixed
+descendants. **When adding any of them to a SHARED component, enumerate the fixed-position elements that could
+end up inside it.**
