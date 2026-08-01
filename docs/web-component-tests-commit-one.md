@@ -281,3 +281,88 @@ skipped gate is a vacuous gate wearing a different hat.**
 - the lists are asserted **disjoint**, so a screen cannot be quietly covered and pending at once
 
 **Proven to bite:** creating `src/pages/NewThing.tsx` fails the census by name; removing it restores green.
+
+---
+
+# CENSUS × WIREFRAME MAPPING — done BEFORE writing the next screen (founder-ruled 2026-08-01)
+
+**The redesign is a RE-ARCHITECTURE that consolidates. A wiring test for a screen that gets absorbed is
+throwaway work, so the mapping runs first.** Extracted from `docs/design/TUNNEX-wireframe-v2.html` by
+measurement — the nav is declared as `{ id, icon, label, admin }` objects and was read with a bounded `grep -o`,
+never by loading the file into context.
+
+## CORRECTION: THE WIREFRAME DECLARES **17** SCREENS, NOT 12
+
+The "12 screens" figure is the MAIN NAV minus one. The declaration carries **13 main-nav entries** plus a
+separate **`OTHER SCREENS`** group of four.
+
+**Main nav:** `overview` · `gateways` · `sites` · **`subnets` (Routed Ranges)** · `access` · `devices` ·
+`users` · `flows` (ENT) · `audit` · `cli` · `settings` · `k8s` (ENT) · `ops`
+**OTHER SCREENS:** `auth` · `desktop` · `license` · `onboarding`
+
+`subnets` was missing from the ruling's list of 12 and is a real main-nav screen.
+
+## THE THREE BUCKETS — and the answer is better than feared
+
+### ✅ SURVIVES AS ITSELF — write the test now, it carries through (7 of 9)
+
+| census screen | wireframe id | |
+|---|---|---|
+| `Gateways.tsx` | `gateways` | **covered** |
+| `Devices.tsx` | `devices` | **covered** |
+| `Access.tsx` | `access` (Access Policies) | pending |
+| `Kubernetes.tsx` | `k8s` (ENT) | pending |
+| `Users.tsx` | `users` (Users & Roles) | pending |
+| `AuditLog.tsx` | `audit` | pending |
+| `Dashboard.tsx` | `overview` | pending |
+
+### ⚠️ SURVIVES BUT SHEDS SUB-SURFACES — test the DECISION, name the destination (2 of 9)
+
+| census screen | stays | splits out to |
+|---|---|---|
+| `Sites.tsx` | `sites` | **`subnets`** — routed ranges live inside `Sites.tsx` today and become their own screen |
+| `Settings.tsx` | `settings` | **`cli`** (`MachineCredentials.tsx`, today rendered inside Settings) and **`license`** (Edition — no surface today) |
+
+**Neither is absorbed. Both keep their identity and lose a section.** A test asserting a DECISION — *"a routed
+range that fails to load is surfaced, not rendered as none"* — carries to whichever screen renders it. A test
+asserting *"the Sites page shows a routed-range list"* would not. **Write the decision.**
+
+### ❌ NO WIREFRAME EQUIVALENT — **none among the 9.** Nothing is dropped.
+
+**No throwaway work exists in the current census.** The only current screens without a 1:1 wireframe entry are
+the **EXEMPT** ones: the seven auth pages consolidate into `auth`, and `CreateOrg` into `onboarding`. **They are
+exempt precisely because they carry no backend concept to disagree about**, so the consolidation costs the tier
+nothing.
+
+**One genuine flag:** `CliAuth.tsx` / `CliDevice.tsx` have **no wireframe equivalent** — the wireframe's `cli`
+is *CLI Credentials* (an admin list), **not** the browser consent flow. **Assessment: not a finding against
+either side.** Those routes are entered from the CLI, not from the dashboard nav, so a dashboard wireframe has
+no reason to draw them. They remain exempt, covered by S5.1's Playwright no-click-no-mint leg.
+
+## WIREFRAME SCREENS WITH NO CURRENT EQUIVALENT — the census's 9 is a SNAPSHOT, NOT A TARGET
+
+| wireframe id | status today | note |
+|---|---|---|
+| **`subnets`** (Routed Ranges) | lives **inside** `Sites.tsx` | an extraction, not net-new |
+| **`cli`** (CLI Credentials) | lives **inside** `Settings.tsx` (`MachineCredentials.tsx`) | an extraction, not net-new |
+| **`flows`** (Access Events, ENT) | **no UI has ever existed** | one of the four REGISTERED GAPS the redesign closes (S7.5.1b) |
+| **`ops`** (Operations) | **no surface at all** | net-new |
+| **`license`** (Edition) | **no surface at all** | net-new; S12.1 territory, and decide-item 6's one-seam ruling binds it |
+| **`onboarding`** | no surface | net-new |
+| **`desktop`** (Desktop Client) | **not a dashboard screen** | Item A ruled the client CONNECT-ONLY with its own components; it is drawn here for reference only |
+
+**So the tier's ceiling grows from 9 to ~13 accountable screens after the redesign.** The census must be
+re-baselined at that point — its totals are a ledger of today, and the redesign is a deliberate, reviewable
+edit to them.
+
+## CONSEQUENCE FOR ORDERING — Access is NOT automatically next
+
+**The founder's criterion: a screen that both survives intact AND carries more of the four findings outranks
+one that survives intact and carries none.**
+
+- **`Access.tsx`** — survives intact, carries **none of the four walk findings**. Its case is
+  consequence-based: *a rule shown active but not compiled is a silent authorization gap.*
+- **`Kubernetes.tsx`** — survives intact, and **carries WF-S11-7 itself** — the unrendered health kind
+  (`k8s_endpoints_unavailable`), the canonical producer-without-consumer instance this repo cites everywhere.
+
+**By the stated criterion, `Kubernetes` outranks `Access`.** Recommended, not assumed — the founder rules.
