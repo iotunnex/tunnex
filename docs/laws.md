@@ -1179,6 +1179,29 @@ framework's existing keys** (12px = `3`, 16px = `4`, 24px = `6`), or **migrate e
 change**. Silently redefining is the only option that looks like it worked.
 
 **AND THE DEEPER POINT: A UNIT CHANGE IS INVISIBLE TO EVERY GATE WE HAVE.** Types check names, not magnitudes.
-Tests assert decisions, not pixels. The drift guard compares artifacts, not meanings. **The only instrument
-that can see it is an eye on a rendered page** — which is precisely why the founder's localhost review is a
-required gate and not a courtesy (see the SECTION PROTOCOL).
+Tests assert decisions, not pixels. The drift guard compares artifacts, not meanings.
+
+> ## ⭐ THE STRONGEST ARGUMENT YET FOR THE HUMAN GATE, AND IT IS WORTH STATING AS ONE.
+>
+> **128 use sites across 17 screens silently changed magnitude. A donut rendered at a QUARTER SIZE. And:**
+>
+> | gate | verdict it gave |
+> |---|---|
+> | `tsc --noEmit` | **clean** — every class name still valid |
+> | 415 vitest assertions | **green** — every decision still correct |
+> | `make generate-check` | **clean** — every artifact matched its source |
+> | contrast gate, coverage census, `ok`-reservation scan | **green** |
+> | CI, e2e included | **green** |
+>
+> **Every instrument we own reported success, and the page was wrong.** The defect was found by a founder
+> looking at a screenshot and saying *"the donuts are missing."*
+
+**THIS IS NOT AN ARGUMENT FOR FEWER GATES — it is an argument about what gates are FOR.** Ours answer *is this
+correct, honest, and non-vacuous?* **None of them can answer *does this look right?*, and no amount of rigour
+on the first question produces evidence about the second.** The founder's localhost review is therefore a
+**required gate for a dimension nothing else measures** (see the SECTION PROTOCOL), and calling it a courtesy
+is how it gets skipped under time pressure — invisibly, because everything else is green.
+
+**CONFINEMENT, CHECKED:** the override never reached `main` (`f9b2dfd`), so no other branch or session was
+affected. **But every one of the 17 screens was mis-rendered while it was live** — only Overview was being
+looked at, so only Overview's damage was noticed. **The other sixteen were equally broken and equally silent.**

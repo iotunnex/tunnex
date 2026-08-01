@@ -350,11 +350,35 @@ that section's definition of done.
 > ## **A CARD WITH AN EMPTY STATE PROMISES THAT DATA WILL FILL IT.**
 > ## **A CAPABILITY THAT DOES NOT EXIST MUST NOT MAKE THAT PROMISE.**
 
-| the panel's situation | verdict |
+> ## ⛔ IT CLASSIFIES **PANEL + RENDERING**, NOT THE PANEL ALONE — the two can differ, and that is the case
+> ## that gets cut wrongly.
+
+| situation | verdict |
 |---|---|
-| **endpoint exists, no data yet** | **BUILD IT, with an empty state.** The empty state is honest: it says the capability is there and waiting. |
-| **endpoint exists, the SPEC FORBIDS the use** | **ABSENT, with the reason recorded on the panel grid.** |
+| **endpoint exists, no data yet** | **BUILD IT, with an empty state.** The empty state is honest: the capability is there and waiting. |
+| **subject supported, the WIREFRAME'S RENDERING unsupported** | ⭐ **BUILD THE PANEL IN A DIFFERENT FORM.** Cut the drawing, keep the subject. |
+| **endpoint exists, the SPEC FORBIDS the use entirely** | **ABSENT, with the reason recorded on the panel grid.** |
 | **no endpoint, no capability** | **ABSENT, marked roadmap.** |
+
+## ⭐ THE SPLIT CASE, AND WHY THE TEST NEEDED REFINING — *Site-Link Throughput*
+
+**The first version of this test classified PANELS. This case splits: the SUBJECT is supported and the
+wireframe's CHOSEN RENDERING is not.**
+
+- **The counters EXIST.** `HubMemberMetrics.rx_bytes` / `tx_bytes` are served today.
+- **The TIME SERIES does not.** The spec calls them *"a raw gauge since the last handshake (display only,
+  never summed as monotonic)"* — **the counter RESETS at every handshake**, so a 7-day line would look like
+  throughput and not be throughput, at any data volume, forever.
+- **S8.3 already ruled the honest form:** metrics-L1 = *"cumulative-since-handshake totals labelled as exactly
+  that, no rate graphs, no sampling implied."*
+
+**SO THE PANEL IS CATEGORY ONE AND THE CHART IS CATEGORY TWO.** Built as **`Site-Link Traffic`** — inbound and
+outbound **numbers**, with the caption stating they reset at each handshake and are not a rate. **The chart
+stays absent**, and the rate/time-series version is **owed to S11.1**, where it gets an endpoint.
+
+> **CUTTING THE PANEL BECAUSE ITS DRAWN FORM WAS UNSUPPORTED WOULD HAVE SAID *"we cannot show traffic at
+> all"* — WHICH IS FALSE.** A missing chart is a rendering decision; a missing panel is a claim about the
+> product's capability, and the two must not be confused.
 
 **WHY THE MIDDLE ROW IS NOT THE FIRST ROW, using the case that forced the rule.** *Site-Link Throughput* is
 **not a built feature awaiting data.** `openapi.yaml` describes the byte fields as *"a raw gauge since the last

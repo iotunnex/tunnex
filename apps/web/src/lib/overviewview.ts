@@ -152,3 +152,48 @@ export function postureSplit(devices: Device[]): PostureSplit {
     percent: reported === 0 ? null : Math.round((compliant / reported) * 100),
   };
 }
+
+export interface LinkTraffic {
+  /** Members currently REPORTING. Absent metrics are excluded, never counted as zero. */
+  reporting: number;
+  /** Members in the set that are NOT reporting — stated, because absent metrics are not an idle link. */
+  silent: number;
+  rxBytes: number;
+  txBytes: number;
+}
+
+/**
+ * Site-link traffic as CUMULATIVE TOTALS — the only reading these counters support.
+ *
+ * ⛔ WHY THIS IS A PANEL OF NUMBERS AND NOT THE WIREFRAME'S CHART.
+ *
+ * `HubMemberMetrics.rx_bytes` is described by the spec as *"a raw gauge since the last handshake (display
+ * only, never summed as monotonic)"*. The counter RESETS AT EVERY HANDSHAKE. A 7-day rate series drawn from
+ * it would look like throughput and not be throughput — at any data volume, forever.
+ *
+ * But the SUBJECT is supported: the bytes exist, and S8.3 ruled metrics-L1 as
+ * "cumulative-since-handshake totals labelled as exactly that, no rate graphs, no sampling implied."
+ * So the panel is category one and the CHART is category two. Cutting the panel because its drawn form was
+ * unsupported would have said "we cannot show traffic at all", which is false.
+ *
+ * ⛔ SUMMING ACROSS MEMBERS IS A TOTAL, NOT A RATE, and it is still only valid because each addend is a
+ * current gauge read at the same moment. It is never accumulated over time, and nothing here is stored.
+ */
+export function linkTraffic(
+  members: Array<{ metrics?: { rx_bytes: number; tx_bytes: number } | null }>,
+): LinkTraffic {
+  let reporting = 0,
+    silent = 0,
+    rxBytes = 0,
+    txBytes = 0;
+  for (const m of members) {
+    if (!m.metrics) {
+      silent++;
+      continue;
+    }
+    reporting++;
+    rxBytes += m.metrics.rx_bytes;
+    txBytes += m.metrics.tx_bytes;
+  }
+  return { reporting, silent, rxBytes, txBytes };
+}

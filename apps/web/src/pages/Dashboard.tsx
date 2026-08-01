@@ -3,7 +3,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
 import { HealthStatus } from "../components/HealthStatus";
-import { hubSetView } from "../lib/hubsetview";
+import { formatBytes, hubSetView } from "../lib/hubsetview";
 import { assembleTopology } from "../lib/sitesview";
 import { Donut, NodeLink } from "../components/viz";
 import { Link } from "react-router-dom";
@@ -35,6 +35,7 @@ import { policyHealthBadge } from "../lib/healthview";
 import {
   isFreshOrg,
   sortGateways,
+  linkTraffic,
   peerSlices,
   postureSplit,
   statFrom,
@@ -490,6 +491,68 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
+                  <Panel title="Site-Link Traffic" className="col-span-4">
+                    {/* ⛔ THE PANEL IS CATEGORY ONE. THE WIREFRAME'S CHART IS CATEGORY TWO.
+                        The counters exist; the TIME SERIES does not. `rx_bytes` is "a raw gauge since the
+                        last handshake (display only, never summed as monotonic)" — it RESETS at every
+                        handshake, so a 7-day line would look like throughput and not be throughput at any
+                        data volume, forever.
+                        S8.3 ruled metrics-L1: cumulative-since-handshake totals, labelled as exactly that,
+                        no rate graphs and no sampling implied. So this renders NUMBERS.
+                        The rate/time-series version is owed to S11.1, where it gets an endpoint. */}
+                    {hubSetRes === null ? (
+                      <Loading />
+                    ) : !hubSetRes.ok ? (
+                      <ErrorText>Link traffic is unavailable.</ErrorText>
+                    ) : !hubSetRes.data?.members?.length ? (
+                      <EmptyState>
+                        No hub set yet. Pin two or more gateways to a site and
+                        their link counters appear here.
+                      </EmptyState>
+                    ) : (
+                      (() => {
+                        const t = linkTraffic(hubSetRes.data.members);
+                        return (
+                          <>
+                            <div className="flex gap-6">
+                              <div>
+                                <p className="text-[11px] font-medium text-ink-secondary">
+                                  Inbound
+                                </p>
+                                <p className="mt-1 font-mono text-[20px] font-bold text-ink-heading">
+                                  {formatBytes(t.rxBytes)}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-medium text-ink-secondary">
+                                  Outbound
+                                </p>
+                                <p className="mt-1 font-mono text-[20px] font-bold text-ink-heading">
+                                  {formatBytes(t.txBytes)}
+                                </p>
+                              </div>
+                            </div>
+                            {t.silent > 0 && (
+                              // Absent metrics are not an idle link, so the silence is STATED rather than
+                              // folded into the totals as zero.
+                              <p className="mt-2 text-[11px] text-warn">
+                                {t.silent} of {t.reporting + t.silent} members
+                                are not reporting. Their traffic is not
+                                included.
+                              </p>
+                            )}
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                              Cumulative since each member&rsquo;s last
+                              handshake, not a rate. These counters reset
+                              whenever a peer re-handshakes, so they are a
+                              running total and never a throughput figure.
+                            </p>
+                          </>
+                        );
+                      })()
+                    )}
+                  </Panel>
+
                   <Panel title="Device Posture" className="col-span-4">
                     {devicesRes === null ? (
                       <Loading />
@@ -649,7 +712,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Needs Attention" className="col-span-8">
+                  <Panel title="Needs Attention" className="col-span-4">
                     {attention === null ? (
                       <Loading />
                     ) : attention.length === 0 ? (
