@@ -292,7 +292,22 @@ everything else in this session: **the visible signal describes one thing and th
 **FOUND LIVE:** a seed run against a two-stack machine hit the wrong database and was stopped only by the
 seeder's own `seed_refused` guard (`real_orgs: 6690`). **The guard held — against the wrong database.**
 
-**WORKAROUND (verified with `make -n`):** `NET=tunnex-s141_default` on the command line overrides it.
-**FIX:** `NET := $(or $(COMPOSE_PROJECT_NAME),tunnex)_default`.
+**WORKAROUND — AND THE FORM MATTERS, WHICH IS ITS OWN TRAP:**
+
+```bash
+COMPOSE_PROJECT_NAME=tunnex-s141 make seed NET=tunnex-s141_default   # ✅ works
+NET=tunnex-s141_default COMPOSE_PROJECT_NAME=… make seed             # ❌ silently ignored
+```
+
+**`NET=x make seed` sets an ENVIRONMENT variable, and a Makefile's `NET := …` OVERRIDES the environment.
+`make seed NET=x` is a COMMAND-LINE variable, which overrides the Makefile.** Same characters, opposite
+precedence, decided entirely by which side of `make` they sit on — and the wrong form produces **no warning**,
+just the default network.
+
+**This cost a second failed seed run against the wrong database.** The workaround was verified with
+`make -n seed NET=…` (the correct form) and then written down in the other form: **the verification was right
+and the transcription was wrong, which is why it read as checked.**
+
+**FIX:** `NET := $(or $(COMPOSE_PROJECT_NAME),tunnex)_default` — removing the need for either form.
 
 **NOT FIXED — registered. TRIGGER: the next Makefile change, or the next time a second stack is needed.**

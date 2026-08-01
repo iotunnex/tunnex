@@ -1091,3 +1091,25 @@ more careful re-reading of the one already trusted.
 **STATED AS A RULE SO THE NEXT ASSET IS NOT DECIDED BY PRECEDENT.** *"We lazy-loaded the last one"* is not an
 argument — **the two rulings above would be inconsistent under any precedent-based reading, and they are both
 correct.** Ask the question, not the history.
+
+## A VERIFIED FACT AND A CORRECTLY TRANSCRIBED FACT ARE TWO DIFFERENT CLAIMS (2026-08-01)
+
+**THE INSTANCE.** A Makefile override was verified with `make -n seed NET=tunnex-s141_default` — **correct, and
+the output proved it.** The instruction was then written as `NET=tunnex-s141_default make seed`.
+
+**Those are not the same command.** `NET=x make …` sets an **environment variable**, and a Makefile's
+`NET := …` **overrides the environment**. `make … NET=x` is a **command-line variable**, which **overrides the
+Makefile**. Opposite precedence, decided purely by which side of `make` the assignment sits on — and the wrong
+form fails **silently**, using the default.
+
+**THE VERIFICATION WAS SOUND. THE HANDOFF WAS NOT.** The check happened; its result was then restated in a form
+the check never covered. **Nothing about "I verified it" is false, and the instruction was still wrong.**
+
+**THE RULE. VERIFY THE ARTIFACT YOU ARE ABOUT TO HAND OVER, NOT THE ONE YOU HAPPENED TO RUN.** Where a command
+is being given to someone else, **paste the exact string that was executed** — do not retype it, do not
+normalise it, do not move a flag for readability. **The gap between "what I ran" and "what I wrote" is
+invisible to every gate**, because the gate only ever saw the first one.
+
+**SIBLING OF `APPLY-THE-DETECTOR-TO-THE-MEASUREMENT`:** there, the measurement needed checking as much as the
+thing measured. **Here, the TRANSCRIPTION needs checking as much as the measurement** — it is one more link in
+the chain, and it is the only link no tool observes.
