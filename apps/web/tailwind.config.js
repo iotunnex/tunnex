@@ -18,9 +18,17 @@ export default {
     extend: {
       colors: tokens.colors,
       fontFamily: tokens.fontFamily,
-      // S14.4: the design's scales, all GENERATED — spacing/radius/elevation/type keyed by the README's own
-      // px values, so `p-16` is 16px and `rounded-card` is the card radius. No translation table to maintain.
-      spacing: tokens.spacing,
+      // ⛔ `spacing` IS DELIBERATELY NOT EXTENDED. Tailwind's scale is keyed 4 = 1rem = 16px; the design's is
+      // keyed in PX. Overriding it with px values does not ADD a scale — it REDEFINES every existing numeric
+      // spacing class in the product. `h-24` went from 96px to 24px, `p-4` from 16px to 4px, across 128 use
+      // sites in 17 screens, silently, with nothing failing.
+      //
+      // The symptom was a donut that "was wired" and did not appear: it rendered at 24×24 instead of 96×96.
+      // Tailwind's defaults already express the design's scale (12px = `3`, 14px = `3.5`, 16px = `4`,
+      // 20px = `5`, 24px = `6`); the two odd values are written as `[7px]` / `[9px]`.
+      //
+      // The px values remain EMITTED as `--tnx-space-*` for reference and for anything that needs them by
+      // name — they are simply not bound to Tailwind's numeric keys.
       borderRadius: tokens.borderRadius,
       boxShadow: tokens.boxShadow,
       fontSize: tokens.fontSize,

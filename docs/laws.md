@@ -1148,3 +1148,37 @@ git fetch origin && git rev-parse HEAD && git rev-parse origin/<branch>   # must
 **A HANDOFF IS AN ACT, NOT A CONSEQUENCE.** Building, testing, committing and pushing are four separate
 things, and only the fourth makes the other three visible. **The gate cannot notice the missing one, because
 the gate runs on the side where the work already is.**
+
+## EXTENDING A FRAMEWORK'S SCALE WITH ITS OWN KEY NAMES REDEFINES EVERY EXISTING USE (2026-08-01, S14.4)
+
+**THE INSTANCE.** The design specifies spacing in **px** — 4 · 6 · 7 · 8 · 9 · 10 · 12 · 14 · 16 · 20 · 24 —
+so the token set was emitted with those numbers as keys and fed to `theme.extend.spacing`.
+
+**Tailwind's scale is keyed in QUARTER-REMS: `4` means `1rem` (16px), `24` means `6rem` (96px).** The extension
+did not ADD a scale. **It redefined the existing one**, across **128 use sites in 17 screens**:
+
+| class | was | became |
+|---|---|---|
+| `p-4` | 16px | **4px** |
+| `gap-12` | 48px | **12px** |
+| `h-24` | 96px | **24px** |
+
+**NOTHING FAILED.** Every class still resolved, every page still rendered, the type-checker was silent, and
+**415 tests stayed green** — because no test asserts a computed size, and jsdom has no layout engine to assert
+one with.
+
+### HOW IT SURFACED — and the symptom pointed away from the cause
+
+**A donut "was wired" and did not appear.** It was rendering at `h-24 w-24` = **24×24px instead of 96×96** —
+present, correct, and a quarter the size of its own legend text. **The reported fact ("wired") and the observed
+fact ("no donut") were both true**, and the gap between them was a unit.
+
+**THE RULE. WHEN EXTENDING A DESIGN-SYSTEM SCALE, CHECK WHETHER THE KEYS COLLIDE WITH THE FRAMEWORK'S OWN.**
+If they do, one of three things must happen: **namespace the new scale**, **express the design in the
+framework's existing keys** (12px = `3`, 16px = `4`, 24px = `6`), or **migrate every existing use in the same
+change**. Silently redefining is the only option that looks like it worked.
+
+**AND THE DEEPER POINT: A UNIT CHANGE IS INVISIBLE TO EVERY GATE WE HAVE.** Types check names, not magnitudes.
+Tests assert decisions, not pixels. The drift guard compares artifacts, not meanings. **The only instrument
+that can see it is an eye on a rendered page** — which is precisely why the founder's localhost review is a
+required gate and not a courtesy (see the SECTION PROTOCOL).

@@ -100,7 +100,7 @@ function NavGroups({
                   className={({ isActive }) =>
                     // README: nav item = flex, gap 10, padding 7px 12px, radius 9, 14px icon + 12.5px label,
                     // right-aligned badge. Active = accent at 13%; hover nudges 2px right.
-                    `flex items-center gap-10 rounded-nav px-12 py-7 text-nav transition-colors ${
+                    `flex items-center gap-2.5 rounded-nav px-3 py-[7px] text-nav transition-colors ${
                       isActive
                         ? "bg-white/[.12] text-ink-heading"
                         : "text-ink-body hover:translate-x-[2px] hover:bg-white/[.06] hover:text-ink-primary"
@@ -161,7 +161,7 @@ function SidebarNav() {
           id="main-nav"
           aria-label="Main"
           hidden={!drawerOpen}
-          className="absolute inset-y-0 left-0 z-20 w-[228px] border-r border-line bg-bg p-10"
+          className="absolute inset-y-0 left-0 z-20 w-[228px] border-r border-line bg-bg p-2.5"
         >
           <NavGroups onNavigate={() => setDrawerOpen(false)} counts={counts} />
         </nav>
@@ -176,7 +176,7 @@ function SidebarNav() {
       aria-label="Main"
       // README: 228px, collapsing to 64px. `rail` is our narrow-viewport mode — the designer authored no
       // breakpoints, so the collapsed width is ours (founder-ruled), the 228px is theirs.
-      className={`shrink-0 border-r border-line p-10 ${navMode === "rail" ? "w-[64px]" : "w-[228px]"}`}
+      className={`shrink-0 border-r border-line p-2.5 ${navMode === "rail" ? "w-[64px]" : "w-[228px]"}`}
     >
       <NavGroups counts={counts} />
     </nav>
@@ -234,9 +234,9 @@ export function AppShell() {
       {/* Mounted on the SHELL, not per screen: ⌘K must work wherever the user is. */}
       <CommandPalette />
       {/* README: TOP BAR, h:56px — search (opens the palette), spacer, then identity. */}
-      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-line px-16">
+      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-line px-4">
         <Logo />
-        <div className="flex items-center gap-12">
+        <div className="flex items-center gap-3">
           {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
               discoverable entry point, since a shortcut nobody sees is a shortcut nobody uses). */}
           <button
@@ -250,11 +250,11 @@ export function AppShell() {
                 }),
               )
             }
-            className="hidden items-center gap-8 rounded-input border border-line bg-surface-inset px-12 py-7 text-cell text-ink-secondary hover:text-ink-body md:flex"
+            className="hidden items-center gap-2 rounded-input border border-line bg-surface-inset px-3 py-[7px] text-cell text-ink-secondary hover:text-ink-body md:flex"
           >
             <Icon name="search" size={13} />
             <span>Search users, devices, gateways, sites…</span>
-            <span className="ml-8 font-mono text-badge text-ink-secondary">
+            <span className="ml-2 font-mono text-badge text-ink-secondary">
               ⌘K
             </span>
           </button>
@@ -274,7 +274,7 @@ export function AppShell() {
             computed, asserted, and never consumable — dormant machinery in our own new code (docs/laws.md).
             Padding and gap are the README's: 20px 24px 28px, flex column, gap 14. */}
         <main
-          className="tnx-page flex flex-1 flex-col gap-14 px-24 pb-[30px] pt-[34px]"
+          className="tnx-page flex flex-1 flex-col gap-3.5 px-6 pb-[30px] pt-[34px]"
           data-columns={columns}
         >
           {/* data-columns publishes the column BUDGET so a page grid can consume it — which nothing could do

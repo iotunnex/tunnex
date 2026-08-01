@@ -109,16 +109,19 @@ export function Donut({
   failed,
   slices,
   empty = "Nothing to show yet.",
+  centreLabel,
 }: {
   label: string;
   source: VizSource;
   failed: boolean;
   slices: Slice[];
   empty?: ReactNode;
+  /** The word under the centre total ("devices", "gateways"). Absent when the total needs no unit. */
+  centreLabel?: string;
 }) {
   const total = slices.reduce((t, s) => t + s.value, 0);
   const titleId = useId();
-  let offset = 0;
+  let offset = 25; // 25% = 12 o'clock, so the first arc starts at the top rather than at 3 o'clock
   return (
     <VizFrame
       label={label}
@@ -128,38 +131,73 @@ export function Donut({
       empty={empty}
     >
       <div className="flex items-center gap-4">
-        <svg
-          viewBox="0 0 42 42"
-          className="h-24 w-24 shrink-0"
-          role="presentation"
-          aria-labelledby={titleId}
-        >
-          <title id={titleId}>{label}</title>
-          {slices.map((s) => {
-            const pct = (s.value / total) * 100;
-            const dash = `${pct} ${100 - pct}`;
-            const el = (
-              <circle
-                key={s.label}
-                cx="21"
-                cy="21"
-                r="15.9"
-                fill="transparent"
-                stroke={TONE_VAR[s.tone]}
-                strokeWidth="4"
-                strokeDasharray={dash}
-                strokeDashoffset={String(25 - offset)}
-              />
-            );
-            offset += pct;
-            return el;
-          })}
-        </svg>
-        {/* THE READABLE HALF. This is what the tier queries and what a screen reader announces. */}
-        <ul className="space-y-1 text-xs">
+        <div className="relative h-[120px] w-[120px] shrink-0">
+          <svg
+            viewBox="0 0 42 42"
+            className="h-full w-full -rotate-90"
+            role="presentation"
+            aria-labelledby={titleId}
+          >
+            <title id={titleId}>{label}</title>
+            {/* The track. Without it a partial ring reads as a broken ring rather than as a proportion. */}
+            <circle
+              cx="21"
+              cy="21"
+              r="15.9"
+              fill="transparent"
+              stroke="var(--tnx-badge-bg)"
+              strokeWidth="4"
+            />
+            {slices.map((s) => {
+              const pct = (s.value / total) * 100;
+              const el = (
+                <circle
+                  key={s.label}
+                  cx="21"
+                  cy="21"
+                  r="15.9"
+                  fill="transparent"
+                  stroke={TONE_VAR[s.tone]}
+                  strokeWidth="4"
+                  strokeDasharray={`${pct} ${100 - pct}`}
+                  strokeDashoffset={String(offset)}
+                />
+              );
+              offset -= pct;
+              return el;
+            })}
+          </svg>
+          {/* THE TOTAL IN THE CENTRE, as the design has it — and as TEXT, so it is readable, queryable and
+              announced. The ring is the accelerant; the number is the content. */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-[26px] font-bold leading-none text-ink-heading">
+              {total}
+            </span>
+            {centreLabel && (
+              <span className="mt-1 text-[9px] text-ink-tertiary">
+                {centreLabel}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* The legend. This is what the tier queries and what a screen reader announces. */}
+        <ul className="min-w-0 flex-1 space-y-1.5 text-[11px]">
           {slices.map((s) => (
-            <li key={s.label} className="text-slate-400">
-              <span className="text-slate-200">{s.value}</span> {s.label}
+            <li key={s.label} className="flex items-center gap-2 text-ink-body">
+              <span
+                aria-hidden
+                className="h-[7px] w-[7px] shrink-0 rounded-full"
+                style={{ background: TONE_VAR[s.tone] }}
+              />
+              <span className="truncate">{s.label}</span>
+              <span className="ml-auto shrink-0 text-ink-primary">
+                {s.value}
+                {total > 0 && (
+                  <span className="ml-1 text-ink-tertiary">
+                    ({Math.round((s.value / total) * 100)}%)
+                  </span>
+                )}
+              </span>
             </li>
           ))}
         </ul>

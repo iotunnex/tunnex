@@ -179,16 +179,16 @@ export default function Dashboard() {
     // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
     // ZERO spacing — the stat row touched Get started, which touched the panel row.
     //
-    // The shell's `<main>` already sets `flex flex-col gap-14` (the README's page-body rhythm), but a flex gap
+    // The shell's `<main>` already sets `flex flex-col gap-3.5` (the README's page-body rhythm), but a flex gap
     // reaches only DIRECT children, and the whole page is a single child of main. The gap was correct and
     // applied to exactly one element. Every screen root must therefore repeat this — see docs/S14.4.
-    <div className="flex flex-col gap-14">
+    <div className="flex flex-col gap-3.5">
       {/* README: PAGE HEADER = title + subtitle, its own block above the body. */}
       <div>
         <h1 className="text-[22px] font-semibold leading-tight text-ink-heading">
           Overview
         </h1>
-        <p className="mt-4 text-cell text-ink-secondary">{orgName || "…"}</p>
+        <p className="mt-1 text-cell text-ink-secondary">{orgName || "…"}</p>
       </div>
       <ErrorText>{error}</ErrorText>
 
@@ -226,7 +226,18 @@ export default function Dashboard() {
             // item appears only when its source has been READ. A source still loading contributes nothing;
             // a source that FAILED contributes nothing either, because "nothing needs attention" and "we could
             // not check" must not render identically. The panel says "loading" until every source has answered.
-            const sources = [nodesRes, pendingRes] as const;
+            // ⛔ WAIT ONLY ON SOURCES THAT WILL ACTUALLY ARRIVE.
+            //
+            // `pendingRes` is enterprise-gated and is NEVER FETCHED on the open edition, so it stays `null`
+            // forever — and `null` was the "still loading" signal. The panel hung on "Loading…" permanently,
+            // waiting for a request that was deliberately never made.
+            //
+            // A DELIBERATE NON-FETCH AND AN IN-FLIGHT FETCH ARE THE SAME `null`, and that ambiguity was
+            // created by the edition gate two hours after the gate was added. The fix is to ask each source
+            // whether it is EXPECTED, not merely whether it has answered.
+            const sources = enterprise
+              ? ([nodesRes, pendingRes] as const)
+              : ([nodesRes] as const);
             const attention: Array<{
               key: string;
               text: string;
@@ -275,11 +286,22 @@ export default function Dashboard() {
             return (
               // The same reason, one level down: these three sections are siblings and need the page rhythm
               // between them, not zero.
-              <div className="flex flex-col gap-14">
+              <div className="flex flex-col gap-3.5">
                 {/* README: the Overview stat row is `repeat(12,1fr)` gap 12 — SIX cards at span 2.
                     Settled from the SOURCE prototype, not from the README's generic "4-up" sentence (which
                     describes the other screens) and not from the screenshot alone. */}
-                <div className="grid grid-cols-12 gap-12">
+                {/* ⛔ THE ROW RE-SPANS TO FILL 12. RULED, and the argument matters more than the choice:
+                    a fixed six-slot row leaves the open edition with five cards and a two-column hole, which
+                    is the SAME ragged-row defect already fixed for the panels — and worse here, because a gap
+                    in a stat row reads as a card that failed to render rather than as a capability the org
+                    does not have. Absence should be invisible when the thing absent was never offered.
+                    Six cards -> span 2 each. Five -> the row is a 5-column grid. Either way it fills. */}
+                <div
+                  className="grid gap-3"
+                  style={{
+                    gridTemplateColumns: `repeat(${enterprise ? 6 : 5}, minmax(0, 1fr))`,
+                  }}
+                >
                   <Stat
                     label="Members"
                     icon="users"
@@ -359,7 +381,7 @@ export default function Dashboard() {
                     {/* The floating "Get started" widget is CUT — it becomes this. Rendered only when we KNOW
                         the org is empty: showing it because a fetch failed would tell a founder with a working
                         fleet that they have nothing. */}
-                    <ol className="space-y-6 text-explainer leading-[1.55] text-ink-body">
+                    <ol className="space-y-1.5 text-explainer leading-[1.55] text-ink-body">
                       <li>
                         1. Enroll a tunnex-node agent to serve WireGuard peers.
                       </li>
@@ -368,7 +390,7 @@ export default function Dashboard() {
                     </ol>
                     <Link
                       to="/devices"
-                      className="mt-10 inline-block text-mono text-ink-emphasis hover:text-ink-heading"
+                      className="mt-2.5 inline-block text-mono text-ink-emphasis hover:text-ink-heading"
                     >
                       Enroll a gateway →
                     </Link>
@@ -387,7 +409,8 @@ export default function Dashboard() {
                       Network map / HA Hub Set — no hub, generation, pin or handshake-age field exists on Site
                       Alerts               — composed from sources this screen does not own; Access Events' job
                       Fleet risk           — Tier-3, not built */}
-                <div className="grid grid-cols-12 gap-12">
+                {/* README panel spans on the 12-column base: rows 4+4+4, 4+4+4, 8+4. */}
+                <div className="grid grid-cols-12 gap-3">
                   <Panel title="Peer Connection Status" className="col-span-4">
                     {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
                         than the one the panel is named for. A chart can be perfectly honest about the wrong
@@ -399,10 +422,11 @@ export default function Dashboard() {
                       }}
                       failed={devicesRes !== null && !devicesRes.ok}
                       slices={devicesRes?.ok ? peerSlices(devicesRes.data) : []}
+                      centreLabel="devices"
                       empty="No devices enrolled yet."
                     />
                     {/* The design's caption, verbatim — it states the product's rule, not a decoration. */}
-                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
                       Status derived from WireGuard handshake liveness. Never
                       green while dead.
                     </p>
@@ -433,7 +457,7 @@ export default function Dashboard() {
                           }),
                         ).map((g) => (
                           <ListItem key={g.id}>
-                            <span className="flex items-center justify-between gap-8">
+                            <span className="flex items-center justify-between gap-2">
                               <span className="truncate font-mono text-mono text-ink-primary">
                                 {g.name}
                               </span>
@@ -452,7 +476,7 @@ export default function Dashboard() {
                       <List label="Recent activity">
                         {data.recent_activity.slice(0, 6).map((a, i) => (
                           <ListItem key={i}>
-                            <span className="flex items-baseline justify-between gap-8">
+                            <span className="flex items-baseline justify-between gap-2">
                               <span className="truncate font-mono text-mono text-ink-primary">
                                 {a.action}
                               </span>
@@ -474,39 +498,50 @@ export default function Dashboard() {
                     ) : (
                       (() => {
                         const ps = postureSplit(devicesRes.data);
+                        const none =
+                          ps.compliant + ps.blocked + ps.unknown === 0;
+                        if (none)
+                          return (
+                            <EmptyState>No devices enrolled yet.</EmptyState>
+                          );
                         return (
                           <>
-                            <p className="text-stat font-bold leading-none text-ink-heading">
-                              {/* ⛔ NULL, NOT 0. With nothing reported there is no percentage to state: 0%
-                                  would claim total non-compliance and 100% the opposite, and neither was
-                                  measured. */}
-                              {ps.percent === null ? "n/a" : `${ps.percent}%`}
-                            </p>
-                            <ul className="mt-10 space-y-6 text-cell">
-                              <li className="text-ink-body">
-                                <span className="text-ink-primary">
-                                  {ps.compliant}
-                                </span>{" "}
-                                compliant
-                              </li>
-                              <li className="text-ink-body">
-                                <span className="text-ink-primary">
-                                  {ps.blocked}
-                                </span>{" "}
-                                blocked
-                              </li>
-                              <li className="text-ink-body">
-                                <span className="text-ink-primary">
-                                  {ps.unknown}
-                                </span>{" "}
-                                unknown
-                              </li>
-                            </ul>
-                            {/* The design's caption, and it is the rule this panel is built on. */}
-                            <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
-                              Client-reported, not attestation. Absence is not
-                              compliance. Unknown is its own state, and it is
-                              excluded from the percentage.
+                            <Donut
+                              label="Device posture"
+                              source={{
+                                endpoint:
+                                  "/api/v1/organizations/{orgId}/devices",
+                              }}
+                              failed={false}
+                              slices={[
+                                {
+                                  label: "Compliant",
+                                  value: ps.compliant,
+                                  tone: "ok",
+                                },
+                                {
+                                  label: "Blocked",
+                                  value: ps.blocked,
+                                  tone: "danger",
+                                },
+                                {
+                                  label: "Unknown",
+                                  value: ps.unknown,
+                                  tone: "neutral",
+                                },
+                              ]}
+                              centreLabel="devices"
+                              empty="No devices enrolled yet."
+                            />
+                            {/* ⛔ THE STATE, IN WORDS — not "n/a".
+                                A big "n/a" is indistinguishable from a failed load at a glance, which is the
+                                exact confusion this screen exists to remove. When nothing has reported there
+                                is no percentage to state (0% would claim total non-compliance, 100% the
+                                opposite, and neither was measured) — so the SENTENCE says what is true. */}
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                              {ps.percent === null
+                                ? `No device has reported posture yet, so there is no compliance rate to show. Unknown is its own state: absence is not compliance.`
+                                : `${ps.percent}% of the ${ps.compliant + ps.blocked} devices that have reported are compliant. The ${ps.unknown} that have not reported are excluded — absence is not compliance.`}
                             </p>
                           </>
                         );
@@ -550,7 +585,7 @@ export default function Dashboard() {
                                   : undefined;
                                 return (
                                   <ListItem key={m.nodeId}>
-                                    <span className="flex items-center justify-between gap-8">
+                                    <span className="flex items-center justify-between gap-2">
                                       <span className="truncate font-mono text-mono text-ink-primary">
                                         {node?.name ?? m.nodeId.slice(0, 8)}
                                       </span>
@@ -569,7 +604,7 @@ export default function Dashboard() {
                                 );
                               })}
                             </List>
-                            <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
                               Pinned gateways form the hub set. members[0] is
                               the acting primary, and the generation bumps on
                               every promotion. Absent metrics are not an idle
@@ -623,7 +658,7 @@ export default function Dashboard() {
                       <List label="Needs attention">
                         {attention.map((a) => (
                           <ListItem key={a.key}>
-                            <span className="flex items-center justify-between gap-8">
+                            <span className="flex items-center justify-between gap-2">
                               <span className="text-cell text-ink-body">
                                 {a.text}
                               </span>
@@ -638,7 +673,7 @@ export default function Dashboard() {
                         ))}
                       </List>
                     )}
-                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
                       Server refusals are shown verbatim. No client-side
                       re-validation.
                     </p>
@@ -647,7 +682,7 @@ export default function Dashboard() {
                   <Panel title="System Health" className="col-span-4">
                     <List label="System health">
                       <ListItem>
-                        <span className="flex items-center justify-between gap-8">
+                        <span className="flex items-center justify-between gap-2">
                           <span className="text-cell text-ink-body">
                             Control Plane
                           </span>
@@ -661,7 +696,7 @@ export default function Dashboard() {
                         claim a check that never ran — a green light for a thing nobody looked at, which is
                         the render-floor violation in its most dangerous form. IdP Sync and Access-log
                         retention are enterprise-only and absent on this edition. */}
-                    <p className="mt-8 text-explainer leading-[1.55] text-ink-tertiary">
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
                       Liveness only. The control plane does not probe its
                       dependencies, so nothing else is claimed here.
                     </p>
@@ -709,8 +744,8 @@ function Stat({
   return (
     // Composes GLASS rather than restating it — the divergence between this card and Panel is exactly what
     // produced a screenshot with glass stat cards above flat panels.
-    <div className={`${GLASS} col-span-2 flex flex-col gap-8 p-14`}>
-      <div className="flex items-center gap-9">
+    <div className={`${GLASS} flex flex-col gap-2 p-3.5`}>
+      <div className="flex items-center gap-[9px]">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-inset border border-white/[.2] bg-white/[.09] text-ink-emphasis">
           <Icon name={icon} size={15} />
         </span>

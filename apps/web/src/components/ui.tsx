@@ -57,7 +57,7 @@ export function Card({
   className?: string;
   children: ReactNode;
 }) {
-  return <div className={`${GLASS} p-16 ${className}`}>{children}</div>;
+  return <div className={`${GLASS} p-4 ${className}`}>{children}</div>;
 }
 
 export function Field({
@@ -205,9 +205,9 @@ export function Panel({
     // "overlapped": each panel floats its text at a different vertical position.
     <section
       aria-labelledby={id}
-      className={`${GLASS} flex flex-col gap-10 p-16 ${className}`}
+      className={`${GLASS} flex flex-col gap-2.5 p-4 ${className}`}
     >
-      <div className="flex items-center justify-between gap-8">
+      <div className="flex items-center justify-between gap-2">
         <h2 id={id} className="text-title font-semibold text-ink-heading">
           {title}
         </h2>
