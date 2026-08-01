@@ -59,14 +59,23 @@ describe("the `ok` reservation — S4.4 decision f, asserted rather than comment
   it("NO forbidden use appears as an `ok` use-site anywhere in the app", () => {
     // The real assertion. `text-ok` / `bg-ok` next to success wording is the drift this reservation forbids,
     // and it is the form the violation actually takes — nobody renames the token, they reuse it.
-    const files = import.meta.glob("../src/**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    const files = import.meta.glob("../src/**/*.tsx", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>;
     const offenders: string[] = [];
 
     for (const [path, src] of Object.entries(files)) {
       for (const line of src.split("\n")) {
         if (!/\b(?:text|bg|border|ring)-ok\b/.test(line)) continue;
-        const hit = RESERVATIONS.ok.forbiddenUses.find((w: string) => new RegExp(`\\b${w}\\b`, "i").test(line));
-        if (hit) offenders.push(`${path}: "${hit}" beside an \`ok\` colour — ${RESERVATIONS.ok.meaning}`);
+        const hit = RESERVATIONS.ok.forbiddenUses.find((w: string) =>
+          new RegExp(`\\b${w}\\b`, "i").test(line),
+        );
+        if (hit)
+          offenders.push(
+            `${path}: "${hit}" beside an \`ok\` colour — ${RESERVATIONS.ok.meaning}`,
+          );
       }
     }
 
@@ -75,23 +84,33 @@ describe("the `ok` reservation — S4.4 decision f, asserted rather than comment
 
   it("scans a non-trivial number of files — the scan must not pass by finding nothing", () => {
     // Same vacuity guard as above: a glob that silently matched zero files would make the check green forever.
-    const files = import.meta.glob("../src/**/*.tsx", { query: "?raw", import: "default", eager: true });
+    const files = import.meta.glob("../src/**/*.tsx", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    });
     expect(Object.keys(files).length).toBeGreaterThanOrEqual(20);
   });
 });
 
 describe("theme completeness — a theme that omits a token renders a broken var()", () => {
-  for (const [name, theme] of Object.entries(THEMES) as Array<[string, Record<string, string>]>) {
+  for (const [name, theme] of Object.entries(THEMES) as Array<
+    [string, Record<string, string>]
+  >) {
     it(`[${name}] supplies every token name`, () => {
       const missing = TOKEN_NAMES.filter((n) => !theme[n]);
-      expect(missing, `missing tokens in "${name}": ${missing.join(", ")}`).toEqual([]);
+      expect(
+        missing,
+        `missing tokens in "${name}": ${missing.join(", ")}`,
+      ).toEqual([]);
     });
   }
 
   it("the emitted CSS carries :root plus one selector per theme", () => {
     const css = themeCss();
     expect(css).toContain(":root{");
-    for (const name of Object.keys(THEMES)) expect(css).toContain(`[data-theme="${name}"]`);
+    for (const name of Object.keys(THEMES))
+      expect(css).toContain(`[data-theme="${name}"]`);
     expect(Object.keys(THEMES)).toContain(DEFAULT_THEME);
   });
 
@@ -124,7 +143,9 @@ describe("COVERAGE CENSUS — the CLAIM compared to the ARTIFACT (S14.3 slice 0)
   // "and nothing unexpected" check, an empty artifact would have satisfied it VACUOUSLY. The guard three tests
   // down exists for that reason and is what identified the empty.
   const css = readFileSync(
-    fileURLToPath(new URL("../../../packages/shared/generated/tokens.css", import.meta.url)),
+    fileURLToPath(
+      new URL("../../../packages/shared/generated/tokens.css", import.meta.url),
+    ),
     "utf8",
   );
 
@@ -160,9 +181,10 @@ describe("COVERAGE CENSUS — the CLAIM compared to the ARTIFACT (S14.3 slice 0)
     // component that forgets the preference still animates for zero milliseconds.
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
     for (const k of Object.keys(MOTION.duration)) {
-      expect(css, `--tnx-duration-${k} is not zeroed under reduced motion`).toMatch(
-        new RegExp(`--tnx-duration-${k}\\s*:\\s*0ms`),
-      );
+      expect(
+        css,
+        `--tnx-duration-${k} is not zeroed under reduced motion`,
+      ).toMatch(new RegExp(`--tnx-duration-${k}\\s*:\\s*0ms`));
     }
   });
 });

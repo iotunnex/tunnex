@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { UNDOABLE_ACTIONS, NOT_UNDOABLE, isUndoable, inverseOf } from "../src/lib/undo";
+import {
+  UNDOABLE_ACTIONS,
+  NOT_UNDOABLE,
+  isUndoable,
+  inverseOf,
+} from "../src/lib/undo";
 
 // S14.3 SLICE B — THE UNDO CRITERION, ASSERTED RATHER THAN REMEMBERED.
 //
@@ -19,7 +24,10 @@ describe("the criterion: an inverse verb is NOT sufficient", () => {
     // re-creating a deleted rule produces a NEW rule id. A different object, audited as a creation. On an
     // access-control surface, "a new grant that looks like the old one" is not "the old one back".
     for (const a of UNDOABLE_ACTIONS) {
-      expect(a.action, `${a.action} looks like a creation/deletion`).not.toMatch(/_created$|_deleted$|_issued$|_revoked$/);
+      expect(
+        a.action,
+        `${a.action} looks like a creation/deletion`,
+      ).not.toMatch(/_created$|_deleted$|_issued$|_revoked$/);
     }
   });
 
@@ -30,13 +38,19 @@ describe("the criterion: an inverse verb is NOT sufficient", () => {
   });
 
   it("the inverse of an undoable action is itself known", () => {
-    for (const a of UNDOABLE_ACTIONS) expect(inverseOf(a.action)).toBe(a.inverse);
+    for (const a of UNDOABLE_ACTIONS)
+      expect(inverseOf(a.action)).toBe(a.inverse);
   });
 
   it("no action is BOTH undoable and excluded — the two lists cannot contradict each other", () => {
     const un = new Set(UNDOABLE_ACTIONS.map((a) => a.action));
-    const overlap = NOT_UNDOABLE.filter((n) => un.has(n.action)).map((n) => n.action);
-    expect(overlap, `both undoable and excluded: ${overlap.join(", ")}`).toEqual([]);
+    const overlap = NOT_UNDOABLE.filter((n) => un.has(n.action)).map(
+      (n) => n.action,
+    );
+    expect(
+      overlap,
+      `both undoable and excluded: ${overlap.join(", ")}`,
+    ).toEqual([]);
   });
 });
 
@@ -58,7 +72,8 @@ describe("the EXCLUSIONS, asserted so the criterion cannot be quietly widened", 
   }
 
   it("every exclusion states a reason", () => {
-    for (const n of NOT_UNDOABLE) expect(n.why.length, n.action).toBeGreaterThan(20);
+    for (const n of NOT_UNDOABLE)
+      expect(n.why.length, n.action).toBeGreaterThan(20);
   });
 
   it("the IdP-sync exclusion is recorded in the terms that make it different from the others", () => {

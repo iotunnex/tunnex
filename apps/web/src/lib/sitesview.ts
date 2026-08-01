@@ -1,7 +1,12 @@
 import type { Node, Site, SiteSubnet } from "./api";
 import { can } from "./rbac";
 import type { Role } from "./api";
-import { policyHealthBadge, siteLinkNote, type HealthBadge, type SiteLinkNote } from "./healthview";
+import {
+  policyHealthBadge,
+  siteLinkNote,
+  type HealthBadge,
+  type SiteLinkNote,
+} from "./healthview";
 import { relativeAge } from "./format";
 
 // sitesview — PURE, electron-free view-models for the Sites page (S8.3 Slice 2). The page is a thin
@@ -22,12 +27,17 @@ export interface SiteGate {
   canManage: boolean; // owner/admin + verified → mutations + queue
 }
 
-export function siteGate(input: { role: Role | undefined; emailVerified: boolean; edition: string | undefined }): SiteGate {
+export function siteGate(input: {
+  role: Role | undefined;
+  emailVerified: boolean;
+  edition: string | undefined;
+}): SiteGate {
   const isEnterprise = input.edition === "enterprise";
   return {
     isEnterprise,
     canView: isEnterprise, // any enterprise member sees the topology (read-only)
-    canManage: isEnterprise && input.emailVerified && can(input.role, "site:manage"),
+    canManage:
+      isEnterprise && input.emailVerified && can(input.role, "site:manage"),
   };
 }
 
@@ -35,7 +45,11 @@ export function siteGate(input: { role: Role | undefined; emailVerified: boolean
 // topology (D5 read-only), so the only non-body states are load/retry/upsell.
 export type SitesViewState = "loading" | "load_retry" | "upsell" | "body";
 
-export function sitesView(i: { editionReady: boolean; loadError: boolean; isEnterprise: boolean }): SitesViewState {
+export function sitesView(i: {
+  editionReady: boolean;
+  loadError: boolean;
+  isEnterprise: boolean;
+}): SitesViewState {
   if (i.loadError) return "load_retry";
   if (!i.editionReady) return "loading";
   if (!i.isEnterprise) return "upsell";
@@ -68,7 +82,10 @@ export const GATEWAY_OFFLINE_MS = 90_000;
 // VERIFY-0's dead-gateway-renders-healthy hole on the site surface. It reads the SAME node.last_seen_at the
 // Devices page already shows; no new signal, no third health vocabulary — the offline flag styles via the
 // existing badge system. PURE.
-export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: number): { lastSeen: string; offline: boolean } {
+export function gatewayLiveness(
+  lastSeenAt: string | null | undefined,
+  nowMs: number,
+): { lastSeen: string; offline: boolean } {
   if (!lastSeenAt) {
     return { lastSeen: "never connected", offline: true };
   }
@@ -76,7 +93,10 @@ export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: nu
   if (Number.isNaN(t)) {
     return { lastSeen: "unknown", offline: true };
   }
-  return { lastSeen: relativeAge(lastSeenAt), offline: nowMs - t > GATEWAY_OFFLINE_MS };
+  return {
+    lastSeen: relativeAge(lastSeenAt),
+    offline: nowMs - t > GATEWAY_OFFLINE_MS,
+  };
 }
 
 // gatewayOnline (S8.5 WF-1 — positive health) is the affirmative liveness signal on the site surface: a
@@ -86,7 +106,11 @@ export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: nu
 // discharge with NO third vocabulary and NO new data. (The numeric handshake age + link bytes — L1 — are
 // re-deferred to S8.6's commit-one: "reported" ≢ "stored" for gateway peers, so a fresh/stale signal is
 // what the surface honestly has; numeric age is richer, not required for liveness.) PURE.
-export function gatewayOnline(status: GatewayView["status"], offline: boolean, health: HealthBadge | null): boolean {
+export function gatewayOnline(
+  status: GatewayView["status"],
+  offline: boolean,
+  health: HealthBadge | null,
+): boolean {
   return status === "active" && !offline && health == null;
 }
 
@@ -107,17 +131,27 @@ export interface SiteCard {
 // the artifact bumps to v5). That happens iff THIS site has no approved subnet yet AND exactly ONE OTHER
 // site already does (1 → 2). A first site's first approval (0 others) does not cross; a 3rd-site approval
 // when already multi-site (≥2 others) does not newly cross (v5 already active). PURE.
-export function crossesMultiSiteThreshold(approvingSiteId: string, approvedCountBySite: Record<string, number>): boolean {
+export function crossesMultiSiteThreshold(
+  approvingSiteId: string,
+  approvedCountBySite: Record<string, number>,
+): boolean {
   if ((approvedCountBySite[approvingSiteId] ?? 0) > 0) return false; // site already contributes routes
-  const otherSitesWithApproved = Object.entries(approvedCountBySite).filter(([id, c]) => id !== approvingSiteId && c > 0).length;
+  const otherSitesWithApproved = Object.entries(approvedCountBySite).filter(
+    ([id, c]) => id !== approvingSiteId && c > 0,
+  ).length;
   return otherSitesWithApproved === 1; // was single-site-routable, becomes multi-site — the crossing
 }
 
 // subCeilingGateways — the gateways the CW confirm NAMES: those whose reported max policy version is below
 // the server ceiling. Absence (null — a pre-CW/pre-upgrade agent that never reported) counts as BELOW (the
 // S7.5.3 absence-is-not-compliance rule; those are the very gateways the warning exists for). PURE.
-export function subCeilingGateways(gateways: { id: string; name: string; maxPolicyVersion: number | null }[], ceiling: number): { id: string; name: string }[] {
-  return gateways.filter((g) => (g.maxPolicyVersion ?? 0) < ceiling).map((g) => ({ id: g.id, name: g.name }));
+export function subCeilingGateways(
+  gateways: { id: string; name: string; maxPolicyVersion: number | null }[],
+  ceiling: number,
+): { id: string; name: string }[] {
+  return gateways
+    .filter((g) => (g.maxPolicyVersion ?? 0) < ceiling)
+    .map((g) => ({ id: g.id, name: g.name }));
 }
 
 // nameMatchesExactly — the delete-site name-typed ceremony (D4, the S4.5 one-time grain): the typed value
@@ -132,7 +166,11 @@ export function nameMatchesExactly(typed: string, siteName: string): boolean {
 // validator, never a second copy in JS). PURE.
 export function disjointRefusal(err: unknown): string | null {
   const e = err as { error?: { code?: string; message?: string } } | undefined;
-  if (e?.error?.code === "subnet_not_disjoint") return e.error.message ?? "This subnet overlaps an existing range; approval refused.";
+  if (e?.error?.code === "subnet_not_disjoint")
+    return (
+      e.error.message ??
+      "This subnet overlaps an existing range; approval refused."
+    );
   return null;
 }
 
@@ -155,23 +193,33 @@ export function ipv4ToInt(ip: string): number | null {
 // subnet-removal confirm ("removing this also removes N forwards"). NOT an enforcement check: the server
 // sweeps authoritatively in the same tx (RemoveSubnet); this only tells the admin what that sweep will do.
 // Anything it can't parse as IPv4 is excluded (the server stays the truth). Site subnets are IPv4-only.
-export function forwardsInSubnet(forwards: { domain: string; resolver_ip: string }[], cidr: string): string[] {
+export function forwardsInSubnet(
+  forwards: { domain: string; resolver_ip: string }[],
+  cidr: string,
+): string[] {
   const [base, bitsStr] = cidr.split("/");
   const bits = Number(bitsStr);
   const baseInt = ipv4ToInt(base ?? "");
-  if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return [];
+  if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32)
+    return [];
   const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
   const net = (baseInt & mask) >>> 0;
-  return forwards.filter((f) => {
-    const ipInt = ipv4ToInt(f.resolver_ip);
-    return ipInt !== null && ((ipInt & mask) >>> 0) === net;
-  }).map((f) => f.domain);
+  return forwards
+    .filter((f) => {
+      const ipInt = ipv4ToInt(f.resolver_ip);
+      return ipInt !== null && (ipInt & mask) >>> 0 === net;
+    })
+    .map((f) => f.domain);
 }
 
 // assembleTopology joins sites + their subnets + the nodes list into render-ready cards. PURE. A site's
 // gateways = the nodes whose site_id is this site (the D2/CH join). Everything a card shows is a wire
 // field; the only computation is the join + the health-badge projection (itself pure).
-export function assembleTopology(sites: Site[], subnetsBySite: Record<string, SiteSubnet[]>, nodes: Node[]): SiteCard[] {
+export function assembleTopology(
+  sites: Site[],
+  subnetsBySite: Record<string, SiteSubnet[]>,
+  nodes: Node[],
+): SiteCard[] {
   return sites.map((s) => ({
     id: s.id,
     name: s.name,
@@ -188,6 +236,10 @@ export function assembleTopology(sites: Site[], subnetsBySite: Record<string, Si
         agentVersion: n.agent_version,
         lastSeenAt: n.last_seen_at ?? null,
       })),
-    subnets: (subnetsBySite[s.id] ?? []).map((ss) => ({ id: ss.id, cidr: ss.cidr, status: ss.status })),
+    subnets: (subnetsBySite[s.id] ?? []).map((ss) => ({
+      id: ss.id,
+      cidr: ss.cidr,
+      status: ss.status,
+    })),
   }));
 }

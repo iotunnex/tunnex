@@ -1,15 +1,30 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, act, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import { ToastProvider, useToast } from "../src/components/Toasts";
 
 // S14.3 SLICE B — the three properties of the undo, each asserted.
 
 afterEach(cleanup);
 
-function Harness({ action, undo }: { action?: string; undo?: () => Promise<void> }) {
+function Harness({
+  action,
+  undo,
+}: {
+  action?: string;
+  undo?: () => Promise<void>;
+}) {
   const { show } = useToast();
   return (
-    <button onClick={() => show({ message: "Rule disabled.", action, undo })}>fire</button>
+    <button onClick={() => show({ message: "Rule disabled.", action, undo })}>
+      fire
+    </button>
   );
 }
 
@@ -50,7 +65,9 @@ describe("PROPERTY 2 — undo can FAIL, and its failure is LOUD", () => {
   it("a successful undo dismisses the toast", async () => {
     fire({ action: "policy.rule_disabled", undo: async () => {} });
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    await waitFor(() => expect(screen.queryByText("Rule disabled.")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("Rule disabled.")).toBeNull(),
+    );
   });
 
   it("A FAILED UNDO DOES NOT DISMISS, SAYS SO, AND OFFERS A RETRY", async () => {
@@ -63,7 +80,9 @@ describe("PROPERTY 2 — undo can FAIL, and its failure is LOUD", () => {
       },
     });
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry undo" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry undo" })).toBeTruthy(),
+    );
     expect(screen.getByText(/Couldn't undo/)).toBeTruthy();
   });
 });

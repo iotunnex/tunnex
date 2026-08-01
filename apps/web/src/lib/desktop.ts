@@ -19,7 +19,9 @@ export interface TunnexBridge {
   };
   config: {
     getServerUrl(): Promise<string>;
-    setServerUrl(url: string): Promise<{ url: string; reloginRequired: boolean }>;
+    setServerUrl(
+      url: string,
+    ): Promise<{ url: string; reloginRequired: boolean }>;
   };
   tunnel: {
     // fullTunnel = the split-tunnel toggle intent (S6.4); effective only when a

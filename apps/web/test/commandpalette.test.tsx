@@ -1,5 +1,12 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, within, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  within,
+  act,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { CommandPalette } from "../src/components/CommandPalette";
 import { NAV_DESTINATIONS } from "../src/components/AppShell";
@@ -25,7 +32,9 @@ const open = () => {
 describe("the palette is a named dialog with a combobox and a listbox", () => {
   it("⌘K opens it", () => {
     open();
-    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(
+      screen.getByRole("dialog", { name: "Command palette" }),
+    ).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Go to" })).toBeTruthy();
     expect(screen.getByRole("listbox", { name: "Destinations" })).toBeTruthy();
   });
@@ -38,7 +47,9 @@ describe("the palette is a named dialog with a combobox and a listbox", () => {
         </MotionProvider>
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+    expect(
+      screen.queryByRole("dialog", { name: "Command palette" }),
+    ).toBeNull();
   });
 });
 
@@ -71,7 +82,9 @@ describe("it offers NO ACTIONS in this slice, and that is the measured ruling", 
       .getAllByRole("option")
       .map((o) => (o.textContent ?? "").toLowerCase());
     for (const l of labels) {
-      expect(l, `"${l}" reads like an action`).not.toMatch(/revoke|delete|remove|disable|reset|create/);
+      expect(l, `"${l}" reads like an action`).not.toMatch(
+        /revoke|delete|remove|disable|reset|create/,
+      );
     }
   });
 });
@@ -79,15 +92,21 @@ describe("it offers NO ACTIONS in this slice, and that is the measured ruling", 
 describe("filtering narrows, and says so when nothing matches", () => {
   it("typing filters the list", () => {
     open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Go to" }), { target: { value: "site" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Go to" }), {
+      target: { value: "site" },
+    });
     const list = screen.getByRole("listbox", { name: "Destinations" });
-    const labels = within(list).getAllByRole("option").map((o) => o.textContent);
+    const labels = within(list)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
     expect(labels).toEqual(["Sites"]);
   });
 
   it("an unmatched query says NO MATCH rather than rendering an empty box", () => {
     open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Go to" }), { target: { value: "zzzz" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Go to" }), {
+      target: { value: "zzzz" },
+    });
     expect(screen.getByText("No destination matches.")).toBeTruthy();
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });

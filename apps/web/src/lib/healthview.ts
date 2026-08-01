@@ -13,7 +13,9 @@ export interface HealthBadge {
   tone: BadgeTone;
 }
 
-export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_degraded_kind">): HealthBadge | null {
+export function policyHealthBadge(
+  node: Pick<Node, "policy_degraded" | "policy_degraded_kind">,
+): HealthBadge | null {
   if (!node.policy_degraded) return null; // bool primary — not degraded → no badge
   switch (node.policy_degraded_kind) {
     case "converging":
@@ -40,17 +42,26 @@ export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_d
       // S11 WF-S11-6: the agent's cert expired, so it cannot authenticate to the CP — including the renewal
       // endpoint, which needs the cert that expired. The label carries the REMEDY because no other kind's
       // remedy applies and waiting is actively wrong: this never self-heals.
-      return { label: "certificate expired — re-enroll this gateway", tone: "danger" };
+      return {
+        label: "certificate expired — re-enroll this gateway",
+        tone: "danger",
+      };
     case "k8s_endpoints_unavailable":
       // S10.3 WF-K5 — added here by the S11 mirror-surface census (WF-S11-7): the kind shipped in the Go enum
       // and the metrics but never reached the spec or this renderer, so it fell through to the generic
       // degraded badge and its named remedy was invisible in the product.
-      return { label: "no Kubernetes endpoint view (check API access + RBAC)", tone: "danger" };
+      return {
+        label: "no Kubernetes endpoint view (check API access + RBAC)",
+        tone: "danger",
+      };
     case "hub_forwarding_not_reconciling":
       // WF-C L2: zombie hub — wire fresh, agent dead. The label names BOTH halves so it lies in neither
       // direction (not "offline" — it forwards; not "healthy" — it's stale). Remedy: restart the agent
       // (the wire is fine, the brain is dead). Danger: it enforces a policy the CP has since changed.
-      return { label: "agent down — still forwarding (restart agent)", tone: "danger" };
+      return {
+        label: "agent down — still forwarding (restart agent)",
+        tone: "danger",
+      };
     default:
       // Degraded per the authoritative bool but the kind is absent/healthy — still show a
       // badge (never less alarmed than the bool).
@@ -69,9 +80,14 @@ export interface SiteLinkNote {
   demoted: boolean;
 }
 
-export function siteLinkNote(node: Pick<Node, "site_link_note_peer" | "site_link_note_demoted">): SiteLinkNote | null {
+export function siteLinkNote(
+  node: Pick<Node, "site_link_note_peer" | "site_link_note_demoted">,
+): SiteLinkNote | null {
   if (!node.site_link_note_peer) return null; // render-floor: the field it consumes, present ⇒ a note
-  return { peer: node.site_link_note_peer, demoted: node.site_link_note_demoted ?? false };
+  return {
+    peer: node.site_link_note_peer,
+    demoted: node.site_link_note_demoted ?? false,
+  };
 }
 
 export function badgeClass(tone: BadgeTone): string {

@@ -37,8 +37,12 @@ export type _LoadedHasErrBranch = Expect<Not<IsNever<ErrBranch>>>;
 
 // 3 — THE FAILURE BRANCH MUST CARRY NO `data` AT ALL. Not "optional data" — none. An optional `data` on the
 // error branch is precisely what lets a failed load supply a defaulted value.
-export type _LoadedErrBranchHasNoData = Expect<"data" extends keyof ErrBranch ? false : true>;
+export type _LoadedErrBranchHasNoData = Expect<
+  "data" extends keyof ErrBranch ? false : true
+>;
 
 // 4 — `data` MUST BE REQUIRED ON THE SUCCESS BRANCH. If it were optional, `ok: true` would no longer
 // guarantee a value and every consumer would need a second check that nothing forces them to write.
-export type _LoadedOkDataIsRequired = Expect<undefined extends OkBranch["data"] ? false : true>;
+export type _LoadedOkDataIsRequired = Expect<
+  undefined extends OkBranch["data"] ? false : true
+>;

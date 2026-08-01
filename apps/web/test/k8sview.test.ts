@@ -1,11 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { k8sGate, portLabel, assembleClusters, serviceFqdnById, objectControls } from "../src/lib/k8sview";
+import {
+  k8sGate,
+  portLabel,
+  assembleClusters,
+  serviceFqdnById,
+  objectControls,
+} from "../src/lib/k8sview";
 import type { K8sCluster, K8sService } from "../src/lib/api";
 
 const CL = (id: string, name: string): K8sCluster =>
-  ({ id, site_id: "s1", name, vip_range: "100.64.0.0/16", service_cidr: "10.96.0.0/12", dns_zone: "k8s.acme.com", dns_vip: "100.64.0.2" } as K8sCluster);
-const SVC = (id: string, cluster: string, name: string, fqdn: string): K8sService =>
-  ({ id, cluster_id: cluster, name, namespace: "prod", protocol: "tcp", vip: "100.64.0.5", fqdn } as K8sService);
+  ({
+    id,
+    site_id: "s1",
+    name,
+    vip_range: "100.64.0.0/16",
+    service_cidr: "10.96.0.0/12",
+    dns_zone: "k8s.acme.com",
+    dns_vip: "100.64.0.2",
+  }) as K8sCluster;
+const SVC = (
+  id: string,
+  cluster: string,
+  name: string,
+  fqdn: string,
+): K8sService =>
+  ({
+    id,
+    cluster_id: cluster,
+    name,
+    namespace: "prod",
+    protocol: "tcp",
+    vip: "100.64.0.5",
+    fqdn,
+  }) as K8sService;
 
 describe("k8sGate — CORE (no edition bit): org:view reads, k8s:manage + verified email mutates", () => {
   it("a member reads but cannot manage", () => {
@@ -19,7 +46,9 @@ describe("k8sGate — CORE (no edition bit): org:view reads, k8s:manage + verifi
     expect(g.canManage).toBe(true);
   });
   it("an unverified admin cannot manage (mirrors the server mutating gate)", () => {
-    expect(k8sGate({ role: "admin", emailVerified: false }).canManage).toBe(false);
+    expect(k8sGate({ role: "admin", emailVerified: false }).canManage).toBe(
+      false,
+    );
   });
   it("no role → neither (fail-closed)", () => {
     const g = k8sGate({ role: undefined, emailVerified: true });
@@ -45,7 +74,10 @@ describe("portLabel — the wire port_low/port_high projection", () => {
 describe("assembleClusters — group Services under their cluster (the wire-truth join)", () => {
   it("services attach to their own cluster; the FQDN is READ, never constructed", () => {
     const clusters = [CL("c1", "prod"), CL("c2", "staging")];
-    const services = [SVC("k1", "c1", "api", "api.prod.svc.prod.k8s.acme.com"), SVC("k2", "c2", "web", "web.prod.svc.staging.k8s.acme.com")];
+    const services = [
+      SVC("k1", "c1", "api", "api.prod.svc.prod.k8s.acme.com"),
+      SVC("k2", "c2", "web", "web.prod.svc.staging.k8s.acme.com"),
+    ];
     const cards = assembleClusters(clusters, services);
     expect(cards).toHaveLength(2);
     expect(cards[0].services).toHaveLength(1);
@@ -55,7 +87,7 @@ describe("assembleClusters — group Services under their cluster (the wire-trut
     expect(cards[1].services.map((s) => s.id)).toEqual(["k2"]);
   });
   it("a cluster with no exposed Services renders an empty list, not an error", () => {
-    expect(assembleClusters([CL("c1", "prod")], []) [0].services).toEqual([]);
+    expect(assembleClusters([CL("c1", "prod")], [])[0].services).toEqual([]);
   });
 });
 
@@ -72,12 +104,22 @@ describe("serviceFqdnById — the grant-picker label source", () => {
 describe("managed-by-operator ownership surface (S10.2 D2 cond 1)", () => {
   it("carries managed_by_operator from the wire onto clusters and services", () => {
     const cl = { ...CL("c1", "prod"), managed_by_operator: true } as K8sCluster;
-    const managed = { ...SVC("k1", "c1", "api", "api.prod.svc.prod.k8s.acme.com"), managed_by_operator: true } as K8sService;
-    const human = { ...SVC("k2", "c1", "web", "web.prod.svc.prod.k8s.acme.com"), managed_by_operator: false } as K8sService;
+    const managed = {
+      ...SVC("k1", "c1", "api", "api.prod.svc.prod.k8s.acme.com"),
+      managed_by_operator: true,
+    } as K8sService;
+    const human = {
+      ...SVC("k2", "c1", "web", "web.prod.svc.prod.k8s.acme.com"),
+      managed_by_operator: false,
+    } as K8sService;
     const cards = assembleClusters([cl], [managed, human]);
     expect(cards[0].managedByOperator).toBe(true);
-    expect(cards[0].services.find((s) => s.id === "k1")!.managedByOperator).toBe(true);
-    expect(cards[0].services.find((s) => s.id === "k2")!.managedByOperator).toBe(false);
+    expect(
+      cards[0].services.find((s) => s.id === "k1")!.managedByOperator,
+    ).toBe(true);
+    expect(
+      cards[0].services.find((s) => s.id === "k2")!.managedByOperator,
+    ).toBe(false);
   });
 });
 

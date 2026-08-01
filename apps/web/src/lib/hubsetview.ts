@@ -42,7 +42,10 @@ export interface HubSetViewModel {
 // zero-config case: no HA surface at all). The CONFIGURED order is read from the members' hub_priority (the
 // pins); the ACTIVE order is the served member order. When they diverge, a promotion is in effect and the
 // configured-primary member renders as demoted.
-export function hubSetView(hs: HubSet | null | undefined, nowMs: number): HubSetViewModel | null {
+export function hubSetView(
+  hs: HubSet | null | undefined,
+  nowMs: number,
+): HubSetViewModel | null {
   if (!hs || hs.members.length === 0) return null;
   let configuredPrimary: string | null = null;
   let bestPrio = Infinity;
@@ -53,7 +56,8 @@ export function hubSetView(hs: HubSet | null | undefined, nowMs: number): HubSet
     }
   }
   const activePrimary = hs.members[0].node_id;
-  const promotionInEffect = configuredPrimary != null && configuredPrimary !== activePrimary;
+  const promotionInEffect =
+    configuredPrimary != null && configuredPrimary !== activePrimary;
   const members = hs.members.map((m): HubMemberRow => {
     const met = m.metrics;
     const reporting = met != null;

@@ -15,7 +15,10 @@ export interface K8sGate {
   canManage: boolean;
 }
 
-export function k8sGate(input: { role: Role | undefined; emailVerified: boolean }): K8sGate {
+export function k8sGate(input: {
+  role: Role | undefined;
+  emailVerified: boolean;
+}): K8sGate {
   return {
     canView: can(input.role, "org:view"),
     canManage: input.emailVerified && can(input.role, "k8s:manage"),
@@ -59,14 +62,20 @@ export function managedEditWarning(kind: "cluster" | "Service"): string {
 // the dashboard MUST NOT offer the destructive control (Deregister/Unexpose) — edit the CR instead. Extracted
 // out of inline JSX so a refactor that re-exposes the control fails a test, not just review (the D2 ruling's
 // worst case: an admin's dashboard edit silently reverted on the next reconcile).
-export function objectControls(managedByOperator: boolean): { withheld: boolean } {
+export function objectControls(managedByOperator: boolean): {
+  withheld: boolean;
+} {
   return { withheld: managedByOperator };
 }
 
 // portLabel projects the wire port_low/port_high onto a human range. null/absent both = "any".
-export function portLabel(portLow: number | null | undefined, portHigh: number | null | undefined): string {
+export function portLabel(
+  portLow: number | null | undefined,
+  portHigh: number | null | undefined,
+): string {
   if (portLow == null && portHigh == null) return "any";
-  if (portLow != null && (portHigh == null || portHigh === portLow)) return String(portLow);
+  if (portLow != null && (portHigh == null || portHigh === portLow))
+    return String(portLow);
   if (portLow == null) return String(portHigh);
   return `${portLow}–${portHigh}`; // en-dash range
 }
@@ -86,7 +95,10 @@ function serviceRow(s: K8sService): ServiceRow {
 
 // assembleClusters joins the clusters with their org-wide Services (grouped by cluster_id). PURE — the only
 // computation is the group-by + the port projection.
-export function assembleClusters(clusters: K8sCluster[], services: K8sService[]): ClusterCard[] {
+export function assembleClusters(
+  clusters: K8sCluster[],
+  services: K8sService[],
+): ClusterCard[] {
   const byCluster: Record<string, ServiceRow[]> = {};
   for (const s of services) {
     (byCluster[s.cluster_id] ??= []).push(serviceRow(s));
@@ -105,6 +117,9 @@ export function assembleClusters(clusters: K8sCluster[], services: K8sService[])
 }
 
 // serviceFqdnById is the grant-picker's label source: id -> fqdn for a live Service (or null if absent).
-export function serviceFqdnById(services: K8sService[], id: string): string | null {
+export function serviceFqdnById(
+  services: K8sService[],
+  id: string,
+): string | null {
   return services.find((s) => s.id === id)?.fqdn ?? null;
 }

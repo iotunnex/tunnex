@@ -18,25 +18,43 @@ describe("postureBadge — the three-way legibility rider", () => {
   });
 
   it("unknown is FIRST-CLASS and distinct — never a pass", () => {
-    const never = postureBadge({ health_state: "unknown", health_blocked: false });
+    const never = postureBadge({
+      health_state: "unknown",
+      health_blocked: false,
+    });
     expect(never).toEqual({ label: "posture not reported", tone: "unknown" });
-    const stale = postureBadge({ health_state: "unknown", health_blocked: false, health_reported_at: "2026-07-16T00:00:00Z" });
+    const stale = postureBadge({
+      health_state: "unknown",
+      health_blocked: false,
+      health_reported_at: "2026-07-16T00:00:00Z",
+    });
     expect(stale).toEqual({ label: "posture stale", tone: "unknown" });
     // The load-bearing distinction: unknown must never share compliant's tone/label.
-    const ok = postureBadge({ health_state: "compliant", health_blocked: false });
+    const ok = postureBadge({
+      health_state: "compliant",
+      health_blocked: false,
+    });
     expect(never!.tone).not.toBe(ok!.tone);
     expect(stale!.tone).not.toBe(ok!.tone);
   });
 
   it("blocked wins the label even when the report went stale (the device IS still excluded)", () => {
-    expect(postureBadge({ health_state: "unknown", health_blocked: true, health_reported_at: "2026-07-16T00:00:00Z" })).toEqual({
+    expect(
+      postureBadge({
+        health_state: "unknown",
+        health_blocked: true,
+        health_reported_at: "2026-07-16T00:00:00Z",
+      }),
+    ).toEqual({
       label: "posture blocked",
       tone: "danger",
     });
   });
 
   it("warn-mode noncompliance is a warning, not a block", () => {
-    expect(postureBadge({ health_state: "noncompliant", health_blocked: false })).toEqual({
+    expect(
+      postureBadge({ health_state: "noncompliant", health_blocked: false }),
+    ).toEqual({
       label: "posture warning",
       tone: "warn",
     });
@@ -74,14 +92,20 @@ describe("osVersionCoverage — the ratified coverage indicator", () => {
   });
 
   it("both platforms empty → both named unconstrained", () => {
-    expect(osVersionCoverage({ macos: "", windows: "" }).every((l) => !l.covered)).toBe(true);
+    expect(
+      osVersionCoverage({ macos: "", windows: "" }).every((l) => !l.covered),
+    ).toBe(true);
   });
 });
 
 describe("buildOsVersionParam", () => {
   it("omits empty platforms (platform-absent = not enforced)", () => {
-    expect(buildOsVersionParam({ macos: "14.0", windows: "" })).toEqual({ min: { macos: "14.0" } });
-    expect(buildOsVersionParam({ macos: " 14.0 ", windows: "10.0" })).toEqual({ min: { macos: "14.0", windows: "10.0" } });
+    expect(buildOsVersionParam({ macos: "14.0", windows: "" })).toEqual({
+      min: { macos: "14.0" },
+    });
+    expect(buildOsVersionParam({ macos: " 14.0 ", windows: "10.0" })).toEqual({
+      min: { macos: "14.0", windows: "10.0" },
+    });
   });
   it("refuses an all-empty min (a check constraining nothing is a config lie)", () => {
     expect(buildOsVersionParam({ macos: "", windows: "  " })).toBeNull();
@@ -90,7 +114,11 @@ describe("buildOsVersionParam", () => {
 
 describe("osVersionMins / checkModeOf — config round-trip", () => {
   const checks: HealthCheck[] = [
-    { kind: "os_version", mode: "require", param: { min: { macos: "14.0" } } as never },
+    {
+      kind: "os_version",
+      mode: "require",
+      param: { min: { macos: "14.0" } } as never,
+    },
     { kind: "disk_encryption", mode: "warn" },
   ];
   it("extracts per-platform mins ('' = unset)", () => {
@@ -124,7 +152,9 @@ describe("wouldFailCopy — honest blast-radius copy", () => {
 describe("the verbatim honesty line (D6 — locked copy)", () => {
   it("carries the three load-bearing claims verbatim", () => {
     expect(POSTURE_HONESTY_LINE).toContain("deter honest non-compliance");
-    expect(POSTURE_HONESTY_LINE).toContain("client-reported, not hardware-attested");
+    expect(POSTURE_HONESTY_LINE).toContain(
+      "client-reported, not hardware-attested",
+    );
     expect(POSTURE_HONESTY_LINE).toContain("defense-in-depth, not a guarantee");
   });
 });

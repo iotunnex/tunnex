@@ -56,7 +56,10 @@ export function postureBadge(
     default:
       // unknown: never reported, stale, or the fact was absent. Distinct from
       // compliant BY DESIGN — absence is not compliance.
-      return { label: d.health_reported_at ? "posture stale" : "posture not reported", tone: "unknown" };
+      return {
+        label: d.health_reported_at ? "posture stale" : "posture not reported",
+        tone: "unknown",
+      };
   }
 }
 
@@ -84,8 +87,12 @@ export interface OsVersionMins {
 
 // osVersionMins extracts the per-platform min map from a HealthCheck's param
 // ("" = not set = that platform is NOT constrained).
-export function osVersionMins(check: Pick<HealthCheck, "param"> | undefined): OsVersionMins {
-  const min = (check?.param as { min?: Record<string, string> } | undefined | null)?.min ?? {};
+export function osVersionMins(
+  check: Pick<HealthCheck, "param"> | undefined,
+): OsVersionMins {
+  const min =
+    (check?.param as { min?: Record<string, string> } | undefined | null)
+      ?.min ?? {};
   return { macos: min.macos ?? "", windows: min.windows ?? "" };
 }
 
@@ -102,9 +109,17 @@ export function osVersionCoverage(mins: OsVersionMins): CoverageLine[] {
   return REPORTING_PLATFORMS.map((p) => {
     const min = mins[p].trim();
     if (!min) {
-      return { platform: p, label: `${PLATFORM_LABELS[p]}: not constrained by this check`, covered: false };
+      return {
+        platform: p,
+        label: `${PLATFORM_LABELS[p]}: not constrained by this check`,
+        covered: false,
+      };
     }
-    return { platform: p, label: `${PLATFORM_LABELS[p]}: ${min} or newer required`, covered: true };
+    return {
+      platform: p,
+      label: `${PLATFORM_LABELS[p]}: ${min} or newer required`,
+      covered: true,
+    };
   });
 }
 
@@ -112,7 +127,9 @@ export function osVersionCoverage(mins: OsVersionMins): CoverageLine[] {
 // OMITTED (platform-absent = not enforced). Returns null when NO platform is set —
 // the caller must refuse the save (an os_version check constraining nothing is a
 // config lie, and the server rejects an empty min anyway).
-export function buildOsVersionParam(mins: OsVersionMins): { min: Record<string, string> } | null {
+export function buildOsVersionParam(
+  mins: OsVersionMins,
+): { min: Record<string, string> } | null {
   const min: Record<string, string> = {};
   if (mins.macos.trim()) min.macos = mins.macos.trim();
   if (mins.windows.trim()) min.windows = mins.windows.trim();
@@ -124,7 +141,10 @@ export function buildOsVersionParam(mins: OsVersionMins): { min: Record<string, 
 // would fail the check. require-mode failing devices get BLOCKED at their next report
 // (~one report cycle); warn-mode ones surface a warning. The config write itself
 // blocks nothing (D4 grandfather) — the copy says when the effect lands, honestly.
-export function wouldFailCopy(mode: "warn" | "require", wouldFail: number | undefined): string | null {
+export function wouldFailCopy(
+  mode: "warn" | "require",
+  wouldFail: number | undefined,
+): string | null {
   if (wouldFail === undefined || wouldFail === 0) return null;
   const n = `${wouldFail} device${wouldFail === 1 ? "" : "s"}`;
   if (mode === "require") {
@@ -137,7 +157,10 @@ export function wouldFailCopy(mode: "warn" | "require", wouldFail: number | unde
 export type CheckMode = "off" | "warn" | "require";
 
 // checkModeOf maps the config list (no row = off) to the 3-state control.
-export function checkModeOf(checks: HealthCheck[] | null, kind: HealthCheck["kind"]): CheckMode {
+export function checkModeOf(
+  checks: HealthCheck[] | null,
+  kind: HealthCheck["kind"],
+): CheckMode {
   const row = checks?.find((c) => c.kind === kind);
   return row ? row.mode : "off";
 }

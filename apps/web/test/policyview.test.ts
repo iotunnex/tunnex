@@ -21,8 +21,8 @@ import {
 import { loadOne, type Loaded } from "../src/lib/api";
 import type { PolicyRule, UserGroup, Resource, Member } from "../src/lib/api";
 
-const G = (id: string, name: string) => ({ id, name } as UserGroup);
-const R = (id: string, name: string) => ({ id, name } as Resource);
+const G = (id: string, name: string) => ({ id, name }) as UserGroup;
+const R = (id: string, name: string) => ({ id, name }) as Resource;
 const LOADED: LoadState = { groupsLoaded: true, resourcesLoaded: true };
 
 describe("D-a4 mode-enable confirm = pure function of the rule COUNT", () => {
@@ -50,25 +50,41 @@ describe("D-a4 mode-enable confirm = pure function of the rule COUNT", () => {
 
 describe("policyGate — enterprise + RBAC + verified-email", () => {
   it("open edition → nothing, even for an owner", () => {
-    const g = policyGate({ role: "owner", emailVerified: true, edition: "open" });
+    const g = policyGate({
+      role: "owner",
+      emailVerified: true,
+      edition: "open",
+    });
     expect(g.isEnterprise).toBe(false);
     expect(g.canView).toBe(false);
     expect(g.canManagePolicy).toBe(false);
     expect(g.canManageDevices).toBe(false);
   });
   it("enterprise member → no view (policy is admin/owner only)", () => {
-    const g = policyGate({ role: "member", emailVerified: true, edition: "enterprise" });
+    const g = policyGate({
+      role: "member",
+      emailVerified: true,
+      edition: "enterprise",
+    });
     expect(g.canView).toBe(false);
     expect(g.canManagePolicy).toBe(false);
   });
   it("enterprise admin, verified → view + manage", () => {
-    const g = policyGate({ role: "admin", emailVerified: true, edition: "enterprise" });
+    const g = policyGate({
+      role: "admin",
+      emailVerified: true,
+      edition: "enterprise",
+    });
     expect(g.canView).toBe(true);
     expect(g.canManagePolicy).toBe(true);
     expect(g.canManageDevices).toBe(true);
   });
   it("enterprise admin, UNVERIFIED email → can view but NOT manage (mirrors server)", () => {
-    const g = policyGate({ role: "admin", emailVerified: false, edition: "enterprise" });
+    const g = policyGate({
+      role: "admin",
+      emailVerified: false,
+      edition: "enterprise",
+    });
     expect(g.canView).toBe(true);
     expect(g.canManagePolicy).toBe(false);
     expect(g.canManageDevices).toBe(false);
@@ -80,41 +96,93 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
   const resources = [R("r-net", "10.0.5.0/24")];
 
   it("resolves group→group and group→resource to names", () => {
-    const g2g: PolicyRule = { id: "1", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
+    const g2g: PolicyRule = {
+      id: "1",
+      src_group_id: "g-eng",
+      dst_kind: "group",
+      dst_group_id: "g-db",
+    } as PolicyRule;
     const row = ruleRow(g2g, groups, resources, [], [], LOADED);
     expect(row.src.label).toBe("Engineering");
     expect(row.dst.label).toBe("Databases");
     expect(row.broken).toBe(false);
 
-    const g2r: PolicyRule = { id: "2", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    expect(ruleRow(g2r, groups, resources, [], [], LOADED).dst.label).toBe("10.0.5.0/24");
+    const g2r: PolicyRule = {
+      id: "2",
+      src_group_id: "g-eng",
+      dst_kind: "resource",
+      dst_resource_id: "r-net",
+    } as PolicyRule;
+    expect(ruleRow(g2r, groups, resources, [], [], LOADED).dst.label).toBe(
+      "10.0.5.0/24",
+    );
   });
 
   it("carries managed_by_operator onto the row (S10.2 D2 cond 1 — badge + withhold-edit source)", () => {
-    const managed = { id: "m", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db", managed_by_operator: true } as PolicyRule;
-    const human = { id: "h", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    expect(ruleRow(managed, groups, resources, [], [], LOADED).managedByOperator).toBe(true);
-    expect(ruleRow(human, groups, resources, [], [], LOADED).managedByOperator).toBeFalsy();
+    const managed = {
+      id: "m",
+      src_group_id: "g-eng",
+      dst_kind: "group",
+      dst_group_id: "g-db",
+      managed_by_operator: true,
+    } as PolicyRule;
+    const human = {
+      id: "h",
+      src_group_id: "g-eng",
+      dst_kind: "group",
+      dst_group_id: "g-db",
+    } as PolicyRule;
+    expect(
+      ruleRow(managed, groups, resources, [], [], LOADED).managedByOperator,
+    ).toBe(true);
+    expect(
+      ruleRow(human, groups, resources, [], [], LOADED).managedByOperator,
+    ).toBeFalsy();
   });
 
   it("WF-8: site rules resolve to NAMES, and two UUIDv7-prefix-sharing sites render distinguishably", () => {
     // UUIDv7 (time-ordered) — created seconds apart, so they SHARE the first 8 chars (the demo bug).
-    const azure = { id: "019f762b-b62b-7aa8-9362-249ecf231395", name: "azure-site" } as any;
-    const aws = { id: "019f762b-c00c-7fff-8888-000000000000", name: "aws-site" } as any;
-    const rule: PolicyRule = { id: "s", src_kind: "site", src_site_id: azure.id, dst_kind: "site", dst_site_id: aws.id } as PolicyRule;
-    const row = ruleRow(rule, [], [], [], [azure, aws], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true });
+    const azure = {
+      id: "019f762b-b62b-7aa8-9362-249ecf231395",
+      name: "azure-site",
+    } as any;
+    const aws = {
+      id: "019f762b-c00c-7fff-8888-000000000000",
+      name: "aws-site",
+    } as any;
+    const rule: PolicyRule = {
+      id: "s",
+      src_kind: "site",
+      src_site_id: azure.id,
+      dst_kind: "site",
+      dst_site_id: aws.id,
+    } as PolicyRule;
+    const row = ruleRow(rule, [], [], [], [azure, aws], {
+      groupsLoaded: true,
+      resourcesLoaded: true,
+      sitesLoaded: true,
+    });
     expect(row.src.label).toBe("site azure-site");
     expect(row.dst.label).toBe("site aws-site");
     expect(row.src.label).not.toBe(row.dst.label); // the prefix-collision no longer makes them identical
     expect(row.broken).toBe(false);
     // sites set FAILED to load → honest "refresh", not a fake name.
-    const un = ruleRow(rule, [], [], [], [], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: false });
+    const un = ruleRow(rule, [], [], [], [], {
+      groupsLoaded: true,
+      resourcesLoaded: true,
+      sitesLoaded: false,
+    });
     expect(un.src.state).toBe("unresolved");
     expect(un.src.label).toMatch(/refresh/);
   });
 
   it("referent ABSENT from a LOADED set → 'deleted' (not omitted, broken=true)", () => {
-    const rule: PolicyRule = { id: "3", src_group_id: "g-gone", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
+    const rule: PolicyRule = {
+      id: "3",
+      src_group_id: "g-gone",
+      dst_kind: "group",
+      dst_group_id: "g-db",
+    } as PolicyRule;
     const row = ruleRow(rule, groups, resources, [], [], LOADED);
     expect(row.src.state).toBe("deleted");
     expect(row.src.label).toMatch(/deleted group/i);
@@ -123,16 +191,32 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
   });
 
   it("set FAILED TO LOAD → 'unresolved — refresh', NOT 'deleted' (no false alarm)", () => {
-    const rule: PolicyRule = { id: "4", src_group_id: "g-eng", dst_kind: "group", dst_group_id: "g-db" } as PolicyRule;
-    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: false, resourcesLoaded: true });
+    const rule: PolicyRule = {
+      id: "4",
+      src_group_id: "g-eng",
+      dst_kind: "group",
+      dst_group_id: "g-db",
+    } as PolicyRule;
+    const row = ruleRow(rule, [], resources, [], [], {
+      groupsLoaded: false,
+      resourcesLoaded: true,
+    });
     expect(row.src.state).toBe("unresolved");
     expect(row.src.label).toMatch(/unresolved group.*refresh/i);
     expect(row.src.label).not.toMatch(/deleted/i); // must NOT lie about why
   });
 
   it("resource set failed to load → dst unresolved, not deleted", () => {
-    const rule: PolicyRule = { id: "5", src_group_id: "g-eng", dst_kind: "resource", dst_resource_id: "r-net" } as PolicyRule;
-    const row = ruleRow(rule, groups, [], [], [], { groupsLoaded: true, resourcesLoaded: false });
+    const rule: PolicyRule = {
+      id: "5",
+      src_group_id: "g-eng",
+      dst_kind: "resource",
+      dst_resource_id: "r-net",
+    } as PolicyRule;
+    const row = ruleRow(rule, groups, [], [], [], {
+      groupsLoaded: true,
+      resourcesLoaded: false,
+    });
     expect(row.dst.state).toBe("unresolved");
     expect(row.dst.label).toMatch(/refresh/i);
   });
@@ -141,7 +225,14 @@ describe("D-a6 rule label — NEVER omit; DELETED ≠ UNRESOLVED", () => {
 describe("S8.7 ruleRow — cidr source: literal label + read-time warn badge (served verbatim, no client re-derivation)", () => {
   const grp = [G("g1", "Eng")];
   const cidrRule = (outside: boolean): PolicyRule =>
-    ({ id: "c1", src_kind: "cidr", src_cidr: "172.31.17.64/32", dst_kind: "group", dst_group_id: "g1", cidr_outside_org_ranges: outside } as PolicyRule);
+    ({
+      id: "c1",
+      src_kind: "cidr",
+      src_cidr: "172.31.17.64/32",
+      dst_kind: "group",
+      dst_group_id: "g1",
+      cidr_outside_org_ranges: outside,
+    }) as PolicyRule;
   it("src renders the LITERAL CIDR, always ok (a value, never a deletable referent)", () => {
     const row = ruleRow(cidrRule(false), grp, [], [], [], LOADED);
     expect(row.src.label).toBe("172.31.17.64/32");
@@ -149,8 +240,12 @@ describe("S8.7 ruleRow — cidr source: literal label + read-time warn badge (se
     expect(row.broken).toBe(false); // an out-of-world cidr is NOT broken — a valid rule that WARNS
   });
   it("the warn badge is the SERVED field verbatim — appears when outside, clears when inside (both directions)", () => {
-    expect(ruleRow(cidrRule(true), grp, [], [], [], LOADED).cidrOutsideRanges).toBe(true);
-    expect(ruleRow(cidrRule(false), grp, [], [], [], LOADED).cidrOutsideRanges).toBe(false);
+    expect(
+      ruleRow(cidrRule(true), grp, [], [], [], LOADED).cidrOutsideRanges,
+    ).toBe(true);
+    expect(
+      ruleRow(cidrRule(false), grp, [], [], [], LOADED).cidrOutsideRanges,
+    ).toBe(false);
     // still not "broken" even when warning — warn-not-refuse
     expect(ruleRow(cidrRule(true), grp, [], [], [], LOADED).broken).toBe(false);
   });
@@ -158,10 +253,30 @@ describe("S8.7 ruleRow — cidr source: literal label + read-time warn badge (se
 
 describe("S10.3 ruleRow — k8s_service dst: FQDN label + vanished warn badge (served verbatim)", () => {
   const grp = [G("g1", "Eng")];
-  const svc = [{ id: "k1", cluster_id: "c1", name: "api", namespace: "prod", protocol: "tcp", vip: "100.64.0.5", fqdn: "api.prod.svc.prod.k8s.acme.com" }] as never[];
+  const svc = [
+    {
+      id: "k1",
+      cluster_id: "c1",
+      name: "api",
+      namespace: "prod",
+      protocol: "tcp",
+      vip: "100.64.0.5",
+      fqdn: "api.prod.svc.prod.k8s.acme.com",
+    },
+  ] as never[];
   const k8sRule = (vanished: boolean): PolicyRule =>
-    ({ id: "ks1", src_group_id: "g1", dst_kind: "k8s_service", dst_k8s_service_id: "k1", dst_k8s_service_vanished: vanished } as PolicyRule);
-  const L: LoadState = { groupsLoaded: true, resourcesLoaded: true, k8sServicesLoaded: true };
+    ({
+      id: "ks1",
+      src_group_id: "g1",
+      dst_kind: "k8s_service",
+      dst_k8s_service_id: "k1",
+      dst_k8s_service_vanished: vanished,
+    }) as PolicyRule;
+  const L: LoadState = {
+    groupsLoaded: true,
+    resourcesLoaded: true,
+    k8sServicesLoaded: true,
+  };
   it("dst renders the server FQDN (copy-not-construct), state ok", () => {
     const row = ruleRow(k8sRule(false), grp, [], [], [], L, svc);
     expect(row.dst.label).toBe("api.prod.svc.prod.k8s.acme.com");
@@ -169,8 +284,12 @@ describe("S10.3 ruleRow — k8s_service dst: FQDN label + vanished warn badge (s
     expect(row.broken).toBe(false);
   });
   it("the vanished badge is the SERVED field verbatim, both directions", () => {
-    expect(ruleRow(k8sRule(true), grp, [], [], [], L, svc).k8sServiceVanished).toBe(true);
-    expect(ruleRow(k8sRule(false), grp, [], [], [], L, svc).k8sServiceVanished).toBe(false);
+    expect(
+      ruleRow(k8sRule(true), grp, [], [], [], L, svc).k8sServiceVanished,
+    ).toBe(true);
+    expect(
+      ruleRow(k8sRule(false), grp, [], [], [], L, svc).k8sServiceVanished,
+    ).toBe(false);
   });
   it("a Service absent from the LIVE set resolves as removed (deleted), still not a load failure", () => {
     const row = ruleRow(k8sRule(true), grp, [], [], [], L, []);
@@ -178,7 +297,15 @@ describe("S10.3 ruleRow — k8s_service dst: FQDN label + vanished warn badge (s
     expect(row.dst.label).toMatch(/removed service/i);
   });
   it("services set failed to load → dst unresolved, not deleted", () => {
-    const row = ruleRow(k8sRule(false), grp, [], [], [], { groupsLoaded: true, resourcesLoaded: true, k8sServicesLoaded: false }, []);
+    const row = ruleRow(
+      k8sRule(false),
+      grp,
+      [],
+      [],
+      [],
+      { groupsLoaded: true, resourcesLoaded: true, k8sServicesLoaded: false },
+      [],
+    );
     expect(row.dst.state).toBe("unresolved");
     expect(row.dst.label).toMatch(/refresh/i);
   });
@@ -186,7 +313,10 @@ describe("S10.3 ruleRow — k8s_service dst: FQDN label + vanished warn badge (s
 
 describe("loadOne — the class armed-guard: a failure NEVER reads as absence", () => {
   it("non-2xx (error present, data undefined) → NOT ok (never a reassuring empty)", async () => {
-    const r = await loadOne(async () => ({ data: undefined, error: { error: { message: "boom" } } }));
+    const r = await loadOne(async () => ({
+      data: undefined,
+      error: { error: { message: "boom" } },
+    }));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe("boom");
   });
@@ -209,12 +339,16 @@ describe("loadOne — the class armed-guard: a failure NEVER reads as absence", 
 });
 
 describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (failed never reads as 0-rules)", () => {
-  const ok = <T,>(data: T): Loaded<T> => ({ ok: true, data });
+  const ok = <T>(data: T): Loaded<T> => ({ ok: true, data });
   const fail: Loaded<never> = { ok: false, error: "boom" };
 
   it("either input still loading → loading (no premature posture claim)", () => {
-    expect(rulesSummary({ modeResult: null, rulesResult: ok(0) }).state).toBe("loading");
-    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: null }).state).toBe("loading");
+    expect(rulesSummary({ modeResult: null, rulesResult: ok(0) }).state).toBe(
+      "loading",
+    );
+    expect(
+      rulesSummary({ modeResult: ok("enforcing"), rulesResult: null }).state,
+    ).toBe("loading");
   });
   it("a FAILED rules load → 'failed', NEVER the 0-rules message (the reassuring-empty class on the loud line)", () => {
     const s = rulesSummary({ modeResult: ok("enforcing"), rulesResult: fail });
@@ -223,7 +357,9 @@ describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (faile
     expect(s.text).not.toMatch(/0 rules/);
   });
   it("a failed MODE load → failed (can't claim off or enforcing)", () => {
-    expect(rulesSummary({ modeResult: fail, rulesResult: ok(3) }).state).toBe("failed");
+    expect(rulesSummary({ modeResult: fail, rulesResult: ok(3) }).state).toBe(
+      "failed",
+    );
   });
   it("off → open-mesh copy, not loud", () => {
     const s = rulesSummary({ modeResult: ok("off"), rulesResult: ok(0) });
@@ -238,40 +374,110 @@ describe("S8.3 rulesSummary — states enumerated, derived from Loaded<T> (faile
     expect(s.text).toMatch(/denied/i);
   });
   it("enforcing + N rules → 'N rules — default-deny active', not loud; singular at 1", () => {
-    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).text).toMatch(/3 rules/);
-    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(1) }).text).toMatch(/1 rule\b/);
-    expect(rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).loud).toBe(false);
+    expect(
+      rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).text,
+    ).toMatch(/3 rules/);
+    expect(
+      rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(1) }).text,
+    ).toMatch(/1 rule\b/);
+    expect(
+      rulesSummary({ modeResult: ok("enforcing"), rulesResult: ok(3) }).loud,
+    ).toBe(false);
   });
 });
 
 describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rules (via the API, not a DB insert)", () => {
-  const base = { src: "g1", srcUser: "u1", srcSite: "s1", srcCidr: "172.31.17.64/32", dstGroup: "g2", dstResource: "r1", dstSite: "s2", dstK8sService: "k1", expiresAt: "", editing: false };
+  const base = {
+    src: "g1",
+    srcUser: "u1",
+    srcSite: "s1",
+    srcCidr: "172.31.17.64/32",
+    dstGroup: "g2",
+    dstResource: "r1",
+    dstSite: "s2",
+    dstK8sService: "k1",
+    expiresAt: "",
+    editing: false,
+  };
   it("site → site sets ONLY the site ids (the demo's DB-insert path, now first-class in the UI)", () => {
     const b = ruleBody({ ...base, srcKind: "site", dstKind: "site" });
-    expect(b).toMatchObject({ src_kind: "site", src_site_id: "s1", dst_kind: "site", dst_site_id: "s2" });
+    expect(b).toMatchObject({
+      src_kind: "site",
+      src_site_id: "s1",
+      dst_kind: "site",
+      dst_site_id: "s2",
+    });
     expect("src_group_id" in b).toBe(false);
     expect("dst_resource_id" in b).toBe(false);
   });
   it("group → site (a device group reaching a site LAN)", () => {
-    expect(ruleBody({ ...base, srcKind: "group", dstKind: "site" })).toMatchObject({ src_kind: "group", src_group_id: "g1", dst_kind: "site", dst_site_id: "s2" });
+    expect(
+      ruleBody({ ...base, srcKind: "group", dstKind: "site" }),
+    ).toMatchObject({
+      src_kind: "group",
+      src_group_id: "g1",
+      dst_kind: "site",
+      dst_site_id: "s2",
+    });
   });
   it("S8.7 cidr → resource sets ONLY src_cidr (the /32-precise source)", () => {
     const b = ruleBody({ ...base, srcKind: "cidr", dstKind: "resource" });
-    expect(b).toMatchObject({ src_kind: "cidr", src_cidr: "172.31.17.64/32", dst_kind: "resource", dst_resource_id: "r1" });
+    expect(b).toMatchObject({
+      src_kind: "cidr",
+      src_cidr: "172.31.17.64/32",
+      dst_kind: "resource",
+      dst_resource_id: "r1",
+    });
     expect("src_group_id" in b).toBe(false);
     expect("src_site_id" in b).toBe(false);
   });
   it("existing kinds unchanged (group→group, user→resource)", () => {
-    expect(ruleBody({ ...base, srcKind: "group", dstKind: "group" })).toMatchObject({ src_kind: "group", dst_kind: "group", dst_group_id: "g2" });
-    expect(ruleBody({ ...base, srcKind: "user", dstKind: "resource" })).toMatchObject({ src_kind: "user", src_user_id: "u1", dst_kind: "resource", dst_resource_id: "r1" });
+    expect(
+      ruleBody({ ...base, srcKind: "group", dstKind: "group" }),
+    ).toMatchObject({
+      src_kind: "group",
+      dst_kind: "group",
+      dst_group_id: "g2",
+    });
+    expect(
+      ruleBody({ ...base, srcKind: "user", dstKind: "resource" }),
+    ).toMatchObject({
+      src_kind: "user",
+      src_user_id: "u1",
+      dst_kind: "resource",
+      dst_resource_id: "r1",
+    });
   });
   it("expiry is create-only", () => {
-    expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: false })).toBe(true);
-    expect("expires_at" in ruleBody({ ...base, srcKind: "site", dstKind: "site", expiresAt: "2030-01-01T00:00", editing: true })).toBe(false);
+    expect(
+      "expires_at" in
+        ruleBody({
+          ...base,
+          srcKind: "site",
+          dstKind: "site",
+          expiresAt: "2030-01-01T00:00",
+          editing: false,
+        }),
+    ).toBe(true);
+    expect(
+      "expires_at" in
+        ruleBody({
+          ...base,
+          srcKind: "site",
+          dstKind: "site",
+          expiresAt: "2030-01-01T00:00",
+          editing: true,
+        }),
+    ).toBe(false);
   });
   it("S10.3 group → k8s_service sets ONLY the Service id (never a resource/site id)", () => {
     const b = ruleBody({ ...base, srcKind: "group", dstKind: "k8s_service" });
-    expect(b).toMatchObject({ src_kind: "group", src_group_id: "g1", dst_kind: "k8s_service", dst_k8s_service_id: "k1" });
+    expect(b).toMatchObject({
+      src_kind: "group",
+      src_group_id: "g1",
+      dst_kind: "k8s_service",
+      dst_k8s_service_id: "k1",
+    });
     expect("dst_resource_id" in b).toBe(false);
     expect("dst_site_id" in b).toBe(false);
   });
@@ -279,26 +485,41 @@ describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rule
 
 describe("[291] sectionRender — legibility signals COMPOSE, never compete", () => {
   it("loadError + notice both set → retry shows AND notice STILL shows (content hidden)", () => {
-    const v = sectionRender("couldn't load", "old rule still active — retry removal");
+    const v = sectionRender(
+      "couldn't load",
+      "old rule still active — retry removal",
+    );
     expect(v.showRetry).toBe(true);
     expect(v.showNotice).toBe(true); // the partial-swap warning is NOT masked by the load failure
     expect(v.showContent).toBe(false); // only CONTENT is replaced by retry
   });
   it("no error, notice set → content + notice", () => {
-    expect(sectionRender(null, "note")).toEqual({ showRetry: false, showContent: true, showNotice: true });
+    expect(sectionRender(null, "note")).toEqual({
+      showRetry: false,
+      showContent: true,
+      showNotice: true,
+    });
   });
   it("no error, no notice → content only", () => {
-    expect(sectionRender(null, null)).toEqual({ showRetry: false, showContent: true, showNotice: false });
+    expect(sectionRender(null, null)).toEqual({
+      showRetry: false,
+      showContent: true,
+      showNotice: false,
+    });
   });
 });
 
 describe("notices reduction — derived from staleRuleIds (single source of truth)", () => {
-  const R = (id: string) => ({ id } as PolicyRule);
+  const R = (id: string) => ({ id }) as PolicyRule;
 
   it("staleNoticeText: none → null; one → the partial message; many → a count line", () => {
     expect(staleNoticeText([])).toBeNull();
-    expect(staleNoticeText(["abcdef12"])).toMatch(/could not be removed.*still active/i);
-    expect(staleNoticeText(["a", "b"])).toMatch(/^2 rules could not be removed/i);
+    expect(staleNoticeText(["abcdef12"])).toMatch(
+      /could not be removed.*still active/i,
+    );
+    expect(staleNoticeText(["a", "b"])).toMatch(
+      /^2 rules could not be removed/i,
+    );
   });
 
   it("[371] a clean create never drops the warning — the set is only pruned by pruneStaleRuleIds", () => {
@@ -324,15 +545,34 @@ describe("notices reduction — derived from staleRuleIds (single source of trut
 });
 
 describe("[75]+[101] accessView — upsell needs only edition; role in-flight is not the gate", () => {
-  const base = { fatal: false, loadError: false, editionReady: true, isEnterprise: true, roleError: false, roleResolved: true, canView: true };
+  const base = {
+    fatal: false,
+    loadError: false,
+    editionReady: true,
+    isEnterprise: true,
+    roleError: false,
+    roleResolved: true,
+    canView: true,
+  };
   it("[75] non-enterprise + members-fail → upsell, NOT role_retry", () => {
-    expect(accessView({ ...base, isEnterprise: false, roleError: true, roleResolved: false })).toBe("upsell");
+    expect(
+      accessView({
+        ...base,
+        isEnterprise: false,
+        roleError: true,
+        roleResolved: false,
+      }),
+    ).toBe("upsell");
   });
   it("[101] enterprise + role in-flight → role_loading, NOT member_gate", () => {
-    expect(accessView({ ...base, roleResolved: false, canView: false })).toBe("role_loading");
+    expect(accessView({ ...base, roleResolved: false, canView: false })).toBe(
+      "role_loading",
+    );
   });
   it("enterprise + roleError → role_retry", () => {
-    expect(accessView({ ...base, roleError: true, roleResolved: false })).toBe("role_retry");
+    expect(accessView({ ...base, roleError: true, roleResolved: false })).toBe(
+      "role_retry",
+    );
   });
   it("enterprise admin resolved → admin_body; member resolved → member_gate", () => {
     expect(accessView({ ...base, canView: true })).toBe("admin_body");
@@ -348,7 +588,10 @@ describe("[75]+[101] accessView — upsell needs only edition; role in-flight is
 describe("[0] roleFromMembers — a FAILED members load is NOT 'member' (no false lockout)", () => {
   const me = "u-me";
   it("failed load → failed:true, NO role (caller shows retry, not the manage-gate)", () => {
-    const res = roleFromMembers({ ok: false, error: "boom" } as Loaded<Member[]>, me);
+    const res = roleFromMembers(
+      { ok: false, error: "boom" } as Loaded<Member[]>,
+      me,
+    );
     expect(res.failed).toBe(true);
     expect(res.role).toBeUndefined();
     // Critical: policyGate must NOT be fed this as role=undefined-treated-as-member.
@@ -370,8 +613,14 @@ describe("D-a5 swapRule — CREATE-THEN-DELETE, gap-free, LEGIBLE partial", () =
     const calls: string[] = [];
     const out = await swapRule(
       "old-1",
-      async () => { calls.push("create"); return { id: "new-1" }; },
-      async () => { calls.push("delete"); return; },
+      async () => {
+        calls.push("create");
+        return { id: "new-1" };
+      },
+      async () => {
+        calls.push("delete");
+        return;
+      },
     );
     expect(out).toEqual({ outcome: "replaced", newId: "new-1" });
     expect(calls).toEqual(["create", "delete"]); // create STRICTLY before delete
@@ -382,7 +631,9 @@ describe("D-a5 swapRule — CREATE-THEN-DELETE, gap-free, LEGIBLE partial", () =
     const out = await swapRule(
       "old-1",
       async () => ({ error: "boom" }),
-      async () => { deleted = true; },
+      async () => {
+        deleted = true;
+      },
     );
     expect(out).toEqual({ outcome: "create_failed", error: "boom" });
     expect(deleted).toBe(false); // delete-old must NOT run when create failed
@@ -394,30 +645,56 @@ describe("D-a5 swapRule — CREATE-THEN-DELETE, gap-free, LEGIBLE partial", () =
       async () => ({ id: "new-1" }),
       async () => ({ error: "delete failed" }),
     );
-    expect(out).toEqual({ outcome: "partial", newId: "new-1", oldId: "old-1", error: "delete failed" });
+    expect(out).toEqual({
+      outcome: "partial",
+      newId: "new-1",
+      oldId: "old-1",
+      error: "delete failed",
+    });
     // Caller uses this to show BOTH rules + a retry — never a silent duplicate.
   });
 });
 
-const M = (id: string, name: string, status: "active" | "deactivated" = "active") =>
-  ({ user_id: id, name, email: `${name}@x`, status } as Member);
+const M = (
+  id: string,
+  name: string,
+  status: "active" | "deactivated" = "active",
+) => ({ user_id: id, name, email: `${name}@x`, status }) as Member;
 
 describe("S7.5.4 ruleRow user subject", () => {
-  const rule = { id: "r1", src_kind: "user", src_user_id: "u1", dst_kind: "resource", dst_resource_id: "res1" } as PolicyRule;
+  const rule = {
+    id: "r1",
+    src_kind: "user",
+    src_user_id: "u1",
+    dst_kind: "resource",
+    dst_resource_id: "res1",
+  } as PolicyRule;
   const resources = [R("res1", "db")];
   it("resolves a per-user subject to the member name", () => {
-    const row = ruleRow(rule, [], resources, [M("u1", "alice")], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    const row = ruleRow(rule, [], resources, [M("u1", "alice")], [], {
+      groupsLoaded: true,
+      resourcesLoaded: true,
+      membersLoaded: true,
+    });
     expect(row.src.label).toBe("alice");
     expect(row.src.state).toBe("ok");
   });
   it("a removed user (not in a loaded roster) shows distinctly, never mislabeled", () => {
-    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: true });
+    const row = ruleRow(rule, [], resources, [], [], {
+      groupsLoaded: true,
+      resourcesLoaded: true,
+      membersLoaded: true,
+    });
     expect(row.src.label).toMatch(/removed user/);
     expect(row.src.state).toBe("deleted");
     expect(row.broken).toBe(true);
   });
   it("a FAILED roster load reads unresolved (refresh), not removed", () => {
-    const row = ruleRow(rule, [], resources, [], [], { groupsLoaded: true, resourcesLoaded: true, membersLoaded: false });
+    const row = ruleRow(rule, [], resources, [], [], {
+      groupsLoaded: true,
+      resourcesLoaded: true,
+      membersLoaded: false,
+    });
     expect(row.src.state).toBe("unresolved");
   });
 });
@@ -425,16 +702,26 @@ describe("S7.5.4 ruleRow user subject", () => {
 describe("S7.5.4 grantExpiry (linger model)", () => {
   const now = 1_000_000_000_000;
   it("no expiry = permanent, not extendable", () => {
-    expect(grantExpiry({ expires_at: null }, now)).toEqual({ state: "permanent", label: "permanent", extendable: false });
+    expect(grantExpiry({ expires_at: null }, now)).toEqual({
+      state: "permanent",
+      label: "permanent",
+      extendable: false,
+    });
   });
   it("future expiry = active, extendable", () => {
-    const g = grantExpiry({ expires_at: new Date(now + 3 * 3600_000).toISOString() }, now);
+    const g = grantExpiry(
+      { expires_at: new Date(now + 3 * 3600_000).toISOString() },
+      now,
+    );
     expect(g.state).toBe("active");
     expect(g.label).toMatch(/expires in 3h/);
     expect(g.extendable).toBe(true);
   });
   it("past expiry = expired-but-EXTENDABLE (linger: shown + the extend 409s legibly)", () => {
-    const g = grantExpiry({ expires_at: new Date(now - 2 * 3600_000).toISOString() }, now);
+    const g = grantExpiry(
+      { expires_at: new Date(now - 2 * 3600_000).toISOString() },
+      now,
+    );
     expect(g.state).toBe("expired");
     expect(g.label).toMatch(/expired 2h ago/);
     expect(g.extendable).toBe(true); // the server refuses with 409 grant_lapsed, surfaced legibly
@@ -451,20 +738,40 @@ describe("S7.5.4 extendErrorCopy", () => {
 
 describe("S7.5.4 attributionLabel (rider 1 — absence is visible)", () => {
   it("device present + user unresolved shows 'device X · user unknown', never blank", () => {
-    expect(attributionLabel({ deviceId: "dev-abc12345", userId: null })).toBe("device dev-abc1… · user unknown");
-    expect(attributionLabel({ deviceId: "d", userId: null, deviceName: "alice-laptop" })).toBe("alice-laptop · user unknown");
+    expect(attributionLabel({ deviceId: "dev-abc12345", userId: null })).toBe(
+      "device dev-abc1… · user unknown",
+    );
+    expect(
+      attributionLabel({
+        deviceId: "d",
+        userId: null,
+        deviceName: "alice-laptop",
+      }),
+    ).toBe("alice-laptop · user unknown");
   });
   it("both resolved shows device · user", () => {
-    expect(attributionLabel({ deviceId: "d", userId: "u", deviceName: "laptop", userName: "alice" })).toBe("laptop · alice");
+    expect(
+      attributionLabel({
+        deviceId: "d",
+        userId: "u",
+        deviceName: "laptop",
+        userName: "alice",
+      }),
+    ).toBe("laptop · alice");
   });
   it("no device stamped reads 'unattributed', not a blank/dash", () => {
-    expect(attributionLabel({ deviceId: null, userId: null })).toBe("unattributed");
+    expect(attributionLabel({ deviceId: null, userId: null })).toBe(
+      "unattributed",
+    );
   });
 });
 
 describe("S7.5.4 activeMembers (D1 picker constraint)", () => {
   it("offers only current active members", () => {
-    const out = activeMembers([M("u1", "alice"), M("u2", "bob", "deactivated")]);
+    const out = activeMembers([
+      M("u1", "alice"),
+      M("u2", "bob", "deactivated"),
+    ]);
     expect(out.map((m) => m.user_id)).toEqual(["u1"]);
   });
 });
@@ -473,14 +780,22 @@ import { canEditRuleInModal } from "../src/lib/policyview";
 
 describe("canEditRuleInModal — site rules are NOT editable in the group/resource modal (S8.1 dst, S8.2 src)", () => {
   it("group and resource rules (with a group/user source) are editable", () => {
-    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "group" })).toBe(true);
-    expect(canEditRuleInModal({ src_kind: "user", dst_kind: "resource" })).toBe(true);
+    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "group" })).toBe(
+      true,
+    );
+    expect(canEditRuleInModal({ src_kind: "user", dst_kind: "resource" })).toBe(
+      true,
+    );
   });
   it("a site-DST rule is NOT editable here (would silently rewrite it — write-guard, not display)", () => {
-    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "site" })).toBe(false);
+    expect(canEditRuleInModal({ src_kind: "group", dst_kind: "site" })).toBe(
+      false,
+    );
   });
   it("a site-SRC rule (S8.2) is NOT editable here either (same write-guard)", () => {
-    expect(canEditRuleInModal({ src_kind: "site", dst_kind: "group" })).toBe(false);
+    expect(canEditRuleInModal({ src_kind: "site", dst_kind: "group" })).toBe(
+      false,
+    );
   });
 });
 
@@ -492,11 +807,26 @@ describe("canEditRuleInModal — site rules are NOT editable in the group/resour
 describe("ruleRow — a site-dst rule renders as a site, NEVER a broken 'deleted resource' (S8.1 #2)", () => {
   it("dst_kind='site' → site label, state ok, not broken", () => {
     const rule = {
-      id: "r1", org_id: "o", src_kind: "group", src_group_id: "g1",
-      dst_kind: "site", dst_site_id: "00000000-0000-0000-0000-0000000051e1", created_at: "x",
+      id: "r1",
+      org_id: "o",
+      src_kind: "group",
+      src_group_id: "g1",
+      dst_kind: "site",
+      dst_site_id: "00000000-0000-0000-0000-0000000051e1",
+      created_at: "x",
     } as any;
-    const site = { id: "00000000-0000-0000-0000-0000000051e1", name: "hq-site" } as any;
-    const row = ruleRow(rule, [{ id: "g1", name: "Admins" } as any], [], [], [site], { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true } as any);
+    const site = {
+      id: "00000000-0000-0000-0000-0000000051e1",
+      name: "hq-site",
+    } as any;
+    const row = ruleRow(
+      rule,
+      [{ id: "g1", name: "Admins" } as any],
+      [],
+      [],
+      [site],
+      { groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true } as any,
+    );
     expect(row.dst.state).toBe("ok");
     expect(row.dst.label).toBe("site hq-site"); // WF-8: resolved to the NAME, never a broken 'deleted resource'
     expect(row.broken).toBe(false);
@@ -507,19 +837,36 @@ import { defaultDstKind, defaultSrcKind } from "../src/lib/policyview";
 
 describe("defaultSrcKind / defaultDstKind — the modal opens on a kind that HAS options (re-review #4)", () => {
   it("an editing rule's kind always wins", () => {
-    expect(defaultDstKind({ editingKind: "site", hasGroups: true, hasResources: true, hasSites: true })).toBe("site");
-    expect(defaultSrcKind({ editingKind: "user", hasGroups: true, hasSites: true })).toBe("user");
+    expect(
+      defaultDstKind({
+        editingKind: "site",
+        hasGroups: true,
+        hasResources: true,
+        hasSites: true,
+      }),
+    ).toBe("site");
+    expect(
+      defaultSrcKind({ editingKind: "user", hasGroups: true, hasSites: true }),
+    ).toBe("user");
   });
   it("groups present → groups is the primary default (both sides)", () => {
-    expect(defaultDstKind({ hasGroups: true, hasResources: true, hasSites: true })).toBe("group");
+    expect(
+      defaultDstKind({ hasGroups: true, hasResources: true, hasSites: true }),
+    ).toBe("group");
     expect(defaultSrcKind({ hasGroups: true, hasSites: true })).toBe("group");
   });
   it("THE FIX: no groups + resources → dst defaults to resource, NOT the empty group select (the dead-end)", () => {
-    expect(defaultDstKind({ hasGroups: false, hasResources: true, hasSites: true })).toBe("resource");
-    expect(defaultDstKind({ hasGroups: false, hasResources: true, hasSites: false })).toBe("resource");
+    expect(
+      defaultDstKind({ hasGroups: false, hasResources: true, hasSites: true }),
+    ).toBe("resource");
+    expect(
+      defaultDstKind({ hasGroups: false, hasResources: true, hasSites: false }),
+    ).toBe("resource");
   });
   it("no groups, no resources, sites only → dst defaults to site (both sides site-first)", () => {
-    expect(defaultDstKind({ hasGroups: false, hasResources: false, hasSites: true })).toBe("site");
+    expect(
+      defaultDstKind({ hasGroups: false, hasResources: false, hasSites: true }),
+    ).toBe("site");
     expect(defaultSrcKind({ hasGroups: false, hasSites: true })).toBe("site");
   });
 });
@@ -539,16 +886,22 @@ describe("disableConfirmText (F3)", () => {
 import { resPortsValid } from "../src/lib/policyview";
 
 describe("resPortsValid (Feature 1 — resource port scope, client UX gate; server authoritative)", () => {
-  it("both blank = all ports (valid)", () => expect(resPortsValid("", "")).toBe(true));
-  it("a high without a low is invalid", () => expect(resPortsValid("", "80")).toBe(false));
-  it("a low alone = a single port (valid)", () => expect(resPortsValid("80", "")).toBe(true));
-  it("low <= high range is valid", () => expect(resPortsValid("8000", "8100")).toBe(true));
-  it("high < low is invalid", () => expect(resPortsValid("8100", "8000")).toBe(false));
+  it("both blank = all ports (valid)", () =>
+    expect(resPortsValid("", "")).toBe(true));
+  it("a high without a low is invalid", () =>
+    expect(resPortsValid("", "80")).toBe(false));
+  it("a low alone = a single port (valid)", () =>
+    expect(resPortsValid("80", "")).toBe(true));
+  it("low <= high range is valid", () =>
+    expect(resPortsValid("8000", "8100")).toBe(true));
+  it("high < low is invalid", () =>
+    expect(resPortsValid("8100", "8000")).toBe(false));
   it("out of range 0 / 65536 invalid", () => {
     expect(resPortsValid("0", "")).toBe(false);
     expect(resPortsValid("1", "65536")).toBe(false);
   });
-  it("non-integer invalid", () => expect(resPortsValid("80.5", "")).toBe(false));
+  it("non-integer invalid", () =>
+    expect(resPortsValid("80.5", "")).toBe(false));
 });
 
 describe("grantControls — the withhold decision (M3)", () => {

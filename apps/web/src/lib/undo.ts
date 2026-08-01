@@ -40,7 +40,8 @@ export const UNDOABLE_ACTIONS: UndoableAction[] = [
   {
     action: "policy.rule_disabled",
     inverse: "policy.rule_enabled",
-    sameIdentity: "PATCH /policies/{ruleId} — the same ruleId is re-enabled; no row is created",
+    sameIdentity:
+      "PATCH /policies/{ruleId} — the same ruleId is re-enabled; no row is created",
   },
   {
     action: "policy.rule_enabled",
@@ -75,11 +76,20 @@ export const UNDOABLE_ACTIONS: UndoableAction[] = [
  * An absent entry proves nothing; an entry that names its reason can be argued with.
  */
 export const NOT_UNDOABLE: Array<{ action: string; why: string }> = [
-  { action: "policy.rule_created", why: "re-creating yields a NEW rule id — a new grant, not the old one back" },
+  {
+    action: "policy.rule_created",
+    why: "re-creating yields a NEW rule id — a new grant, not the old one back",
+  },
   { action: "resource.created", why: "re-creating yields a NEW resource id" },
   { action: "group.created", why: "re-creating yields a NEW group id" },
-  { action: "machine.credential_issued", why: "re-issuing mints a NEW secret; the old one is gone" },
-  { action: "device.revoked", why: "revocation is a FULL SWEEP — peer slot, pool address and telemetry" },
+  {
+    action: "machine.credential_issued",
+    why: "re-issuing mints a NEW secret; the old one is gone",
+  },
+  {
+    action: "device.revoked",
+    why: "revocation is a FULL SWEEP — peer slot, pool address and telemetry",
+  },
   { action: "org.deleted", why: "no inverse exists at all" },
   {
     action: "group.member_added",
@@ -89,7 +99,10 @@ export const NOT_UNDOABLE: Array<{ action: string; why: string }> = [
       "by the next sync. AN UNDO THE SYSTEM WILL FIGHT IS WORSE THAN NO UNDO: the user sees a success, then " +
       "watches it disappear, and learns the interface cannot be trusted about the thing it just confirmed.",
   },
-  { action: "group.member_removed", why: "same — the sync reconciler is authoritative for synced groups" },
+  {
+    action: "group.member_removed",
+    why: "same — the sync reconciler is authoritative for synced groups",
+  },
 ];
 
 /** May this action carry an undo? The allow-list is the criterion; membership is not a judgement call. */

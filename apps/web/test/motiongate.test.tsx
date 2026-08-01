@@ -1,7 +1,14 @@
-import { describe, expect, it, afterEach, vi } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { motionAllowed, readsReducedMotionPreference, REDUCED_MOTION_QUERY } from "../src/lib/motion";
-import { MotionProvider, useMotionPreference } from "../src/components/MotionProvider";
+import {
+  motionAllowed,
+  readsReducedMotionPreference,
+  REDUCED_MOTION_QUERY,
+} from "../src/lib/motion";
+import {
+  MotionProvider,
+  useMotionPreference,
+} from "../src/components/MotionProvider";
 
 // S14.3 SLICE B — `prefers-reduced-motion` AS A GATE, PROVEN TO REJECT.
 //
@@ -13,8 +20,10 @@ import { MotionProvider, useMotionPreference } from "../src/components/MotionPro
 afterEach(cleanup);
 
 describe("motionAllowed — the whole decision, both directions", () => {
-  it("reduced preference FORBIDS motion", () => expect(motionAllowed(true)).toBe(false));
-  it("no preference ALLOWS motion", () => expect(motionAllowed(false)).toBe(true));
+  it("reduced preference FORBIDS motion", () =>
+    expect(motionAllowed(true)).toBe(false));
+  it("no preference ALLOWS motion", () =>
+    expect(motionAllowed(false)).toBe(true));
 });
 
 describe("readsReducedMotionPreference — FAILS TOWARDS LESS MOTION", () => {
@@ -30,7 +39,11 @@ describe("readsReducedMotionPreference — FAILS TOWARDS LESS MOTION", () => {
 
   it("returns REDUCED when matchMedia THROWS", () => {
     const orig = window.matchMedia;
-    // @ts-expect-error — assigning a throwing stub
+    /* No suppression directive here: a function returning `never` IS assignable to MediaQueryList's
+       signature, so the one that used to sit on this line was UNUSED and tsc rejected it (TS2578).
+       And a second lesson from writing that explanation: naming the directive in a `//` comment MAKES ONE —
+       tsc reads the token, not the sentence around it. Hence the block comment. A stale suppression is itself
+       a standing claim that a type error exists, and it goes stale in silence. */
     window.matchMedia = () => {
       throw new Error("nope");
     };
@@ -57,7 +70,11 @@ describe("readsReducedMotionPreference — FAILS TOWARDS LESS MOTION", () => {
 
 function Probe() {
   const reduced = useMotionPreference();
-  return <span data-testid="probe">{motionAllowed(reduced) ? "animating" : "still"}</span>;
+  return (
+    <span data-testid="probe">
+      {motionAllowed(reduced) ? "animating" : "still"}
+    </span>
+  );
 }
 
 describe("the preference reaches components, injected rather than measured", () => {

@@ -16,7 +16,12 @@ describe("hubSetView (S8.6 HA surface view-model)", () => {
     const hs: HubSet = {
       generation: 7,
       members: [
-        { node_id: "a", role: "primary", hub_priority: 1, metrics: { last_handshake_at: fresh, rx_bytes: 2048, tx_bytes: 0 } },
+        {
+          node_id: "a",
+          role: "primary",
+          hub_priority: 1,
+          metrics: { last_handshake_at: fresh, rx_bytes: 2048, tx_bytes: 0 },
+        },
         { node_id: "b", role: "standby", hub_priority: 2 },
       ],
     };
@@ -30,7 +35,12 @@ describe("hubSetView (S8.6 HA surface view-model)", () => {
     const hs: HubSet = {
       generation: 3,
       members: [
-        { node_id: "a", role: "primary", hub_priority: 1, metrics: { last_handshake_at: fresh, rx_bytes: 0, tx_bytes: 0 } }, // idle
+        {
+          node_id: "a",
+          role: "primary",
+          hub_priority: 1,
+          metrics: { last_handshake_at: fresh, rx_bytes: 0, tx_bytes: 0 },
+        }, // idle
         { node_id: "b", role: "standby", hub_priority: 2 }, // NOT reporting (no metrics)
       ],
     };
@@ -47,7 +57,12 @@ describe("hubSetView (S8.6 HA surface view-model)", () => {
     const hs: HubSet = {
       generation: 1,
       members: [
-        { node_id: "a", role: "primary", hub_priority: 1, metrics: { last_handshake_at: stale, rx_bytes: 5, tx_bytes: 5 } },
+        {
+          node_id: "a",
+          role: "primary",
+          hub_priority: 1,
+          metrics: { last_handshake_at: stale, rx_bytes: 5, tx_bytes: 5 },
+        },
       ],
     };
     expect(hubSetView(hs, now)!.members[0].warm).toBe(false);
@@ -58,8 +73,18 @@ describe("hubSetView (S8.6 HA surface view-model)", () => {
     const hs: HubSet = {
       generation: 9,
       members: [
-        { node_id: "a", role: "primary", hub_priority: 2, metrics: { last_handshake_at: fresh, rx_bytes: 1, tx_bytes: 1 } },
-        { node_id: "b", role: "standby", hub_priority: 1, metrics: { last_handshake_at: stale, rx_bytes: 1, tx_bytes: 1 } },
+        {
+          node_id: "a",
+          role: "primary",
+          hub_priority: 2,
+          metrics: { last_handshake_at: fresh, rx_bytes: 1, tx_bytes: 1 },
+        },
+        {
+          node_id: "b",
+          role: "standby",
+          hub_priority: 1,
+          metrics: { last_handshake_at: stale, rx_bytes: 1, tx_bytes: 1 },
+        },
       ],
     };
     const v = hubSetView(hs, now)!;

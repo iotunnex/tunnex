@@ -40,7 +40,8 @@ export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
  * is nothing; the cost of animating for someone who cannot tolerate it is a person feeling ill.
  */
 export function readsReducedMotionPreference(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+    return true;
   try {
     return window.matchMedia(REDUCED_MOTION_QUERY).matches;
   } catch {

@@ -1,5 +1,14 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { REDUCED_MOTION_QUERY, readsReducedMotionPreference } from "../lib/motion";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  REDUCED_MOTION_QUERY,
+  readsReducedMotionPreference,
+} from "../lib/motion";
 
 // S14.3 SLICE B — the preference, read ONCE at the app edge.
 //
@@ -10,12 +19,24 @@ import { REDUCED_MOTION_QUERY, readsReducedMotionPreference } from "../lib/motio
 
 const MotionContext = createContext<boolean | null>(null);
 
-export function MotionProvider({ children, value }: { children: ReactNode; value?: boolean }) {
-  const [reduced, setReduced] = useState<boolean>(() => readsReducedMotionPreference());
+export function MotionProvider({
+  children,
+  value,
+}: {
+  children: ReactNode;
+  value?: boolean;
+}) {
+  const [reduced, setReduced] = useState<boolean>(() =>
+    readsReducedMotionPreference(),
+  );
 
   useEffect(() => {
     if (value !== undefined) return; // injected: never read the platform
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
     const mq = window.matchMedia(REDUCED_MOTION_QUERY);
     const onChange = () => setReduced(mq.matches);
     // The preference can change while the app is open (an OS setting, a system-wide toggle). Honouring it only
@@ -24,7 +45,11 @@ export function MotionProvider({ children, value }: { children: ReactNode; value
     return () => mq.removeEventListener?.("change", onChange);
   }, [value]);
 
-  return <MotionContext.Provider value={value ?? reduced}>{children}</MotionContext.Provider>;
+  return (
+    <MotionContext.Provider value={value ?? reduced}>
+      {children}
+    </MotionContext.Provider>
+  );
 }
 
 /**

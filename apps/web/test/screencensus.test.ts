@@ -27,15 +27,21 @@ const PAGES_DIR = join(__dirname, "..", "src", "pages");
 const EXEMPT: Record<string, string> = {
   "Login.tsx": "unauthenticated shell — no backend concept to disagree about",
   "Signup.tsx": "unauthenticated shell — no backend concept to disagree about",
-  "ForgotPassword.tsx": "single-form flow; the decision is server-side, nothing rendered to disagree with",
-  "ResetPassword.tsx": "single-form flow; the decision is server-side, nothing rendered to disagree with",
-  "VerifyEmail.tsx": "terminal status page — renders a fixed state, no list, no derivation",
-  "VerifyPending.tsx": "terminal status page — renders a fixed state, no list, no derivation",
+  "ForgotPassword.tsx":
+    "single-form flow; the decision is server-side, nothing rendered to disagree with",
+  "ResetPassword.tsx":
+    "single-form flow; the decision is server-side, nothing rendered to disagree with",
+  "VerifyEmail.tsx":
+    "terminal status page — renders a fixed state, no list, no derivation",
+  "VerifyPending.tsx":
+    "terminal status page — renders a fixed state, no list, no derivation",
   "AcceptInvite.tsx": "one-shot token redemption; no ongoing backend concept",
   "CreateOrg.tsx": "one form, one POST, no rendered backend state",
   // TESTED ELSEWHERE, not skipped — the distinction matters and is why the reason names the coverage.
-  "CliAuth.tsx": "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
-  "CliDevice.tsx": "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
+  "CliAuth.tsx":
+    "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
+  "CliDevice.tsx":
+    "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
   // ⚠ CONDITIONAL EXEMPTION — VOID IF ITEM A DOES NOT LAND. Dashboard fetches one overview and renders it: no
   // derivation, no gating, no suppression, and its failure mode is guarded BY CONSTRUCTION (`{data && (…)}`,
   // so counts cannot render from a failed load — the same class as the Loaded<T> finding). A test asserting
@@ -44,23 +50,32 @@ const EXEMPT: Record<string, string> = {
   // revocation cannot leave a stale view. That is an ELECTRON BRIDGE decision, and Item A removes the
   // dashboard from Electron entirely (connect-only client). TRIGGER: if Item A does not land, or if the
   // dashboard is ever rendered in Electron again, THIS EXEMPTION IS VOID and Dashboard rejoins COVERED.
-  "Dashboard.tsx": "display-only: guarded by construction ({data && …}), no derivation/gating/suppression. CONDITIONAL on Item A — see the note above; void if the dashboard is ever rendered in Electron again",
+  "Dashboard.tsx":
+    "display-only: guarded by construction ({data && …}), no derivation/gating/suppression. CONDITIONAL on Item A — see the note above; void if the dashboard is ever rendered in Electron again",
 };
 
 // COVERED — a screen enters this list when it has BOTH a wiring test and a failure-path test.
 const COVERED: Record<string, string> = {
-  "Gateways.tsx": "test/gatewayswiring.test.tsx — revoke wiring + revoked-suppression + failed-revoke surfaced",
-  "Devices.tsx": "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
-  "Kubernetes.tsx": "test/kuberneteswiring.test.tsx — health-kind mirror census (WF-S11-7) + withheld destructive control + LoadRetry reached",
-  "Access.tsx": "test/accesswiring.test.tsx — enforcement posture cannot be claimed without being read (both directions) + disabled rules shown + failed load never renders a count",
+  "Gateways.tsx":
+    "test/gatewayswiring.test.tsx — revoke wiring + revoked-suppression + failed-revoke surfaced",
+  "Devices.tsx":
+    "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
+  "Kubernetes.tsx":
+    "test/kuberneteswiring.test.tsx — health-kind mirror census (WF-S11-7) + withheld destructive control + LoadRetry reached",
+  "Access.tsx":
+    "test/accesswiring.test.tsx — enforcement posture cannot be claimed without being read (both directions) + disabled rules shown + failed load never renders a count",
   // SHEDDER, tested accordingly: assertions are written against the DECISION and name `subnets` as the
   // destination, so they travel through the split instead of becoming throwaway work.
-  "Sites.tsx": "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
+  "Sites.tsx":
+    "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
   // SHEDDER: machine credentials -> cli, edition -> license. Assertions target the DECISION and name the
   // destination, so they travel through the split.
-  "Users.tsx": "test/userswiring.test.tsx — the sole owner cannot be demoted (lockout), both directions + failed roster surfaced, never 'no members yet'",
-  "AuditLog.tsx": "test/auditlogwiring.test.tsx — paging uses the APPLIED filter set, never a mid-edit one + failed load surfaced, never an empty history",
-  "Settings.tsx": "test/settingswiring.test.tsx — the control reflects the ORG's opt-in state, not a default (misconfigure, stays in settings) + edition gating both directions (destination: license) + failed org load surfaced, no defaults offered",
+  "Users.tsx":
+    "test/userswiring.test.tsx — the sole owner cannot be demoted (lockout), both directions + failed roster surfaced, never 'no members yet'",
+  "AuditLog.tsx":
+    "test/auditlogwiring.test.tsx — paging uses the APPLIED filter set, never a mid-edit one + failed load surfaced, never an empty history",
+  "Settings.tsx":
+    "test/settingswiring.test.tsx — the control reflects the ORG's opt-in state, not a default (misconfigure, stays in settings) + edition gating both directions (destination: license) + failed org load surfaced, no defaults offered",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -92,21 +107,33 @@ describe("screen census", () => {
   });
 
   it("every screen is COVERED, PENDING or EXEMPT — a NEW screen fails here BY NAME", () => {
-    const unaccounted = screens.filter((s) => !(s in COVERED) && !(s in PENDING) && !(s in EXEMPT));
+    const unaccounted = screens.filter(
+      (s) => !(s in COVERED) && !(s in PENDING) && !(s in EXEMPT),
+    );
     // `Gateways.tsx` lives in components/ but IS the gateway screen; it is accounted for in COVERED and is not
     // enumerated here, which is why it never appears in `unaccounted`.
-    expect(unaccounted, `unaccounted screens (add a wiring+failure test, or a PENDING/EXEMPT entry WITH A REASON): ${unaccounted.join(", ")}`).toEqual([]);
+    expect(
+      unaccounted,
+      `unaccounted screens (add a wiring+failure test, or a PENDING/EXEMPT entry WITH A REASON): ${unaccounted.join(", ")}`,
+    ).toEqual([]);
   });
 
   it("every EXEMPT and PENDING entry carries a non-empty reason", () => {
-    const unreasoned = [...Object.entries(EXEMPT), ...Object.entries(PENDING)].filter(([, why]) => !why || why.trim().length < 10);
+    const unreasoned = [
+      ...Object.entries(EXEMPT),
+      ...Object.entries(PENDING),
+    ].filter(([, why]) => !why || why.trim().length < 10);
     expect(unreasoned.map(([f]) => f)).toEqual([]);
   });
 
   // A screen cannot be in two lists at once — that is how a "covered" screen quietly stays on the backlog, or
   // an exempt one silently acquires an obligation nobody meant to give it.
   it("the three lists are disjoint", () => {
-    const names = [...Object.keys(COVERED), ...Object.keys(PENDING), ...Object.keys(EXEMPT)];
+    const names = [
+      ...Object.keys(COVERED),
+      ...Object.keys(PENDING),
+      ...Object.keys(EXEMPT),
+    ];
     expect(names.length).toBe(new Set(names).size);
   });
 

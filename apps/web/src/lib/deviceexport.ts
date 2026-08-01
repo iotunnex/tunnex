@@ -18,7 +18,9 @@ export interface ExportCeremony {
 export function exportCeremony(kind: ExportKind): ExportCeremony {
   const wg = kind !== "openvpn";
   return {
-    title: wg ? "Your configuration — shown once" : "Your OpenVPN profile — shown once",
+    title: wg
+      ? "Your configuration — shown once"
+      : "Your OpenVPN profile — shown once",
     ext: wg ? "conf" : "ovpn",
     showQR: wg,
     honesty: wg
@@ -33,6 +35,9 @@ export function exportCeremony(kind: ExportKind): ExportCeremony {
 // is dismissed the caller clears the secret (null), so the QR stops rendering — it is NEVER
 // re-rendered after close (the secret it encodes lives only in caller state and is never re-fetched).
 // A re-viewable QR would break the D2 one-time-secret discipline.
-export function shouldRenderQR(kind: ExportKind, secret: string | null): boolean {
+export function shouldRenderQR(
+  kind: ExportKind,
+  secret: string | null,
+): boolean {
   return kind === "wireguard" && secret != null && secret !== "";
 }

@@ -3,16 +3,32 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest, Site, K8sService } from "./api";
+import type {
+  Role,
+  UserGroup,
+  Resource,
+  PolicyRule,
+  Member,
+  Loaded,
+  CreatePolicyRuleRequest,
+  Site,
+  K8sService,
+} from "./api";
 
 // roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
 // members load must NOT read as "no role" — that silently downgrades an admin to the
 // member gate (a false lockout from their own admin surface). Distinguish role-unknown-
 // because-the-fetch-FAILED from a genuine member: `failed` true → the caller shows
 // "couldn't determine your role — retry", never the manage-gated-away notice.
-export function roleFromMembers(loaded: Loaded<Member[]>, myId: string): { role?: Role; failed: boolean } {
+export function roleFromMembers(
+  loaded: Loaded<Member[]>,
+  myId: string,
+): { role?: Role; failed: boolean } {
   if (!loaded.ok) return { failed: true };
-  return { role: loaded.data.find((m) => m.user_id === myId)?.role, failed: false };
+  return {
+    role: loaded.data.find((m) => m.user_id === myId)?.role,
+    failed: false,
+  };
 }
 
 // ── D-a4: mode-enable confirm copy = a pure function of the ALLOW-RULE COUNT ────────
@@ -55,8 +71,15 @@ export interface SectionRender {
   showContent: boolean;
   showNotice: boolean;
 }
-export function sectionRender(loadError: string | null, notice: string | null): SectionRender {
-  return { showRetry: !!loadError, showContent: !loadError, showNotice: !!notice };
+export function sectionRender(
+  loadError: string | null,
+  notice: string | null,
+): SectionRender {
+  return {
+    showRetry: !!loadError,
+    showContent: !loadError,
+    showNotice: !!notice,
+  };
 }
 
 // The partial-swap notice is DERIVED from ONE state — the SET of rule ids a create-then-delete
@@ -65,7 +88,8 @@ export function sectionRender(loadError: string | null, notice: string | null): 
 // partials each stay tracked — a second partial never orphans the first's warning (amendment B).
 export function staleNoticeText(staleRuleIds: string[]): string | null {
   if (staleRuleIds.length === 0) return null;
-  if (staleRuleIds.length === 1) return swapPartialMessage(staleRuleIds[0].slice(0, 8));
+  if (staleRuleIds.length === 1)
+    return swapPartialMessage(staleRuleIds[0].slice(0, 8));
   return `${staleRuleIds.length} rules could not be removed after an edit — they are still active. Retry the removals.`;
 }
 
@@ -73,7 +97,11 @@ export function staleNoticeText(staleRuleIds: string[]): string | null {
 // load (`loadOk`) — a failed/transient load must NEVER satisfy the clear (that would be [291]
 // via the clear path). On success, keep per-id only the ids still present in the fresh list
 // (amendment B) — so a resolved stale rule clears while others persist.
-export function pruneStaleRuleIds(staleRuleIds: string[], loadOk: boolean, rules: PolicyRule[]): string[] {
+export function pruneStaleRuleIds(
+  staleRuleIds: string[],
+  loadOk: boolean,
+  rules: PolicyRule[],
+): string[] {
   if (!loadOk) return staleRuleIds; // A: never clear on a failed load
   return staleRuleIds.filter((id) => rules.some((r) => r.id === id));
 }
@@ -134,9 +162,14 @@ export function policyGate(input: {
   return {
     isEnterprise,
     canView,
-    canManagePolicy: canView && input.emailVerified && can(input.role, "policy:manage"),
-    canManageDevices: isEnterprise && input.emailVerified && can(input.role, "device:approve"),
-    canManageDeviceHealth: isEnterprise && input.emailVerified && can(input.role, "device_health:manage"),
+    canManagePolicy:
+      canView && input.emailVerified && can(input.role, "policy:manage"),
+    canManageDevices:
+      isEnterprise && input.emailVerified && can(input.role, "device:approve"),
+    canManageDeviceHealth:
+      isEnterprise &&
+      input.emailVerified &&
+      can(input.role, "device_health:manage"),
   };
 }
 
@@ -201,23 +234,46 @@ function short(id: string): string {
 function resolveUser(id: string, members: Member[], loaded: boolean): RefLabel {
   const m = members.find((x) => x.user_id === id);
   if (m) return { id, label: m.name || m.email, state: "ok" };
-  if (!loaded) return { id, label: `unresolved user ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved user ${short(id)} — refresh`,
+      state: "unresolved",
+    };
   // A per-user grant whose subject is no longer a member (the src_user_id→memberships
   // cascade should delete such a rule, so this is a transient/edge render, shown honestly).
   return { id, label: `removed user ${short(id)}`, state: "deleted" };
 }
 
-function resolveGroup(id: string, groups: UserGroup[], loaded: boolean): RefLabel {
+function resolveGroup(
+  id: string,
+  groups: UserGroup[],
+  loaded: boolean,
+): RefLabel {
   const g = groups.find((x) => x.id === id);
   if (g) return { id, label: g.name, state: "ok" };
-  if (!loaded) return { id, label: `unresolved group ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved group ${short(id)} — refresh`,
+      state: "unresolved",
+    };
   return { id, label: `deleted group ${short(id)}`, state: "deleted" };
 }
 
-function resolveResource(id: string, resources: Resource[], loaded: boolean): RefLabel {
+function resolveResource(
+  id: string,
+  resources: Resource[],
+  loaded: boolean,
+): RefLabel {
   const r = resources.find((x) => x.id === id);
   if (r) return { id, label: r.name, state: "ok" };
-  if (!loaded) return { id, label: `unresolved resource ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved resource ${short(id)} — refresh`,
+      state: "unresolved",
+    };
   return { id, label: `deleted resource ${short(id)}`, state: "deleted" };
 }
 
@@ -228,17 +284,23 @@ function resolveResource(id: string, resources: Resource[], loaded: boolean): Re
 function resolveSite(id: string, sites: Site[], loaded: boolean): RefLabel {
   const s = sites.find((x) => x.id === id);
   if (s) return { id, label: `site ${s.name}`, state: "ok" };
-  if (!loaded) return { id, label: `site ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return { id, label: `site ${short(id)} — refresh`, state: "unresolved" };
   return { id, label: `deleted site ${short(id)}`, state: "deleted" };
 }
 
 // resolveK8sService (S10.3): render a k8s_service dst by its resolvable FQDN (server-supplied, never
 // constructed). A Service absent from the LIVE set is "deleted" (the vanished-Service warn); an unavailable
 // set (fetch failed) is "unresolved". Mirrors the group/resource/site honesty.
-function resolveK8sService(id: string, services: K8sService[], loaded: boolean): RefLabel {
+function resolveK8sService(
+  id: string,
+  services: K8sService[],
+  loaded: boolean,
+): RefLabel {
   const s = services.find((x) => x.id === id);
   if (s) return { id, label: s.fqdn, state: "ok" };
-  if (!loaded) return { id, label: `service ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return { id, label: `service ${short(id)} — refresh`, state: "unresolved" };
   return { id, label: `removed service ${short(id)}`, state: "deleted" };
 }
 
@@ -255,11 +317,23 @@ export function ruleRow(
   // honestly (a removed-user / deleted-group / deleted-site ref shows distinctly, never mislabeled).
   const src: RefLabel =
     rule.src_kind === "user"
-      ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
+      ? resolveUser(
+          rule.src_user_id ?? "",
+          members,
+          loaded.membersLoaded ?? false,
+        )
       : rule.src_kind === "site" // WF-8: resolve to the site NAME, not the ambiguous UUIDv7 prefix
-        ? resolveSite(rule.src_site_id ?? "", sites, loaded.sitesLoaded ?? false)
+        ? resolveSite(
+            rule.src_site_id ?? "",
+            sites,
+            loaded.sitesLoaded ?? false,
+          )
         : rule.src_kind === "cidr" // S8.7: a literal CIDR — a VALUE, never a referent, so always "ok"
-          ? { id: rule.src_cidr ?? "", label: rule.src_cidr ?? "cidr", state: "ok" }
+          ? {
+              id: rule.src_cidr ?? "",
+              label: rule.src_cidr ?? "cidr",
+              state: "ok",
+            }
           : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site NAME (WF-8), NOT the
   // resource branch (which would render a valid site rule as a broken 'deleted resource'), preserving
@@ -268,10 +342,22 @@ export function ruleRow(
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
       : rule.dst_kind === "site"
-        ? resolveSite(rule.dst_site_id ?? "", sites, loaded.sitesLoaded ?? false)
+        ? resolveSite(
+            rule.dst_site_id ?? "",
+            sites,
+            loaded.sitesLoaded ?? false,
+          )
         : rule.dst_kind === "k8s_service" // S10.3: resolve to the Service FQDN, never the resource branch
-          ? resolveK8sService(rule.dst_k8s_service_id ?? "", services, loaded.k8sServicesLoaded ?? false)
-          : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
+          ? resolveK8sService(
+              rule.dst_k8s_service_id ?? "",
+              services,
+              loaded.k8sServicesLoaded ?? false,
+            )
+          : resolveResource(
+              rule.dst_resource_id ?? "",
+              resources,
+              loaded.resourcesLoaded,
+            );
   // The warns are the SERVER's read-time fields, rendered verbatim (no client-side re-derivation).
   return {
     id: rule.id,
@@ -296,11 +382,24 @@ export interface GrantExpiry {
   extendable: boolean;
 }
 
-export function grantExpiry(rule: Pick<PolicyRule, "expires_at">, now: number): GrantExpiry {
-  if (!rule.expires_at) return { state: "permanent", label: "permanent", extendable: false };
+export function grantExpiry(
+  rule: Pick<PolicyRule, "expires_at">,
+  now: number,
+): GrantExpiry {
+  if (!rule.expires_at)
+    return { state: "permanent", label: "permanent", extendable: false };
   const exp = new Date(rule.expires_at).getTime();
-  if (exp <= now) return { state: "expired", label: `expired ${compactSpan(now - exp)} ago`, extendable: true };
-  return { state: "active", label: `expires in ${compactSpan(exp - now)}`, extendable: true };
+  if (exp <= now)
+    return {
+      state: "expired",
+      label: `expired ${compactSpan(now - exp)} ago`,
+      extendable: true,
+    };
+  return {
+    state: "active",
+    label: `expires in ${compactSpan(exp - now)}`,
+    extendable: true,
+  };
 }
 
 function compactSpan(ms: number): string {
@@ -315,7 +414,8 @@ function compactSpan(ms: number): string {
 // The one-line posture summary atop the rules list. It derives from the LOAD RESULTS, never from an empty
 // default: a FAILED rules load must never render "0 rules — all denied" (the reassuring-empty class on the
 // loudest line). enforcing+0 is the LOUD legibility-law state (a live default-deny with no rules).
-export type RulesSummaryState = "loading" | "failed" | "off" | "enforcing_empty" | "enforcing";
+export type RulesSummaryState =
+  "loading" | "failed" | "off" | "enforcing_empty" | "enforcing";
 
 export interface RulesSummaryView {
   state: RulesSummaryState;
@@ -327,13 +427,33 @@ export function rulesSummary(i: {
   modeResult: Loaded<"off" | "enforcing"> | null; // null = still loading
   rulesResult: Loaded<number> | null; // the rule COUNT from a real load; null = still loading
 }): RulesSummaryView {
-  if (!i.modeResult || !i.rulesResult) return { state: "loading", text: "…", loud: false };
+  if (!i.modeResult || !i.rulesResult)
+    return { state: "loading", text: "…", loud: false };
   // A failed load (mode OR rules) cannot render a truthful posture → say so, never a defaulted count.
-  if (!i.modeResult.ok || !i.rulesResult.ok) return { state: "failed", text: "Rule status unavailable — refresh.", loud: false };
-  if (i.modeResult.data === "off") return { state: "off", text: "Policy not enforced — open mesh.", loud: false };
+  if (!i.modeResult.ok || !i.rulesResult.ok)
+    return {
+      state: "failed",
+      text: "Rule status unavailable — refresh.",
+      loud: false,
+    };
+  if (i.modeResult.data === "off")
+    return {
+      state: "off",
+      text: "Policy not enforced — open mesh.",
+      loud: false,
+    };
   const n = i.rulesResult.data;
-  if (n === 0) return { state: "enforcing_empty", text: "0 rules — ALL traffic denied.", loud: true };
-  return { state: "enforcing", text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`, loud: false };
+  if (n === 0)
+    return {
+      state: "enforcing_empty",
+      text: "0 rules — ALL traffic denied.",
+      loud: true,
+    };
+  return {
+    state: "enforcing",
+    text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`,
+    loud: false,
+  };
 }
 
 // ── S8.2c D5: the rule-create body (PURE, so the site-subject branches are unit-tested) ───────────────
@@ -398,9 +518,15 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
       : i.dstKind === "site"
         ? { dst_kind: "site" as const, dst_site_id: i.dstSite }
         : i.dstKind === "k8s_service" // S10.3: a grant reaching an exposed K8s Service
-          ? { dst_kind: "k8s_service" as const, dst_k8s_service_id: i.dstK8sService }
+          ? {
+              dst_kind: "k8s_service" as const,
+              dst_k8s_service_id: i.dstK8sService,
+            }
           : { dst_kind: "resource" as const, dst_resource_id: i.dstResource };
-  const expiry = !i.editing && i.expiresAt ? { expires_at: new Date(i.expiresAt).toISOString() } : {};
+  const expiry =
+    !i.editing && i.expiresAt
+      ? { expires_at: new Date(i.expiresAt).toISOString() }
+      : {};
   return { ...srcPart, ...dstPart, ...expiry };
 }
 
@@ -428,8 +554,10 @@ export interface FlowAttribution {
 }
 
 export function attributionLabel(a: FlowAttribution): string {
-  const dev = a.deviceId ? a.deviceName ?? `device ${short(a.deviceId)}` : null;
-  const user = a.userId ? a.userName ?? a.userId : null;
+  const dev = a.deviceId
+    ? (a.deviceName ?? `device ${short(a.deviceId)}`)
+    : null;
+  const user = a.userId ? (a.userName ?? a.userId) : null;
   if (!dev && !user) return "unattributed"; // no device stamped (src had no grant) — honest, not blank
   if (dev && !user) return `${dev} · user unknown`; // device known, user unresolved — ABSENCE visible
   if (!dev && user) return user; // (unusual: user derives from device CP-side)
@@ -461,7 +589,8 @@ export async function swapRule(
   deleteOld: (id: string) => Promise<{ error?: unknown } | void>,
 ): Promise<SwapOutcome> {
   const created = await createNew();
-  if ("error" in created) return { outcome: "create_failed", error: created.error };
+  if ("error" in created)
+    return { outcome: "create_failed", error: created.error };
   // Create succeeded → old rule still present (no gap). Now remove the old one.
   const del = await deleteOld(oldId);
   if (del && typeof del === "object" && "error" in del && del.error) {
@@ -486,7 +615,9 @@ export function managedGrantWarning(): string {
 // grantControls (M3) is the PURE, unit-pinned withhold decision for a grant row: `withheld` true means every
 // dashboard mutation (extend/edit/disable/enable/delete) is withheld — edit the CR. Extracted from inline JSX
 // so re-exposing a mutation on a managed grant fails a test, not just review.
-export function grantControls(row: Pick<RuleRow, "managedByOperator">): { withheld: boolean } {
+export function grantControls(row: Pick<RuleRow, "managedByOperator">): {
+  withheld: boolean;
+} {
   return { withheld: row.managedByOperator };
 }
 
@@ -496,7 +627,10 @@ export function grantControls(row: Pick<RuleRow, "managedByOperator">): { withhe
 // disguised as a display limitation. Site rules are CREATED via the Access rule builder (S8.2c D5) and
 // managed via the API; only in-place EDIT is withheld here. (The read-side kind coercion in the modal is
 // display-only; this blocks the WRITE path.)
-export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }): boolean {
+export function canEditRuleInModal(rule: {
+  src_kind?: string;
+  dst_kind: string;
+}): boolean {
   return rule.dst_kind !== "site" && rule.src_kind !== "site";
 }
 

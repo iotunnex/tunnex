@@ -18,7 +18,13 @@ import { useMotionPreference } from "./MotionProvider";
 // A palette with its own list would drift, and the drift would be invisible: both surfaces would look fine.
 
 /** `g`-prefixed shortcuts, mapped onto destinations that must ALSO exist in the nav. */
-const G_KEYS: Record<string, string> = { o: "/dashboard", g: "/sites", s: "/settings", d: "/devices", a: "/access" };
+const G_KEYS: Record<string, string> = {
+  o: "/dashboard",
+  g: "/sites",
+  s: "/settings",
+  d: "/devices",
+  a: "/access",
+};
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -34,7 +40,9 @@ export function CommandPalette() {
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return NAV_DESTINATIONS;
-    return NAV_DESTINATIONS.filter((d) => d.label.toLowerCase().includes(q) || d.to.includes(q));
+    return NAV_DESTINATIONS.filter(
+      (d) => d.label.toLowerCase().includes(q) || d.to.includes(q),
+    );
   }, [query]);
 
   useEffect(() => {
@@ -52,7 +60,9 @@ export function CommandPalette() {
       // `g`-sequences must never fire while the user is typing into something.
       const el = document.activeElement;
       const typing =
-        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement)?.isContentEditable;
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el as HTMLElement)?.isContentEditable;
       if (typing) return;
       if (pendingG) {
         pendingG = false;
@@ -128,7 +138,12 @@ export function CommandPalette() {
             setActive(0);
           }}
         />
-        <ul id="palette-results" role="listbox" aria-label="Destinations" className="mt-2 max-h-72 overflow-y-auto">
+        <ul
+          id="palette-results"
+          role="listbox"
+          aria-label="Destinations"
+          className="mt-2 max-h-72 overflow-y-auto"
+        >
           {results.map((d, i) => (
             <li key={d.to} role="option" aria-selected={i === active}>
               <button
@@ -143,7 +158,11 @@ export function CommandPalette() {
               </button>
             </li>
           ))}
-          {results.length === 0 && <li className="px-3 py-2 text-sm text-slate-500">No destination matches.</li>}
+          {results.length === 0 && (
+            <li className="px-3 py-2 text-sm text-slate-500">
+              No destination matches.
+            </li>
+          )}
         </ul>
       </div>
     </div>

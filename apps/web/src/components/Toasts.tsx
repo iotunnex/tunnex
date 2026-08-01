@@ -1,4 +1,10 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
+} from "react";
 import { isUndoable } from "../lib/undo";
 import { Button } from "./ui";
 
@@ -37,7 +43,12 @@ interface ToastApi {
    * and dropped in production rather than rendering a control that cannot keep its promise. A criterion that
    * lives only in prose gets widened one plausible case at a time by people acting in good faith.
    */
-  show: (t: { kind?: ToastKind; message: string; action?: string; undo?: () => Promise<void> }) => void;
+  show: (t: {
+    kind?: ToastKind;
+    message: string;
+    action?: string;
+    undo?: () => Promise<void>;
+  }) => void;
   dismiss: (id: string) => void;
   toasts: Toast[];
 }
@@ -49,31 +60,43 @@ let seq = 0;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const dismiss = useCallback((id: string) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
+  const dismiss = useCallback(
+    (id: string) => setToasts((ts) => ts.filter((t) => t.id !== id)),
+    [],
+  );
 
-  const show = useCallback<ToastApi["show"]>(({ kind = "info", message, action, undo }) => {
-    const id = `t${++seq}`;
-    let entry: Toast = { id, kind, message };
-    if (undo) {
-      if (!action || !isUndoable(action)) {
-        // The offer is dropped, not honoured. An undo control on an act the server cannot reverse is a lie
-        // told by a button, and it is worse than no button because the user relies on it.
-        if (import.meta.env?.DEV) {
-          console.error(
-            `[toast] refused an undo for "${action ?? "(no action given)"}": not in UNDOABLE_ACTIONS. ` +
-              `An undo requires an inverse operation that returns the SAME OBJECT to its prior state.`,
-          );
+  const show = useCallback<ToastApi["show"]>(
+    ({ kind = "info", message, action, undo }) => {
+      const id = `t${++seq}`;
+      let entry: Toast = { id, kind, message };
+      if (undo) {
+        if (!action || !isUndoable(action)) {
+          // The offer is dropped, not honoured. An undo control on an act the server cannot reverse is a lie
+          // told by a button, and it is worse than no button because the user relies on it.
+          if (import.meta.env?.DEV) {
+            console.error(
+              `[toast] refused an undo for "${action ?? "(no action given)"}": not in UNDOABLE_ACTIONS. ` +
+                `An undo requires an inverse operation that returns the SAME OBJECT to its prior state.`,
+            );
+          }
+        } else {
+          entry = {
+            ...entry,
+            undo: { action, run: undo },
+            undoState: "offered",
+          };
         }
-      } else {
-        entry = { ...entry, undo: { action, run: undo }, undoState: "offered" };
       }
-    }
-    setToasts((ts) => [...ts, entry]);
-  }, []);
+      setToasts((ts) => [...ts, entry]);
+    },
+    [],
+  );
 
   const runUndo = useCallback(async (t: Toast) => {
     if (!t.undo) return;
-    setToasts((ts) => ts.map((x) => (x.id === t.id ? { ...x, undoState: "running" } : x)));
+    setToasts((ts) =>
+      ts.map((x) => (x.id === t.id ? { ...x, undoState: "running" } : x)),
+    );
     try {
       await t.undo.run();
       // Success dismisses. The RECORD of both acts is the audit log, not this toast.
@@ -84,7 +107,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       setToasts((ts) =>
         ts.map((x) =>
           x.id === t.id
-            ? { ...x, kind: "error", undoState: "failed", message: `Couldn't undo — ${x.message.toLowerCase()}` }
+            ? {
+                ...x,
+                kind: "error",
+                undoState: "failed",
+                message: `Couldn't undo — ${x.message.toLowerCase()}`,
+              }
             : x,
         ),
       );
@@ -120,13 +148,18 @@ function ToastList({
     // `role="status"` + aria-live: a toast nobody announces is a message only sighted users receive.
     // "polite" deliberately — a toast reports something the user just did; interrupting them to say so is
     // worse than waiting for a pause.
-    <div aria-live="polite" className="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+    <div
+      aria-live="polite"
+      className="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2"
+    >
       {toasts.map((t) => (
         <div
           key={t.id}
           role="status"
           className={`rounded-md border px-3 py-2 text-sm ${
-            t.kind === "error" ? "border-danger/40 bg-ink-800 text-danger" : "border-white/10 bg-ink-800 text-slate-300"
+            t.kind === "error"
+              ? "border-danger/40 bg-ink-800 text-danger"
+              : "border-white/10 bg-ink-800 text-slate-300"
           }`}
         >
           <div className="flex items-start justify-between gap-3">
@@ -137,8 +170,14 @@ function ToastList({
                   {t.undoState === "failed" ? "Retry undo" : "Undo"}
                 </Button>
               )}
-              {t.undoState === "running" && <span className="text-xs text-slate-500">Undoing…</span>}
-              <Button variant="ghost" onClick={() => onDismiss(t.id)} aria-label="Dismiss">
+              {t.undoState === "running" && (
+                <span className="text-xs text-slate-500">Undoing…</span>
+              )}
+              <Button
+                variant="ghost"
+                onClick={() => onDismiss(t.id)}
+                aria-label="Dismiss"
+              >
                 ×
               </Button>
             </div>
