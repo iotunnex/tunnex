@@ -38,7 +38,15 @@ for (const w of WIDTHS) {
     //
     // Masking here would have hidden a real surface. The distinction: mask what CANNOT be made deterministic
     // (a wall-clock age); WAIT for what merely has not settled yet.
-    await expect(page.getByText(/control plane operational/)).toBeVisible();
+    // Scoped to the PANEL, because `control plane operational` matches TWICE on this page: the shell footer
+    // has carried a health indicator since S4.x, and S14.4 added the System Health panel showing the same
+    // thing. That duplication is a real finding, registered rather than silently resolved here — a visual
+    // suite must not become the place where product decisions are made quietly.
+    await expect(
+      page
+        .getByRole("region", { name: "System Health" })
+        .getByText(/control plane operational/),
+    ).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expect(page).toHaveScreenshot(`overview-${w.name}.png`, {
       fullPage: true,

@@ -424,3 +424,21 @@ would have stayed silent until their own section arrived — **weeks later, with
 **IT DOES NOT REPLACE THE FOUNDER'S REVIEW** — it cannot judge whether a design is right, only whether it
 CHANGED. **The two answer different questions**, and the epic needs both: the founder for *is this correct*,
 the diff for *did anything move that nobody asked to move*.
+
+## ⚠ REGISTERED — THE CONTROL-PLANE HEALTH INDICATOR RENDERS TWICE ON OVERVIEW
+
+**Found by the viewport leg** (a Playwright strict-mode violation: `control plane operational` resolved to two
+elements).
+
+- the **shell footer** has carried it since S4.x
+- **S14.4's System Health panel** now shows the same value
+
+**NOT RESOLVED IN THE VIEWPORT LEG.** A visual suite must not become the place where product decisions get made
+quietly — the test is scoped to the panel and the duplication is registered.
+
+**THE LIKELY ANSWER, for the founder to rule:** the README's layout is **sidebar + topbar + page body, with no
+footer at all**, and System Health is the designed home for this value. So the footer indicator is probably
+redundant. **But removing it is a SHELL change touching all 18 screens**, and the shell's footer is also where
+`e2e` asserts the SPA issues `GET /healthz` — so it needs its own disposition, not a drive-by deletion.
+
+**TRIGGER: the next shell-touching section, or S14.5's review.**
