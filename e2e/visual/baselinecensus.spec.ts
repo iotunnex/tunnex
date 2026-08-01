@@ -18,12 +18,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 //
 // Same form as the screen census (`toBe`, not `toBeGreaterThan`) and for the same reason.
 
-const EXPECTED_SNAPSHOTS = [
-  "gallery-1440.png",
-  "gallery-390.png",
-  "overview-1440.png",
-  "overview-390.png",
-] as const;
+// ⛔ TWO, NOT FOUR — and the number went DOWN in a reviewed edit, which is the census working, not failing.
+//
+// The two `overview-*.png` baselines were harvested, read, committed, and then DROPPED (founder-ruled
+// 2026-08-02) because the surface is data-determined rather than code-determined. The rationale is at the
+// top of `overview.spec.ts`; Overview keeps its two GEOMETRIC assertions, which are what found the defects.
+//
+// This is the distinction the census exists to enforce: a baseline removed by a ruling, in a diff, with the
+// count edited alongside it, is not the same act as a baseline deleted to silence a red check. The census
+// cannot tell those apart on its own — it forces the second one to LOOK like the first, in public.
+const EXPECTED_SNAPSHOTS = ["gallery-1440.png", "gallery-390.png"] as const;
 
 test("the baseline set is EXACTLY what is expected — no additions, no silent deletions", () => {
   const dir = join(HERE, "visual.spec.ts-snapshots");
@@ -51,5 +55,8 @@ test("the baseline set is EXACTLY what is expected — no additions, no silent d
 });
 
 test("the expectation list is not empty — a census over zero baselines cannot fail", () => {
-  expect(EXPECTED_SNAPSHOTS.length).toBeGreaterThanOrEqual(4);
+  // A FLOOR ON THE FLOOR. The count above is allowed to move, so this guards the move: it may be reduced by
+  // a ruling, but never to nothing. An empty EXPECTED_SNAPSHOTS makes the census above pass over an empty
+  // directory — the subject and its check vanishing together, which is the mechanism this file is named for.
+  expect(EXPECTED_SNAPSHOTS.length).toBeGreaterThanOrEqual(2);
 });
