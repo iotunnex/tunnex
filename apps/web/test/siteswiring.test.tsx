@@ -1,0 +1,113 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
+
+// SLICE 5 — Sites. First of the two SHEDDERS, and the shedder constraint drives how these are written.
+//
+// ⚠ THE REDESIGN SPLITS THIS SCREEN. `Sites.tsx` keeps `sites` and sheds ROUTED RANGES to a NEW `subnets`
+// screen (docs/UI-REDESIGN-registration.md — the wireframe declares `subnets` in the main nav). So every
+// assertion below is written against the DECISION and NAMES ITS DESTINATION:
+//
+//   "a routed range that is PENDING must not read as ROUTED"  -> travels to `subnets`
+//   "the Sites page shows a routed-range list"                -> does NOT travel, and would be throwaway work
+//
+// The decision under test is what the user is told about REACHABILITY. A pending subnet is advertised but NOT
+// yet routed; presenting it as routed tells an admin a LAN is reachable when it is not, and the inverse hides
+// one that is. Neither is a rendering preference.
+//
+// QUERY RULES 1-4 BIND: role + accessible name; NETWORK-boundary mocks; decisions not rendering; and no
+// assertion may assume a viewport — nothing here depends on layout, column order, or width-conditional
+// visibility.
+
+afterEach(cleanup); // docs/laws.md — no globals/setup file, so auto-cleanup never registers
+
+let sitesFail = false;
+
+const SITES = [{ id: "s1", name: "aws-site" }];
+const SUBNETS = [
+  { id: "sub-approved", site_id: "s1", cidr: "172.31.0.0/16", status: "approved" },
+  { id: "sub-pending", site_id: "s1", cidr: "10.50.0.0/16", status: "pending" },
+];
+
+vi.mock("../src/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+  return {
+    ...actual,
+    apiErrorMessage: (_e: unknown, f: string) => f,
+    api: {
+      GET: vi.fn(async (path: string) => {
+        if (path === "/api/v1/auth/me") return { data: { id: "u1", email: "a@b.c", email_verified: true } };
+        if (path === "/api/v1/meta") return { data: { edition: "enterprise", protocol_version: 5 } };
+        if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+        if (path.endsWith("/members")) return { data: [{ user_id: "u1", role: "admin", email_verified: true }] };
+        if (path.endsWith("/sites")) {
+          if (sitesFail) return { data: undefined, error: { error: { code: "boom", message: "nope" } } };
+          return { data: SITES };
+        }
+        if (path.endsWith("/nodes")) return { data: [] };
+        if (path.includes("/subnets")) return { data: SUBNETS };
+        if (path.endsWith("/site-subnets/pending")) return { data: [] };
+        if (path.endsWith("/hub-set")) return { data: null };
+        if (path.endsWith("/dns-forwards")) return { data: [] };
+        return { data: [] };
+      }),
+      POST: vi.fn(async () => ({ data: {} })),
+      DELETE: vi.fn(async () => ({ data: {} })),
+    },
+  };
+});
+
+import Sites from "../src/pages/Sites";
+import { AuthProvider } from "../src/lib/auth";
+import { crossesMultiSiteThreshold } from "../src/lib/sitesview";
+
+// The REAL AuthProvider — stubbing the context puts the TEST's role gate under assertion, not the PRODUCT's.
+const withAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
+
+beforeEach(() => {
+  sitesFail = false;
+});
+
+describe("Sites — wiring: a routed range must not lie about REACHABILITY (destination: `subnets`)", () => {
+  it("a PENDING range is marked pending; an APPROVED one is not — the two must stay distinguishable", async () => {
+    withAuth(<Sites />);
+    await waitFor(() => expect(screen.getByText(/10\.50\.0\.0\/16/)).toBeTruthy());
+
+    // The decision: pending means ADVERTISED BUT NOT ROUTED. If both rendered identically an admin would read
+    // an unapproved LAN as reachable — or, inverted, treat a routed one as still waiting.
+    expect(screen.getByText(/10\.50\.0\.0\/16\s*·\s*pending/)).toBeTruthy();
+    expect(screen.getByText(/172\.31\.0\.0\/16/).textContent).not.toMatch(/pending/);
+  });
+
+  it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
+    withAuth(<Sites />);
+    await waitFor(() => expect(screen.getByTitle("Approved — routed")).toBeTruthy());
+    // The pending counterpart must say the opposite in words. Colour-only differentiation would fail both a
+    // screen reader and the accessibility gate the redesign now carries (registration consequence 1).
+    expect(screen.getByTitle("Pending approval — not yet routed")).toBeTruthy();
+  });
+
+  // The CW crossing decision, asserted through the production function rather than restated. It travels with
+  // routed ranges to `subnets`: approving a range that makes the org multi-site routable for the FIRST time is
+  // the moment that needs a confirm, and it is a property of the ranges, not of the page.
+  it("crossing into multi-site routability is detected only on the FIRST crossing", () => {
+    // The approving site contributes nothing yet and exactly one OTHER site does -> this approval crosses.
+    expect(crossesMultiSiteThreshold("s2", { s1: 1 })).toBe(true);
+    // Already contributing -> not a crossing.
+    expect(crossesMultiSiteThreshold("s1", { s1: 1 })).toBe(false);
+    // Nobody else routes yet -> still single-site.
+    expect(crossesMultiSiteThreshold("s2", {})).toBe(false);
+    // Already multi-site -> the crossing happened earlier; do not re-confirm.
+    expect(crossesMultiSiteThreshold("s3", { s1: 1, s2: 1 })).toBe(false);
+  });
+});
+
+describe("Sites — failure path", () => {
+  // D1(b). On this surface an empty topology reads as "this org has no sites" — a statement about the network
+  // that a failed load has no standing to make.
+  it("a failed sites load renders a retry, not an empty topology", async () => {
+    sitesFail = true;
+    withAuth(<Sites />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+  });
+});

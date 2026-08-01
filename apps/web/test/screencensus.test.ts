@@ -36,6 +36,15 @@ const EXEMPT: Record<string, string> = {
   // TESTED ELSEWHERE, not skipped — the distinction matters and is why the reason names the coverage.
   "CliAuth.tsx": "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
   "CliDevice.tsx": "single-purpose consent flow; the property that matters (no click, no mint) is covered by S5.1's Playwright leg",
+  // ⚠ CONDITIONAL EXEMPTION — VOID IF ITEM A DOES NOT LAND. Dashboard fetches one overview and renders it: no
+  // derivation, no gating, no suppression, and its failure mode is guarded BY CONSTRUCTION (`{data && (…)}`,
+  // so counts cannot render from a failed load — the same class as the Loaded<T> finding). A test asserting
+  // "the numbers appear" is the render-floor version the tier ruled out.
+  // BUT it carries ONE real decision: `onStatusChanged` refreshes when the tunnel goes `revoked`, so a
+  // revocation cannot leave a stale view. That is an ELECTRON BRIDGE decision, and Item A removes the
+  // dashboard from Electron entirely (connect-only client). TRIGGER: if Item A does not land, or if the
+  // dashboard is ever rendered in Electron again, THIS EXEMPTION IS VOID and Dashboard rejoins COVERED.
+  "Dashboard.tsx": "display-only: guarded by construction ({data && …}), no derivation/gating/suppression. CONDITIONAL on Item A — see the note above; void if the dashboard is ever rendered in Electron again",
 };
 
 // COVERED — a screen enters this list when it has BOTH a wiring test and a failure-path test.
@@ -44,6 +53,9 @@ const COVERED: Record<string, string> = {
   "Devices.tsx": "test/deviceswiring.test.tsx — posture/re-export suppression on revoked + failed-load surfaced, distinct from empty",
   "Kubernetes.tsx": "test/kuberneteswiring.test.tsx — health-kind mirror census (WF-S11-7) + withheld destructive control + LoadRetry reached",
   "Access.tsx": "test/accesswiring.test.tsx — enforcement posture cannot be claimed without being read (both directions) + disabled rules shown + failed load never renders a count",
+  // SHEDDER, tested accordingly: assertions are written against the DECISION and name `subnets` as the
+  // destination, so they travel through the split instead of becoming throwaway work.
+  "Sites.tsx": "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -62,14 +74,12 @@ const PENDING: Record<string, string> = {
   // `subnets` screen. Its tests MUST assert the DECISION and NAME THE DESTINATION: "a routed range that fails
   // to load is surfaced, not rendered as none" travels to whichever screen renders it; "the Sites page shows a
   // routed-range list" does not, and becomes throwaway work the day the split lands.
-  "Sites.tsx": "SHEDS routed ranges -> subnets. Assert the decision, name the destination. Carries the D4 three-way assertion already (test/siblingconsistency.test.tsx); still owes its own wiring + failure-path pair",
   "Users.tsx": "unranked backlog",
   "AuditLog.tsx": "unranked backlog",
   // ⚠ SHEDDER — Settings keeps `settings` and sheds MACHINE CREDENTIALS to `cli` (MachineCredentials.tsx is
   // rendered inside Settings today) and EDITION to `license` (no surface today). Same rule: assert the
   // decision, name the destination.
   "Settings.tsx": "SHEDS machine credentials -> cli, edition -> license. Assert the decision, name the destination",
-  "Dashboard.tsx": "unranked backlog",
 };
 
 describe("screen census", () => {
@@ -104,11 +114,11 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(4);
+    expect(Object.keys(COVERED).length).toBe(5);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(5);
+    expect(Object.keys(PENDING).length).toBe(3);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
@@ -121,7 +131,7 @@ describe("screen census", () => {
   //
   // RE-BASELINING IS A DELIBERATE, REVIEWABLE EDIT — which is exactly the property the equals-the-total form
   // was chosen for. A `>=` floor would have absorbed the growth silently and nobody would have had to look.
-  it("the ledger is a snapshot of today — 9 accountable screens, ceiling ~13 after the redesign", () => {
-    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(9);
+  it("the ledger is a snapshot of today — 8 accountable screens, ceiling ~13 after the redesign", () => {
+    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(8);
   });
 });
