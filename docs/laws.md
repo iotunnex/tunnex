@@ -1202,6 +1202,25 @@ on the first question produces evidence about the second.** The founder's localh
 **required gate for a dimension nothing else measures** (see the SECTION PROTOCOL), and calling it a courtesy
 is how it gets skipped under time pressure — invisibly, because everything else is green.
 
+### ⛔ AND THE SHARPER HALF — **THE EYE GATES ONLY WHAT SOMEONE HAPPENS TO LOOK AT**
+
+**All 17 screens were mis-rendered while the override was live. ONE was being reviewed.**
+
+**Overview had coverage because it was the section in flight. The other sixteen had NONE** — and would have
+had none until their own section arrived, **possibly weeks later, by which time the cause would be buried
+under dozens of unrelated commits.** The bug would then present as *"Sites has always looked a bit off"*, with
+no path back to a spacing key changed in a different story.
+
+> ## **A HUMAN GATE IS A SPOTLIGHT, NOT A FLOODLIGHT. IT PROVES THE SCREEN THAT WAS LOOKED AT AND SAYS NOTHING
+> ## ABOUT THE REST — AND ITS SILENCE ABOUT THE REST IS INDISTINGUISHABLE FROM APPROVAL.**
+
+**THIS IS THE ARGUMENT FOR THE PLAYWRIGHT VIEWPORT LEG IN ITS STRONGEST FORM.** A screenshot diff across every
+screen at every breakpoint is **the only instrument that could have caught this without a human standing in
+front of all seventeen.** Not types, not unit tests, not the drift guard — and not the founder, who can only
+be in one place.
+
+> ### **REGISTERED AND UNBUILT. TRIGGER ALREADY FIRED (the first screen slice, S14.4). OWED BEFORE THE EPIC
+> ### CLOSES.**
+
 **CONFINEMENT, CHECKED:** the override never reached `main` (`f9b2dfd`), so no other branch or session was
-affected. **But every one of the 17 screens was mis-rendered while it was live** — only Overview was being
-looked at, so only Overview's damage was noticed. **The other sixteen were equally broken and equally silent.**
+affected — the blast radius was one branch and one reviewer's time.

@@ -405,3 +405,22 @@ was declared missing — **while the hub set was its own endpoint and its own sc
 instances were caught by the assistant; **this one the founder caught**, which is worse.
 
 **BINDING: every cut on every screen is re-checked against the three-way test before that screen ships.**
+
+# ⛔ OWED BEFORE THE EPIC CLOSES — THE PLAYWRIGHT VIEWPORT LEG
+
+**Registered at S14.2, trigger fired at S14.4 (the first screen slice). STILL UNBUILT.**
+
+**The case for it stopped being theoretical on 2026-08-01.** A spacing override silently re-keyed 128 use
+sites across 17 screens; a donut rendered at a quarter size; **`tsc`, 422 tests, the drift guard, the contrast
+gate, the coverage census and CI-with-e2e all reported green.** The defect was found by the founder looking at
+one screenshot.
+
+**AND ONLY ONE SCREEN WAS BEING LOOKED AT.** The other sixteen were equally broken and equally silent, and
+would have stayed silent until their own section arrived — **weeks later, with the cause buried.**
+
+> **A HUMAN GATE IS A SPOTLIGHT. A SCREENSHOT DIFF ACROSS EVERY SCREEN AT EVERY BREAKPOINT IS THE ONLY
+> INSTRUMENT THAT COVERS THE SCREENS NOBODY IS CURRENTLY REVIEWING.**
+
+**IT DOES NOT REPLACE THE FOUNDER'S REVIEW** — it cannot judge whether a design is right, only whether it
+CHANGED. **The two answer different questions**, and the epic needs both: the founder for *is this correct*,
+the diff for *did anything move that nobody asked to move*.
