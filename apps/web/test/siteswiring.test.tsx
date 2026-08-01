@@ -70,7 +70,22 @@ beforeEach(() => {
 describe("Sites — wiring: a routed range must not lie about REACHABILITY (destination: `subnets`)", () => {
   it("a PENDING range is marked pending; an APPROVED one is not — the two must stay distinguishable", async () => {
     withAuth(<Sites />);
-    await waitFor(() => expect(screen.getByText(/10\.50\.0\.0\/16/)).toBeTruthy());
+    // WAIT ON THE THING BEING ASSERTED. The first draft waited on the CIDR text and then queried the title —
+    // which raced a partially-rendered tree and passed locally while failing in the gate's container. A
+    // waitFor whose condition is weaker than the assertion is not synchronisation, it is luck.
+    // Timeout raised above waitFor's 1s default: the FIRST test in a file pays module-init + the page's
+    // multi-request load chain, and the gate's container is slower than a dev machine. Evidence it is latency
+    // and not absence: the next test asserts the SAME element and passes. A default that works locally and
+    // times out in CI is the local-equivalent trap one layer down.
+    // WAIT FOR BOTH, then assert. Waiting on only one let the test proceed while the other had not rendered:
+    // pending appears BEFORE approved, so test 1 raced ahead and failed on the approved chip while test 2 —
+    // which happened to wait on the LATER one — passed. Two tests over the same elements disagreeing is the
+    // tell. The rule generalises: a waitFor must cover EVERY element the assertions touch, not the first one
+    // that happens to appear.
+    const [pendingEl, approvedEl] = await waitFor(
+      () => [screen.getByTitle("Pending approval — not yet routed"), screen.getByTitle("Approved — routed")],
+      { timeout: 5000 },
+    );
 
     // The decision: pending means ADVERTISED BUT NOT ROUTED. If both rendered identically an admin would read
     // an unapproved LAN as reachable — or, inverted, treat a routed one as still waiting.
@@ -80,18 +95,16 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // separate JSX children, so matching across them depends on how a given @testing-library/dom build
     // normalizes whitespace between nodes. That is a DOM-STRUCTURE dependency, which query rule 1 forbids —
     // and the gate caught it, which is the argument for running the gate's own command.
-    const pendingEl = screen.getByTitle("Pending approval — not yet routed");
     expect(pendingEl.textContent).toContain("10.50.0.0/16");
     expect(pendingEl.textContent).toContain("pending");
 
-    const approvedEl = screen.getByTitle("Approved — routed");
     expect(approvedEl.textContent).toContain("172.31.0.0/16");
     expect(approvedEl.textContent).not.toContain("pending");
   });
 
   it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
     withAuth(<Sites />);
-    await waitFor(() => expect(screen.getByTitle("Approved — routed")).toBeTruthy());
+    await waitFor(() => screen.getByTitle("Approved — routed"));
     // The pending counterpart must say the opposite in words. Colour-only differentiation would fail both a
     // screen reader and the accessibility gate the redesign now carries (registration consequence 1).
     expect(screen.getByTitle("Pending approval — not yet routed")).toBeTruthy();

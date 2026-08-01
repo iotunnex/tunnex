@@ -56,6 +56,9 @@ const COVERED: Record<string, string> = {
   // SHEDDER, tested accordingly: assertions are written against the DECISION and name `subnets` as the
   // destination, so they travel through the split instead of becoming throwaway work.
   "Sites.tsx": "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
+  // SHEDDER: machine credentials -> cli, edition -> license. Assertions target the DECISION and name the
+  // destination, so they travel through the split.
+  "Settings.tsx": "test/settingswiring.test.tsx — the control reflects the ORG's opt-in state, not a default (misconfigure, stays in settings) + edition gating both directions (destination: license) + failed org load surfaced, no defaults offered",
 };
 
 // PENDING — accounted for, NOT yet covered. This list is the BACKLOG STATED OUT LOUD, and it exists because a
@@ -76,10 +79,6 @@ const PENDING: Record<string, string> = {
   // routed-range list" does not, and becomes throwaway work the day the split lands.
   "Users.tsx": "unranked backlog",
   "AuditLog.tsx": "unranked backlog",
-  // ⚠ SHEDDER — Settings keeps `settings` and sheds MACHINE CREDENTIALS to `cli` (MachineCredentials.tsx is
-  // rendered inside Settings today) and EDITION to `license` (no surface today). Same rule: assert the
-  // decision, name the destination.
-  "Settings.tsx": "SHEDS machine credentials -> cli, edition -> license. Assert the decision, name the destination",
 };
 
 describe("screen census", () => {
@@ -114,11 +113,11 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(5);
+    expect(Object.keys(COVERED).length).toBe(6);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
-    expect(Object.keys(PENDING).length).toBe(3);
+    expect(Object.keys(PENDING).length).toBe(2);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.

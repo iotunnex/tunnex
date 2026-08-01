@@ -104,13 +104,15 @@ describe("Kubernetes — wiring", () => {
   // real control lives. `objectControls` is unit-pinned; this asserts the SCREEN honours it.
   it("an operator-managed object withholds its destructive control and names the CR instead", async () => {
     withAuth(<Kubernetes />);
-    await waitFor(() => expect(screen.getByText("prod-cluster")).toBeTruthy());
+
+    // Queried by ACCESSIBLE NAME (the aria-label carries the full guidance), not by the visible fragment.
+    // The first draft used getAllByText("edit the CR") and raced the render — it passed locally and failed in
+    // the gate's container. Rule 1 asked for the accessible name anyway; the gate is what made me use it.
+    await waitFor(() => screen.getAllByLabelText(/managed by the GitOps operator/i));
 
     // The control is absent BY ROLE — the strongest form of this assertion.
     expect(screen.queryByRole("button", { name: "Unexpose" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Deregister/i })).toBeNull();
-    // And the replacement is present, so the refusal is legible rather than a missing button.
-    expect(screen.getAllByText("edit the CR").length).toBeGreaterThan(0);
   });
 });
 
