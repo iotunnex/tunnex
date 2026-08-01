@@ -1411,3 +1411,97 @@ numbers and compare them** — here 2s against 7s. Read the lifetime out of the 
 
 **FOLDED INTO THE RESTORE WINDOW** ([founder]-ruled): the restore path re-keys, so the flip recurs there and the
 fast poller rides step 10 rather than costing its own stop/start.
+
+
+# §B step 9 — B3 PASSES. And the cascade did NOT disconnect anything. (2026-08-01 07:47:58Z, [agent])
+
+`POST /nodes/019fb892…/revoke` → **204**. Path verified against the spec before firing (`openapi.yaml:637`,
+`operationId: revokeNode`).
+
+## B3 — SATISFIED, and it is the FIRST WIRE VERIFICATION of WF-S13-3's fix
+
+| device | address | `revoked_prev_status` | `revoked_cause` |
+|---|---|---|---|
+| `b3-pending` | 10.99.0.2 | **`pending`** | cascade |
+| `b3-active` | 10.99.0.3 | **`active`** | cascade |
+| `b4-managed` | 10.99.0.4 | **`active`** | cascade |
+
+**Both prior statuses recorded** — which is why `b3-pending` was created and never approved. §A found this column
+**empty** (WF-S13-3: *"#8's fix half-landed; the red passed because the FIXTURE faked the missing half"*).
+
+**WHY THIS LEG IS MORE THAN A GAP-CLOSURE, and it was framed this way BEFORE the result was known** ([founder]):
+WF-S13-3's fix was folded and mutation-proven — **but that fold predates the discovery that `mutate.sh` was dead
+on arrival.** Its proof therefore rests on hand-run assertions, not on an enforced tool. **A NULL in any of the
+three would have been a half-fold that survived a mutation round — a fourth instance of that class, and
+merge-blocking.** It is not NULL. The fix is real, and this is the first time anything but the author's own hand
+has confirmed it.
+
+*(The sibling rows with a blank `revoked_prev_status` and cause `deliberate` are the earlier hand-revokes — the
+duplicate sets and the keyless pair. Deliberate revocation correctly does not set the column; only a cascade
+does. Their presence is what makes the contrast readable.)*
+
+
+# WF-S13-12 (HIGH) — REVOKING A GATEWAY DOES NOT DISCONNECT ITS DEVICES
+
+**Found at step 9, not looked for.** The cascade is correct in the database and inert on the wire.
+
+## The measurement
+
+**BEFORE the revoke** — `b4-managed` live on B′'s `wg0`: handshake 1m11s ago, 13.52 KiB rx / 3.68 KiB sent.
+
+**AFTER the revoke** (node `revoked`, all three devices `revoked`):
+
+```
+peer: yEWUmXVmvF3fPky5T0n7kzOq8kHxQxczwYDQCCKUO38=   allowed ips 10.99.0.4/32
+  endpoint 119.252.205.29:23290
+  latest handshake: 1 second ago            <-- sampled twice, 20s apart: 1m44s, then 1s
+  transfer: 13.82 KiB received, 3.77 KiB sent
+```
+
+```
+$ ping 10.99.0.1        # from the revoked device, through the revoked gateway
+2 packets transmitted, 2 packets received, 0.0% packet loss   avg 177.089 ms
+```
+
+**A revoked device, on a revoked gateway, still handshakes and still carries traffic.**
+
+## WHY — and it is a composition of two correct decisions, which is this epic's recurring shape
+
+Revoking the NODE immediately cuts the agent's authorization. Its own log, seconds later:
+
+```
+07:48:17  agent_renew_failed          renew status 401: unauthorized agent      retry_in 15m0s
+07:48:18  reconcile_interval_failed   desired-state status 401
+07:48:08  watch_failed_backing_off    watch status 401
+```
+
+**The peers are removed by the desired-state reconcile — and revocation is exactly what severs the agent's
+ability to fetch desired state.** The reconcile model is `{atomic, fail-static, full-sweep, keep-last}`, so on an
+unreachable/refusing control plane the agent **keeps the last known good peer set**. That is deliberate and
+right: a CP outage must not disconnect the fleet.
+
+**Both halves are correct. The composition leaves a revoked gateway serving revoked devices indefinitely** —
+until a human stops the agent. Nothing in the product does it.
+
+**The agent is TOLD, in words.** `renew status 401: unauthorized agent` is not ambiguous, and it retries in 15
+minutes. The information required to act is present and unused.
+
+## What this is NOT
+
+**Not a regression, and not introduced by this epic** — it is the standing fail-static posture meeting node
+revocation. **Not the same as DEVICE revocation**, which works: revoking a device leaves the node authorized, so
+the next reconcile sweeps that peer within seconds (the shipped claim *"peer removed from the gateway within
+seconds"* holds for its own case).
+
+**And the obvious fix is NOT obviously right.** "Tear down `wg0` on a 401" converts a fail-static posture into a
+fail-closed one, and a control-plane bug that returned 401 would then disconnect every gateway in the fleet at
+once. That is the trade this needs a ruling on, not a patch.
+
+## Rank and disposition
+
+**HIGH, and a DECIDE-ITEM — halted and surfaced rather than worked around**, per the mid-build fork rule. The
+security statement is plain: **revoking a compromised gateway does not stop it serving traffic**, and an operator
+reading the UI would believe otherwise, because the CP shows every row as `revoked`.
+
+**It does not block step 10** — the restore re-homes these devices onto A1′ and is unaffected — so §B continues
+with this recorded.
