@@ -11,6 +11,33 @@ number is readable by someone who did not run it.**
 | measured | **2026-08-01**, locally, `main` at **`a25713e`** |
 | **PUBLISHED?** | **NO** |
 
+---
+
+# ⛔ THE REAL FINDING IS NOT THE SCORE, AND NOT THE 71. READ THIS FIRST.
+
+> ## **THE JAVASCRIPT DEPENDENCY SURFACE HAS NO SCANNING AT ALL.**
+
+**Not "unreached" — UNMEASURED.** Searched the entire `.github/` tree on 2026-08-01:
+
+| candidate | present? |
+|---|---|
+| `npm audit` / `pnpm audit` | **NO** |
+| `osv-scanner` | **NO** |
+| `.github/dependabot.yml` | **NO** |
+| CodeQL `javascript-typescript` | present — scans **OUR SOURCE for security bugs**, *not* dependency advisories |
+| Trivy | present — but **`image-ref: tunnex-api:scan`**, the **Go API image only**. Not the web bundle. Not the Electron client. |
+
+**The distinction is the whole point: an UNREACHABLE vulnerability has been examined and dismissed. An
+UNMEASURED one has never been looked at.** The 44 npm advisories are the second kind.
+
+## THE BUYER-FACING SENTENCE — verbatim, because it is honest and sayable
+
+> ### *"Our Go dependencies are reachability-gated on every PR; our JavaScript dependencies currently are not."*
+
+**That is the thing to fix.** The score is a symptom; this is the finding.
+
+---
+
 ## ⚠ THERE IS NO PUBLIC SCORE, AND THAT IS A DELIBERATE SETTING
 
 `security.yml` runs the job with **`publish_results: false`**, so **`api.securityscorecards.dev` returns
@@ -102,7 +129,34 @@ inherits more than it needs.
 breaks CI in a way that looks like a flake, and several jobs legitimately need `security-events: write` and
 `id-token: write`.
 
-### 4c. `Vulnerabilities` — 0/10, *"71 existing vulnerabilities"* · **SEE THE FULL ANALYSIS BELOW**
+### 4c. **NO JS DEPENDENCY SCANNING** — the finding behind `Vulnerabilities` 0/10 · **DECIDE-ITEM**
+
+**The check reports *"71 existing vulnerabilities"*. The decide-item is not the 71** — see the analysis below.
+It is that **nothing scans the JavaScript dependency surface at all.**
+
+**The cheapest honest step is MANIFEST-LEVEL scanning** (`osv-scanner`, or Dependabot) so the 44 become
+*measured*. **PARITY WITH GO IS NOT ACHIEVABLE**: no JS tool does what `govulncheck` does — call-graph
+reachability against a curated advisory database. **The achievable goal is VISIBILITY, and the honest framing
+should say so rather than implying parity.**
+
+**Why it is a decide-item and not a fix:** a manifest-level scanner on this repo will report **44 findings on
+day one**, most of them build-tooling. **Turning it on without first ruling what BLOCKS and what ADVISES
+creates a permanently red check** — and `security.yml`'s own header already names that failure (S11-1/O-1: *a
+job configured not to matter let a regression merge and then excused it*). **The ruling has to come first.**
+
+---
+
+## ⛔ ALL THREE ARE `security.yml` CHANGES — THEY LAND AS ONE HARDENING SLICE, NOT PIECEMEAL
+
+**4a, 4b and 4c all modify the same file, and two of them change how every job is permitted to run.** Landing
+them separately means **three CI-breaking-shaped changes on three different days**, each one hard to attribute
+when something goes red.
+
+**They also interact.** SHA-pinning (4a) changes every `uses:` line; token scoping (4b) changes every
+`permissions:` block; adding a scanner (4c) adds a job needing both. **Doing them together means the workflow is
+reasoned about once, with one CI run to judge the result.**
+
+**TRIGGER (shared): the next `security.yml` change, or an S11-class hardening pass.**
 
 ---
 
@@ -143,9 +197,26 @@ JavaScript dependencies currently are not."*
 (`electron`, `postcss`, `vite`, `vitest`) — **build-time, not shipped in the SPA bundle**. Only
 `react-router-dom` is a runtime dependency.
 
-**NOT VERIFIED: which TRANSITIVE packages reach the shipped bundle.** That needs the build's real dependency
-graph and is separate work. **Stated as unknown rather than assumed benign** — several (`tar`, `js-yaml`,
-`brace-expansion`) are classic build-tool dependencies, but *classic* is not *measured*.
+## ⚠ THE MITIGATION RESTS ON AN UNCHECKED PREMISE — **mechanism ⑦'s shape**
+
+**The reassuring sentence above is *"4 of the 5 direct npm packages are devDependencies, so they are not
+shipped."* THAT REASONING RESTS ON PACKAGE ROLE, NOT ON THE BUNDLE GRAPH — and the two are not the same
+thing.**
+
+**A TRANSITIVE DEPENDENCY OF A devDependency CAN STILL BE BUNDLED.** Vite and its plugin chain pull packages
+that are *build-time by role* and *runtime by inclusion* — a polyfill, a helper, an inlined shim. **`devDependency`
+describes where a package is DECLARED, not where its code ENDS UP.**
+
+**So the state is exactly [[⑦ THE SEVENTH VACUITY MECHANISM]]: A CLAIM WITH NO CHECK READS EXACTLY LIKE A CLAIM
+THAT IS KEPT.** Nothing in this repo compares "what we assume ships" to "what actually ships", so the
+mitigation cannot currently be wrong — it can only be **undiscovered**.
+
+**RECORDED AS AN UNCHECKED PREMISE, NOT AS A MITIGATION.** Several of the transitive packages (`tar`,
+`js-yaml`, `brace-expansion`) are *classic* build-tool dependencies — **and *classic* is not *measured*.**
+
+**THE VERIFICATION, REGISTERED AND NOT DONE:** build the SPA and **enumerate what actually ships** — resolve
+the production bundle's real module graph and intersect it with the 15 advisory-bearing packages. **Until that
+runs, "not shipped" is an assumption wearing a fact's clothing.**
 
 ## THE 27 GO ADVISORIES — NO MODULE-LEVEL COVERAGE HOLE
 
@@ -158,12 +229,23 @@ more of them — `x/crypto` → api+helper · `x/net` → helper+node+operator �
 workflow's own comment claims the tool buys: *"a finding here is one we can actually fix, never inherited
 noise."* **The claim holds, and it was checked rather than assumed.**
 
-### ⚠ ONE CAVEAT ON "UNREACHABLE", because it is evidence and not proof
+### ⛔ PERMANENT CAVEAT — QUOTE THIS WHENEVER "UNREACHABLE" IS QUOTED
 
-**govulncheck's verdict is a claim about THE CALL GRAPH IT CAN SEE.** Reflection, `cgo`, and dynamic dispatch
-are where static reachability is weakest. **"Unreachable" here means "no path found by a sound-ish analyser",
-not "no path exists."** Strong evidence; not a proof. Recorded so the distinction survives into whatever
-public trust page quotes it.
+> ## **`govulncheck`'s VERDICT IS A CLAIM ABOUT THE CALL GRAPH IT CAN SEE.**
+> ## **REFLECTION, `cgo` AND DYNAMIC DISPATCH ARE WHERE REACHABILITY ANALYSIS IS WEAKEST.**
+> ## **"UNREACHABLE" IS STRONG EVIDENCE. IT IS NOT PROOF.**
+
+**THIS IS NOT A FOOTNOTE AND MUST NOT BECOME ONE.** *"Unreachable"* **hardens into a guarantee the moment it is
+repeated without the caveat** — and it will be repeated, because it is the reassuring half of the story and the
+one a trust page wants.
+
+**SAME CLASS AS TWO FAILURES THIS PROJECT HAS ALREADY PAID FOR:** *"CI green"* without a **sha**, and
+*"`make web-gate` passed"* without its **composition**. In all three, a **precise, true, qualified** statement
+loses its qualifier in transit and arrives as a **broader claim nobody ever made**. **The qualifier is the
+claim; a compressed version of it is a different claim.**
+
+**So: `govulncheck` exit=0 means "no path found by a static analyser that cannot see every path."** It does not
+mean the code is not there, and it does not mean it can never be called.
 
 ## WHY SCORECARD AND `govulncheck` DISAGREE, AND WHY BOTH ARE RIGHT
 
@@ -181,11 +263,11 @@ path is reachable. **The same gap between "it is present" and "it is reached", r
 
 # TRIGGERS
 
-- **4a `Pinned-Dependencies` and 4b `Token-Permissions`** — **the next `security.yml` change, or an S11-class
-  hardening pass.** Both change how CI is allowed to run; both are decide-items, not chores.
-- **4c the npm reachability gap** — **unregistered until dispositioned.** The cheapest honest step is a
-  manifest-level scan (`osv-scanner` or Dependabot) to make the 44 *measured*; **true reachability analysis for
-  JS does not exist in the same form govulncheck provides for Go**, so parity is not achievable, only
-  visibility.
+- **4a `Pinned-Dependencies` · 4b `Token-Permissions` · 4c NO JS DEPENDENCY SCANNING** — **the next
+  `security.yml` change, or an S11-class hardening pass.** All three are decide-items, not chores, and
+  **ALL THREE LAND TOGETHER AS ONE HARDENING SLICE** — same file, interacting changes, one CI run to judge.
 - **`Signed-Releases`** — already carried by **S6.5b**'s trigger.
 - **`Branch-Protection`** — **revisit only on a second maintainer.**
+- **THE UNCHECKED PREMISE (what actually ships)** — build the SPA, enumerate the production bundle's real
+  module graph, intersect with the 15 advisory-bearing packages. **Same trigger.** Until it runs, *"not
+  shipped"* is an assumption wearing a fact's clothing.

@@ -7,6 +7,7 @@ import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
 import { useLayoutCapability } from "./ComposeGate";
+import { CommandPalette } from "./CommandPalette";
 
 // S14.2 — THE NAV, GROUPED. The wireframe groups destinations NETWORK / ACCESS / OBSERVE / OPERATE / SETTINGS,
 // and that grouping is preserved at EVERY width; only its PRESENTATION changes.
@@ -181,6 +182,8 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-full flex-col">
+      {/* Mounted on the SHELL, not per screen: ⌘K must work wherever the user is. */}
+      <CommandPalette />
       <header className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <Logo />
         <div className="flex items-center gap-4">
