@@ -511,8 +511,45 @@ export function NodeLink({
           const isHub = n.kind === "hub";
           const r = isHub ? 34 : 26;
           const dim = selectedId && !isSel ? 0.3 : 1;
+          const state = n.tone ?? n.note ?? "no link";
           return (
-            <g key={n.id} opacity={dim}>
+            // ⛔ SELECTION LIVES ON THE NODE, and it is still keyboard-operable.
+            //
+            // It was a list of rows beneath the diagram, which is NOT in the design — the handoff's rows are
+            // an `sc-for extraSites`, i.e. sites added during the prototype session, not a permanent list.
+            // So they duplicated the labels already drawn in the SVG and made the panel look like a diagram
+            // with debug output stapled under it.
+            //
+            // An SVG shape is not focusable BY DEFAULT — that was the original reason for the rows. It is
+            // focusable when you give it `tabIndex`, a `role` and a key handler, which is what this does. The
+            // accessible name carries the node's state IN WORDS, so nothing is conveyed by colour alone, and
+            // the sr-only list below still enumerates every link state as text.
+            <g
+              key={n.id}
+              opacity={dim}
+              role={interactive ? "button" : undefined}
+              tabIndex={interactive ? 0 : undefined}
+              aria-pressed={interactive ? isSel : undefined}
+              aria-label={
+                interactive
+                  ? `${n.label}${n.sub ? ` ${n.sub}` : ""} — ${state}`
+                  : undefined
+              }
+              className={interactive ? "cursor-pointer outline-none" : undefined}
+              onClick={
+                interactive ? () => onSelect(isSel ? null : n.id) : undefined
+              }
+              onKeyDown={
+                interactive
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelect(isSel ? null : n.id);
+                      }
+                    }
+                  : undefined
+              }
+            >
               {isSel && (
                 <circle
                   cx={p.x}
@@ -580,92 +617,79 @@ export function NodeLink({
           );
         })}
       </svg>
-      {/* ⛔ THE SVG IS DECORATION. THIS LIST IS THE CONTENT — and it is what makes the diagram operable.
-          Selection lives on real <button> elements here, NOT on the <circle>s: an SVG node is not focusable,
-          not reachable by keyboard, and announces nothing. Clicking a circle is a shortcut for people who
-          can see and aim; the list is the interface. Link state is stated in WORDS, so "down" is never
-          carried by a red line alone. */}
-      {/* ROW SPEC TAKEN FROM THE HANDOFF, not from a screenshot: inset surface, 1px hairline, radius 8,
-          padding 9/11, MONO name, a pill for the state, the range in a muted grey, the note pushed right.
-          It was bare text under the diagram, which read as debug output beside a designed panel. */}
-      <ul className="mt-2 flex flex-col gap-1.5 text-cell">
-        {nodes.map((n) => {
-          const isSel = n.id === selectedId;
-          const body = (
-            <>
-              <span className="font-mono text-ink-primary">{n.label}</span>
-              {n.kind === "hub" ? (
-                <span className="rounded-full border border-line px-1.5 py-px font-mono text-micro text-ink-body">
-                  HUB
-                </span>
-              ) : n.tone ? (
-                <span
-                  className="rounded-full border px-1.5 py-px font-mono text-micro"
-                  style={{ color: NODE_DOT[n.tone], borderColor: NODE_DOT[n.tone] }}
-                >
-                  {n.tone}
-                </span>
-              ) : (
-                // NO PILL WHEN NO LINK EXISTS. A pill is a claim about a state, and there is no state here.
-                <span className="font-mono text-micro text-ink-faint">
-                  {n.note ?? "no link"}
-                </span>
-              )}
-              {n.sub && (
-                <span className="truncate text-micro text-ink-tertiary">
-                  {n.sub}
-                </span>
-              )}
-            </>
-          );
-          const rowClass =
-            "flex w-full items-center gap-2.5 rounded-lg border border-line bg-ink-800 px-2.5 py-2 text-left";
-          return (
-            <li key={n.id}>
-              {interactive ? (
-                <button
-                  type="button"
-                  aria-pressed={isSel}
-                  onClick={() => onSelect(isSel ? null : n.id)}
-                  className={`${rowClass} ${isSel ? "ring-1 ring-white/25" : ""}`}
-                >
-                  {body}
-                </button>
-              ) : (
-                <span className={rowClass}>{body}</span>
-              )}
-            </li>
-          );
-        })}
+      {/* ⛔ THE LEGEND AND THE READOUT SHARE ONE ROW, INSIDE THE MAP — the handoff's structure (dc.html
+          L456-465): three swatches, a flex spacer, then the selected-node box on the right.
+
+          The visible node ROWS that used to sit here are GONE. They were never in the design: the handoff's
+          rows are an `sc-for extraSites`, i.e. sites added during the prototype session, not a permanent
+          list. They duplicated the labels already drawn in the SVG and made the panel read as a diagram with
+          debug output stapled underneath.
+
+          Selection moved ONTO the nodes, which are now real focusable controls (role, tabIndex, key handler,
+          and an accessible name carrying the state in words). The sr-only list below keeps every link state
+          available as TEXT — so nothing is conveyed by colour alone, which was the rows' actual job. */}
+      <div className="mt-2 flex flex-wrap items-center gap-4">
+        {links.length > 0 &&
+          (["linked", "degraded", "down"] as const).map((tone) => (
+            <span
+              key={tone}
+              className="flex items-center gap-1.5 font-mono text-micro text-ink-tertiary"
+            >
+              <span
+                aria-hidden
+                className="inline-block w-[18px]"
+                style={
+                  LINK_DASH[tone]
+                    ? { borderTop: `2px dashed ${LINK_STROKE[tone]}` }
+                    : {
+                        height: 2,
+                        borderRadius: 2,
+                        background: LINK_STROKE[tone],
+                      }
+                }
+              />
+              {tone}
+            </span>
+          ))}
+        <span className="flex-1" />
+        {interactive && (
+          // OCCUPIES ITS SPACE WHETHER OR NOT ANYTHING IS SELECTED: a readout that APPEARS on selection
+          // shifts everything beneath it, and a diagram that reflows the page when clicked feels broken
+          // though nothing is wrong. The unselected state is a real state with real copy.
+          <span className="flex min-w-0 items-center gap-2.5 rounded-lg border border-line bg-ink-800 px-3 py-1.5">
+            <span className="whitespace-nowrap text-cell font-semibold text-ink-emphasis">
+              {selected ? selected.label : "No node selected"}
+            </span>
+            <span className="truncate font-mono text-micro text-ink-secondary">
+              {selected
+                ? [
+                    selected.tone ?? selected.note ?? "no link",
+                    selected.sub?.replace(/^· /, ""),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : "Click a node to inspect"}
+            </span>
+          </span>
+        )}
+      </div>
+
+      {/* Every state as TEXT, for anyone who is not reading the picture. Visually redundant with the diagram
+          and its readout, which is exactly why it is sr-only rather than deleted. */}
+      <ul className="sr-only">
+        {nodes.map((n) => (
+          <li key={n.id}>
+            {n.label} {n.sub}: {n.tone ?? n.note ?? "no link"}
+          </li>
+        ))}
         {links
           .filter((l) => l.tone !== "linked")
           .map((l) => (
-            <li
-              key={`${l.from}-${l.to}-d`}
-              className={l.tone === "down" ? "text-danger" : "text-warn"}
-            >
+            <li key={`${l.from}-${l.to}-d`}>
               {l.from} to {l.to}: {l.note ?? l.tone}
             </li>
           ))}
       </ul>
-      {interactive && (
-        // ⛔ THE SELECTED-NODE READOUT, as its own bordered box rather than a loose paragraph.
-        //
-        // IT OCCUPIES THE SPACE WHETHER OR NOT ANYTHING IS SELECTED, on purpose: a readout that APPEARS on
-        // selection shifts every element beneath it, and a diagram that reflows the page when you click it
-        // feels broken even though nothing is wrong. The unselected state is a real state with real copy,
-        // not a gap waiting to be filled.
-        <div className="mt-2 flex items-center gap-2.5 self-start rounded-lg border border-line bg-ink-800 px-3 py-1.5">
-          <span className="whitespace-nowrap text-cell font-semibold text-ink-emphasis">
-            {selected ? selected.label : "No node selected"}
-          </span>
-          <span className="truncate font-mono text-micro text-ink-secondary">
-            {selected
-              ? (selected.sub ?? "no further detail served")
-              : "Click a node to inspect"}
-          </span>
-        </div>
-      )}
     </VizFrame>
   );
 }
