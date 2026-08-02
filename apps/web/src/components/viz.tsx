@@ -153,6 +153,7 @@ export function Donut({
               const el = (
                 <circle
                   key={s.label}
+                  className="tnx-arc"
                   cx="21"
                   cy="21"
                   r="15.9"
@@ -265,7 +266,7 @@ export function Histogram({
               <span
                 aria-label={`${b.label}: ${b.value}`}
                 title={`${b.label}: ${b.value}`}
-                className="block w-full rounded-sm bg-accent-500"
+                className="tnx-rise block w-full rounded-sm bg-accent-500"
                 style={{ height: `${(b.value / max) * 100}%` }}
               />
             )}
@@ -506,6 +507,9 @@ export function NodeLink({
           return (
             <g key={`${l.from}-${l.to}`} opacity={dim}>
               <line
+                // Entry only: EVERY edge draws itself in, healthy or dead. `tnx-draw` sets its own
+                // stroke-dasharray, so a tone that wants a dash pattern keeps it via the overlay below.
+                className={LINK_DASH[l.tone] ? undefined : "tnx-draw"}
                 x1={a.x}
                 y1={a.y}
                 x2={b.x}
@@ -621,6 +625,7 @@ export function NodeLink({
               )}
               {/* The RING. Dark fill + light stroke, per the design — not a solid disc. */}
               <circle
+                className="tnx-pop"
                 cx={p.x}
                 cy={p.y}
                 r={r}
@@ -747,6 +752,199 @@ export function NodeLink({
               {l.from} to {l.to}: {l.note ?? l.tone}
             </li>
           ))}
+      </ul>
+    </VizFrame>
+  );
+}
+
+// ── PRIMITIVE 4 — AREA / TIME SERIES (S14.5) ────────────────────────────────────────────────────────────
+//
+// ⛔ THE ONE CHART SHAPE THIS SYSTEM DID NOT HAVE, AND THE ONE THE DESIGN ASKS FOR MOST LOUDLY.
+//
+// A PROPORTION (donut), a BINNED COUNT (histogram) and a GRAPH (node-link) cover current-state facts. A
+// SERIES OVER TIME is a different claim: it asserts that a value was MEASURED REPEATEDLY, at a known cadence,
+// and that the gaps between samples mean what the axis says they mean.
+//
+// ⚠ WHICH IS EXACTLY WHY IT NEEDS AN ENDPOINT THAT DOES NOT EXIST YET. `rx_bytes` is a raw gauge that RESETS
+// on every handshake — plotting it against time draws a sawtooth and calls it throughput. So this primitive
+// ships with its consumer rendering `source={{ roadmap: true }}`, and `VizFrame` refuses to draw anything at
+// all in that state. THE COMPONENT BEING READY IS NOT THE DATA BEING READY, and the frame is what keeps those
+// two facts from being confused.
+
+export interface Series {
+  label: string;
+  /** Samples in chronological order. Same length across every series, or the x-axis means nothing. */
+  values: number[];
+  tone: "primary" | "secondary";
+}
+
+/** Catmull-Rom through the points, emitted as cubic beziers — the design's curves are smooth, not polylines. */
+function smoothPath(pts: Array<{ x: number; y: number }>): string {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0]!.x} ${pts[0]!.y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
+export function AreaChart({
+  label,
+  source,
+  failed,
+  series,
+  xLabels,
+  formatValue,
+  empty = "Nothing to show yet.",
+}: {
+  label: string;
+  source: VizSource;
+  failed: boolean;
+  series: Series[];
+  /** One label per sample index; only a few are rendered, evenly spaced. */
+  xLabels: string[];
+  formatValue?: (n: number) => string;
+  empty?: ReactNode;
+}) {
+  const W = 600;
+  const H = 220;
+  const PAD_L = 44;
+  const PAD_B = 22;
+  const n = Math.max(...series.map((s) => s.values.length), 0);
+  const max = Math.max(1, ...series.flatMap((s) => s.values));
+  const fmt = formatValue ?? ((v: number) => String(v));
+
+  const xy = (v: number, i: number) => ({
+    x: PAD_L + (i / Math.max(1, n - 1)) * (W - PAD_L - 8),
+    y: 8 + (1 - v / max) * (H - PAD_B - 16),
+  });
+
+  return (
+    <VizFrame
+      label={label}
+      source={source}
+      failed={failed}
+      isEmpty={n === 0}
+      empty={empty}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="presentation">
+        <defs>
+          {series.map((s) => (
+            <linearGradient
+              key={s.label}
+              id={`tnxArea-${s.tone}`}
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop
+                offset="0"
+                stopColor={s.tone === "primary" ? "#E6E6E2" : "#858582"}
+                stopOpacity="0.28"
+              />
+              <stop
+                offset="1"
+                stopColor={s.tone === "primary" ? "#E6E6E2" : "#858582"}
+                stopOpacity="0"
+              />
+            </linearGradient>
+          ))}
+        </defs>
+
+        {/* Gridlines and their VALUES. An axis without numbers is a shape, not a measurement. */}
+        {[0, 0.5, 1].map((f) => {
+          const y = 8 + (1 - f) * (H - PAD_B - 16);
+          return (
+            <g key={f}>
+              <line
+                x1={PAD_L}
+                y1={y}
+                x2={W - 8}
+                y2={y}
+                stroke="#1A1A1A"
+                strokeWidth="1"
+              />
+              <text
+                x={PAD_L - 8}
+                y={y + 3}
+                textAnchor="end"
+                fill="#5E5E5B"
+                fontSize="9"
+                fontFamily="JetBrains Mono, monospace"
+              >
+                {fmt(max * f)}
+              </text>
+            </g>
+          );
+        })}
+
+        {series.map((s) => {
+          const pts = s.values.map(xy);
+          const line = smoothPath(pts);
+          const last = pts[pts.length - 1];
+          const first = pts[0];
+          const area =
+            line && first && last
+              ? `${line} L ${last.x} ${H - PAD_B} L ${first.x} ${H - PAD_B} Z`
+              : "";
+          return (
+            <g key={s.label}>
+              <path d={area} fill={`url(#tnxArea-${s.tone})`} />
+              <path
+                className="tnx-draw"
+                d={line}
+                fill="none"
+                stroke={s.tone === "primary" ? "#E6E6E2" : "#858582"}
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </g>
+          );
+        })}
+
+        {xLabels.map((lb, i) =>
+          i % Math.max(1, Math.ceil(n / 6)) === 0 ? (
+            <text
+              key={lb + i}
+              x={xy(0, i).x}
+              y={H - 6}
+              textAnchor="middle"
+              fill="#5E5E5B"
+              fontSize="9"
+              fontFamily="JetBrains Mono, monospace"
+            >
+              {lb}
+            </text>
+          ) : null,
+        )}
+      </svg>
+
+      {/* Same rule as every other primitive here: the picture is the accelerant, the text is the content. */}
+      <ul className="mt-1 flex flex-wrap gap-4 text-[11px]">
+        {series.map((s) => (
+          <li key={s.label} className="flex items-center gap-2 text-ink-body">
+            <span
+              aria-hidden
+              className="h-[7px] w-[7px] shrink-0 rounded-full"
+              style={{
+                background: s.tone === "primary" ? "#E6E6E2" : "#858582",
+              }}
+            />
+            {s.label}
+            <span className="font-mono text-ink-heading">
+              {fmt(s.values[s.values.length - 1] ?? 0)}
+            </span>
+          </li>
+        ))}
       </ul>
     </VizFrame>
   );

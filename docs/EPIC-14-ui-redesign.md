@@ -580,3 +580,38 @@ story that touches site-link health.**
 
 The founder's 2026-08-02 run reported `"edition":"open"` in the badge **and Sites rendered**. That is the
 screen which previously showed an upsell. **The ruling is confirmed on a live stack, not only in unit tests.**
+
+## ⛔ HALT — SITE-LINK THROUGHPUT NEEDS A BACKEND FEATURE, AND THE FOUNDER HAS AUTHORISED BUILDING IT
+
+**FOUNDER, 2026-08-02:** *"if we don't have throughput feature will develop it but we want like that."*
+
+**THE CHART IS BUILT. THE DATA IS NOT, AND CANNOT BE FAKED.**
+
+`AreaChart` now exists as a primitive and renders in the gallery with fixture data, so its DESIGN can be
+judged today. On Overview it renders `source={{ roadmap: true }}`, which draws nothing — **the component
+being ready is not the data being ready**, and `VizFrame` is what keeps those two from being confused.
+
+### Why the existing field cannot be plotted
+
+`rx_bytes` / `tx_bytes` are **raw gauges that RESET at every handshake** (`openapi.yaml`: *"display only,
+never summed as monotonic"*). Plotting them against time draws a **sawtooth** and labels it throughput. That
+is not a data-volume problem that improves with a bigger network — **it is wrong at every scale, forever.**
+
+### What the feature actually requires — for the founder to scope
+
+| piece | question it forces |
+|---|---|
+| **sampling** | who samples, how often? The agent already reports on a cadence; is that the sample, or does the CP poll? |
+| **delta reconstruction** | a counter that resets needs reset-detection to become a rate. Where does that live — agent or CP? |
+| **storage** | a new time-series table, or Prometheus (EPIC 11 shipped `/metrics`)? **This is the fork.** |
+| **retention** | 7 days at what resolution? Retention is a cost decision, not a UI one. |
+| **aggregation** | per hub member, per site link, or org total? The chart shows org totals; the data is per member. |
+
+**⚠ THE STORAGE QUESTION IS THE REAL ONE.** EPIC 11 already ships a Prometheus endpoint and a leader-elected
+control plane. **If the answer is "Prometheus already has this", the feature is a query and a proxy endpoint,
+not a storage design** — and the UI work is small. If the answer is a first-party table, it is a full story
+with migrations, retention and a reconciler.
+
+**NOT DECIDED HERE.** Registered as the blocking dependency for this panel, with the fork named.
+**S11.1 was the previously-named home for the rate/time-series version; this is the same debt, now with a
+founder mandate and a finished chart waiting on it.**
