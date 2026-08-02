@@ -124,10 +124,26 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
 
   it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
     withAuth(<Sites />);
-    await waitFor(() => screen.getByTitle("Approved, routed"));
+    // ⛔ THE WAITFOR COVERS BOTH TITLES, AND IT DID NOT UNTIL S14.5.
+    //
+    // It waited for "Approved, routed" alone and then asserted on the PENDING one — the exact defect the test
+    // directly above documents in its own comment, one test down, unnoticed. It passed for months because
+    // both chips render in the same commit; it started failing only when the FULL suite ran slower than the
+    // file alone, which is the definition of a race that was always there.
+    //
+    // SAME SHAPE AS THE MISSING-PRIMITIVE LAW: a lesson written at one call site does not reach the call site
+    // beside it. Writing the rule in a comment is not applying it.
+    const [approvedEl, pendingEl] = await waitFor(
+      () => [
+        screen.getByTitle("Approved, routed"),
+        screen.getByTitle("Pending approval, not yet routed"),
+      ],
+      { timeout: 5000 },
+    );
     // The pending counterpart must say the opposite in words. Colour-only differentiation would fail both a
     // screen reader and the accessibility gate the redesign now carries (registration consequence 1).
-    expect(screen.getByTitle("Pending approval, not yet routed")).toBeTruthy();
+    expect(approvedEl).toBeTruthy();
+    expect(pendingEl).toBeTruthy();
   });
 
   // The CW crossing decision, asserted through the production function rather than restated. It travels with

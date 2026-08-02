@@ -76,6 +76,11 @@ test.describe("width-sensitive specimens at full column width", () => {
     await expect(wide).toHaveScreenshot("gallery-wide-1440.png", {
       maxDiffPixelRatio: 0,
       animations: "disabled",
+      // ⛔ MASK THE PORTALLED MODAL. The gallery renders one OPEN, on purpose (combination 3), and it is
+      // `position: fixed` on the viewport — so an ELEMENT screenshot of a different section still has it
+      // sitting on top. Masking is right rather than closing it: the modal is a load-bearing specimen in the
+      // full-page gallery baseline, and it is simply not this image's subject.
+      mask: [page.locator('[role="dialog"]')],
     });
   });
 });
