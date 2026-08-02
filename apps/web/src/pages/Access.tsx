@@ -49,6 +49,8 @@ import {
   rulesSummary,
   rulesEmptyState,
   rulesEmptyCopy,
+  flowGraphState,
+  flowGraphNote,
   ruleBody,
   defaultSrcKind,
   defaultDstKind,
@@ -577,6 +579,66 @@ function RulesSection({
               to add a rule.
             </p>
           )}
+          {/* ── ACCESS FLOW ({{ polFlow }}) — D5 ─────────────────────────────────────────────────────────
+              ⛔ WITHHELD SAYS WHY. Above FLOW_GRAPH_MAX_RULES the graph is not drawn and the panel states
+              the count, the limit, and that the table below is authoritative. A panel that simply
+              disappears above N reads as a rendering bug on exactly the orgs with the most policy — the
+              ones least able to tell. Same rule the epic already applies to withheld destructive controls,
+              applied to a visualisation. */}
+          {(() => {
+            // Derived from the SAME ruleRow() the table below uses, so the graph and the table can never
+            // disagree about what a rule says.
+            const rows = rules.map((r) => ({
+              id: r.id,
+              src: ruleRow(r, groups, resources, members, sites, loaded, services).src,
+              dst: ruleRow(r, groups, resources, members, sites, loaded, services).dst,
+              expiry: r.expires_at != null,
+            }));
+            const g = flowGraphState(rows.length);
+            const note = flowGraphNote(g);
+            if (g.kind !== "draw")
+              return (
+                <p className="mt-3 text-xs text-slate-500" data-testid="flow-withheld">
+                  {note}
+                </p>
+              );
+            // A bipartite source -> destination flow: every rule IS one edge, and both node sets come from
+            // reads this screen already makes. No new endpoint, no fan-out.
+            const srcs = [...new Set(rows.map((r) => r.src.label))];
+            const dsts = [...new Set(rows.map((r) => r.dst.label))];
+            const H = Math.max(srcs.length, dsts.length) * 22 + 12;
+            const y = (i: number, n: number) => (H / (n + 1)) * (i + 1);
+            return (
+              <svg
+                className="mt-3 w-full"
+                height={H}
+                role="img"
+                aria-label={`Access flow: ${srcs.length} sources to ${dsts.length} destinations across ${rows.length} rules`}
+              >
+                {rows.map((r) => (
+                  <line
+                    key={r.id}
+                    x1="30%"
+                    x2="70%"
+                    y1={y(srcs.indexOf(r.src.label), srcs.length)}
+                    y2={y(dsts.indexOf(r.dst.label), dsts.length)}
+                    stroke={r.expiry ? "var(--tnx-accent)" : "var(--tnx-neutral)"}
+                    strokeWidth="1"
+                  />
+                ))}
+                {srcs.map((l, i) => (
+                  <text key={l} x="28%" y={y(i, srcs.length)} textAnchor="end" className="fill-slate-400 text-[10px]">
+                    {l}
+                  </text>
+                ))}
+                {dsts.map((l, i) => (
+                  <text key={l} x="72%" y={y(i, dsts.length)} className="fill-slate-400 text-[10px]">
+                    {l}
+                  </text>
+                ))}
+              </svg>
+            );
+          })()}
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
               const row = ruleRow(

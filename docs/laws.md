@@ -2886,3 +2886,29 @@ survived four PRs in the first place.
 
 **SIBLING:** *a composite result reported by its most favourable component*. Same session, same root: an
 aggregate cannot report on whether its parts ran.
+
+---
+
+## A VIEW-MODEL WITH GREEN TESTS AND NO CALLER IS INVISIBLE TO EVERY GATE WE OWN
+
+**S14.12 (founder-ruled). SECOND dormant-machinery catch this epic, and the two were found differently — which
+is the point.**
+
+**FIRST (S14.11):** the founder asked why a primitive had no consumer. **A person noticed.**
+**SECOND (S14.12):** `flowGraphState` / `flowGraphNote` were built, tested, and **mutation-proven** — 4 tests,
+4 mutations, zero survivors — and referenced **nowhere**. I found it by grepping the SERVED ARTIFACT for
+`"Too many rules to draw legibly"` and getting **0**.
+
+> ### **EVERY GATE WE OWN TESTS THE VIEW-MODEL. So a view-model that is correct, covered and uncalled passes**
+> ### **all of them — unit tests, mutations, typecheck, build. There is no gate whose subject is "is this**
+> ### **reachable from the page", because reachability is exactly what the tests supply themselves.**
+
+**THE CHECK, and it is cheap:** after building a view-model, **grep the ARTIFACT for a string only its
+consumer can produce.**
+
+> ### **TREE-SHAKING IS THE TELL — IF THE BUNDLER DROPPED IT, NOTHING CALLS IT.** The bundler already performs
+> ### the reachability analysis no test performs; read its output instead of duplicating it.
+
+**AND WHY WIRING IT IMMEDIATELY MATTERS:** an unwired view-model *between slices* is how dormant machinery
+becomes permanent. **It passes its tests, so nothing ever complains** — the debt has no failing signal and no
+deadline. The catch is only worth having if the wiring follows in the same slice.
