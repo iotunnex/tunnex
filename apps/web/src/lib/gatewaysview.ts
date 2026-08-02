@@ -55,7 +55,7 @@ export function toGatewayRow(
     agentVersion: n.agent_version,
     siteId: n.site_id ?? null,
     siteName: n.site_id ? (siteNames?.[n.site_id] ?? null) : null,
-    isHub: n.is_site_hub === true,
+    isHub: n.status === "revoked" ? false : n.is_site_hub === true,
     lastSeenAt: n.last_seen_at ?? null,
   };
 }
