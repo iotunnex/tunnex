@@ -3013,3 +3013,53 @@ animation wins by default.
 **SIBLING — the same defect one layer up:** the epic already rules that **a gate must be a RENDER decision,
 never a style**, because a column hidden by `opacity` is still in the DOM. Here a *meaning* was hidden by an
 animation. **Both are: a presentational mechanism silently overriding a semantic one.**
+
+---
+
+## RUN A SWEEP AGAINST A CASE YOU ALREADY KNOW THE ANSWER TO
+
+**S14.12 (founder-ruled — the most reusable thing in that report).**
+
+The first "which mutating endpoints have no web call site" sweep reported **6**. `addGroupMember` — which I had
+*already measured* as uncalled ten minutes earlier — **was not in the list.** That absence is what caught it.
+
+**THE PROXY, and it is the worst kind:** the sweep asked *"does this path string appear anywhere in
+`apps/web/src`?"* But `edition.ts` is a **PATH MANIFEST** — it lists every enterprise-gated path so the
+reactive-403 layer can classify them.
+
+> ### **SO THE PROXY WAS CORRECT-BY-CONSTRUCTION FOR THE WRONG QUESTION. Every enterprise path was**
+> ### **guaranteed to match, called or not. A proxy that fails randomly gets noticed; one that is**
+> ### **structurally guaranteed to agree looks like a clean result.**
+
+Re-run against **actual call sites** (`api.POST|PUT|PATCH|DELETE("…")`, manifest excluded): **19 of 80**, and
+the known case was present.
+
+> ### **THE FLOOR: SEED EVERY ENUMERATION WITH A CASE WHOSE ANSWER YOU ALREADY KNOW. If the known case is**
+> ### **MISSING FROM THE OUTPUT, THE SWEEP IS MEASURING SOMETHING ELSE — and you learn that in one glance,**
+> ### **before the number reaches anyone.**
+
+This is the **vacuity floor for enumerations**, the sibling of the count floors already on the census tests
+(`gated < 40`, `files > 50`, `found < 2`). Those catch a scan that broke; **this catches a scan that works
+perfectly on the wrong question.**
+
+---
+
+## THE WHO-READS-THIS PROBE, FAILING ON A **VERB**
+
+**S14.12 (founder-ruled).** Every prior instance was a served **FIELD** nobody rendered — `actor_system`, the
+peer count, `Histogram`. This one is **three shipped ENDPOINTS with one consumer**, since S7.5.2:
+`listGroupMembers` is called; **`addGroupMember` and `removeGroupMember` never have been.**
+
+> ### **A FIELD WITH NO READER SHOWS NOTHING. A VERB WITH NO CALLER MEANS A CAPABILITY THE PRODUCT HAS AND**
+> ### **THE OPERATOR CANNOT REACH — an incomplete view versus an unusable feature.**
+
+And it compounds: the Access screen lets an admin create a group and write rules that *use* it as a source,
+while the surface to put anyone in it does not exist. **The form creates an object nobody can populate, above
+rules that depend on it being populated.**
+
+**THE DIAGNOSTIC:** for every mutating endpoint in the spec, **name its call site.** An endpoint with no
+caller is either **dead** or **missing a surface**, and nothing distinguishes those without asking — so the
+question has to be asked per endpoint, not inferred from the count.
+
+**MEASURED SIZE (S14.12): 19 of 80 mutating operations have no web call site; 12 are genuinely unreachable
+capability.** Registered as its own story, not folded.
