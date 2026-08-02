@@ -31,7 +31,7 @@ only in prose is a cut that will be re-proposed.**
 | **Floating action button** | **CUT** | purpose unclear; every screen already has a primary action in its header | EPIC 14 open |
 | **"Get started 2 of 4" floating widget** | **CUT** | becomes part of the Overview EMPTY STATE. A checklist following an established admin around is noise | EPIC 14 open |
 | **Per-region mesh nodes with site counts** (Sites map) | **DIFFERENT FORM** | no region field on `Node` or `Site`. Built per-SITE, uniform radius | S14.5 |
-| **`PEERS` / `cloud · region` / `egress ✓`** (Gateways table) | **PEERS = SERVE IT; other two CUT** | no field for region or egress capability. Peer count is one aggregate query | S14.6 |
+| **`cloud · region` / `egress ✓`** (Gateways table) | **CUT** | no field for region or for egress capability on `Node`. Same gap as the Sites mesh | S14.6 |
 | **"hover to trace a link"** (map hint copy) | **CUT** | we do not implement hover tracing; describing an interaction the component lacks is the same class as a chart with no source | S14.5 |
 | **Per-link byte counters on the map** | **MOVED** | `rx/tx` exist only on `HubMemberMetrics`, per hub member. Rendered in the HA panel where they are true | S14.5 |
 | **The wireframe's node ROWS under the map** | **CUT** | they are an `sc-for extraSites` — sites added during the prototype session, not a permanent list | S14.5 |
@@ -50,4 +50,5 @@ only in prose is a cut that will be re-proposed.**
 |---|---|---|---|
 | **Sites edition gate / upsell** | **DELETED** | the site model is all-editions core (D11); the client invented a boundary the server does not have | S14.5 |
 | **Failed-load triad panel** (Gateways/Sites right column) | **CUT** | a wireframe DOCUMENTATION device showing three states side by side, not a product panel | S14.5 |
+| **`PEERS` column** (Gateways) | **ABSENT — its own slice** | `devices WHERE node_id` counts DEVICES, and a hub's WireGuard peers include SITE LINKS, so on a hub it under-reports exactly where an operator looks hardest. Either count wg peers or label it `DEVICES`. Spec+codegen change, so it is a slice, not a rider | S14.6 |
 | **Operations screen** | **ABSENT-PENDING-ENDPOINTS** | the capability shipped in EPIC 11; the API exposes none of it. See the fifth category in `EPIC-14-ui-redesign.md` | S14.6 nav audit |

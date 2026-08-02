@@ -896,20 +896,24 @@ function SiteList({
         c.subnets.length === 0 ? (
           <span className="text-ink-faint">none</span>
         ) : (
-          <span className="flex flex-wrap gap-1">
+          // ⛔ role + accessible name, NOT `title`. A `title` on a role-less <span> is not an accessible
+          // name a screen reader reliably announces, and querying it violated query rule 1 — role and
+          // accessible name only. The chip is a LIST ITEM stating a range's routing state, so it says so.
+          <span role="list" className="flex flex-wrap gap-1">
             {c.subnets.map((sn) => (
               <span
                 key={sn.id}
+                role="listitem"
+                aria-label={`${sn.cidr}: ${
+                  sn.status === "approved"
+                    ? "Approved, routed"
+                    : "Pending approval, not yet routed"
+                }`}
                 className={`rounded border px-1.5 py-px font-mono text-micro ${
                   sn.status === "approved"
                     ? "border-line text-ink-body"
                     : "border-warn/50 text-warn"
                 }`}
-                title={
-                  sn.status === "approved"
-                    ? "Approved, routed"
-                    : "Pending approval, not yet routed"
-                }
               >
                 {sn.cidr}
                 {sn.status === "pending" && " · pending"}
@@ -997,20 +1001,21 @@ function SiteCardView({
       )}
 
       {card.subnets.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div role="list" className="mt-3 flex flex-wrap gap-2">
           {card.subnets.map((s) => (
             <span
               key={s.id}
+              role="listitem"
+              aria-label={`${s.cidr}: ${
+                s.status === "approved"
+                  ? "Approved, routed"
+                  : "Pending approval, not yet routed"
+              }`}
               className={`rounded px-2 py-0.5 text-xs ${
                 s.status === "approved"
                   ? "bg-white/5 text-slate-300"
                   : "border border-amber-500/30 text-amber-300"
               }`}
-              title={
-                s.status === "approved"
-                  ? "Approved, routed"
-                  : "Pending approval, not yet routed"
-              }
             >
               {s.cidr}
               {s.status === "pending" && " · pending"}

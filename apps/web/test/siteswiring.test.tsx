@@ -101,8 +101,8 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // that happens to appear.
     const [pendingEl, approvedEl] = await waitFor(
       () => [
-        screen.getByTitle("Pending approval, not yet routed"),
-        screen.getByTitle("Approved, routed"),
+        screen.getByRole("listitem", { name: /Pending approval, not yet routed/ }),
+        screen.getByRole("listitem", { name: /Approved, routed/ }),
       ],
       { timeout: 5000 },
     );
@@ -122,7 +122,17 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     expect(approvedEl.textContent).not.toContain("pending");
   });
 
-  it("the reachability claim is carried in the accessible title, not by colour alone", async () => {
+  // ⛔ QUERIED BY ROLE + ACCESSIBLE NAME (query rule 1), not by `title`.
+  //
+  // These asserted `getByTitle`, which is neither a role nor an accessible name — and the chip it queried was
+  // a role-less <span> whose `title` a screen reader does not reliably announce. So the test was BOTH a rule-1
+  // violation AND evidence of a real defect: the reachability claim, load-bearing in two assertions, was not
+  // announced to anyone using assistive tech.
+  //
+  // THE FIX WAS THE CHIP, NOT THE QUERY. It is now role="listitem" inside role="list", with an aria-label
+  // carrying the range AND its state. Fixing the query alone would have kept the test green over a chip that
+  // still said nothing.
+  it("the reachability claim is carried in the accessible name, not by colour alone", async () => {
     withAuth(<Sites />);
     // ⛔ THE WAITFOR COVERS BOTH TITLES, AND IT DID NOT UNTIL S14.5.
     //
@@ -135,8 +145,8 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // beside it. Writing the rule in a comment is not applying it.
     const [approvedEl, pendingEl] = await waitFor(
       () => [
-        screen.getByTitle("Approved, routed"),
-        screen.getByTitle("Pending approval, not yet routed"),
+        screen.getByRole("listitem", { name: /Approved, routed/ }),
+        screen.getByRole("listitem", { name: /Pending approval, not yet routed/ }),
       ],
       { timeout: 5000 },
     );
