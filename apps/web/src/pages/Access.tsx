@@ -669,15 +669,17 @@ function RulesSection({
                     </pattern>
                   </defs>
                   <rect x="0" y="0" width="600" height="312" rx="14" fill="url(#tnxPolDots)" />
+                  <g className="tnx-flow-edges">
                   {shown.map((r) => {
                     const sy = cy(si(r.src)), dy = cy(di(r.dst));
                     return (
-                      <path key={r.id} fill="none" strokeWidth="2" className="tnx-flow-edge"
+                      <path key={r.id} fill="none" strokeWidth="2"
                             stroke={r.temp ? "var(--tnx-neutral)" : "var(--tnx-accent)"}
                             strokeDasharray={r.temp ? "5 6" : undefined}
                             d={`M170,${sy} C300,${sy} 300,${dy} 430,${dy}`} />
                     );
                   })}
+                  </g>
                   {srcs.map((n, i) => node(n, i, true))}
                   {dsts.map((n, i) => node(n, i, false))}
                 </svg>

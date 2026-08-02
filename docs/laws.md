@@ -2986,3 +2986,30 @@ wrong produces a clean, specific, actionable red.
 
 **THE CHECK:** when an assertion goes red on code you did not just change, read the subject before you read
 the fix. The first question is *"is this red correct?"*, not *"how do I make it green?"*
+
+---
+
+## AN ANIMATION AND A SEMANTIC ENCODING MUST NOT SHARE A PROPERTY
+
+**S14.12 (founder-found on screen).** The flow panel encodes *temporary grant* as **`stroke-dasharray: "5 6"`**
+and its legend says `- - - temporary`. The entry animation drew each edge with
+`stroke-dasharray: 1600; animation: tnxDraw …` on the same element.
+
+**A CSS declaration beats an SVG PRESENTATION ATTRIBUTE.** So the animation's dasharray silently overrode the
+semantic one and **every temporary edge rendered SOLID, while the legend promised a dash.**
+
+> ### **WHICHEVER THE CASCADE FAVOURS WINS, AND THE LOSER FAILS SILENTLY. The edge still drew, at the right**
+> ### **width, in the right colour, along the right path — just carrying the wrong meaning. Nothing looked**
+> ### **broken, which is why it survived a review pass that caught a wrong type tag.**
+
+**THE FIX IS NOT PRECEDENCE, IT IS SEPARATION.** The reveal now uses **`clip-path`**, which nothing on this
+panel encodes, applied to the edge `<g>` so the flow wipes in once. Dash is free to mean what the legend says.
+
+**THE CHECK:** before animating an SVG or CSS property, ask **what else on this surface reads that property as
+meaning**. `stroke-dasharray`, `opacity`, `stroke-width` and colour are all commonly BOTH decorative and
+semantic — and an animation is written in CSS while the meaning is usually written as an attribute, so the
+animation wins by default.
+
+**SIBLING — the same defect one layer up:** the epic already rules that **a gate must be a RENDER decision,
+never a style**, because a column hidden by `opacity` is still in the DOM. Here a *meaning* was hidden by an
+animation. **Both are: a presentational mechanism silently overriding a semantic one.**

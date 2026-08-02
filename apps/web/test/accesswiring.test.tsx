@@ -42,6 +42,17 @@ const RULES = [
     src_group_id: "g1",
     dst_resource_id: "res1",
   },
+  // ⛔ A TEMPORARY GRANT, so the dashed encoding has a subject. Without one the dash assertion passes
+  // vacuously against a panel that draws no dashes at all — which is exactly how the defect survived.
+  {
+    id: "r-temp",
+    enabled: true,
+    src_kind: "group",
+    dst_kind: "site",
+    src_group_id: "g2",
+    dst_site_id: "site1",
+    expires_at: "2099-01-01T00:00:00Z",
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
@@ -196,5 +207,28 @@ describe("Access flow panel — the geometry contract and the type tags", () => 
     expect(texts).toContain("GROUP");
     expect(texts.filter((t) => t === "USER")).toHaveLength(0);
     expect(texts.filter((t) => t === "U")).toHaveLength(0);
+  });
+
+  it("⛔ a TEMPORARY grant renders DASHED, and the entry animation must not steal the property", async () => {
+    // THE DEFECT: the reveal animated `stroke-dashoffset` with `stroke-dasharray: 1600`, and a CSS
+    // declaration beats an SVG PRESENTATION ATTRIBUTE — so `strokeDasharray="5 6"` was silently overridden
+    // and every temporary edge drew SOLID while the legend promised "- - - temporary".
+    //   AN ANIMATION AND A SEMANTIC ENCODING MUST NOT SHARE A PROPERTY.
+    withAuth(<Access />);
+    const svg = await waitFor(() => {
+      const el = document.querySelector('svg[role="img"]');
+      if (!el) throw new Error("flow SVG not rendered");
+      return el;
+    });
+    const paths = Array.from(svg.querySelectorAll("path"));
+    const dashed = paths.filter((p) => p.getAttribute("stroke-dasharray") === "5 6");
+    const solid = paths.filter((p) => !p.getAttribute("stroke-dasharray"));
+    // BOTH arms: the fixture has a temporary rule and permanent ones, so each encoding must appear.
+    expect(dashed.length).toBeGreaterThan(0);
+    expect(solid.length).toBeGreaterThan(0);
+    // And no path may carry the animation's old dasharray, which is what did the overriding.
+    expect(paths.some((p) => p.getAttribute("stroke-dasharray") === "1600")).toBe(false);
+    // The reveal lives on the GROUP, on a property nothing else encodes.
+    expect(svg.querySelector("g.tnx-flow-edges")).toBeTruthy();
   });
 });
