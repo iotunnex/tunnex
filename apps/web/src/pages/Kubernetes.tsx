@@ -398,9 +398,15 @@ export default function Kubernetes() {
                   {t.label}
                 </p>
                 <p className="mt-1 text-[22px] font-semibold text-ink-heading">
-                  {/* A LONE DASH IS A NULL MARKER, NOT PROSE — the em-dash sweep leaves it. A null never
-                      renders 0, because "we could not look" is a different fact from "there are none". */}
-                  {t.value === null ? "—" : t.value}
+                  {/* ⛔ "n/a", NOT AN EM-DASH. A null never renders 0 — "we could not look" is a different
+                      fact from "there are none" — but the ABSENT MARKER ITSELF was the banned glyph.
+                      S14.5 already resolved this exact collision on hubsetview: an em-dash "is not READ as
+                      'we have no value' by anyone who has not been told that it means that. It reads as a
+                      dash, as a minus, or as NOTHING AT ALL to a screen reader."
+                      This site carried a WRITTEN EXEMPTION for the case that law had already decided — and
+                      that law's closing line names the reflex verbatim: "the reflex in that moment is to
+                      claim an exemption for the older rule." */}
+                  {t.value === null ? "n/a" : t.value}
                 </p>
                 <p className="text-micro text-ink-faint">{t.hint}</p>
               </li>

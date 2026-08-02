@@ -219,7 +219,7 @@ export default function AuditLog() {
               header: "Target",
               cell: (a) => (
                 <span className="text-xs text-slate-500">
-                  {a.target_type ?? "—"}
+                  {a.target_type ?? "n/a"}
                   {a.details && Object.keys(a.details).length > 0 && (
                     <span className="ml-2 font-mono text-slate-600">
                       {JSON.stringify(a.details)}

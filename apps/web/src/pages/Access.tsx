@@ -301,7 +301,7 @@ function ModeSection({
               : mode === "off"
                 ? "Off — legacy full-mesh (all devices reach all devices)."
                 : loadError
-                  ? "—"
+                  ? "n/a"
                   : "…"}
           </p>
         </div>
@@ -1596,7 +1596,7 @@ function DeviceApprovalSection({
               : mode === "off"
                 ? "Off — new devices are active on enrollment."
                 : modeError
-                  ? "—"
+                  ? "n/a"
                   : "…"}
           </p>
         </div>
