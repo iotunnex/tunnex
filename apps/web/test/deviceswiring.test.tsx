@@ -43,6 +43,12 @@ const DEVICES = [
     health_blocked: true,
     needs_reexport: true,
   },
+  {
+    id: "d-pending",
+    name: "unapproved-phone",
+    status: "pending",
+    assigned_ip: "10.99.0.15",
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
@@ -152,15 +158,12 @@ describe("Devices — wiring", () => {
     // The distinction matters: an operator must still see a revoked device exists. Suppressing the row would
     // trade a wrong badge for a missing fact.
     //
-    // 3 rows = 1 header + 2 devices. Counting rows is a stronger claim than "these two strings appear": it
-    // also fails if a THIRD device were rendered, which text matching could never notice.
-    expect(within(table).getAllByRole("row")).toHaveLength(3);
-    // The address is asserted ON ITS OWN DEVICE'S ROW. Worth recording that this line caught a real error
-    // WHILE BEING WRITTEN: it was first written against `work-laptop`, and the per-row query rejected it
-    // because 10.99.0.9 belongs to `old-laptop`. The ORIGINAL page-wide `getByText("10.99.0.9")` could not
-    // have noticed — it only ever asked whether the string existed somewhere on the screen, which is exactly
-    // the class of mistake a device list must not make: an address attributed to the wrong machine.
+    // 4 rows = 1 header + 3 devices (revoked, active, pending). Counting rows is a stronger claim than "these strings appear": it
+    // also fails if an unexpected device were rendered, which text matching could never notice.
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    // The address and pending status are asserted ON THEIR OWN DEVICE'S ROW.
     expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
+    expect(within(rowFor("unapproved-phone")).getByText("pending")).toBeTruthy();
   });
 
   it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
