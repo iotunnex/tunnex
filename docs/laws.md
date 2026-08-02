@@ -2723,3 +2723,57 @@ and put them where the comparison happens — here, in the `seed-open` target it
 found later is investigated from zero; an explained one is checked against its explanation in seconds. And a
 difference nobody wrote down eventually gets "fixed" by someone making the two match, which is how an edition
 gate quietly stops being tested.
+
+---
+
+## THE ARTIFACT OUTLIVES THE SOURCE THAT PRODUCED IT — AND KEEPS ANSWERING
+
+**S14.12 (founder-ruled). THIRD instance of one family, now named.**
+
+`make up-open-review` was committed on a branch **after that branch merged**, so the target existed on no
+branch anyone would check out. The `:8081` containers kept running the whole time — so the open-edition stack
+**looked present and healthy** while its definition was gone from every tree, and the bundle it served
+predated a day of work.
+
+**THE SIBLINGS, and they are the same failure:**
+
+| instance | the artifact | what it outlived |
+|---|---|---|
+| S14.11 | the **served bundle** | eight commits that were never deployed |
+| S14.11 | **"CI green"** | the sha it was green on, superseded by a push |
+| S14.12 | a **running container** | the Makefile target that defines it |
+
+> ### **AN ARTIFACT KEEPS ANSWERING AFTER THE THING THAT DEFINES IT HAS MOVED OR VANISHED, AND THE ANSWER**
+> ### **LOOKS CURRENT PRECISELY BECAUSE THE ARTIFACT IS STILL RUNNING. Health is not freshness. A green**
+> ### **check, a serving port and a healthy container all report on a PAST state with a PRESENT voice.**
+
+**THE DIAGNOSTIC, cheap enough to always run:** *before trusting a running thing, confirm its DEFINITION is on
+the branch you are on.* `grep` the target in the checked-out `Makefile`; diff the served bundle hash after a
+deploy; re-read check-runs for **the exact sha** rather than the PR. **All three instances would have been
+caught by that one question**, and each was instead caught by luck or by a later failure.
+
+---
+
+## A CONSEQUENCE ASSERTED WITHOUT ITS PRECONDITION
+
+**S14.12 (founder-ruled — and the finding of the slice, though it is not what was ruled).**
+
+The empty rule list rendered: *"No rules — under Enforcing, all device-to-device traffic is denied."*
+**Unconditionally.** The demo org's mode is `off`, and with enforcement off an empty rule set denies
+**nothing**. The sentence was true of a state the screen was not in.
+
+**It was invisible because the fixture had rules**, so the branch never rendered. **One deletion away, the
+screen makes a false claim about enforcement** — on the surface whose entire job is stating the enforcement
+posture.
+
+> ### **THE SENTENCE NAMED A CONSEQUENCE ("all traffic is denied") AND OMITTED ITS PRECONDITION ("while**
+> ### **enforcing"). A conditional truth rendered unconditionally is FALSE HALF THE TIME, and the half it is**
+> ### **false in is invisible whenever the fixture keeps you out of it.**
+
+**HOW IT WAS FOUND, and this is the transferable part: by being asked a DIFFERENT question.** The ruling was
+about two empty states — *failed* vs *zero-while-enforcing*. Building that distinction properly forced reading
+the mode, and the third claim fell out. **Neither the founder nor I was looking for it.**
+
+**THE CHECK:** for every rendered sentence asserting a consequence, name the state that makes it true and ask
+whether the render is conditioned on that state. If the copy contains *"under X"*, *"while X"*, *"since X"* —
+X must be in the branch condition, not only in the prose.
