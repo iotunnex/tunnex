@@ -129,3 +129,123 @@ describe("objectControls — the withhold decision (M3)", () => {
     expect(objectControls(false).withheld).toBe(false);
   });
 });
+
+// ── S14.8 SECTION PASS ──────────────────────────────────────────────────────────────────────────────────
+
+import {
+  clusterReachability,
+  serviceRowClass,
+  statTiles,
+} from "../src/lib/k8sview";
+
+const card = (name: string, services: number, siteId = "s1") =>
+  ({
+    id: name,
+    siteId,
+    name,
+    vipRange: "10.50.0.0/24",
+    serviceCidr: "10.96.0.0/16",
+    dnsZone: "k8s.demo.local",
+    dnsVip: "10.50.0.2",
+    managedByOperator: false,
+    services: Array.from({ length: services }, (_, i) => ({
+      id: `${name}-${i}`,
+      name: `svc${i}`,
+      namespace: "default",
+      protocol: "tcp" as const,
+      ports: "80",
+      vip: `10.50.0.${i + 3}`,
+      fqdn: `svc${i}.default.svc.${name}.k8s.demo.local`,
+      managedByOperator: false,
+    })),
+  }) as ReturnType<typeof statTiles> extends never ? never : any;
+
+describe("statTiles", () => {
+  it("is THREE tiles — the operator version is cut because it is not served", () => {
+    const t = statTiles([card("a", 2), card("b", 1)], 1);
+    expect(t).toHaveLength(3);
+    expect(t.map((x) => x.label)).toEqual([
+      "Clusters",
+      "Exposed Services",
+      "Machine credentials",
+    ]);
+    // A tile whose value would be invented is the render-floor violation, and a version number is the most
+    // quietly authoritative thing a screen can invent.
+    expect(t.some((x) => /operator|version/i.test(x.label))).toBe(false);
+  });
+
+  it("counts Services ACROSS clusters, not per cluster", () => {
+    expect(statTiles([card("a", 2), card("b", 1)], 0)[1].value).toBe(3);
+  });
+
+  it("⛔ null and 0 are DIFFERENT for machine credentials — both arms", () => {
+    // 0 means "we looked, there are none"; null means "we could not look". A zero standing in for unknown is
+    // the reassuring-empty defect in numeric form.
+    const zero = statTiles([], 0)[2];
+    const unknown = statTiles([], null)[2];
+    expect(zero.value).toBe(0);
+    expect(unknown.value).toBeNull();
+    expect(unknown.hint).toMatch(/could not read/i);
+    expect(zero.hint).not.toMatch(/could not read/i);
+  });
+
+  it("N=0 clusters says 'none registered' rather than an empty hint", () => {
+    expect(statTiles([], 0)[0].hint).toMatch(/none registered/i);
+  });
+});
+
+describe("clusterReachability — D9", () => {
+  const gw = (siteId: string | null, endpointsUnavailable = false) => ({
+    siteId,
+    endpointsUnavailable,
+  });
+
+  it("⛔ reachable and UNREACHABLE are both observed, in one test", () => {
+    // Mechanism ⑨: a function that always returned reachable:true would pass a happy-path-only test.
+    expect(clusterReachability({ siteId: "s1", gateways: [gw("s1")] }).reachable).toBe(true);
+    expect(
+      clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] }).reachable,
+    ).toBe(false);
+  });
+
+  it("NEVER blames the cluster — the kind has three causes and only one is 'cluster down'", () => {
+    const r = clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] });
+    expect(r.why).toMatch(/no endpoint view/i);
+    // Measured at dnat_linux.go:174 — the kind is also true for RBAC denial and an unsynced watch.
+    expect(r.why).not.toMatch(/cluster is down|cluster down|unreachable cluster/i);
+  });
+
+  it("no gateway at all is UNREACHABLE, with a different reason than a failed watch", () => {
+    const none = clusterReachability({ siteId: "s1", gateways: [] });
+    const failed = clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] });
+    expect(none.reachable).toBe(false);
+    // Two distinct facts: nothing is bound, versus something is bound and blind.
+    expect(none.why).not.toBe(failed.why);
+    expect(none.why).toMatch(/no gateway fronts/i);
+  });
+
+  it("ignores gateways on OTHER sites — a foreign gateway's blindness is not this cluster's problem", () => {
+    expect(
+      clusterReachability({
+        siteId: "s1",
+        gateways: [gw("s2", true), gw("s1", false)],
+      }).reachable,
+    ).toBe(true);
+  });
+
+  it("ANY fronting gateway being blind is enough — fail towards unreachable", () => {
+    expect(
+      clusterReachability({
+        siteId: "s1",
+        gateways: [gw("s1", false), gw("s1", true)],
+      }).reachable,
+    ).toBe(false);
+  });
+});
+
+describe("serviceRowClass", () => {
+  it("recedes an unreachable cluster's rows and only those", () => {
+    expect(serviceRowClass(true)).toBe("");
+    expect(serviceRowClass(false)).not.toBe("");
+  });
+});
