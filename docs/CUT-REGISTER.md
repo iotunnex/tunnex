@@ -60,3 +60,28 @@ only in prose is a cut that will be re-proposed.**
 |---|---|---|---|
 | **`e2e/` was never typechecked** | **FIXED** | no tsconfig, not in the workspace, not in `apps/web/tsconfig` — so nothing PARSED the specs before CI ran them, and an orphaned `describe` reached CI as a `SyntaxError`. Now typechecked inside the BLOCKING gate, proven to reject | S14.5 |
 | **Page suites render without a Router** | **NOT A LIVE DEFECT — loud, not silent** | measured: **0 of 7 pages use `useNavigate`/`Link`/`useLocation`**, so nothing routing-dependent is being skipped. And the first `<Link>` added (Devices, S14.6) **crashed five tests immediately.** An under-capabilitied double that THROWS is self-announcing | S14.6 |
+
+## REPO AND MERGE SETTINGS
+
+| setting / claim | state | reason | recorded |
+|---|---|---|---|
+| **`allow_auto_merge`** | **ON** (was off) | flipped 2026-08-02 so PR #50 could land the moment `gates` went green, instead of a human polling CI. **⚠ It is now inside the broadened Bash permission rules, so a future `gh pr merge --auto` runs unattended.** Turn it off if that is not wanted | S14.5 |
+| **"every merged sha is the exact object CI verified"** | **FALSE, and has been for both merges** | GitHub's **rebase-merge rewrites commit objects**. `main` = `85081b0`, verified = `1b91bcd`; PR #49 was `556cfaf` vs `f180d02`. **TREES are identical; OBJECTS are not.** I reported "byte-identical to the sha CI verified" twice — true of the tree, false of the object, and I checked only the tree | measured S14.6 |
+
+### ⛔ WHAT THE GUARANTEE ACTUALLY IS, NOW THAT IT IS MEASURED
+
+**The rewritten `main` sha gets its OWN full CI run** — 17 checks on `85081b0`. So the merged object *is*
+verified, **just not by the run that was reported at merge time.**
+
+> **THE CLAIM SHOULD HAVE BEEN "THE MERGED TREE IS THE VERIFIED TREE, AND THE MERGED OBJECT IS VERIFIED
+> AFTERWARDS BY ITS OWN RUN." I SAID SOMETHING STRONGER AND CHECKED SOMETHING WEAKER.**
+
+**The gap that leaves:** between the merge and that post-merge run completing, `main` carries an object no
+green run covers. For a tree-identical rebase that is a formality — **but it is not the ff-only guarantee the
+record claims**, and a reader taking the record at face value would believe `main` never holds an unverified
+object.
+
+**TO ACTUALLY GET THE STRONGER PROPERTY:** merge with **`--merge-queue` or a local ff-push**, not
+`--rebase`. A local ff is possible whenever `main` is an ancestor of the branch head, which it was here.
+**Not changed unilaterally — the linear-history requirement interacts with it and that is a
+branch-protection decision.**
