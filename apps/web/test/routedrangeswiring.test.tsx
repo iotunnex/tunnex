@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  within,
+} from "@testing-library/react";
 
 afterEach(cleanup);
 
@@ -34,6 +40,13 @@ vi.mock("../src/lib/api", async () => {
 });
 
 const { default: RoutedRanges } = await import("../src/pages/RoutedRanges");
+
+// ⛔ SCOPED TO THE TABLE, DELIBERATELY. The address-space map renders the same CIDR strings as SVG <text>, so
+// an unscoped findByText("10.20.0.0/24") now matches twice — and would have matched the MAP while claiming to
+// prove something about the TABLE. The ambiguity is the finding: "the range is on the page" was never the
+// property; "the range is in the list a device reads" is.
+const inTable = () =>
+  within(screen.getByRole("table", { name: /approved routed ranges/i }));
 
 const ORG = [{ id: "o1", name: "Acme" }];
 const SITES = [
@@ -117,9 +130,10 @@ describe("RoutedRanges — the attribution join", () => {
     });
     render(<RoutedRanges />);
 
-    // The RANGE is already on screen — proving we are past the first request and genuinely mid-fan-out,
+    // The RANGE is already in the table — proving we are past the first request and genuinely mid-fan-out,
     // rather than asserting against a page that has not rendered at all (which would pass vacuously).
-    expect(await screen.findByText("10.20.0.0/24")).toBeTruthy();
+    await screen.findByRole("table", { name: /approved routed ranges/i });
+    expect(inTable().getByText("10.20.0.0/24")).toBeTruthy();
     expect(screen.queryByText(/no site advertises this/i)).toBeNull();
     expect(screen.getByText(/loading/i)).toBeTruthy();
 
@@ -209,7 +223,8 @@ describe("RoutedRanges — failure and emptiness", () => {
     // must not lose the subject.
     handler = backend({ ranges: ["10.20.0.0/24"], sites: "fail" });
     render(<RoutedRanges />);
-    expect(await screen.findByText("10.20.0.0/24")).toBeTruthy();
+    await screen.findByRole("table", { name: /approved routed ranges/i });
+    expect(inTable().getByText("10.20.0.0/24")).toBeTruthy();
     expect(screen.getByText(/could not load/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
   });
@@ -241,5 +256,65 @@ describe("RoutedRanges — the DNS forward gate", () => {
     expect(
       screen.getByText(/only when its resolver falls inside a routed range/i),
     ).toBeTruthy();
+  });
+});
+
+describe("RoutedRanges — the address-space map", () => {
+  it("draws PENDING cells from the fan-out the screen already issues, without an approve control", async () => {
+    // The pending QUEUE is cut (its endpoints are site:manage and live on Sites). The pending CELLS are not
+    // the same thing: they are real served data from the attribution fan-out, and showing a withheld range is
+    // the opposite of offering a control we have no permission for.
+    handler = backend({
+      ranges: ["10.20.0.0/16"],
+      subnets: {
+        s1: [
+          approved("s1", "10.20.0.0/16"),
+          { ...approved("s1", "10.40.0.0/16"), status: "pending" },
+        ],
+      },
+    });
+    render(<RoutedRanges />);
+    expect(
+      await screen.findByText(/pending, withheld until approved on Sites/i),
+    ).toBeTruthy();
+    // 1 approved · 1 pending, counted from the two different sources.
+    expect(await screen.findByText(/1 approved · 1 pending/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
+  });
+
+  it("⛔ a 192.168 range is DRAWN — the handoff's fixed 10/8 grid would have hidden it", async () => {
+    handler = backend({ ranges: ["10.10.0.0/16", "192.168.4.0/24"] });
+    render(<RoutedRanges />);
+    // Two grids, each labelled, rather than one grid silently missing half the data.
+    expect(await screen.findByRole("img", { name: /^10\.0\.0\.0\/8/ })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /^192\.168\.0\.0\/16/ })).toBeTruthy();
+  });
+
+  it("⛔ a range outside every private block is NAMED, not silently undrawn", async () => {
+    handler = backend({ ranges: ["10.10.0.0/16", "203.0.113.0/24"] });
+    render(<RoutedRanges />);
+    const note = await screen.findByText(/outside the private blocks/i);
+    expect(note.textContent).toContain("203.0.113.0/24");
+    // And it must not read as "not routed" — it is routed identically; only the drawing cannot place it.
+    expect(note.textContent).toMatch(/routed exactly the same/i);
+  });
+
+  it("renders NO map panel at all when nothing is routed, rather than an empty grid", async () => {
+    handler = backend({ ranges: [] });
+    render(<RoutedRanges />);
+    await screen.findByText(/no lan ranges are routed/i);
+    expect(screen.queryByRole("img", { name: /address space/i })).toBeNull();
+  });
+
+  it("the grid's facts are also TEXT — the picture is never the only path", async () => {
+    // An SVG is unreadable to a screen reader and unqueryable by this tier. Same three-failures-one-cause the
+    // Donut avoids. Every number the drawing carries is asserted here through its accessible name.
+    handler = backend({ ranges: ["10.10.0.0/16"] });
+    render(<RoutedRanges />);
+    const svg = await screen.findByRole("img", { name: /10\.0\.0\.0\/8/ });
+    const name = svg.getAttribute("aria-label") ?? "";
+    expect(name).toContain("1 approved");
+    // A /16 in a /8 is 1/256 = 0.39%.
+    expect(name).toMatch(/0\.4% of \/8/);
   });
 });

@@ -254,3 +254,175 @@ describe("sortForwards", () => {
     expect(JSON.stringify(input)).toBe(snapshot);
   });
 });
+
+// ── THE ADDRESS-SPACE MAP ───────────────────────────────────────────────────────────────────────────────
+
+import {
+  allocationLabel,
+  BLOCKS,
+  mapAddressSpace,
+  parseCidr,
+  utilisationLabel,
+} from "../src/lib/routedrangesview";
+
+describe("mapAddressSpace — the two defects the panel was cut for", () => {
+  it("⛔ DEFECT ①: a /24 lights its cell PARTIAL, a /16 lights it FULL — the two are distinguishable", () => {
+    // The handoff marked 10.20.0.0/24 by its second octet, painting a 65,536-address block for a 256-address
+    // LAN. Both cases in ONE test, so a model that returned a constant state fails whichever it is not.
+    const partial = mapAddressSpace(["10.31.0.0/24"]).blocks[0];
+    const full = mapAddressSpace(["10.31.0.0/16"]).blocks[0];
+    expect(partial.lit).toHaveLength(1);
+    expect(full.lit).toHaveLength(1);
+    expect(partial.lit[0].index).toBe(31);
+    expect(full.lit[0].index).toBe(31);
+    // SAME CELL, DIFFERENT STATE. That difference is the entire fix.
+    expect(partial.lit[0].state).toBe("partial");
+    expect(full.lit[0].state).toBe("full");
+  });
+
+  it("⛔ DEFECT ②: a 192.168 or 172.16 range is DRAWN, not invisible", () => {
+    // The wireframe's grid domain was hard-coded 10.0.0.0/8. Our seed is all 10.x, so this would have looked
+    // perfect while being wrong for any customer on the other two private blocks.
+    const m = mapAddressSpace([
+      "10.10.0.0/16",
+      "172.20.0.0/16",
+      "192.168.4.0/24",
+    ]);
+    expect(m.blocks.map((b) => b.block.key)).toEqual(["10", "172", "192"]);
+    expect(m.offMap).toEqual([]);
+    // And each landed in the right cell of its own block's geometry.
+    expect(m.blocks[0].lit[0].index).toBe(10); // second octet of 10/8
+    expect(m.blocks[1].lit[0].index).toBe(4); // 172.20 -> 20-16 = 4
+    expect(m.blocks[2].lit[0].index).toBe(4); // third octet of 192.168/16
+  });
+
+  it("a range outside every RFC1918 block goes to offMap — it can NEVER just vanish", () => {
+    // The failure this closes is silent: a range that is neither drawn nor listed has been deleted from the
+    // reader's picture by the drawing's own limits.
+    const m = mapAddressSpace(["10.10.0.0/16", "203.0.113.0/24"]);
+    expect(m.offMap).toEqual(["203.0.113.0/24"]);
+    expect(m.blocks).toHaveLength(1);
+  });
+
+  it("an unparseable CIDR is reported, not skipped", () => {
+    const m = mapAddressSpace(["10.10.0.0/16", "fd00::/8", "garbage"]);
+    expect(m.unparseable).toEqual(["fd00::/8", "garbage"]);
+    expect(m.offMap).toEqual([]);
+  });
+
+  it("omits a block that contains nothing — 16 dark squares are not information", () => {
+    const m = mapAddressSpace(["10.10.0.0/16"]);
+    expect(m.blocks).toHaveLength(1);
+    expect(m.blocks[0].block.key).toBe("10");
+  });
+
+  it("a range COARSER than one cell fills every cell it spans, wholly", () => {
+    // 10.0.0.0/12 is 16 /16s. Drawing it as one cell would under-report by a factor of sixteen.
+    const m = mapAddressSpace(["10.0.0.0/12"]);
+    expect(m.blocks[0].lit).toHaveLength(16);
+    expect(m.blocks[0].lit.map((c) => c.index)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ]);
+    expect(new Set(m.blocks[0].lit.map((c) => c.state))).toEqual(
+      new Set(["full"]),
+    );
+  });
+
+  it("a /8 fills the whole block and does not run past it", () => {
+    // The clamp matters: `firstCell + i < block.cells` is what keeps a coarse range from writing cell 256+.
+    const m = mapAddressSpace(["10.0.0.0/8"]);
+    expect(m.blocks[0].lit).toHaveLength(256);
+    expect(m.blocks[0].lit[255].index).toBe(255);
+    expect(m.blocks[0].utilised).toBe(1);
+  });
+
+  it("pending is a distinct STATUS, and approved wins when a cell is both", () => {
+    // Both arms. A model that always returned "approved" passes the second assertion and fails the first.
+    const pendingOnly = mapAddressSpace([], ["10.40.0.0/16"]).blocks[0];
+    expect(pendingOnly.lit[0].status).toBe("pending");
+    expect(pendingOnly.approvedCount).toBe(0);
+    expect(pendingOnly.pendingCount).toBe(1);
+
+    // Same /16: an approved /24 and a pending /24. The cell must not read as merely pending.
+    const both = mapAddressSpace(["10.50.1.0/24"], ["10.50.2.0/24"]).blocks[0];
+    expect(both.lit).toHaveLength(1);
+    expect(both.lit[0].status).toBe("approved");
+    expect(both.lit[0].cidrs).toEqual(["10.50.1.0/24", "10.50.2.0/24"]);
+  });
+
+  it("FULL beats PARTIAL on a shared cell", () => {
+    const m = mapAddressSpace(["10.7.0.0/24", "10.7.0.0/16"]).blocks[0];
+    expect(m.lit).toHaveLength(1);
+    expect(m.lit[0].state).toBe("full");
+  });
+
+  it("utilisation is measured in ADDRESSES, not in lit cells", () => {
+    // THE TRAP THIS AVOIDS: counting cells would score a /24 and a /16 identically at 1/256, overstating the
+    // /24 by 256x. The whole value of the bar is that it does not do that.
+    const oneSixteen = mapAddressSpace(["10.1.0.0/16"]).blocks[0];
+    const oneTwentyFour = mapAddressSpace(["10.1.0.0/24"]).blocks[0];
+    expect(oneSixteen.utilised).toBeCloseTo(1 / 256, 10);
+    expect(oneTwentyFour.utilised).toBeCloseTo(1 / 65536, 10);
+    expect(oneSixteen.utilised).toBeGreaterThan(oneTwentyFour.utilised * 100);
+    // Pending is NOT utilisation — it is not pushed to anything.
+    expect(mapAddressSpace([], ["10.1.0.0/16"]).blocks[0].utilised).toBe(0);
+  });
+
+  it("N=0 draws nothing at all rather than an empty grid", () => {
+    const m = mapAddressSpace([]);
+    expect(m).toEqual({ blocks: [], offMap: [], unparseable: [] });
+  });
+});
+
+describe("parseCidr", () => {
+  it("returns the network address as an UNSIGNED int32", () => {
+    // 192.168.x and 172.x both have the high bit patterns that make a signed int32 go negative. A negative
+    // address silently fails every containment check, so both blocks would come back empty.
+    expect(parseCidr("10.0.0.0/8")).toEqual({ addr: 0x0a000000, prefix: 8 });
+    expect(parseCidr("192.168.4.0/24")).toEqual({
+      addr: 0xc0a80400,
+      prefix: 24,
+    });
+    expect(parseCidr("172.16.0.0/12")!.addr).toBeGreaterThan(0);
+    expect(parseCidr("192.168.0.0/16")!.addr).toBeGreaterThan(0);
+  });
+
+  it("rejects what canonicalCidr rejects, rather than re-implementing validation", () => {
+    expect(parseCidr("nope")).toBeNull();
+    expect(parseCidr("10.0.0.0/33")).toBeNull();
+  });
+});
+
+describe("the block table itself", () => {
+  it("every block's cell count matches its own arithmetic", () => {
+    // TRUE-BY-STRUCTURE avoided: the constants are checked against the prefixes rather than restated. A typo
+    // in `cells` (say 16 for 10/8) would otherwise be invisible until a cell landed off the grid.
+    for (const b of BLOCKS)
+      expect(b.cells, b.label).toBe(Math.pow(2, b.cellPrefix - b.prefix));
+  });
+});
+
+describe("utilisationLabel / allocationLabel", () => {
+  it("never prints a bare 0.0% for a real allocation", () => {
+    // A /24 in a /8 is 0.0000015%. `toFixed(1)` renders "0.0%", which reads as NOTHING IS ROUTED on a panel
+    // showing a lit cell — the numeric form of the reassuring-empty defect.
+    const tiny = mapAddressSpace(["10.1.0.0/24"]).blocks[0];
+    expect(utilisationLabel(tiny)).toBe("<0.1% of /8");
+    expect(utilisationLabel(mapAddressSpace(["10.0.0.0/8"]).blocks[0])).toBe(
+      "100.0% of /8",
+    );
+    // And genuinely zero says zero, not "<0.1" — the two mean different things.
+    expect(utilisationLabel(mapAddressSpace([], ["10.1.0.0/16"]).blocks[0])).toBe(
+      "0% of /8",
+    );
+  });
+
+  it("omits pending at zero and includes it otherwise", () => {
+    expect(allocationLabel(mapAddressSpace(["10.1.0.0/16"]).blocks[0])).toBe(
+      "1 approved",
+    );
+    expect(
+      allocationLabel(mapAddressSpace(["10.1.0.0/16"], ["10.2.0.0/16"]).blocks[0]),
+    ).toBe("1 approved · 1 pending");
+  });
+});
