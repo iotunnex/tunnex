@@ -800,3 +800,22 @@ one is already scoped in `docs/S11.1-throughput-commit-one.md`.
 **DISPOSITION: an EPIC 11 backend story, alongside the throughput commit-one.** The screen is marked
 **absent-pending-endpoints**, not roadmap, and it stays out of EPIC 14's screen count until the endpoints
 exist.
+
+## ⏰ TRIGGERS THAT HAVE FIRED — carry into the Gateways review
+
+**1 · THE `--tnx-ink-600` OVERVIEW RE-LOOK. Trigger was *"the next review that has seeded data"* — IT HAS
+FIRED.** `make seed-fixtures` now seeds 8 devices, so the **Peer Connection Status** donut renders an ARC
+instead of an empty state, and the neutral slice that has been **rendering black since S14.3** is finally
+visible. **FOLD IT INTO THE SAME LOCALHOST SESSION AS GATEWAYS.** Do not schedule a separate look — the whole
+reason it was deferred was that a look with no data could not see it, and that condition is gone.
+
+**2 · `Histogram`'s CONSUMER OBLIGATION — THE CLOCK GOT LONGER, WHICH IS THE RISK.** `Histogram` was built in
+S14.3 with **Access Events** named as its consumer. The nav audit moved Access Events from **REDESIGN** to
+**BUILD** — a screen that does not exist rather than one awaiting a section pass.
+
+> **A DEFERRAL WHOSE TRIGGER MOVES FURTHER AWAY IS HOW A DEFERRAL BECOMES PERMANENT.**
+
+**The producer-without-consumer count for this epic is now: `Histogram` (Access Events, BUILD), `AreaChart`
+(throughput, ABSENT-PENDING-ENDPOINTS).** Both are real components with no shipping consumer. **Re-state both
+at EPIC 14 close**, and if either still has none, that is the moment to ask whether it should have been built
+yet — not to quietly carry it into EPIC 15.
