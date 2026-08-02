@@ -43,7 +43,7 @@ export function policyHealthBadge(
       // endpoint, which needs the cert that expired. The label carries the REMEDY because no other kind's
       // remedy applies and waiting is actively wrong: this never self-heals.
       return {
-        label: "certificate expired — re-enroll this gateway",
+        label: "certificate expired, re-enroll this gateway",
         tone: "danger",
       };
     case "k8s_endpoints_unavailable":
@@ -59,7 +59,7 @@ export function policyHealthBadge(
       // direction (not "offline" — it forwards; not "healthy" — it's stale). Remedy: restart the agent
       // (the wire is fine, the brain is dead). Danger: it enforces a policy the CP has since changed.
       return {
-        label: "agent down — still forwarding (restart agent)",
+        label: "agent down, still forwarding (restart agent)",
         tone: "danger",
       };
     default:
