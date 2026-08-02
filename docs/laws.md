@@ -2777,3 +2777,37 @@ the mode, and the third claim fell out. **Neither the founder nor I was looking 
 **THE CHECK:** for every rendered sentence asserting a consequence, name the state that makes it true and ask
 whether the render is conditioned on that state. If the copy contains *"under X"*, *"while X"*, *"since X"* —
 X must be in the branch condition, not only in the prose.
+
+---
+
+## A GUARD THAT VALIDATES ONE COPY OF A DUPLICATED RULE CERTIFIES THE COPY, NOT THE RULE
+
+**S14.12 (founder-ruled — the session's result). IT COMPOUNDS THREE WAYS, and each alone would have been
+survivable.**
+
+**1 — THE RULE WAS DUPLICATED WITH NOTHING LINKING THE COPIES.** The diff classifier lives in `ci.yml` **and**
+in `security.yml`. Adding `\.sql$` to one left the other behind; nothing in the repo related them.
+
+**2 — THE GUARD BUILT TO PREVENT EXACTLY THIS CLASS READ ONLY ONE COPY, AND PASSED.**
+`TestClassifierPatternMatchesTheWorkflow` was written *because* a transcribed pattern can drift from the
+workflow. It opened `ci.yml`, found agreement, and reported green — **certifying the artifact I had already
+fixed while the divergent one went unexamined.**
+
+**3 — THE FAILURE MODE WAS `skipped`, NOT `failed`.** Three security jobs — **`govulncheck` ×5 modules,
+`gofmt + vet parity`, `Trivy`** — did not run on a diff containing a Go compile input. **Every badge was
+green.** A skipped security job is indistinguishable at a glance from "not applicable to this diff", which is
+the *normal* reason a job skips.
+
+> ### **A GREEN BOARD WITH THREE ABSENT SECURITY JOBS LOOKS EXACTLY LIKE A GREEN BOARD.**
+
+**THE FIX ASSERTS THE RULE, NOT A COPY:** both workflows must carry the **identical** pattern, and the guard
+loops over both files. **Proven to fire on the sibling** — reverting `security.yml` alone reds it by name.
+
+**THE GENERAL CHECK:** when a guard validates a duplicated value, its assertion must range over **every**
+instance, and the loop must be **derived** (a list of files) rather than written once per instance — because a
+guard extended by hand acquires the same drift it exists to prevent.
+
+**AND THE SHAPE THAT HID IT — the third `skipped`-vs-`passed` instance this epic.** The classifier's own
+notice says it (`false = the Go steps below are SKIPPED, not passed`); CodeQL's counting step said it; and now
+a whole job set. **Every time, the thing that made it invisible was that skipping is also the correct
+behaviour most of the time.**

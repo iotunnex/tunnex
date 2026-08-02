@@ -106,14 +106,27 @@ func TestGoEmbedTargetsAreGoRelevantToCI(t *testing.T) {
 // and this guard would cheerfully validate embeds against a pattern CI no longer uses — a guard checking a
 // copy of the thing instead of the thing.
 func TestClassifierPatternMatchesTheWorkflow(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", "ci.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), classifierPattern) {
-		t.Fatalf("the classifier regex in ci.yml no longer matches the copy in this file.\n"+
-			"  this file expects: %s\n"+
-			"  update BOTH, or the embed census validates against a pattern CI does not run.",
-			classifierPattern)
+	// ⛔ THERE ARE TWO CLASSIFIERS, AND CHECKING ONE IS HOW THIS GUARD MISSED A REAL SKIP.
+	//
+	// S14.12: `.sql$` was added to ci.yml and NOT to security.yml. This test passed — it only read ci.yml —
+	// while security.yml's scope job emitted go=false on a diff containing `fixtures.sql`, SILENTLY SKIPPING
+	// govulncheck (5 modules), gofmt+vet parity, and Trivy. A skipped security job reports as `skipped`,
+	// which is indistinguishable from "not applicable" at a glance.
+	//
+	//   A GUARD THAT VALIDATES ONE COPY OF A DUPLICATED RULE CERTIFIES THE COPY, NOT THE RULE.
+	//
+	// Both files are now required to carry the identical pattern.
+	for _, wf := range []string{"ci.yml", "security.yml"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", wf))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), classifierPattern) {
+			t.Errorf("the classifier regex in %s does not match the copy in this file.\n"+
+				"  expected: %s\n"+
+				"  BOTH workflows classify the diff, and they must agree — otherwise one set of jobs\n"+
+				"  skips on a diff the other set runs, and a skipped job looks like a passing one.",
+				wf, classifierPattern)
+		}
 	}
 }
