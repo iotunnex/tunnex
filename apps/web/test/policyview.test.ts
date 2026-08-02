@@ -1097,6 +1097,38 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
     expect(l.srcs[0].label).toBe("hub");
   });
 
+  it("⛔ THE PROPERTY, NOT THE PROXY: crossings go DOWN versus insertion order, counted", () => {
+    // "the ordering function ran" is a proxy. "crossings went down" is the property — the same distinction
+    // the coverage threshold turns on. MEASURED on the live 11-rule fixture: insertion 8 -> ordered 2.
+    //
+    // ⛔ AND IT DOES NOT REACH ZERO, WHICH IS HONEST. A bipartite graph with genuinely tangled edges cannot;
+    // the wireframe reaches zero because a human chose five edges that do not cross. Asserting `=== 0` here
+    // would pin an outcome the algorithm cannot guarantee and would fail on the next fixture row.
+    const R = [
+      ["Engineering", "Internal Gitlab"], ["DevOps", "Contractors"], ["192.168.99.0/24", "Staging Database"],
+      ["Engineering", "removed service 0"], ["Grace Okafor", "Staging Database"], ["site eu-lan", "site ap-lan"],
+      ["Contractors", "EU LAN Services"], ["DevOps", "Internal Gitlab"], ["Demo Member", "Engineering"],
+      ["Contractors", "Contractors"], ["Engineering", "Staging Database"],
+    ].map(([s2, d], i) => ({
+      id: String(i), src: s2, dst: d, temp: false,
+      srcKind: "group" as const, dstKind: "resource" as const,
+    }));
+    const ordered = flowLayout(R);
+    const insertion = {
+      ...ordered,
+      srcs: [...new Set(R.map((r) => r.src))]
+        .filter((x) => ordered.srcs.some((n) => n.label === x))
+        .map((label) => ({ label, kind: "group" as const })),
+      dsts: [...new Set(R.map((r) => r.dst))]
+        .filter((x) => ordered.dsts.some((n) => n.label === x))
+        .map((label) => ({ label, kind: "resource" as const })),
+    };
+    const before = flowCrossings(insertion), after = flowCrossings(ordered);
+    expect(after).toBeLessThan(before);   // the property
+    expect(before).toBeGreaterThan(0);    // and the input really does tangle, or the claim is vacuous
+    expect(after).toBeLessThanOrEqual(2); // pinned at the measured value; a regression is a red
+  });
+
   it("⛔ A KNOWN-CROSSING INPUT COMES OUT ORDERED — the cap alone does not fix the tangle", () => {
     // Deliberately reversed: insertion order puts every destination opposite its source.
     const edges = [e("1", "s1", "d4"), e("2", "s2", "d3"), e("3", "s3", "d2"), e("4", "s4", "d1")];

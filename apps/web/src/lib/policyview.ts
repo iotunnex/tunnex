@@ -889,18 +889,38 @@ export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout
   const deg = (l: string, k: "src" | "dst") => edges.filter((e) => e[k] === l).length;
   const kindOfSrc = new Map(edges.map((e) => [e.src, e.srcKind]));
   const kindOfDst = new Map(edges.map((e) => [e.dst, e.dstKind]));
-  const srcLabels = [...new Set(edges.map((e) => e.src))]
+  let srcLabels = [...new Set(edges.map((e) => e.src))]
     .sort((a, b) => deg(b, "src") - deg(a, "src"))
     .slice(0, cap);
   const si = (l: string) => srcLabels.indexOf(l);
-  const bary = (d: string) => {
-    const ss = edges.filter((e) => e.dst === d && si(e.src) >= 0).map((e) => si(e.src));
-    return ss.length ? ss.reduce((a, b) => a + b, 0) / ss.length : Number.MAX_SAFE_INTEGER;
-  };
-  const dstLabels = [...new Set(edges.map((e) => e.dst))]
+  let dstLabels = [...new Set(edges.map((e) => e.dst))]
     .sort((a, b) => deg(b, "dst") - deg(a, "dst"))
-    .slice(0, cap)
-    .sort((a, b) => bary(a) - bary(b));
+    .slice(0, cap);
+
+  // ⛔ MEASURED, THEN FIXED. The first version ordered ONE side ONCE: sources were pinned by degree and only
+  // destinations got a barycentric pass. On the live 11-rule fixture that gave 3 crossings against insertion
+  // order's 8 — real, but short.
+  //
+  // DEGREE PICKS *WHO* APPEARS; IT MUST NOT ALSO PIN *WHERE*. Selection and placement are different
+  // decisions, and conflating them left half the graph unordered. So: select by degree (above), then order
+  // BOTH columns by ALTERNATING barycentric passes until they stop moving.
+  //
+  // Four passes is the cap: barycentric ordering converges quickly and can cycle, so an iteration limit is
+  // required, not optional.
+  let srcOrder = [...srcLabels];
+  const meanOf = (label: string, side: "src" | "dst", other: string[]) => {
+    const idx = edges
+      .filter((e) => e[side] === label)
+      .map((e) => other.indexOf(side === "src" ? e.dst : e.src))
+      .filter((i) => i >= 0);
+    return idx.length ? idx.reduce((a, b) => a + b, 0) / idx.length : Number.MAX_SAFE_INTEGER;
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    dstLabels = [...dstLabels].sort((a, b) => meanOf(a, "dst", srcOrder) - meanOf(b, "dst", srcOrder));
+    srcOrder = [...srcOrder].sort((a, b) => meanOf(a, "src", dstLabels) - meanOf(b, "src", dstLabels));
+  }
+  srcLabels = srcOrder;
+
   const shown = edges.filter((e) => si(e.src) >= 0 && dstLabels.indexOf(e.dst) >= 0);
   return {
     srcs: srcLabels.map((l) => ({ label: l, kind: kindOfSrc.get(l)! })),
