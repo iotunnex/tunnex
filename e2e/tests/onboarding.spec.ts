@@ -259,7 +259,7 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   // Gateways enroll ceremony lives.
   await signIn(page, OWNER);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Devices" }).click();
+  await page.getByRole("link", { name: "Gateways" }).click();
   await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
 
   await page.getByRole("button", { name: "Enroll gateway" }).click();
