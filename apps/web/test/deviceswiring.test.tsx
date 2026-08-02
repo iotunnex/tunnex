@@ -71,6 +71,14 @@ const DEVICES = [
     health_state: "unknown",
     health_reported_at: "2026-07-16T00:00:00Z",
   },
+  {
+    id: "d-blocked",
+    name: "blocked-device",
+    status: "active",
+    assigned_ip: "10.99.0.18",
+    health_state: "noncompliant",
+    health_blocked: true,
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
@@ -180,12 +188,13 @@ describe("Devices — wiring", () => {
     // The distinction matters: an operator must still see a revoked device exists. Suppressing the row would
     // trade a wrong badge for a missing fact.
     //
-    // 7 rows = 1 header + 6 devices (revoked, active, pending, stale-laptop, ovpn-contractor, stale-device).
+    // 8 rows = 1 header + 7 devices (revoked, active, pending, stale-laptop, ovpn-contractor, stale-device, blocked-device).
     // Counting rows is a stronger claim than "these strings appear": it also fails if an unexpected device were rendered.
-    expect(within(table).getAllByRole("row")).toHaveLength(7);
-    // The address and pending status are asserted ON THEIR OWN DEVICE'S ROW.
+    expect(within(table).getAllByRole("row")).toHaveLength(8);
+    // The address, pending status, and posture blocked label are asserted ON THEIR OWN DEVICE'S ROW.
     expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
     expect(within(rowFor("unapproved-phone")).getByText("pending")).toBeTruthy();
+    expect(within(rowFor("blocked-device")).getByText("posture blocked")).toBeTruthy();
   });
 
   it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
