@@ -987,7 +987,26 @@ export function AreaChart({
 // cause the `Donut` avoids. Every fact the picture carries is also in its accessible name and in the text
 // beneath it. The picture is the fast path, never the only path.
 
-const GRID = { x0: 44, top: 50, cw: 10.4, ch: 13.5, cellW: 8.4, cellH: 11.4 };
+// The handoff's origin, kept. The PITCH is now derived rather than fixed — see `gridMetrics`.
+const GRID = { x0: 44, top: 50 };
+/** The left column's usable width, up to the divider at 356. */
+const GRID_MAX = 296;
+const GRID_MIN = 176;
+/** Call-out row pitch. Tighter than the handoff's 42 because our list runs to eight rows, not three. */
+const ROW_PITCH = 36;
+
+/**
+ * Cell pitch sized so the grid stands as tall as the call-out list beside it.
+ *
+ * ⛔ THE GRID IS SQUARE AND SCALES; IT DOES NOT SIT AT A FIXED 108px WHILE THE LIST GROWS. That mismatch is
+ * what made the connectors look like they overflowed the drawing — they were correct, and pointing at a
+ * column that had run out of picture.
+ */
+function gridMetrics(cols: number, rows: number, listHeight: number) {
+  const box = Math.max(GRID_MIN, Math.min(GRID_MAX, listHeight));
+  const pitch = box / Math.max(cols, rows);
+  return { pitch, cellW: pitch * 0.78, cellH: pitch * 0.78, box };
+}
 export const MAP_LIST_MAX = 8;
 
 /** Per-kind stroke. Deliberately four distinguishable tones: the cell's colour IS its constraint class. */
@@ -1015,23 +1034,26 @@ function LitCell({
   block,
   animate,
   order,
+  m,
 }: {
   cell: Cell;
   block: Block;
   animate: boolean;
   order: number;
+  m: { pitch: number; cellW: number; cellH: number };
 }) {
   const col = cell.index % block.cols;
   const row = Math.floor(cell.index / block.cols);
-  const cx = GRID.x0 + col * GRID.cw + GRID.cellW / 2;
-  const cy = GRID.top + row * GRID.ch + GRID.cellH / 2;
+  const cx = GRID.x0 + col * m.pitch + m.cellW / 2;
+  const cy = GRID.top + row * m.pitch + m.cellH / 2;
   const tone = KIND_TONE[cell.kind];
   const pending = cell.kind === "pending";
   // ⛔ PARTIAL IS DRAWN INSET — defect ① closed in one line. A /24 inside a /16 cell occupies a visibly
   // smaller square, so "some of this block" cannot be misread as "all of it".
-  const inset = cell.state === "partial" ? 2.3 : 0;
-  const w = GRID.cellW - inset * 2;
-  const h = GRID.cellH - inset * 2;
+  // Inset scales with the cell so a partial stays visibly smaller at every grid size.
+  const inset = cell.state === "partial" ? m.cellW * 0.26 : 0;
+  const w = m.cellW - inset * 2;
+  const h = m.cellH - inset * 2;
   const begin = 0.15 + order * 0.09;
 
   return (
@@ -1111,16 +1133,24 @@ export function AddressSpaceMap({
   const { block, lit } = map;
   const rows = Math.ceil(block.cells / block.cols);
   const showList = lit.length > 0 && lit.length <= MAP_LIST_MAX;
-  const gridBottom = GRID.top + rows * GRID.ch;
-  const listBottom = 60 + (showList ? lit.length : 0) * 40;
-  const height = Math.max(gridBottom + 20, listBottom + 66);
+  const listRows = showList ? lit.length : 0;
+  const listBottom = 46 + listRows * ROW_PITCH;
+  // ⛔ THE UTILISATION BLOCK SITS UNDER THE LIST, NOT AT max(grid, list). Anchoring it to whichever column
+  // happened to be taller left it FLOATING in space at low N — the right column ended, then 140px of nothing,
+  // then a bar. It belongs to the list; it goes under the list.
+  const utY = listBottom + 30;
+  const rightBottom = utY + 40;
+  // And the grid is sized FROM the right column's full height, so the two end level at every N. It is
+  // clamped: below GRID_MIN the cells stop being legible, and above GRID_MAX it would cross the divider.
+  const m = gridMetrics(block.cols, rows, rightBottom - GRID.top);
+  const gridBottom = GRID.top + rows * m.pitch;
+  const height = Math.max(gridBottom, rightBottom) + 14;
   const panelL = 372;
   const listX = 392;
-  const utY = Math.max(listBottom + 22, gridBottom - 20);
 
   const centre = (index: number) => ({
-    x: GRID.x0 + (index % block.cols) * GRID.cw + GRID.cellW / 2,
-    y: GRID.top + Math.floor(index / block.cols) * GRID.ch + GRID.cellH / 2,
+    x: GRID.x0 + (index % block.cols) * m.pitch + m.cellW / 2,
+    y: GRID.top + Math.floor(index / block.cols) * m.pitch + m.cellH / 2,
   });
   const barW = 120;
   const filled = Math.max(barW * map.utilised, map.utilised > 0 ? 4 : 0);
@@ -1142,12 +1172,12 @@ export function AddressSpaceMap({
       </text>
 
       {Array.from({ length: rows }, (_, r) => r)
-        .filter((r) => rows <= 2 || r % 2 === 0)
+        .filter((r) => rows <= 4 || r % 4 === 0)
         .map((r) => (
           <text
             key={`rl${r}`}
             x={GRID.x0 - 9}
-            y={GRID.top + r * GRID.ch + 9}
+            y={GRID.top + r * m.pitch + m.cellH * 0.75}
             textAnchor="end"
             className="font-mono"
             fill="var(--tnx-text-faint)"
@@ -1163,10 +1193,10 @@ export function AddressSpaceMap({
       {Array.from({ length: block.cells }, (_, i) => (
         <rect
           key={`f${i}`}
-          x={GRID.x0 + (i % block.cols) * GRID.cw}
-          y={GRID.top + Math.floor(i / block.cols) * GRID.ch}
-          width={GRID.cellW}
-          height={GRID.cellH}
+          x={GRID.x0 + (i % block.cols) * m.pitch}
+          y={GRID.top + Math.floor(i / block.cols) * m.pitch}
+          width={m.cellW}
+          height={m.cellH}
           rx={2.2}
           fill="var(--tnx-surface-inset)"
           stroke="var(--tnx-divider)"
@@ -1175,14 +1205,14 @@ export function AddressSpaceMap({
       ))}
 
       {lit.map((cell, i) => (
-        <LitCell key={cell.index} cell={cell} block={block} animate={animate} order={i} />
+        <LitCell key={cell.index} cell={cell} block={block} animate={animate} order={i} m={m} />
       ))}
 
       {showList && (
         <>
-          <line x1={356} y1={26} x2={356} y2={height - 16} stroke="var(--tnx-divider)" strokeWidth={1} />
+          <line x1={356} y1={26} x2={356} y2={height - 14} stroke="var(--tnx-divider)" strokeWidth={1} />
           {lit.map((cell, i) => {
-            const y = 60 + i * 40;
+            const y = 60 + i * ROW_PITCH;
             const c = centre(cell.index);
             const tone = KIND_TONE[cell.kind];
             const primary = cell.allocs[0];

@@ -232,10 +232,17 @@ export type Block = {
   cols: number;
 };
 
+// ⛔ `cols` IS SQUARE, NOT 32-WIDE, AND THAT IS A LAYOUT FIX WITH A REASON. The handoff drew 256 cells as
+// 32x8 — a 4:1 letterbox 108px tall — beside a call-out list that grows 40px PER RANGE. At the handoff's
+// three ranges the two were roughly level; at our eight the list is 320px and the grid still 108px, so the
+// connectors trailed 250px into empty space and read as OVERFLOWING the drawing.
+//
+// A SHAPE CHOSEN AT N=3 IS NOT A SHAPE THAT SURVIVES N=8. Square (16x16) puts the grid's aspect ratio in the
+// same family as the list's, so the two columns stay level as the list grows.
 export const BLOCKS: Block[] = [
-  { key: "10", label: "10.0.0.0/8", base: 0x0a000000, prefix: 8, cellPrefix: 16, cells: 256, cols: 32 },
-  { key: "172", label: "172.16.0.0/12", base: 0xac100000, prefix: 12, cellPrefix: 16, cells: 16, cols: 16 },
-  { key: "192", label: "192.168.0.0/16", base: 0xc0a80000, prefix: 16, cellPrefix: 24, cells: 256, cols: 32 },
+  { key: "10", label: "10.0.0.0/8", base: 0x0a000000, prefix: 8, cellPrefix: 16, cells: 256, cols: 16 },
+  { key: "172", label: "172.16.0.0/12", base: 0xac100000, prefix: 12, cellPrefix: 16, cells: 16, cols: 4 },
+  { key: "192", label: "192.168.0.0/16", base: 0xc0a80000, prefix: 16, cellPrefix: 24, cells: 256, cols: 16 },
 ];
 
 export type CellState = "partial" | "full";
