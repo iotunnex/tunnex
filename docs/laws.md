@@ -2561,3 +2561,31 @@ is ignored by the page, and the omitted one makes the page take the branch nobod
 
 **MEASURE BEFORE BLAMING THE PAGE.** The live endpoint served a populated `actor_id` on 34 of 78 rows — so the
 page was right and only the fixture was wrong. Reading the code alone would have supported either conclusion.
+
+---
+
+## A PER-SCREEN OBLIGATION THAT NOBODY DISCHARGES PER SCREEN IS PROSE
+
+**S14.11, founder-ruled.** *"Each section clears its own em-dashes"* was written down and carried across
+sections. **It is not what cleared anything.** The 163→19 burn-down happened in **one global sweep in S14.6**,
+while the per-screen passes **preserved** em-dashes because tests asserted on them.
+
+> ### **THE OBLIGATION EXISTED, WAS WRITTEN DOWN, AND WAS NOT THE MECHANISM. Every section reported its**
+> ### **pass complete without discharging it, and no check noticed — because the obligation's only**
+> ### **enforcement was the sentence stating it.**
+
+Reclassified to a **single global sweep plus an ESLint/CI rule at EPIC 14 close** — the honest form, because a
+lint rule is discharged by machinery rather than by intent.
+
+**THE DIAGNOSTIC, and it generalises past em-dashes:** for any standing per-unit obligation, ask **what
+actually discharged it last time**. If the answer is "a batch pass someone ran once", it was never per-unit —
+it is a global task wearing a per-unit costume, and leaving it in the per-unit definition of done means every
+unit reports done while the debt accrues.
+
+**AND NOTE WHICH RULE THIS DOES *NOT* COVER.** The em-dash as a **placeholder glyph** is a separate, already
+resolved rule (S14.5: `"—"` → `"n/a"`), and it does **not** wait for the global prose sweep. Collapsing the two
+would let a resolved rule ride on an unresolved one's schedule — which is how `Kubernetes.tsx:403` shipped a
+regression with a written exemption.
+
+**This is a sibling of the prose-versus-behaviour class:** there the prose asserted a fact the code did not
+implement; here the prose asserted a *process* nobody performed. Same failure, one level up.
