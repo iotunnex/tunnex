@@ -13,15 +13,19 @@ import {
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
+  Badge,
   Button,
-  Card,
+  DataTable,
+  EmptyState,
   ErrorText,
   Field,
   Input,
   Modal,
+  Panel,
   Select,
 } from "../components/ui";
 import { LoadRetry } from "../components/LoadRetry";
+import { Icon, type IconName } from "../components/Icon";
 import { roleFromMembers } from "../lib/policyview";
 import {
   assembleClusters,
@@ -29,7 +33,6 @@ import {
   k8sGate,
   managedEditWarning,
   objectControls,
-  serviceRowClass,
   statTiles,
   type ClusterCard,
 } from "../lib/k8sview";
@@ -146,12 +149,213 @@ export default function Kubernetes() {
     [cards, raw],
   );
 
+  // ⛔ ONE MODAL OWNER AT PAGE LEVEL. The per-cluster card used to hold its own modal state; the wireframe's
+  // layout is a TABLE, and a table row cannot own a modal without one instance per row. Hoisting it here is
+  // what makes the table possible, and it keeps every mutation path (expose / unexpose / deregister) intact.
+  const [exposeFor, setExposeFor] = useState<ClusterCard | null>(null);
+  const [deregisterFor, setDeregisterFor] = useState<ClusterCard | null>(null);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+
+  async function unexpose(serviceId: string) {
+    setRowErr(null);
+    const { error } = await api.DELETE(
+      "/api/v1/organizations/{orgId}/k8s/services/{serviceId}",
+      { params: { path: { orgId: orgId ?? "", serviceId } } },
+    );
+    if (error)
+      return setRowErr(apiErrorMessage(error, "Could not unexpose the Service."));
+    reload();
+  }
+
+  // Every exposed Service, flattened WITH its cluster, so the table is one scannable list rather than a list
+  // per card. §6.2: the SERVICE list is the scaling surface, so it gets the table; the cluster list does not.
+  const serviceRows = useMemo(
+    () =>
+      cards.flatMap((c) =>
+        c.services.map((sv) => ({
+          ...sv,
+          clusterName: c.name,
+          reachable: clusterReachability({ siteId: c.siteId, gateways })
+            .reachable,
+        })),
+      ),
+    [cards, gateways],
+  );
+
+  const clusterColumns = [
+    {
+      key: "cluster",
+      header: "Cluster",
+      cell: (c: ClusterCard) => (
+        <span className="flex flex-col gap-0.5">
+          <span className="flex items-center gap-2">
+            <span className="font-mono text-ink-primary">{c.name}</span>
+            {c.managedByOperator && <ManagedBadge />}
+          </span>
+          {/* The handoff's sub-line, and it carries the REASON the address is untouchable. */}
+          {c.dnsVip !== null && (
+            <span className="font-mono text-micro text-ink-faint">
+              DNS VIP {c.dnsVip} (reserved, never handed to a Service)
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: "site",
+      header: "Fronted by",
+      cell: (c: ClusterCard) => {
+        const reach = clusterReachability({ siteId: c.siteId, gateways });
+        const name = siteName.get(c.siteId) ?? null;
+        return (
+          <span className="flex flex-col gap-0.5">
+            <span className="font-mono text-cell text-ink-body">
+              {name === null ? "site unknown" : `site: ${name}`}
+            </span>
+            {/* ⛔ D9 SITS HERE, ON THE THING IT IS ABOUT. The claim is about the GATEWAY fronting the site, so
+                it belongs in this column and not on the Service rows, which would read as a fact about them. */}
+            {!reach.reachable && reach.why !== null && (
+              <span className="text-micro text-warn">{reach.why}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      key: "vip",
+      header: "VIP range",
+      cell: (c: ClusterCard) => (
+        <span className="font-mono text-cell text-ink-body">{c.vipRange}</span>
+      ),
+    },
+    {
+      key: "svccidr",
+      header: "Service CIDR",
+      cell: (c: ClusterCard) => (
+        <span className="font-mono text-cell text-ink-body">
+          {c.serviceCidr}
+        </span>
+      ),
+    },
+    {
+      key: "zone",
+      header: "DNS zone",
+      cell: (c: ClusterCard) => (
+        <span className="font-mono text-cell text-ink-body">{c.dnsZone}</span>
+      ),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      cell: (c: ClusterCard) => (
+        <Badge tone="neutral">
+          {c.managedByOperator ? "OPERATOR" : "DASHBOARD"}
+        </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      cell: (c: ClusterCard) =>
+        !gate.canManage ? null : objectControls(c.managedByOperator).withheld ? (
+          // The destructive control is WITHHELD, not faked: a dashboard edit would be reconciled away.
+          //
+          // ⛔ THE ACCESSIBLE NAME CARRIES THE FULL GUIDANCE, and it is load-bearing rather than decoration:
+          // the visible text is a fragment that fits a table cell, so a screen-reader user would otherwise get
+          // "edit the CR, not here" with no statement of WHAT is managed or WHY the control is absent. My first
+          // pass rendered the visible text only and the wiring test caught the regression.
+          <span
+            className="text-micro text-ink-faint"
+            aria-label={managedEditWarning("cluster")}
+          >
+            edit the CR, not here
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <Button variant="ghost" onClick={() => setExposeFor(c)}>
+              Expose Service
+            </Button>
+            <Button variant="ghost" onClick={() => setDeregisterFor(c)}>
+              Deregister
+            </Button>
+          </span>
+        ),
+    },
+  ];
+
+  type SvcRow = (typeof serviceRows)[number];
+  const serviceColumns = [
+    {
+      key: "fqdn",
+      header: "Exposed Service — FQDN (copy, don't construct)",
+      cell: (r: SvcRow) => (
+        <span className="flex flex-col gap-0.5">
+          <span className="font-mono text-ink-primary">{r.fqdn}</span>
+          <span className="text-micro text-ink-faint">
+            ns {r.namespace} · name {r.name}
+            {cards.length > 1 ? ` · cluster ${r.clusterName}` : ""}
+          </span>
+        </span>
+      ),
+    },
+    {
+      key: "vip",
+      header: "VIP",
+      cell: (r: SvcRow) => (
+        <span className="font-mono text-cell text-ink-body">{r.vip}</span>
+      ),
+    },
+    {
+      key: "ports",
+      header: "Ports",
+      cell: (r: SvcRow) => (
+        <span className="font-mono text-cell text-ink-body">
+          {r.protocol} {r.ports}
+        </span>
+      ),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      cell: (r: SvcRow) => (
+        <Badge tone="neutral">
+          {r.managedByOperator ? "OPERATOR" : "DASHBOARD"}
+        </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      cell: (r: SvcRow) =>
+        !gate.canManage ? null : objectControls(r.managedByOperator).withheld ? (
+          <span
+            className="text-micro text-ink-faint"
+            aria-label={managedEditWarning("Service")}
+          >
+            edit the CR, not here
+          </span>
+        ) : (
+          <Button variant="ghost" onClick={() => unexpose(r.id)}>
+            Unexpose
+          </Button>
+        ),
+    },
+  ];
+
+  const TILE_ICON: Record<string, IconName> = {
+    Clusters: "boxes",
+    "Exposed Services": "route",
+    "Machine credentials": "key",
+  };
+
   return (
-    <div>
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3.5">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-white">Kubernetes</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-[22px] font-semibold text-ink-heading">
+            Kubernetes
+          </h1>
+          <p className="text-cell text-ink-tertiary">
             Clusters, exposed Services and the VIPs clients reach them at. A
             Service is reached by name over the tunnel, never by its ClusterIP.
           </p>
@@ -162,165 +366,178 @@ export default function Kubernetes() {
       </div>
 
       {loadError && <LoadRetry error={loadError} onRetry={reload} />}
+      {!loadError && raw === null && (
+        <p className="text-cell text-ink-faint">Loading…</p>
+      )}
 
-      {raw && !loadError && (
+      {raw && !loadError && cards.length === 0 && (
+        // ⛔ N=0 IS ONE EMPTY STATE, NOT EIGHT. Every panel below would render its own emptiness, and eight
+        // simultaneous empty panels is the reassuring-empty defect multiplied. It names the precondition.
+        <EmptyState>
+          {raw.sites.length === 0
+            ? "Register a site with a gateway first: a cluster is fronted by one site's gateway, and without one no VIP can be programmed."
+            : "No clusters registered. Registering one reserves a VIP range and a DNS zone, and then in-cluster Services can be exposed by name."}
+        </EmptyState>
+      )}
+
+      {raw && !loadError && cards.length > 0 && (
         <>
-          {raw.sites.length === 0 && (
-            <p className="mt-4 text-sm text-slate-500">
-              Register a site gateway first — a cluster is fronted by one site's
-              gateway.
-            </p>
-          )}
-          {cards.length === 0 && raw.sites.length > 0 && (
-            <p className="mt-4 text-sm text-slate-500">
-              No clusters yet. Register one to start exposing Services.
-            </p>
-          )}
-          {cards.length > 0 && (
-            <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {tiles.map((t: { label: string; value: number | null; hint: string }) => (
-                <li
-                  key={t.label}
-                  className="rounded-card border border-line bg-surface px-3.5 py-3"
-                >
-                  <p className="text-micro uppercase tracking-wide text-ink-tertiary">
-                    {t.label}
-                  </p>
-                  <p className="mt-1 text-[22px] font-semibold text-ink-heading">
-                    {/* ⛔ A NULL VALUE RENDERS AS A DASH, NEVER AS 0. A zero standing in for "we could not
-                        look" is the reassuring-empty defect in numeric form. */}
-                    {/* A LONE DASH IS A NULL MARKER, NOT PROSE, so the em-dash sweep leaves it: it is the
-                        clearest "no value" glyph in a numeric slot, and the hint beneath says WHY. */}
-                    {t.value === null ? "—" : t.value}
-                  </p>
-                  <p className="text-micro text-ink-faint">{t.hint}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-4 space-y-4">
-            {cards.map((c) => (
-              <ClusterCardView
-                key={c.id}
-                orgId={orgId ?? ""}
-                card={c}
-                canManage={gate.canManage}
-                onDone={reload}
-                siteName={siteName.get(c.siteId) ?? null}
-                reach={clusterReachability({ siteId: c.siteId, gateways })}
-              />
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {tiles.map((t) => (
+              <li
+                key={t.label}
+                className="rounded-card border border-line bg-surface px-3.5 py-3"
+              >
+                <p className="flex items-center gap-2 text-micro uppercase tracking-wide text-ink-tertiary">
+                  <Icon name={TILE_ICON[t.label] ?? "boxes"} size={13} />
+                  {t.label}
+                </p>
+                <p className="mt-1 text-[22px] font-semibold text-ink-heading">
+                  {/* A LONE DASH IS A NULL MARKER, NOT PROSE — the em-dash sweep leaves it. A null never
+                      renders 0, because "we could not look" is a different fact from "there are none". */}
+                  {t.value === null ? "—" : t.value}
+                </p>
+                <p className="text-micro text-ink-faint">{t.hint}</p>
+              </li>
             ))}
-          </div>
+          </ul>
 
-          {cards.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
-              <Card>
-                <h2 className="text-sm font-semibold text-ink-heading">
-                  How a client reaches a Service
-                </h2>
-                {/* STATIC COPY, and its content is verified against the code rather than copied from the
-                    wireframe: the DNAT target is a READY POD (dnat_linux.go), and the grant matches
-                    `ct original ip daddr` so enforcement keys the PRE-DNAT VIP. */}
-                <ol className="mt-2 space-y-1.5 text-cell text-ink-body">
-                  <li>1. The client resolves the FQDN at the cluster&rsquo;s reserved DNS VIP.</li>
-                  <li>2. It connects to the Service&rsquo;s synthetic VIP.</li>
-                  <li>3. The gateway DNATs that VIP to a ready pod endpoint.</li>
-                </ol>
+          <Panel title={`Clusters (${cards.length})`}>
+            <DataTable
+              caption="Registered Kubernetes clusters"
+              columns={clusterColumns}
+              rows={cards}
+              rowKey={(c: ClusterCard) => c.id}
+              empty="No clusters registered."
+              failed={false}
+            />
+          </Panel>
+
+          <ErrorText>{rowErr}</ErrorText>
+
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[8fr_4fr]">
+            <div className="flex min-w-0 flex-col gap-3">
+              <Panel title={`Exposed Services (${serviceRows.length})`}>
+                <DataTable
+                  caption="Exposed Kubernetes Services"
+                  columns={serviceColumns}
+                  rows={serviceRows}
+                  rowKey={(r: SvcRow) => r.id}
+                  empty="No Services exposed yet. Exposing one allocates a VIP and gives it a name clients can reach."
+                  failed={false}
+                />
+              </Panel>
+
+              <Panel title="How a client reaches a Service">
+                {/* The handoff's HORIZONTAL flow, not a numbered list: the point is that these are four hops in
+                    sequence, and a vertical list reads as four independent facts. */}
+                <div className="flex flex-wrap items-center gap-1.5 text-micro">
+                  {[
+                    "device",
+                    "DNS VIP answers the FQDN",
+                    "the Service's VIP",
+                    "gateway DNATs to a READY POD endpoint",
+                    "pod endpoint",
+                  ].map((step, i, all) => (
+                    <span key={step} className="flex items-center gap-1.5">
+                      <span className="rounded-input border border-line bg-surface-inset px-2 py-1 font-mono text-ink-body">
+                        {step}
+                      </span>
+                      {i < all.length - 1 && (
+                        <span aria-hidden className="text-ink-faint">
+                          &rarr;
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
                 <p className="mt-2 text-micro text-ink-tertiary">
-                  Not a ClusterIP DNAT. netfilter applies one destination NAT per
-                  prerouting pass, so kube-proxy&rsquo;s ClusterIP rule would be a
-                  no-op after ours and the packet would die addressed to the
-                  ClusterIP. The gateway targets a ready pod directly, fed by an
-                  EndpointSlice watch, and fails closed on every fault.
+                  <strong className="text-ink-body">Not a ClusterIP DNAT.</strong>{" "}
+                  netfilter applies one destination NAT per prerouting pass, so
+                  kube-proxy&rsquo;s ClusterIP rule would be a no-op after ours and
+                  the packet would die addressed to the ClusterIP. The gateway
+                  targets a ready pod directly, fed by an EndpointSlice watch, and
+                  fails closed on every fault.
                 </p>
                 <p className="text-micro text-ink-faint">
-                  Enforcement keys the pre-DNAT VIP: the grant matches the
-                  original destination, so a broad rule cannot slip past and a
-                  bare destination match cannot miss the post-DNAT pod IP.
+                  <strong className="text-ink-body">
+                    Enforcement keys the pre-DNAT VIP.
+                  </strong>{" "}
+                  The grant matches the original destination, so a bare
+                  destination match cannot miss the post-DNAT pod IP and a broad
+                  grant cannot slip past.
                 </p>
-              </Card>
+              </Panel>
+            </div>
 
-              <Card>
-                <h2 className="text-sm font-semibold text-ink-heading">
-                  Refusals this surface reports verbatim
-                </h2>
-                <dl className="mt-2 space-y-2 text-micro">
-                  <div>
-                    <dt className="font-mono text-ink-body">409 vip_range_overlap</dt>
-                    <dd className="text-ink-tertiary">
-                      A VIP range must be disjoint from the device pool, every
-                      site subnet, and other clusters&rsquo; ranges. Disjointness
-                      is an org-wide fact, so the control plane owns it.
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-mono text-ink-body">409 vip_range_exhausted</dt>
-                    <dd className="text-ink-tertiary">
-                      No address left to allocate. Unexposing frees a VIP for
-                      immediate reuse.
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-mono text-ink-body">409 service_exists</dt>
-                    <dd className="text-ink-tertiary">
-                      That namespace and name pair is already exposed: one stable
-                      identity per Service.
-                    </dd>
-                  </div>
-                </dl>
-              </Card>
-
-              <Card>
-                <h2 className="text-sm font-semibold text-ink-heading">
-                  Installing the operator
-                </h2>
-                {/* ⛔ NAMED AS COPY, NOT A CAPABILITY. This screen installs nothing; these are commands a human
-                    runs elsewhere, and implying otherwise would be a control that does not exist. */}
-                <p className="mt-1 text-micro text-ink-tertiary">
-                  Reference only. Run these yourself; this screen does not
-                  install anything.
+            <div className="flex min-w-0 flex-col gap-3">
+              <Panel title="Installing the operator">
+                {/* ⛔ NAMED AS COPY, NOT A CAPABILITY. This screen installs nothing. */}
+                <p className="text-micro text-ink-tertiary">
+                  Reference only. Run these yourself; this screen does not install
+                  anything.
                 </p>
-                <pre className="mt-2 overflow-x-auto rounded-input border border-line bg-surface-inset p-2.5 text-micro text-ink-body">
-{`helm install gw tunnex/tunnex-gateway \
+                <pre className="overflow-x-auto rounded-input border border-line bg-surface-inset p-2.5 text-micro text-ink-body">
+{`helm install gw tunnex/tunnex-gateway \\
   --set joinToken.secretRef=tunnex-join
-helm install op tunnex/operator \
+helm install op tunnex/operator \\
   --set machineToken.secretRef=tunnex-machine`}
                 </pre>
-                <p className="mt-1 text-micro text-ink-faint">
+                <p className="text-micro text-ink-faint">
                   Both secrets are one-time ceremonies you create, never chart
                   values. The gateway pod runs with a read-only role on services
                   and endpointslices: it cannot read Secrets, write, or escalate.
                 </p>
-              </Card>
+              </Panel>
 
-              <Card>
-                <h2 className="text-sm font-semibold text-ink-heading">
-                  Not shown, and why
-                </h2>
-                {/* Absence recorded is a decision; absence unrecorded gets re-proposed at the next review. */}
-                <ul className="mt-2 space-y-1.5 text-micro text-ink-tertiary">
+              <Panel title="Not shown, and why">
+                <ul className="flex flex-col gap-1.5 text-micro text-ink-tertiary">
                   <li>
-                    <strong>The GitOps CR panel.</strong> Reconcile time,
-                    per-kind ready counts and refused grants are not fields we
-                    serve, and neither is the operator&rsquo;s version. Every
-                    value on it would be invented.
+                    <strong className="text-ink-body">The GitOps CR panel.</strong>{" "}
+                    The operator and its CRs are built and shipping; what does not
+                    exist is any API reporting their status here. Reconcile time,
+                    per-kind ready counts, refused grants and the operator&rsquo;s
+                    version are not served, so every value on that panel would be
+                    invented. <strong className="text-ink-body">
+                      What IS served is ownership
+                    </strong>{" "}
+                    — which is why the withheld control above is real.
                   </li>
                   <li>
-                    <strong>A per-Service ready state.</strong> The agent does
-                    watch endpoints, so readiness is observed, but it is not
-                    reported per Service. The node-level view is on Gateways.
+                    <strong className="text-ink-body">A per-Service ready state.</strong>{" "}
+                    The agent does watch endpoints, so readiness is observed; it is
+                    not reported per Service. The node-level view is on Gateways.
                   </li>
                   <li>
-                    <strong>A state column.</strong> The API returns live
-                    Services only, so the column would carry one value forever. A
-                    grant pointing at a removed Service is flagged on Access
-                    Policies, which is where that fact is served.
+                    <strong className="text-ink-body">A state column.</strong> The
+                    API returns live Services only, so the column would carry one
+                    value forever. A grant pointing at a removed Service is
+                    flagged on <strong className="text-ink-body">Access Policies</strong>,
+                    which is where that fact is served.
                   </li>
                 </ul>
-              </Card>
+              </Panel>
             </div>
-          )}
+          </div>
+
+          <Panel title="Refusals this surface reports verbatim">
+            <p className="text-micro text-ink-faint">
+              Disjointness is an org-wide fact, so the control plane owns it, not
+              a cluster.
+            </p>
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                ["409 vip_range_overlap", "A cluster's VIP range must be disjoint from the device pool, every site subnet, and other clusters' ranges."],
+                ["409 vip_range_exhausted", "No address left to allocate. Unexposing frees a VIP for immediate reuse."],
+                ["409 service_exists", "That namespace and name pair is already exposed: one stable identity per Service."],
+              ].map(([code, why]) => (
+                <div key={code}>
+                  <dt className="font-mono text-micro text-ink-body">{code}</dt>
+                  <dd className="text-micro text-ink-tertiary">{why}</dd>
+                </div>
+              ))}
+            </dl>
+          </Panel>
         </>
       )}
 
@@ -332,167 +549,23 @@ helm install op tunnex/operator \
           onDone={reload}
         />
       )}
-    </div>
-  );
-}
-
-function ClusterCardView({
-  orgId,
-  card,
-  canManage,
-  onDone,
-  siteName,
-  reach,
-}: {
-  orgId: string;
-  card: ClusterCard;
-  canManage: boolean;
-  onDone: () => void;
-  /** FRONTED BY. Null when the sites read failed — a courtesy, never a reason to blank the card. */
-  siteName: string | null;
-  reach: { reachable: boolean; why: string | null };
-}) {
-  const [exposing, setExposing] = useState(false);
-  const [deregistering, setDeregistering] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function unexpose(serviceId: string) {
-    setErr(null);
-    const { error } = await api.DELETE(
-      "/api/v1/organizations/{orgId}/k8s/services/{serviceId}",
-      {
-        params: { path: { orgId, serviceId } },
-      },
-    );
-    if (error)
-      return setErr(apiErrorMessage(error, "Could not unexpose the Service."));
-    onDone();
-  }
-
-  return (
-    <Card>
-      {/* ⛔ D9 — REACHABILITY STATED, NOT INFERRED FROM STYLING ALONE. Without this line a reader sees dimmed
-          rows and concludes something about the SERVICES; the fact is about the gateway that serves them. The
-          copy never says "the cluster is down": the kind is also true for an RBAC denial and an unsynced
-          watch, and naming a cause we cannot know would be the reassuring-comment defect in user copy. */}
-      {!reach.reachable && reach.why !== null && (
-        <p className="mb-2 text-micro text-warn">{reach.why}</p>
-      )}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200">
-            {card.name}
-            {card.managedByOperator && <ManagedBadge />}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            {/* FRONTED BY — the column the handoff leads the cluster table with, and the link between this
-                screen and Sites. Absent (not "unknown") when the sites read failed. */}
-            {siteName !== null && (
-              <>
-                site <span className="text-slate-400">{siteName}</span> ·{" "}
-              </>
-            )}
-            {card.dnsVip !== null && (
-              <>
-                DNS VIP{" "}
-                <span className="font-mono text-slate-400">{card.dnsVip}</span>{" "}
-                (reserved, never handed to a Service) ·{" "}
-              </>
-            )}
-            zone <span className="text-slate-400">{card.dnsZone}</span> · VIP
-            range <span className="text-slate-400">{card.vipRange}</span> ·
-            Service CIDR{" "}
-            <span className="text-slate-400">{card.serviceCidr}</span>
-            {/* The DNS VIP is printed ONCE, at the head of this line, WITH its reservation reason. The
-                second copy that used to sit here said the same address with less meaning. */}
-          </p>
-        </div>
-        {canManage && (
-          <span className="flex gap-2">
-            <Button onClick={() => setExposing(true)}>Expose Service</Button>
-            {objectControls(card.managedByOperator).withheld ? (
-              // D2 cond 1: refuse the destructive dashboard edit on a GitOps-managed cluster — warn, don't
-              // silently revert on the next reconcile. aria-label carries the full guidance (L1).
-              <span
-                className="self-center text-xs text-amber-400/90"
-                title={managedEditWarning("cluster")}
-                aria-label={managedEditWarning("cluster")}
-              >
-                edit the CR
-              </span>
-            ) : (
-              <Button variant="danger" onClick={() => setDeregistering(true)}>
-                Deregister
-              </Button>
-            )}
-          </span>
-        )}
-      </div>
-
-      <ErrorText>{err}</ErrorText>
-
-      {card.services.length === 0 ? (
-        /* ⛔ N=1 CLUSTER WITH ZERO SERVICES IS ITS OWN STATE, AND IT IS NOT A FAULT. A registered cluster with
-           nothing exposed is a working cluster, so the copy names the next action rather than reading as
-           something being broken. */
-        <p className="mt-3 text-xs text-slate-500">
-          No Services exposed yet. Exposing one allocates a VIP from{" "}
-          {card.vipRange} and gives it a name clients can reach.
-        </p>
-      ) : (
-        <ul className="mt-3 space-y-1">
-          {card.services.map((s) => (
-            <li
-              key={s.id}
-              /* Recession is the honest encoding for a degraded state: an unreachable cluster's rows recede
-                 rather than disappearing, because the Services DO exist — they just cannot be reached. */
-              className={`flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm ${serviceRowClass(reach.reachable)}`}
-            >
-              <span className="text-slate-200">
-                <span className="font-mono text-xs text-slate-300">
-                  {s.fqdn}
-                </span>
-                <span className="ml-2 text-slate-500">
-                  {s.vip} · {s.protocol}/{s.ports}
-                </span>
-                {s.managedByOperator && <ManagedBadge />}
-              </span>
-              {canManage &&
-                (objectControls(s.managedByOperator).withheld ? (
-                  <span
-                    className="text-xs text-amber-400/90"
-                    title={managedEditWarning("Service")}
-                    aria-label={managedEditWarning("Service")}
-                  >
-                    edit the CR
-                  </span>
-                ) : (
-                  <Button variant="ghost" onClick={() => unexpose(s.id)}>
-                    Unexpose
-                  </Button>
-                ))}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {exposing && (
+      {exposeFor && orgId && (
         <ExposeServiceModal
           orgId={orgId}
-          clusterId={card.id}
-          onClose={() => setExposing(false)}
-          onDone={onDone}
+          clusterId={exposeFor.id}
+          onClose={() => setExposeFor(null)}
+          onDone={reload}
         />
       )}
-      {deregistering && (
+      {deregisterFor && orgId && (
         <DeregisterClusterModal
           orgId={orgId}
-          card={card}
-          onClose={() => setDeregistering(false)}
-          onDone={onDone}
+          card={deregisterFor}
+          onClose={() => setDeregisterFor(null)}
+          onDone={reload}
         />
       )}
-    </Card>
+    </div>
   );
 }
 
