@@ -2339,3 +2339,34 @@ only because the merge was verified by a direct query instead of by the watcher 
 
 Related: A SYMPTOM HAS AXES · CHECK THE MATCHER BEFORE THE SUBJECT · A TEST CAN PIN A LABEL PRODUCTION CAN
 NEVER PRODUCE. Same family — the evidence was collected and not compared against the authoritative source.
+
+---
+
+## BEFORE RECORDING AN ABSENCE, NAME THE TABLE. A DTO IS A PROJECTION; A SCHEMA IS THE PRODUCT.
+
+**SECOND INSTANCE, and the property that matters is that NEITHER was caught by the person who made the call.**
+
+| # | the call | what was actually there | who caught it |
+|---|---|---|---|
+| 1 | S14.5 — *"the Site schema has no hub fields, so the capability is missing"* | the hub set was **its own endpoint and its own schema** all along | the founder |
+| 2 | S14.11 — *"`Member` has no auth source / device count / MFA state, so the product doesn't hold them"* | `users.password_hash`, `Device.user_id` + an admin-scoped `listDevices`, and `user_totp.confirmed` — **all persisted** | review |
+
+**FOUR OF FIVE VERDICTS WERE WRONG IN INSTANCE 2**, all in the same direction: **under-building the screen.**
+`N devices` was a client-side group-by over a call the audience already makes. MFA was a projection, not a
+roadmap. AUTH was half-derivable. `idp-sync` was reachable through the group tables.
+
+> ### **THE STANDING QUESTION, ASKED BEFORE THE WORD "ABSENT" IS WRITTEN:**
+> ### **WHICH TABLE DID I LOOK IN? IF THE ANSWER IS A DTO, I HAVE NOT LOOKED YET.**
+
+**WHY IT NEEDS A QUESTION AND NOT A CAUTION: THIS CLASS DOES NOT SELF-DETECT.** A grep over one response
+returns a clean, confident, *true* answer — the field really is not on that response — and nothing in the
+result hints that a different place holds it. Both instances required an outside reader. A caution
+("be careful about DTOs") does not fire, because nothing feels uncertain at the moment of the mistake.
+
+**THE FOUR PLACES TO NAME, IN ORDER:** the **table** (`information_schema` / `\d`), the **handler** (what it
+scopes and to whom), the **other endpoint** (a capability often has its own), and the **gate**
+(permission / edition — see ABSENCE OF PERMISSION IS NOT ABSENCE OF DATA).
+
+Related: VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME · A TEST CAN PIN A LABEL PRODUCTION CAN NEVER
+PRODUCE · ABSENCE OF PERMISSION IS NOT ABSENCE OF DATA. Every one of them is the same failure at a different
+layer: **the evidence was collected somewhere other than where the truth lives.**
