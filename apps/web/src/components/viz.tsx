@@ -1,5 +1,12 @@
 import { useId, type ReactNode } from "react";
 import { EmptyState } from "./ui";
+import {
+  allocationLabel,
+  utilisationLabel,
+  type Block,
+  type BlockMap,
+  type Cell,
+} from "../lib/routedrangesview";
 
 // S14.3 SLICE C — DATA VISUALIZATION. THREE PRIMITIVES, HAND-ROLLED SVG, NO CHARTING LIBRARY.
 //
@@ -959,5 +966,353 @@ export function AreaChart({
         ))}
       </ul>
     </VizFrame>
+  );
+}
+
+// ── PRIMITIVE 5 — ADDRESS SPACE ─────────────────────────────────────────────────────────────────────────
+//
+// The handoff's `buildRangeMap`, generalised. Its geometry is kept verbatim (x0 44, top 50, cell 8.4×11.4 on
+// a 10.4×13.5 pitch, divider at 356, list at 392) because that is the drawing that was designed; what is NOT
+// kept is its two hard-coded assumptions, both of which are defects and both of which our own data or a
+// customer's would hit. See `mapAddressSpace` for the full statement.
+//
+// ⛔ THE GRID IS NOT THE ONLY OUTPUT. An SVG is unreadable to a screen reader and unqueryable by the test
+// tier — the same three-failures-one-cause the `Donut` avoids — so every fact the picture carries is also
+// rendered as text beneath it. The picture is the fast path, never the only path.
+
+const GRID = { x0: 44, top: 50, cw: 10.4, ch: 13.5, cellW: 8.4, cellH: 11.4 };
+// Beyond this many lit cells the connector fan becomes spaghetti and the table below is the better read.
+//
+// ⛔ SET FROM MEASURED DATA, NOT FROM THE WIREFRAME. The handoff drew THREE call-outs, so any cap above three
+// looked safe on paper. Our own seeded org has SEVEN lit cells — a cap of 6 would have shown the founder the
+// "omitted as unreadable" note instead of the design, on the very first look. A layout derived from a
+// populated example must be checked at the sizes that actually occur, and 3 was not one of them.
+export const MAP_LIST_MAX = 8;
+
+/** "10.64" / "172.16" / "192.168.64" — the first address of a grid row, at the block's own resolution. */
+export function mapRowLabel(block: Block, row: number): string {
+  const addr =
+    block.base + row * block.cols * Math.pow(2, 32 - block.cellPrefix);
+  const o = [
+    Math.floor(addr / 16777216) % 256,
+    Math.floor(addr / 65536) % 256,
+    Math.floor(addr / 256) % 256,
+  ];
+  return block.cellPrefix >= 24 ? `${o[0]}.${o[1]}.${o[2]}` : `${o[0]}.${o[1]}`;
+}
+
+function CellRect({
+  cell,
+  block,
+  animate,
+  order,
+}: {
+  cell: Cell | null;
+  block: Block;
+  animate: boolean;
+  order: number;
+}) {
+  const index = cell?.index ?? order;
+  const col = index % block.cols;
+  const row = Math.floor(index / block.cols);
+  const cx = GRID.x0 + col * GRID.cw + GRID.cellW / 2;
+  const cy = GRID.top + row * GRID.ch + GRID.cellH / 2;
+
+  if (cell === null)
+    return (
+      <rect
+        x={GRID.x0 + col * GRID.cw}
+        y={GRID.top + row * GRID.ch}
+        width={GRID.cellW}
+        height={GRID.cellH}
+        rx={2.4}
+        fill="#121212"
+        stroke="#212121"
+        strokeWidth={0.7}
+      />
+    );
+
+  const pending = cell.status === "pending";
+  // ⛔ PARTIAL IS DRAWN INSET, and this is defect ① closed in one line. A /24 inside a /16 cell occupies a
+  // visibly smaller square, so "some of this block" cannot be misread as "all of it" — which is exactly what
+  // the handoff's version said about 10.20.0.0/24.
+  const inset = cell.state === "partial" ? 2.2 : 0;
+  const w = GRID.cellW - inset * 2;
+  const h = GRID.cellH - inset * 2;
+
+  // Scale-from-centre needs a transform origin, so the rect is drawn about (0,0) inside a translated group.
+  return (
+    <g transform={`translate(${cx} ${cy})`}>
+      {cell.state === "full" && !pending && (
+        <rect
+          x={-(w + 2) / 2}
+          y={-(h + 2) / 2}
+          width={w + 2}
+          height={h + 2}
+          rx={3}
+          fill="var(--tnx-text-heading)"
+          opacity={0.22}
+        />
+      )}
+      <rect
+        x={-w / 2}
+        y={-h / 2}
+        width={w}
+        height={h}
+        rx={2.4}
+        fill={pending ? "rgba(195,154,78,.14)" : "var(--tnx-neutral)"}
+        stroke={pending ? "var(--tnx-warn)" : "var(--tnx-text-heading)"}
+        strokeWidth={pending ? 1.1 : 0.8}
+        strokeDasharray={pending ? "2 2" : undefined}
+        opacity={animate ? 0 : 1}
+      >
+        {/* The pending PULSE. It is the handoff's, and it earns its place: pending means WITHHELD — a state
+            that needs an admin to act — so it is the one thing on this panel that should not sit still. */}
+        {animate && pending && (
+          <animate
+            attributeName="opacity"
+            values="1;0.35;1"
+            dur="1.8s"
+            begin={`${0.15 + order * 0.12 + 0.55}s`}
+            repeatCount="indefinite"
+          />
+        )}
+        {animate && (
+          <animate
+            attributeName="opacity"
+            from="0"
+            to="1"
+            dur="0.55s"
+            begin={`${0.15 + order * 0.12}s`}
+            fill="freeze"
+          />
+        )}
+      </rect>
+      {animate && (
+        // `back.out(2)` in the handoff's GSAP; keySplines is the SMIL equivalent overshoot.
+        <animateTransform
+          attributeName="transform"
+          type="scale"
+          from="0"
+          to="1"
+          dur="0.55s"
+          begin={`${0.15 + order * 0.12}s`}
+          calcMode="spline"
+          keyTimes="0;1"
+          keySplines="0.34 1.56 0.64 1"
+          fill="freeze"
+          additive="sum"
+        />
+      )}
+    </g>
+  );
+}
+
+/**
+ * The address-space map for ONE RFC1918 block.
+ *
+ * `animate` is passed in rather than read here: `matchMedia` is touched in exactly one place in this product
+ * (`readsReducedMotionPreference`), so a component asking the platform itself would be the second.
+ */
+export function AddressSpaceMap({
+  map,
+  animate,
+}: {
+  map: BlockMap;
+  animate: boolean;
+}) {
+  const { block, lit } = map;
+  const rows = Math.ceil(block.cells / block.cols);
+  const litByIndex = new Map(lit.map((c) => [c.index, c]));
+  const order = new Map(lit.map((c, i) => [c.index, i]));
+
+  const showList = lit.length > 0 && lit.length <= MAP_LIST_MAX;
+  const listRows = showList ? lit : [];
+  const gridBottom = GRID.top + rows * GRID.ch;
+  const height = Math.max(gridBottom + 58, 60 + listRows.length * 42 + 46);
+  const panelL = 372;
+  const listX = 392;
+
+  const centre = (index: number) => ({
+    x: GRID.x0 + (index % block.cols) * GRID.cw + GRID.cellW / 2,
+    y: GRID.top + Math.floor(index / block.cols) * GRID.ch + GRID.cellH / 2,
+  });
+
+  const utY = gridBottom + 22;
+  const utW = 120;
+  const barW = Math.max(utW * map.utilised, map.utilised > 0 ? 4 : 0);
+
+  return (
+    <svg
+      viewBox={`0 0 600 ${height}`}
+      // ⛔ PIXEL HEIGHT MATCHED TO THE viewBox HEIGHT. A `w-full` SVG with a viewBox and no height derives
+      // its height from its WIDTH — the defect that shipped a 750px-tall diagram in the gallery.
+      style={{ width: "100%", height: `${height}px`, display: "block" }}
+      role="img"
+      aria-label={`${block.label} address space: ${allocationLabel(map)}, ${utilisationLabel(map)}`}
+    >
+      <text
+        x={GRID.x0}
+        y={30}
+        fill="var(--tnx-neutral)"
+        fontFamily="JetBrains Mono"
+        fontSize={8.5}
+        fontWeight={700}
+      >
+        {block.label}
+      </text>
+      <text
+        x={GRID.x0 + 66}
+        y={30}
+        fill="var(--tnx-text-faint)"
+        fontFamily="JetBrains Mono"
+        fontSize={7.5}
+      >
+        {`each cell = one /${block.cellPrefix} · ${block.cells} blocks`}
+      </text>
+
+      {Array.from({ length: rows }, (_, r) => r)
+        .filter((r) => rows <= 2 || r % 2 === 0)
+        .map((r) => (
+          <text
+            key={`rl${r}`}
+            x={GRID.x0 - 9}
+            y={GRID.top + r * GRID.ch + 9}
+            textAnchor="end"
+            fill="var(--tnx-text-faint)"
+            fontFamily="JetBrains Mono"
+            fontSize={7.5}
+          >
+            {mapRowLabel(block, r)}
+          </text>
+        ))}
+
+      {Array.from({ length: block.cells }, (_, i) => (
+        <CellRect
+          key={i}
+          cell={litByIndex.get(i) ?? null}
+          block={block}
+          animate={animate}
+          order={order.get(i) ?? 0}
+        />
+      ))}
+
+      {showList && (
+        <>
+          <line
+            x1={356}
+            y1={26}
+            x2={356}
+            y2={height - 20}
+            stroke="var(--tnx-divider)"
+            strokeWidth={1}
+          />
+          {listRows.map((cell, i) => {
+            const y = 60 + i * 42;
+            const c = centre(cell.index);
+            const tone =
+              cell.status === "pending" ? "var(--tnx-warn)" : "var(--tnx-ok)";
+            const label = cell.cidrs[0];
+            const extra = cell.cidrs.length - 1;
+            return (
+              <g key={cell.index}>
+                <path
+                  d={`M${c.x},${c.y} C${c.x + 30},${c.y} ${panelL - 26},${y} ${panelL - 4},${y}`}
+                  fill="none"
+                  stroke={tone}
+                  strokeWidth={1}
+                  strokeOpacity={0.32}
+                  strokeDasharray={animate ? 400 : undefined}
+                  strokeDashoffset={animate ? 400 : undefined}
+                >
+                  {animate && (
+                    <animate
+                      attributeName="stroke-dashoffset"
+                      from="400"
+                      to="0"
+                      dur="0.9s"
+                      begin={`${0.5 + i * 0.18}s`}
+                      fill="freeze"
+                    />
+                  )}
+                </path>
+                <circle cx={c.x} cy={c.y} r={1.6} fill="var(--tnx-text-heading)" opacity={0.9} />
+                <rect x={panelL} y={y - 15} width={3} height={30} rx={1.5} fill={tone} />
+                <text
+                  x={listX}
+                  y={y - 2}
+                  fill="var(--tnx-text-heading)"
+                  fontFamily="JetBrains Mono"
+                  fontSize={12}
+                  fontWeight={700}
+                >
+                  {label}
+                </text>
+                <text
+                  x={listX}
+                  y={y + 12}
+                  fill="var(--tnx-neutral)"
+                  fontSize={9.5}
+                >
+                  {cell.state === "partial"
+                    ? `part of one /${block.cellPrefix}`
+                    : `fills its /${block.cellPrefix}`}
+                  {extra > 0 ? ` · +${extra} more here` : ""}
+                </text>
+              </g>
+            );
+          })}
+        </>
+      )}
+
+      <text
+        x={GRID.x0}
+        y={utY - 8}
+        fill="var(--tnx-neutral)"
+        fontFamily="JetBrains Mono"
+        fontSize={8}
+        fontWeight={600}
+      >
+        ADDRESS SPACE UTILISED
+      </text>
+      <rect x={GRID.x0} y={utY} width={utW} height={6} rx={3} fill="var(--tnx-surface-inset)" />
+      <rect
+        x={GRID.x0}
+        y={utY}
+        width={animate ? 0 : barW}
+        height={6}
+        rx={3}
+        fill="var(--tnx-text-heading)"
+      >
+        {animate && (
+          <animate
+            attributeName="width"
+            from="0"
+            to={barW}
+            dur="1s"
+            begin="0.9s"
+            fill="freeze"
+          />
+        )}
+      </rect>
+      <text
+        x={GRID.x0 + utW + 10}
+        y={utY + 6}
+        fill="var(--tnx-text-body)"
+        fontFamily="JetBrains Mono"
+        fontSize={8.5}
+      >
+        {utilisationLabel(map)}
+      </text>
+      <text
+        x={GRID.x0}
+        y={utY + 22}
+        fill="var(--tnx-text-faint)"
+        fontFamily="JetBrains Mono"
+        fontSize={8}
+      >
+        {allocationLabel(map)}
+      </text>
+    </svg>
   );
 }
