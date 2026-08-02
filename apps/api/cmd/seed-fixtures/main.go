@@ -82,8 +82,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ⛔ COUNTED, NOT ASSERTED — and the difference already misled a review.
+	//
+	// This line used to read "5 gateways, 4 sites, 6 subnets, 5 devices, 12 audit entries": the rows THIS FILE
+	// INSERTS. The screen renders what EXISTS, which is those rows PLUS whatever `make seed` already wrote —
+	// live totals were 6 gateways, 6 sites, 8 devices, 35 audit entries. The founder reviewed Gateways showing
+	// "1/6" against a seeder that had just claimed 5.
+	//
+	// A fixture that reports its own INTENT rather than the resulting STATE is a census of the wrong thing.
+	// These numbers now come from the database after the write, so the line cannot drift from what is there.
+	var gateways, sites, subnets, devices, audits, clusters, services, rules int
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM nodes        WHERE org_id = $1),
+		       (SELECT count(*) FROM sites        WHERE org_id = $1),
+		       (SELECT count(*) FROM site_subnets ss WHERE EXISTS (SELECT 1 FROM sites s WHERE s.id = ss.site_id AND s.org_id = $1)),
+		       (SELECT count(*) FROM devices      WHERE org_id = $1),
+		       (SELECT count(*) FROM audit_logs   WHERE org_id = $1),
+		       (SELECT count(*) FROM k8s_clusters WHERE org_id = $1),
+		       (SELECT count(*) FROM k8s_services WHERE org_id = $1),
+		       (SELECT count(*) FROM policy_rules WHERE org_id = $1)`,
+		seeddata.DemoOrgID,
+	).Scan(&gateways, &sites, &subnets, &devices, &audits, &clusters, &services, &rules); err != nil {
+		logger.Error("seed_fixtures_count_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_fixtures_ok",
 		slog.String("org", seeddata.DemoOrgID),
-		slog.String("note", "5 gateways, 4 sites, 6 subnets, 5 devices, 12 audit entries; health kinds are DERIVED, not seeded"),
+		slog.Int("gateways", gateways), slog.Int("sites", sites), slog.Int("subnets", subnets),
+		slog.Int("devices", devices), slog.Int("audit_entries", audits),
+		// ⛔ THESE THREE ARE THE POINT OF PRINTING THEM. A zero here means a whole SCREEN can render nothing
+		// but its empty state, which is not visible from the seeder succeeding. S14.8 pre-flight found
+		// clusters=0 AND policy_rules=0 — the second is the Zero Trust product's own screen.
+		slog.Int("k8s_clusters", clusters), slog.Int("k8s_services", services),
+		slog.Int("policy_rules", rules),
+		slog.String("note", "totals as they now EXIST (fixture + make seed), counted after the write; health kinds are DERIVED, not seeded"),
 	)
 }
