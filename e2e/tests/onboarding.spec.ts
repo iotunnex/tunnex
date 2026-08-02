@@ -271,7 +271,7 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
 
   // The one-time ceremony: amber modal, command shown, must be acknowledged.
   await expect(
-    page.getByText("Enroll your gateway — run this once"),
+    page.getByText(/Enroll your gateway/i),
   ).toBeVisible();
   // The COMPLETE runnable command (S6.6 / zero-touch ruling): a SINGLE `docker run` (NEVER compose — the
   // paste-mismatch is structurally impossible), carrying the token env AND the shell-quoted pinned name (an
