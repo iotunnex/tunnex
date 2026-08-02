@@ -13,7 +13,6 @@ import {
   extendErrorCopy,
   attributionLabel,
   activeMembers,
-  ruleRow,
   rulesSummary,
   rulesEmptyState,
   rulesEmptyCopy,
