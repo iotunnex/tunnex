@@ -207,12 +207,15 @@ export default function Devices() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: "14px" }}>
         <div>
-          <h1 className="text-xl font-semibold text-white">Devices</h1>
-          <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+          <h1 style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>Devices</h1>
+          <div style={{ font: "400 12px 'Instrument Sans'", color: "#6E6E6B" }}>
+            {org ? org.name : "…"}
+          </div>
         </div>
+        <div style={{ flex: 1 }}></div>
       </div>
 
       <ErrorText>{error}</ErrorText>
@@ -224,14 +227,14 @@ export default function Devices() {
           deleting the reference outright would lose that connection for anyone who learned the old location.
           RENDERING IT TWICE WOULD BE TWO PLACES TO BE WRONG — the same reasoning that collapsed the two
           network maps onto one `meshFrom`. */}
-      <p className="mt-6 text-cell text-ink-tertiary">
+      <div style={{ background: "rgba(31,31,31,.72)", backdropFilter: "blur(24px) saturate(140%)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: "12px", padding: "12px 16px", font: "500 12px 'Instrument Sans'", color: "#A9A9A6" }}>
         Gateways moved to their own screen.{" "}
-        <Link to="/gateways" className="text-ink-body underline">
+        <Link to="/gateways" style={{ color: "#F5F5F5", textDecoration: "underline" }}>
           Open Gateways
         </Link>
-      </p>
+      </div>
 
-      <form onSubmit={create} className="mt-6">
+      <form onSubmit={create}>
         <Card>
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[12rem] flex-1">
@@ -370,6 +373,8 @@ export default function Devices() {
               cell: (d) =>
                 d.status === "revoked" ? (
                   <Badge tone="danger">revoked</Badge>
+                ) : d.status === "pending" ? (
+                  <Badge tone="amber">pending</Badge>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                     <StatusDot tone={d.online ? "on" : "off"} />
