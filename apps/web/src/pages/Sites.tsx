@@ -22,6 +22,7 @@ import {
   Badge,
   Button,
   Card,
+  DataTable,
   EmptyState,
   ErrorText,
   Field,
@@ -297,25 +298,28 @@ export default function Sites() {
             </div>
           </div>
 
-          {/* D3 (ruled): the mesh sits ABOVE the cards, it does not replace them. The wireframe drew only a
-              diagram because a drawing never had to manage anything; the cards are where subnets are
-              advertised, gateways bound and zones edited. Selecting a node scopes this list rather than
-              hiding it. */}
-          <Topology
-            cards={selectedCard ? [selectedCard] : cards}
+          {/* D3 (ruled): the mesh sits ABOVE the list and scopes it; it does not replace it. The wireframe
+              drew only a diagram because a drawing never had to manage anything.
+
+              ⛔ THE LIST IS A TABLE AND THE DETAIL IS ONE CARD. Rendering a full card per site made the page
+              grow with the network — 10 sites was 3,200px of scroll, and the two teaching accordions were
+              identical on every one of them. Now: every site is one row, and the SELECTED site alone expands
+              into the card that carries the forms. */}
+          <SiteList
+            cards={cards}
             canManage={gate.canManage}
-            orgId={org.id}
-            unboundNodes={unboundNodes}
-            onDone={reload}
+            selectedId={selectedSiteId}
+            onSelect={setSelectedSiteId}
           />
+
           {selectedCard && (
-            <button
-              type="button"
-              onClick={() => setSelectedSiteId(null)}
-              className="self-start text-cell text-ink-tertiary underline"
-            >
-              Show all {cards.length} sites
-            </button>
+            <SiteCardView
+              card={selectedCard}
+              canManage={gate.canManage}
+              orgId={org.id}
+              unboundNodes={unboundNodes}
+              onDone={reload}
+            />
           )}
         </>
       )}
@@ -808,44 +812,144 @@ function HubSetSection({
 }
 
 // ── the read-only topology + per-site mutation affordances ───────────────────────────
-function Topology({
+// ── S14.5 — THE SITE LIST SCALES, THE DETAIL DOES NOT REPEAT ────────────────────────────────────────────
+//
+// ⛔ WHAT WAS WRONG. Every site rendered as a full CARD: name, gateway, health, subnet chips, TWO collapsed
+// teaching accordions and four buttons. ~320px each.
+//
+//     5 sites  = 1,600px of scroll
+//    10 sites  = 3,200px
+//    50 sites  = unusable
+//
+// And the two accordions — "Cloud fabric setup" and "Cross-site DNS forwarding" — are STATIC TEACHING TEXT,
+// IDENTICAL ON EVERY CARD. N sites meant N copies of the same paragraph. The page's height grew with the
+// network while the information in it did not.
+//
+// ⛔ THE SHAPE THAT SCALES: A LIST IS A TABLE. A DETAIL IS ONE PANEL. SELECTION IS THE LINK BETWEEN THEM.
+//
+// One row per site — scannable, sortable-shaped, constant height, works at 500 sites. The row carries the
+// facts you compare ACROSS sites (health, gateway, ranges). The panel carries what you only need for ONE
+// (actions, teaching text, forms). Nothing that is the same on every site is rendered more than once.
+//
+// Selecting a row selects the same site the MESH selects — one selection, two ways in.
+function SiteList({
   cards,
   canManage,
-  orgId,
-  unboundNodes,
-  onDone,
+  selectedId,
+  onSelect,
 }: {
   cards: SiteCard[];
   canManage: boolean;
-  orgId: string;
-  unboundNodes: Node[];
-  onDone: () => void;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
 }) {
-  if (cards.length === 0) {
-    return (
-      <Card className="mt-6">
-        <p className="text-sm text-slate-400">
-          No sites yet.
-          {canManage
-            ? " Use Route a LAN above, or Add site for an empty one."
-            : " An owner or admin can add one."}
-        </p>
-      </Card>
-    );
-  }
+  const columns = [
+    {
+      key: "name",
+      header: "Site",
+      cell: (c: SiteCard) => (
+        <button
+          type="button"
+          aria-pressed={c.id === selectedId}
+          onClick={() => onSelect(c.id === selectedId ? null : c.id)}
+          className={`text-left font-mono ${c.id === selectedId ? "text-ink-heading underline" : "text-ink-primary"}`}
+        >
+          {c.name}
+        </button>
+      ),
+    },
+    {
+      key: "gw",
+      header: "Gateway",
+      cell: (c: SiteCard) => {
+        const gw = c.gateways.find((g) => g.status === "active");
+        return gw ? (
+          <span className="flex items-center gap-1.5">
+            <span className="font-mono text-ink-body">{gw.name}</span>
+            {gw.isHub && <Badge tone="neutral">HUB</Badge>}
+          </span>
+        ) : (
+          // NOT an empty cell: "no gateway bound" is a fact, and a blank would read as missing data.
+          <span className="text-ink-faint">none bound</span>
+        );
+      },
+    },
+    {
+      key: "health",
+      header: "State",
+      cell: (c: SiteCard) => {
+        const gw = c.gateways.find((g) => g.status === "active");
+        if (!gw) return <span className="text-ink-faint">no link</span>;
+        return gw.health ? (
+          <Badge tone={gw.health.tone as "ok" | "warn" | "danger" | "neutral"}>
+            {gw.health.label}
+          </Badge>
+        ) : (
+          <Badge tone="ok">linked</Badge>
+        );
+      },
+    },
+    {
+      key: "ranges",
+      header: "Ranges",
+      cell: (c: SiteCard) =>
+        c.subnets.length === 0 ? (
+          <span className="text-ink-faint">none</span>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {c.subnets.map((sn) => (
+              <span
+                key={sn.id}
+                className={`rounded border px-1.5 py-px font-mono text-micro ${
+                  sn.status === "approved"
+                    ? "border-line text-ink-body"
+                    : "border-warn/50 text-warn"
+                }`}
+                title={
+                  sn.status === "approved"
+                    ? "Approved, routed"
+                    : "Pending approval, not yet routed"
+                }
+              >
+                {sn.cidr}
+                {sn.status === "pending" && " · pending"}
+              </span>
+            ))}
+          </span>
+        ),
+    },
+  ];
+
   return (
-    <div className="mt-6 space-y-4">
-      {cards.map((c) => (
-        <SiteCardView
-          key={c.id}
-          card={c}
-          canManage={canManage}
-          orgId={orgId}
-          unboundNodes={unboundNodes}
-          onDone={onDone}
-        />
-      ))}
-    </div>
+    <Panel title="Sites">
+      <DataTable
+        caption="Sites"
+        columns={columns}
+        rows={cards}
+        rowKey={(c: SiteCard) => c.id}
+        empty={
+          canManage
+            ? "No sites yet. Use Route a LAN above, or Add site for an empty one."
+            : "No sites yet. An owner or admin can add one."
+        }
+        // The page blanks to a retry on any failed load, so reaching this render means the read succeeded.
+        failed={false}
+      />
+      {/* ⛔ ONCE, NOT PER SITE. This text is identical for every site, so rendering it inside each card made
+          the page longer without making it say more. */}
+      <details className="rounded-lg border border-line bg-ink-800 px-3 py-2">
+        <summary className="cursor-pointer text-cell text-ink-body">
+          Cloud fabric setup, one console visit per side (why a behind-host may
+          not reach yet)
+        </summary>
+        <p className="mt-2 text-micro text-ink-tertiary">
+          A behind-host reply needs a route back to the device pool. Add it once
+          per side, in the cloud console, never on the gateway. On failover the
+          VPC route still points at ONE gateway ENI, so it must be re-pointed at
+          the promoted hub.
+        </p>
+      </details>
+    </Panel>
   );
 }
 

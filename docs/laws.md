@@ -1986,3 +1986,39 @@ from a derived artifact when the original is available. The first cost four slic
 
 **THE LOOP WAS PRODUCTIVE AND THE METHOD WAS WRONG. Both are true, and recording only one of them would
 teach the wrong lesson** — the fix is not to iterate less, it is to iterate against the source.
+
+# ⭐ A LIST IS A TABLE. A DETAIL IS ONE PANEL. SELECTION IS THE LINK. (2026-08-02, S14.5 — founder-caught)
+
+**THE DEFECT: EVERY SITE RENDERED AS A FULL CARD** — name, gateway, health, subnet chips, two collapsed
+teaching accordions, four buttons. **~320px each.**
+
+| sites | page height |
+|---|---|
+| 5 | 1,600px |
+| 10 | 3,200px |
+| 50 | unusable |
+
+**AND THE TWO ACCORDIONS WERE STATIC TEACHING TEXT, IDENTICAL ON EVERY CARD.** *N* sites meant *N* copies
+of the same paragraph.
+
+> ## **THE PAGE'S HEIGHT GREW WITH THE NETWORK WHILE THE INFORMATION IN IT DID NOT.**
+
+## ⛔ THE DIAGNOSTIC, AND IT IS ONE QUESTION
+
+> **WHAT DOES THIS SCREEN LOOK LIKE AT 10× THE CURRENT DATA? AT 100×?**
+
+**A design reviewed on a demo dataset answers it by accident and usually wrongly**, because the mock has
+three rows and three rows look fine as anything. **This is the cardinality sibling of *check every borrowed
+layout at N=1*** — that one catches the empty end, this one catches the full end, and a design hands you a
+flattering sample in the middle so you check neither.
+
+## THE SHAPE THAT SCALES
+
+**ONE ROW PER ITEM, CONSTANT HEIGHT** — carrying only what you compare ACROSS items (state, owner, ranges).
+**ONE DETAIL PANEL** — carrying what you only need for ONE (forms, actions, teaching text). **SELECTION is
+the link**, and it is the SAME selection the diagram uses, so there is one notion of "the current site" with
+two ways in.
+
+**THE TEST FOR WHERE SOMETHING BELONGS: IS IT THE SAME ON EVERY ROW?** If yes it renders ONCE, at the panel,
+never per item. Repeating identical text per row is not redundancy — **it is a page that costs more to read
+the more successful the customer is.**
