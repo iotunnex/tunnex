@@ -46,17 +46,32 @@ type PostureFacts = Pick<
 >;
 
 /**
- * Which of the three `unknown` causes this is. Exported so each arm gets its own red.
+ * Which of the **TWO** reachable `unknown` causes this is.
  *
- * ⛔ "FACTS PRESENT" MEANS ANY FACT. A report that carried an OS version but no disk answer is still
- * a report that reached us, so the discriminator is `some`, not `every` — using `every` would send a
- * partially-answering device to the stale label, which is the same mislabel one notch narrower.
+ * ⛔ THIS WAS BRIEFLY THREE, AND THE THIRD WAS UNREACHABLE. The spec says
+ * `unknown = no report, stale report, or the fact was reported absent`, and that third disjunct cannot occur.
+ * MEASURED, on the live schema and in the evaluator:
+ *
+ *   device_health.evaluated_state   NOT NULL, CHECK (evaluated_state IN ('compliant','noncompliant'))
+ *   healthInfoFor                   falls to `unknown` ONLY when evaluatedState is nil, reportedAt is nil,
+ *                                   or the report is past HealthStaleTTL
+ *   the evaluator                   `if f.DiskEncrypted == nil { continue }` — "absence never blocks"
+ *
+ * So a device that reports and CANNOT determine the disk fact is evaluated **compliant** (the check is skipped)
+ * and stored as `compliant`. It never becomes `unknown`. With a row present, `evaluatedState` is never nil, so
+ * `unknown` means exactly: NO ROW, or a STALE row.
+ *
+ * ⛔ THE SPEC IS A WRONG SOURCE OF TRUTH HERE — same class as the `listSiteSubnets` summary and the
+ * `policy_degraded_kind` paragraph, and it cost a full build-and-revert. Registered as a spec defect; the
+ * correction belongs in `openapi.yaml`, in place.
+ *
+ * HOW IT WAS CAUGHT: a reachability check on the RENDERED PAGE returned 0 matches for the new label. The unit
+ * tests passed, the payload looked right, and five reds were green against a state production cannot produce.
+ *
+ *   A TEST CAN PIN A LABEL THAT PRODUCTION CAN NEVER PRODUCE. ONLY THE SCREEN SAYS OTHERWISE.
  */
 export function unknownPostureLabel(d: PostureFacts): string {
-  if (!d.health_reported_at) return "posture not reported";
-  const anyFact =
-    d.health_os_version !== undefined || d.health_disk_encrypted !== undefined;
-  return anyFact ? "posture stale" : "posture reported, fact unavailable";
+  return d.health_reported_at ? "posture stale" : "posture not reported";
 }
 
 export function postureBadge(
