@@ -100,16 +100,16 @@ describe("Access — wiring: the screen must not claim enforcement it does not h
     // The gap in direction (a): two rules exist and are listed, but nothing is enforcing them. The screen has
     // to say so, or an admin reads a rule list as an access-control posture that the gateway is not applying.
     await waitFor(() =>
-      expect(screen.getByText("Policy not enforced — open mesh.")).toBeTruthy(),
+      expect(screen.getByText("Policy not enforced. Open mesh: every device reaches every device.")).toBeTruthy(),
     );
-    expect(screen.queryByText(/default-deny active/)).toBeNull();
+    expect(screen.queryByText(/Default-deny active/)).toBeNull();
   });
 
   it("with mode ENFORCING, the posture names default-deny", async () => {
     mode = "enforcing";
     withAuth(<Access />);
     await waitFor(() =>
-      expect(screen.getByText(/default-deny active/)).toBeTruthy(),
+      expect(screen.getByText(/Default-deny active/)).toBeTruthy(),
     );
   });
 
@@ -141,7 +141,7 @@ describe("Access — failure path: the most consequential one in the product", (
 
     await waitFor(() =>
       expect(
-        screen.getByText("Rule status unavailable — refresh."),
+        screen.getByText("Rule status unavailable. Refresh to try again."),
       ).toBeTruthy(),
     );
     // The specific lie this prevents: "0 rules — ALL traffic denied." on a load that never returned. A count

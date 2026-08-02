@@ -13,6 +13,7 @@ import {
   extendErrorCopy,
   attributionLabel,
   activeMembers,
+  ruleRow,
   rulesSummary,
   rulesEmptyState,
   rulesEmptyCopy,
@@ -1030,5 +1031,39 @@ describe("flowGraphState — the threshold is a variable, not a constant", () =>
     // The derivation lives beside the constant; this pins the value so a bump is a deliberate edit with a
     // test change, never a drive-by.
     expect(FLOW_GRAPH_MAX_RULES).toBe(24);
+  });
+});
+
+describe("a deactivated per-user subject is a FACT, never a warning", () => {
+  const mk = (status: string) =>
+    [{ user_id: "u9", name: "Grace Okafor", email: "g@x.io", status }] as unknown as Member[];
+  const refs = (status: string) =>
+    ruleRow(
+      { id: "r1", src_kind: "user", src_user_id: "u9", dst_kind: "group", dst_group_id: "g1" } as never,
+      [{ id: "g1", name: "Eng" }] as never,
+      [],
+      mk(status),
+      [],
+      { membersLoaded: true, groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true, servicesLoaded: true } as never,
+      [],
+    );
+
+  it("\u26d4 renders '(deactivated)' \u2014 and does NOT become a warn state", () => {
+    // MEASURED before deciding: the compiler matches on DEVICE OWNERSHIP (`r.SrcUserID == d.UserID`,
+    // compiler.go:397) with no user-status filter, and deactivation revokes sessions + sweeps CLI creds. The
+    // grant therefore compiles to exactly what it says. OUTSIDE RANGES and VANISHED describe rules that
+    // COMPILE TO NOTHING WHILE LOOKING LIVE; this is not one.
+    //   A WARN KIND THAT FIRES ON A CORRECT RULE IS HOW THE REAL ONES STOP BEING READ.
+    const j = JSON.stringify(refs("deactivated"));
+    expect(j).toContain("Grace Okafor (deactivated)");
+    // The row is NOT marked broken, because it is not broken.
+    expect(j).not.toContain('"state":"deleted"');
+    expect(j).not.toContain('"state":"unresolved"');
+  });
+
+  it("an ACTIVE subject renders the bare name \u2014 both values of the same condition", () => {
+    const j = JSON.stringify(refs("active"));
+    expect(j).toContain("Grace Okafor");
+    expect(j).not.toContain("deactivated");
   });
 });

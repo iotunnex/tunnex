@@ -46,7 +46,7 @@ export function modeEnableConfirm(ruleCount: number): ConfirmCopy {
     return {
       title: "Enable enforcing with NO allow rules?",
       body:
-        "You have no allow rules. Enabling Enforcing denies ALL traffic — including your own access — " +
+        "You have no allow rules. Enabling Enforcing denies ALL traffic. including your own access. " +
         "until you add rules. Continue?",
       danger: true,
       confirmLabel: "Enable anyway",
@@ -55,7 +55,7 @@ export function modeEnableConfirm(ruleCount: number): ConfirmCopy {
   const n = `${ruleCount} allow rule${ruleCount === 1 ? "" : "s"}`;
   return {
     title: "Enable enforcing?",
-    body: `Enforcing denies all traffic except what your rules allow — you have ${n}. Continue?`,
+    body: `Enforcing denies all traffic except what your rules allow. you have ${n}. Continue?`,
     danger: false,
     confirmLabel: "Enable enforcing",
   };
@@ -90,7 +90,7 @@ export function staleNoticeText(staleRuleIds: string[]): string | null {
   if (staleRuleIds.length === 0) return null;
   if (staleRuleIds.length === 1)
     return swapPartialMessage(staleRuleIds[0].slice(0, 8));
-  return `${staleRuleIds.length} rules could not be removed after an edit — they are still active. Retry the removals.`;
+  return `${staleRuleIds.length} rules could not be removed after an edit. they are still active. Retry the removals.`;
 }
 
 // pruneStaleRuleIds is the ONLY clear path. AMENDMENT A: it prunes ONLY on a SUCCESSFUL rules
@@ -251,11 +251,31 @@ function short(id: string): string {
 
 function resolveUser(id: string, members: Member[], loaded: boolean): RefLabel {
   const m = members.find((x) => x.user_id === id);
-  if (m) return { id, label: m.name || m.email, state: "ok" };
+  if (m) {
+    // ⛔ A DEACTIVATED SUBJECT IS STATED AS A FACT, NEVER AS A WARNING — and the distinction is the whole
+    // reason there is no fourth warn kind here.
+    //
+    // OUTSIDE RANGES and VANISHED describe rules that COMPILE TO NOTHING WHILE LOOKING LIVE — a permanent,
+    // invisible lie. This rule is not that. MEASURED: the compiler matches on device ownership
+    // (`r.SrcUserID == d.UserID`, compiler.go:397) with NO user-status filter, and deactivation revokes
+    // sessions and sweeps CLI credentials, so the grant compiles to exactly what it says — that user's
+    // devices, a set which for a deactivated account only shrinks. Nothing is broken.
+    //
+    //   A WARN KIND THAT FIRES ON A CORRECT RULE IS HOW THE REAL ONES STOP BEING READ.
+    //
+    // So: state the fact, do not infer the consequence — S14.11's AUTH ruling applied one screen over. The
+    // reader sees the account cannot sign in and draws their own conclusion, which is theirs to draw.
+    const name = m.name || m.email;
+    return {
+      id,
+      label: m.status === "deactivated" ? `${name} (deactivated)` : name,
+      state: "ok",
+    };
+  }
   if (!loaded)
     return {
       id,
-      label: `unresolved user ${short(id)} — refresh`,
+      label: `unresolved user ${short(id)}. Refresh.`,
       state: "unresolved",
     };
   // A per-user grant whose subject is no longer a member (the src_user_id→memberships
@@ -273,7 +293,7 @@ function resolveGroup(
   if (!loaded)
     return {
       id,
-      label: `unresolved group ${short(id)} — refresh`,
+      label: `unresolved group ${short(id)}. refresh`,
       state: "unresolved",
     };
   return { id, label: `deleted group ${short(id)}`, state: "deleted" };
@@ -289,7 +309,7 @@ function resolveResource(
   if (!loaded)
     return {
       id,
-      label: `unresolved resource ${short(id)} — refresh`,
+      label: `unresolved resource ${short(id)}. refresh`,
       state: "unresolved",
     };
   return { id, label: `deleted resource ${short(id)}`, state: "deleted" };
@@ -303,7 +323,7 @@ function resolveSite(id: string, sites: Site[], loaded: boolean): RefLabel {
   const s = sites.find((x) => x.id === id);
   if (s) return { id, label: `site ${s.name}`, state: "ok" };
   if (!loaded)
-    return { id, label: `site ${short(id)} — refresh`, state: "unresolved" };
+    return { id, label: `site ${short(id)}. refresh`, state: "unresolved" };
   return { id, label: `deleted site ${short(id)}`, state: "deleted" };
 }
 
@@ -318,7 +338,7 @@ function resolveK8sService(
   const s = services.find((x) => x.id === id);
   if (s) return { id, label: s.fqdn, state: "ok" };
   if (!loaded)
-    return { id, label: `service ${short(id)} — refresh`, state: "unresolved" };
+    return { id, label: `service ${short(id)}. refresh`, state: "unresolved" };
   return { id, label: `removed service ${short(id)}`, state: "deleted" };
 }
 
@@ -451,25 +471,25 @@ export function rulesSummary(i: {
   if (!i.modeResult.ok || !i.rulesResult.ok)
     return {
       state: "failed",
-      text: "Rule status unavailable — refresh.",
+      text: "Rule status unavailable. Refresh to try again.",
       loud: false,
     };
   if (i.modeResult.data === "off")
     return {
       state: "off",
-      text: "Policy not enforced — open mesh.",
+      text: "Policy not enforced. Open mesh: every device reaches every device.",
       loud: false,
     };
   const n = i.rulesResult.data;
   if (n === 0)
     return {
       state: "enforcing_empty",
-      text: "0 rules — ALL traffic denied.",
+      text: "0 rules. ALL traffic denied.",
       loud: true,
     };
   return {
     state: "enforcing",
-    text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`,
+    text: `${n} ${n === 1 ? "rule" : "rules"}. Default-deny active.`,
     loud: false,
   };
 }
@@ -552,9 +572,9 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
 export function extendErrorCopy(code: string | undefined): string {
   switch (code) {
     case "grant_lapsed":
-      return "This grant already expired — create a new one instead of extending.";
+      return "This grant already expired. create a new one instead of extending.";
     case "not_temporary":
-      return "This is a permanent grant — it has no expiry to extend.";
+      return "This is a permanent grant. it has no expiry to extend.";
     default:
       return "Could not extend the grant.";
   }
@@ -619,7 +639,7 @@ export async function swapRule(
 }
 
 export function swapPartialMessage(oldIdShort: string): string {
-  return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
+  return `New rule created, but the old rule (${oldIdShort}) could not be removed. it is still active. Retry the removal.`;
 }
 
 // S10.2 D2 cond 1 — the grant ownership surface. A GitOps-managed grant is badged and its dashboard edit/
@@ -627,7 +647,7 @@ export function swapPartialMessage(oldIdShort: string): string {
 // dashboard change silently reverted on the next reconcile.
 export const MANAGED_BADGE = "Managed by GitOps";
 export function managedGrantWarning(): string {
-  return "This grant is managed by the GitOps operator — edit its TunnexGrant CR, not the dashboard.";
+  return "This grant is managed by the GitOps operator. edit its TunnexGrant CR, not the dashboard.";
 }
 
 // grantControls (M3) is the PURE, unit-pinned withhold decision for a grant row: `withheld` true means every
@@ -723,10 +743,10 @@ export function rulesEmptyCopy(s: RulesEmptyState): { text: string; loud: boolea
       return { text: "", loud: false };
     case "failed":
       // Never "No rules". The screen did not read them.
-      return { text: "Rules could not be loaded — refresh to try again.", loud: false };
+      return { text: "Rules could not be loaded. refresh to try again.", loud: false };
     case "enforcing_empty":
       return {
-        text: "0 rules while enforcing — every device-to-device connection is denied by default.",
+        text: "0 rules while enforcing. every device-to-device connection is denied by default.",
         loud: true,
       };
     case "off_empty":
@@ -782,6 +802,6 @@ export function flowGraphNote(s: FlowGraphState): string | null {
     case "withheld_empty":
       return "No rules to draw yet.";
     case "withheld_too_many":
-      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}) — the table below is authoritative.`;
+      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}). the table below is authoritative.`;
   }
 }

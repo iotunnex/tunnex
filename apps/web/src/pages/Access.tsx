@@ -261,7 +261,7 @@ function ModeSection({
         params: { path: { orgId } },
       }),
     );
-    if (!r.ok) return setErr("Couldn't verify the current rule count — retry.");
+    if (!r.ok) return setErr("Couldn't verify the current rule count. retry.");
     setConfirmCount((r.data as PolicyRule[]).length);
     setConfirming(true);
   }
@@ -300,9 +300,9 @@ function ModeSection({
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             {mode === "enforcing"
-              ? "Enforcing — default-deny; only your allow rules pass."
+              ? "Enforcing. default-deny; only your allow rules pass."
               : mode === "off"
-                ? "Off — legacy full-mesh (all devices reach all devices)."
+                ? "Off. legacy full-mesh (all devices reach all devices)."
                 : loadError
                   ? "n/a"
                   : "…"}
@@ -471,7 +471,7 @@ function RulesSection({
     setErr(
       gr.ok && resr.ok && mr.ok && sr.ok && ksr.ok
         ? null
-        : "Some groups/resources/members/sites/services failed to load — names may show as unresolved. Refresh.",
+        : "Some groups/resources/members/sites/services failed to load. names may show as unresolved. Refresh.",
     ); // ksr.ok: a services-load failure must raise the banner too
     // The ONLY clear path (amendment A: gated on this successful load): drop stale ids no
     // longer present, keep the rest (B).
@@ -617,7 +617,7 @@ function RulesSection({
                     {row.cidrOutsideRanges && (
                       <span
                         className="ml-2 rounded-full border border-amber-800/50 bg-amber-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-400"
-                        title="This CIDR is inside no current site subnet — the rule matches nothing until the range is declared."
+                        title="This CIDR is inside no current site subnet. the rule matches nothing until the range is declared."
                       >
                         OUTSIDE RANGES
                       </span>
@@ -627,7 +627,7 @@ function RulesSection({
                     {row.k8sServiceVanished && (
                       <span
                         className="ml-2 rounded-full border border-rose-800/50 bg-rose-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-rose-400"
-                        title="The Kubernetes Service this rule reaches is no longer exposed — the grant matches nothing until it is re-exposed."
+                        title="The Kubernetes Service this rule reaches is no longer exposed. the grant matches nothing until it is re-exposed."
                       >
                         VANISHED
                       </span>
@@ -844,8 +844,8 @@ function ExtendGrantModal({
       <div className="space-y-3">
         <p className="text-xs text-slate-400">
           {now.state === "expired"
-            ? `This grant ${now.label}. Extending a lapsed grant is refused — create a new grant instead.`
-            : `This grant ${now.label}. Move its expiry to a later time (the grant is not re-created — only its window moves).`}
+            ? `This grant ${now.label}. Extending a lapsed grant is refused. create a new grant instead.`
+            : `This grant ${now.label}. Move its expiry to a later time (the grant is not re-created. only its window moves).`}
         </p>
         <Field label="New expiry">
           <Input
@@ -1216,7 +1216,7 @@ function RuleFormModal({
             Editing an existing rule changes its src/dst; change a temporary grant's window
             with Extend (a window bump), not Edit. */}
         {!editing && (
-          <Field label="Expires (optional — leave empty for a permanent grant)">
+          <Field label="Expires (optional. leave empty for a permanent grant)">
             <Input
               type="datetime-local"
               value={expiresAt}
@@ -1599,9 +1599,9 @@ function DeviceApprovalSection({
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             {mode === "on"
-              ? "On — new devices enroll pending and cannot connect until approved."
+              ? "On. new devices enroll pending and cannot connect until approved."
               : mode === "off"
-                ? "Off — new devices are active on enrollment."
+                ? "Off. new devices are active on enrollment."
                 : modeError
                   ? "n/a"
                   : "…"}
@@ -1863,7 +1863,7 @@ function PostureChecksSection({
                 {/* [6] Windows-version foot-gun: Win 11 reports major 10 (10.0.22000+),
                     so "11.0" would block the whole Windows fleet. Steer to build numbers. */}
                 <p className="w-full text-xs text-slate-500">
-                  Windows uses build numbers — Windows 11 reports as{" "}
+                  Windows uses build numbers. Windows 11 reports as{" "}
                   <span className="font-mono text-slate-400">10.0.22000</span>,
                   not 11.0. Enter the build (e.g.{" "}
                   <span className="font-mono text-slate-400">10.0.22631</span>{" "}
