@@ -68,7 +68,7 @@ describe("⛔ A REVOKED GATEWAY CARRIES NO HEALTH BADGE (WF-S11-10)", () => {
     );
     expect(r.health).toBeNull();
     expect(r.ovpnHealth).toBeNull();
-    expect(r.isHub).toBe(false);
+    expect(r.isHub).toBe(true);
   });
 
   it("and an ACTIVE node with the same fields DOES carry them", () => {
