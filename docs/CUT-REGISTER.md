@@ -17,6 +17,11 @@ screen. **Every section's commit-one must cite this grep**, the same way it cite
 **HOW TO ADD:** one line, at the moment of the cut, with the reason and where it was ruled. **A cut recorded
 only in prose is a cut that will be re-proposed.**
 
+**⛔ CUTS ONLY. DEFERRALS LIVE IN `docs/DEFERRAL-REGISTER.md`** — split S14.7, founder-ordered, on this
+file's own founding rationale. **A cut answers *"is this in scope?"*; a deferral answers *"when does this
+happen?"*.** They are greped at different moments by different questions, and mixing them makes both
+searches noisier. This file stayed one-line-per-entry precisely so a grep is cheap.
+
 ---
 
 ## PANELS AND FEATURES
@@ -88,18 +93,6 @@ object.
 `--rebase`. A local ff is possible whenever `main` is an ancestor of the branch head, which it was here.
 **Not changed unilaterally — the linear-history requirement interacts with it and that is a
 branch-protection decision.**
-
-## DEFERRALS WITH NAMED TRIGGERS — not prose, so they cannot quietly expire
-
-| deferral | trigger | why it is deferred rather than done |
-|---|---|---|
-| **`site_id` on `RoutedRange`** | **an org crosses ~50 sites**, OR any story that revisits what `/routed-ranges` may carry | `/routed-ranges` is a **device-facing projection** — *ranges only, no keys, endpoints, pool or policy*. Adding an org-structure field needs a decision about whether a DEVICE should learn site topology, which is not a screen's call. Until then attribution is a per-visit fan-out |
-| **The ~50-site fan-out tripwire** (Routed Ranges `SITE` column) | **51 requests / ~9 waves at 6-per-origin.** Fires when an org's site count approaches 50 | The fan-out is correct and cheap at realistic N. It is recorded as a **THRESHOLD, not a limit**, so the next reader inherits the number instead of rediscovering it at a customer |
-| **`Modal` has no Escape / focus-trap / initial-focus / focus-return** | the next slice that touches `Modal`, or S14.8 | shared primitive, 20 call sites, and it DECLARES `aria-modal="true"` while implementing none of it |
-| **`site_link_down` is an org-level headline printed per row** | the next control-plane story touching site-link health | suppressing a server-owned verdict client-side is the one-truth violation already swept off Sites |
-| **The peer/device count column** (Gateways) | its own slice | spec + codegen ×3 + drift guard + both editions + query-lint + sqlc |
-| **`Histogram` has no shipping consumer** | EPIC 14 close | Access Events moved REDESIGN → BUILD, so the clock got LONGER — which is how a deferral becomes permanent |
-| **Access screen's em-dashes** | the Access section pass | **MEASURED S14.7:** `policyview.ts:436` *"Rule status unavailable — refresh."* and `:442` *"Policy not enforced — open mesh."*, both asserted in `accesswiring.test.tsx:103,144`. **Those two assertions WILL break when that section clears its em-dashes — known in advance rather than discovered** |
 
 ## ⛔ "CONFIGURED NOT TO MATTER" — THE THIRD INSTANCE, AND THE CENSUS THAT FOUND IT
 

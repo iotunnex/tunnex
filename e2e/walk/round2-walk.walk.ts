@@ -15,6 +15,25 @@ import * as fs from "fs";
 // edition slot); w2 = the second signup that must hit the invitation-only cap.
 // Steps A1–A4, A6–A8. A5 (real agent enrollment) runs outside this spec — the
 // minted join token is written to /e2e/.walk-token for the compose agent.
+// ⛔ MOVED OUT OF `tests/` AND RENAMED `.walk.ts` — S14.7, founder-dispositioned.
+//
+// This is a BOX-WALK RIG, not a CI test. It needs Mailpit, a real signup flow and round-2 conditions, so it
+// legitimately does not belong in the automated suite.
+//
+// ⚠ BUT IT USED TO LIVE IN `testDir: "./tests"`, so the BLOCKING `e2e` job COLLECTED it and skipped it at
+// runtime on `!process.env.ROUND2` — which is set NOWHERE in `.github/workflows/` or the `Makefile`.
+//
+//   IT HAS NEVER RUN, IN THE JOB S11-1 PROMOTED TO BLOCKING, WHILE READING AS COVERAGE.
+//
+// That is how two assertions on a string DELETED IN S14.6 survived here: they cannot fail, because nothing
+// runs them. A `test.skip(!process.env.X)` inside the suite is indistinguishable from a test that passes.
+//
+// THE FIX IS PLACEMENT, NOT A FLAG. Out of `testDir` it is no longer collected, no longer counted, and no
+// longer claims to be part of the suite. Run it deliberately:
+//
+//     npx playwright test -c playwright.config.ts walk/round2-walk.walk.ts
+//
+// (Kept as a `test.skip` guard as well, so an accidental direct run still refuses without ROUND2 set.)
 test.skip(
   !process.env.ROUND2,
   "Round-2 walk: run explicitly with ROUND2=1 against an UNSEEDED stack",
