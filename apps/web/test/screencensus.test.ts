@@ -73,6 +73,11 @@ const COVERED: Record<string, string> = {
     "test/accesswiring.test.tsx — enforcement posture cannot be claimed without being read (both directions) + disabled rules shown + failed load never renders a count",
   // SHEDDER, tested accordingly: assertions are written against the DECISION and name `subnets` as the
   // destination, so they travel through the split instead of becoming throwaway work.
+  // S14.7. The one derivation it makes is the client-side attribution join, and the covered property is
+  // WHICH of the three indistinguishable-looking non-answers it claims: in-flight, could-not-ask, and
+  // asked-and-nobody-owns-it all render as an innocent cell if you let them.
+  "RoutedRanges.tsx":
+    "test/routedrangeswiring.test.tsx — in-flight never claims 'no site' (both sides), a failed fan-out degrades to 'could not load' not 'no site', pending never attributes, failed ranges read renders retry not an empty routing table, and the DNS gate is stated on a NON-empty list too",
   "Sites.tsx":
     "test/siteswiring.test.tsx — pending vs approved reachability (destination: subnets) + accessible title not colour + first-crossing threshold + failed load renders retry",
   // SHEDDER: machine credentials -> cli, edition -> license. Assertions target the DECISION and name the
@@ -147,7 +152,7 @@ describe("screen census", () => {
   // THE LEDGER LINES. Not floors. Covering a screen means moving it from PENDING to COVERED and editing BOTH
   // numbers — two deliberate edits, in one diff a reviewer sees. A `>=` here would be satisfied forever.
   it("the COVERED count equals its ledger total", () => {
-    expect(Object.keys(COVERED).length).toBe(8);
+    expect(Object.keys(COVERED).length).toBe(9);
   });
 
   it("the PENDING count equals its ledger total — the backlog shrinks deliberately or not at all", () => {
@@ -167,7 +172,7 @@ describe("screen census", () => {
   //
   // RE-BASELINING IS A DELIBERATE, REVIEWABLE EDIT — which is exactly the property the equals-the-total form
   // was chosen for. A `>=` floor would have absorbed the growth silently and nobody would have had to look.
-  it("the ledger is a snapshot of today — 8 accountable screens, ceiling ~13 after the redesign", () => {
-    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(8);
+  it("the ledger is a snapshot of today — 9 accountable screens, ceiling ~13 after the redesign", () => {
+    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(9);
   });
 });
