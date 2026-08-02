@@ -241,11 +241,21 @@ export function roleTallyLabel(t: RoleTally): string {
 
 // ── LAST-OWNER: MIRRORED FROM THE 403, NEVER PRE-EMPTED ─────────────────────────────────────────────────
 //
-// ⛔ NO CLIENT-SIDE OWNER COUNT. The S4.7 reactive-403 precedent: the server owns the refusal, and a
-// client-side count is a SECOND authority on the same rule that is wrong the moment two admins act at once.
-// The control is offered; the server's verbatim refusal is what the user is shown.
+// ⛔ MY §2.5 RULING WAS "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE — with a rationale written
+// next to it. I ruled on the screen's behaviour without reading the screen: the same method error as grepping
+// `Member` and concluding the product did not know. THIRD instance of forming a verdict without opening the
+// artifact.
+//
+// Reconciled, because the existing design and the ruling's concern are about DIFFERENT THINGS:
+//
+//   the DISABLE is client-side  — legitimate: it avoids a pointless round-trip and the tooltip teaches why
+//   the REFUSAL is the server's — mutate() renders apiErrorMessage(error, fallback), server text FIRST, and
+//                                 refetches on error so a lost race self-corrects (S4.7 reactive-403)
+//
+// So what the ruling forbids is PREDICTING THE REFUSAL TEXT, not disabling a control. The copy below says that
+// accurately — the earlier draft claimed the screen does not predict at all, which was false of the disable.
 export const LAST_OWNER_NOTE =
-  "Demoting the last owner is refused by the server. The refusal is shown verbatim rather than predicted here.";
+  "An organization must always have at least one owner, so the last owner's role and deactivate controls are disabled. The server refuses the change regardless, and its message is shown verbatim if it ever disagrees with what is disabled here.";
 
 /** Rows a `Filter members…` box keeps — client-side over rows already loaded, no new request. */
 export function filterMembers(members: Member[], q: string): Member[] {

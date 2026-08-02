@@ -2395,3 +2395,68 @@ the diff. A correction that leaves its own premise standing has not landed; it h
 **AND IN A DOC, LEAVE THE CORRECTION VISIBLE.** Both the headline and the paragraph now say what they used to
 say and why it was wrong — a future reader needs to know the claim was tested, or they will re-derive the
 original from the wireframe.
+
+---
+
+## A MUTATION SURVIVOR IS NOT AUTOMATICALLY A MISSING TEST — IT MAY BE A WRONG BEHAVIOUR
+
+**S14.11.** A mutation that swapped the two gate lines in `groupAccessState` **survived**. I read the survivor
+the way a survivor is normally read — *my code is right, my test is thin* — and wrote a new test asserting the
+order I had written. **The order was the thing that was wrong.**
+
+Measured afterwards, `ListGroups` runs `authorize(PermPolicyView)` and **only then** `if s.policy == nil`, so an
+open-edition member's real response is `403 forbidden`. My edition-first version told that member *"Groups are a
+Tunnex Enterprise feature"* — **an upsell to someone whose role would not let them see groups after buying
+them.** The S14.5 halt shape, forward, in the function whose own comment warns against its reverse.
+
+> ### **HARDENING A TEST AROUND A SURVIVOR PINS THE BUG. The new test is then a second, LOUDER assertion**
+> ### **that the defect is correct — and it will outlive the reasoning that produced it.**
+
+**THE CHECK:** a survivor says *"no test distinguishes these two behaviours."* Before writing the test, decide
+**which behaviour is right, from the substrate** — the handler, the schema, the wire. Only then pin it. The
+survivor tells you where the ambiguity is; it does not tell you which side of it you are on.
+
+**COROLLARY — A MUTATION MUST BE EQUIVALENT TO THE DEFECT IT NAMES.** My first "edition-first" page mutation
+swapped only the *condition* and left the branch strings, so for the one caller under test both conditions were
+true and it emitted **identical output**. It "survived" by not being the bug. **A mutation that cannot produce
+the defect proves nothing about the defect** — and it reads in a report exactly like a real survivor.
+
+---
+
+## A FIXTURE LESS REPRESENTATIVE THAN A TEST DOUBLE HIDES DEFECTS THE DOUBLE FINDS
+
+**S14.11.** `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation`'s `name` is optional, so **144 of 241
+users in the review database have an empty name.** Every seeded demo member had one. The roster cell rendered
+`{m.name || m.email}` **and** `{m.email}` unconditionally, printing the address twice for a nameless member —
+and **nobody ever saw it**, because the only members ever rendered had names.
+
+It surfaced because a test **mock omitted `name`**, and the first thing I did was try to fix the *test*.
+
+> ### **S14.10's TRAP WAS THE DOUBLE BEING MORE PERMISSIVE THAN THE SUBSTRATE (a label pinned that production**
+> ### **cannot produce). THIS IS THE SAME LESSON FROM THE OTHER SIDE — and it is the worse side, because**
+> ### **ONLY THE FIXTURE IS REVIEWABLE ON A SCREEN. A founder cannot see what the fixture never produces.**
+
+**THE CHECK:** for each column, ask *what does this field look like for the users who never filled it in?* —
+then seed that. Optional-on-write plus `DEFAULT ''` is the signature: a field the SCHEMA calls required and the
+POPULATION mostly leaves blank. And when a double disagrees with the fixture, **ask which one production
+resembles** before fixing either.
+
+---
+
+## A HARNESS THAT MUTATES SOURCE MUST RESTORE IN A `finally`
+
+**S14.11.** My mutation harness restored the original file on its last line. An assert threw mid-run, so it
+**left the source mutated** — and because I ran it twice in one command, the second run took its backup **from
+the corrupted file**, destroying the only clean copy of an untracked file.
+
+Damage was one line, and it was named precisely before repair rather than guessed at. But the shape is general:
+
+> ### **A TOOL THAT EDITS THE WORKING TREE AND CLEANS UP ON THE HAPPY PATH IS NOT A TOOL, IT IS A WAGER.**
+
+**AND THE SECOND HALF, WHICH IS THE ONE THAT LIES:** the harness matched each mutation by a text anchor. When an
+anchor went stale (the function had been deleted), `str.count() != 1` — so the mutation **never ran**, and a
+naive harness counts a never-run mutation as *no failure*, i.e. **as a survivor or, worse, as a pass.**
+
+**THE CHECK:** restore in `finally`; refuse to start if a stale backup exists; and report a stale anchor as
+**NEVER APPLIED**, never as a result. *A mutation whose anchor no longer matches is not a mutation that passed.*
+Print `applied: N of M` so the count and the list cannot disagree.

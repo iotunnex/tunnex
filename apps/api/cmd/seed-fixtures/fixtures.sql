@@ -417,4 +417,31 @@ VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000
         'member', now() - interval '60 days')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
 
+-- ⛔ A MEMBER WITH NO NAME — AND THE FIXTURE'S ABSENCE OF ONE HID A LIVE RENDER DEFECT.
+--
+-- `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation`'s `name` is OPTIONAL, so anyone who accepts an
+-- invite without supplying one has `''`. MEASURED: 144 of 241 users in this database have an empty name. It is
+-- not a corner case; it is what an invite-driven org mostly looks like.
+--
+-- Every seeded member above has a name, so the roster cell rendered `{m.name || m.email}` AND `{m.email}`
+-- unconditionally and NOBODY EVER SAW the address printed twice. A test MOCK that omitted `name` is what
+-- surfaced it.
+--
+--   THE FIXTURE WAS LESS REPRESENTATIVE THAN THE DOUBLE. S14.10's trap was a double MORE PERMISSIVE than the
+--   substrate; this is the same lesson from the other side, and only the fixture side is reviewable on a screen.
+--
+-- Named 'Nadia' in the EMAIL only — the name column stays empty deliberately. Do not "fix" it.
+INSERT INTO users (id, email, name, password_hash, email_verified_at, status, created_at)
+VALUES ('01900000-0000-7000-8000-0000000b0006', 'nadia-no-name@demo.tunnex.local', '',
+        '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+        now() - interval '30 days', 'active', now() - interval '30 days')
+ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name,   -- re-runnable INTO the state it describes: the empty name is the point
+      status = EXCLUDED.status, email_verified_at = EXCLUDED.email_verified_at;
+
+INSERT INTO memberships (org_id, user_id, role, created_at)
+VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000b0006',
+        'member', now() - interval '30 days')
+ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
 COMMIT;

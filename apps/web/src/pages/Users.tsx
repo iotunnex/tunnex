@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   api,
   apiErrorMessage,
+  type Device,
   type Member,
   type Org,
   type Role,
@@ -18,6 +19,17 @@ import {
   Modal,
 } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
+import {
+  deviceCountFor,
+  deviceCountLabel,
+  filterMembers,
+  groupAccessLabel,
+  groupAccessState,
+  LAST_OWNER_NOTE,
+  roleDistribution,
+  roleTallyLabel,
+  rosterShape,
+} from "../lib/usersview";
 
 const ROLES: Role[] = ["owner", "admin", "member"];
 const selectCls =
@@ -37,6 +49,13 @@ export default function Users() {
   const [resetTarget, setResetTarget] = useState<Member | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  // ⛔ `null` MEANS "NOT LOADED", AND IT IS NOT THE SAME AS `[]`. An empty array is a fetched answer; null is
+  // the absence of one, and deviceCountFor / groupAccessState each have a DISTINCT arm for it. Initialising
+  // these to `[]` would make a page that has not finished loading claim every member owns nothing.
+  const [devices, setDevices] = useState<Device[] | null>(null);
+  const [groupCount, setGroupCount] = useState<number | null>(null);
 
   // My role in this org comes from my own row in the roster — no extra endpoint.
   const myRole = useMemo(
@@ -63,6 +82,12 @@ export default function Users() {
     let cancelled = false;
     (async () => {
       try {
+        // Edition comes from /meta, the same source Access.tsx uses — never inferred from whether an
+        // enterprise call happened to 403 (which conflates edition with permission, the bug this screen's
+        // view-model was fixed for).
+        const { data: meta } = await api.GET("/api/v1/meta");
+        if (cancelled) return;
+        setIsEnterprise(meta?.edition === "enterprise");
         const { data: orgs, error: orgErr } = await api.GET(
           "/api/v1/organizations",
         );
@@ -84,6 +109,36 @@ export default function Users() {
       cancelled = true;
     };
   }, []);
+
+  // ⛔ THE TWO GATED READS ARE NOT ISSUED WHEN THEIR GATE FAILS. Firing them anyway would put a 403 into the
+  // page's single error surface, so a member's ordinary, correct page load would show an error — and the gate
+  // note already says the same thing calmly. Depends on `myRole`, which arrives with the members list, so this
+  // effect runs after it rather than in the load above.
+  useEffect(() => {
+    let cancelled = false;
+    if (!org || !myRole) return;
+    (async () => {
+      if (can(myRole, "member:manage")) {
+        const { data, error } = await api.GET(
+          "/api/v1/organizations/{orgId}/devices",
+          { params: { path: { orgId: org.id } } },
+        );
+        // A failure leaves `devices` NULL on purpose — deviceCountFor renders "could not load", which is
+        // honest, rather than a zero that would read as "this person has no devices".
+        if (!cancelled && !error) setDevices(data ?? []);
+      }
+      if (isEnterprise && can(myRole, "policy:view")) {
+        const { data, error } = await api.GET(
+          "/api/v1/organizations/{orgId}/groups",
+          { params: { path: { orgId: org.id } } },
+        );
+        if (!cancelled && !error) setGroupCount((data ?? []).length);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [org, myRole, isEnterprise]);
 
   // The last-owner invariant is deterministic client-side: disable the control
   // that would demote/deactivate the sole owner. The server refusal (409
@@ -136,15 +191,91 @@ export default function Users() {
     );
   };
 
+  const shape = rosterShape({ role: myRole, isEnterprise });
+  const groupAccess = groupAccessState({ isEnterprise, role: myRole, groupCount });
+  const shown = filterMembers(members, query);
+
   return (
     <div>
       <h1 className="text-xl font-semibold text-white">Users</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
 
+      {/* ── Access posture ────────────────────────────────────────────────────────────────────────────────
+          The wireframe's subtitle promises `role hierarchy · MFA coverage · authentication sources` and the
+          product projects ONE of the three. This panel ships that one and NAMES the two it does not have,
+          rather than printing a subtitle that promises all three. `MFA enrolled 5/7` in particular is a
+          NUMBER, and a reader trusts a number more than prose. */}
+      <div className="mt-6">
+        <Card>
+          <h2 className="text-sm font-semibold text-white">Access posture</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            Role hierarchy across {members.length}{" "}
+            {members.length === 1 ? "member" : "members"}.
+          </p>
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+            {roleDistribution(members).map((t) => (
+              <div key={t.role}>
+                {/* The zero is rendered, not dropped: an omitted role reads as a role that does not exist. */}
+                <dt className="text-xs uppercase tracking-wide text-slate-500">
+                  {t.role}
+                  {t.n === 1 ? "" : "s"}
+                </dt>
+                <dd className="text-lg font-semibold text-white">{t.n}</dd>
+                <span className="sr-only">{roleTallyLabel(t)}</span>
+              </div>
+            ))}
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">
+                Groups
+              </dt>
+              {/* Five arms, five distinct readings — a count, "none yet", "not yours to see", "not this
+                  edition", and "the read failed". A single "no groups" would be wrong in four of them. */}
+              <dd
+                className={
+                  groupAccess.kind === "edges"
+                    ? "text-lg font-semibold text-white"
+                    : "pt-1 text-xs text-slate-400"
+                }
+              >
+                {groupAccess.kind === "edges"
+                  ? groupAccess.n
+                  : groupAccessLabel(groupAccess)}
+              </dd>
+              {groupAccess.kind === "edges" && (
+                <span className="sr-only">{groupAccessLabel(groupAccess)}</span>
+              )}
+            </div>
+          </dl>
+          {/* ⛔ THE TWO MISSING FACTS ARE NAMED, NOT OMITTED. Silence here would read as "this org has no MFA
+              story", which is false — MFA is enforced and enrollable, it is the per-member PROJECTION that
+              does not exist (D1), as with authentication sources (D1b). */}
+          <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-500">
+            MFA coverage and authentication sources are not shown per member yet:
+            both are enforced by the server but not carried on the roster
+            response. Two-factor can still be reset per member from the row
+            actions.
+          </p>
+          {shape.gateNote && (
+            <p className="mt-2 text-xs text-slate-400">{shape.gateNote}</p>
+          )}
+        </Card>
+      </div>
+
       {can(myRole, "member:invite") && emailVerified && org && (
         <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />
       )}
+
+      <div className="mt-6 max-w-sm">
+        <Field label="Filter members">
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="name, email or role"
+          />
+        </Field>
+      </div>
 
       {/* S14.3 slice A: a real <table>. The roster is tabular — person, role, state, actions per row — and as
           <li> blocks the tier could only find a member by matching their email as free text. The role control
@@ -152,27 +283,44 @@ export default function Users() {
       <div className="mt-6">
         <DataTable
           caption="Members"
-          rows={members}
+          rows={shown}
           rowKey={(m) => m.user_id}
-          empty="No members yet."
+          // ⛔ THE FILTER'S EMPTY STATE IS NOT THE ROSTER'S. "No members yet" under an active query would tell
+          // an admin their org is empty when they simply typed a name that does not match.
+          empty={
+            query.trim() !== "" && members.length > 0
+              ? `No members match “${query.trim()}”.`
+              : "No members yet."
+          }
           failed={error != null}
           columns={[
             {
               key: "person",
               header: "Member",
-              cell: (m) => (
+              cell: (m) => {
+                // The primary label falls back to the email; the secondary line then has nothing to add.
+                const primary = m.name || m.email;
+                return (
                 <>
-                  <span className="text-sm text-white">
-                    {m.name || m.email}
-                  </span>
+                  <span className="text-sm text-white">{primary}</span>
                   {m.user_id === myId && (
                     <span className="ml-2 text-xs text-slate-500">(you)</span>
                   )}
-                  <span className="ml-2 font-mono text-xs text-slate-500">
-                    {m.email}
-                  </span>
+                  {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
+                      it rendered the address TWICE for a nameless member — and that is not a corner case:
+                      `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
+                      241 users in the review database have an empty name.
+                      Found because a MOCK omitted `name` while every seeded member had one — the fixture was
+                      LESS representative than the double. The inverse of S14.10, where the double was more
+                      permissive than the substrate; the lesson is the same one from the other side. */}
+                  {primary !== m.email && (
+                    <span className="ml-2 font-mono text-xs text-slate-500">
+                      {m.email}
+                    </span>
+                  )}
                 </>
-              ),
+                );
+              },
             },
             {
               key: "state",
@@ -188,6 +336,41 @@ export default function Users() {
                 </>
               ),
             },
+            // ⛔ SPLICED IN, NOT DIMMED. `...(cond ? [col] : [])` means a viewer without member:manage gets
+            // NO <th> and NO cell — nothing in the DOM, nothing announced, nothing keyboard-reachable. An
+            // `opacity-40` column would be "gone only to a sighted mouse user".
+            //
+            // And the reason it is gated at all is the FALSE ZERO: /devices is audience-scoped at the handler
+            // (ListForOrg for member:manage, ListForUser otherwise), so a member's list holds only their own
+            // devices and a group-by over it would print `0 devices` against every colleague. Measured live:
+            // owner@ sees 13 devices / 2 owners, member@ sees 6 / 1.
+            ...(shape.showDeviceCount
+              ? [
+                  {
+                    key: "devices",
+                    header: "Devices",
+                    numeric: true,
+                    cell: (m: Member) => {
+                      const c = deviceCountFor({
+                        role: myRole,
+                        devices,
+                        userId: m.user_id,
+                      });
+                      return (
+                        <span
+                          className={
+                            c.kind === "count"
+                              ? "text-sm text-white"
+                              : "text-xs text-slate-500"
+                          }
+                        >
+                          {c.kind === "count" ? c.n : deviceCountLabel(c)}
+                        </span>
+                      );
+                    },
+                  },
+                ]
+              : []),
             {
               key: "role",
               header: "Role",
@@ -271,6 +454,18 @@ export default function Users() {
             },
           ]}
         />
+        {/* ⛔ §2.5 OF THE COMMIT-ONE SAID "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE, with a
+            written rationale (see isSoleOwner). I ruled on this screen's behaviour without reading the screen
+            — the same method error as grepping `Member` and concluding the product did not know.
+            Reconciled rather than overwritten, because the existing design is right and the ruling's CONCERN
+            is also right, and they are about different things:
+              the DISABLE is client-side  — it stops a pointless round-trip and the tooltip teaches WHY
+              the REFUSAL is the server's — mutate() surfaces apiErrorMessage(error, fallback), server text
+                                            first, and refetches so a lost race self-corrects
+            What §2.5 must forbid is PREDICTING THE REFUSAL TEXT, not disabling a control. */}
+        {can(myRole, "member:manage") && (
+          <p className="mt-2 text-xs text-slate-500">{LAST_OWNER_NOTE}</p>
+        )}
       </div>
       {resetTarget && (
         <Modal

@@ -204,3 +204,27 @@ deleted in S14.6 survived undetected — they cannot fail, because nothing runs 
 
 **NOT DISPOSITIONED HERE** — either `ROUND2` gets set in a job, or the spec is deleted, or it is renamed to
 declare itself. **Three options, founder's call. TRIGGER: EPIC 14 close, with the visual job's re-arm.**
+
+---
+
+## ⛔ A VERDICT FORMED WITHOUT OPENING THE ARTIFACT — **THREE INSTANCES IN ONE STORY (S14.11)**
+
+Not a cut. A **method** class, registered because all three landed inside a single commit-one and **none was
+self-detected** — two were caught by the founder, one by a mutation sweep.
+
+| # | the verdict I recorded | what I looked at | what the artifact said |
+|---|---|---|---|
+| 1 | *"the product doesn't know"* for five roster columns | the **`Member` DTO** | **four of five wrong** — a projection, a permission, an edition, a missing read. `docs/laws.md` → *BEFORE RECORDING AN ABSENCE, NAME THE TABLE* |
+| 2 | *"edition first, because a permission message would misdirect an owner"* | **my own reasoning** | `ListGroups` authorizes **`PermPolicyView` FIRST**, then checks the edition. An open-edition member's real answer is `forbidden`, and my order **sold them Enterprise** |
+| 3 | *"NO client-side owner count"* (§2.5) | **the wireframe copy** | `Users.tsx` **already had one**, with its rationale written beside it. Reconciled, not overwritten |
+
+> ## **THE COMMON SHAPE: I read a SUMMARY OF THE ARTIFACT (a DTO, my own prose, a wireframe) and reported on**
+> ## **THE ARTIFACT. Each summary was accurate about itself and wrong about the thing it stood for.**
+
+**AND THE DIRECTION IS NOT RANDOM: all three under-built or mis-served the caller with the LEAST access.** #1
+removed columns, #2 upsold a member who could never use the feature, #3 would have removed a working guard.
+**When a method error has a consistent direction, the direction is the finding.**
+
+**Instrument gap:** the three axes of spec drift (`docs/S14.10-handoff.md` §4.2) would have caught **none** of
+these — they compare a spec to a schema. **These are prose-vs-handler and prose-vs-page.** Nothing mechanical
+covers either; only reading the handler and the page does.
