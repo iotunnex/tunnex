@@ -225,6 +225,33 @@ self-detected** — two were caught by the founder, one by a mutation sweep.
 removed columns, #2 upsold a member who could never use the feature, #3 would have removed a working guard.
 **When a method error has a consistent direction, the direction is the finding.**
 
-**Instrument gap:** the three axes of spec drift (`docs/S14.10-handoff.md` §4.2) would have caught **none** of
-these — they compare a spec to a schema. **These are prose-vs-handler and prose-vs-page.** Nothing mechanical
-covers either; only reading the handler and the page does.
+## THE DIAGNOSIS, CORRECTED — it is not "the axes compare spec to schema", it is **PROSE VERSUS BEHAVIOUR**
+
+My first diagnosis was that the three spec-drift axes miss this because *they compare a spec to a schema.* True
+and too narrow. **The sharper statement, which is what names the check:**
+
+> ## **ALL THREE FINDINGS ARE AN ARTIFACT A HUMAN WROTE, ASSERTING SOMETHING THE CODE DOES NOT DO.**
+> ## **A COMMENT · A PAPER RULING · A FIXTURE. Three different artifacts, none checked against anything.**
+
+| the artifact | what it asserted | the behaviour |
+|---|---|---|
+| a **comment** (§2.4's *"not the S14.5 halt in reverse"*) | that the gates were ordered safely | the code three lines below committed the S14.5 halt itself |
+| a **paper ruling** (§2.5) | *"no client-side owner count"* | the page had one, deliberately |
+| a **fixture** (every seeded member has a name) | that a named member is what a roster holds | 144 of 241 users have `name = ''` |
+
+**AND THIS IS WHY THE SPEC-DRIFT AXES CANNOT BE EXTENDED TO COVER IT.** All three axes compare **two
+machine-readable things** — a spec enum to a column `CHECK`, a summary's permission to a handler's. Both sides
+are parseable, so a script can hold them together. **Prose has no second side to compare against.** A comment
+that lies is well-formed; a fixture that under-represents is valid data; a ruling in a decisions doc is
+authoritative by construction.
+
+> ## **SO THIS CLASS IS UNAUTOMATABLE BY CONSTRUCTION, WHICH MAKES IT A STANDING QUESTION AND NOT A GUARD:**
+> ## **⛔ WHAT IN THIS CHANGE IS ASSERTED ONLY IN PROSE?**
+
+Ask it of a comment claiming an invariant, a ruling made without opening the file it rules on, and a fixture
+whose values were chosen rather than measured against the population. **The one mechanical thing available is
+narrower and worth doing where it fits:** where prose asserts an *ordering* or a *shape* over many call sites,
+a **static census test** can hold it — `TestEditionGateNeverPrecedesPermissionGate` is that, built here after
+this class produced a security defect, and it covers a 42nd handler nobody has written yet.
+
+**Instrument note:** the three axes (`docs/S14.10-handoff.md` §4.2) would have caught **none** of these.

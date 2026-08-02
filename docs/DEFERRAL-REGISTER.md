@@ -208,5 +208,44 @@ second stack.
 | **`sso_configs` IS EMPTY — an unmeasured fixture zero** | **the next slice needing an SSO-dependent state — `Org Settings` (REDESIGN) will hit it** | Measured while settling the AUTH label: **no `sso_configs` row for the demo org.** Consequence is broader than AUTH — the **SSO config UI**, **domain capture** (`createDomainClaim` / `verifyDomainClaim`) and every SSO-dependent state are **unreachable on this stack**. ⛔ **Registered HERE so the next slice finds it rather than discovering it at pre-flight check 2** — which is exactly what cost S14.8 five rounds. Not this slice's work | S14.11 AUTH measurement | measured, unseeded |
 
 | **D1 — the MFA column + `adminResetMfa`'s precondition** | **founder disposition** (paper recommends *both wait*) | `user_totp.confirmed` + `confirmed_at` are **persisted, `NOT NULL`, read by `HasConfirmedTOTP` in the login path** — three fields to project, not a roadmap. The wireframe's `MFA enrolled 5/7` and per-row `TOTP ✓ / Enroll req.` need them. **`Reset 2FA` ships today with its precondition invisible**, which the paper called worse than no action | S14.11 §2.2 | HELD, not built |
-| **D1b — the AUTH column** (the twin) | **founder disposition, same breath as D1** | `users.password_hash` makes *has a local password* derivable, but `Member` serves **exactly seven fields** and `additionalProperties: false`. ONE projected boolean. I wrote the view-model FIRST and deleted it under the dormant-machinery law once the payload was measured — **a consumer with no producer.** A **type-level tripwire** in `test/usersview.test.ts` fails `typecheck` when `Member` gains a field, and **was proven to fire**; the ruled label (`local password` / `no local password`, never inferring SSO) lives in §2.3 | S14.11 §2.3 | HELD; tripwire armed |
+| **D1b — the AUTH column** (the twin) | **founder disposition, same breath as D1** — **AND a second, MECHANICAL trigger: see the tripwire row below** | `users.password_hash` makes *has a local password* derivable, but `Member` serves **exactly seven fields** and `additionalProperties: false`. ONE projected boolean. I wrote the view-model FIRST and deleted it under the dormant-machinery law once the payload was measured — **a consumer with no producer** | S14.11 §2.3 | HELD; tripwire armed |
+
+### ⛔ THE D1/D1b TRIPWIRE — WHAT IT IS, WHEN IT FIRES, AND WHAT TO DO, because "satisfy the compiler" is the wrong answer
+
+**WHERE:** `apps/web/test/usersview.test.ts` —
+
+```ts
+type UnaccountedMemberField = Exclude<keyof Member,
+  "user_id"|"email"|"name"|"role"|"status"|"email_verified"|"joined_at">;
+const _memberHasNoAuthField: UnaccountedMemberField extends never ? true : false = true;
+```
+
+**FIRES WHEN:** any field is added to `Member` in `openapi/openapi.yaml` — `mfa_confirmed` (D1),
+`has_local_password` (D1b), or anything else. `typecheck` goes red with
+`Type 'true' is not assignable to type 'false'`. **PROVEN TO FIRE** (baseline 0 errors → one field unaccounted
+→ exactly one error at that line → restored → 0).
+
+> ## **⛔ THE WRONG RESPONSE IS TO ADD THE NEW FIELD NAME TO THE `Exclude` LIST AND MOVE ON. That silences the**
+> ## **tripwire and ships a projected field NOTHING RENDERS — which is the producer-without-consumer defect**
+> ## **this epic has already hit three times.**
+
+**THE WORK TO DO, and it EXISTS — do not reinvent it.** The deleted view-model was:
+
+| deleted symbol | what it did | recover from |
+|---|---|---|
+| `AuthFact` (type) | `"local-password" \| "no-local-password"` — **two** arms, deliberately not three | commit `d93627b`, `apps/web/src/lib/usersview.ts` |
+| `authFact(hasPasswordHash: boolean)` | the pure derivation | same commit |
+| `authFactLabel()` | `local password` / `no local password` | same commit |
+| its two unit tests | one asserting the label **never matches** `/sso\|entra\|google\|okta\|saml\|oidc/i` | commit `d93627b`, `apps/web/test/usersview.test.ts` |
+
+**AND THE RULING THAT CONSTRAINS THE REBUILD (§2.3, measured, do not re-derive):** the label **STOPS AT THE
+FACT**. It must NEVER infer SSO from `sso_configs`, because **237 of 241 users have `password_hash IS NULL` and
+the demo org has NO `sso_configs` row** — so *"no password ⇒ SSO"* is disproved by the first org anyone opens.
+A user with no password in an org with no provider is **neither**.
+
+**For D1 (MFA) the same discipline applies:** `user_totp.confirmed` is the source; the wireframe's
+`MFA enrolled 5/7` is a **number**, and a reader trusts a number more than prose — so it must not be derived
+from anything weaker than the confirmed flag.
 | **D2 — per-member group edges + the `idp-sync` marker** | **founder disposition**; the paper recommends *cut*, registered against `Groups` landing | Needs `listGroups` **plus `listGroupMembers` PER GROUP** — an N+1, **51 requests at 50 groups** (pre-flight check 1). The panel ships group **access + count from ONE request** instead; the arms (`forbidden` / `edition` / `failed` / `none` / count) are already built and would be reused unchanged | S14.11 §2.4 | HELD; panel ships the 1-request form |
+
+| **`make test-editions` IS RED LOCALLY AGAINST A LIVE-STACK DB — a REQUIRED gate that only passes on a fresh database** | **the next session that runs the gate and cannot tell a real red from this one** — or a CI change that stops provisioning a fresh postgres | **PRE-EXISTING, proven: fails identically at `main` 832e6b0.** One root cause, four packages: the tests share the database with a RUNNING stack. Once the API has minted an agent CA (encrypted with the stack's key) the test's own key cannot decrypt it, and the code **correctly refuses to regenerate** (*"a new CA would orphan every enrolled agent"*). Leader-election tests fail for the sibling reason — the live API holds the lock.<br><br>`agentca` ×3 · `nodes/TestNodeEnrollmentLifecycle` · `devices` ×2 · `ovpn` · leader-election ×2<br><br>**MEASURED CLEAN on a fresh DB (CI's condition — CI runs `docker compose up -d --wait postgres` and never starts the API): open 32 ok, enterprise 35 ok, ZERO failures, both editions.**<br><br>⛔ **WHY THIS IS WORTH A ROW RATHER THAN A SHRUG: `make test-editions` is a REQUIRED gate in CLAUDE.md, and a gate that is always red teaches you to skip reading it.** The next genuine failure in those four packages arrives already camouflaged. Fix is test-side isolation (a per-test schema or a dedicated test database), not a skip — a skip would make it pass while checking nothing, which is the worse failure (the witness-liveness law). | S14.11 gate run | pre-existing, unfixed, NOT mine |
