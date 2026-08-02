@@ -207,6 +207,22 @@ export default function Users() {
   };
 
   const shape = rosterShape({ role: myRole, isEnterprise });
+  // ⛔ ACTIONS IS ABSENT WHEN NO ROW HAS ONE — the same rule as the Devices column, for the same reason.
+  //
+  // A COLUMN HEADER IS A CLAIM THAT THE COLUMN HAS CONTENT. On the member view every ACTIONS cell was empty,
+  // which tells a member there are actions they cannot see when there are none for them AT ALL. If Devices is
+  // absent for lack of permission, ACTIONS is absent for the same reason; shipping one and not the other
+  // would undercut the rule the screen is built on.
+  //
+  // ⛔ AND THE TEST IS "DOES ANY ROW HAVE AN ACTION", NOT "DOES THE VIEWER HOLD A ROLE". An admin on a roster
+  // of owners can act on nobody — `canManageMembership(admin, owner, …)` is false — and a role-based test
+  // would keep an empty column for them. It mirrors the CELL's own condition exactly, so the two cannot drift.
+  const anyRowHasAction = members.some(
+    (m) =>
+      emailVerified &&
+      canManageMembership(myRole, m.role, "") &&
+      m.user_id !== myId,
+  );
   const groupAccess = groupAccessState({ isEnterprise, role: myRole, groupCount });
   const shown = filterMembers(members, query);
 
@@ -432,11 +448,13 @@ export default function Users() {
                 );
               },
             },
-            {
+            // Spliced, not dimmed — identical to the Devices column above. See `anyRowHasAction`.
+            ...(anyRowHasAction
+              ? [{
               key: "actions",
               header: "Actions",
               numeric: true,
-              cell: (m) => {
+              cell: (m: Member) => {
                 const canManage =
                   emailVerified && canManageMembership(myRole, m.role, "");
                 const isSelf = m.user_id === myId;
@@ -473,7 +491,8 @@ export default function Users() {
                   </span>
                 );
               },
-            },
+            }]
+              : []),
           ]}
         />
         {/* ⛔ §2.5 OF THE COMMIT-ONE SAID "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE, with a

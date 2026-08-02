@@ -416,8 +416,12 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
       screen.getByRole("table", { name: "Members" }),
     );
     await waitFor(() => within(table).getByText("owner@acme.test"));
-    for (const h of ["Member", "State", "Role", "Actions"])
+    // ⛔ "Actions" WAS IN THIS LIST AND THAT PINNED THE DEFECT the founder review caught: a member saw an
+    // ACTIONS header over cells that were all empty. Coherent means "every column shown has content for
+    // this viewer" — not "as many columns as an admin gets".
+    for (const h of ["Member", "State", "Role"])
       expect(within(table).getByRole("columnheader", { name: h })).toBeTruthy();
+    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
     // And the role tallies render, INCLUDING the zero for admins.
     expect(screen.getByText("0")).toBeTruthy();
   });
@@ -504,5 +508,49 @@ describe("Users — an empty name AND a long email (the interaction)", () => {
       node = node.parentElement;
     }
     expect(clipping).toEqual([]);
+  });
+});
+
+describe("Users — the ACTIONS column follows the same rule as Devices", () => {
+  it("⛔ a MEMBER gets NO ACTIONS COLUMN — a header with every cell empty is a false claim", async () => {
+    // FOUNDER REVIEW FINDING. ACTIONS rendered as a header with every cell empty on the member view — the
+    // same class the Devices column avoids. A COLUMN HEADER IS A CLAIM THAT THE COLUMN HAS CONTENT, so an
+    // empty ACTIONS tells a member there are actions they cannot see when there are none for them at all.
+    roster = [
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
+      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", status: "active", email_verified: true },
+    ];
+    whoAmI = "u3";
+    withAuth(<Users />);
+    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    await waitFor(() => within(table).getByText("Olive Owner"));
+
+    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(["Member", "State", "Role"]);
+    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    expect(within(table).queryByRole("columnheader", { name: "Devices" })).toBeNull();
+  });
+
+  it("an ADMIN keeps the ACTIONS column — 'always absent' must not pass either", async () => {
+    withAuth(<Users />); // default roster: u1 owner (me), u2 admin — I can act on u2
+    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    await waitFor(() => within(table).getByText("Adam Admin"));
+    expect(within(table).getByRole("columnheader", { name: "Actions" })).toBeTruthy();
+  });
+
+  it("⛔ the test is ANY-ROW-HAS-AN-ACTION, not the viewer's role", async () => {
+    // An ADMIN on a roster of OWNERS can act on nobody — canManageMembership(admin, owner, …) is false — so a
+    // role-based test would leave them an empty column, reintroducing the defect for a different caller.
+    roster = [
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
+      { user_id: "u2", email: "admin@acme.test", name: "Adam Admin", role: "admin", status: "active", email_verified: true },
+    ];
+    whoAmI = "u2"; // I am the admin; the only other row is an owner I cannot manage
+    withAuth(<Users />);
+    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    await waitFor(() => within(table).getByText("Olive Owner"));
+    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    // But the Devices column STAYS — an admin holds member:manage, and that gate is unrelated.
+    expect(within(table).getByRole("columnheader", { name: "Devices" })).toBeTruthy();
   });
 });
