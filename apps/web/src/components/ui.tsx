@@ -38,8 +38,29 @@ export function Button({
 }) {
   const base =
     "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400";
+  // ⛔ THE PRIMARY BUTTON WAS UNREADABLE, PRODUCT-WIDE, AND THE PALETTE SWAP IS WHY.
+  //
+  // It was `bg-accent-500 text-white`. In the mono palette `--tnx-accent` is **#C9C9C4** — a LIGHT GREY — so
+  // every primary button in the app rendered WHITE TEXT ON LIGHT GREY. It was legible under the old violet
+  // accent (#7C5CFC) and stopped being legible the moment the palette was re-pointed at the handoff's mono
+  // set, because the class names did not change and nothing asserts contrast.
+  //
+  // A SEMANTIC NAME SURVIVES A PALETTE SWAP; THE CONTRAST IT ASSUMED DOES NOT. `accent` kept meaning
+  // "the accent", and the thing it pointed at went from dark-enough-for-white-text to far too light.
+  //
+  // THE FIX IS THE DESIGN'S OWN RECIPE (dc.html L449, the `+ Add site` button):
+  //   background rgba(255,255,255,.16) · border rgba(255,255,255,.4) · blur(10px)
+  //   shadow 0 4px 16px rgba(0,0,0,.4) · color #F5F5F5
+  // A 16%-white wash over a near-black page lands around #2F2F2F, so #F5F5F5 sits at roughly 12:1 — and it
+  // stays legible on the glass panels too, which is why the design uses a translucent fill rather than a
+  // solid one.
+  //
+  // ⚠ `backdrop-blur` makes an element a containing block for `position: fixed` descendants — the trap that
+  // clipped five modals inside `Card`. Safe here: a button has no fixed descendants. Do not lift this recipe
+  // onto a container without re-reading that law.
   const variants = {
-    primary: "bg-accent-500 text-white hover:bg-accent-600",
+    primary:
+      "border border-white/40 bg-white/[.16] text-ink-heading shadow-[0_4px_16px_rgba(0,0,0,.4)] backdrop-blur-[10px] hover:bg-white/25",
     ghost: "border border-white/10 text-slate-200 hover:bg-white/5",
     danger: "text-slate-400 hover:text-danger",
   } as const;
