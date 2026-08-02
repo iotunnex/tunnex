@@ -379,3 +379,64 @@ func TestDeriveMemberLivenessSharedTruth(t *testing.T) {
 		t.Fatalf("c: NULL witness → !Observed, never Fresh (Step HOLDS), got %+v", live[c])
 	}
 }
+
+// ⛔ THE WEDGE. S14.8: `failoverOrg` declared `var demoted []uuid.UUID` and assigned it ONLY inside a
+// `len(configured) >= 2` branch. `org_hub_set.demoted` is NOT NULL, and a nil slice reaches pgx as SQL NULL,
+// so an org that HAS a demotion and then drops below two configured hubs wrote NULL and failed with 23502 —
+// EVERY TICK, FOREVER. The controller stops working exactly when the fleet is already degraded, and says so
+// only in a log nobody is tailing (42 consecutive failures before anyone looked).
+//
+// ⚠ WHY THIS TEST EXISTS AT ALL, and it is the real lesson: THE RULE IT ENFORCES WAS ALREADY WRITTEN DOWN —
+// in a query comment ("this writer NEVER touches `demoted`; the controller owns it"). A fixture violated the
+// partition and nothing objected, because A COMMENT IS NOT A GUARD. This repo has a law about that.
+//
+// It drives `failoverOrg` — the caller — rather than the query, so reverting the one-word fix turns it red.
+func TestFailoverClearsDemotionBelowTwoHubs(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	q := sqlc.New(pool)
+	org := uuid.New()
+	if _, e := pool.Exec(ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,'O',$2)", org, "wd-"+org.String()[:8]); e != nil {
+		t.Fatalf("seed org: %v", e)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org) })
+
+	// A single-member hub set WITH a demotion recorded — precisely the state that wedged. One member is what
+	// makes `len(configured) >= 2` false, so the demoted slice is never assigned by the Step branch.
+	lone := uuid.New()
+	if _, e := q.UpsertOrgHubSetConfigured(ctx, sqlc.UpsertOrgHubSetConfiguredParams{OrgID: org, Configured: []uuid.UUID{lone}}); e != nil {
+		t.Fatalf("seed configured: %v", e)
+	}
+	if _, e := q.UpsertOrgHubSetDemoted(ctx, sqlc.UpsertOrgHubSetDemotedParams{OrgID: org, Demoted: []uuid.UUID{lone}}); e != nil {
+		t.Fatalf("seed demoted: %v", e)
+	}
+
+	// ⛔ `failovers` MUST BE INITIALISED. A hand-built Service leaves it nil and `failoverFor` panics with
+	// "assignment to entry in nil map" — which is how the FIRST version of this test produced a red that had
+	// nothing to do with the wedge. A test that fails for the wrong reason is not evidence, and it looks
+	// exactly like one that fails for the right one.
+	s := &Service{q: q, pool: pool, failovers: map[uuid.UUID]*FailoverController{}}
+	// ⛔ THE ASSERTION IS THAT THE TICK SUCCEEDS. Against the nil slice this returns
+	// `null value in column "demoted" ... violates not-null constraint (SQLSTATE 23502)`.
+	if err := s.failoverOrg(ctx, org, time.Now()); err != nil {
+		t.Fatalf("a tick on a below-two-hub org with a demotion must SUCCEED, not wedge: %v", err)
+	}
+
+	// And the demotion must actually be CLEARED, not merely survive the write — an empty slice that never
+	// reached the row would pass the assertion above while leaving the org demoted forever.
+	hs, err := q.GetOrgHubSet(ctx, org)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if len(hs.Demoted) != 0 {
+		t.Fatalf("demotion must be cleared once the member is no longer configured; got %v", hs.Demoted)
+	}
+}

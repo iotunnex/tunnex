@@ -66,7 +66,24 @@ func TestEveryHealthKindReachesItsMirrorSurfaces(t *testing.T) {
 		if !strings.Contains(enumLine, kind+",") && !strings.Contains(enumLine, kind+"]") {
 			missingSpec = append(missingSpec, kind)
 		}
-		if _, ok := notRenderedInUI[kind]; !ok && !strings.Contains(string(view), `case "`+kind+`":`) {
+		// ⛔ TWO FORMS, BECAUSE THE RENDERER CHANGED SHAPE AND THIS CENSUS WENT SILENTLY RED (S14.8).
+		//
+		// `policyHealthBadge` was a `switch` with `case "<kind>":` arms; S14.8 replaced it with a
+		// `Record<NonHealthyPolicyDegradedKind, HealthBadge>` keyed `<kind>: { label, tone }`, so that the TS
+		// COMPILER refuses a new kind with no badge. That is a STRONGER guard than this one — and it defeated
+		// this one, because the literal `case "` disappeared and all thirteen kinds read as unrendered.
+		//
+		// ⛔ BOTH GUARDS STAY, BECAUSE THEY CATCH DIFFERENT FAILURES:
+		//   THE RECORD  catches a kind that IS in openapi.yaml but has no badge — at TS compile time.
+		//   THIS CENSUS catches a kind that is in the GO ENUM and never reached the spec at all, so the
+		//               generated TS union does not contain it and the compiler has nothing to complain about.
+		//
+		// The second is exactly how `k8s_endpoints_unavailable` shipped invisible: Go enum + metrics, absent
+		// from the spec, rendering as a generic "degraded". A compiler cannot see across that gap; only a
+		// cross-surface census can.
+		rendered := strings.Contains(string(view), `case "`+kind+`":`) || // switch form (pre-S14.8)
+			strings.Contains(string(view), "\n  "+kind+": {") // Record form (S14.8 on)
+		if _, ok := notRenderedInUI[kind]; !ok && !rendered {
 			missingUI = append(missingUI, kind)
 		}
 	}
