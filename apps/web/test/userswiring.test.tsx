@@ -433,3 +433,37 @@ describe("Users — a member with no name", () => {
     expect(within(table).getAllByText("owner@acme.test")).toHaveLength(1);
   });
 });
+
+describe("Users — an empty name AND a long email (the interaction)", () => {
+  it("⛔ still renders the address ONCE when it is long enough to wrap", async () => {
+    // The founder's check: the original defect was a DOUBLED string, and truncation is where a doubled string
+    // hides — the second copy clipped out of view reads as one copy. So the fix is asserted at the length that
+    // actually wraps, not only at a short address.
+    //
+    // Measured on the shipped cell: NO `truncate`, NO `overflow-hidden`, NO `whitespace-nowrap` on either span
+    // or the <td>, so the text wraps rather than clipping. This test is what keeps that true — adding
+    // `truncate` later would not fail it, but adding a second unconditional email span would.
+    const long = "nadia.okonkwo-contractor.external@a-very-long-subdomain.example-company.co.uk";
+    roster = [
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
+      { user_id: "u5", email: long, name: "", role: "member", email_verified: true, active: true },
+    ];
+    withAuth(<Users />);
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Members" }),
+    );
+    await waitFor(() => within(table).getByText(long));
+    expect(within(table).getAllByText(long)).toHaveLength(1);
+
+    // And the cell is not clipped: no class on the rendered node or its ancestors up to the row hides overflow.
+    let node: HTMLElement | null = within(table).getByText(long);
+    const clipping: string[] = [];
+    while (node && node.tagName !== "TR") {
+      const c = node.className || "";
+      for (const bad of ["truncate", "overflow-hidden", "whitespace-nowrap", "text-ellipsis"])
+        if (typeof c === "string" && c.includes(bad)) clipping.push(`${node.tagName}.${bad}`);
+      node = node.parentElement;
+    }
+    expect(clipping).toEqual([]);
+  });
+});

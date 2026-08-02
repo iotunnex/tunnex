@@ -444,4 +444,26 @@ VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000
         'member', now() - interval '30 days')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
 
+-- ⛔ EMPTY NAME **AND** A LONG ADDRESS — the INTERACTION, seeded separately from the isolated case above.
+--
+-- One isolation per fact keeps `nadia-no-name@` about the empty name alone. But the original defect was a
+-- DOUBLED STRING, and **truncation is where a doubled string hides**: a clipped second copy reads as one copy,
+-- so a fix confirmed only at a short address is confirmed at the length least able to expose it.
+--
+-- Measured on the shipped cell: NO `truncate`, `overflow-hidden`, `whitespace-nowrap` or `text-ellipsis` on
+-- either span, the `<td>`, or any ancestor up to the `<tr>` — so it wraps. A wiring test walks that ancestor
+-- chain and was PROVEN to fire (adding `truncate` to the span reds it with `expected [ 'SPAN.truncate' ]`).
+INSERT INTO users (id, email, name, password_hash, email_verified_at, status, created_at)
+VALUES ('01900000-0000-7000-8000-0000000b0007',
+        'oluwaseun.adebayo-contractor.external@a-very-long-subdomain.demo.tunnex.local', '',
+        '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+        now() - interval '20 days', 'active', now() - interval '20 days')
+ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name, status = EXCLUDED.status, email_verified_at = EXCLUDED.email_verified_at;
+
+INSERT INTO memberships (org_id, user_id, role, created_at)
+VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000b0007',
+        'member', now() - interval '20 days')
+ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
 COMMIT;
