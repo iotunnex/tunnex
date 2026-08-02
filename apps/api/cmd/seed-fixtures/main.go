@@ -124,4 +124,3 @@ func main() {
 		slog.String("note", "totals as they now EXIST (fixture + make seed), counted after the write; health kinds are DERIVED, not seeded"),
 	)
 }
-
