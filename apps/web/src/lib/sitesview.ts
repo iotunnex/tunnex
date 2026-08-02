@@ -291,6 +291,14 @@ export function meshFrom(
   cards: SiteCard[],
   nodes: Node[],
   hubGeneration?: number,
+  /**
+   * ⛔ DID THE CALLER ACTUALLY LOAD SUBNETS? Overview renders this same mesh but does NOT fetch per-site
+   * subnets, and with them absent the sub-line would read "no approved subnet" for every site — asserting a
+   * fact nobody measured, on a screen whose whole job is to be trusted at a glance.
+   *
+   * Absent-because-unloaded and absent-because-none are different, so the caller says which it has.
+   */
+  subnetsKnown = true,
 ): Mesh {
   const hubNode = nodes.find((n) => n.is_site_hub && n.status === "active");
   const out: Mesh = { nodes: [], links: [] };
@@ -309,9 +317,11 @@ export function meshFrom(
   }
   for (const c of cards) {
     const approved = c.subnets.filter((s) => s.status === "approved");
-    const sub = approved.length
-      ? "· " + approved.map((s) => s.cidr).join(", ")
-      : "· no approved subnet";
+    const sub = !subnetsKnown
+      ? undefined
+      : approved.length
+        ? "· " + approved.map((s) => s.cidr).join(", ")
+        : "· no approved subnet";
     // `value` = the site's bound gateway count. The wireframe puts a SITE COUNT inside the ring because its
     // nodes are regions; ours are sites, so the honest analogue is how many gateways front this one. Zero is
     // a real fact here (a site with no gateway bound), unlike an absent count.
