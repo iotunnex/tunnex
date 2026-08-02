@@ -812,10 +812,42 @@ export function flowGraphNote(s: FlowGraphState): string | null {
 // without specifying the rule that produces it. So this is a DECISION, not an implementation of the design.
 export const FLOW_COLUMN_CAP = 4; // the design's own four slots per column
 
-export interface FlowEdge { id: string; src: string; dst: string; temp: boolean }
+// ⛔ THE KIND COMES FROM THE RULE'S OWN DISCRIMINATED UNION, NEVER FROM MATCHING THE LABEL.
+// A label-matching heuristic rendered every resource as USER: `members.some(m => label.startsWith(m.name))`
+// is ALWAYS TRUE when any member has an empty name — and `users.name` is NOT NULL DEFAULT '' with 144 such
+// rows. So the fixture added one slice earlier made the guess match everything.
+//   A WRONG TYPE TAG IS NOT STYLING. It is a FALSE CLAIM ABOUT WHAT A RULE POINTS AT.
+// `policy_rules` already enforces the union in two CHECK constraints; read it instead of inferring it.
+export type FlowKind = "group" | "user" | "site" | "cidr" | "resource" | "k8s_service";
+export interface FlowEdge {
+  id: string;
+  src: string;
+  dst: string;
+  temp: boolean;
+  srcKind: FlowKind;
+  dstKind: FlowKind;
+}
+
+/** Single letter in the glyph circle. Every arm of BOTH unions, exhaustively. */
+export function flowGlyph(k: FlowKind): string {
+  switch (k) {
+    case "group": return "G";
+    case "user": return "U";
+    case "site": return "S";
+    case "cidr": return "C";
+    case "resource": return "R";
+    case "k8s_service": return "K";
+  }
+}
+
+/** The tag line under the name. */
+export function flowTag(k: FlowKind): string {
+  return k === "k8s_service" ? "K8S SERVICE" : k.toUpperCase();
+}
+export interface FlowNode { label: string; kind: FlowKind }
 export interface FlowLayout {
-  srcs: string[];
-  dsts: string[];
+  srcs: FlowNode[];
+  dsts: FlowNode[];
   shown: FlowEdge[];
   hidden: number;
 }
@@ -830,25 +862,33 @@ export interface FlowLayout {
  */
 export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout {
   const deg = (l: string, k: "src" | "dst") => edges.filter((e) => e[k] === l).length;
-  const srcs = [...new Set(edges.map((e) => e.src))]
+  const kindOfSrc = new Map(edges.map((e) => [e.src, e.srcKind]));
+  const kindOfDst = new Map(edges.map((e) => [e.dst, e.dstKind]));
+  const srcLabels = [...new Set(edges.map((e) => e.src))]
     .sort((a, b) => deg(b, "src") - deg(a, "src"))
     .slice(0, cap);
-  const si = (l: string) => srcs.indexOf(l);
+  const si = (l: string) => srcLabels.indexOf(l);
   const bary = (d: string) => {
     const ss = edges.filter((e) => e.dst === d && si(e.src) >= 0).map((e) => si(e.src));
     return ss.length ? ss.reduce((a, b) => a + b, 0) / ss.length : Number.MAX_SAFE_INTEGER;
   };
-  const dsts = [...new Set(edges.map((e) => e.dst))]
+  const dstLabels = [...new Set(edges.map((e) => e.dst))]
     .sort((a, b) => deg(b, "dst") - deg(a, "dst"))
     .slice(0, cap)
     .sort((a, b) => bary(a) - bary(b));
-  const shown = edges.filter((e) => si(e.src) >= 0 && dsts.indexOf(e.dst) >= 0);
-  return { srcs, dsts, shown, hidden: edges.length - shown.length };
+  const shown = edges.filter((e) => si(e.src) >= 0 && dstLabels.indexOf(e.dst) >= 0);
+  return {
+    srcs: srcLabels.map((l) => ({ label: l, kind: kindOfSrc.get(l)! })),
+    dsts: dstLabels.map((l) => ({ label: l, kind: kindOfDst.get(l)! })),
+    shown,
+    hidden: edges.length - shown.length,
+  };
 }
 
 /** How many edge pairs cross, given a layout. Used by the test to prove ordering does work. */
 export function flowCrossings(l: FlowLayout): number {
-  const si = (x: string) => l.srcs.indexOf(x), di = (x: string) => l.dsts.indexOf(x);
+  const si = (x: string) => l.srcs.findIndex((n) => n.label === x);
+  const di = (x: string) => l.dsts.findIndex((n) => n.label === x);
   let n = 0;
   for (let i = 0; i < l.shown.length; i++)
     for (let j = i + 1; j < l.shown.length; j++) {

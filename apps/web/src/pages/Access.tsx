@@ -52,6 +52,9 @@ import {
   flowGraphState,
   flowGraphNote,
   flowLayout,
+  flowGlyph,
+  flowTag,
+  type FlowKind,
   ruleBody,
   defaultSrcKind,
   defaultDstKind,
@@ -600,7 +603,15 @@ function RulesSection({
           {(() => {
             const rows = rules.map((r) => {
               const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
-              return { id: r.id, src: rr.src.label, dst: rr.dst.label, temp: r.expires_at != null };
+              return {
+                id: r.id,
+                src: rr.src.label,
+                dst: rr.dst.label,
+                temp: r.expires_at != null,
+                // ⛔ FROM THE RULE'S OWN UNION, never inferred from the label.
+                srcKind: r.src_kind as FlowKind,
+                dstKind: r.dst_kind as FlowKind,
+              };
             });
             const g = flowGraphState(rows.length);
             if (g.kind !== "draw")
@@ -609,60 +620,67 @@ function RulesSection({
                   {flowGraphNote(g)}
                 </p>
               );
-            const PITCH = 68, TOP = 54, W = 600, H = 312;
-            // ⛔ THE CAP AND THE ORDERING LIVE IN policyview.ts, PURE AND TESTED. They are OUR design
-            // decision (the handoff's polFlow is a hardcoded literal that never reads the rule table), so
-            // they get asserted like one: the cap at both sides, and a known-crossing input proven to come
-            // out with zero crossings.
             const { srcs, dsts, shown, hidden } = flowLayout(rows);
-            const si = (l: string) => srcs.indexOf(l);
-            const cy = (i: number) => TOP + i * PITCH;
-            const box = (label: string, i: number, isSrc: boolean, sub: string) => {
+            const si = (l: string) => srcs.findIndex((n) => n.label === l);
+            const di = (l: string) => dsts.findIndex((n) => n.label === l);
+            const cy = (i: number) => 54 + i * 68;
+            const node = (n: { label: string; kind: FlowKind }, i: number, isSrc: boolean) => {
               const cx = isSrc ? 95 : 505;
               return (
-                <g key={(isSrc ? "s" : "d") + label}>
+                <g key={(isSrc ? "s" : "d") + n.label}>
                   <rect x={cx - 76} y={cy(i) - 18} width="152" height="36" rx="10"
                         fill="var(--tnx-surface-inset)" stroke="var(--tnx-divider)" strokeWidth="1.4" />
-                  <circle cx={cx - 60} cy={cy(i)} r="8" fill="var(--tnx-surface)" stroke="var(--tnx-divider)" />
-                  <text x={cx - 60} y={cy(i) + 3} textAnchor="middle" className="fill-slate-400 text-[8px]">
-                    {sub.charAt(0)}
+                  <circle cx={cx - 60} cy={cy(i)} r="8"
+                          fill="var(--tnx-surface)" stroke="var(--tnx-divider)" />
+                  <text x={cx - 60} y={cy(i) + 3} textAnchor="middle"
+                        style={{ fontSize: "8px" }} className="fill-slate-400">
+                    {flowGlyph(n.kind)}
                   </text>
-                  <text x={cx - 46} y={cy(i) - 2} className="fill-slate-200 text-[11px]">{label.slice(0, 22)}</text>
-                  <text x={cx - 46} y={cy(i) + 10} className="fill-slate-500 text-[8px] uppercase tracking-wider">{sub}</text>
+                  <text x={cx - 46} y={cy(i) - 2} style={{ fontSize: "10px" }} className="fill-slate-200">
+                    {n.label.length > 18 ? n.label.slice(0, 17) + "\u2026" : n.label}
+                  </text>
+                  <text x={cx - 46} y={cy(i) + 9} style={{ fontSize: "7px", letterSpacing: ".08em" }}
+                        className="fill-slate-500">
+                    {flowTag(n.kind)}
+                  </text>
                 </g>
               );
             };
-            const kindOf = (label: string) =>
-              groups.some((x) => x.name === label) ? "group"
-              : sites.some((x) => x.name === label) ? "site"
-              : members.some((m) => (m.name || m.email) === label || label.startsWith(m.name)) ? "user"
-              : "resource";
             return (
               <div className="mt-3">
-                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
-                     aria-label={`Access flow: ${shown.length} of ${rows.length} rules drawn, ${srcs.length} sources to ${dsts.length} destinations`}>
+                {/* ⛔ FIXED 600x312 — ONE USER UNIT IS ONE PIXEL. `w-full` on a viewBox scaled the whole
+                    drawing to the container (~1900px), magnifying 152x36 boxes to ~490x130 and truncating
+                    every name. THE SCALE IS A CONTRACT: same law, same panel shape, second occurrence after
+                    the Sites map. width/height are set explicitly and the SVG is centred, never stretched. */}
+                <svg
+                  width="600"
+                  height="312"
+                  viewBox="0 0 600 312"
+                  className="mx-auto block max-w-full"
+                  role="img"
+                  aria-label={`Access flow: ${shown.length} of ${rows.length} rules drawn, ${srcs.length} sources to ${dsts.length} destinations`}
+                >
                   <defs>
                     <pattern id="tnxPolDots" width="16" height="16" patternUnits="userSpaceOnUse">
                       <circle cx="1.5" cy="1.5" r="1" fill="var(--tnx-divider)" />
                     </pattern>
                   </defs>
-                  <rect x="0" y="0" width={W} height={H} rx="14" fill="url(#tnxPolDots)" />
+                  <rect x="0" y="0" width="600" height="312" rx="14" fill="url(#tnxPolDots)" />
                   {shown.map((r) => {
-                    const sy = cy(si(r.src)), dy = cy(dsts.indexOf(r.dst));
+                    const sy = cy(si(r.src)), dy = cy(di(r.dst));
                     return (
-                      <path key={r.id} fill="none" strokeWidth="2"
+                      <path key={r.id} fill="none" strokeWidth="2" className="tnx-flow-edge"
                             stroke={r.temp ? "var(--tnx-neutral)" : "var(--tnx-accent)"}
                             strokeDasharray={r.temp ? "5 6" : undefined}
-                            className="tnx-flow-edge"
                             d={`M170,${sy} C300,${sy} 300,${dy} 430,${dy}`} />
                     );
                   })}
-                  {srcs.map((l, i) => box(l, i, true, kindOf(l)))}
-                  {dsts.map((l, i) => box(l, i, false, kindOf(l)))}
+                  {srcs.map((n, i) => node(n, i, true))}
+                  {dsts.map((n, i) => node(n, i, false))}
                 </svg>
-                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                <div className="mx-auto mt-1 flex max-w-[600px] items-center justify-between text-[10px] text-slate-500">
                   <span>
-                    <span className="text-slate-300">——</span> allow&nbsp;&nbsp;
+                    <span className="text-slate-300">&#8212;&#8212;</span> allow&nbsp;&nbsp;
                     <span className="text-slate-300">- - -</span> temporary
                   </span>
                   <span>
@@ -674,7 +692,6 @@ function RulesSection({
               </div>
             );
           })()}
-
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
               const row = ruleRow(

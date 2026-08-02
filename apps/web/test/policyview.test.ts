@@ -20,6 +20,8 @@ import {
   flowGraphNote,
   flowLayout,
   flowCrossings,
+  flowGlyph,
+  flowTag,
   FLOW_COLUMN_CAP,
   FLOW_GRAPH_MAX_RULES,
   ruleBody,
@@ -1071,7 +1073,9 @@ describe("a deactivated per-user subject is a FACT, never a warning", () => {
 });
 
 describe("flowLayout — the cap and the ordering, both ours to design", () => {
-  const e = (id: string, src: string, dst: string, temp = false) => ({ id, src, dst, temp });
+  const e = (id: string, src: string, dst: string, temp = false) => ({
+    id, src, dst, temp, srcKind: "group" as const, dstKind: "resource" as const,
+  });
 
   it("⛔ THE CAP AT BOTH SIDES — 4 fits whole, 5 is capped and the remainder is COUNTED", () => {
     const four = flowLayout(["a", "b", "c", "d"].map((x) => e(x, "s" + x, "d" + x)));
@@ -1089,7 +1093,7 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
        e("6", "hub", "y"), e("7", "hub", "z")],
       2,
     );
-    expect(l.srcs[0]).toBe("hub");
+    expect(l.srcs[0].label).toBe("hub");
   });
 
   it("⛔ A KNOWN-CROSSING INPUT COMES OUT ORDERED — the cap alone does not fix the tangle", () => {
@@ -1098,7 +1102,10 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
     const ordered = flowLayout(edges);
     expect(flowCrossings(ordered)).toBe(0);
     // And prove the metric is not vacuous: the UNORDERED arrangement really does cross.
-    const unordered = { ...ordered, dsts: ["d1", "d2", "d3", "d4"] };
+    const unordered = {
+      ...ordered,
+      dsts: ["d1", "d2", "d3", "d4"].map((l) => ({ label: l, kind: "resource" as const })),
+    };
     expect(flowCrossings(unordered)).toBeGreaterThan(0);
   });
 
@@ -1111,5 +1118,44 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
       e("5", "oncall-grp", "db-prod.internal", true),
     ]);
     expect(flowCrossings(l)).toBe(0);
+  });
+});
+
+
+describe("flowGlyph / flowTag — every arm of BOTH unions, exhaustively", () => {
+  // ⛔ THE DEFECT THIS REPLACES: the kind was guessed by matching the label against members, and
+  // `label.startsWith(m.name)` is ALWAYS TRUE when a member has an empty name — which `users.name`
+  // (NOT NULL DEFAULT '') produces for 144 rows. Every resource rendered as USER.
+  //   A WRONG TYPE TAG IS NOT STYLING. IT IS A FALSE CLAIM ABOUT WHAT A RULE POINTS AT.
+  const SRC = ["group", "user", "site", "cidr"] as const; // policy_rules_src_kind_check
+  const DST = ["resource", "group", "site", "k8s_service"] as const; // policy_rules_dst_kind_check
+
+  it("every src_kind and dst_kind the CHECK constraints allow has a DISTINCT glyph", () => {
+    const all = [...new Set([...SRC, ...DST])];
+    const glyphs = all.map(flowGlyph);
+    expect(new Set(glyphs).size).toBe(all.length); // no two kinds share a letter
+    for (const g of glyphs) expect(g).toMatch(/^[A-Z]$/);
+  });
+
+  it("⛔ a RESOURCE is never labelled USER — the exact defect, both arms", () => {
+    expect(flowGlyph("resource")).toBe("R");
+    expect(flowTag("resource")).toBe("RESOURCE");
+    expect(flowGlyph("user")).toBe("U");
+    expect(flowTag("user")).toBe("USER");
+    expect(flowTag("resource")).not.toBe(flowTag("user"));
+  });
+
+  it("k8s_service reads as two words, not a snake_case identifier", () => {
+    expect(flowTag("k8s_service")).toBe("K8S SERVICE");
+    expect(flowTag("k8s_service")).not.toContain("_");
+  });
+
+  it("the layout carries each node's kind THROUGH, never re-derives it", () => {
+    const l = flowLayout([
+      { id: "1", src: "eng", dst: "gitlab", temp: false, srcKind: "group", dstKind: "resource" },
+      { id: "2", src: "10.0.0.0/8", dst: "hq", temp: false, srcKind: "cidr", dstKind: "site" },
+    ]);
+    expect(l.srcs.map((n) => n.kind).sort()).toEqual(["cidr", "group"]);
+    expect(l.dsts.map((n) => n.kind).sort()).toEqual(["resource", "site"]);
   });
 });
