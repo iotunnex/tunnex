@@ -271,7 +271,11 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
 
   // The one-time ceremony: amber modal, command shown, must be acknowledged.
   await expect(
-    page.getByText(/Enroll your gateway/i),
+    // ⛔ THE EXACT STRING, not /Enroll your gateway/i. The regex was introduced when an em-dash sweep
+    // changed this title, and it matches even if "run this once" is deleted — it removed coverage rather
+    // than tracking the change. An assertion loosened to make a red go away is a check that has stopped
+    // asserting the thing it names.
+    page.getByText("Enroll your gateway: run this once"),
   ).toBeVisible();
   // The COMPLETE runnable command (S6.6 / zero-touch ruling): a SINGLE `docker run` (NEVER compose — the
   // paste-mismatch is structurally impossible), carrying the token env AND the shell-quoted pinned name (an
