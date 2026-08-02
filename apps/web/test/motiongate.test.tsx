@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { Donut } from "../src/components/viz";
 import {
   motionAllowed,
   readsReducedMotionPreference,
@@ -111,3 +112,48 @@ describe("the preference reaches components, injected rather than measured", () 
 // `tokens.test.ts`, beside the coverage census that already reads the same file. Duplicating it here would
 // have meant either a second path-resolution scheme or a weaker assertion, and one gate asserted once in the
 // environment that can actually see the artifact beats two half-assertions.
+
+// ── THE EPIC'S FIRST OPT-IN ANIMATION ON A SHARED PRIMITIVE (S14.8) ─────────────────────────────────────
+//
+// ⛔ THIS TEST EXISTS BECAUSE I CLAIMED IT ALREADY DID. Reporting the Donut's reduced-motion path as "covered
+// by the motion gate's tests", I had not checked: `grep -c Donut` over this file returned ZERO. The gate's
+// tests covered the pure decision and a generic component, and NOTHING asserted that the Donut emits no
+// animation under the preference.
+//
+//   A GUARD THAT HAS ONLY EVER PASSED IS INDISTINGUISHABLE FROM ONE THAT DOES NOTHING —
+//   AND A GUARD THAT DOES NOT EXIST IS INDISTINGUISHABLE FROM BOTH, IF NOBODY GREPS FOR IT.
+//
+// `prefers-reduced-motion` is a GATE, not a courtesy (founder-ruled): vestibular disorders make large or fast
+// motion physically unpleasant, so this is an accessibility obligation and is asserted, not reviewed.
+describe("Donut — the reduced-motion path emits NO animation", () => {
+  const slices = [
+    { label: "a", value: 2, tone: "ok" as const },
+    { label: "b", value: 1, tone: "neutral" as const },
+  ];
+
+  function animateEls(reduced: boolean) {
+    const { container } = render(
+      <Donut
+        label="proportion"
+        source={{ endpoint: "GET /test" }}
+        failed={false}
+        slices={slices}
+        animate={motionAllowed(reduced)}
+      />,
+    );
+    return container.querySelectorAll("animate");
+  }
+
+  it("⛔ reduced=true emits ZERO <animate> elements", () => {
+    // Not "fewer", not "shorter" — NONE. A gate that reduces motion instead of removing it is still motion
+    // for someone who asked for none.
+    expect(animateEls(true)).toHaveLength(0);
+  });
+
+  it("reduced=false DOES emit them — one per slice", () => {
+    // ⛔ MECHANISM ⑨: the assertion above passes trivially against a Donut that never animates at all. The
+    // gate is only load-bearing if the OTHER side is observed in the same file, so a change that silently
+    // disabled the animation everywhere would fail HERE rather than pass as "accessible".
+    expect(animateEls(false)).toHaveLength(slices.length);
+  });
+});
