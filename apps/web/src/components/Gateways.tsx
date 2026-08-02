@@ -130,10 +130,21 @@ export function Gateways({
   org,
   nodes,
   onNodesChanged,
+  renderList = true,
 }: {
   org: Org;
   nodes: Node[];
   onNodesChanged?: () => void;
+  /**
+   * ⛔ S14.6: the PAGE owns the fleet list now, and this component keeps the ENROLMENT CEREMONY.
+   *
+   * Set false when a caller renders its own list. The alternative was to extract the ceremony into a third
+   * component in the same commit that added the health grouping — a move and a rewrite together, which is
+   * the diff nobody can read. One prop, one seam, and the extraction can happen on its own later.
+   *
+   * DEFAULT TRUE so the component's existing contract is unchanged for anyone still rendering it whole.
+   */
+  renderList?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // WF-S11-9: which gateway is awaiting a revoke confirmation. Two-step rather than a window.confirm — the
@@ -264,7 +275,7 @@ export function Gateways({
             </Field>
           </div>
           <div className="min-w-[12rem] flex-1">
-            <Field label="Public endpoint (optional — ip:port peers dial)">
+            <Field label="Public endpoint (optional: the ip:port peers dial)">
               <Input
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
@@ -295,13 +306,14 @@ export function Gateways({
       {open && ep.ok && ep.usedFallback && metaError && (
         <p className="mt-2 text-xs text-amber-400">
           Couldn't confirm the control plane's public URL (metadata unavailable)
-          — the command below uses this dashboard's origin. Verify the gateway
+          so the command below uses this dashboard's origin. Verify the gateway
           can reach <span className="font-mono">{ep.apiURL}</span>.
         </p>
       )}
 
       <ErrorText>{error}</ErrorText>
 
+      {renderList && (
       <ul className="mt-3 space-y-2">
         {nodes.map((n) => (
           <li
@@ -334,7 +346,7 @@ export function Gateways({
               {n.ovpn_health && (
                 <span
                   className="ml-2 text-xs text-amber-400"
-                  title="This gateway has OpenVPN enabled but isn't serving it — resolves on its own once the material/binary/config is corrected."
+                  title="This gateway has OpenVPN enabled but is not serving it. Resolves on its own once the material, binary or config is corrected."
                 >
                   {n.ovpn_health === "ovpn_binary_absent"
                     ? "OpenVPN: binary missing"
@@ -394,6 +406,7 @@ export function Gateways({
           </li>
         )}
       </ul>
+      )}
 
       {/* One-time join-token CEREMONY — the token authenticates a new agent on its
           first connect and is shown exactly once (shared OneTimeSecretModal). The
@@ -401,20 +414,20 @@ export function Gateways({
           token on first connect. */}
       {token && ep.ok && (
         <OneTimeSecretModal
-          title="Enroll your gateway — run this once"
+          title="Enroll your gateway: run this once"
           caption={
             <>
               Paste this <span className="font-semibold">single command</span>{" "}
-              on the gateway VM (Docker installed) to bring it online — it pulls
+              on the gateway VM (Docker installed) to bring it online. It pulls
               the agent and comes up on real WireGuard with{" "}
               <span className="font-semibold">no edits</span>. Shown{" "}
-              <span className="font-semibold">exactly once</span>, single-use —
+              <span className="font-semibold">exactly once</span>, single-use:
               copy it now.
               {pinnedName && (
                 <>
                   {" "}
                   Pinned to the name{" "}
-                  <span className="font-mono">{pinnedName}</span> — the agent
+                  <span className="font-mono">{pinnedName}</span>. The agent
                   enrolls under exactly that or the server refuses it.
                 </>
               )}
@@ -428,7 +441,7 @@ export function Gateways({
               )}{" "}
               (Installing on the SAME host as the control plane? See{" "}
               <span className="font-mono">docs/deploy-cloud-gateway.md</span>{" "}
-              for the co-located compose form — it carries this same token.)
+              for the co-located compose form. It carries this same token.)
             </>
           }
           // D4: the ONE true remote-gateway docker run — single line, host networking + wgctrl baked in.
