@@ -70,6 +70,28 @@ searches noisier. This file stayed one-line-per-entry precisely so a grep is che
 - **`126 devices` on `PUSHED TO` — CUT, not served.** Same class as the gateway `PEERS` count. Counting
   devices locally would count ones that never fetched this list.
 
+## ⛔ THE "SILENTLY DIDN'T APPLY" CLASS — three instances, registered as a CLASS because the fourth will look different again
+
+> ### **A THING CONFIGURED TO RUN, NOT RUNNING, AND REPORTING NOTHING.**
+> ### **THE SHAPE IS WHAT MAKES IT FINDABLE. THE INSTANCES LOOK NOTHING ALIKE.**
+
+Each was found by accident, none by a check, and in every case the SUCCESS PATH AND THE SILENT-NOOP PATH ARE
+INDISTINGUISHABLE FROM THE OUTSIDE — the command exits 0, the suite is green, the panel renders.
+
+| # | instance | what was configured | what actually happened | how it was found |
+|---|---|---|---|---|
+| 1 | **`NET := tunnex_default`** (Makefile, S14.7) | `migrate` / `seed` / `seed-fixtures` / `sqlc` join the compose network by name | founder runs `COMPOSE_PROJECT_NAME=tunnex-s141`, so all of them hit **a different stack's database** while exiting 0 | the fixture's own real-data guard fired on 6690 orgs. **`migrate` has no such guard and would have applied silently.** |
+| 2 | **`round2-walk.spec.ts`** (e2e, S14.7) | a walk spec inside `testDir`, gated `test.skip(!process.env.ROUND2)` | `ROUND2` is set **nowhere** in `.github/workflows/` or the `Makefile`. **Never ran, inside the job S11-1 promoted to BLOCKING, while reading as coverage.** | two assertions on a string deleted in S14.6 survived in it — they cannot fail, because nothing runs them |
+| 3 | **`ON CONFLICT (org_id) DO NOTHING`** (seed-fixtures, S14.8) | the HA hub-set fixture writes `configured` + `demoted` | `make seed` already writes that row, so the fixture **lost the conflict and never applied**. The HA panel rendered base-seed state. | reading `\d org_hub_set` while discharging the demoted-note debt |
+
+**THE COUNTERMEASURE IS NOT A FIX PER INSTANCE — IT IS MAKING THE NOOP AUDIBLE.** #1 now derives from
+`COMPOSE_PROJECT_NAME`; #2 left `testDir` so it makes no claim; #3 is `DO UPDATE`. But the general defence is
+the one added with #3: **`seed-fixtures` now COUNTS after writing and logs the totals**, so a write that did
+not happen shows up as a number that did not move.
+
+**WHEN YOU ADD THE FOURTH, ADD IT HERE.** Ask of any new mechanism: *if this silently did nothing, what would
+be different?* If the answer is "nothing", it belongs in this table before it belongs in the codebase.
+
 ## HARNESS AND TEST-INFRASTRUCTURE FINDINGS
 
 - **S14.7 · `NET := tunnex_default` was HARD-CODED while the founder runs `COMPOSE_PROJECT_NAME=tunnex-s141`.**
