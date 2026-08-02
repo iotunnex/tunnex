@@ -77,13 +77,21 @@ OAPI_CODEGEN_VERSION := v2.4.1
 OPENAPI_TS_VERSION := 7.4.4
 
 # Compose network + dev DB creds (defaults match .env.example) used by seed/e2e.
-NET := tunnex_default
+# ⛔ DERIVED FROM COMPOSE_PROJECT_NAME, not hard-coded. Every docker-run target below (`migrate`, `seed`,
+# `seed-fixtures`, `sqlc`) joins a compose network BY NAME. `COMPOSE_PROJECT_NAME=tunnex-s141 make up-enterprise`
+# creates `tunnex-s141_default`, but a hard-coded `tunnex_default` sent all of those at a DIFFERENT STACK'S
+# DATABASE while appearing to succeed. `seed-fixtures` refused (its real-data guard fired on 6690 orgs);
+# `migrate` has no such guard. Found in S14.7 while seeding for review.
+#
+# Unset behaves exactly as before, so no existing invocation changes.
+NET := $(if $(COMPOSE_PROJECT_NAME),$(COMPOSE_PROJECT_NAME)_default,tunnex_default)
 PG_USER ?= tunnex
 PG_PASS ?= tunnex_dev_password
 PG_DB ?= tunnex
-# The compose-managed named volume holding the master key (project `tunnex`, same
-# prefix convention as NET). seed-enterprise mounts it to SEAL with the API's key.
-SECRETS_VOL := tunnex_tunnex_secrets
+# The compose-managed named volume holding the master key. seed-enterprise mounts it to SEAL with the API's
+# key — so the SAME class as NET one line up, and worse in effect: sealing against a different stack's master
+# key produces a secret THAT STACK CANNOT UNSEAL, with no error at seal time.
+SECRETS_VOL := $(if $(COMPOSE_PROJECT_NAME),$(COMPOSE_PROJECT_NAME)_tunnex_secrets,tunnex_tunnex_secrets)
 
 .PHONY: generate
 generate: generate-go generate-ts generate-rbac generate-tokens sqlc ## Regenerate all code from openapi/openapi.yaml

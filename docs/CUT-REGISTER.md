@@ -62,7 +62,24 @@ searches noisier. This file stayed one-line-per-entry precisely so a grep is che
 | **`PEERS` column** (Gateways) | **ABSENT — its own slice** | `devices WHERE node_id` counts DEVICES, and a hub's WireGuard peers include SITE LINKS, so on a hub it under-reports exactly where an operator looks hardest. Either count wg peers or label it `DEVICES`. Spec+codegen change, so it is a slice, not a rider | S14.6 |
 | **Operations screen** | **ABSENT-PENDING-ENDPOINTS** | the capability shipped in EPIC 11; the API exposes none of it. See the fifth category in `EPIC-14-ui-redesign.md` | S14.6 nav audit |
 
+### S14.7 — Routed Ranges
+
+- **`STATUS` column — CUT as a CONSTANT COLUMN.** `/routed-ranges` is APPROVED-ONLY, so the column would
+  carry one value in every row of every org forever. Not merely useless: it teaches the reader that some
+  other value is reachable on this screen, which is what sends them here looking for the pending queue.
+- **`126 devices` on `PUSHED TO` — CUT, not served.** Same class as the gateway `PEERS` count. Counting
+  devices locally would count ones that never fetched this list.
+
 ## HARNESS AND TEST-INFRASTRUCTURE FINDINGS
+
+- **S14.7 · `NET := tunnex_default` was HARD-CODED while the founder runs `COMPOSE_PROJECT_NAME=tunnex-s141`.**
+  Every docker-run make target (`migrate`, `seed`, `seed-fixtures`, `sqlc`) joins a compose network BY NAME,
+  so all of them were aimed at a DIFFERENT STACK'S DATABASE while appearing to succeed. `seed-fixtures`
+  refused (its real-data guard fired on 6690 orgs); **`migrate` has no such guard.** `SECRETS_VOL` was the
+  same class one line down, and worse in effect: sealing against another stack's master key yields a secret
+  that stack cannot unseal, with no error at seal time. Both now derive; unset behaves exactly as before.
+  **A GUARD ON ONE TARGET IS NOT A GUARD ON THE CLASS** — the guard that fired belonged to the one command
+  that had one.
 
 | finding | verdict | reason | ruled |
 |---|---|---|---|

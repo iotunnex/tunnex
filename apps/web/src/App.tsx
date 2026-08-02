@@ -22,6 +22,7 @@ import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
 import Gateways from "./pages/Gateways";
 import Sites from "./pages/Sites";
+import RoutedRanges from "./pages/RoutedRanges";
 import Kubernetes from "./pages/Kubernetes";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
@@ -113,6 +114,7 @@ export default function App() {
             <Route path="/devices" element={<Devices />} />
             <Route path="/gateways" element={<Gateways />} />
           <Route path="/sites" element={<Sites />} />
+          <Route path="/routed-ranges" element={<RoutedRanges />} />
             <Route path="/kubernetes" element={<Kubernetes />} />
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
