@@ -160,9 +160,9 @@ const KIND_NOTES: Record<string, string> = {
     "The agent refused the compiled policy because its version exceeds what the agent can apply, and went deny-all. The remedy is operator-side: upgrade the agent.",
   "enforcing a disabled policy":
     "Enforcing a policy it cannot swap out.",
-  "certificate expired — re-enroll this gateway":
+  "certificate expired, re-enroll this gateway":
     "The client certificate lapsed, so the mTLS channel itself is blocked. Only re-enrolment recovers this.",
-  "agent down — still forwarding (restart agent)":
+  "agent down, still forwarding (restart agent)":
     "The wire is warm and the brain is dead: wg0 keeps forwarding while the agent is silent, so a since-revoked device is still enforced from a frozen artifact.",
   "expiry-flush degraded":
     "Conntrack flush is unavailable, so an expired grant may keep an established flow alive.",
