@@ -700,39 +700,37 @@ with migrations, retention and a reconciler.
 **S11.1 was the previously-named home for the rate/time-series version; this is the same debt, now with a
 founder mandate and a finished chart waiting on it.**
 
-## ⚠ REGISTERED — THE VISUAL JOB IS ADVISORY UNTIL EPIC 14 CLOSES, THEN IT RE-ARMS
+## ⛔⛔ FOUNDER RULE — THE VISUAL JOB DOES NOT BLOCK. ADVISORY FOR ALL OF EPIC 14.
 
-**Founder-ruled 2026-08-02: it was costing more than it returned during the redesign itself.**
+**Ruled 2026-08-02. A RULE, not a session decision, and stated once rather than as a decision plus an
+amendment.**
 
-> ## **A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN.**
+**NO PART OF THE VISUAL JOB GATES A MERGE.** Both steps are `continue-on-error`. It is **not** in `main`'s
+required contexts — those are `gates` · `client (macos-latest)` · `client (windows-latest)` — **and it is not
+to be added to them.**
 
-The job compares against a committed image, and **every slice of this epic deliberately changes the shared
-surface** — a palette, a primitive, an animation, a button recipe. So on almost every commit of EPIC 14 the
-check's honest answer is *"yes it moved, you moved it"*, and saying that cost **a full CI round-trip plus a
-harvest**. In S14.5 it went red on **five consecutive pushes**, none of them a regression.
+**KEPT:** the two-step split (good structure, costs nothing) · the artifact and diff uploading · the geometric
+and strict-mode assertions still RUN and still report.
 
-**IT IS `continue-on-error`, NOT DELETED, and the artifact and diff still upload.** What it found while
-"failing" is the argument:
+**WHY.** A pixel baseline is **red by design during a redesign** — the job compares against a committed image
+while every slice deliberately changes the shared surface. It went red on **five consecutive pushes** in
+S14.5, none of them a regression, and each cost a CI round-trip plus a harvest.
 
-| found | how |
-|---|---|
-| a 65px header overflow on every screen at 390 | geometric assertion |
-| the drawer `Menu` button over the page `<h1>` | reading a harvested image |
-| the control-plane health indicator rendered twice | strict-mode locator violation |
-| `AreaChart` rendering ~500px tall at column width | the wide specimen, on its first render |
-| **a baseline that was a solid magenta rectangle** | **reading the harvest before committing it** |
+### ⚠ THE ACCEPTED PRICE — recorded once, plainly, so epic close re-arms with knowledge and not rediscovery
 
-**THE LAST ONE IS THE SHARPEST AND IT IS NOT A DIFF AT ALL.** A mask selector matched the modal's
-full-viewport overlay, so the harvested image was entirely magenta. Every count agreed — three baselines,
-three expected names, census satisfied — and the check would have gone **green forever with no subject in
-it.** *Mechanism ⑧, and only a human looking caught it.*
+**The geometric overflow assertions and the strict-mode locators NEED A REAL BROWSER.** They cannot move into
+`make web-gate`: **jsdom has no layout engine**, which is the same fact that made a commissioned click-through
+report *"nothing is broken"* while `backdrop-filter` had already broken five modals.
 
-**TRIGGER TO RE-ARM: EPIC 14 close**, when the surface stops moving on purpose. At that point a red means
-what it is supposed to mean — **something moved that nobody asked to move** — and it blocks again.
+> ## **SO THE CLASS THAT FOUND THE 65px HEADER OVERFLOW, THE DUPLICATED HEALTH INDICATOR AND THE 500px
+> ## AreaChart IS NOW ADVISORY TOO. NOTHING ELSE COVERS IT.**
 
-**⛔ THIS IS A DEMOTION WITH A NAMED TRIGGER, NOT A QUIET ONE.** The CI file says so at the job, the job's
-`name:` says so in the checks list, and this entry says so here. A check that is advisory and does not
-announce it is a check nobody knows they are ignoring.
+**That is the cost, knowingly taken.** It is written here so that at epic close the re-arm is a decision made
+with the ledger in hand — not a surprise discovered by whoever finds the next 65px overflow.
+
+**RE-ARM TRIGGER: EPIC 14 CLOSE.** A named trigger, not a hope. **Mechanically: delete two
+`continue-on-error` lines in `.github/workflows/ci.yml`.**
+
 
 # ⛔⛔ THE NAV AUDIT — THE EPIC IS NOT ELEVEN SCREENS TO REDESIGN (founder-ordered 2026-08-02)
 

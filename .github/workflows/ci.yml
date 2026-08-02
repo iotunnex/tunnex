@@ -161,40 +161,21 @@ jobs:
   # artifacts (expected/actual/diff) and its failures MEAN something different: e2e red = broken behaviour,
   # visual red = something moved, possibly on purpose.
   #
-  # ⛔ SPLIT: THE GEOMETRIC HALF FAILS THE JOB, THE PIXEL HALF DOES NOT. Founder-ruled 2026-08-02, correcting
-  # an earlier wholesale demotion that surrendered the half that pays along with the half that does not.
+  # ⛔⛔ FOUNDER RULE — THIS ENTIRE JOB IS ADVISORY FOR THE REST OF EPIC 14. NO STEP GATES A MERGE.
   #
-  # ⚠⚠ AND "BLOCKING" HAS TWO MEANINGS HERE. BE PRECISE ABOUT WHICH ONE:
+  # It is NOT in `main`'s required contexts (those are: gates · client (macos-latest) · client (windows-latest))
+  # and it is NOT to be added to them. Both steps are `continue-on-error`. The two-step split is kept because
+  # it is good structure and costs nothing; the artifact and diff keep uploading.
   #
-  #   FAILS THE JOB    the step is not continue-on-error, so a red step reddens this check in the PR list
-  #   REQUIRED         branch protection REFUSES THE MERGE without it
+  # ⚠ THE ACCEPTED PRICE, RECORDED SO EPIC CLOSE RE-ARMS WITH KNOWLEDGE RATHER THAN REDISCOVERY:
+  # the geometric overflow assertions and the strict-mode locators NEED A REAL BROWSER, so they cannot move
+  # into `make web-gate` — jsdom has no layout engine. With this job advisory, THE CLASS THAT FOUND THE 65px
+  # HEADER OVERFLOW, THE DUPLICATED HEALTH INDICATOR AND THE 500px AreaChart IS ADVISORY TOO. Nothing else
+  # covers it. That is the cost of the ruling, knowingly taken.
   #
-  # `main`'s required contexts are exactly: gates · client (macos-latest) · client (windows-latest).
-  # THIS JOB IS NOT AMONG THEM. So step 1 is RED-IN-THE-LIST, NOT MERGE-PREVENTING — and calling it "blocking"
-  # (as an earlier revision of this comment did) overstated it in the direction that matters, while the job's
-  # NAME said "advisory" and understated it in the other. Both are fixed above.
-  #
-  # PROMOTING STEP 1 TO A REQUIRED CHECK IS A BRANCH-PROTECTION CHANGE, which is itself the registered trigger
-  # for dispositioning the PLAN-pointer bypass (docs/EPIC-14-ui-redesign.md). The two land together or neither
-  # does; a protection edit made in passing is how the last one went unnoticed.
-  #
-  # A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN. This job compares against a committed image, and
-  # every slice of EPIC 14 deliberately changes the shared surface — a palette, a primitive, an animation, a
-  # button recipe. So the honest state of the check on almost every commit of this epic is "yes, it moved,
-  # you moved it", and it charged a full CI round-trip plus a harvest to say so.
-  #
-  # ⚠ THAT IS NOT THE SAME AS THE CHECK BEING WORTHLESS, and it is why this is `continue-on-error` rather than
-  # deleted. In S14.5 alone it caught an AreaChart rendering 500px tall at column width, and the harvest step
-  # caught a masked baseline that was a solid magenta rectangle — a check that would have compared equal
-  # forever with no subject in it. THE ARTIFACT AND THE DIFF STILL UPLOAD; only the BLOCK is lifted.
-  #
-  # TRIGGER TO RE-ARM: EPIC 14 close, when the surface stops moving on purpose. At that point a red here means
-  # what it is supposed to mean — something moved that nobody asked to move — and it should block again.
-  #
-  # Unblocked by COMMITTING A BASELINE, never by re-running with --update-snapshots, which this job can never
-  # do because it only ever compares.
+  # RE-ARM TRIGGER: EPIC 14 CLOSE — a named trigger, not a hope. Delete the two `continue-on-error` lines.
   visual:
-    name: visual — geometric+census FAIL THE JOB; pixel advisory; NOT a required check
+    name: visual — ADVISORY for all of EPIC 14 (no step gates a merge)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +194,8 @@ jobs:
       # ⛔ STEP 1 — BLOCKING. Geometric invariants, the baseline census, and the strict-mode locators.
       # DETERMINISTIC: no committed image, no harvest, and no data difference can flake them. This is where
       # the 65px header overflow and the duplicate health indicator were actually found.
-      - name: Geometric invariants + census (BLOCKING)
+      - name: Geometric invariants + census (advisory)
+        continue-on-error: true
         run: |
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
@@ -223,7 +205,7 @@ jobs:
       # ⛔ STEP 2 — ADVISORY during EPIC 14. The committed-image comparison, which is red BY DESIGN while the
       # epic deliberately changes the shared surface every slice. The artifact and diff still upload below.
       # RE-ARM TRIGGER: EPIC 14 close — delete this `continue-on-error`, nothing else.
-      - name: Pixel diff (advisory during EPIC 14)
+      - name: Pixel diff (advisory)
         continue-on-error: true
         run: |
           docker run --rm --network tunnex_default \
