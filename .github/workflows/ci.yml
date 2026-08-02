@@ -62,6 +62,25 @@ jobs:
           pnpm --filter @tunnex/web test
           pnpm --filter @tunnex/web build
 
+      # ⛔ THE E2E SPECS COMPILE — INSIDE THE BLOCKING GATE, WITH NO BROWSER.
+      #
+      # `e2e/` had no tsconfig and is not in the pnpm workspace, so NOTHING parsed these files before CI
+      # executed them. On 2026-08-02 a spec split left an orphaned `describe` and reached CI as
+      # `SyntaxError: Unexpected token (153:0)` — and because the visual job is ADVISORY, that red would have
+      # been shrugged at.
+      #
+      # A red advisory job otherwise means one of four indistinguishable things: pixel drift · a geometric
+      # regression · THE SPEC DOES NOT COMPILE · the spec has no subject. This removes the third, here, where
+      # it blocks.
+      #
+      # IT DOES NOT REOPEN THE ADVISORY RULING — it asserts the check COMPILES, never that the pixels match.
+      # PROVEN TO REJECT: reintroducing the orphaned `describe` gives `visual.spec.ts(151,1): error TS1005`.
+      - name: E2E specs — typecheck (compiles, not runs)
+        run: |
+          cd e2e
+          npm install --no-audit --no-fund --silent
+          npx tsc --noEmit -p tsconfig.json
+
   # macOS + Windows: the desktop client. Display-free (no Electron launch).
   # RED BLOCKS MERGE — this is the cross-platform surface a human can't cover.
   client:
