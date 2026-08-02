@@ -258,6 +258,7 @@ seed-fixtures: ## Seed the DEMO FIXTURES (populated network for UI review) ON TO
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  -e TUNNEX_SEED_FORCE="$(TUNNEX_SEED_FORCE)" -e TUNNEX_API_URL="$(TUNNEX_API_URL)" \
+	  -e TUNNEX_SEED_STRICT="$(TUNNEX_SEED_STRICT)" \
 	  $(GO_IMAGE) go run ./cmd/seed-fixtures
 
 .PHONY: k3s-demo k3s-demo-verify k3s-demo-down

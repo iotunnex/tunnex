@@ -206,6 +206,26 @@ func main() {
 		)
 	}
 
+	// ⛔ HOW A CONSUMER KNOWS THE STATE IS MISSING RATHER THAN MERELY UNRENDERED.
+	//
+	// The seeder now depends on the API being up, which it did not before — so on a cold boot, a different
+	// compose project, or any stack where TUNNEX_API_URL is wrong, the severest posture state is silently
+	// absent. That is the SAME SHAPE as the `DO NOTHING` freshness bug this slice just fixed, one layer up: a
+	// command that succeeds while the thing it exists to produce does not exist.
+	//
+	// THREE SIGNALS, because a warning alone is a line in a log nobody greps:
+	//   1. `posture_blocked` is a COUNTED CENSUS FIELD below — it reads `false`, it is not merely absent.
+	//   2. The warning above names the CONSEQUENCE, not just the error.
+	//   3. TUNNEX_SEED_STRICT=true makes it a NON-ZERO EXIT — for anyone automating the review stack, where a
+	//      silent partial seed is worse than a failed one. Default stays lenient: the SQL half succeeded, and
+	//      a hard failure would leave a half-seeded database over a review aid.
+	if !postureBlocked && os.Getenv("TUNNEX_SEED_STRICT") == "true" {
+		logger.Error("seed_fixtures_incomplete",
+			slog.String("missing", "posture_blocked"),
+			slog.String("hint", "the API must be reachable at seed time; unset TUNNEX_SEED_STRICT to seed anyway"))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_fixtures_ok",
 		slog.String("org", seeddata.DemoOrgID),
 		slog.Int("gateways", gateways), slog.Int("sites", sites), slog.Int("subnets", subnets),

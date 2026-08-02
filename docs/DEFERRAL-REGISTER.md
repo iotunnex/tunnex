@@ -27,5 +27,82 @@ from scratch.
 | **Device fabric graph** (online / idle / blocked node graph) | **its own slice** | Center node's "1000 peers" count is blocked on the exact same gap that made PEERS its own slice at S14.6 (DB `devices WHERE node_id` count vs gateway WireGuard peer graph). Requires a dedicated peer graph query + codegen slice | S14.10 element extraction | **REGISTERED** — deferred to its own slice |
 | **`TUNNEL` column (`split` / `full`) on Devices table** | **its own slice / spec update** | `full_tunnel` exists on `CreateDeviceRequest` but is **NOT emitted on the `Device` response schema** in `openapi.yaml`. Displaying tunnel mode on list items requires spec + codegen + SQL select update | S14.10 element extraction | **REGISTERED** — absent endpoint schema field |
 
+---
 
+## ⛔ THE "`ON CONFLICT … DO NOTHING` ON A TIME-RELATIVE FIXTURE" CLASS — its own line, because it made every device freshness state false
 
+> ### **A FIXTURE FOR A LIVE SYSTEM WRITES `now() - interval '3 minutes'`. THAT IS THREE MINUTES AGO ONCE,**
+> ### **AND THEN AGES FOREVER. WITH `DO NOTHING`, EVERY RE-SEED REPORTS SUCCESS AND CHANGES NOTHING.**
+
+**S14.10. Two tables, both silent, and the consequence was total:**
+
+| table | what aged | what the screen showed |
+|---|---|---|
+| `device_health` | `reported_at` drifted past `HealthStaleTTL` (30 min) | `health_state: unknown` for devices seeded as compliant/noncompliant, **and the sweep correctly cleared `health_blocked`** — so the device named `blocked-device` was not blocked |
+| `device_status` | `last_handshake_at` | every device drifted OFFLINE |
+
+**SO ANY SECTION REVIEWED AGAINST A RE-SEEDED STACK SAW STALE TIMESTAMPS AND NOBODY KNEW.** The seed exited 0
+every time.
+
+**⛔ AND THE FIX ALREADY EXISTED IN THE SAME FILE, THREE SECTIONS EARLIER.** `node_peer_status` was converted to
+`DO UPDATE` for gateway liveness, carrying the reason verbatim:
+
+> *"A DEMO FIXTURE FOR A LIVE SYSTEM HAS TO BE RE-RUNNABLE INTO FRESHNESS."*
+
+**Device posture and device liveness are that same problem under different names, and never got the treatment.**
+A law written down in one block does not protect the block below it.
+
+**FIXED:** both now `DO UPDATE`. **THE STANDING CHECK:** any fixture row whose value is relative to `now()` is
+`DO UPDATE`, never `DO NOTHING` — and the test is not "is it idempotent" but **"is it re-runnable INTO the state
+it describes."**
+
+---
+
+## ⛔ THE "FIXTURE WRITES A CONTROLLER-OWNED FIELD" CLASS — two instances
+
+> ### **SEED THE INPUTS A CONTROLLER CONSUMES, NEVER THE FIELD IT OWNS. THE RECONCILE LOOP SILENTLY UNDOES**
+> ### **THE WRITE, AND THE ROW READS AS APPLIED.**
+
+| # | field | owner | what happened |
+|---|---|---|---|
+| 1 | `org_hub_set.demoted` | the failover controller (`UpsertOrgHubSetDemoted`) | the fixture declared a demotion; the controller recomputes it every tick. **Seeding it also exposed a permanent wedge** (nil slice → SQL NULL → 23502 forever) |
+| 2 | `devices.health_blocked` | the posture evaluator (`ReportHealth`) | the fixture set it `true`; the stale-block sweep cleared it. **`SweepStaleHealthBlocks` can only ever set it FALSE** |
+
+**INSTANCE 2 CARRIES A HARDER CONSEQUENCE: THE INPUT IS AN HTTP REQUEST, NOT A ROW.** `SetDeviceHealthBlocked`
+is called from exactly one place, `ReportHealth`, so **no SQL can produce a blocked device.** The seeder now
+**registers it through the product** — logs in as the demo owner, POSTs a failing report for one fixed device id
+— and counts the **server's own `blocked` verdict** into its census. Same pattern as the k3s cluster.
+
+**REACHABILITY COST, STATED:** the seeder now needs the API up at seed time. Absence is detectable three ways —
+a counted `posture_blocked: false` census field, a warning naming the consequence, and `TUNNEX_SEED_STRICT=true`
+for a non-zero exit (proven to reject). `seed-fixtures` is **never run in CI** (0 references in either
+workflow), so this is a local-stack concern only.
+
+**THE SWEEP:** `fixtures.sql` was read for other controller-owned writes — see the row below.
+
+### THE `fixtures.sql` SWEEP — every write read, three candidates, one latent instance
+
+All 36 writes enumerated. Nine distinct `SET` columns; six are admin-owned (`dns_forwarding`, `hub_priority`,
+`ovpn_enabled`, `provisioning_mode`, `revoked_at`, `site_id`) and are safe to seed. **Three are AGENT-written:**
+
+| column | verdict |
+|---|---|
+| `nodes.capabilities` | ⛔ **INSTANCE 3, LATENT.** The fixture injects `ovpn_health` via `capabilities \|\| '{…}'`. The control plane REBUILDS this column server-side from the agent's typed report on every reconcile. **Measured: the injection survives ONLY because no agent reports as `gw-eu-west`** — `gw-local-1`, which a live agent does report as, carries a server-built `policy_version` and would have the injection overwritten. **One enrolment change from silent loss, with no signal.** |
+| `nodes.last_seen_at` | same dependency, benign: the fixture ages `gw-ap-south` deliberately and it stays aged only because no agent reports as it |
+| `nodes.endpoint` | written at enrolment, not on a loop — safe |
+
+**NOT FIXED, REGISTERED.** The honest fix mirrors instance 2 — have the agent report `ovpn_health`, or accept
+the injection with its dependency stated. **TRIGGER: the next change to which node the compose agent enrols as,
+or any slice that needs a SECOND faulting OpenVPN gateway.**
+
+---
+
+## S14.10 DEFERRALS
+
+| deferral | trigger | why deferred | found where | reviewed? |
+|---|---|---|---|---|
+| **TX/RX columns** (Devices) | **S11.1**, where throughput gets an endpoint | `rx_bytes`/`tx_bytes` are raw gauges since the last handshake — they RESET on re-handshake, so a rate or total would look like throughput and not be throughput. **The same split as Site-Link Traffic**: numbers now, rates when there is a series | S14.10 classification | founder-ruled, not built |
+| **Device approval-mode toggle** | **the endpoints existing** | ⛔ `getDeviceApprovalMode` / `setDeviceApprovalMode` are **NOT IN THE SPEC** — measured. The panel was classified as five served endpoints and is THREE (`listPendingDevices`, `approveDevice`, `rejectDevice`). The org-level half is **BUILD + BACKEND, like Operations** | S14.10 scope census | ruled deferred |
+| **Device Approval panel** → **S14.10b** | its own commit-one | `rejectDevice` is destructive and irreversible: `pending → revoked, assigned_ip = NULL`, freeing the tunnel address. **A mutation surface with a confirm step, not a column** — folding it into a layout pass is how a confirm dialog gets reviewed as a div. **AND it makes the Modal a11y deferral LIVE** (Escape / focus trap / initial focus / focus return — paper-only, never reviewed) | S14.10 scope question | founder-approved split |
+| **Served `health_stale` discriminator** | next posture-touching slice, or EPIC 14 close | The three `unknown` causes are now derived client-side from two server fields with no client clock — **sound, but it RECONSTRUCTS a decision the server already made.** `HealthStaleTTL` is server-side and neither it nor a staleness flag is served. **One-truth says the server should say it** | S14.10 item 1 | derivation built + 5 reds; the discriminator is not |
+| **S7.4c shared-DB leakage** ⚠ **UPDATED** | ⛔ **now** — it has moved an order of magnitude | Registered at `real_orgs=29`, **never revisited. MEASURED TODAY: 298.** All created 2026-08-02, all Go integration-test debris — single-letter names (`O` ×153, `S` ×51, `K` ×44), `MFA Org` ×33, and slug prefixes `wd-` (21 — my own wedge test), `gf-`, `k8s`, `mfa`, `pos`. **CAUSE: runs that PANIC skip `t.Cleanup`**, and this session produced several (the nil-map false red). **CONSEQUENCE: `seed-fixtures` refuses on `realOrgs > 0`, so the review stack now needs `TUNNEX_SEED_FORCE=true` — the guard has been turned into a formality by debris** | S14.10, seeding for review | measured, not cleaned |
