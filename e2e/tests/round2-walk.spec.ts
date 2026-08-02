@@ -206,7 +206,7 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
 
   // The S4.5-style ceremony: amber, shown-once, explicit ack.
   await expect(
-    page.getByText("Enroll your gateway — run this once"),
+    page.getByText("Enroll your gateway: run this once"),
   ).toBeVisible();
   // Extract ONLY the token value — since S4.8 the pre line also carries
   // TUNNEX_NODE_NAME for a name-pinned token; a prefix-strip would smuggle the
@@ -220,7 +220,7 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
 
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
   await expect(
-    page.getByText("Enroll your gateway — run this once"),
+    page.getByText("Enroll your gateway: run this once"),
   ).toHaveCount(0);
   // No route back: a reload must not resurrect the token.
   await page.reload();

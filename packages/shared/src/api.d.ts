@@ -1611,7 +1611,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List a site's subnets (S8.1; site:manage) */
+        /**
+         * List a site's subnets (S8.1; org:view — MEMBER-READABLE)
+         * @description ⚠ THIS LINE SAID `site:manage` UNTIL S14.7 AND THE HANDLER NEVER DID. `ListSiteSubnets` authorizes on `rbac.PermOrgView` (`internal/http/site_handlers.go:195`), per S8.3 D5: subnets are part of the read-only topology a MEMBER may see; advertise and approve stay `site:manage`. PLAN.md's S8.3 entry rules the same thing. The wrong annotation caused a real design decision to be taken on a false constraint — Routed Ranges was scoped as "attribution is admin-only" because of it. On an OpenAPI-first codebase a wrong summary is a wrong source of truth, so it is corrected here rather than noted elsewhere. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME.
+         */
         get: operations["listSiteSubnets"];
         put?: never;
         /** Advertise a subnet on a site — pending approval (S8.1; site:manage) */
