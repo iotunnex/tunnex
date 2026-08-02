@@ -47,6 +47,8 @@ import {
   swapRule,
   grantExpiry,
   rulesSummary,
+  rulesEmptyState,
+  rulesEmptyCopy,
   ruleBody,
   defaultSrcKind,
   defaultDstKind,
@@ -141,6 +143,7 @@ export default function Access() {
     roleError: roleError != null,
     roleResolved,
     canView: gate.canView,
+    role: myRole,
   });
 
   return (
@@ -689,12 +692,16 @@ function RulesSection({
                 </li>
               );
             })}
-            {rules.length === 0 && (
-              <li className="text-xs text-slate-500">
-                No rules — under Enforcing, all device-to-device traffic is
-                denied.
+            {(() => {
+              const es = rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length });
+              if (es.kind === "rows") return null;
+              const c = rulesEmptyCopy(es);
+              return (
+              <li className={es.kind === "enforcing_empty" ? "text-xs font-semibold text-warn" : "text-xs text-slate-500"}>
+                {c.text}
               </li>
-            )}
+              );
+            })()}
           </ul>
         </>
       )}

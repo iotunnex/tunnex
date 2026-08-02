@@ -14,6 +14,11 @@ import {
   attributionLabel,
   activeMembers,
   rulesSummary,
+  rulesEmptyState,
+  rulesEmptyCopy,
+  flowGraphState,
+  flowGraphNote,
+  FLOW_GRAPH_MAX_RULES,
   ruleBody,
   grantControls,
   type LoadState,
@@ -553,8 +558,15 @@ describe("[75]+[101] accessView — upsell needs only edition; role in-flight is
     roleError: false,
     roleResolved: true,
     canView: true,
+    role: "owner" as const,
   };
-  it("[75] non-enterprise + members-fail → upsell, NOT role_retry", () => {
+
+  // ⛔ [75] IS REVERSED, AND IT PINNED THE DEFECT. It asserted "non-enterprise + members-fail -> upsell, NOT
+  // role_retry", on the reasoning that role is irrelevant once the edition gate fires. THAT REASONING IS THE
+  // BUG (S14.12 D2): the server answers `forbidden` to an open-edition MEMBER and `edition_required` to an
+  // open-edition OWNER, so the role decides WHICH refusal is true — and when the role failed to load we do
+  // not know which. `upsell` there asserts "you would get this if you upgraded", which is FALSE for a member.
+  it("⛔ non-enterprise + role UNKNOWN -> role_retry, because which refusal is true depends on the role", () => {
     expect(
       accessView({
         ...base,
@@ -562,7 +574,28 @@ describe("[75]+[101] accessView — upsell needs only edition; role in-flight is
         roleError: true,
         roleResolved: false,
       }),
+    ).toBe("role_retry");
+  });
+
+  it("⛔ OPEN + MEMBER -> member_gate, NEVER upsell — the S14.12 defect, measured on the open stack", () => {
+    // GET /policies as member@ on :8081 answers 403 forbidden, not edition_required. Selling Enterprise to a
+    // caller whose role forbids the feature on ANY edition is the S14.5 halt running forward.
+    expect(
+      accessView({ ...base, isEnterprise: false, role: "member", canView: false }),
+    ).toBe("member_gate");
+  });
+
+  it("OPEN + OWNER -> upsell — the upsell reaches whoever could actually use it", () => {
+    // Both arms of the same gate. Without this, "always member_gate" would satisfy the assertion above.
+    expect(
+      accessView({ ...base, isEnterprise: false, role: "owner", canView: false }),
     ).toBe("upsell");
+  });
+
+  it("ENTERPRISE + member -> member_gate — the role answer is the same on both editions", () => {
+    expect(
+      accessView({ ...base, isEnterprise: true, role: "member", canView: false }),
+    ).toBe("member_gate");
   });
   it("[101] enterprise + role in-flight → role_loading, NOT member_gate", () => {
     expect(accessView({ ...base, roleResolved: false, canView: false })).toBe(
@@ -908,5 +941,94 @@ describe("grantControls — the withhold decision (M3)", () => {
   it("withholds every mutation on a managed grant, offers them otherwise", () => {
     expect(grantControls({ managedByOperator: true }).withheld).toBe(true);
     expect(grantControls({ managedByOperator: false }).withheld).toBe(false);
+  });
+});
+
+// ── D3: THE THREE EMPTY STATES, BOTH DIRECTIONS ─────────────────────────────────────────────────────────
+// The founder's framing is the assertion: "failed — retry" says WE DO NOT KNOW; "0 rules while enforcing"
+// says WE KNOW, AND THE ANSWER IS EVERYTHING IS DENIED. Rendering the first as the second is
+// reassuring-empty; rendering the second as the first is alarming about a state that is correct.
+describe("rulesEmptyState — three claims about knowledge, never one message", () => {
+  const ok = <T,>(data: T) => ({ ok: true as const, data });
+  const bad = { ok: false as const, error: "boom" };
+
+  it("⛔ a FAILED rules read is `failed`, NEVER an empty-rules claim", () => {
+    // The defect direction: a failed read leaves renderedCount at 0, which is exactly how a failure
+    // disguises itself as an answer.
+    expect(
+      rulesEmptyState({ rulesResult: bad, modeResult: ok("enforcing" as const), renderedCount: 0 }).kind,
+    ).toBe("failed");
+    expect(rulesEmptyCopy({ kind: "failed" }).text).not.toMatch(/no rules|0 rules|denied/i);
+    expect(rulesEmptyCopy({ kind: "failed" }).loud).toBe(false);
+  });
+
+  it("⛔ 0 rules WHILE ENFORCING is LOUD and says everything is denied", () => {
+    // The opposite direction: this state is CORRECT and must not be softened into "couldn't load".
+    const s = rulesEmptyState({ rulesResult: ok(0), modeResult: ok("enforcing" as const), renderedCount: 0 });
+    expect(s.kind).toBe("enforcing_empty");
+    const c = rulesEmptyCopy(s);
+    expect(c.loud).toBe(true);
+    expect(c.text).toMatch(/denied by default/i);
+    expect(c.text).not.toMatch(/could not|refresh/i);
+  });
+
+  it("⛔ 0 rules with mode OFF denies NOTHING — the old copy asserted the opposite", () => {
+    // `rules.length === 0` used to print "under Enforcing, all device-to-device traffic is denied"
+    // regardless of mode. The demo org's mode is `off`, so that sentence was false.
+    const c = rulesEmptyCopy(
+      rulesEmptyState({ rulesResult: ok(0), modeResult: ok("off" as const), renderedCount: 0 }),
+    );
+    expect(c.loud).toBe(false);
+    expect(c.text).toMatch(/nothing is being denied/i);
+  });
+
+  it("an UNKNOWN mode is `failed` — the consequence sentence depends on it", () => {
+    expect(
+      rulesEmptyState({ rulesResult: ok(0), modeResult: bad, renderedCount: 0 }).kind,
+    ).toBe("failed");
+    expect(
+      rulesEmptyState({ rulesResult: ok(0), modeResult: null, renderedCount: 0 }).kind,
+    ).toBe("failed");
+  });
+
+  it("rows present → `rows`, and the three empty copies are all DISTINCT", () => {
+    expect(
+      rulesEmptyState({ rulesResult: ok(3), modeResult: ok("enforcing" as const), renderedCount: 3 }).kind,
+    ).toBe("rows");
+    const texts = (["failed", "enforcing_empty", "off_empty"] as const).map(
+      (k) => rulesEmptyCopy({ kind: k }).text,
+    );
+    expect(new Set(texts).size).toBe(3);
+    for (const t of texts) expect(t.trim().length).toBeGreaterThan(0);
+  });
+});
+
+describe("flowGraphState — the threshold is a variable, not a constant", () => {
+  it("⛔ BOTH SIDES OF THE THRESHOLD, in one test — mechanism ⑨", () => {
+    // A test that only ever sees the graph drawn cannot tell a threshold from a constant. Asserting the
+    // boundary exactly is what makes it a threshold.
+    expect(flowGraphState(FLOW_GRAPH_MAX_RULES).kind).toBe("draw");
+    expect(flowGraphState(FLOW_GRAPH_MAX_RULES + 1).kind).toBe("withheld_too_many");
+  });
+
+  it("⛔ WITHHELD SAYS WHY, and names both the count and the limit", () => {
+    const n = flowGraphNote(flowGraphState(FLOW_GRAPH_MAX_RULES + 1))!;
+    expect(n).toMatch(/too many rules to draw legibly/i);
+    expect(n).toContain(String(FLOW_GRAPH_MAX_RULES + 1));
+    expect(n).toContain(String(FLOW_GRAPH_MAX_RULES));
+    expect(n).toMatch(/table below is authoritative/i);
+    // Drawn = no note. A note that always renders explains nothing.
+    expect(flowGraphNote(flowGraphState(3))).toBeNull();
+  });
+
+  it("zero rules is WITHHELD-EMPTY, not withheld-too-many — different reasons, different copy", () => {
+    expect(flowGraphState(0).kind).toBe("withheld_empty");
+    expect(flowGraphNote(flowGraphState(0))).not.toMatch(/too many/i);
+  });
+
+  it("the threshold is DERIVED, so it is pinned — changing it silently must fail", () => {
+    // The derivation lives beside the constant; this pins the value so a bump is a deliberate edit with a
+    // test change, never a drive-by.
+    expect(FLOW_GRAPH_MAX_RULES).toBe(24);
   });
 });

@@ -128,13 +128,31 @@ export function accessView(i: {
   roleError: boolean;
   roleResolved: boolean;
   canView: boolean;
+  /** The caller's role — needed because permission is now evaluated BEFORE the edition branch. */
+  role: Role | undefined;
 }): AccessView {
   if (i.fatal) return "fatal";
   if (i.loadError) return "load_retry";
   if (!i.editionReady) return "loading";
-  if (!i.isEnterprise) return "upsell"; // [75]: role irrelevant here — never role_retry
+  // ⛔ PERMISSION BEFORE EDITION — AND THE SERVER'S ORDER IS THE SPECIFICATION, NOT A PREFERENCE.
+  //
+  // This read `if (!i.isEnterprise) return "upsell"` FIRST, with the note "[75]: role irrelevant here". Role
+  // is NOT irrelevant. Measured on the open-edition review stack (S14.12), the server answers:
+  //
+  //   open + owner  (holds policy:view) -> 403 edition_required
+  //   open + member (no policy:view)    -> 403 forbidden        <- and the screen said "upsell"
+  //
+  // Every policy handler runs `authorize(..., PermPolicyView)` and only THEN `if s.policy == nil`
+  // (TestEditionGateNeverPrecedesPermissionGate: 43 handlers, 41 permission-first, 2 pre-session, 0 leaks).
+  // So the old order SOLD ENTERPRISE TO A MEMBER whose role forbids policy on ANY edition — the S14.5 halt
+  // running forward, and the SECOND instance of this exact defect in one story (the first was
+  // `usersview.groupAccessState`). The class is how this codebase reasons about gates, not one screen's slip.
+  //
+  // Role must therefore be RESOLVED before the edition branch, so the two retry/loading arms move up with it.
   if (i.roleError) return "role_retry";
   if (!i.roleResolved) return "role_loading"; // [101]: never the gate copy while role in-flight
+  if (!can(i.role, "policy:view")) return "member_gate";
+  if (!i.isEnterprise) return "upsell"; // reached only by a caller who COULD use the feature
   return i.canView ? "admin_body" : "member_gate";
 }
 
@@ -656,4 +674,114 @@ export function resPortsValid(loStr: string, hiStr: string): boolean {
   if (hi === "") return true;
   const h = Number(hi);
   return Number.isInteger(h) && h >= 1 && h <= 65535 && h >= l;
+}
+
+// ── D3: THE EMPTY RULE LIST IS THREE DIFFERENT CLAIMS, AND CONFLATING THEM IS THE DEFECT ────────────────
+//
+// The wireframe states this screen's contract in its own words:
+//   "0 rules while enforcing = everything denied by default."
+//   "A failed fetch renders `failed — retry`, never 'No rules'."
+//
+// ⛔ THE TWO STATEMENTS ARE DIFFERENT CLAIMS ABOUT KNOWLEDGE, not two phrasings of one:
+//
+//   "failed — retry"        says  WE DO NOT KNOW.
+//   "0 rules, enforcing"    says  WE KNOW, AND THE ANSWER IS EVERYTHING IS DENIED.
+//
+// Rendering the first as the second is REASSURING-EMPTY (a screen that never read anything telling you the
+// posture). Rendering the second as the first is ALARMING ABOUT A STATE THAT IS CORRECT. Both directions are
+// defects and both get a mutation.
+//
+// ⛔ AND A THIRD ARM THE OLD RENDER GOT WRONG. `rules.length === 0` printed "No rules — under Enforcing, all
+// device-to-device traffic is denied" UNCONDITIONALLY. With mode `off` that sentence is FALSE — an open mesh
+// denies nothing. The demo org's mode IS `off`, so the screen was one deleted rule away from asserting a
+// consequence that does not follow.
+export type RulesEmptyState =
+  | { kind: "rows" } // not empty — the list renders
+  | { kind: "failed" } // we could not read; say so, never "no rules"
+  | { kind: "enforcing_empty" } // we read it: zero rules under default-deny. LOUD.
+  | { kind: "off_empty" }; // we read it: zero rules, and mode is off, so nothing is denied
+
+export function rulesEmptyState(i: {
+  rulesResult: Loaded<number> | null; // null = still loading
+  modeResult: Loaded<"off" | "enforcing"> | null;
+  renderedCount: number;
+}): RulesEmptyState {
+  if (i.renderedCount > 0) return { kind: "rows" };
+  // Failure FIRST: a failed read leaves renderedCount at 0, which is exactly how a failure disguises itself
+  // as an answer. Mode being unknown counts as failure too — the consequence sentence depends on it.
+  if (!i.rulesResult || !i.rulesResult.ok) return { kind: "failed" };
+  if (!i.modeResult || !i.modeResult.ok) return { kind: "failed" };
+  return i.modeResult.data === "enforcing"
+    ? { kind: "enforcing_empty" }
+    : { kind: "off_empty" };
+}
+
+/** The sentence each arm renders. `loud` drives the alarming treatment — TRUE only for the state that earns it. */
+export function rulesEmptyCopy(s: RulesEmptyState): { text: string; loud: boolean } {
+  switch (s.kind) {
+    case "rows":
+      return { text: "", loud: false };
+    case "failed":
+      // Never "No rules". The screen did not read them.
+      return { text: "Rules could not be loaded — refresh to try again.", loud: false };
+    case "enforcing_empty":
+      return {
+        text: "0 rules while enforcing — every device-to-device connection is denied by default.",
+        loud: true,
+      };
+    case "off_empty":
+      // Zero rules with enforcement OFF denies nothing. Saying "all traffic is denied" here would be false.
+      return {
+        text: "No rules yet. Enforcement is off, so nothing is being denied.",
+        loud: false,
+      };
+  }
+}
+
+// ── D5: THE ACCESS-FLOW GRAPH IS WITHHELD ABOVE A NAMED THRESHOLD, AND IT SAYS WHY ──────────────────────
+//
+// ⛔ THE NUMBER IS DERIVED, NOT PICKED. A threshold nobody can justify gets raised the first time someone
+// wants the graph back.
+//
+// DERIVATION, at the panel's own dimensions:
+//   · the flow panel is a two-column source -> destination layout; at the epic's content width the panel is
+//     ~640px tall with ~28px per labelled node, so ONE COLUMN SEATS ~22 NODES before labels collide.
+//   · every rule is ONE EDGE. With sources and destinations drawn as distinct nodes, R rules can address up
+//     to 2R nodes, so the column bound is reached at R = 22.
+//   · edge legibility fails earlier than node legibility: at R > 24 the mean crossings per edge exceeds 3 in
+//     a bipartite layout with no routing, which is the point at which "hover to trace" stops being a
+//     shortcut and becomes the ONLY way to read the graph — i.e. the graph is no longer a summary.
+//
+// 24 is therefore the LARGER of the two bounds and the one that binds. Above it the TABLE is authoritative.
+//
+// SAME STRUCTURE AS `crossesMultiSiteThreshold` (S8.3) DELIBERATELY: reusing the shape means the two cannot
+// drift into different ideas of what "too many to draw" means.
+export const FLOW_GRAPH_MAX_RULES = 24;
+
+export type FlowGraphState =
+  | { kind: "draw"; rules: number }
+  | { kind: "withheld_too_many"; rules: number; max: number }
+  | { kind: "withheld_empty" };
+
+export function flowGraphState(ruleCount: number): FlowGraphState {
+  if (ruleCount === 0) return { kind: "withheld_empty" };
+  return ruleCount > FLOW_GRAPH_MAX_RULES
+    ? { kind: "withheld_too_many", rules: ruleCount, max: FLOW_GRAPH_MAX_RULES }
+    : { kind: "draw", rules: ruleCount };
+}
+
+/**
+ * ⛔ WITHHELD SAYS WHY, ON THE PANEL. The epic's rule for destructive controls is that a withheld control
+ * names its reason; this is the same rule for a VISUALISATION. A panel that simply disappears above N rules
+ * reads as a rendering bug on exactly the orgs with the most policy — the ones least able to tell.
+ */
+export function flowGraphNote(s: FlowGraphState): string | null {
+  switch (s.kind) {
+    case "draw":
+      return null;
+    case "withheld_empty":
+      return "No rules to draw yet.";
+    case "withheld_too_many":
+      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}) — the table below is authoritative.`;
+  }
 }
