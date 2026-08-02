@@ -127,23 +127,32 @@ UPDATE nodes SET hub_priority = 2 WHERE id = '01900000-0000-7000-8000-0000000f00
 -- said so. Same class as the `NET` bug and the missing OpenVPN state: a write that silently does not happen
 -- looks exactly like a write that did.
 --
--- WF-B: `demoted` carries the SUBORDINATE member, and `siteLinkVerdictFrom` needs it OBSERVED-AND-STALE —
--- a MISSING peer row yields nothing, because silence is not death (a reassuring subordinate on an unobserved
--- peer is the reassuring-green class one tier down, WF-B review F1).
+-- ⛔ THE FIXTURE DOES NOT WRITE `demoted`, AND MY FIRST VERSION DID. That was writing into another
+-- component's field: the query comments state the partition explicitly — ReconcileHubSet owns `configured`,
+-- the FAILOVER CONTROLLER owns `demoted`. A hand-seeded demotion is not a stable state; the controller
+-- recomputes it on the next tick, so the fixture would have been describing a world the product corrects.
 --
--- THE DEMOTED MEMBER IS ap-south (f0003), NOT eu-west. eu-west is deliberately FRESH so the map has a linked
--- flowing edge; demoting it would have produced the note by destroying the state next to it. ap-south is
--- ALREADY observed-stale at 20 minutes and already site-bound, so it yields the demoted-dead peer while every
--- other fixture intent survives untouched — and its own offline rendering is unaffected, so both states
--- coexist on one screen.
-INSERT INTO org_hub_set (org_id, configured, demoted, generation, updated_at)
+-- Worse, seeding it EXPOSED A PERMANENT WEDGE (fixed this slice in failover.go): a nil demoted slice reaches
+-- pgx as SQL NULL against a NOT NULL column, so an org with a demotion that drops below two configured hubs
+-- fails EVERY tick forever. 42 consecutive failures in the CP log before it was noticed.
+--
+-- THE HONEST WAY TO GET A DEMOTED MEMBER IS TO EARN ONE: put ap-south in the hub set with the capability the
+-- elector requires, leave its handshake stale, and THE CONTROLLER DEMOTES IT. Derived, not declared — the
+-- same rule this file already follows for every health kind.
+--
+-- The endpoints below are what makes that possible: `electSiteHubSet` gates on endpoint + wg_public_key, and
+-- eu-west and ap-south had keys but NO endpoint, so the elected set never reached two members and the
+-- controller's demotion branch never ran at all.
+UPDATE nodes SET endpoint = '203.0.113.20:51820' WHERE id = '01900000-0000-7000-8000-0000000f0002' AND (endpoint IS NULL OR endpoint = '');
+UPDATE nodes SET endpoint = '203.0.113.30:51820' WHERE id = '01900000-0000-7000-8000-0000000f0003' AND (endpoint IS NULL OR endpoint = '');
+UPDATE nodes SET hub_priority = 3 WHERE id = '01900000-0000-7000-8000-0000000f0003';
+
+INSERT INTO org_hub_set (org_id, configured, generation, updated_at)
 VALUES ('01900000-0000-7000-8000-000000000001',
         ARRAY['01900000-0000-7000-8000-0000000f0001','01900000-0000-7000-8000-0000000f0002','01900000-0000-7000-8000-0000000f0003']::uuid[],
-        ARRAY['01900000-0000-7000-8000-0000000f0003']::uuid[],
         7, now())
 ON CONFLICT (org_id) DO UPDATE
   SET configured = EXCLUDED.configured,
-      demoted    = EXCLUDED.demoted,
       generation = EXCLUDED.generation,
       updated_at = now();
 
