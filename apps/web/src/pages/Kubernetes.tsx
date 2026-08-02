@@ -256,6 +256,10 @@ export default function Kubernetes() {
     {
       key: "actions",
       header: "",
+      // ⛔ `numeric` IS THE RIGHT-ALIGN PROP DataTable ALREADY HAS. The buttons sat mid-column with a gap to
+      // the table edge, so the row's actions read as unrelated to the row. Using the existing prop rather than
+      // a wrapper div keeps one alignment mechanism in the table, not two.
+      numeric: true,
       cell: (c: ClusterCard) =>
         !gate.canManage ? null : objectControls(c.managedByOperator).withheld ? (
           // The destructive control is WITHHELD, not faked: a dashboard edit would be reconciled away.
@@ -271,7 +275,7 @@ export default function Kubernetes() {
             edit the CR, not here
           </span>
         ) : (
-          <span className="flex items-center gap-2">
+          <span className="flex items-center justify-end gap-2">
             <Button variant="ghost" onClick={() => setExposeFor(c)}>
               Expose Service
             </Button>
@@ -326,6 +330,7 @@ export default function Kubernetes() {
     {
       key: "actions",
       header: "",
+      numeric: true,
       cell: (r: SvcRow) =>
         !gate.canManage ? null : objectControls(r.managedByOperator).withheld ? (
           <span

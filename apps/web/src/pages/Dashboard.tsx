@@ -20,6 +20,8 @@ import {
   type HubSet,
   type PolicyRule,
   type ZeroTrustMode,
+  type K8sCluster,
+  type K8sService,
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import {
@@ -65,6 +67,9 @@ export default function Dashboard() {
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
   const [devicesRes, setDevicesRes] = useState<Loaded<Device[]> | null>(null);
   const [hubSetRes, setHubSetRes] = useState<Loaded<HubSet> | null>(null);
+  // `null` = not resolved yet; `{ok:false}` = the read FAILED. Neither is "there are none" — the card says which.
+  const [k8sClustersRes, setK8sClustersRes] = useState<Loaded<K8sCluster[]> | null>(null);
+  const [k8sServicesRes, setK8sServicesRes] = useState<Loaded<K8sService[]> | null>(null);
   const [ztRes, setZtRes] = useState<Loaded<ZeroTrustMode> | null>(null);
   // THE ONE GATING SEAM. `/meta`'s edition is the same value that decides whether every other enterprise
   // surface exists — read here, never re-derived from an error.
@@ -153,6 +158,20 @@ export default function Dashboard() {
             params: { path: { orgId: org.id } },
           }),
         ).then((r) => !cancelled && setHubSetRes(r as Loaded<HubSet>));
+        // ⛔ KUBERNETES HAS NO PLACE IN `OrgOverview`, MEASURED: that schema is
+        // `members, devices, nodes, online, recent_activity` and nothing more. So the counts come from the two
+        // live reads, which are BOTH `org:view` (verified at the handler in S14.7) and both second-class here:
+        // a failure degrades this one card and nothing else, exactly like sites and nodes above.
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/k8s/clusters", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setK8sClustersRes(r as Loaded<K8sCluster[]>));
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/k8s/services", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setK8sServicesRes(r as Loaded<K8sService[]>));
       } catch {
         if (!cancelled) setError("Could not reach the API.");
       }
@@ -524,6 +543,86 @@ export default function Dashboard() {
                           </ListItem>
                         ))}
                       </List>
+                    )}
+                  </Panel>
+
+                  {/* ⛔ KUBERNETES ON OVERVIEW, AND ITS COUNTS DO NOT COME FROM `OrgOverview`.
+                      Measured: that schema is `members, devices, nodes, online, recent_activity` and carries
+                      nothing about clusters. So this reads the two live endpoints directly (both `org:view`,
+                      verified at the handler) as a SECOND-CLASS read — a failure degrades this card alone.
+
+                      THREE STATES, NOT TWO. `null` = still loading · `{ok:false}` = we could not look ·
+                      `[]` = there are genuinely none. A zero standing in for the middle case would claim an
+                      org has no clusters on the strength of a failed request. */}
+                  <Panel title="Kubernetes" className="lg:col-span-4">
+                    {k8sClustersRes === null || k8sServicesRes === null ? (
+                      <Loading />
+                    ) : !k8sClustersRes.ok ? (
+                      <p className="text-cell text-warn">
+                        Could not read clusters. This card only; the rest of the page is unaffected.
+                      </p>
+                    ) : k8sClustersRes.data.length === 0 ? (
+                      <EmptyState>
+                        No clusters registered. Registering one reserves a VIP range and a DNS zone, and then
+                        in-cluster Services can be reached by name over the tunnel.
+                      </EmptyState>
+                    ) : (
+                      <>
+                        <dl className="flex flex-wrap gap-x-6 gap-y-2">
+                          <div>
+                            <dt className="text-micro uppercase tracking-wide text-ink-tertiary">
+                              Clusters
+                            </dt>
+                            <dd className="text-[22px] font-semibold text-ink-heading">
+                              {k8sClustersRes.data.length}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-micro uppercase tracking-wide text-ink-tertiary">
+                              Exposed Services
+                            </dt>
+                            <dd className="text-[22px] font-semibold text-ink-heading">
+                              {/* The services read is INDEPENDENT of the clusters read, so it has its own
+                                  failure state. A dash here with clusters showing a number is honest; a 0
+                                  would say "nothing is exposed" on a request that never returned. */}
+                              {k8sServicesRes.ok ? k8sServicesRes.data.length : "—"}
+                            </dd>
+                          </div>
+                        </dl>
+                        <ul className="flex flex-col gap-1">
+                          {k8sClustersRes.data.slice(0, 3).map((c) => (
+                            <li
+                              key={c.id}
+                              /* `gap-2`, not `justify-between`: at N=1 the two facts were flung to opposite
+                                 edges of the panel and stopped reading as one row. A name and its range belong
+                                 next to each other at every N. */
+                              className="flex items-center gap-2 text-micro"
+                            >
+                              <span className="font-mono text-ink-body">{c.name}</span>
+                              <span className="font-mono text-ink-faint">
+                                {c.vip_range}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                        {k8sClustersRes.data.length > 3 && (
+                          // ⛔ A TRUNCATION SAYS SO. A list silently cut at three reads as the whole set.
+                          <p className="text-micro text-ink-faint">
+                            {k8sClustersRes.data.length - 3} more on Kubernetes.
+                          </p>
+                        )}
+                        {!k8sServicesRes.ok && (
+                          <p className="text-micro text-warn">
+                            The Service count could not be read.
+                          </p>
+                        )}
+                        <Link
+                          to="/kubernetes"
+                          className="text-micro text-ink-tertiary underline decoration-dotted underline-offset-2 hover:text-ink-body"
+                        >
+                          Open Kubernetes &rarr;
+                        </Link>
+                      </>
                     )}
                   </Panel>
 
