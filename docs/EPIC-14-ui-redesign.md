@@ -322,7 +322,15 @@ than the mock.
 
 ## 4 · READ THE HANDOFF BEFORE WRITING, AND BEFORE EVERY CORRECTION — AND CHECK THIS DOC FOR EXISTING RULINGS
 
-> ## ⛔⛔ **BEFORE ARGUING FOR A PANEL OR A LIBRARY, GREP THIS DOC FOR ITS NAME.**
+> ## ⛔⛔ **BEFORE ARGUING FOR A PANEL, A LIBRARY OR A SCREEN:**
+> ## **`grep -i '<name>' docs/CUT-REGISTER.md`**
+
+**THE RULE WAS RIGHT AND ITS TARGET WAS WRONG.** "Grep the epic doc" points at **400 lines of prose**, and
+**both misses happened to someone who had read it** — this is not an ignorance failure, it is a
+re-scan-cost failure. `docs/CUT-REGISTER.md` is one line per cut, and **every section commit-one must cite
+that grep** the way it cites the handoff extraction.
+
+*A lesson written at one call site does not reach the call site beside it — applied to itself.*
 
 **TWICE IN ONE SESSION I ARGUED A POINT THIS FILE HAD ALREADY DECIDED:**
 
@@ -759,3 +767,36 @@ not exist**: replicas, leader-election state, last-backup time, and version are 
 Everything the design's Operations screen shows — replicas, metrics port, last backup, version, leader
 lease — **exists as behaviour in EPIC 11 and is exposed to nobody through the API.** That is a story, not a
 section.
+
+# ⛔ A FIFTH CATEGORY — **ABSENT-PENDING-ENDPOINTS** (founder-ruled 2026-08-02)
+
+**THE FOUR-WAY PANEL TEST DOES NOT COVER OPERATIONS, AND CALLING IT "ROADMAP" WOULD BE A LIE.**
+
+| # | case | rendering |
+|---|---|---|
+| 1 | endpoint exists, no data | build with an **empty state** |
+| 2 | subject supported, the wireframe's RENDERING unsupported | build in a **different form** |
+| 3 | the spec forbids the use | **absent**, with the reason |
+| 4 | no endpoint, no capability | **absent, roadmap** |
+| **5** | **the CAPABILITY SHIPPED and the API EXPOSES NONE OF IT** | **ABSENT-PENDING-ENDPOINTS** |
+
+## Why it needed its own row
+
+**Operations** shows replicas, leader lease, last-backup time, version, metrics port. **Every one of those is
+real, working behaviour delivered by EPIC 11** — leader election with a 15s lease, `backupctl`, a
+loopback-bound `/metrics`, a version. **None of it is reachable through the API.** `/readyz` and `/metrics`
+are operational HTTP surfaces absent from `openapi.yaml`; backup is a CLI.
+
+> ## **CATEGORY 4 SAYS "WE MAY NEVER BUILD THIS." THAT IS FALSE HERE — IT IS BUILT, AND UNREACHABLE.**
+> ## **THE GAP IS AN API SURFACE, NOT A FEATURE.**
+
+**The distinction is not pedantry: it changes who owns the work.** Roadmap parks a thing on a wishlist that
+nobody costs. **Absent-pending-endpoints names a backend story with a known scope and an existing
+implementation behind it**, which is a different conversation and a much shorter one.
+
+**Same shape as the Site-Link Throughput split** — *the subject exists and the surface does not* — and that
+one is already scoped in `docs/S11.1-throughput-commit-one.md`.
+
+**DISPOSITION: an EPIC 11 backend story, alongside the throughput commit-one.** The screen is marked
+**absent-pending-endpoints**, not roadmap, and it stays out of EPIC 14's screen count until the endpoints
+exist.
