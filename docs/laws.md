@@ -2966,3 +2966,23 @@ test, and it is usually easy to construct once you look for it.
 **THE SIBLING, one level down:** the class-token regex in the same slice. `max-w-full` **contains** `w-full`,
 so matching the substring reported correct code as broken. **Same error at a smaller scale: the thing measured
 was a proxy (does the string appear) for the thing that mattered (is the class token present).**
+
+### ⛔ AND THE DIRECTION IS WHAT COSTS — SECOND INSTANCE OF A RULE ALREADY FILED
+
+`docs/laws.md` already records *a wrong direction is worse than not having looked, because it sends the fix to
+the wrong file* (the `go-version` inversion). **This is its second instance, and it names the cheaper half:**
+
+> ### **A MATCHER THAT IS WRONG IN THE FALSE-POSITIVE DIRECTION SENDS YOU TO FIX SOMETHING THAT IS NOT**
+> ### **BROKEN.** A false negative costs you a finding. A **false positive costs you a change** — and the
+> ### change lands on correct code, with a test now pinning the damage.
+
+Here it would have removed `max-w-full`, which is the very thing keeping the panel from overflowing a narrow
+viewport. **The "fix" would have introduced the defect the assertion exists to prevent.**
+
+**BOTH INSTANCES WERE CAUGHT THE SAME WAY: by checking the finding instead of acting on it.** The `go-version`
+inversion was caught by reading the file the claim was about; this one by reading the class string the regex
+had judged. **Neither was caught by a gate, and neither would have been** — a matcher that is confidently
+wrong produces a clean, specific, actionable red.
+
+**THE CHECK:** when an assertion goes red on code you did not just change, read the subject before you read
+the fix. The first question is *"is this red correct?"*, not *"how do I make it green?"*
