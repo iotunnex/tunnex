@@ -6,6 +6,9 @@ import { HealthStatus } from "../components/HealthStatus";
 import { formatBytes, hubSetView } from "../lib/hubsetview";
 import { assembleTopology, meshFrom } from "../lib/sitesview";
 import { Donut, Histogram, NodeLink } from "../components/viz";
+import { assembleClusters, serviceSlices } from "../lib/k8sview";
+import { motionAllowed } from "../lib/motion";
+import { useMotionPreference } from "../components/MotionProvider";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -67,6 +70,8 @@ export default function Dashboard() {
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
   const [devicesRes, setDevicesRes] = useState<Loaded<Device[]> | null>(null);
   const [hubSetRes, setHubSetRes] = useState<Loaded<HubSet> | null>(null);
+  // The motion preference is read ONCE at the app edge and passed down; no component asks matchMedia itself.
+  const reducedMotion = useMotionPreference();
   // `null` = not resolved yet; `{ok:false}` = the read FAILED. Neither is "there are none" — the card says which.
   const [k8sClustersRes, setK8sClustersRes] = useState<Loaded<K8sCluster[]> | null>(null);
   const [k8sServicesRes, setK8sServicesRes] = useState<Loaded<K8sService[]> | null>(null);
@@ -568,52 +573,37 @@ export default function Dashboard() {
                       </EmptyState>
                     ) : (
                       <>
-                        <dl className="flex flex-wrap gap-x-6 gap-y-2">
-                          <div>
-                            <dt className="text-micro uppercase tracking-wide text-ink-tertiary">
-                              Clusters
-                            </dt>
-                            <dd className="text-[22px] font-semibold text-ink-heading">
-                              {k8sClustersRes.data.length}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-micro uppercase tracking-wide text-ink-tertiary">
-                              Exposed Services
-                            </dt>
-                            <dd className="text-[22px] font-semibold text-ink-heading">
-                              {/* The services read is INDEPENDENT of the clusters read, so it has its own
-                                  failure state. A dash here with clusters showing a number is honest; a 0
-                                  would say "nothing is exposed" on a request that never returned. */}
-                              {k8sServicesRes.ok ? k8sServicesRes.data.length : "—"}
-                            </dd>
-                          </div>
-                        </dl>
-                        <ul className="flex flex-col gap-1">
-                          {k8sClustersRes.data.slice(0, 3).map((c) => (
-                            <li
-                              key={c.id}
-                              /* `gap-2`, not `justify-between`: at N=1 the two facts were flung to opposite
-                                 edges of the panel and stopped reading as one row. A name and its range belong
-                                 next to each other at every N. */
-                              className="flex items-center gap-2 text-micro"
-                            >
-                              <span className="font-mono text-ink-body">{c.name}</span>
-                              <span className="font-mono text-ink-faint">
-                                {c.vip_range}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                        {k8sClustersRes.data.length > 3 && (
-                          // ⛔ A TRUNCATION SAYS SO. A list silently cut at three reads as the whole set.
-                          <p className="text-micro text-ink-faint">
-                            {k8sClustersRes.data.length - 3} more on Kubernetes.
-                          </p>
-                        )}
-                        {!k8sServicesRes.ok && (
-                          <p className="text-micro text-warn">
-                            The Service count could not be read.
+                        {/* ⛔ THE RING IS "EXPOSED SERVICES BY CLUSTER", not "1 cluster and 3 services".
+                            Two unrelated counts drawn as a ring would be a picture pretending to be a
+                            proportion; this is one total split by who carries it, and the legend states every
+                            number as text so the arc is never the only path to the value. */}
+                        {k8sServicesRes.ok ? (
+                          <Donut
+                            label="Exposed Services by cluster"
+                            // The endpoint the ring is drawn FROM, which is the contract VizSource exists to
+                            // force: a chart names its source or it cannot be audited later.
+                            source={{
+                              endpoint:
+                                "GET /organizations/{orgId}/k8s/clusters + /k8s/services",
+                            }}
+                            failed={false}
+                            slices={serviceSlices(
+                              assembleClusters(
+                                k8sClustersRes.data,
+                                k8sServicesRes.data,
+                              ),
+                            )}
+                            centreLabel="services"
+                            empty="No Services exposed yet. Exposing one allocates a VIP and gives it a name clients can reach."
+                            animate={motionAllowed(reducedMotion)}
+                          />
+                        ) : (
+                          // The services read is INDEPENDENT of the clusters read, so it has its own failure
+                          // arm. A ring drawn from a failed read would be a shape asserting a proportion.
+                          <p className="text-cell text-warn">
+                            {k8sClustersRes.data.length} cluster
+                            {k8sClustersRes.data.length === 1 ? "" : "s"} registered.
+                            The Service count could not be read, so no proportion is drawn.
                           </p>
                         )}
                         <Link

@@ -31,13 +31,27 @@ export const GLASS =
 
 export function Button({
   variant = "primary",
+  size = "default",
   className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "danger";
+  /**
+   * `sm` for a button that lives INSIDE A TABLE ROW.
+   *
+   * ⛔ A REAL PROP RATHER THAN AN OVERRIDE CLASS, and the reason is Tailwind: `px-4 py-2` is baked into `base`,
+   * so a caller passing `px-2.5 py-1` gets whichever rule the generated stylesheet happens to order last —
+   * which is not the attribute order, so the "fix" works or does not depending on the build. Swapping the
+   * classes here means one of them exists, not both.
+   *
+   * THE DEFECT IT FIXES: a default button is ~36px tall against a ~20px row line, so at `align-top` its label
+   * sat visibly BELOW the row's own text and the action stopped reading as part of that row.
+   */
+  size?: "default" | "sm";
 }) {
+  const pad = size === "sm" ? "px-2.5 py-1 text-xs" : "px-4 py-2 text-sm";
   const base =
-    "inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400";
+    `inline-flex items-center justify-center rounded-md ${pad} font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400`;
   // ⛔ THE PRIMARY BUTTON WAS UNREADABLE, PRODUCT-WIDE, AND THE PALETTE SWAP IS WHY.
   //
   // It was `bg-accent-500 text-white`. In the mono palette `--tnx-accent` is **#C9C9C4** — a LIGHT GREY — so

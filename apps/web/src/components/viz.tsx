@@ -119,6 +119,7 @@ export function Donut({
   slices,
   empty = "Nothing to show yet.",
   centreLabel,
+  animate = false,
 }: {
   label: string;
   source: VizSource;
@@ -127,6 +128,18 @@ export function Donut({
   empty?: ReactNode;
   /** The word under the centre total ("devices", "gateways"). Absent when the total needs no unit. */
   centreLabel?: string;
+  /**
+   * Sweep the arcs on. OPT-IN and defaulted OFF so every existing Donut renders byte-identically.
+   *
+   * ⛔ SMIL, NOT GSAP. The founder asked for "gsap animation"; gsap is NOT a dependency of this repo
+   * (`grep -c gsap package.json` -> 0) and the wireframe's own animations were ported to SMIL in S14.7 for
+   * that reason. Adding a 70KB animation runtime to sweep one ring is not the trade, and SMIL gives the same
+   * draw-on with no bundle cost.
+   *
+   * The caller passes the MOTION DECISION, it is not read here: `matchMedia` is touched in exactly one place
+   * in this product (`readsReducedMotionPreference`), so a component asking the platform would be the second.
+   */
+  animate?: boolean;
 }) {
   const total = slices.reduce((t, s) => t + s.value, 0);
   const titleId = useId();
@@ -157,7 +170,7 @@ export function Donut({
               stroke="var(--tnx-badge-bg)"
               strokeWidth="4"
             />
-            {slices.map((s) => {
+            {slices.map((s, i) => {
               const pct = (s.value / total) * 100;
               const el = (
                 <circle
@@ -169,9 +182,25 @@ export function Donut({
                   fill="transparent"
                   stroke={TONE_VAR[s.tone]}
                   strokeWidth="4"
-                  strokeDasharray={`${pct} ${100 - pct}`}
+                  // The arc's length IS its dash, so sweeping it on means growing the dash from 0 to `pct`
+                  // while the gap shrinks — the ring draws clockwise from twelve o'clock, in slice order.
+                  strokeDasharray={animate ? `0 100` : `${pct} ${100 - pct}`}
                   strokeDashoffset={String(offset)}
-                />
+                >
+                  {animate && (
+                    <animate
+                      attributeName="stroke-dasharray"
+                      from="0 100"
+                      to={`${pct} ${100 - pct}`}
+                      dur="0.7s"
+                      begin={`${0.1 + i * 0.12}s`}
+                      calcMode="spline"
+                      keyTimes="0;1"
+                      keySplines="0.22 1 0.36 1"
+                      fill="freeze"
+                    />
+                  )}
+                </circle>
               );
               offset -= pct;
               return el;
