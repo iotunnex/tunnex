@@ -23,7 +23,7 @@ only in prose is a cut that will be re-proposed.**
 
 | name | verdict | reason | ruled |
 |---|---|---|---|
-| **Fleet risk** (Gateways `gwScatter` bubble plot) | **CUT** | risk scoring is an unbuilt Tier-3 name in the competitive ledger. Replaced by a health-grouped gateway list | EPIC 14 open |
+| **Fleet risk** (Gateways `gwScatter` bubble plot) | **CUT — for the NAME; the content is largely serveable** | ⚠ **REASON AMENDED S14.6, measured.** The original entry said *"risk scoring is an unbuilt Tier-3 name"* — true of the TITLE and misleading about the PANEL. It plots **agent version × peer load** against a **`MIN SUPPORTED`** boundary: `agent_version` ✅ served · the boundary ✅ (`max_policy_version` + `meta.protocol_version`, the CW ceiling we already compute) · **peer count ❌ — the same column that is its own slice.** So it is 2-of-3 served and **blocked on peers**, not on an unbuilt capability. **STAYS CUT.** A register whose reasons are wrong launders a bad reason into a decision — and this one was already cited as a reason to pick a screen | EPIC 14 open · reason corrected S14.6 |
 | **Site-Link Throughput as a rate time-series** | **ABSENT-PENDING-ENDPOINTS** | `rx_bytes` is a gauge that resets each handshake; a time axis draws a sawtooth. Chart BUILT (`AreaChart`), data owed | EPIC 14 open · rescoped S14.5 · `docs/S11.1-throughput-commit-one.md` |
 | **FREE/ENTERPRISE and ADMIN/USER toggles** | **CUT** | wireframe demo controls. A user cannot switch their own edition or role. Read-only badges instead | EPIC 14 open |
 | **Density (Cozy/Compact)** | **CUT** | ship one density; the spacing scale is kept so it could return | pre-EPIC 14 |
