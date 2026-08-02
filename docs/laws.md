@@ -2064,3 +2064,28 @@ page, on a glass panel, and on a modal. **A solid fill fixes a colour and hopes 
 lives at the call site, the value lives in the token, and nothing connects the two — so the enumeration has
 to be deliberate. **Ours found exactly one text pairing (`Button`); the other two `bg-accent` uses are a logo
 square and a histogram bar, and neither carries text.**
+
+## ⛔ COROLLARY — AN UNDER-CAPABILITIED DOUBLE IS DANGEROUS ONLY IF THE MISSING CAPABILITY FAILS *SILENTLY*
+
+**Founder-raised 2026-08-02 as the harness sibling of fixture-fidelity. Measured, and the measurement
+sharpens it rather than confirming it.**
+
+Nine test suites render a page component with **no Router context**. The concern: *anything
+routing-dependent was untested by construction and green.*
+
+**MEASURED: 0 of 7 pages use `useNavigate`, `<Link>`, `useLocation`, `useParams` or `useSearchParams`.**
+Nothing was being skipped. **And when the first `<Link>` was added (Devices, S14.6), five tests CRASHED
+immediately** — `Cannot destructure property 'basename' of useContext(...) as it is null`.
+
+> ## **A MISSING CAPABILITY THAT *THROWS* IS SELF-ANNOUNCING. ONE THAT SILENTLY NO-OPS IS THE TRAP.**
+> ## **THE HARNESS GAP IS NOT THE RISK — THE FAILURE MODE OF THE GAP IS.**
+
+**AND THE SILENT INSTANCE ALREADY EXISTS IN THIS REPO, one file over.** `lib/motion.ts` says it outright:
+jsdom does not implement `matchMedia`, so a test asking whether reduced motion is honoured would **throw, or
+— worse, if someone stubbed it carelessly — silently no-op and pass at every setting.** That is why the motion
+gate is a **pure function** with the platform read at the app edge: it converts a silent-failure capability
+into a value a test can pass in.
+
+**THE DIAGNOSTIC: for every capability the harness does not provide, ask WHAT HAPPENS WHEN CODE USES IT.**
+Throws → the gap is loud and self-correcting. Returns `undefined`/no-ops → **the gap is a permanent green over
+untested behaviour**, and the capability must be lifted out of the component into a value.

@@ -801,8 +801,28 @@ exist.
 
 ## ⏰ TRIGGERS THAT HAVE FIRED — carry into the Gateways review
 
-**1 · THE `--tnx-ink-600` OVERVIEW RE-LOOK. Trigger was *"the next review that has seeded data"* — IT HAS
-FIRED.** `make seed-fixtures` now seeds 8 devices, so the **Peer Connection Status** donut renders an ARC
+**1 · ✅ DISCHARGED BY MEASUREMENT, 2026-08-02 — not by a scheduled look.**
+
+**THE DEFERRAL'S REASON WAS WRONG, AND IT WAS THE SAME WRONG REASON TWICE.** It rested on *"the founder's
+stack has zero devices, he would be looking for a difference that cannot appear"* — but **the gallery renders
+FIXTURES and needs no API.** A donut with a neutral slice was renderable and readable in ninety seconds at any
+point since S14.3, and the black slice shipped through every review in between.
+
+**MEASURED, from a `VITE_VISUAL_GALLERY=1` build served on a spare port:**
+
+```
+DONUT_STROKES: ["rgb(26,26,26)", "rgb(110,156,124)", "rgb(133,133,130)", "rgb(195,154,78)", "rgb(199,116,116)"]
+                 track #1A1A1A     ok #6E9C7C         NEUTRAL #858582      warn #C39A4E      danger #C77474
+```
+
+**The neutral slice renders `#858582` — correct, and visibly distinct from the track.** Before the fix that
+`var()` resolved to nothing and the slice painted BLACK.
+
+> ## **"IT NEEDS THE STACK" WAS WRONG ON THE HEIGHT GUARD AND WRONG HERE. ANY UI DEFERRAL JUSTIFIED BY THAT
+> ## PHRASE, WHERE THE SUBJECT IS FIXTURE-RENDERABLE, IS NOT A DEFERRAL — IT IS AN UNPROVEN CLAIM.**
+
+*(Original trigger, for the record: "the next review that has seeded data" — it fired, and was then discharged
+without needing the data at all.)* `make seed-fixtures` now seeds 8 devices, so the **Peer Connection Status** donut renders an ARC
 instead of an empty state, and the neutral slice that has been **rendering black since S14.3** is finally
 visible. **FOLD IT INTO THE SAME LOCALHOST SESSION AS GATEWAYS.** Do not schedule a separate look — the whole
 reason it was deferred was that a look with no data could not see it, and that condition is gone.

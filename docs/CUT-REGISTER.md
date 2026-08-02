@@ -53,3 +53,10 @@ only in prose is a cut that will be re-proposed.**
 | **Failed-load triad panel** (Gateways/Sites right column) | **CUT** | a wireframe DOCUMENTATION device showing three states side by side, not a product panel | S14.5 |
 | **`PEERS` column** (Gateways) | **ABSENT — its own slice** | `devices WHERE node_id` counts DEVICES, and a hub's WireGuard peers include SITE LINKS, so on a hub it under-reports exactly where an operator looks hardest. Either count wg peers or label it `DEVICES`. Spec+codegen change, so it is a slice, not a rider | S14.6 |
 | **Operations screen** | **ABSENT-PENDING-ENDPOINTS** | the capability shipped in EPIC 11; the API exposes none of it. See the fifth category in `EPIC-14-ui-redesign.md` | S14.6 nav audit |
+
+## HARNESS AND TEST-INFRASTRUCTURE FINDINGS
+
+| finding | verdict | reason | ruled |
+|---|---|---|---|
+| **`e2e/` was never typechecked** | **FIXED** | no tsconfig, not in the workspace, not in `apps/web/tsconfig` — so nothing PARSED the specs before CI ran them, and an orphaned `describe` reached CI as a `SyntaxError`. Now typechecked inside the BLOCKING gate, proven to reject | S14.5 |
+| **Page suites render without a Router** | **NOT A LIVE DEFECT — loud, not silent** | measured: **0 of 7 pages use `useNavigate`/`Link`/`useLocation`**, so nothing routing-dependent is being skipped. And the first `<Link>` added (Devices, S14.6) **crashed five tests immediately.** An under-capabilitied double that THROWS is self-announcing | S14.6 |
