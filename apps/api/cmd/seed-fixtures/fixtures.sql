@@ -228,4 +228,78 @@ VALUES
   ('01900000-0000-7000-8000-0000000b000c', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', NULL, 'site.subnet_advertise','subnet','10.40.0.0/16',  '{"site":"sa-lan"}',                        now() - interval '2 hours')
 ON CONFLICT (id) DO NOTHING;
 
+-- ── ZERO TRUST: USER GROUPS & GROUP MEMBERS ─────────────────────────────────────────────────────────────
+INSERT INTO user_groups (id, org_id, name, description, created_at)
+VALUES
+  ('01900000-0000-7000-8000-0000000a0001', '01900000-0000-7000-8000-000000000001', 'Engineering',  'Core Engineering and Platform Infrastructure Team', now() - interval '25 days'),
+  ('01900000-0000-7000-8000-0000000a0002', '01900000-0000-7000-8000-000000000001', 'DevOps',       'Site Reliability & GitOps Operators',               now() - interval '20 days'),
+  ('01900000-0000-7000-8000-0000000a0003', '01900000-0000-7000-8000-000000000001', 'Contractors',  'External Audit & Third-Party Contractors',          now() - interval '10 days')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO group_members (org_id, group_id, user_id, created_at)
+VALUES
+  ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0001', '01900000-0000-7000-8000-000000000002', now() - interval '25 days'),
+  ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0001', '01900000-0000-7000-8000-000000000003', now() - interval '20 days'),
+  ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0002', '01900000-0000-7000-8000-000000000002', now() - interval '20 days'),
+  ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0003', '01900000-0000-7000-8000-000000000003', now() - interval '10 days')
+ON CONFLICT (group_id, user_id) DO NOTHING;
+
+-- ── RESOURCES ───────────────────────────────────────────────────────────────────────────────────────────
+INSERT INTO resources (id, org_id, name, cidr, protocol, port_low, port_high, created_at)
+VALUES
+  ('01900000-0000-7000-8000-000000090001', '01900000-0000-7000-8000-000000000001', 'Internal Gitlab',  '10.10.1.50/32', 'tcp', 443,  443,  now() - interval '25 days'),
+  ('01900000-0000-7000-8000-000000090002', '01900000-0000-7000-8000-000000000001', 'Staging Database', '10.20.4.0/24',  'tcp', 5432, 5432, now() - interval '20 days'),
+  ('01900000-0000-7000-8000-000000090003', '01900000-0000-7000-8000-000000000001', 'EU LAN Services',  '10.20.0.0/16',  'any', NULL, NULL, now() - interval '15 days')
+ON CONFLICT (id) DO NOTHING;
+
+-- ── CREDENTIALS: MACHINE & CLI ─────────────────────────────────────────────────────────────────────────
+INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint, created_at)
+VALUES
+  ('01900000-0000-7000-8000-000000050001', '01900000-0000-7000-8000-000000000001', 'k8s-operator-us-east', 'operator', '\x5d41402abc4b2a76b9719d911017c592', 'mc-operator-01', now() - interval '15 days')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO cli_credentials (id, user_id, name, token_hash, fingerprint, created_at, last_used_at, expires_at)
+VALUES
+  ('01900000-0000-7000-8000-000000060001', '01900000-0000-7000-8000-000000000002', 'owner-macbook-cli', '\x098f6bcd4621d373ade4e832627b4f6f', '9a1f04c47bd2', now() - interval '30 days', now() - interval '4 minutes', now() + interval '60 days'),
+  ('01900000-0000-7000-8000-000000060002', '01900000-0000-7000-8000-000000000003', 'member-thinkpad-cli', '\x1679091c5a880faf6fb5e6087eb1b2dc', '4e0b119dc3a7', now() - interval '20 days', now() - interval '2 hours', now() + interval '40 days'),
+  ('01900000-0000-7000-8000-000000060003', '01900000-0000-7000-8000-000000000003', 'ci-runner-expired', '\xc3ec378b5784990924b8785c0746e8c8', '77aa12f0e94b', now() - interval '90 days', now() - interval '31 days', now() - interval '1 day')
+ON CONFLICT (id) DO NOTHING;
+
+-- ── SOFT-DELETED K8S SERVICE FOR `dst_k8s_service_vanished` WARN STATE ────────────────────────────────
+INSERT INTO k8s_services (id, cluster_id, name, namespace, vip, target_port, managed_by_operator, created_at, deleted_at)
+VALUES
+  ('01900000-0000-7000-8000-000000030003', '01900000-0000-7000-8000-000000030001', 'legacy-vault-svc', 'default', '10.244.0.99', 8200, false, now() - interval '30 days', now() - interval '2 days')
+ON CONFLICT (id) DO NOTHING;
+
+-- ── POLICY RULES (COVERING ALL 4 WARN-NOT-REFUSE / WARNING STATES) ────────────────────────────────────
+INSERT INTO policy_rules (id, org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, disabled, expires_at, managed_by_machine, created_at)
+VALUES
+  -- Rule 1: Clean/Active Resource Grant (Engineering -> Internal Gitlab)
+  ('01900000-0000-7000-8000-000000080001', '01900000-0000-7000-8000-000000000001', 'group', '01900000-0000-7000-8000-0000000a0001', NULL, NULL, NULL, 'resource', '01900000-0000-7000-8000-000000090001', NULL, NULL, NULL, false, NULL, NULL, now() - interval '25 days'),
+
+  -- Rule 2: Clean/Active Group Grant (DevOps -> Contractors)
+  ('01900000-0000-7000-8000-000000080002', '01900000-0000-7000-8000-000000000001', 'group', '01900000-0000-7000-8000-0000000a0002', NULL, NULL, NULL, 'group', NULL, '01900000-0000-7000-8000-0000000a0003', NULL, NULL, false, NULL, NULL, now() - interval '20 days'),
+
+  -- Rule 3: ⛔ WARN STATE 1 (`cidr_outside_org_ranges`): src_kind='cidr' with CIDR 192.168.99.0/24 outside all org subnets
+  ('01900000-0000-7000-8000-000000080003', '01900000-0000-7000-8000-000000000001', 'cidr', NULL, NULL, NULL, '192.168.99.0/24', 'resource', '01900000-0000-7000-8000-000000090002', NULL, NULL, NULL, false, NULL, NULL, now() - interval '15 days'),
+
+  -- Rule 4: ⛔ WARN STATE 2 (`dst_k8s_service_vanished`): dst_kind='k8s_service' pointing at soft-deleted legacy-vault-svc
+  ('01900000-0000-7000-8000-000000080004', '01900000-0000-7000-8000-000000000001', 'group', '01900000-0000-7000-8000-0000000a0001', NULL, NULL, NULL, 'k8s_service', NULL, NULL, NULL, '01900000-0000-7000-8000-000000030003', false, NULL, NULL, now() - interval '10 days'),
+
+  -- Rule 5: ⛔ WARN STATE 3 (`enabled: false`): rule explicitly disabled (F3 toggle)
+  ('01900000-0000-7000-8000-000000080005', '01900000-0000-7000-8000-000000000001', 'group', '01900000-0000-7000-8000-0000000a0003', NULL, NULL, NULL, 'resource', '01900000-0000-7000-8000-000000090003', NULL, NULL, NULL, true, NULL, NULL, now() - interval '5 days'),
+
+  -- Rule 6: ⛔ WARN STATE 4 (`managed_by_operator`): created by operator machine credential
+  ('01900000-0000-7000-8000-000000080006', '01900000-0000-7000-8000-000000000001', 'group', '01900000-0000-7000-8000-0000000a0002', NULL, NULL, NULL, 'resource', '01900000-0000-7000-8000-000000090001', NULL, NULL, NULL, false, NULL, '01900000-0000-7000-8000-000000050001', now() - interval '2 days')
+ON CONFLICT (id) DO NOTHING;
+
+-- ── ACCESS EVENTS / FLOW LOGS ───────────────────────────────────────────────────────────────────────────
+INSERT INTO access_events (id, org_id, seq, node_id, occurred_at, decision, rule_id, src_device_id, src_user_id, src_ip, dst_ip, dst_resource_id, protocol, dst_port, deny_count, window_end, created_at)
+VALUES
+  ('01900000-0000-7000-8000-000000070001', '01900000-0000-7000-8000-000000000001', 101, '01900000-0000-7000-8000-0000000f0001', now() - interval '2 minutes',  'allow',          '01900000-0000-7000-8000-000000080001', '01900000-0000-7000-8000-0000000c0001', '01900000-0000-7000-8000-000000000002', '10.99.0.11', '10.10.1.50', '01900000-0000-7000-8000-000000090001', 'tcp', 443, 1, NULL, now() - interval '2 minutes'),
+  ('01900000-0000-7000-8000-000000070002', '01900000-0000-7000-8000-000000000001', 102, '01900000-0000-7000-8000-0000000f0002', now() - interval '12 minutes', 'deny',           NULL,                                   '01900000-0000-7000-8000-0000000c0002', '01900000-0000-7000-8000-000000000003', '10.99.0.12', '10.20.4.5',  '01900000-0000-7000-8000-000000090002', 'tcp', 22,  1, NULL, now() - interval '12 minutes'),
+  ('01900000-0000-7000-8000-000000070003', '01900000-0000-7000-8000-000000000001', 103, '01900000-0000-7000-8000-0000000f0001', now() - interval '1 hour',    'deny_aggregate', NULL,                                   '01900000-0000-7000-8000-0000000c0004', '01900000-0000-7000-8000-000000000002', '10.99.0.14', '10.10.9.1',  NULL,                                  'tcp', 80, 24, now() - interval '55 minutes', now() - interval '1 hour')
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;
+
