@@ -2022,3 +2022,45 @@ two ways in.
 **THE TEST FOR WHERE SOMETHING BELONGS: IS IT THE SAME ON EVERY ROW?** If yes it renders ONCE, at the panel,
 never per item. Repeating identical text per row is not redundancy — **it is a page that costs more to read
 the more successful the customer is.**
+
+# ⭐ A SEMANTIC NAME SURVIVES A PALETTE SWAP; THE CONTRAST IT ASSUMED DOES NOT (2026-08-02, S14.5, founder-caught)
+
+**EVERY PRIMARY BUTTON IN THE PRODUCT WAS WHITE TEXT ON LIGHT GREY.**
+
+```
+primary: "bg-accent-500 text-white"     // unchanged since before S14.1
+--tnx-accent: #7C5CFC                   // violet — white text is fine
+--tnx-accent: #C9C9C4                   // mono, S14.1 — white text is INVISIBLE
+```
+
+**The class names never changed. The token they resolve to did.** `accent` kept meaning *"the accent"*
+faithfully, and the thing it pointed at moved from dark-enough-for-white-text to far too light.
+
+> ## **A COLOUR TOKEN CARRIES A NAME AND A VALUE. RE-POINTING THE VALUE KEEPS EVERY NAME HONEST AND BREAKS
+> ## EVERY PAIRING THAT DEPENDED ON THE OLD LUMINANCE.**
+
+## ⛔ WHY NOTHING CAUGHT IT
+
+- **`tsc`** — the class string is valid either way
+- **445 tests** — jsdom resolves no custom properties, and none asserts contrast
+- **the build** — Tailwind emits the class; luminance is not its concern
+- **the drift guard** — the token file is generated correctly, and correctly generated is the problem
+- **the gallery** — it renders the button, and a low-contrast button is still a rendered button
+- **the founder's review of S14.1, S14.3 and S14.4** — a wash of light grey with faint text reads as a
+  *disabled* button, which is a plausible design choice rather than an obvious fault
+
+**IT SURVIVED A PALETTE MIGRATION, A PRIMITIVES STORY AND THREE HUMAN REVIEWS**, which is what a defect looks
+like when every gate is asking a different question from the one that matters.
+
+## THE FIX IS THE DESIGN'S OWN RECIPE, AND ITS SHAPE IS THE LESSON
+
+`background rgba(255,255,255,.16)` · `border rgba(255,255,255,.4)` · `blur(10px)` · `color #F5F5F5`
+
+**THE DESIGN USES A TRANSLUCENT FILL RATHER THAN A SOLID ONE PRECISELY SO THIS CANNOT HAPPEN:** a wash
+composited over whatever is behind it keeps a fixed RELATIONSHIP to that backdrop, so it stays legible on the
+page, on a glass panel, and on a modal. **A solid fill fixes a colour and hopes the text still works.**
+
+**THE STANDING CHECK: WHEN A TOKEN'S VALUE MOVES, ENUMERATE EVERY FOREGROUND PAIRED WITH IT.** The pairing
+lives at the call site, the value lives in the token, and nothing connects the two — so the enumeration has
+to be deliberate. **Ours found exactly one text pairing (`Button`); the other two `bg-accent` uses are a logo
+square and a histogram bar, and neither carries text.**
