@@ -322,6 +322,20 @@ than the mock.
 
 ## 4 · READ THE HANDOFF BEFORE WRITING, AND BEFORE EVERY CORRECTION — AND CHECK THIS DOC FOR EXISTING RULINGS
 
+> ## ⛔⛔ **BEFORE ARGUING FOR A PANEL OR A LIBRARY, GREP THIS DOC FOR ITS NAME.**
+
+**TWICE IN ONE SESSION I ARGUED A POINT THIS FILE HAD ALREADY DECIDED:**
+
+| I argued | already ruled, here |
+|---|---|
+| GSAP is too heavy (bundle size) | **GSAP is not adopted — REDISTRIBUTION LICENCE**, days earlier |
+| Gateways is a good next screen, partly for its `Fleet risk` bubble plot | **`Fleet risk` was CUT at epic open**, nineteen days earlier |
+
+**THE SECOND IS THE WORSE ONE: I RECOMMENDED A SCREEN PARTLY ON THE STRENGTH OF A PANEL THAT HAD BEEN CUT.**
+Not a wasted argument — a wasted *decision input*, offered to the founder as a reason.
+
+**A grep costs seconds. Re-deriving a ruling costs an argument, and losing one costs a rebuilt panel.**
+
 **Not after a screenshot.** *A screenshot shows what is wrong; only the source says what is right.*
 
 **AND CHECK FOR A RULING BEFORE ANSWERING A QUESTION.** I argued GSAP on bundle size while the founder had
@@ -711,3 +725,37 @@ what it is supposed to mean — **something moved that nobody asked to move** �
 **⛔ THIS IS A DEMOTION WITH A NAMED TRIGGER, NOT A QUIET ONE.** The CI file says so at the job, the job's
 `name:` says so in the checks list, and this entry says so here. A check that is advisory and does not
 announce it is a check nobody knows they are ignoring.
+
+# ⛔⛔ THE NAV AUDIT — THE EPIC IS NOT ELEVEN SCREENS TO REDESIGN (founder-ordered 2026-08-02)
+
+**Run before S14.6's build, as ruled. Four questions per destination, measured.**
+
+| destination | component | route | nav | endpoints | bucket |
+|---|---|---|---|---|---|
+| **Gateways** | ✅ `components/Gateways.tsx`, 458 lines, mounted inside `Devices.tsx` | ❌ | ❌ | ✅ `listNodes` · `issueJoinToken` · `revokeNode` | **CONNECT** |
+| **CLI Credentials** | ✅ `components/MachineCredentials.tsx`, mounted inside `Settings.tsx` | ❌ | ❌ | ✅ `listCliCredentials` · `revokeCliCredential` · `listMachineCredentials` | **CONNECT** |
+| **Routed Ranges** | ❌ none | ❌ | ❌ | ✅ `/routed-ranges` | **BUILD** |
+| **Groups** | ❌ none — `Users.tsx` contains **zero** group references | ❌ | ❌ | ✅ 6 endpoints (enterprise) | **BUILD** |
+| **Access Events** | ❌ none | ❌ | ❌ | ✅ 3 endpoints (enterprise) | **BUILD** |
+| **Edition** | partial — the badge in `IdentityBadges`, reading `/meta` | ❌ | ❌ | ✅ `/meta` | **BUILD** (small) |
+| **Operations** | ❌ none | ❌ | ❌ | ❌ **none** — `/readyz` and `/metrics` are operational HTTP surfaces, absent from the spec; backup is `backupctl`, a CLI | **BUILD + BACKEND** |
+
+## THE RE-SCOPE
+
+| bucket | count | what it costs |
+|---|---|---|
+| **CONNECT** — built, works, merely unrouted | **2** | a route + a nav entry + the section pass. **Hours, not days.** |
+| **REDESIGN** — routed, needs its section pass | **6** | Kubernetes · Access Policies · Devices · Users & Roles · Audit Log · Org Settings |
+| **BUILD** — genuinely absent | **5** | Routed Ranges · Groups · Access Events · Edition · **Operations** |
+
+**"ELEVEN SCREENS TO REDESIGN" WAS WRONG IN BOTH DIRECTIONS.** Two are cheaper than assumed. **Five are not
+redesigns at all — they are new screens**, and one of those (**Operations**) needs **backend endpoints that do
+not exist**: replicas, leader-election state, last-backup time, and version are not served by the API today.
+
+> ## **AN EPIC SCOPED BY COUNTING SCREENS IN A DESIGN COUNTS PICTURES, NOT WORK.**
+> ## **THE SAME PICTURE IS A ROUTE, A REDESIGN, OR A NEW FEATURE, AND NOTHING IN THE DESIGN SAYS WHICH.**
+
+**⚠ AND `Operations` IS THE ONE TO SURFACE EARLY**, because it is the only entry whose cost is not a UI cost.
+Everything the design's Operations screen shows — replicas, metrics port, last backup, version, leader
+lease — **exists as behaviour in EPIC 11 and is exposed to nobody through the API.** That is a story, not a
+section.
