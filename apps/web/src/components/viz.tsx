@@ -492,7 +492,7 @@ export function NodeLink({
             <stop offset="1" stopColor="#C9C9C4" />
           </linearGradient>
         </defs>
-        {links.map((l) => {
+        {links.map((l, i) => {
           const a = pos.get(l.from);
           const b = pos.get(l.to);
           if (!a || !b) return null;
@@ -519,15 +519,37 @@ export function NodeLink({
                   fault as if it were alive — the loudest possible version of the reassuring-green defect.
                   Motion is reserved for the one state that is genuinely current. */}
               {l.tone === "linked" && (
-                <line
-                  className="tnx-edge"
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke="url(#tnxMeshEdge)"
-                  strokeWidth={w}
-                />
+                <>
+                  <line
+                    className="tnx-edge"
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="url(#tnxMeshEdge)"
+                    strokeWidth={w}
+                  />
+                  {/* ⛔ A PACKET CONVERGING ON THE HUB — the handoff's `.tnx-pkt`, its timings verbatim
+                      (duration 2.4 + (i%3)*0.4, delay i*0.35, linear, infinite).
+
+                      DIRECTION IS SPOKE → HUB, not hub → spoke: the design calls these "packets converging
+                      on hub", and convergence is the picture of a fabric that WORKS. Outward-radiating dots
+                      read as broadcast, which is not what a transit hub does.
+
+                      ONLY ON A `linked` EDGE. A packet crawling along a down link would animate traffic on a
+                      tunnel that is carrying none — the same reassuring-green defect the flowing line
+                      already avoids, one step louder because a moving dot reads as a PACKET, not a state. */}
+                  <circle
+                    className="tnx-pkt"
+                    r="2.6"
+                    fill="#E6E6E2"
+                    style={{
+                      offsetPath: `path("M ${b.x} ${b.y} L ${a.x} ${a.y}")`,
+                      animationDuration: `${2.4 + (i % 3) * 0.4}s`,
+                      animationDelay: `${i * 0.35}s`,
+                    }}
+                  />
+                </>
               )}
             </g>
           );

@@ -91,7 +91,25 @@ VALUES
   ('01900000-0000-7000-8000-0000000f0002', 'ZmlY3R1cmVLZXlIVUIwMDAwMDAwMDAwMDAwMDAwMDA9', now() - interval '45 seconds', 90118400,  183001200, now()),
   ('01900000-0000-7000-8000-0000000f0001', 'ZmlY3R1cmVLZXlBUDAwMDAwMDAwMDAwMDAwMDAwMDA9', now() - interval '20 minutes', 4194304,   2097152,   now() - interval '20 minutes'),
   ('01900000-0000-7000-8000-0000000f0003', 'ZmlY3R1cmVLZXlIVUIwMDAwMDAwMDAwMDAwMDAwMDA9', now() - interval '20 minutes', 2097152,   4194304,   now() - interval '20 minutes')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (node_id, public_key) DO UPDATE
+  SET last_handshake_at = EXCLUDED.last_handshake_at,
+      updated_at        = EXCLUDED.updated_at;
+
+-- ⛔ THESE UPSERT RATHER THAN DO-NOTHING, and the reason is the whole point of the fixture.
+--
+-- Liveness is RELATIVE TO now(). A fixture that inserts once and never updates is fresh for ninety seconds
+-- and stale forever after — so the map showed every link DOWN a couple of minutes after seeding, which is
+-- not the designed picture and is not a bug in the map.
+--
+-- A DEMO FIXTURE FOR A LIVE SYSTEM HAS TO BE RE-RUNNABLE INTO FRESHNESS. `make seed-fixtures` is now the
+-- verb for "make the demo network current again", and it stays idempotent in every other respect.
+UPDATE nodes SET last_seen_at = now() - interval '20 seconds'
+ WHERE id IN ('01900000-0000-7000-8000-0000000f0001',
+              '01900000-0000-7000-8000-0000000f0002',
+              '01900000-0000-7000-8000-0000000f0004');
+-- ap-south stays STALE on purpose: it is the one gateway whose offline rendering we need to see.
+UPDATE nodes SET last_seen_at = now() - interval '20 minutes'
+ WHERE id = '01900000-0000-7000-8000-0000000f0003';
 
 -- ── HA HUB SET ──────────────────────────────────────────────────────────────────────────────────────────
 -- Two pinned candidates, which is what crosses the HA panel's threshold so it renders the SET rather than the

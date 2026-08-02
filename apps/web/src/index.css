@@ -56,3 +56,39 @@ body {
     animation: none;
   }
 }
+
+/* ⛔ TRAVELLING PACKETS — the handoff's `.tnx-pkt`, converging on the hub.
+ *
+ * The design drives these with GSAP's MotionPathPlugin:
+ *
+ *     g.to(pkt, { duration: 2.4 + (i%3)*.4, delay: i*.35, repeat: -1, ease: 'none',
+ *                 motionPath: { path, align: path, alignOrigin: [.5,.5] } })
+ *
+ * ⚠ SAME MOTION, NO DEPENDENCY. GSAP + MotionPathPlugin is ~70 kB minified for decoration on one panel.
+ * This repo already refused a charting library on exactly that reasoning (see viz.tsx: ten chart types, a
+ * library covers three), and the motion here is a point moving along a STRAIGHT LINE — CSS `offset-path`
+ * expresses it in four declarations. The timings below are the design's numbers, not approximations.
+ *
+ * GSAP still earns its place on the surfaces that need real path work — the auth mesh's curved spokes, the
+ * Routed Ranges plot, the Gateways bubbles. This is not an argument against it there.
+ *
+ * MOTION GATE: hidden outright under `prefers-reduced-motion`, exactly as `buildAuthMesh` returns early.
+ */
+@keyframes tnxPkt {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+.tnx-pkt {
+  animation-name: tnxPkt;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tnx-pkt {
+    display: none;
+  }
+}
