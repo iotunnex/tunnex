@@ -121,11 +121,44 @@ UPDATE nodes SET hub_priority = 2 WHERE id = '01900000-0000-7000-8000-0000000f00
 -- `members` from the ORIGINAL CREATE TABLE and missed the later ALTER, which is the same error one scale
 -- down as reading a screenshot instead of the source: I read ONE statement rather than the schema's history.
 -- The live `\d org_hub_set` is the authority.
-INSERT INTO org_hub_set (org_id, configured, generation, updated_at)
+-- ⛔ `DO UPDATE`, NOT `DO NOTHING` — AND THAT IS A BUG FIX, NOT A PREFERENCE.
+-- `make seed` already writes an org_hub_set row, so `DO NOTHING` meant THIS FIXTURE NEVER APPLIED. The live
+-- `configured` held a single base-seed node, the HA panel rendered base-seed state, and nothing anywhere
+-- said so. Same class as the `NET` bug and the missing OpenVPN state: a write that silently does not happen
+-- looks exactly like a write that did.
+--
+-- WF-B: `demoted` carries the SUBORDINATE member, and `siteLinkVerdictFrom` needs it OBSERVED-AND-STALE —
+-- a MISSING peer row yields nothing, because silence is not death (a reassuring subordinate on an unobserved
+-- peer is the reassuring-green class one tier down, WF-B review F1).
+--
+-- THE DEMOTED MEMBER IS ap-south (f0003), NOT eu-west. eu-west is deliberately FRESH so the map has a linked
+-- flowing edge; demoting it would have produced the note by destroying the state next to it. ap-south is
+-- ALREADY observed-stale at 20 minutes and already site-bound, so it yields the demoted-dead peer while every
+-- other fixture intent survives untouched — and its own offline rendering is unaffected, so both states
+-- coexist on one screen.
+INSERT INTO org_hub_set (org_id, configured, demoted, generation, updated_at)
 VALUES ('01900000-0000-7000-8000-000000000001',
-        ARRAY['01900000-0000-7000-8000-0000000f0001','01900000-0000-7000-8000-0000000f0002']::uuid[],
+        ARRAY['01900000-0000-7000-8000-0000000f0001','01900000-0000-7000-8000-0000000f0002','01900000-0000-7000-8000-0000000f0003']::uuid[],
+        ARRAY['01900000-0000-7000-8000-0000000f0003']::uuid[],
         7, now())
-ON CONFLICT (org_id) DO NOTHING;
+ON CONFLICT (org_id) DO UPDATE
+  SET configured = EXCLUDED.configured,
+      demoted    = EXCLUDED.demoted,
+      generation = EXCLUDED.generation,
+      updated_at = now();
+
+-- ── OPENVPN: OPTED IN, AND ONE GATEWAY REFUSING LOUDLY ──────────────────────────────────────────────────
+-- Registered fixture debt from the S14.6 review, trigger "S14.7 Routed Ranges visual review" — discharged.
+-- Without these two writes the Gateways screen's OpenVPN panel could only ever render its not-opted-in
+-- precondition, so the opted-in and the faulting branches were UNREVIEWABLE on localhost.
+UPDATE organizations SET ovpn_enabled = true
+ WHERE id = '01900000-0000-7000-8000-000000000001';
+
+-- `ovpn_health` is NOT a column: it rides `nodes.capabilities`, which the control plane builds server-side
+-- from the agent's typed report (a compromised agent cannot inject arbitrary JSON). Seeding the REPORT is
+-- therefore the honest fixture — the health kind stays derived, exactly as `node_peer_status` is for liveness.
+UPDATE nodes SET capabilities = capabilities || '{"ovpn_health":"ovpn_certs_absent"}'::jsonb
+ WHERE id = '01900000-0000-7000-8000-0000000f0002';
 
 -- ── CROSS-SITE DNS ──────────────────────────────────────────────────────────────────────────────────────
 -- Two clean zones plus ONE ORG-WIDE CONFLICT: `*.corp` resolves differently depending on the site, which is
