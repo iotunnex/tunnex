@@ -27,12 +27,57 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 so the classifier below can diff against the PR base. A shallow clone would make the
+      # base unreachable — which the classifier treats as UNKNOWN and therefore runs everything, so a
+      # regression here costs time, never coverage.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ⛔ THE DIFF CLASSIFIER. MEASURED FINDING (S14.10): `gates` is 8.1 min and is the ENTIRE critical path
+      # of a PR run, and 78% of that is Go steps a web-only diff cannot affect. A UI section pushes 3-6 times,
+      # so the epic was paying 20-40 min per section for work it could not have changed.
+      #
+      # ⛔ IT IS CONDITIONAL STEPS INSIDE THIS JOB, NOT A SECOND JOB, and that is the load-bearing choice:
+      # GitHub's `paths:` filter is workflow-level, so a `gates-web` job would mean a NEW REQUIRED-CHECK NAME,
+      # a companion no-op job so branch protection resolves, and two mechanisms for one problem. Keeping the
+      # job name means branch protection is untouched and `gates` still reports on every PR.
+      #
+      # ⛔ AND IT FAILS CLOSED. `RUN_GO` starts true; ONLY an explicit, successful, non-empty classification
+      # turns it off. Unknown base, shallow clone, non-PR event, or an EMPTY diff all run everything — an
+      # empty result is indistinguishable from a detection that silently returned nothing, and skipping every
+      # Go test on "we found no files" is the worst possible reading of silence.
+      #
+      # Go-relevant is deliberately WIDE: Go sources, module files, Dockerfiles, workflows, THE SPEC
+      # (openapi/ regenerates Go) and MIGRATIONS (apps/api/db/). `packages/shared` is NOT listed because it is
+      # generated and the Codegen drift guard — which always runs — catches a hand-edit there.
+      #
+      # Decision table proven 18/18 including every fail-closed arm (docs/S14.10-handoff.md).
+      - name: Classify the diff (fails closed — anything uncertain runs everything)
+        id: scope
+        run: |
+          set -euo pipefail
+          RUN_GO=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              CHANGED=$(git diff --name-only "${BASE}...HEAD" || true)
+              if [ -n "$(printf '%s' "$CHANGED" | tr -d '[:space:]')" ]; then
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|Dockerfile|\.github/|openapi/|apps/api/db/)'; then
+                  RUN_GO=false
+                fi
+              fi
+            fi
+          fi
+          echo "go=$RUN_GO" >> "$GITHUB_OUTPUT"
+          echo "::notice title=gates scope::go=$RUN_GO (false = the Go steps below are SKIPPED, not passed)"
+          printf '%s\n' "${CHANGED:-<no diff computed>}" | head -40
 
       - name: Codegen drift guard
         run: make generate-check
 
       - name: Both editions — build + test (open + enterprise)
+        if: steps.scope.outputs.go == 'true'
         run: |
           cp .env.example .env   # compose + make migrate read DATABASE_URL from here
           docker compose up -d --wait postgres
@@ -40,18 +85,23 @@ jobs:
           make test-editions
 
       - name: Node agent — data-plane tests (reconcile idempotence)
+        if: steps.scope.outputs.go == 'true'
         run: make test-node
 
       - name: GitOps operator — build + no-DB-import census (S10.2)
+        if: steps.scope.outputs.go == 'true'
         run: make test-operator
 
       - name: "tunnex CLI — build + vet + test (S11-2: previously covered by NO job)"
+        if: steps.scope.outputs.go == 'true'
         run: make test-cli
 
       - name: Privilege-helper core — vet + test (S6.3)
+        if: steps.scope.outputs.go == 'true'
         run: make test-helper
 
       - name: Privilege-helper — cross-compile darwin/amd64+arm64 + windows/amd64 (S6.3)
+        if: steps.scope.outputs.go == 'true'
         run: make helper-crosscompile
 
       - name: Web — typecheck + unit tests + build
