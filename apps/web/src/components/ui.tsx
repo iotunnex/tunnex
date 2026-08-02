@@ -336,8 +336,18 @@ export function List({
   );
 }
 
-export function ListItem({ children, className, ...props }: React.HTMLAttributes<HTMLLIElement> & { children: ReactNode }) {
-  return <li className={`py-3 ${className ?? ""}`.trim()} {...props}>{children}</li>;
+export interface ListItemProps {
+  children: ReactNode;
+  "aria-label"?: string;
+  className?: string;
+}
+
+export function ListItem({ children, className, "aria-label": ariaLabel }: ListItemProps) {
+  return (
+    <li className={`py-3 ${className ?? ""}`.trim()} aria-label={ariaLabel}>
+      {children}
+    </li>
+  );
 }
 
 export interface Column<T> {
