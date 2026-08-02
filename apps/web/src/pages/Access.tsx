@@ -144,9 +144,16 @@ export default function Access() {
   });
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold text-white">Access policies</h1>
-      <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: "14px" }}>
+        <div>
+          <div style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>Access policies</div>
+          <div style={{ font: "400 12px 'Instrument Sans'", color: "#6E6E6B" }}>
+            {org ? org.name : "…"} · <span style={{ color: "#858582" }}>control plane</span> <span style={{ color: "#A9A9A6" }}>● healthy</span>
+          </div>
+        </div>
+        <div style={{ flex: 1 }}></div>
+      </div>
 
       {view === "fatal" && <ErrorText>{fatal}</ErrorText>}
       {view === "load_retry" && (
@@ -183,7 +190,7 @@ export default function Access() {
       )}
 
       {view === "admin_body" && org && (
-        <>
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <ModeSection orgId={org.id} canManage={gate.canManagePolicy} />
           <RulesSection
             orgId={org.id}
@@ -203,7 +210,7 @@ export default function Access() {
             orgId={org.id}
             canManage={gate.canManageDeviceHealth}
           />
-        </>
+        </div>
       )}
     </div>
   );
@@ -598,7 +605,7 @@ function RulesSection({
                     {row.managedByOperator && <ManagedBadge />}
                     {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
                     {!r.enabled && (
-                      <span className="ml-2 rounded bg-slate-600/50 px-1.5 py-0.5 text-xs text-slate-300">
+                      <span className="ml-2 rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-400">
                         disabled
                       </span>
                     )}
@@ -606,29 +613,29 @@ function RulesSection({
                         rule matching no current org range (a reassuring-rule). Self-clears when a range lands. */}
                     {row.cidrOutsideRanges && (
                       <span
-                        className="ml-2 text-xs text-amber-400"
+                        className="ml-2 rounded-full border border-amber-800/50 bg-amber-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-400"
                         title="This CIDR is inside no current site subnet — the rule matches nothing until the range is declared."
                       >
-                        ⚠ outside org ranges
+                        OUTSIDE RANGES
                       </span>
                     )}
                     {/* S10.3 warn-not-refuse: the SERVER's read-time judgment — the dst Service was unexposed
                         or its cluster deregistered, so the grant compiles to nothing. Self-clears if it returns. */}
                     {row.k8sServiceVanished && (
                       <span
-                        className="ml-2 text-xs text-amber-400"
+                        className="ml-2 rounded-full border border-rose-800/50 bg-rose-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-rose-400"
                         title="The Kubernetes Service this rule reaches is no longer exposed — the grant matches nothing until it is re-exposed."
                       >
-                        ⚠ service removed
+                        VANISHED
                       </span>
                     )}
                     {/* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant
                         stays visible (audit-history), rendered distinctly — never hidden. */}
                     {exp.state !== "permanent" && (
                       <span
-                        className={`ml-2 text-xs ${exp.state === "expired" ? "text-rose-400" : "text-amber-300"}`}
+                        className={`ml-2 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold ${exp.state === "expired" ? "border-rose-800/50 bg-rose-950/40 text-rose-400" : "border-amber-800/50 bg-amber-950/40 text-amber-300"}`}
                       >
-                        · {exp.label}
+                        TEMP · {exp.label}
                       </span>
                     )}
                   </span>
