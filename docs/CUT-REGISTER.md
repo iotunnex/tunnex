@@ -1,0 +1,53 @@
+# THE CUT REGISTER — one line per cut. GREP THIS FILE, NOT THE PROSE.
+
+**Created 2026-08-02, founder-ordered, after the rule *"grep the epic doc for its name"* failed twice on
+someone who had read the doc.**
+
+> ## **A RULE WITH A 400-LINE PROSE TARGET IS A RULE NOBODY CAN EXECUTE.**
+> ## **THE RULE WAS RIGHT. THE TARGET WAS WRONG.**
+
+**BOTH MISSES HAPPENED TO A READER OF THE DOC:** I argued GSAP on bundle size when it was ruled out on
+**redistribution licence**, and I recommended the Gateways screen partly for its `Fleet risk` bubble plot when
+`Fleet risk` had been **cut at epic open**. Neither was ignorance of the file. Both were the file being too
+long to re-scan for one name.
+
+**HOW TO USE IT:** `grep -i '<name>' docs/CUT-REGISTER.md` before arguing for a panel, a library, or a
+screen. **Every section's commit-one must cite this grep**, the same way it cites the handoff extraction.
+
+**HOW TO ADD:** one line, at the moment of the cut, with the reason and where it was ruled. **A cut recorded
+only in prose is a cut that will be re-proposed.**
+
+---
+
+## PANELS AND FEATURES
+
+| name | verdict | reason | ruled |
+|---|---|---|---|
+| **Fleet risk** (Gateways `gwScatter` bubble plot) | **CUT** | risk scoring is an unbuilt Tier-3 name in the competitive ledger. Replaced by a health-grouped gateway list | EPIC 14 open |
+| **Site-Link Throughput as a rate time-series** | **ABSENT-PENDING-ENDPOINTS** | `rx_bytes` is a gauge that resets each handshake; a time axis draws a sawtooth. Chart BUILT (`AreaChart`), data owed | EPIC 14 open · rescoped S14.5 · `docs/S11.1-throughput-commit-one.md` |
+| **FREE/ENTERPRISE and ADMIN/USER toggles** | **CUT** | wireframe demo controls. A user cannot switch their own edition or role. Read-only badges instead | EPIC 14 open |
+| **Density (Cozy/Compact)** | **CUT** | ship one density; the spacing scale is kept so it could return | pre-EPIC 14 |
+| **Date-range picker on screens that do not filter by date** | **CUT** | keep it only where the data is time-ranged: Access Events, Audit Log | EPIC 14 open |
+| **Floating action button** | **CUT** | purpose unclear; every screen already has a primary action in its header | EPIC 14 open |
+| **"Get started 2 of 4" floating widget** | **CUT** | becomes part of the Overview EMPTY STATE. A checklist following an established admin around is noise | EPIC 14 open |
+| **Per-region mesh nodes with site counts** (Sites map) | **DIFFERENT FORM** | no region field on `Node` or `Site`. Built per-SITE, uniform radius | S14.5 |
+| **`PEERS` / `cloud · region` / `egress ✓`** (Gateways table) | **PEERS = SERVE IT; other two CUT** | no field for region or egress capability. Peer count is one aggregate query | S14.6 |
+| **"hover to trace a link"** (map hint copy) | **CUT** | we do not implement hover tracing; describing an interaction the component lacks is the same class as a chart with no source | S14.5 |
+| **Per-link byte counters on the map** | **MOVED** | `rx/tx` exist only on `HubMemberMetrics`, per hub member. Rendered in the HA panel where they are true | S14.5 |
+| **The wireframe's node ROWS under the map** | **CUT** | they are an `sc-for extraSites` — sites added during the prototype session, not a permanent list | S14.5 |
+| **`gallery-wide-390.png`** | **CUT** | at 390 there is no wide column, so a wide specimen is the narrow one again. Symmetry is not a reason | S14.5 |
+
+## LIBRARIES
+
+| name | verdict | reason | ruled |
+|---|---|---|---|
+| **GSAP** | **NOT ADOPTED** | custom non-OSI licence; we REDISTRIBUTE a built bundle in a self-hosted Apache-2.0 artifact. Use **Motion (MIT)** | EPIC 14 open |
+| **A charting library** | **NOT ADOPTED** | covers 3 of 10 needed visualisation types; the other 7 are hand-rolled anyway | S14.3 |
+
+## SCREENS AND SURFACES
+
+| name | verdict | reason | ruled |
+|---|---|---|---|
+| **Sites edition gate / upsell** | **DELETED** | the site model is all-editions core (D11); the client invented a boundary the server does not have | S14.5 |
+| **Failed-load triad panel** (Gateways/Sites right column) | **CUT** | a wireframe DOCUMENTATION device showing three states side by side, not a product panel | S14.5 |
+| **Operations screen** | **ABSENT-PENDING-ENDPOINTS** | the capability shipped in EPIC 11; the API exposes none of it. See the fifth category in `EPIC-14-ui-redesign.md` | S14.6 nav audit |
