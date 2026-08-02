@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 
@@ -185,7 +186,11 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
     // its guard, because the assertion would have been reading the test's own copy of the rule. That is
     // fixture-restates-production (WF-S13-3's class) inside the very check written to prevent it. Caught before
     // it was committed; recorded here because the near-miss is the lesson.
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
     await screen.findByText("dev-revoked");
 
     // One badge for two posture-blocked devices: the active one. Same arithmetic as the Gateways case above —

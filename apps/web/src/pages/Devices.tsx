@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { PRODUCT_NAME } from "../brand";
 import {
@@ -19,7 +20,6 @@ import {
   Input,
   StatusDot,
 } from "../components/ui";
-import { Gateways } from "../components/Gateways";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 import { postureBadge, postureBadgeClass } from "../lib/postureview";
 import {
@@ -173,22 +173,6 @@ export default function Devices() {
     await loadDevices(org.id);
   }
 
-  // Hoisted so the Gateways child can refresh the list after revoking one (WF-S11-9). The parent owns `nodes`,
-  // so a child mutation that did not propagate would leave a revoked gateway rendering as active until reload —
-  // the stale-render class this project has fixed twice.
-  async function loadNodes(orgId: string) {
-    const { data, error } = await api.GET(
-      "/api/v1/organizations/{orgId}/nodes",
-      {
-        params: { path: { orgId } },
-      },
-    );
-    if (error) {
-      setError(apiErrorMessage(error, "Could not load gateway nodes."));
-      return;
-    }
-    setNodes(data ?? []);
-  }
 
   async function revoke(id: string) {
     if (!org) return;
@@ -233,15 +217,19 @@ export default function Devices() {
 
       <ErrorText>{error}</ErrorText>
 
-      {org && (
-        <div className="mt-6">
-          <Gateways
-            org={org}
-            nodes={nodes}
-            onNodesChanged={() => loadNodes(org.id)}
-          />
-        </div>
-      )}
+      {/* ⛔ A LINK, NOT A COPY (S14.6 D2). Gateways lived HERE — 458 lines of fleet management mounted
+          partway down the Devices page, with no route and no nav entry of its own. It is now a screen.
+
+          Devices keeps a POINTER because the two are genuinely related (a device homes to a gateway), and
+          deleting the reference outright would lose that connection for anyone who learned the old location.
+          RENDERING IT TWICE WOULD BE TWO PLACES TO BE WRONG — the same reasoning that collapsed the two
+          network maps onto one `meshFrom`. */}
+      <p className="mt-6 text-cell text-ink-tertiary">
+        Gateways moved to their own screen.{" "}
+        <Link to="/gateways" className="text-ink-body underline">
+          Open Gateways
+        </Link>
+      </p>
 
       <form onSubmit={create} className="mt-6">
         <Card>

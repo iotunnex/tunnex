@@ -33,6 +33,10 @@ export const NAV_GROUPS: Array<{
   {
     group: "NETWORK",
     items: [
+      // S14.6: Gateways leads NETWORK, as the handoff's nav does. It was a component inside Devices with no
+      // route and no entry here — working fleet management an operator could only reach by scrolling another
+      // screen.
+      { to: "/gateways", label: "Gateways", icon: "server" },
       { to: "/sites", label: "Sites", icon: "network" },
       { to: "/kubernetes", label: "Kubernetes", icon: "boxes" },
     ],
