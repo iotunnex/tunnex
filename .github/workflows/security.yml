@@ -30,8 +30,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ⛔ ONE CLASSIFIER, SHARED. Same measured reason as the `gates` split (S14.10): a UI section touches no Go,
+  # yet CodeQL(go) at 2.8 min and govulncheck x5 ran on every push. This buys RUNNER-MINUTES, not wall clock —
+  # Security is 3.2 min in parallel and never on the critical path, which is exactly why moving it to
+  # `push: main` was REJECTED: it would trade the pre-merge signal for nothing.
+  #
+  # ⛔ FAILS CLOSED, identically to `gates`: unknown base, shallow clone, non-PR event or an EMPTY diff all
+  # run everything. A skipped SECURITY job is a coverage hole, and none of these are required checks, so
+  # nothing else would notice.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.c.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: c
+        run: |
+          set -euo pipefail
+          RUN_GO=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              CHANGED=$(git diff --name-only "${BASE}...HEAD" || true)
+              if [ -n "$(printf '%s' "$CHANGED" | tr -d '[:space:]')" ]; then
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|Dockerfile|\.github/|openapi/|apps/api/db/)'; then
+                  RUN_GO=false
+                fi
+              fi
+            fi
+          fi
+          echo "go=$RUN_GO" >> "$GITHUB_OUTPUT"
+          echo "::notice title=security scope::go=$RUN_GO"
+
   # ── BLOCKING: our dependency choices ────────────────────────────────────────────────────────────────
   govulncheck:
+    needs: scope
+    if: needs.scope.outputs.go == 'true'
     name: govulncheck (blocking)
     runs-on: ubuntu-latest
     strategy:
@@ -55,6 +91,7 @@ jobs:
 
   # ── BLOCKING: our code ─────────────────────────────────────────────────────────────────────────────
   codeql:
+    needs: scope
     name: CodeQL (blocking on high/critical)
     runs-on: ubuntu-latest
     permissions:
@@ -67,12 +104,20 @@ jobs:
         language: [go, javascript-typescript]
     steps:
       - uses: actions/checkout@v4
+      # ⛔ THE GO LEG ONLY. `javascript-typescript` stays UNFILTERED — it is genuinely relevant to a UI
+      # section, which is the whole reason this is a per-leg condition and not a job-level filter.
+      - name: Skip note (go leg, non-Go diff)
+        if: matrix.language == 'go' && needs.scope.outputs.go != 'true'
+        run: echo "::notice::CodeQL(go) SKIPPED — the diff touches no Go. javascript-typescript still ran."
       - uses: github/codeql-action/init@v3
+        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
       - uses: github/codeql-action/autobuild@v3
+        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
       - uses: github/codeql-action/analyze@v3
+        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
         with:
           category: /language:${{ matrix.language }}
           output: codeql-results
@@ -97,6 +142,8 @@ jobs:
 
   # ── BLOCKING: formatting / lint parity (the same checks a dev runs locally) ─────────────────────────
   fmt-lint:
+    needs: scope
+    if: needs.scope.outputs.go == 'true'
     name: gofmt + vet parity (blocking)
     runs-on: ubuntu-latest
     steps:
@@ -138,6 +185,8 @@ jobs:
   # inside the slice that repaid it. The produced-results assertion below closes the other half: a scan
   # that emits nothing must not read as a scan that found nothing.
   trivy:
+    needs: scope
+    if: needs.scope.outputs.go == 'true'
     name: Trivy image scan (advisory findings, blocking setup)
     runs-on: ubuntu-latest
     permissions:
