@@ -227,3 +227,32 @@ export function clusterReachability(input: {
 export function serviceRowClass(reachable: boolean): string {
   return reachable ? "" : "opacity-60";
 }
+
+// ── THE OVERVIEW DONUT ──────────────────────────────────────────────────────────────────────────────────
+//
+// ⛔ WHAT A DONUT NEEDS IS PARTS OF A WHOLE, AND "1 cluster / 3 services" IS NOT THAT. Two unrelated counts
+// drawn as a ring would be a picture pretending to be a proportion.
+//
+// The honest proportion here is EXPOSED SERVICES BY CLUSTER: one total (everything reachable by name), split
+// by which cluster carries it. That answers a real question — where is the exposure concentrated — and it is
+// the split that gets MORE useful as an org grows, which is the opposite of the address-space bar.
+//
+// AT N=1 IT IS ONE FULL RING, AND THAT IS THE FACT, not a degenerate case: one cluster carries everything.
+// The centre total and the legend rows carry the numbers as TEXT regardless, so the ring is never the only
+// path to the value.
+export function serviceSlices(clusters: ClusterCard[]): Array<{
+  label: string;
+  value: number;
+  tone: "ok" | "warn" | "danger" | "neutral";
+}> {
+  // Tones cycle through the neutral-ish set rather than encoding health: a cluster is not "warn" for owning
+  // more Services. Colour here is IDENTITY, not status — using ok/danger would imply a verdict.
+  const TONES = ["ok", "neutral", "warn", "danger"] as const;
+  return clusters
+    .filter((c) => c.services.length > 0)
+    .map((c, i) => ({
+      label: c.name,
+      value: c.services.length,
+      tone: TONES[i % TONES.length],
+    }));
+}

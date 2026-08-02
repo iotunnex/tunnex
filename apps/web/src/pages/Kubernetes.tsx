@@ -276,10 +276,10 @@ export default function Kubernetes() {
           </span>
         ) : (
           <span className="flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={() => setExposeFor(c)}>
+            <Button size="sm" variant="ghost" onClick={() => setExposeFor(c)}>
               Expose Service
             </Button>
-            <Button variant="ghost" onClick={() => setDeregisterFor(c)}>
+            <Button size="sm" variant="ghost" onClick={() => setDeregisterFor(c)}>
               Deregister
             </Button>
           </span>
@@ -340,7 +340,7 @@ export default function Kubernetes() {
             edit the CR, not here
           </span>
         ) : (
-          <Button variant="ghost" onClick={() => unexpose(r.id)}>
+          <Button size="sm" variant="ghost" onClick={() => unexpose(r.id)}>
             Unexpose
           </Button>
         ),
