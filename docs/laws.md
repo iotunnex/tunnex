@@ -2074,6 +2074,13 @@ Neither defect on Overview was invisible because it was state-branching rather t
 
 **Actionable Precondition**: The review stack (`make seed-fixtures`) must exercise every state each redesigned screen can produce (N=0, N=1, N=many, degraded, un-reporting, pending). Pre-flight 2 applies to fixtures as a strict precondition for the human review gate: a screen review is not valid unless seed fixtures reach all states the screen can render.
 
+## ⛔ EVIDENCE COLLECTED WITHOUT COMPARISON TO AUTHORITATIVE SOURCE (founder-ratified 2026-08-02, S14.6 audit) — Nav-audit defect shape recurrence 3
+
+**An audit table listed a state (`ovpn_ok`) the API cannot produce, and the subsequent diagnostic turn treated the table entry as empirical evidence about the codebase without checking the source code.**
+
+This is the nav-audit defect shape for the third time: evidence collected, not compared against authoritative source. The phantom `ovpn_ok` finding was retracted. Authoritative OpenAPI audit confirms `ovpn_health` is absent on the wire (`{}`) when healthy and normalized at the boundary via `?? null`.
+
+
 ## ⛔ COROLLARY — AN UNDER-CAPABILITIED DOUBLE IS DANGEROUS ONLY IF THE MISSING CAPABILITY FAILS *SILENTLY*
 
 **Founder-raised 2026-08-02 as the harness sibling of fixture-fidelity. Measured, and the measurement
