@@ -24,6 +24,8 @@ export interface GatewayRow {
   ovpnHealth: string | null;
   agentVersion: string;
   siteId: string | null;
+  /** The bound site's NAME, when the caller knows it. `null` = unbound, or the caller did not load sites. */
+  siteName: string | null;
   isHub: boolean;
   lastSeenAt: string | null;
 }
@@ -40,7 +42,10 @@ export interface GatewayGroup {
  * would have the row asserting two things at once — the WF-S11-10 finding, preserved here rather than
  * re-derived. `policyHealthBadge` is only consulted for an active node.
  */
-export function toGatewayRow(n: Node): GatewayRow {
+export function toGatewayRow(
+  n: Node,
+  siteNames?: Record<string, string>,
+): GatewayRow {
   return {
     id: n.id,
     name: n.name,
@@ -49,6 +54,7 @@ export function toGatewayRow(n: Node): GatewayRow {
     ovpnHealth: n.status === "revoked" ? null : (n.ovpn_health ?? null),
     agentVersion: n.agent_version,
     siteId: n.site_id ?? null,
+    siteName: n.site_id ? (siteNames?.[n.site_id] ?? null) : null,
     isHub: n.is_site_hub === true,
     lastSeenAt: n.last_seen_at ?? null,
   };
@@ -65,8 +71,11 @@ export function toGatewayRow(n: Node): GatewayRow {
  * different axes (S9.1 4d) and an opted-in gateway that is not serving must not sit in the healthy group
  * because the other axis happens to be fine. Reading only `health` here would put it there.
  */
-export function groupGateways(nodes: Node[]): GatewayGroup[] {
-  const rows = nodes.map(toGatewayRow);
+export function groupGateways(
+  nodes: Node[],
+  siteNames?: Record<string, string>,
+): GatewayGroup[] {
+  const rows = nodes.map((n) => toGatewayRow(n, siteNames));
   const degraded = rows.filter(
     (r) => r.status !== "revoked" && (r.health !== null || r.ovpnHealth !== null),
   );
@@ -118,4 +127,68 @@ export function applyGatewayFilter(
 ): GatewayGroup[] {
   if (filter === "all") return groups;
   return groups.filter((g) => g.key === filter);
+}
+
+
+// ── THE NOTES — the epic's KEEP list, rendered ONCE PER GROUP (S14.6, founder-ruled) ────────────────────
+//
+// ⛔ THE COPY IS THE POINT. The epic's KEEP list names these as its examples of the copy to carry VERBATIM:
+// *"THE COPY — carried VERBATIM. It states the product's laws in the interface."* The BADGE names the state;
+// THE NOTE SAYS WHAT IT MEANS AND WHAT IT IMPLIES, and losing it was the biggest gap on this screen.
+//
+// ⛔ AND THEY RENDER PER GROUP, NOT PER ROW. The note is a property of the health KIND, not of the gateway —
+// four `site link down` rows would carry four copies of one sentence, which the placement test forbids
+// (*is it identical on every row? then it renders once*). Under health grouping the header is that "once".
+//
+// Keyed by the badge LABEL because that is what `policyHealthBadge` returns and what the row renders — one
+// vocabulary, not a second enum to keep in sync with the first.
+const KIND_NOTES: Record<string, string> = {
+  "site link down":
+    "No fresh handshake to the hub. A down site bridge is never shown as green.",
+  "site hub unreachable":
+    "No public-endpoint carrier for transit. The hub outranks a single spoke link being down.",
+  "site subnet unreachable":
+    "The gateway advertises a local subnet but no host address sits inside it, so forwarded traffic cannot be sourced onto the LAN.",
+  "apply failing":
+    "An enforcing apply is currently failing. This errs toward over-reporting: never green while broken.",
+  "silent desync":
+    "Pushed and applied policy differ, past the debounce, with fresh reports. The gateway is stuck.",
+  "health unknown":
+    "Cannot determine: the compile hash is unavailable or the gateway stopped reporting. Unknown is its own state, never healthy.",
+  "syncing…": "A normal push settling. Under the report cadence, so it does not alarm.",
+  "agent too old":
+    "The agent refused the compiled policy because its version exceeds what the agent can apply, and went deny-all. The remedy is operator-side: upgrade the agent.",
+  "enforcing a disabled policy":
+    "Enforcing a policy it cannot swap out.",
+  "certificate expired — re-enroll this gateway":
+    "The client certificate lapsed, so the mTLS channel itself is blocked. Only re-enrolment recovers this.",
+  "agent down — still forwarding (restart agent)":
+    "The wire is warm and the brain is dead: wg0 keeps forwarding while the agent is silent, so a since-revoked device is still enforced from a frozen artifact.",
+  "expiry-flush degraded":
+    "Conntrack flush is unavailable, so an expired grant may keep an established flow alive.",
+  "no Kubernetes endpoint view (check API access + RBAC)":
+    "The VIP DNAT cannot see its backing endpoints.",
+  degraded: "Policy enforcement is degraded. See the gateway's kind for which axis.",
+};
+
+/**
+ * The distinct notes for the kinds present in a group, in the order the rows appear.
+ *
+ * ⚠ A GROUP CAN MIX KINDS, so this returns a LIST rather than one string. Collapsing a mixed group to a
+ * single note would attach one kind's explanation to another kind's row — the badge stays the per-row truth
+ * and the header explains only the kinds actually present.
+ */
+export function groupNotes(rows: GatewayRow[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of rows) {
+    const label = r.health?.label;
+    if (!label) continue;
+    const note = KIND_NOTES[label];
+    if (note && !seen.has(note)) {
+      seen.add(note);
+      out.push(note);
+    }
+  }
+  return out;
 }

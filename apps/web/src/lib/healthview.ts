@@ -90,10 +90,26 @@ export function siteLinkNote(
   };
 }
 
+/**
+ * ⛔ A PILL, NOT BARE TEXT — corrected S14.6, founder-caught, and it was product-wide.
+ *
+ * This returned COLOUR ONLY: `text-amber-400` / `text-rose-400`. So on every surface that renders health
+ * beside other states, a DEGRADED gateway showed as bare coloured text while its `healthy` and `revoked`
+ * siblings showed as bordered pills — one state styled as a different KIND of thing from the others.
+ *
+ * The name said badge and the function returned a colour. Four call sites inherited that, and the wireframe
+ * badges every state uniformly (`HEALTHY`, `APPLY_FAILING`, `DESYNC_UNKNOWN`, `SITE_LINK_DOWN`,
+ * `UNSUPPORTED_VER` are all pills).
+ *
+ * ⚠ FIXED IN THE HELPER RATHER THAN AT THE CALL SITE, deliberately: a fix at one call site does not reach
+ * the call sites beside it — the missing-primitive law, which this repo has now paid for several times.
+ * Matches `Badge`'s recipe so the two cannot drift.
+ */
 export function badgeClass(tone: BadgeTone): string {
-  return {
-    warn: "text-amber-400",
-    danger: "text-rose-400",
-    unknown: "text-slate-400",
+  const colour = {
+    warn: "border-warn/40 text-warn",
+    danger: "border-danger/40 text-danger",
+    unknown: "border-white/10 text-slate-400",
   }[tone];
+  return `inline-flex items-center rounded-full border px-2 py-0.5 text-micro ${colour}`;
 }

@@ -4,6 +4,7 @@ import {
   gatewayFilterCounts,
   applyGatewayFilter,
   toGatewayRow,
+  groupNotes,
 } from "../src/lib/gatewaysview";
 import type { Node } from "../src/lib/api";
 
@@ -110,5 +111,47 @@ describe("⛔ THE CHIP COUNTS AND THE GROUPING ARE ONE DERIVATION", () => {
       applyGatewayFilter(g, "healthy").flatMap((x) => x.rows.map((r) => r.name)),
     ).toEqual(["ok"]);
     expect(applyGatewayFilter(g, "all")).toHaveLength(3);
+  });
+});
+
+describe("⛔ THE NOTES RENDER PER KIND, NOT PER ROW", () => {
+  const n = (id: string, name: string, kind?: string): Node =>
+    ({
+      id,
+      name,
+      status: "active",
+      agent_version: "0.3.0",
+      enrolled_at: "2026-01-01T00:00:00Z",
+      ...(kind ? { policy_degraded: true, policy_degraded_kind: kind } : {}),
+    }) as Node;
+
+  it("four rows of ONE kind produce ONE note, not four", () => {
+    // The whole reason the note moved to the group header. Four `site link down` gateways is one org-level
+    // fact (see the registered finding), and four copies of its sentence is the per-row repetition the
+    // placement test forbids.
+    const g = groupGateways([
+      n("a", "gw1", "site_link_down"),
+      n("b", "gw2", "site_link_down"),
+      n("c", "gw3", "site_link_down"),
+      n("d", "gw4", "site_link_down"),
+    ]);
+    const notes = groupNotes(g[0]!.rows);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/never shown as green/);
+  });
+
+  it("a MIXED group returns one note PER KIND — never one note for the group", () => {
+    // Collapsing a mixed group to a single note would attach one kind's explanation to another kind's row.
+    const g = groupGateways([
+      n("a", "gw1", "site_link_down"),
+      n("b", "gw2", "apply_failing"),
+    ]);
+    expect(groupNotes(g[0]!.rows)).toHaveLength(2);
+  });
+
+  it("a healthy group has NO notes — there is nothing to explain", () => {
+    // Mechanism 9: the empty side observed, so the function is not just "always returns something".
+    const g = groupGateways([n("a", "gw1")]);
+    expect(groupNotes(g[1]!.rows)).toEqual([]);
   });
 });
