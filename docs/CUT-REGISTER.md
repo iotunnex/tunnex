@@ -122,6 +122,25 @@ not happen shows up as a number that did not move.
 **WHEN YOU ADD THE FOURTH, ADD IT HERE.** Ask of any new mechanism: *if this silently did nothing, what would
 be different?* If the answer is "nothing", it belongs in this table before it belongs in the codebase.
 
+### S14.10 — Devices
+
+- **FILTER CHIPS SHIPPED IN A DIFFERENT FORM — `All / Needs attention / Revoked`, not the wireframe's
+  `All / Online / Idle / Blocked`.** Deviation, not an omission, and recorded so the wireframe does not
+  re-propose it at S14.11.
+
+  **WHY THE HANDOFF'S FOUR DO NOT WORK ON THIS DATA:**
+  - `Online` and `Idle` are the SAME axis the STATE column already renders, per row, with a live dot and a
+    relative timestamp. Two chips restating one column is a filter that teaches nothing the table has not said.
+  - `Blocked` is ONE of four things an operator must act on. Shipping it alone hides the other three —
+    `pending` approval, `noncompliant` (warn-mode), and `needs_reexport` — behind a chip that looks complete.
+    **`Needs attention` is the UNION**, which is the actionable question; `Blocked` is a subset of it.
+  - `Revoked` is kept because it is the one state that is deliberately NOT attention: a revoked device is done,
+    and surfacing it as actionable is an instruction to act on a device that cannot come back.
+
+  **WHAT IS LOST, STATED:** filtering to *only* online, or *only* idle, is no longer possible. That is a real
+  capability the handoff offered and this form does not. **If an operator asks for it, the honest answer is a
+  second axis (state) beside the first (attention), not replacing one with the other.**
+
 ## HARNESS AND TEST-INFRASTRUCTURE FINDINGS
 
 - **S14.7 · `NET := tunnex_default` was HARD-CODED while the founder runs `COMPOSE_PROJECT_NAME=tunnex-s141`.**
