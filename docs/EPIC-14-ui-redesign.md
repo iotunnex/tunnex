@@ -739,7 +739,7 @@ with the ledger in hand — not a surprise discovered by whoever finds the next 
 | destination | component | route | nav | endpoints | bucket |
 |---|---|---|---|---|---|
 | **Gateways** | ✅ `components/Gateways.tsx`, 458 lines, mounted inside `Devices.tsx` | ❌ | ❌ | ✅ `listNodes` · `issueJoinToken` · `revokeNode` | **CONNECT** |
-| **CLI Credentials** | ✅ `components/MachineCredentials.tsx`, mounted inside `Settings.tsx` | ❌ | ❌ | ✅ `listCliCredentials` · `revokeCliCredential` · `listMachineCredentials` | **CONNECT** |
+| **CLI Credentials** | ❌ **nothing renders it** — see the correction below | ❌ | ❌ | ✅ `listCliCredentials` · `revokeCliCredential` | ⛔ **BUILD** (was misclassified CONNECT) |
 | **Routed Ranges** | ❌ none | ❌ | ❌ | ✅ `/routed-ranges` | **BUILD** |
 | **Groups** | ❌ none — `Users.tsx` contains **zero** group references | ❌ | ❌ | ✅ 6 endpoints (enterprise) | **BUILD** |
 | **Access Events** | ❌ none | ❌ | ❌ | ✅ 3 endpoints (enterprise) | **BUILD** |
@@ -936,3 +936,37 @@ fact · render the org-level verdict ONCE at page level rather than per row · o
 inheriting rows (`transit down (hub)` vs `link down`). **Not chosen here — it is a control-plane semantics
 decision, and suppressing a server-owned verdict client-side is the one-truth violation already swept off
 Sites.**
+
+
+## ⛔ NAV-AUDIT CORRECTION — CLI CREDENTIALS IS **BUILD**, NOT CONNECT. I MATCHED ON A WORD.
+
+**Caught by the pre-flight on the next screen, before any code. The audit itself contained the error it was
+written to prevent.**
+
+```
+listCliCredentials       /api/v1/auth/cli/credentials                        ← the handoff's screen
+listMachineCredentials   /api/v1/organizations/{orgId}/machine-credentials   ← what Settings renders
+```
+
+**TWO DIFFERENT RESOURCES.** `MachineCredentials.tsx` renders **machine credentials** — org-scoped, no
+expiry, for automation. The handoff's *CLI Credentials* screen is **`tnx_`-prefixed CLI BEARER TOKENS**:
+user-scoped under `/auth/cli/`, **90-day absolute expiry**, hashed at rest, shown exactly once at mint, and
+*"minting requires a browser cookie session — a bearer can never mint another bearer."*
+
+**Nothing in the web app renders those today.**
+
+> ## **I CLASSIFIED IT CONNECT BECAUSE A COMPONENT WITH "CREDENTIAL" IN ITS NAME WAS MOUNTED IN SETTINGS.**
+> ## **I MATCHED ON THE WORD, NOT THE ENDPOINT — INSIDE THE AUDIT WHOSE ENTIRE PURPOSE WAS TO STOP THAT.**
+
+**THE BUCKETS, CORRECTED:**
+
+| bucket | was | now |
+|---|---|---|
+| **CONNECT** | 2 | **1** — Gateways only, and it is done |
+| **REDESIGN** | 6 | 6 |
+| **BUILD** | 5 | **6** — Routed Ranges · Groups · Access Events · Edition · Operations · **CLI Credentials** |
+
+**AND THE AUDIT'S OWN METHOD NEEDS THE FIX, not just this row: *"does a component exist"* must be answered by
+**the ENDPOINT the component calls**, never by its filename.** A component named for a concept is evidence
+about naming, not about coverage. The other five rows were checked by endpoint and stand; this one was
+checked by name and did not.
