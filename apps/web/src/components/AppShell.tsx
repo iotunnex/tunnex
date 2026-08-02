@@ -72,7 +72,14 @@ const TRIAGE_SET = ["/dashboard", "/devices", "/access"];
  * why this surface is stricter than any other in the app.
  */
 function badgeFor(to: string, c: NavCounts): string | null {
-  if (to === "/dashboard")
+  // ⛔ THE GATEWAY RATIO BELONGS ON /gateways, and it was on /dashboard because /gateways DID NOT EXIST.
+  //
+  // Overview rendered `1/6` — the online-of-total GATEWAY count — on a nav item that is not about gateways,
+  // while the Gateways item carried nothing. The handoff binds `3/7` to Gateways. Moved now that slice 1
+  // gave the fleet a route of its own.
+  //
+  // A BADGE PARKED ON THE NEAREST AVAILABLE ITEM OUTLIVES THE REASON IT WAS PARKED THERE.
+  if (to === "/gateways")
     return gatewayBadgeText(c.gatewaysOnline, c.gatewaysTotal);
   if (to === "/sites") return badgeText(c.sites);
   if (to === "/devices") return badgeText(c.devices);

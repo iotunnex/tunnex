@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, loadOne, type Loaded, type Node, type Org } from "../lib/api";
+import {
+  api,
+  loadOne,
+  type Loaded,
+  type Node,
+  type Org,
+  type Site,
+} from "../lib/api";
 import { Gateways as EnrolCeremony } from "../components/Gateways";
 import { LoadRetry } from "../components/LoadRetry";
 import { Badge, DataTable, EmptyState, Panel } from "../components/ui";
@@ -9,6 +16,7 @@ import {
   applyGatewayFilter,
   gatewayFilterCounts,
   groupGateways,
+  groupNotes,
   type GatewayFilter,
   type GatewayRow,
 } from "../lib/gatewaysview";
@@ -65,6 +73,9 @@ function FilterChip({
 export default function GatewaysPage() {
   const [org, setOrg] = useState<Org | null>(null);
   const [nodes, setNodes] = useState<Node[] | null>(null);
+  // Site NAMES for the gateway sub-line. NON-FATAL: a failed sites read leaves the sub-line absent rather
+  // than blanking the fleet — the gateway list is this screen's subject and the site name is a courtesy.
+  const [siteNames, setSiteNames] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<GatewayFilter>("all");
 
@@ -85,6 +96,16 @@ export default function GatewaysPage() {
     // becomes a confident "you have none", on the screen whose job is telling you what is running.
     if (!nRes.ok) return setLoadError(nRes.error);
     setNodes(nRes.data);
+    const sRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/sites", {
+        params: { path: { orgId: first.id } },
+      }),
+    )) as Loaded<Site[]>;
+    if (sRes.ok) {
+      setSiteNames(
+        Object.fromEntries(sRes.data.map((x) => [x.id, x.name])),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -96,8 +117,8 @@ export default function GatewaysPage() {
     [nodes],
   );
   const groups = useMemo(
-    () => applyGatewayFilter(groupGateways(nodes ?? []), filter),
-    [nodes, filter],
+    () => applyGatewayFilter(groupGateways(nodes ?? [], siteNames), filter),
+    [nodes, filter, siteNames],
   );
 
   const columns = [
@@ -105,9 +126,19 @@ export default function GatewaysPage() {
       key: "name",
       header: "Gateway",
       cell: (r: GatewayRow) => (
-        <span className="flex items-center gap-2">
-          <span className="font-mono text-ink-primary">{r.name}</span>
-          {r.isHub && <Badge tone="neutral">HUB</Badge>}
+        <span className="flex flex-col gap-0.5">
+          <span className="flex items-center gap-2">
+            <span className="font-mono text-ink-primary">{r.name}</span>
+            {r.isHub && <Badge tone="neutral">HUB</Badge>}
+          </span>
+          {/* ⛔ THE SERVEABLE THIRD OF A SUB-LINE I CUT WHOLESALE. The handoff shows
+              `AWS · ap-southeast-1 · site: ap-lan`; cloud and region are genuinely absent, and I took
+              `site` with them. It IS served (`Node.site_id`) and it is what connects this screen to Sites. */}
+          {r.siteName && (
+            <span className="font-mono text-micro text-ink-faint">
+              site: {r.siteName}
+            </span>
+          )}
         </span>
       ),
     },
@@ -122,18 +153,6 @@ export default function GatewaysPage() {
           <span className={badgeClass(r.health.tone)}>{r.health.label}</span>
         ) : (
           <Badge tone="ok">healthy</Badge>
-        ),
-    },
-    {
-      key: "ovpn",
-      header: "OpenVPN",
-      cell: (r: GatewayRow) =>
-        r.ovpnHealth ? (
-          // S9.1 4d: a SEPARATE axis. An opted-in gateway that is not serving says why rather than
-          // reading green, and it says so in its own column so the two axes are never conflated.
-          <Badge tone="warn">{r.ovpnHealth.replace(/^ovpn_/, "")}</Badge>
-        ) : (
-          <span className="text-ink-faint">n/a</span>
         ),
     },
     {
@@ -227,17 +246,28 @@ export default function GatewaysPage() {
                     // read succeeded.
                     failed={false}
                   />
+                  {/* ⛔ THE NOTES — the epic's KEEP list, rendered ONCE PER GROUP rather than per row.
+                      The badge names the state; these say what it MEANS. They are a property of the health
+                      KIND, so four `site link down` rows would otherwise carry four copies of one sentence. */}
+                  {groupNotes(g.rows).map((n) => (
+                    <p key={n} className="text-micro text-ink-tertiary">
+                      {n}
+                    </p>
+                  ))}
                 </Panel>
               ))}
 
               {/* ⛔ THE COLUMNS THAT ARE NOT HERE, AND WHY — once, at the panel, not per row.
                   Absence recorded is a decision; absence unrecorded gets re-proposed at the next review. */}
               <p className="text-micro text-ink-faint">
-                The design also shows peers, cloud/region and egress capability
-                per gateway. We serve none of those fields today. The peer count
-                is its own slice: a hub&rsquo;s WireGuard peers include site
-                links, so counting devices would under-report on exactly the
-                gateway you are looking at hardest.
+                Not shown, and why: <strong>peers</strong> is its own slice (a
+                hub&rsquo;s WireGuard peers include site links, so counting
+                devices would under-report on exactly the gateway you are
+                looking at hardest). <strong>Cloud and region</strong> are not
+                fields we serve, nor is <strong>egress capability</strong>. The{" "}
+                <strong>subtitle</strong> the design carries here is held behind
+                a separate ruling on where control-plane health is stated, since
+                the page header would be its third appearance.
               </p>
             </div>
 
@@ -250,6 +280,45 @@ export default function GatewaysPage() {
                 onNodesChanged={reload}
                 renderList={false}
               />
+
+              {/* ⛔ CONDITIONAL ON OPT-IN, not six `n/a` cells. The per-row column was dropped with this:
+                  an org that never opted in has no service to report, and the same four values belong in ONE
+                  place rather than repeated per gateway. Below the threshold the panel names the precondition
+                  instead of offering the surface. */}
+              <Panel title="OpenVPN service">
+                {!org.ovpn_enabled ? (
+                  <EmptyState>
+                    This organization has not opted into OpenVPN, so there is no
+                    service to report. Enable it in Org Settings.
+                  </EmptyState>
+                ) : nodes.filter((n) => n.ovpn_health).length === 0 ? (
+                  <EmptyState>
+                    Every OpenVPN-enabled gateway is serving.
+                  </EmptyState>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {nodes
+                      .filter((n) => n.ovpn_health)
+                      .map((n) => (
+                        <li
+                          key={n.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-line bg-ink-800 px-2.5 py-2"
+                        >
+                          <span className="font-mono text-cell text-ink-body">
+                            {n.name}
+                          </span>
+                          <Badge tone="warn">
+                            {String(n.ovpn_health).replace(/^ovpn_/, "")}
+                          </Badge>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+                <p className="text-micro text-ink-faint">
+                  A separate axis from policy health. An opted-in gateway that
+                  is not serving says why rather than reading green.
+                </p>
+              </Panel>
 
               <Panel title="Deployment requirement">
                 {/* Carried VERBATIM from the handoff. It is the honest NAT-traversal statement the epic's
