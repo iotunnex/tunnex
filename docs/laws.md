@@ -2371,6 +2371,30 @@ Related: VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME · A TEST CAN PIN A LAB
 PRODUCE · ABSENCE OF PERMISSION IS NOT ABSENCE OF DATA. Every one of them is the same failure at a different
 layer: **the evidence was collected somewhere other than where the truth lives.**
 
+
+### ⛔ SECOND INSTANCE (S14.12) — AND IT WAS INVERTED, WHICH IS WORSE THAN MISSING
+
+I enumerated what `ci.yml` and `security.yml` duplicate, and reported: *"`security.yml` pins nothing, so its
+jobs take the runner default"* — naming the security workflow as the drift risk. **Measured:**
+
+```
+security.yml:82,175   go-version-file: <module>/go.mod   <- DERIVED. Cannot drift.
+ci.yml:176            go-version: '1.25'                 <- hardcoded. The actual risk.
+all five modules      go 1.25.12
+```
+
+**My regex matched `go-version:` and missed `go-version-file:`.** Same cause as the first instance: an absence
+established through ONE encoding of the thing, when the thing had two.
+
+> ### **A WRONG DIRECTION IS WORSE THAN NOT HAVING LOOKED, BECAUSE IT SENDS THE FIX TO THE WRONG FILE.**
+> ### **A missing finding costs nothing until someone looks. AN INVERTED ONE SPENDS EFFORT HARDENING THE**
+> ### **SIDE THAT WAS ALREADY CORRECT AND LEAVES THE REAL ONE ALONE — and it does so with the confidence**
+> ### **of a measurement.**
+
+**AND THE FIX FOLLOWED THE CORRECTED DIRECTION:** `ci.yml` now uses `go-version-file: apps/api/go.mod`,
+**removing the hand-maintained copy rather than adding a second one.**
+
+> ### **TWO DERIVED VALUES CANNOT DISAGREE. TWO PINNED VALUES CAN.**
 ---
 
 ## RE-READ THE SURROUNDINGS, NOT THE EDIT — AND IN A DOCUMENT THE STALE HALF IS READ AS TRUTH
@@ -2838,3 +2862,27 @@ one leg you happened to read.
 Same for CI: not *"CI green"* but **`gates: success` (14/14 steps), `client (macos)`: success, `client
 (windows)`: success, `govulncheck` ×5: RAN and passed** — because *ran* and *passed* are different claims and
 a skip reports as neither.
+
+---
+
+## THE RUNNING IS THE RESULT; THE GREEN IS INCIDENTAL
+
+**S14.12 (founder-ruled).** The classifier fix was proven not by a passing board but by a **transition**:
+
+```
+sha 8522614   govulncheck x5, gofmt+vet parity, Trivy   ->  SKIPPED
+sha 129e784   the same seven jobs, same class of diff   ->  SUCCESS
+```
+
+> ### **A JOB THAT PASSES PROVES SOMETHING ABOUT THE CODE. A JOB THAT RUNS WHERE IT PREVIOUSLY SKIPPED**
+> ### **PROVES SOMETHING ABOUT THE GATE — AND THE GATE WAS THE THING UNDER TEST.**
+
+Had those seven jobs simply been green on both shas, nothing would have been demonstrated: green is what a
+skipped job's absence looks like on a board. **The evidence was the change in `conclusion`, not its value.**
+
+**THE CHECK:** when the thing you fixed is a GATE, state the before and after **per job by name**. "CI is
+green" is compatible with the gate being broken in exactly the way you were fixing — which is how the defect
+survived four PRs in the first place.
+
+**SIBLING:** *a composite result reported by its most favourable component*. Same session, same root: an
+aggregate cannot report on whether its parts ran.
