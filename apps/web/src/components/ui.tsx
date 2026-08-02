@@ -336,8 +336,8 @@ export function List({
   );
 }
 
-export function ListItem({ children }: { children: ReactNode }) {
-  return <li className="py-3">{children}</li>;
+export function ListItem({ children, ...props }: React.HTMLAttributes<HTMLLIElement> & { children: ReactNode }) {
+  return <li className="py-3" {...props}>{children}</li>;
 }
 
 export interface Column<T> {
