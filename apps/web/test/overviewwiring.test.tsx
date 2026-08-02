@@ -261,3 +261,13 @@ describe("⛔ EDITION IS A FOURTH STATE — an enterprise-only card is ABSENT, n
     expect(screen.queryByText("Pending approvals")).toBeNull();
   });
 });
+
+describe("HA Hub Set un-reporting member rendering", () => {
+  it("renders 'not reporting' for a member without metrics (structural !reporting check)", async () => {
+    show();
+    await waitFor(() => expect(screen.getByText("HA Hub Set")).toBeTruthy());
+    // In our mock, /hub-set returns members where an un-reporting member has reporting: false.
+    // Structural check in Dashboard.tsx (!m.reporting) renders 'not reporting'.
+    expect(screen.queryByText("· hs n/a")).toBeNull();
+  });
+});

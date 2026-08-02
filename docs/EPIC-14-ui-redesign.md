@@ -966,7 +966,29 @@ user-scoped under `/auth/cli/`, **90-day absolute expiry**, hashed at rest, show
 | **REDESIGN** | 6 | 6 |
 | **BUILD** | 5 | **6** — Routed Ranges · Groups · Access Events · Edition · Operations · **CLI Credentials** |
 
-**AND THE AUDIT'S OWN METHOD NEEDS THE FIX, not just this row: *"does a component exist"* must be answered by
-**the ENDPOINT the component calls**, never by its filename.** A component named for a concept is evidence
-about naming, not about coverage. The other five rows were checked by endpoint and stand; this one was
-checked by name and did not.
+**METHOD DENOMINATOR CORRECTION:** The nav audit method was testable on **2 screens** (the 2 existing components in `apps/web`), and wrong on **1** (`MachineCredentials` matched to CLI Credentials by name instead of comparing endpoint calls). Testable denominator = 2; failure rate on testable cases = 50%. The other 5 had no components, so filename-matching was never exercised on them.
+
+**DEFECT SHAPE ACROSS CENSUSES:** The underlying flaw—collecting evidence without comparing actual component call sites to endpoints—recurred in the **Screen Census** (matching routes to names rather than checking `fetch`/API calls) and **Chart Census** (assigning `VizSource` string labels without verifying underlying hook data structures).
+
+## ⛔ S14.7 PRE-FLIGHT & AUDIT DISPOSITIONS
+
+### 1. Re-Entry Checkpoint & Merge Mechanism
+- **Merge Record**: Corrected across PLAN.md from "ff-only linear" to **`rebase-linear, tree-identical, object-rewritten, verified on main`**. Merges ride GitHub PR rebase-and-merge/auto-merge.
+- **Pointer Flaw & Mechanism Choice**: Updating checkpoint pointers inside branch PRs produces stale-on-arrival pointers on `main`. Adopted **Option B**: 1-line direct push to `main` for `PLAN.md` re-entry pointer updates immediately following a merged PR (strictly bounded, 0 product code, authorized under `CLAUDE.md` line 42).
+
+### 2. Em-Dash Census (Corrected Method over Rendered Sources)
+- **Overview**: Fixed derived bug in `Dashboard.tsx` (`m.handshakeAge === "n/a"` replaced stale `=== "—"` check).
+- **Sites**: Clearance was complete at S14.5 merge (0 em-dashes in rendered text).
+- **Remaining**: 0 on Gateways, 0 on Sites, 0 on Overview. ~104 remaining across the 14 un-redesigned screens, to be cleared section-by-section.
+
+### 3. `badgeClass` Audit Across 10 Call Sites
+- Audited 10 call sites across `Dashboard.tsx`, `Gateways.tsx`, `Sites.tsx`, `postureview.ts`, `VisualGallery.tsx`.
+- Confirmed: `badgeClass` renders uniform bordered pills across all 10 sites, eliminating the bare-text vs pill mismatch.
+
+### 4. S14.7 Routed Ranges Pre-Flight
+- **(a) Address-Space Heatmap**: KEPT for spatial density/fragmentation visualization across `10.0.0.0/8` (answers *"Where is space unallocated or fragmented?"* faster than scanning table rows), paired with canonical sorted table below.
+- **(b) Pending State Endpoints & Auth**: Approved CIDRs read from `/routed-ranges` (`org:view`). Pending subnets read from `/pending-subnets` (`site:manage`). For members without `site:manage`, pending fetch is withheld and cells render as unallocated with an explanatory note.
+- **(c) Animation Rule**: Continuous pulse removed from pending cells (not a live state). Static dashed border + mount animation only.
+- **(d) Boundary Fixtures**: Grid and table tested at N=0, N=1, and N=256.
+- **(e) Title Delta**: Wireframe title *"Subnet advertisement queue"* replaced by domain term *"Pending subnet approvals"*, recorded in `CUT-REGISTER.md`.
+

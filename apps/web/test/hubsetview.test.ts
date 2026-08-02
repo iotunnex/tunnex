@@ -45,8 +45,10 @@ describe("hubSetView (S8.6 HA surface view-model)", () => {
       ],
     };
     const v = hubSetView(hs, now)!;
+    expect(v.members[0].reporting).toBe(true);
     expect(v.members[0].rx).toBe("0 B"); // idle link — a row with zeroes is honest
     expect(v.members[0].warm).toBe(true);
+    expect(v.members[1].reporting).toBe(false);
     expect(v.members[1].rx).toBe("n/a"); // not reporting: absent, NOT "0 B"
     expect(v.members[1].tx).toBe("n/a");
     expect(v.members[1].handshakeAge).toBe("n/a");
