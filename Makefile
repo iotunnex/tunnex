@@ -256,6 +256,16 @@ seed-fixtures: ## Seed the DEMO FIXTURES (populated network for UI review) ON TO
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed-fixtures
 
+.PHONY: k3s-demo k3s-demo-verify k3s-demo-down
+k3s-demo: ## Bring up + register + expose the review k3s cluster for the Kubernetes screen, then VERIFY it (S14.8)
+	scripts/k3s-demo.sh up
+
+k3s-demo-verify: ## Verify the review cluster is up AND the control plane agrees with it (run before a review)
+	scripts/k3s-demo.sh verify
+
+k3s-demo-down: ## Stop the review cluster (CP rows stay -- that asymmetry is finding D9)
+	scripts/k3s-demo.sh down
+
 .PHONY: visual
 visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN THE SAME CONTAINER CI USES.
 	# The playwright image is pinned to CI's. A baseline rendered on the host would NEVER match CI: font
