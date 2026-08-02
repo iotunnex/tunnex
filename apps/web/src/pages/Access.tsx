@@ -53,6 +53,9 @@ import {
   flowGraphState,
   flowGraphNote,
   flowLayout,
+  srcGroupEmptyWarn,
+  srcGroupEmptyBadge,
+  srcGroupEmptyExplain,
   flowGlyph,
   flowTag,
   type FlowKind,
@@ -405,6 +408,12 @@ function RulesSection({
     "off" | "enforcing"
   > | null>(null);
   const [rulesResult, setRulesResult] = useState<Loaded<number> | null>(null);
+  // ⛔ MEMBER COUNTS FOR SOURCE GROUPS ONLY — the bounded half of the coupling.
+  // Lazy counts in the Groups panel LOSE the visibly-empty property; src_group_empty restores it HERE, on the
+  // rule row, where the operator's attention already is. The fan-out is the DISTINCT SOURCE GROUPS of the
+  // rules, not every group — the rules are what need judging.
+  // `undefined` = not fetched yet, `null` = fetched and FAILED. Neither warns: "could not check" is not "empty".
+  const [srcGroupCounts, setSrcGroupCounts] = useState<Map<string, number | null>>(new Map());
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
@@ -461,6 +470,24 @@ function RulesSection({
     setLoadError(null);
     const freshRules = rr.data as PolicyRule[];
     setRules(freshRules);
+    // Bounded: one call per DISTINCT source group actually referenced by a rule.
+    const srcIds = [
+      ...new Set(
+        freshRules
+          .filter((r) => (r.src_kind ?? "group") === "group" && r.src_group_id)
+          .map((r) => r.src_group_id as string),
+      ),
+    ];
+    void Promise.all(
+      srcIds.map(async (gid) => {
+        const mr = (await loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/groups/{groupId}/members", {
+            params: { path: { orgId, groupId: gid } },
+          }),
+        )) as Loaded<GroupMember[]>;
+        return [gid, mr.ok ? mr.data.length : null] as const;
+      }),
+    ).then((pairs) => setSrcGroupCounts(new Map(pairs)));
     setGroups((gr.ok ? (gr.data as UserGroup[]) : []) as UserGroup[]);
     setResources((resr.ok ? (resr.data as Resource[]) : []) as Resource[]);
     setMembers((mr.ok ? (mr.data as Member[]) : []) as Member[]);
@@ -727,6 +754,29 @@ function RulesSection({
                     />
                     {/* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are withheld below. */}
                     {row.managedByOperator && <ManagedBadge />}
+                    {/* ⛔ src_group_empty (S14.12) — the FOURTH warn kind, in the VANISHED / OUTSIDE-RANGES
+                        family. Measured at compiler.go:399 (`matched = owner[r.SrcGroupID]`): a group with
+                        zero members matches NO device, so this rule COMPILES TO NOTHING while rendering
+                        ACTIVE. Derived from the member COUNT, never from group existence, and it does NOT
+                        fire while the count is unfetched or failed — "could not check" is not "empty". */}
+                    {(r.src_kind ?? "group") === "group" &&
+                      r.src_group_id &&
+                      srcGroupEmptyBadge(
+                        srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
+                      ) && (
+                        <span
+                          className="ml-2 rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-warn"
+                          title={
+                            srcGroupEmptyExplain(
+                              srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
+                            ) ?? undefined
+                          }
+                        >
+                          {srcGroupEmptyBadge(
+                            srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
+                          )}
+                        </span>
+                      )}
                     {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
                     {!r.enabled && (
                       <span className="ml-2 rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-400">
