@@ -161,7 +161,8 @@ jobs:
   # artifacts (expected/actual/diff) and its failures MEAN something different: e2e red = broken behaviour,
   # visual red = something moved, possibly on purpose.
   #
-  # ⛔ ADVISORY DURING EPIC 14, BLOCKING AGAIN AT ITS CLOSE. Founder-ruled 2026-08-02.
+  # ⛔ SPLIT: THE GEOMETRIC HALF BLOCKS, THE PIXEL HALF IS ADVISORY. Founder-ruled 2026-08-02, correcting an
+  # earlier wholesale demotion that surrendered the half that pays along with the half that does not.
   #
   # A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN. This job compares against a committed image, and
   # every slice of EPIC 14 deliberately changes the shared surface — a palette, a primitive, an animation, a
@@ -179,8 +180,7 @@ jobs:
   # Unblocked by COMMITTING A BASELINE, never by re-running with --update-snapshots, which this job can never
   # do because it only ever compares.
   visual:
-    name: visual regression (advisory during EPIC 14; re-arms at epic close)
-    continue-on-error: true
+    name: visual regression (geometric BLOCKING; pixel diff advisory during EPIC 14)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -196,12 +196,26 @@ jobs:
           make seed
         env:
           VITE_VISUAL_GALLERY: "1"
-      - name: Playwright visual comparison
+      # ⛔ STEP 1 — BLOCKING. Geometric invariants, the baseline census, and the strict-mode locators.
+      # DETERMINISTIC: no committed image, no harvest, and no data difference can flake them. This is where
+      # the 65px header overflow and the duplicate health indicator were actually found.
+      - name: Geometric invariants + census (BLOCKING)
         run: |
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
+            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep-invert @pixel"
+
+      # ⛔ STEP 2 — ADVISORY during EPIC 14. The committed-image comparison, which is red BY DESIGN while the
+      # epic deliberately changes the shared surface every slice. The artifact and diff still upload below.
+      # RE-ARM TRIGGER: EPIC 14 close — delete this `continue-on-error`, nothing else.
+      - name: Pixel diff (advisory during EPIC 14)
+        continue-on-error: true
+        run: |
+          docker run --rm --network tunnex_default \
+            -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+            mcr.microsoft.com/playwright:v1.48.2-jammy \
+            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep @pixel"
       - name: Upload the diff images for adjudication
         if: always()
         uses: actions/upload-artifact@v4
