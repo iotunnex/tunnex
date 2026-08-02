@@ -2534,3 +2534,30 @@ can sign in and act, and recovery requires direct database access.
 **THE CHECK:** when a proof has several routes to the same headline, run each to the end and ask *is there a
 path back?* Report the narrowest claim the evidence supports, and say explicitly which routes did NOT qualify —
 the exclusions are what make the remaining claim load-bearing.
+
+---
+
+## A FALLBACK NEVER EXERCISED DELIBERATELY IS A FALLBACK ALWAYS EXERCISED ACCIDENTALLY
+
+**S14.11.** The Audit Log's actor cell is `{a.actor_id ? actorName(members, a.actor_id) : "system"}`. Its
+wiring mock sent **`actor_user_id`** — a field the spec does not have and, being `additionalProperties: false`,
+one the server can never send. So `a.actor_id` was `undefined` in **every** audit-log test, **every** row
+rendered `"system"`, and the suite was green.
+
+**No assertion ever looked at the actor column.** The ternary had two branches and the tests only ever ran one
+— the wrong one — for the entire life of the screen.
+
+> ### **THE MOCK AND THE PAGE DISAGREED, THE TEST PASSED, AND THE PASSING BRANCH WAS THE ONE NOBODY WANTED.**
+> ### **A fallback is the branch you expect NOT to take; if no test takes the other one on purpose, the**
+> ### **fallback silently becomes the only behaviour you have ever observed.**
+
+**THE CHECK:** for every `?:`, `??`, `||`, and `default:` on a rendering path, name the test that exercises the
+**non**-fallback branch. If you cannot, the fallback is your actual UI. This is sharpest on surfaces where the
+fallback is *plausible* — `"system"`, `"unknown"`, `"—"` — because a plausible fallback never looks like a bug.
+
+**AND IT COMPOUNDS WITH AN UNFAITHFUL DOUBLE.** The mock was wrong in BOTH directions at once (invented
+`actor_user_id`, omitted `actor_id`), which is exactly the pair that produces a green suite: the invented field
+is ignored by the page, and the omitted one makes the page take the branch nobody checked.
+
+**MEASURE BEFORE BLAMING THE PAGE.** The live endpoint served a populated `actor_id` on 34 of 78 rows — so the
+page was right and only the fixture was wrong. Reading the code alone would have supported either conclusion.
