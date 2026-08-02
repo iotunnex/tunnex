@@ -70,17 +70,21 @@ test.describe("width-sensitive specimens at full column width", () => {
     await page.setViewportSize({ width: 1440, height: 1200 });
     await stabilise(page);
     await page.goto("/__visual");
+    // ⛔ CLOSE THE MODAL RATHER THAN MASK IT. The gallery keeps one open on purpose, and it is
+    // `fixed inset-0` — so it lies over EVERY element screenshot on this page, not just its own section.
+    //
+    // The first attempt masked `[role="dialog"]`, which is that full-viewport overlay, and produced a
+    // baseline that was ENTIRELY MAGENTA: a solid rectangle that would have compared equal forever with no
+    // subject inside it. Caught only by LOOKING at the harvested image before committing it.
+    await page.locator('[role="dialog"]').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
     const wide = page.locator("[data-wide-specimens]");
     await expect(wide).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expect(wide).toHaveScreenshot("gallery-wide-1440.png", {
       maxDiffPixelRatio: 0,
       animations: "disabled",
-      // ⛔ MASK THE PORTALLED MODAL. The gallery renders one OPEN, on purpose (combination 3), and it is
-      // `position: fixed` on the viewport — so an ELEMENT screenshot of a different section still has it
-      // sitting on top. Masking is right rather than closing it: the modal is a load-bearing specimen in the
-      // full-page gallery baseline, and it is simply not this image's subject.
-      mask: [page.locator('[role="dialog"]')],
     });
   });
 });
