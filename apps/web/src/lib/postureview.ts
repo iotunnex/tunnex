@@ -39,8 +39,35 @@ export interface PostureBadge {
   tone: BadgeTone;
 }
 
+/** The facts a report carries. Their PRESENCE is what separates a stale report from an incomplete one. */
+type PostureFacts = Pick<
+  Device,
+  "health_reported_at" | "health_os_version" | "health_disk_encrypted"
+>;
+
+/**
+ * Which of the three `unknown` causes this is. Exported so each arm gets its own red.
+ *
+ * ⛔ "FACTS PRESENT" MEANS ANY FACT. A report that carried an OS version but no disk answer is still
+ * a report that reached us, so the discriminator is `some`, not `every` — using `every` would send a
+ * partially-answering device to the stale label, which is the same mislabel one notch narrower.
+ */
+export function unknownPostureLabel(d: PostureFacts): string {
+  if (!d.health_reported_at) return "posture not reported";
+  const anyFact =
+    d.health_os_version !== undefined || d.health_disk_encrypted !== undefined;
+  return anyFact ? "posture stale" : "posture reported, fact unavailable";
+}
+
 export function postureBadge(
-  d: Pick<Device, "health_state" | "health_blocked" | "health_reported_at">,
+  d: Pick<
+    Device,
+    | "health_state"
+    | "health_blocked"
+    | "health_reported_at"
+    | "health_os_version"
+    | "health_disk_encrypted"
+  >,
 ): PostureBadge | null {
   if (d.health_state === undefined) return null; // surface inactive — no badge, no noise
   if (d.health_blocked) {
@@ -54,10 +81,34 @@ export function postureBadge(
     case "compliant":
       return { label: "posture ok", tone: "ok" };
     default:
-      // unknown: never reported, stale, or the fact was absent. Distinct from
-      // compliant BY DESIGN — absence is not compliance.
+      // ⛔ THREE CAUSES, THREE LABELS. This arm used to emit TWO on a presence check of
+      // `health_reported_at`, and the comment above it named all three — a reassuring comment
+      // sitting on top of the defect it described.
+      //
+      // THE MISLABEL IT FIXES, and it is the reassuring-INVERSE: a device that reported 30
+      // seconds ago but could not determine disk encryption (the tri-state `health_disk_encrypted`
+      // case) has a present, fresh `health_reported_at`, so it rendered "posture stale". It is not
+      // stale. It is CURRENT AND INCOMPLETE, and the old label told an operator the device was
+      // silent while it was talking.
+      //
+      // THE DERIVATION, and it uses TWO SERVER-EMITTED FIELDS AND NO CLIENT CLOCK — the same
+      // standard the two-label version was correctly defended on:
+      //
+      //   `healthInfoFor` sets state to the evaluated value ONLY when the report exists AND is
+      //   within HealthStaleTTL. So `unknown` WITH facts present can only mean the server judged
+      //   the report past that TTL — a fresh report carrying facts would have evaluated to
+      //   compliant or noncompliant and never reached this arm.
+      //
+      //   reported_at absent            -> never reported
+      //   present, facts present        -> STALE (the server judged it past the TTL)
+      //   present, facts absent         -> reported, and the fact was not
+      //
+      // ⚠ REGISTERED, NOT SOLVED: this RECONSTRUCTS a decision the server already made.
+      // `HealthStaleTTL` is server-side and neither it nor a staleness flag is served, so one-truth
+      // says the server should SAY it. A `health_stale` discriminator is the clean fix
+      // (docs/DEFERRAL-REGISTER.md).
       return {
-        label: d.health_reported_at ? "posture stale" : "posture not reported",
+        label: unknownPostureLabel(d),
         tone: "unknown",
       };
   }
@@ -163,4 +214,32 @@ export function checkModeOf(
 ): CheckMode {
   const row = checks?.find((c) => c.kind === kind);
   return row ? row.mode : "off";
+}
+
+
+// ── S14.10 ITEM 2 — THE ADDRESS CELL ────────────────────────────────────────────────────────────────────
+//
+// ⛔ THE EM-DASH SWEEP DELETED A PLACEHOLDER INSTEAD OF REPLACING IT. `d.assigned_ip ?? "—"` became
+// `?? ""`, so a device with no address rendered a BLANK CELL — and "this device has no address" became
+// pixel-identical to "this cell failed to render". That is the reassuring-empty class the `loadOne` law
+// exists for, applied one level down at cell scale.
+//
+// The em-dash obligation is about PUNCTUATION IN PROSE COPY. A placeholder glyph standing in for a null is
+// not prose, and removing it removed information.
+//
+// ⛔ AND `assigned_ip` IS ABSENT ON MORE THAN REVOKED DEVICES — it is not in Device's `required` list, so
+// the placeholder has to read correctly for EVERY absent case, not just the one in the fixture:
+//
+//   revoked   -> the pool IP was released on revoke (a full sweep)
+//   rejected  -> `RejectDevice` sets assigned_ip = NULL, freeing the held IP
+//   pending   -> holds one in the normal path, but the field is optional, so absence is representable
+//   any       -> a device the pool never assigned
+//
+// So the text says WHAT IS TRUE OF ALL OF THEM — no address is assigned — and never guesses the cause.
+// "released" would be wrong for a device that never had one; "revoked" would be wrong for three of four.
+export const NO_ADDRESS = "none assigned";
+
+/** The address cell's text. A string, never an empty one — absence is stated, not left as blank pixels. */
+export function addressLabel(assignedIp: string | undefined | null): string {
+  return assignedIp && assignedIp.length > 0 ? assignedIp : NO_ADDRESS;
 }

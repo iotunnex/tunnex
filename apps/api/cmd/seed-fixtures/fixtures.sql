@@ -183,17 +183,69 @@ UPDATE sites SET dns_forwarding = '[{"domain":"*.corp","resolver_ip":"10.10.0.53
 -- NOTE: `devices` carries NO last_handshake_at — device liveness lives in `device_status`, the same
 -- split as nodes/node_peer_status. Read from the LIVE schema after two column guesses failed; the migration
 -- files describe the schema's HISTORY, the database describes its STATE, and only one of those is authority.
-INSERT INTO devices (id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, full_tunnel, needs_reexport)
+INSERT INTO devices (id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, full_tunnel)
 VALUES
-  ('01900000-0000-7000-8000-0000000c0001', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'macbook-owner', 'darwin',  'ZmlY3R1cmVEZXYwMDEwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.11', 'active',  now() - interval '20 days', false, false),
-  ('01900000-0000-7000-8000-0000000c0002', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'thinkpad-erin', 'windows', 'ZmlY3R1cmVEZXYwMDIwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.12', 'active',  now() - interval '12 days', true,  false),
-  ('01900000-0000-7000-8000-0000000c0003', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0003', 'pixel-erin',    'android', 'ZmlY3R1cmVEZXYwMDMwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.13', 'active',  now() - interval '9 days',  false, false),
-  ('01900000-0000-7000-8000-0000000c0004', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'ipad-owner',    'ios',     'ZmlY3R1cmVEZXYwMDQwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.14', 'active',  now() - interval '3 days',  false, false),
-  ('01900000-0000-7000-8000-0000000c0005', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'old-laptop',    'linux',   'ZmlY3R1cmVEZXYwMDUwMDAwMDAwMDAwMDAwMDAwMDA9', NULL,         'revoked', now() - interval '60 days', false, false),
-  ('01900000-0000-7000-8000-0000000c0006', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0001', 'unapproved-phone', 'ios',  'ZmlY3R1cmVEZXYwMDYwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.15', 'pending',  now() - interval '1 day',   false, false),
-  ('01900000-0000-7000-8000-0000000c0007', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'stale-laptop',  'darwin',  'ZmlY3R1cmVEZXYwMDcwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.16', 'active',   now() - interval '5 days',  false, true),
-  ('01900000-0000-7000-8000-0000000c0008', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'ovpn-contractor', 'linux', '',                                         '10.99.0.17', 'active',   now() - interval '2 days',  false, false)
+  ('01900000-0000-7000-8000-0000000c0001', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'macbook-owner', 'darwin',  'ZmlY3R1cmVEZXYwMDEwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.11', 'active',  now() - interval '20 days', false),
+  ('01900000-0000-7000-8000-0000000c0002', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'thinkpad-erin', 'windows', 'ZmlY3R1cmVEZXYwMDIwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.12', 'active',  now() - interval '12 days', true),
+  ('01900000-0000-7000-8000-0000000c0003', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0003', 'pixel-erin',    'android', 'ZmlY3R1cmVEZXYwMDMwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.13', 'active',  now() - interval '9 days',  false),
+  ('01900000-0000-7000-8000-0000000c0004', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'ipad-owner',    'ios',     'ZmlY3R1cmVEZXYwMDQwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.14', 'active',  now() - interval '3 days',  false),
+  ('01900000-0000-7000-8000-0000000c0005', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'old-laptop',    'linux',   'ZmlY3R1cmVEZXYwMDUwMDAwMDAwMDAwMDAwMDAwMDA9', NULL,         'revoked', now() - interval '60 days', false),
+  ('01900000-0000-7000-8000-0000000c0006', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0001', 'unapproved-phone', 'ios',  'ZmlY3R1cmVEZXYwMDYwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.15', 'pending',  now() - interval '1 day',   false),
+  ('01900000-0000-7000-8000-0000000c0007', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'stale-laptop',  'darwin',  'ZmlY3R1cmVEZXYwMDcwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.16', 'active',   now() - interval '5 days',  false),
+  ('01900000-0000-7000-8000-0000000c0008', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'ovpn-contractor', 'linux', '',                                         '10.99.0.17', 'active',   now() - interval '2 days',  false),
+  ('01900000-0000-7000-8000-0000000c0009', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'blocked-device', 'darwin', 'ZmlY3R1cmVEZXYwMDkwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.18', 'active',   now() - interval '4 days',  false),
+  ('01900000-0000-7000-8000-0000000c0010', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'stale-device',   'windows', 'ZmlY3R1cmVEZXYwMDEwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.19', 'active',   now() - interval '10 days', false)
 ON CONFLICT (id) DO NOTHING;
+
+-- ⛔ `health_blocked` IS NOT WRITTEN HERE, AND MY FIRST VERSION WROTE IT. It is a DERIVED ENFORCEMENT FACT
+-- the control plane's posture sweep owns and recomputes: seeding it is the `org_hub_set.demoted` mistake a
+-- second time. The sweep silently undid the write and the row read as applied.
+--
+-- THE INPUTS ARE SEEDED INSTEAD, and the CP derives the conclusion: a `disk_encryption` check in REQUIRE mode
+-- (below) plus a device reporting `disk_encrypted = false` on a FRESH report. That exercises the sweep's real
+-- behaviour deliberately rather than fighting it.
+
+-- stale-laptop: a static-provisioned device whose baked routes predate the org's current ranges.
+-- provisioned_ranges has only 2 of the 8 current subnets, so RangesStale returns true → needs_reexport = true.
+-- TWO of them, because the wiring mock asserts `needs_reexport` on two devices and the fixture seeded one.
+-- A mock that asserts a state the fixture cannot produce is the inversion that let 522 tests pass while the
+-- POSTURE column rendered blank.
+UPDATE devices SET provisioning_mode = 'static', provisioned_ranges = '["10.10.0.0/16","10.20.0.0/16"]'
+ WHERE id IN ('01900000-0000-7000-8000-0000000c0007',
+              '01900000-0000-7000-8000-0000000c0009');
+
+-- Org health check configuration (disk_encryption require mode)
+INSERT INTO org_health_checks (org_id, check_kind, mode, param)
+VALUES ('01900000-0000-7000-8000-000000000001', 'disk_encryption', 'require', '{}')
+ON CONFLICT (org_id, check_kind) DO NOTHING;
+
+-- Device health telemetry reports
+INSERT INTO device_health (device_id, platform, os_version, disk_encrypted, evaluated_state, reported_at)
+VALUES
+  ('01900000-0000-7000-8000-0000000c0001', 'macos',   '14.5.0', true,  'compliant',    now() - interval '1 minute'),
+  ('01900000-0000-7000-8000-0000000c0002', 'windows', '11.0.0', false, 'noncompliant', now() - interval '2 minutes'),
+  ('01900000-0000-7000-8000-0000000c0009', 'macos',   '14.4.0', false, 'noncompliant', now() - interval '3 minutes'),
+  ('01900000-0000-7000-8000-0000000c0010', 'windows', '10.0.0', false, 'noncompliant', now() - interval '20 days'),
+  -- ⛔ A REVOKED DEVICE THAT IS ALSO POSTURE-BEARING. The wiring mock asserts this shape (the badges must be
+  -- SUPPRESSED on a revoked row — the bug Gateways shipped), and no seeded device had a health row on a
+  -- revoked device, so the suppression could never be observed on localhost.
+  ('01900000-0000-7000-8000-0000000c0005', 'macos', '13.6.0', false, 'noncompliant', now() - interval '2 minutes')
+-- ⛔ `DO UPDATE`, NOT `DO NOTHING`, AND THIS IS THE BUG THAT HID `posture blocked` ENTIRELY.
+--
+-- `reported_at` is written as `now() - 3 minutes` (fresh), but the row already existed from an earlier seed,
+-- so DO NOTHING left the ORIGINAL timestamp in place. It aged past `HealthStaleTTL` (30 minutes) while every
+-- re-run reported success — so the report was stale, the state served as `unknown`, and the sweep correctly
+-- cleared `health_blocked`. The device named `blocked-device` was not blocked, and nothing said so.
+--
+-- The `node_peer_status` block above already fixed this exact problem for GATEWAY liveness and carries the
+-- reason: A DEMO FIXTURE FOR A LIVE SYSTEM HAS TO BE RE-RUNNABLE INTO FRESHNESS. Device posture is liveness
+-- with a different name and never got the same treatment.
+ON CONFLICT (device_id) DO UPDATE
+  SET platform        = EXCLUDED.platform,
+      os_version      = EXCLUDED.os_version,
+      disk_encrypted  = EXCLUDED.disk_encrypted,
+      evaluated_state = EXCLUDED.evaluated_state,
+      reported_at     = EXCLUDED.reported_at;
 
 -- Device liveness is a SEPARATE table, exactly as gateway liveness is. Two connected, one idle-but-seen,
 -- one that has NEVER handshaked (no row at all — enrolled, never connected, which is a different fact from
@@ -203,7 +255,13 @@ VALUES
   ('01900000-0000-7000-8000-0000000c0001', now() - interval '30 seconds', 52428800, 10485760, now()),
   ('01900000-0000-7000-8000-0000000c0002', now() - interval '55 seconds', 83886080, 20971520, now()),
   ('01900000-0000-7000-8000-0000000c0003', now() - interval '4 hours',    1048576,  524288,   now() - interval '4 hours')
-ON CONFLICT (device_id) DO NOTHING;
+-- Same reason as device_health above: a handshake written as "30 seconds ago" is 30 seconds ago ONCE, then
+-- ages forever. Device ONLINE state is derived from this clock, so DO NOTHING makes every device drift offline.
+ON CONFLICT (device_id) DO UPDATE
+  SET last_handshake_at = EXCLUDED.last_handshake_at,
+      rx_bytes          = EXCLUDED.rx_bytes,
+      tx_bytes          = EXCLUDED.tx_bytes,
+      updated_at        = EXCLUDED.updated_at;
 
 UPDATE devices SET revoked_at = now() - interval '15 days'
  WHERE id = '01900000-0000-7000-8000-0000000c0005' AND revoked_at IS NULL;
@@ -269,9 +327,14 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ── SOFT-DELETED K8S SERVICE FOR `dst_k8s_service_vanished` WARN STATE ────────────────────────────────
-INSERT INTO k8s_services (id, cluster_id, name, namespace, vip, target_port, managed_by_operator, created_at, deleted_at)
+INSERT INTO k8s_clusters (id, org_id, site_id, name, vip_range)
 VALUES
-  ('01900000-0000-7000-8000-000000030003', '01900000-0000-7000-8000-000000030001', 'legacy-vault-svc', 'default', '10.244.0.99', 8200, false, now() - interval '30 days', now() - interval '2 days')
+  ('01900000-0000-7000-8000-000000050001', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000e0001', 'us-east-k8s', '10.244.0.0/24')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO k8s_services (id, org_id, cluster_id, name, namespace, vip, port_low, port_high, created_at, deleted_at)
+VALUES
+  ('01900000-0000-7000-8000-000000030003', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000050001', 'legacy-vault-svc', 'default', '10.244.0.99', 8200, 8200, now() - interval '30 days', now() - interval '2 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── POLICY RULES (COVERING ALL 4 WARN-NOT-REFUSE / WARNING STATES) ────────────────────────────────────

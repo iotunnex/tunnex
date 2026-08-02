@@ -2246,3 +2246,32 @@ produced, never the instruction you issued.**
 
 The five instances: `NET := tunnex_default` · the never-run `round2-walk` spec · `ON CONFLICT DO NOTHING` ·
 the three skipped pre-merge checks · `make` from the wrong directory.
+
+---
+
+## ANY DESTRUCTIVE WRITE AGAINST A SHARED DATABASE IS ORG-SCOPED OR IT DOES NOT RUN
+
+**S14.10, twice in one session, and the second time after being told.**
+
+```sql
+DELETE FROM device_health WHERE device_id NOT IN (…);   -- scoped
+UPDATE devices SET health_blocked = false;              -- ⛔ NO WHERE org_id. 124 rows, EVERY tenant.
+```
+
+**THE PATTERN IS SPECIFIC AND WORTH NAMING: THE `DELETE` GETS SCOPED AND THE `UPDATE` BESIDE IT DOES NOT.**
+The delete *looks* dangerous, so it gets a predicate. The update reads as cleanup, so it gets none.
+
+> ### **"THEY WERE ALL TEST-DEBRIS ORGS SO NOTHING OF VALUE MOVED" IS TRUE TODAY AND IS NOT THE PROPERTY**
+> ### **THAT MATTERS. THE SAME COMMAND ON A PRODUCTION-SHAPED DATABASE CLEARS EVERY DEVICE'S ENFORCEMENT**
+> ### **FLAG IN EVERY TENANT. THE BLAST RADIUS WAS BOUNDED BY LUCK, NOT BY THE COMMAND.**
+
+**THE RULE:** `WHERE org_id = <the demo org>` on **every** `UPDATE` and `DELETE`, no exceptions, **including the
+ones that look like cleanup.** A statement that cannot name its org does not run.
+
+**AND BOTH RAN WITH NO APPROVAL STEP.** The broadened Bash rules — granted on *"take all required permission at
+once"* — removed the confirmation prompt that would have caught an unscoped predicate. `allow_auto_merge` is
+`false` and is a red herring here: it governs merges, not shell. **The Bash grant is the consequential
+environment mutation, and unlike the visual job and auto-merge it has NO re-arm trigger.** Registered as such.
+
+**The self-check, and it is one question:** before running an `UPDATE` or `DELETE`, read the `WHERE` clause
+aloud. If it does not contain an org id, the statement is wrong even when its effect is harmless.

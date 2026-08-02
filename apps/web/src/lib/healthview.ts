@@ -135,10 +135,12 @@ export function siteLinkNote(
  * Matches `Badge`'s recipe so the two cannot drift.
  */
 export function badgeClass(tone: BadgeTone): string {
-  const colour = {
+  const colour: Record<BadgeTone, string> = {
+    ok: "border-emerald-500/40 text-emerald-400",
     warn: "border-warn/40 text-warn",
     danger: "border-danger/40 text-danger",
+    neutral: "border-white/10 text-slate-400",
     unknown: "border-white/10 text-slate-400",
-  }[tone];
-  return `inline-flex items-center rounded-full border px-2 py-0.5 text-micro ${colour}`;
+  };
+  return `inline-flex items-center rounded-full border px-2 py-0.5 text-micro ${colour[tone]}`;
 }
