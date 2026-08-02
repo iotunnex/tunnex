@@ -17,6 +17,7 @@ var notShipped = map[string]string{
 	"rbac-policy-gen": "build-time codegen (make generate); runs in the toolchain container, never in production",
 	"seed":            "development fixture — seeding a production database is not a supported operation",
 	"seed-enterprise": "development fixture, same reason as seed",
+	"seed-fixtures":   "development fixture (S14.5) — a populated demo network for reviewing the redesigned screens; seeding a production database is not a supported operation",
 	"walk-bootstrap":  "box-walk rig setup; a test harness, not an operator tool",
 }
 

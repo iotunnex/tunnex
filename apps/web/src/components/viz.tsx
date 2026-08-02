@@ -835,7 +835,19 @@ export function AreaChart({
       isEmpty={n === 0}
       empty={empty}
     >
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="presentation">
+      {/* ⛔ HEIGHT PINNED TO THE VIEWBOX HEIGHT — 1 user unit = 1 px, the same contract NodeLink needed.
+          I FILED THAT LAW AND THEN REPEATED THE DEFECT IN THE NEXT PRIMITIVE: `w-full` on a 600x220 box with
+          no height derives its height from its WIDTH, so at full column width this rendered ~500px tall.
+          The gallery's wide specimen caught it on its FIRST render, which is precisely what it was added for
+          — and it caught it in the component written AFTER the lesson, which is the more useful data point:
+          a law in a document does not fire, an instrument does. */}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ height: `${H}px` }}
+        className="w-full"
+        role="presentation"
+      >
         <defs>
           {series.map((s) => (
             <linearGradient
