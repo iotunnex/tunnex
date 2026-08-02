@@ -374,7 +374,7 @@ export default function Devices() {
                 d.status === "revoked" ? (
                   <Badge tone="danger">revoked</Badge>
                 ) : d.status === "pending" ? (
-                  <Badge tone="amber">pending</Badge>
+                  <Badge tone="warn">pending</Badge>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                     <StatusDot tone={d.online ? "on" : "off"} />
