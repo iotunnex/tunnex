@@ -2618,3 +2618,52 @@ that reports success is worse than a failure that reports honestly.
 **THE COST OF FINDING IT LATE:** this was the FIRST non-Go diff since the `gates` split. Arm 2 of the split
 proof was still uncollected — and the moment a genuinely non-Go diff finally arrived, it did not prove the
 split worked; **it found a defect the split introduced.** A proof deferred is a defect deferred with it.
+
+---
+
+## A PROOF DEFERRED IS A DEFECT DEFERRED WITH IT
+
+**S14.11 (founder-ruled).** Arm 2 of the `gates`-split proof — *"a web-only diff skips the Go steps"* — was
+uncollectable for **four consecutive PRs**, each time for a correct reason: every diff touched Go, so the
+non-Go branch was never taken and could not be observed.
+
+**The first diff that finally could take it did not prove the split worked. It found a defect the split had
+introduced** — the CodeQL findings-gate reading a SARIF that was never produced.
+
+> ### **THE DEFECT SAT LIVE FOR THE ENTIRE PERIOD THE PROOF WAS PENDING, AND THE TWO WERE THE SAME FACT**
+> ### **WEARING DIFFERENT WORDS. "We cannot test this path yet" and "this path is broken" are**
+> ### **INDISTINGUISHABLE FROM THE OUTSIDE — by construction, because the only thing that would tell them**
+> ### **apart is the test that cannot run.**
+
+**THE CHECK:** when a proof is deferred for lack of a triggering condition, write down **what would be true if
+the untested path were already broken** — and notice that the answer is *exactly what you currently observe*.
+That is not a reason to panic; it is a reason to stop treating "not yet provable" as "probably fine", and to
+weight the eventual collection as **defect-hunting** rather than confirmation.
+
+**A cheap partial substitute exists and was not used here:** the branch could have been *forced* — a scratch
+branch touching only a doc, pushed to a throwaway PR, would have taken the non-Go path in minutes. **Waiting
+for the condition to arrive naturally is what let four PRs pass.**
+
+---
+
+## A FALSE RED ON A SECURITY CHECK IS WORSE THAN A FALSE RED ANYWHERE ELSE
+
+**S14.11 (founder-ruled).** The plumbing bug above surfaced as
+**`CodeQL (blocking on high/critical) (go): failure`** — the exact presentation of a real high-severity
+finding. Nothing in the check's name, status, or summary distinguished a missing file from a vulnerability.
+
+> ### **THE FIRST REFLEX IS TO TRUST A SECURITY RED. THE SECOND REFLEX, AFTER IT HAS BEEN WRONG ONCE, IS TO**
+> ### **STOP READING IT.** A security check is the one gate whose red nobody argues with — which is exactly
+> ### **why a false one there costs more than a false one anywhere else. It spends credibility that the next,**
+> ### **real finding needs.
+
+**AND THE REPAIR MUST NOT CONVERT A FALSE RED INTO A SILENT GREEN.** The obvious fix — make a missing SARIF
+pass — would have removed the noise by removing the check. The fix applied instead:
+
+1. the counting step now carries **the same condition as the analysis producing its input**, so on a non-Go
+   diff it is **skipped**, not passed; and
+2. when the analysis **did** run and produced nothing, it fails **loudly** — *"CodeQL ran but produced NO
+   SARIF"* — because a scan that analysed nothing is a real failure.
+
+**Skipped and passed must never render alike** — the classifier's own notice says it (`false = the Go steps
+below are SKIPPED, not passed`), and this is that rule applied to the check's own internals.

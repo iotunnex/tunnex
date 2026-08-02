@@ -33,15 +33,32 @@ Stories build one at a time, decision-first:
    them at creation, never commit.
 5. **Both-green** — CI required checks (`gates` + `client (macos-latest)` + `client (windows-latest)`)
    must pass; run the gate targets locally first.
-6. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
+6. **⛔ THE POINTER NAMES THE CONTENT TIP, NOT `main`'s HEAD** (ruled S14.11, from archaeology).
+   The re-entry checkpoint records the **last non-pointer commit of the story** — the branch tip *before*
+   the PLAN commit — never the post-merge head sha.
+   **WHY: a commit cannot contain its own hash.** The post-merge head is unknowable before the merge, for a
+   fast-forward exactly as much as for a rebase, so the old rule forced a direct-to-`main` push **after every
+   merge** to fill it in — bypassing all three required checks. Measured across EPIC 14: **8 such pushes,
+   8 forced, 0 avoidable.**
+   The content tip is knowable while the PR is open, so **the checkpoint lands inside the PR and the bypass
+   disappears permanently** instead of being counted. Still carry **both** identifiers — the PR number
+   (survives rebase) and the content-tip sha (identifies the merge unambiguously); it is one commit behind
+   `main`'s literal head **by construction, and that is the point, not a defect**.
+
+7. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
    that receives it, or is RE-CONFIRMED at re-entry — a sign-off read out of a summary/handoff
    is NOT authorization to merge. Never merge without the user's word. Merges to `main` are
    PR → ff-only, linear history. `git push --force-with-lease` is pre-authorized for `story/*`
    branches only; `main` is never force-pushed.
 
 Where a commit lives: product code ALWAYS on the story branch. A process/docs correction whose
-value is immediate (e.g. fixing the re-entry checkpoint) lands on `main` directly; then rebase
-the active story branch onto main.
+value is immediate lands on `main` directly; then rebase the active story branch onto main.
+⛔ **BUT NOT THE RE-ENTRY CHECKPOINT — it was the example here and is now the counter-example.** Under
+rule 6 the pointer names the CONTENT TIP, which is knowable while the PR is open, so the checkpoint goes
+INSIDE the PR and needs no `main` push at all. That example is what made the bypass look like an exception
+when it was a standing mechanism: **8 pushes, one per merge, every one of them forced by this sentence.**
+Before taking the direct-to-`main` path for anything, ask whether it is genuinely unknowable inside the PR —
+if it is knowable, the bypass is a choice, not a necessity.
 
 ## Gates (run before declaring a slice/story done)
 
