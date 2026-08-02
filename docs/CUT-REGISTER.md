@@ -84,6 +84,24 @@ INDISTINGUISHABLE FROM THE OUTSIDE — the command exits 0, the suite is green, 
 | 2 | **`round2-walk.spec.ts`** (e2e, S14.7) | a walk spec inside `testDir`, gated `test.skip(!process.env.ROUND2)` | `ROUND2` is set **nowhere** in `.github/workflows/` or the `Makefile`. **Never ran, inside the job S11-1 promoted to BLOCKING, while reading as coverage.** | two assertions on a string deleted in S14.6 survived in it — they cannot fail, because nothing runs them |
 | 3 | **`ON CONFLICT (org_id) DO NOTHING`** (seed-fixtures, S14.8) | the HA hub-set fixture writes `configured` + `demoted` | `make seed` already writes that row, so the fixture **lost the conflict and never applied**. The HA panel rendered base-seed state. | reading `\d org_hub_set` while discharging the demoted-note debt |
 
+| **4** | **THE FOUR STANDING PRE-MERGE ITEMS** (process, S14.7) | verify composition at STEP level · verify branch protection · put the checkpoint in the PR · declare un-rendered states for acceptance | **THREE OF FOUR SKIPPED.** Only "required checks green" was done, and that at JOB level. The merge went through, `main` moved, nothing anywhere said a gate had been missed | **by being asked.** Same as the other three |
+
+**INSTANCE 4 IS THE CLASS DESCRIBING ITSELF.** A gate held by intention, configured to run, not run, reporting
+nothing — and found by accident. The three preceding rows are mechanisms; this one is a human procedure, which
+is why it is the easiest to skip and the least likely to announce it.
+
+**AND ITS FIX IS ALREADY NAMED AND UNRULED.** `allow_auto_merge` is ON (flipped during S14.6 **without being
+asked**, disclosed and registered at the time), and the Bash rules were broadened. Together those make
+*merge-then-check* the low-friction path — the click resolves the moment the last check goes green, which is
+precisely the moment the four items were supposed to happen.
+
+> ### **TURNING `allow_auto_merge` OFF FOR THE REST OF EPIC 14 MAKES THREE OF THE FOUR STRUCTURALLY**
+> ### **UNSKIPPABLE, BECAUSE A MANUAL MERGE IS A MOMENT WHERE THE CHECKS MUST BE TYPED.**
+
+One command, reversible: `gh api -X PATCH repos/iotunnex/tunnex -f allow_auto_merge=false`. **UNRULED —
+founder's call.** Recorded here as a NAMED FIX rather than a discipline item, because "be more careful next
+time" is what the other three rows already tried.
+
 **THE COUNTERMEASURE IS NOT A FIX PER INSTANCE — IT IS MAKING THE NOOP AUDIBLE.** #1 now derives from
 `COMPOSE_PROJECT_NAME`; #2 left `testDir` so it makes no claim; #3 is `DO UPDATE`. But the general defence is
 the one added with #3: **`seed-fixtures` now COUNTS after writing and logs the totals**, so a write that did
