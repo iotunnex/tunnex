@@ -88,7 +88,7 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
-import Devices from "../src/pages/Devices";
+import Devices, { lastSeen } from "../src/pages/Devices";
 
 beforeEach(() => {
   devicesFail = false;
@@ -167,6 +167,7 @@ describe("Devices — wiring", () => {
   });
 
   it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
+    expect(lastSeen(undefined, false)).toBe("liveness not reported");
     render(
       <MemoryRouter>
         <Devices />
