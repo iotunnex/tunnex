@@ -2312,3 +2312,30 @@ Human Gate Limit Law, cannot be accepted.
 **AND THE CHEAPER PRIOR CHECK:** when a label's precondition is a field being ABSENT, read that column's
 nullability and CHECK constraint first. `os_version NOT NULL` alone would have killed my first discriminator
 before a single test was written.
+
+---
+
+## AN INSTRUMENT CAN BE CONFIDENTLY WRONG ABOUT ITS OWN SUBJECT — three instances
+
+**Not "the check failed". The check RAN, MATCHED SOMETHING, and reported on the wrong thing.**
+
+| # | instrument | what it reported | what was true |
+|---|---|---|---|
+| 1 | `grep -E "^FAIL\|arm 4"` over a verifier's output | arm 3 "did not fire" | it HAD fired — the `FAIL` prefix carries ANSI colour codes, so `^FAIL` never matched |
+| 2 | `grep -c FAIL` over a decision table | 2 failures | zero failures. It matched the words **"FAIL-CLOSED"** and **"FAILS CLOSED"** in my own labels |
+| 3 | a CI monitor labelled `373c679` | `ALL THREE REQUIRED PASS on 373c679` | that run was **CANCELLED as superseded.** The loop printed `git log -1` — the LOCAL head — not the sha it was watching |
+
+**#3 IS THE WORST OF THE THREE**, because a pass on a cancelled run is a green light for a merge. It was caught
+only because the merge was verified by a direct query instead of by the watcher that existed to answer it.
+
+> ### **AN INSTRUMENT MUST NAME ITS SUBJECT FROM THE SAME PLACE IT READS ITS RESULT.**
+> ### **A LABEL COMPOSED SEPARATELY FROM THE MEASUREMENT CAN DISAGREE WITH IT AND STILL LOOK RIGHT.**
+
+**THE CHECKS, all cheap:**
+- Strip formatting before matching (`sed 's/\x1b\[[0-9;]*m//g'`), or match a marker that cannot appear in prose.
+- Never match a word that also appears in your own labels — assert on a delimiter (`** FAIL **`), not a word.
+- **A watcher must echo the identifier it QUERIED**, never one it re-derived locally.
+- **And verify a merge-gating result by direct query regardless.** A watcher is a convenience; the gate is a fact.
+
+Related: A SYMPTOM HAS AXES · CHECK THE MATCHER BEFORE THE SUBJECT · A TEST CAN PIN A LABEL PRODUCTION CAN
+NEVER PRODUCE. Same family — the evidence was collected and not compared against the authoritative source.
