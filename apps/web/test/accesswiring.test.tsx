@@ -149,3 +149,52 @@ describe("Access — failure path: the most consequential one in the product", (
     expect(screen.queryByText(/ALL traffic denied/)).toBeNull();
   });
 });
+
+// ⛔ THE TWO CLAIMS A SCREENSHOT WOULD PROVE AND A SECOND HUMAN PASS WOULD MISS.
+//
+// The wrong-type-tag defect was LIVE FOR A FULL REVIEW CYCLE and the founder caught it by eye. The next one
+// may not be visible — a glyph is small, and "USER" beside a resource name reads as plausible. These assert
+// at the DOM what the eye was doing.
+//
+// Backed out once already, because they could not reach the panel: a DOM assertion that cannot reach its
+// subject is NO evidence, and tuning it until it passes is the tautological-guard shape. Re-added only after
+// the mock actually renders the section.
+describe("Access flow panel — the geometry contract and the type tags", () => {
+  it("⛔ the SVG is a FIXED 600x312 — one user unit is one pixel", async () => {
+    // `className="w-full"` over a viewBox let the container stretch 152x36 boxes to ~490x130 and truncate
+    // every name. THE SCALE IS A CONTRACT. Second occurrence after the Sites map.
+    withAuth(<Access />);
+    const svg = await waitFor(() => {
+      const el = document.querySelector('svg[role="img"]');
+      if (!el) throw new Error("flow SVG not rendered");
+      return el;
+    });
+    expect(svg.getAttribute("width")).toBe("600");
+    expect(svg.getAttribute("height")).toBe("312");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 600 312");
+    // ⛔ CLASS TOKENS, NOT SUBSTRINGS. `max-w-full` CONTAINS "w-full" and is CORRECT — it caps the element
+    // on a narrow viewport without stretching it. My first regex matched the substring and reported the
+    // right code as wrong, which is the inverted-finding shape one law down.
+    const cls = (svg.getAttribute("class") ?? "").split(/\s+/);
+    expect(cls).not.toContain("w-full");
+    expect(cls).toContain("max-w-full"); // and the correct cap IS present
+  });
+
+  it("⛔ a RESOURCE destination renders R / RESOURCE, never U / USER", async () => {
+    // The shipped defect: the kind was guessed by matching the label against member names, and
+    // `label.startsWith(m.name)` is ALWAYS TRUE when a member has an empty name — which users.name
+    // (NOT NULL DEFAULT '') produces for 144 rows. Every resource read USER.
+    withAuth(<Access />);
+    const svg = await waitFor(() => {
+      const el = document.querySelector('svg[role="img"]');
+      if (!el) throw new Error("flow SVG not rendered");
+      return el;
+    });
+    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent);
+    // The fixture's rules are group -> resource, so both arms must be present and neither may be USER.
+    expect(texts).toContain("RESOURCE");
+    expect(texts).toContain("GROUP");
+    expect(texts.filter((t) => t === "USER")).toHaveLength(0);
+    expect(texts.filter((t) => t === "U")).toHaveLength(0);
+  });
+});

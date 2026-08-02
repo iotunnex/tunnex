@@ -2934,3 +2934,35 @@ alternative is **Motion (MIT)**.
 **AND NOTE WHAT MADE IT FEEL UNNECESSARY:** I *had* the correct conclusion (don't add it) and a confident
 argument for it. **The grep feels redundant precisely when you already agree with the ruling** — which is
 exactly when it is load-bearing, because agreeing is not the same as knowing why.
+
+---
+
+## A THRESHOLD SHOULD MEASURE THE PROPERTY THAT MATTERS, NOT A PROXY FOR IT
+
+**S14.12 (founder-ruled — and the founder's own question was the proxy).**
+
+The question asked was *"at what rule count does the flow panel stop saying anything?"* **N was the wrong
+variable.** Degree-ranking's usefulness depends on the **degree distribution**, not the count:
+
+| same N | top-4 covers | verdict |
+|---|---|---|
+| 900 rules hub-and-spoke through 4 gateways | nearly everything | **a good summary** |
+| 900 rules across 900 distinct pairs | ~2% | **decoration** |
+
+**A fixed second count would have withheld from a well-summarised org for a property it does not have, and
+kept drawing for a badly-summarised one until somebody noticed.** So the threshold measures **coverage** —
+withhold when the drawn share falls below half — because coverage *is* the property, and count merely
+correlates with it in the cases that first come to mind.
+
+> ### **THE PROOF SHAPE IS THE SHARPEST PART: SAME N, OPPOSITE VERDICT.** Twenty rules hub-and-spoke draws;
+> ### **twenty rules fully distinct withholds. A test that VARIES THE THING THE THRESHOLD CLAIMS TO MEASURE**
+> ### **while HOLDING THE THING IT DOES NOT** is the only test that distinguishes a real threshold from a
+> ### proxy — and it fails loudly the day someone "simplifies" it back to a count.
+
+**THE CHECK:** for any threshold, write the sentence *"this withholds when X"* and ask whether the quantity in
+the code **is** X or merely tracks it. If it tracks it, find the input where they diverge — that input is your
+test, and it is usually easy to construct once you look for it.
+
+**THE SIBLING, one level down:** the class-token regex in the same slice. `max-w-full` **contains** `w-full`,
+so matching the substring reported correct code as broken. **Same error at a smaller scale: the thing measured
+was a proxy (does the string appear) for the thing that mattered (is the class token present).**
