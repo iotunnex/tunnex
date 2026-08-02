@@ -2195,3 +2195,54 @@ a pattern, and the finding is recorded rather than tooled.
 
 **IF ESLINT IS EVER ADOPTED, THIS RULE IS THE FIRST ENTRY.** Until then the check is the sweep above, which is
 cheap to re-run and is what proved the instance was isolated.
+
+---
+
+## A SYMPTOM HAS AXES. FIXING ONE AND REPORTING THE SYMPTOM CLOSED IS A CLAIM ABOUT THE OTHERS.
+
+**S14.8, and the founder saw the same defect twice.** He reported *"button alignment is not correct."* I found
+the action column lacked `numeric`, right-aligned it, screenshotted, and reported it fixed. It was not: the
+buttons were **~36px tall against a ~20px row line under `align-top`**, so their labels still sat visibly below
+the row's own text. Horizontal was one axis of two.
+
+> ### **THE SECOND REPORT WAS AS CONFIDENT AS THE FIRST.**
+
+**THE MECHANISM IS IN THE SECOND LOOK, NOT THE FIRST FIX.** I did screenshot after the change — and compared
+it against **the edit I had made** (are the buttons right-aligned? yes) instead of against **the complaint**
+(does this look aligned?). The screenshot was taken, examined, and asked the wrong question.
+
+**THE CHECK, AND IT IS ALREADY IN USE ELSEWHERE:** after a visual fix, compare the screenshot **against the
+words of the complaint**, not against the diff. That is exactly how the duplicated DNS VIP was caught one
+commit earlier — that look asked *"does this read right?"* rather than *"did my edit land?"*, and it found a
+defect the edit had not introduced.
+
+**Related:** ALL-X-WITHOUT-A-DENOMINATOR and PROVE-A-GUARD-REJECTS. Same family: a check that ran, matched
+something, and was asked a narrower question than the one that mattered.
+
+---
+
+## A DEPLOY IS CONFIRMED BY THE ARTIFACT CHANGING, NOT BY THE COMMAND EXITING ZERO
+
+**S14.8 — the fifth "silently didn't apply", and it was caught by luck.** A deploy step ran
+`make up-enterprise` from `apps/web`, which has **no Makefile**. Nothing built, nothing deployed, **no error**,
+and the next screenshot would have been of the previous bundle. It was caught only because the bundle hash in
+the served HTML was **unchanged from the line before**.
+
+**THE GENERAL DEFENCE CANNOT BE A REPO FIX.** `make` walking up from a directory without a Makefile — or not,
+depending on the shell and the tree — is a property of the environment, not of this codebase. There is no
+`ON CONFLICT` to change and no variable to derive.
+
+> ### **SO THE RULE IS TO VERIFY THE ARTIFACT, NOT THE COMMAND:**
+> ### **A DEPLOY IS CONFIRMED BY THE SERVED BUNDLE HASH CHANGING. A COMMAND EXITING 0 CONFIRMS NOTHING.**
+
+```bash
+curl -s http://localhost/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js'   # must DIFFER from the last one
+```
+
+**`scripts/k3s-demo.sh verify` IS THE SAME PRINCIPLE, ALREADY BUILT:** it does not report success because
+`docker run` exited 0 — it asks the cluster for Ready nodes and the control plane for its Service list, and
+fails by name when either disagrees. **Both are instances of one rule: check the state you claim to have
+produced, never the instruction you issued.**
+
+The five instances: `NET := tunnex_default` · the never-run `round2-walk` spec · `ON CONFLICT DO NOTHING` ·
+the three skipped pre-merge checks · `make` from the wrong directory.
