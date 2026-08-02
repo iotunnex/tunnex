@@ -942,3 +942,43 @@ export function flowCrossings(l: FlowLayout): number {
     }
   return n;
 }
+
+// ── src_group_empty: THE FOURTH WARN KIND, AND IT EARNS ITSELF BY THE TEST THAT REFUSED THE LAST ONE ─────
+//
+// S14.11 refused a warn badge for a per-user grant naming a DEACTIVATED user, on this discriminator:
+// OUTSIDE RANGES and VANISHED describe rules that COMPILE TO NOTHING WHILE LOOKING LIVE — a permanent,
+// invisible lie — and the deactivated grant compiles to exactly what it says (that user's devices, a set that
+// only shrinks). Nothing was broken, so no badge.
+//
+// THE SAME DISCRIMINATOR ADMITS THIS ONE. Measured at `compiler.go:399`:
+//
+//     matched = owner[r.SrcGroupID]      // owner = the device owner's group set
+//     if !matched { continue }
+//
+// A group with ZERO members matches NO device, so the rule compiles to nothing while rendering as ACTIVE.
+// That is the VANISHED family exactly, and the design's own sentence applies: "nothing here is hidden; a rule
+// that can't do what it says is shown saying so."
+//
+//   ⛔ REFUSING ONE CANDIDATE AND ADMITTING ANOTHER ON THE SAME CRITERION IS WHAT SHOWS THE CRITERION HAS
+//   CONTENT. A test that only ever admits is not a test.
+//
+// ⛔ AND IT DERIVES FROM THE MEMBER COUNT, NEVER FROM GROUP EXISTENCE — with a third arm for the count we do
+// not have. "Could not check" is not "empty": warning on a failed member load would call a working rule
+// broken, which is the false-zero defect one level over.
+export type GroupEmptyWarn = "empty" | "populated" | "unknown";
+
+export function srcGroupEmptyWarn(memberCount: number | null | undefined): GroupEmptyWarn {
+  if (memberCount === null || memberCount === undefined) return "unknown"; // not fetched, or the read failed
+  return memberCount === 0 ? "empty" : "populated";
+}
+
+/** Badge text. `unknown` and `populated` BOTH render nothing — for different reasons, neither of them a warn. */
+export function srcGroupEmptyBadge(w: GroupEmptyWarn): string | null {
+  return w === "empty" ? "SOURCE GROUP EMPTY" : null;
+}
+
+export function srcGroupEmptyExplain(w: GroupEmptyWarn): string | null {
+  return w === "empty"
+    ? "This rule's source group has no members, so it matches no device and grants nothing. Add members to the group, or delete the rule."
+    : null;
+}

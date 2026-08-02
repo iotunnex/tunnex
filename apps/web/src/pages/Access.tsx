@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  type GroupMember,
   apiErrorMessage,
   apiErrorCode,
   loadOne,
@@ -1361,6 +1362,9 @@ function GroupsResourcesSection({
   onSubjectsChanged: () => void;
 }) {
   const [groups, setGroups] = useState<UserGroup[]>([]);
+  // The roster, for the "add a member" picker. A failed read leaves it EMPTY, which hides the picker rather
+  // than offering an empty one — the add control is absent, not broken.
+  const [orgMembers, setOrgMembers] = useState<Member[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -1379,7 +1383,7 @@ function GroupsResourcesSection({
   });
 
   const load = useCallback(async () => {
-    const [gr, resr] = await Promise.all([
+    const [gr, resr, mr] = await Promise.all([
       loadOne(() =>
         api.GET("/api/v1/organizations/{orgId}/groups", {
           params: { path: { orgId } },
@@ -1390,9 +1394,17 @@ function GroupsResourcesSection({
           params: { path: { orgId } },
         }),
       ),
+      loadOne(() =>
+        api.GET("/api/v1/organizations/{orgId}/members", {
+          params: { path: { orgId } },
+        }),
+      ),
     ]);
     // Per-column legibility: a failed groups load shows retry in the groups column, not
     // "No groups yet." ([4]); same for resources.
+    // The roster feeds the add-a-member picker only. A failed read leaves it EMPTY, which HIDES the picker
+    // rather than offering an empty one — an absent control, never a broken one.
+    setOrgMembers(mr.ok ? (mr.data as Member[]) : []);
     setGroupsError(gr.ok ? null : gr.error);
     setResourcesError(resr.ok ? null : resr.error);
     if (gr.ok) setGroups(gr.data as UserGroup[]);
@@ -1500,17 +1512,15 @@ function GroupsResourcesSection({
             <>
               <ul className="mt-2 space-y-1">
                 {groups.map((g) => (
-                  <li
+                  <GroupRow
                     key={g.id}
-                    className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200"
-                  >
-                    {g.name}
-                    {canManage && (
-                      <Button variant="danger" onClick={() => delGroup(g.id)}>
-                        Delete
-                      </Button>
-                    )}
-                  </li>
+                    orgId={orgId}
+                    group={g}
+                    members={orgMembers}
+                    canManage={canManage}
+                    onDelete={() => delGroup(g.id)}
+                    onMembershipChange={onSubjectsChanged}
+                  />
                 ))}
                 {groups.length === 0 && (
                   <li className="text-xs text-slate-500">No groups yet.</li>
@@ -2022,5 +2032,156 @@ function PostureChecksSection({
         </div>
       )}
     </Card>
+  );
+}
+
+// ── GROUP MEMBERSHIP — the surface for three endpoints that shipped in S7.5.2 with one consumer ──────────
+//
+// `addGroupMember` and `removeGroupMember` have existed since S7.5.2 and the web app has NEVER called them.
+// A group on this screen was a name and a Delete, while rules above used those same groups as SOURCES — a
+// form creating an object nobody could populate, above rules that depend on it being populated.
+//
+// ⛔ COUNTS ARE LAZY, ON EXPANSION ONLY, AND THE COLLAPSED ROW SHOWS NOTHING RATHER THAN A ZERO IT NEVER
+// FETCHED. `UserGroup` carries no count, so an eager count costs ONE REQUEST PER GROUP. Measured on the live
+// stack: 3 groups = 65ms; ~433ms at 20; ~1083ms at 50 — on a screen already making 15 reads.
+//
+//   "WE HAVEN'T ASKED" AND "ZERO MEMBERS" ARE DIFFERENT FACTS, and the second is the dangerous one on a rule
+//   source: it reads as "this rule grants nothing" and may be false.
+//
+// ⛔ AND LAZY COUNTS LOSE THE VISIBLY-EMPTY PROPERTY, which is why `src_group_empty` exists on the RULE ROW —
+// it restores it where the operator's attention already is, at no request cost. Two decisions, one problem.
+function GroupRow({
+  orgId, group, members, canManage, onDelete, onMembershipChange,
+}: {
+  orgId: string;
+  group: UserGroup;
+  members: Member[];
+  canManage: boolean;
+  onDelete: () => void;
+  onMembershipChange: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // THREE ARMS, as everywhere else: null = not asked, {ok:false} = asked and failed, {ok:true} = the answer.
+  const [loaded, setLoaded] = useState<Loaded<GroupMember[]> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const fetchMembers = useCallback(async () => {
+    const r = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/groups/{groupId}/members", {
+        params: { path: { orgId, groupId: group.id } },
+      }),
+    )) as Loaded<GroupMember[]>;
+    setLoaded(r);
+  }, [orgId, group.id]);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && loaded === null) void fetchMembers();
+  };
+
+  async function mutateMembership(fn: () => Promise<{ error?: unknown }>) {
+    setBusy(true);
+    const { error } = await fn();
+    setBusy(false);
+    if (!error) {
+      await fetchMembers();
+      onMembershipChange(); // the rule rows read this count for src_group_empty
+    }
+  }
+
+  const rows = loaded?.ok ? loaded.data : [];
+  const inGroup = new Set(rows.map((m) => m.user_id));
+  const addable = members.filter((m) => !inGroup.has(m.user_id));
+
+  return (
+    <li className="rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex-1 text-left hover:text-white"
+        >
+          {group.name}
+          {/* ⛔ THE COUNT APPEARS ONLY ONCE ASKED. Collapsed shows NOTHING — never a 0 it did not fetch. */}
+          {open && loaded?.ok && (
+            <span className="ml-2 text-xs text-slate-500">
+              {rows.length === 1 ? "1 member" : `${rows.length} members`}
+            </span>
+          )}
+          {open && loaded && !loaded.ok && (
+            <span className="ml-2 text-xs text-warn">members could not be loaded</span>
+          )}
+        </button>
+        {canManage && (
+          <Button variant="danger" onClick={onDelete}>
+            Delete
+          </Button>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-2 border-t border-white/5 pt-2">
+          {loaded === null && <p className="text-xs text-slate-500">Loading members…</p>}
+          {loaded && !loaded.ok && <LoadRetry error={loaded.error} onRetry={fetchMembers} />}
+          {loaded?.ok && rows.length === 0 && (
+            <p className="text-xs text-slate-500">
+              No members. Rules using this group as a source match no device and grant nothing.
+            </p>
+          )}
+          {loaded?.ok &&
+            rows.map((m) => (
+              <div key={m.user_id} className="flex items-center justify-between py-0.5 text-xs">
+                <span className="text-slate-300">{m.name || m.email}</span>
+                {canManage && (
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      mutateMembership(() =>
+                        api.DELETE(
+                          "/api/v1/organizations/{orgId}/groups/{groupId}/members/{userId}",
+                          { params: { path: { orgId, groupId: group.id, userId: m.user_id } } },
+                        ),
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            ))}
+          {canManage && loaded?.ok && addable.length > 0 && (
+            <div className="mt-2 flex gap-2">
+              <select
+                className="rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-xs text-white disabled:opacity-50"
+                aria-label={`Add a member to ${group.name}`}
+                defaultValue=""
+                disabled={busy}
+                onChange={(e) => {
+                  const userId = e.target.value;
+                  if (!userId) return;
+                  e.target.value = "";
+                  void mutateMembership(() =>
+                    api.POST("/api/v1/organizations/{orgId}/groups/{groupId}/members", {
+                      params: { path: { orgId, groupId: group.id } },
+                      body: { user_id: userId },
+                    }),
+                  );
+                }}
+              >
+                <option value="">Add a member…</option>
+                {addable.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name || m.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }

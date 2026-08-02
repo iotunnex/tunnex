@@ -22,6 +22,9 @@ import {
   flowCrossings,
   flowGlyph,
   flowTag,
+  srcGroupEmptyWarn,
+  srcGroupEmptyBadge,
+  srcGroupEmptyExplain,
   FLOW_COLUMN_CAP,
   FLOW_MIN_COVERAGE,
   FLOW_GRAPH_MAX_RULES,
@@ -1235,5 +1238,35 @@ describe("the SECOND threshold is COVERAGE, not count", () => {
   it("coverage is only judged when the caller supplies what was drawn", () => {
     // One-arg calls keep the old behaviour, so no existing caller changes meaning.
     expect(flowGraphState(9).kind).toBe("draw");
+  });
+});
+
+describe("srcGroupEmptyWarn — the fourth warn kind, admitted by the test that refused the third", () => {
+  it("⛔ BOTH DIRECTIONS: an empty source group warns, a populated one does NOT", () => {
+    // A warn kind that only ever fires cannot be told from a constant.
+    expect(srcGroupEmptyWarn(0)).toBe("empty");
+    expect(srcGroupEmptyWarn(3)).toBe("populated");
+    expect(srcGroupEmptyBadge(srcGroupEmptyWarn(0))).toBe("SOURCE GROUP EMPTY");
+    expect(srcGroupEmptyBadge(srcGroupEmptyWarn(3))).toBeNull();
+  });
+
+  it("⛔ a FAILED or UNFETCHED count is `unknown` and NEVER warns — 'could not check' is not 'empty'", () => {
+    // The third loadOne arm, one level over. Warning here would call a WORKING rule broken.
+    expect(srcGroupEmptyWarn(null)).toBe("unknown");
+    expect(srcGroupEmptyWarn(undefined)).toBe("unknown");
+    expect(srcGroupEmptyBadge("unknown")).toBeNull();
+    expect(srcGroupEmptyExplain("unknown")).toBeNull();
+  });
+
+  it("it derives from the COUNT, not from group existence", () => {
+    // 0 is a fetched answer; null is the absence of one. They must not collapse.
+    expect(srcGroupEmptyWarn(0)).not.toBe(srcGroupEmptyWarn(null));
+  });
+
+  it("the explanation says what compiles and what to do — never just 'empty'", () => {
+    const t = srcGroupEmptyExplain("empty")!;
+    expect(t).toMatch(/matches no device/i);
+    expect(t).toMatch(/grants nothing/i);
+    expect(t).toMatch(/add members|delete the rule/i);
   });
 });
