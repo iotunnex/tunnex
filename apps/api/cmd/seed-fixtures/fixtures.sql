@@ -367,5 +367,54 @@ VALUES
   ('01900000-0000-7000-8000-000000070003', '01900000-0000-7000-8000-000000000001', 103, '01900000-0000-7000-8000-0000000f0001', now() - interval '1 hour',    'deny_aggregate', NULL,                                   '01900000-0000-7000-8000-0000000c0004', '01900000-0000-7000-8000-000000000002', '10.99.0.14', '10.10.9.1',  NULL,                                  'tcp', 80, 24, now() - interval '55 minutes', now() - interval '1 hour')
 ON CONFLICT (id) DO NOTHING;
 
-COMMIT;
+-- ── S14.11: A DEACTIVATED MEMBER ─────────────────────────────────────────────────────────────────────────
+-- S2.6 requires `deactivated` to render DISTINCTLY: a deactivated member KEEPS their roster row (sessions
+-- revoked, access frozen, still listed). That state had NO SUBJECT — measured from the API payload, all three
+-- seeded members were `active`, so the distinct render was unobservable. Same shape as `posture blocked` in
+-- S14.10: a designed state the fixture could not produce.
+--
+-- ⛔ A FOURTH MEMBER, NOT A DEACTIVATED EXISTING ONE. Deactivating one of the three would remove a ROLE from
+-- the active set, and `role` is the column this screen is named for — the fixture must show all three roles
+-- active AND a deactivated row, which needs four people.
+--
+-- `users.status` is ADMIN-OWNED, not controller-owned: `SetUserStatus` is a plain UPDATE driven by
+-- DeactivateMember (`PermMemberManage`), with no reconcile loop that would undo it. So seeding it directly is
+-- safe — unlike `health_blocked` or `org_hub_set.demoted`, which the CP recomputes.
+INSERT INTO users (id, email, name, password_hash, email_verified_at, status, created_at)
+VALUES ('01900000-0000-7000-8000-0000000b0004', 'grace@demo.tunnex.local', 'Grace Okafor',
+        NULL,                        -- no local password: exercises the AUTH label's "no local password" arm
+        now() - interval '90 days',  -- verified, so this row varies ONLY in status
+        'deactivated', now() - interval '90 days')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status, email_verified_at = EXCLUDED.email_verified_at;
 
+INSERT INTO memberships (org_id, user_id, role, created_at)
+VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000b0004',
+        'member', now() - interval '90 days')
+ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+-- ⛔ ONE ISOLATION PER FACT. `grace@` above carries TWO states at once — deactivated AND no local password —
+-- so if her row renders wrong you cannot tell which state caused it. That is a weak fixture for the same
+-- reason a verifier with one coarse arm is weak: the failure does not name itself.
+--
+-- `heikki@` is ACTIVE with NO local password, so the AUTH arm and the STATUS arm become INDEPENDENTLY
+-- observable:
+--
+--   grace@   deactivated + no password  -> the two together
+--   heikki@  ACTIVE      + no password  -> the AUTH arm alone
+--   member@  ACTIVE      + password     -> the control
+--
+-- And `heikki@` is the row that proves the ruled AUTH label: no password in an org with NO sso_configs row is
+-- NEITHER local nor SSO, so the cell must read "no local password" and stop there.
+INSERT INTO users (id, email, name, password_hash, email_verified_at, status, created_at)
+VALUES ('01900000-0000-7000-8000-0000000b0005', 'heikki@demo.tunnex.local', 'Heikki Laine',
+        NULL, now() - interval '60 days', 'active', now() - interval '60 days')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status, email_verified_at = EXCLUDED.email_verified_at;
+
+INSERT INTO memberships (org_id, user_id, role, created_at)
+VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000b0005',
+        'member', now() - interval '60 days')
+ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+COMMIT;

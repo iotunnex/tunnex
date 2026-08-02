@@ -2370,3 +2370,28 @@ scopes and to whom), the **other endpoint** (a capability often has its own), an
 Related: VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME · A TEST CAN PIN A LABEL PRODUCTION CAN NEVER
 PRODUCE · ABSENCE OF PERMISSION IS NOT ABSENCE OF DATA. Every one of them is the same failure at a different
 layer: **the evidence was collected somewhere other than where the truth lives.**
+
+---
+
+## RE-READ THE SURROUNDINGS, NOT THE EDIT — AND IN A DOCUMENT THE STALE HALF IS READ AS TRUTH
+
+**S14.11.** I corrected §0's headline after measuring that four of five "absences" were wrong — and left the
+paragraph **immediately beneath it** still asserting *"the columns below are absent because the fields do not
+exist."* **The exact claim the correction disproved, sitting directly under the correction.**
+
+**This is the duplicated-DNS-VIP shape** (S14.8: I added a DNS VIP line and left the pre-existing one, so one
+address rendered twice) **— same cause, different medium: I verified my edit and not its neighbourhood.**
+
+> ### **THE COST DIFFERS BY MEDIUM, AND THE DOCUMENT VERSION IS WORSE.**
+> ### **A duplicated indicator on a screen is VISIBLE — the founder caught the DNS VIP in one look.**
+> ### **A stale paragraph in a decisions doc is READ BY A FUTURE SESSION AS TRUTH.**
+
+This epic has already had **two documents contradict each other** — the S14.5 HALT, and PLAN vs the epic doc —
+so the failure mode is not hypothetical here.
+
+**THE CHECK IS THE ONE THAT CAUGHT THE DNS VIP:** after correcting a claim, **re-read what surrounds it**, not
+the diff. A correction that leaves its own premise standing has not landed; it has only been added to.
+
+**AND IN A DOC, LEAVE THE CORRECTION VISIBLE.** Both the headline and the paragraph now say what they used to
+say and why it was wrong — a future reader needs to know the claim was tested, or they will re-derive the
+original from the wireframe.
