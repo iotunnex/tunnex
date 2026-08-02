@@ -98,9 +98,19 @@ precisely the moment the four items were supposed to happen.
 > ### **TURNING `allow_auto_merge` OFF FOR THE REST OF EPIC 14 MAKES THREE OF THE FOUR STRUCTURALLY**
 > ### **UNSKIPPABLE, BECAUSE A MANUAL MERGE IS A MOMENT WHERE THE CHECKS MUST BE TYPED.**
 
-One command, reversible: `gh api -X PATCH repos/iotunnex/tunnex -f allow_auto_merge=false`. **UNRULED —
-founder's call.** Recorded here as a NAMED FIX rather than a discipline item, because "be more careful next
-time" is what the other three rows already tried.
+**⛔ RULED AND APPLIED 2026-08-02: `allow_auto_merge=false`** (verified `false` via the API after the PATCH).
+
+**RE-ARM TRIGGER: EPIC 14 close, alongside the visual job's re-arm** — the same event, because both were
+loosened for the same reason (iteration speed on a redesign) and both should tighten together.
+
+**WHAT IT CLOSES, NAMED:** the three pre-merge checks skipped at S14.7 — verify composition at STEP level,
+verify branch protection, declare un-rendered states for acceptance. With auto-merge off, **a merge is a moment
+where the checks must be typed**, so three of the four stop depending on intention. (The fourth, the in-PR
+checkpoint, is stale-by-construction under rebase-merge and is handled by carrying BOTH the PR number and the
+post-merge sha.)
+
+**This is instance 4's fix, and it is a MECHANISM rather than a resolution** — "be more careful next time" is
+what the other three rows in this table already tried.
 
 **THE COUNTERMEASURE IS NOT A FIX PER INSTANCE — IT IS MAKING THE NOOP AUDIBLE.** #1 now derives from
 `COMPOSE_PROJECT_NAME`; #2 left `testDir` so it makes no claim; #3 is `DO UPDATE`. But the general defence is
