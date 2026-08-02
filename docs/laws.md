@@ -2275,3 +2275,40 @@ environment mutation, and unlike the visual job and auto-merge it has NO re-arm 
 
 **The self-check, and it is one question:** before running an `UPDATE` or `DELETE`, read the `WHERE` clause
 aloud. If it does not contain an org id, the statement is wrong even when its effect is harmless.
+
+---
+
+## A TEST CAN PIN A LABEL PRODUCTION CAN NEVER PRODUCE. ONLY THE SCREEN SAYS OTHERWISE.
+
+**S14.10. FIVE unit reds were green against a state the schema forbids.**
+
+I built a third posture label for a cause the spec named, wrote five assertions covering it — including one that
+required all three labels be distinct — and every one passed. The label was **unreachable in production**:
+`device_health.evaluated_state` is `NOT NULL` with `CHECK IN ('compliant','noncompliant')`, and the evaluator
+skips an absent fact (`if f.DiskEncrypted == nil { continue }` — *"absence never blocks"*), so the state the
+label described cannot be stored.
+
+> ### **THIS IS THE FIXTURE-FIDELITY LAW INVERTED. Fixture-fidelity says a double must not be MORE capable**
+> ### **than production. Here the DOUBLE WAS MORE PERMISSIVE THAN THE SUBSTRATE: a hand-built object literal**
+> ### **can hold field combinations a `CHECK` constraint forbids, and unit tests never touch the constraint.**
+
+**SECOND INSTANCE THIS SECTION.** The first was `work-laptop` — a device in the wiring mock with no seeded
+counterpart, which is how 522 tests passed while the POSTURE column rendered blank.
+
+**HOW IT WAS CAUGHT, AND IT IS THE ONLY THING THAT CAUGHT IT:** a reachability assertion on the RENDERED PAGE.
+
+```
+RENDERS      posture blocked  (1)
+** ABSENT ** posture reported, fact unavailable  (0)
+```
+
+The unit tests passed. The API payload looked right. **The count of zero on the screen was the only disagreement
+in the system.**
+
+**THE CHECK:** for any NEW rendered state, assert it appears on the rendered page against seeded data BEFORE
+believing the unit test. A state that cannot be produced is a state that cannot be reviewed — and under the
+Human Gate Limit Law, cannot be accepted.
+
+**AND THE CHEAPER PRIOR CHECK:** when a label's precondition is a field being ABSENT, read that column's
+nullability and CHECK constraint first. `os_version NOT NULL` alone would have killed my first discriminator
+before a single test was written.
