@@ -5,8 +5,9 @@ import type { Node } from "./api";
 // KIND refines the label + tone, but the badge is NEVER less alarmed than the bool (never an
 // "ok" tone, never null, while degraded). `converging` is a normal push settling → a subtle
 // "syncing", not a loud alarm; `silent_desync` is the stuck, actionable case; `desync_unknown`
-// is the honest can't-determine (never rendered as healthy).
-export type BadgeTone = "warn" | "danger" | "unknown";
+import type { BadgeTone } from "../components/ui";
+
+export type { BadgeTone };
 
 export interface HealthBadge {
   label: string;

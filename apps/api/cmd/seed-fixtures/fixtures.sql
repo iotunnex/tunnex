@@ -192,7 +192,7 @@ VALUES
   ('01900000-0000-7000-8000-0000000c0005', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'old-laptop',    'linux',   'ZmlY3R1cmVEZXYwMDUwMDAwMDAwMDAwMDAwMDAwMDA9', NULL,         'revoked', now() - interval '60 days', false, false),
   ('01900000-0000-7000-8000-0000000c0006', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0001', 'unapproved-phone', 'ios',  'ZmlY3R1cmVEZXYwMDYwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.15', 'pending',  now() - interval '1 day',   false, false),
   ('01900000-0000-7000-8000-0000000c0007', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000002', '01900000-0000-7000-8000-0000000f0001', 'stale-laptop',  'darwin',  'ZmlY3R1cmVEZXYwMDcwMDAwMDAwMDAwMDAwMDAwMDA9', '10.99.0.16', 'active',   now() - interval '5 days',  false, true),
-  ('01900000-0000-7000-8000-0000000c0008', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'ovpn-contractor', 'linux', NULL,                                        '10.99.0.17', 'active',   now() - interval '2 days',  false, false)
+  ('01900000-0000-7000-8000-0000000c0008', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000003', '01900000-0000-7000-8000-0000000f0002', 'ovpn-contractor', 'linux', '',                                         '10.99.0.17', 'active',   now() - interval '2 days',  false, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- Device liveness is a SEPARATE table, exactly as gateway liveness is. Two connected, one idle-but-seen,

@@ -36,7 +36,7 @@ export const PLATFORM_LABELS: Record<ReportingPlatform, string> = {
 // open edition) — no posture noise on a feature the org doesn't use.
 export interface PostureBadge {
   label: string;
-  tone: BadgeTone | "ok";
+  tone: BadgeTone;
 }
 
 export function postureBadge(

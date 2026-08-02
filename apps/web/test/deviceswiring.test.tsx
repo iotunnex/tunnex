@@ -49,6 +49,28 @@ const DEVICES = [
     status: "pending",
     assigned_ip: "10.99.0.15",
   },
+  {
+    id: "d-stale-reexport",
+    name: "stale-laptop",
+    status: "active",
+    assigned_ip: "10.99.0.16",
+    needs_reexport: true,
+  },
+  {
+    id: "d-ovpn",
+    name: "ovpn-contractor",
+    status: "active",
+    public_key: "",
+    assigned_ip: "10.99.0.17",
+  },
+  {
+    id: "d-stale-posture",
+    name: "stale-device",
+    status: "active",
+    assigned_ip: "10.99.0.19",
+    health_state: "unknown",
+    health_reported_at: "2026-07-16T00:00:00Z",
+  },
 ];
 
 vi.mock("../src/lib/api", async () => {
@@ -158,9 +180,9 @@ describe("Devices — wiring", () => {
     // The distinction matters: an operator must still see a revoked device exists. Suppressing the row would
     // trade a wrong badge for a missing fact.
     //
-    // 4 rows = 1 header + 3 devices (revoked, active, pending). Counting rows is a stronger claim than "these strings appear": it
-    // also fails if an unexpected device were rendered, which text matching could never notice.
-    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    // 7 rows = 1 header + 6 devices (revoked, active, pending, stale-laptop, ovpn-contractor, stale-device).
+    // Counting rows is a stronger claim than "these strings appear": it also fails if an unexpected device were rendered.
+    expect(within(table).getAllByRole("row")).toHaveLength(7);
     // The address and pending status are asserted ON THEIR OWN DEVICE'S ROW.
     expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
     expect(within(rowFor("unapproved-phone")).getByText("pending")).toBeTruthy();
