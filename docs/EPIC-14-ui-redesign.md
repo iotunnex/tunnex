@@ -980,18 +980,18 @@ user-scoped under `/auth/cli/`, **90-day absolute expiry**, hashed at rest, show
 
 ### 2. Em-Dash Census & Structural Fix
 - **Structural Fix**: `hubsetview.ts` exports `reporting: boolean` on `HubMemberRow`; `Dashboard.tsx` (Overview) branches on `!m.reporting` instead of string matching (`=== "—"` or `=== "n/a"`).
-- **Test Hardening**: Paired positive assertion `expect(getByText(/not reporting/i)).toBeTruthy()` with absence assertion `expect(queryByText('· hs n/a')).toBeNull()` on the same element (mitigating Mechanism ⑧).
-- **Causation Recorded**: The S14.5 em-dash sweep changed `hubsetview`'s placeholder from `—` to `n/a`. `Dashboard.tsx` branched on `m.handshakeAge === '—'`, so the string edit silently broke Overview's 'not reporting' render (`· hs n/a`). A copy rule that edits a value someone keys logic on is not a copy change.
-- **Timeline / When Shipped**: Shipped in PR #50 (`85081b0`). `main` rendered `· hs n/a` from PR #50's merge until this fix—the second defect on Overview to survive review after `--tnx-ink-600`.
-- **Human Gate Limit Law**: Added to `docs/laws.md`. Visual review catches layout; code inspection catches state-branching regressions.
+- **Test Hardening (Query Rule One & PROVE-A-GUARD-REJECTS)**: Accessible `role="status"` markup added to `Dashboard.tsx`. `overviewwiring.test.tsx` queries via `getByRole` with accessible name and asserts exact count (`toEqual(1)`). Demonstrated guard rejection: reverting `Dashboard.tsx` to `m.handshakeAge === "—"` failed with `Unable to find an accessible element with role "status" and name "/not reporting/i"`.
+- **Human Gate Limit Law (Rewritten)**: A human gate can only catch what the data makes visible. Neither Overview defect was invisible due to review modality—both were **fixture-coverage failures** (seed stack lacked devices for donut arc, lacked un-reporting hub member for status text). Actionable precondition: `make seed-fixtures` must reach all states before a human review gate begins.
 
 ### 3. `badgeClass` Audit Across 10 Call Sites
 - Audited 10 call sites across `Dashboard.tsx`, `Gateways.tsx`, `Sites.tsx`, `postureview.ts`, `VisualGallery.tsx`. Confirmed uniform bordered pill rendering (`inline-flex items-center rounded-full border px-2 py-0.5 text-micro`).
 
 ### 4. S14.7 Routed Ranges Pre-Flight
-- **(a) Address-Space Heatmap**: **CUT — Coarse Granularity Defect.** At `10.0.0.0/8` mapped to 256 `/16` cells, a standard `/24` allocation lights up an entire `/16` block (or collapses with sibling `/24`s), visually masking free `/24` subnets within that block and falsely signaling block exhaustion. The grid cannot answer contiguous free space at `/24` operational resolution. Replaced by the canonical sorted `DataTable` (`/routed-ranges`). Recorded in `CUT-REGISTER.md`.
-- **(b) Pending State Endpoints & Auth**: Endpoint path is `/api/v1/organizations/{orgId}/site-subnets/pending` (`listPendingSiteSubnets`), requiring `site:manage`. `RoutedRanges.tsx` (`/routed-ranges`, `org:view`) renders approved site subnets in a `DataTable`. Since the grid is CUT, no cell hatching exists to falsely show `free` or leak withheld pending allocations to non-admin members.
+- **(a) Address-Space Heatmap**: **CUT — Two Independent Reasons:**
+  1. *Coarse Granularity Defect*: At `10.0.0.0/8` mapped to 256 `/16` cells, a standard `/24` allocation lights up an entire `/16` block, visually masking free `/24` subnets.
+  2. *Domain Limitation*: The grid is locked to `10.0.0.0/8`. Real customer networks use arbitrary CIDRs, including RFC1918 `172.16/12` (e.g., AWS default `172.31.0.0/16`) and `192.168/16`, which have no cells at all on a `10/8` grid.
+  - Replaced by canonical sorted `DataTable` (`/routed-ranges`).
+- **(b) Pending Queue & Auth**: Cutting the grid removes the pending queue from Routed Ranges entirely; Routed Ranges is a read-only projection of approved CIDRs (`/routed-ranges`, `org:view`). Pending subnet approvals are managed on `Sites.tsx` (`/api/v1/organizations/{orgId}/site-subnets/pending`, `site:manage`).
 - **(c) Animation Rule**: Continuous pulse removed from waiting/pending states; entry animation on mount only.
 - **(d) Range Scale Check**: N=0, N=1, and N=300 ranges per cell handled by `DataTable` pagination/scroll without layout collapse.
-- **(e) Title Delta**: Wireframe title *"Subnet advertisement queue"* updated to domain term *"Pending subnet approvals"*, recorded in `CUT-REGISTER.md`.
-
+- **(e) Title Delta**: Wireframe title *"Subnet advertisement queue"* updated to domain term *"Pending subnet approvals"* on Sites screen, recorded in `CUT-REGISTER.md`.

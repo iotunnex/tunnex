@@ -2066,11 +2066,13 @@ to be deliberate. **Ours found exactly one text pairing (`Button`); the other tw
 square and a histogram bar, and neither carries text.**
 
 
-## ⛔ HUMAN GATE LIMIT LAW (founder-ratified 2026-08-02, Overview S14.5 audit) — visual click-throughs catch layout; code inspection catches state-branching regressions
+## ⛔ HUMAN GATE LIMIT LAW (founder-ratified 2026-08-02, Overview S14.5 audit) — A human gate can only catch what the data makes visible
 
-**Two defects on Overview (`--tnx-ink-600` black neutral slice and `m.handshakeAge === '—'` stale string check rendering `· hs n/a`) survived a founder review on localhost, and both were found by reading code rather than looking at renders.**
+**A HUMAN GATE CAN ONLY CATCH WHAT THE DATA MAKES VISIBLE. A DEFECT ON A CODE PATH THE REVIEW STACK NEVER RENDERS IS INVISIBLE TO ANY AMOUNT OF LOOKING.**
 
-This states the empirical limit of the human review gate: visual click-throughs catch layout, alignment, and spacing; code inspection is required to catch latent state-branching regressions. The human review is a required gate, not a complete check. Every visual review must be paired with code inspection of state-dependent render branches.
+Neither defect on Overview was invisible because it was state-branching rather than visual. The `--tnx-ink-600` black neutral slice was a visual defect — invisible because the founder's review stack had zero devices (rendering the empty state instead of the neutral arc). `· hs n/a` required an un-reporting hub member in the fixture seed. Both were **fixture-coverage failures**, not review-modality failures.
+
+**Actionable Precondition**: The review stack (`make seed-fixtures`) must exercise every state each redesigned screen can produce (N=0, N=1, N=many, degraded, un-reporting, pending). Pre-flight 2 applies to fixtures as a strict precondition for the human review gate: a screen review is not valid unless seed fixtures reach all states the screen can render.
 
 ## ⛔ COROLLARY — AN UNDER-CAPABILITIED DOUBLE IS DANGEROUS ONLY IF THE MISSING CAPABILITY FAILS *SILENTLY*
 

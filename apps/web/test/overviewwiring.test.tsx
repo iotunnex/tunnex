@@ -58,7 +58,13 @@ vi.mock("../src/lib/api", async () => {
         // The hub-set endpoint returns an OBJECT, not a list. The catch-all `{ data: [] }` below fed an array
         // into hubSetView and threw — which surfaced as "cannot find Members", i.e. the whole page failing to
         // render. A catch-all mock is a fixture that answers questions it was never asked.
-        if (path.endsWith("/hub-set")) return { data: { generation: 1, members: [] } };
+        if (path.endsWith("/hub-set"))
+          return {
+            data: {
+              generation: 1,
+              members: [{ node_id: "gw-a", role: "primary", hub_priority: 1 }],
+            },
+          };
         if (path.endsWith("/nodes"))
           return nodesFail
             ? { data: undefined, ...err }
@@ -263,12 +269,14 @@ describe("⛔ EDITION IS A FOURTH STATE — an enterprise-only card is ABSENT, n
 });
 
 describe("HA Hub Set un-reporting member rendering", () => {
-  it("renders 'not reporting' for a member without metrics (paired positive + absence assertions)", async () => {
+  it("renders 'not reporting' for a member without metrics (Query Rule One + exact count + paired absence)", async () => {
     show();
     await waitFor(() => expect(screen.getByText("HA Hub Set")).toBeTruthy());
-    // Positive assertion: Mechanism ⑧ mitigation — verify the element actually renders 'not reporting'
-    expect(screen.getByText(/not reporting/i)).toBeTruthy();
-    // Absence assertion: verify stale string coupling '· hs n/a' is NOT rendered
-    expect(screen.queryByText("· hs n/a")).toBeNull();
+    // Query Rule One: Query by role="status" and accessible name
+    const statuses = screen.getAllByRole("status", { name: /not reporting/i });
+    expect(statuses.length).toEqual(1);
+    expect(screen.getByRole("status", { name: /primary · not reporting/i })).toBeTruthy();
+    // Absence assertion: paired with positive role query above (mitigating Mechanism ⑧)
+    expect(screen.queryByRole("status", { name: /· hs n\/a/i })).toBeNull();
   });
 });

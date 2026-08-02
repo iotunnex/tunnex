@@ -709,17 +709,20 @@ export default function Dashboard() {
                                   ? nodesRes.data.find((n) => n.id === m.nodeId)
                                   : undefined;
                                 return (
-                                  <ListItem key={m.nodeId}>
+                                  <ListItem
+                                    key={m.nodeId}
+                                    aria-label={`${node?.name ?? m.nodeId.slice(0, 8)} (${m.demoted ? "demoted" : m.role}): ${!m.reporting ? "not reporting" : `handshake ${m.handshakeAge}`}`}
+                                  >
                                     <span className="flex items-center justify-between gap-2">
                                       <span className="truncate font-mono text-mono text-ink-primary">
                                         {node?.name ?? m.nodeId.slice(0, 8)}
                                       </span>
-                                      <span className="shrink-0 text-micro text-ink-tertiary">
+                                      <span
+                                        className="shrink-0 text-micro text-ink-tertiary"
+                                        role="status"
+                                        aria-label={`${m.demoted ? "demoted" : m.role} · ${!m.reporting ? "not reporting" : `hs ${m.handshakeAge}`}`}
+                                      >
                                         {m.demoted ? "demoted" : m.role}
-                                        {/* `hubsetview` returns a dash glyph for "not reporting". Rendering
-                                            that would be both an em-dash and a silence where the honest word
-                                            exists — and "absent metrics is not an idle link" is this panel's
-                                            own rule. */}
                                         {!m.reporting
                                           ? " · not reporting"
                                           : ` · hs ${m.handshakeAge}`}
