@@ -23,8 +23,26 @@ import {
 afterEach(cleanup); // docs/laws.md — no globals/setup file, so auto-cleanup never registers
 
 let devicesFail = false;
+// ⛔ RECONCILED TO THE FIXTURE (S14.10). Every device below now EXISTS in `make seed-fixtures`, and every
+// state asserted here is one the seeded stack can actually render. Before this the mock asserted three states
+// the fixture could not produce, which is the inversion that let 522 tests pass while the POSTURE column
+// rendered blank:
+//
+//   health_blocked: true   -> ZERO blocked devices were seeded. `posture blocked` — the DANGER tone, the
+//                             highest-severity posture state — HAD NEVER RENDERED ON LOCALHOST, and the device
+//                             named `blocked-device` was not blocked. It is unreachable from SQL (see the
+//                             register): the seeder now POSTs a real health report for it.
+//   needs_reexport: true   -> asserted twice, ONE static device seeded. Now two.
+//   revoked + posture      -> `old-laptop` is revoked and had NO health row, so the suppression this file
+//                             exists to pin could never be observed on the screen.
+//
+// `thinkpad-erin` was the one device here with no seeded counterpart at all. It is now `thinkpad-erin`, which
+// carries the same shape (active + noncompliant) and is a real fixture row.
 const DEVICES = [
   // REVOKED and posture-bearing: the row whose badges must be suppressed. This is the shape Gateways got wrong.
+  // ⛔ THIS SHAPE IS NOW SEEDED (S14.10): `old-laptop` has a real device_health row, so the suppression is
+  // observable on localhost instead of only here. It also has assigned_ip NULL on the wire — the revoked sweep
+  // frees the pool IP — so the ADDRESS cell's placeholder is exercised by the same row.
   {
     id: "d-revoked",
     name: "old-laptop",
@@ -35,10 +53,25 @@ const DEVICES = [
     needs_reexport: true,
   },
   {
+    // Was `thinkpad-erin`, which the fixture could not produce. `thinkpad-erin` is seeded active+noncompliant.
+    // health_blocked stays FALSE here: only ONE seeded device is blocked, and that is deliberate — a loop that
+    // blocked every device destroyed the fixture's posture spread once already, and the spread is the only
+    // thing that makes this column reviewable.
     id: "d-active",
-    name: "work-laptop",
+    name: "thinkpad-erin",
     status: "active",
-    assigned_ip: "10.99.0.3",
+    assigned_ip: "10.99.0.12",
+    health_state: "noncompliant",
+    health_blocked: false,
+    needs_reexport: false,
+  },
+  {
+    // THE BLOCKED ROW, and it is its own device because exactly one seeded device is blocked. Reachable only
+    // through ReportHealth — the seeder registers it through the product.
+    id: "d-blocked",
+    name: "blocked-device",
+    status: "active",
+    assigned_ip: "10.99.0.18",
     health_state: "noncompliant",
     health_blocked: true,
     needs_reexport: true,
@@ -162,11 +195,15 @@ describe("Devices — wiring", () => {
     //
     // ASSERTED PER ROW, which is the upgrade. The old page-wide count would have passed even if both badges
     // sat on the WRONG device, as long as there was one of each.
+    // ⛔ THE CARRIER IS `blocked-device`, NOT `thinkpad-erin`. Reconciling the mock to the fixture SPLIT these
+    // roles: exactly one seeded device is blocked, so the blocked+needs-reexport shape became its own row and
+    // `thinkpad-erin` is active+noncompliant only. A blanket rename pointed this assertion at the device that
+    // no longer carries the badges — the test caught it, which is the point of asserting PER ROW.
     expect(
-      within(rowFor("work-laptop")).queryByText("posture blocked"),
+      within(rowFor("blocked-device")).queryByText("posture blocked"),
     ).toBeTruthy();
     expect(
-      within(rowFor("work-laptop")).queryByText("re-export needed"),
+      within(rowFor("blocked-device")).queryByText("re-export needed"),
     ).toBeTruthy();
     expect(
       within(rowFor("old-laptop")).queryByText("posture blocked"),
@@ -188,9 +225,14 @@ describe("Devices — wiring", () => {
     // The distinction matters: an operator must still see a revoked device exists. Suppressing the row would
     // trade a wrong badge for a missing fact.
     //
-    // 8 rows = 1 header + 7 devices (revoked, active, pending, stale-laptop, ovpn-contractor, stale-device, blocked-device).
-    // Counting rows is a stronger claim than "these strings appear": it also fails if an unexpected device were rendered.
-    expect(within(table).getAllByRole("row")).toHaveLength(8);
+    // 9 rows = 1 header + 8 devices (old-laptop, thinkpad-erin, unapproved-phone, stale-laptop,
+    // ovpn-contractor, stale-device, blocked-device, and the blocked row that is now its own device).
+    //
+    // ⛔ THE NUMBER MOVED IN A REVIEWED EDIT, WHICH IS THE CENSUS WORKING. It went 8 -> 9 because the mock was
+    // reconciled to the fixture: `thinkpad-erin` did not exist in `seed-fixtures`, and the BLOCKED shape had to
+    // become its own row because exactly one seeded device is blocked. Counting rows is a stronger claim than
+    // "these strings appear" — it also fails if an unexpected device were rendered.
+    expect(within(table).getAllByRole("row")).toHaveLength(9);
     // The address, pending status, and posture blocked label are asserted ON THEIR OWN DEVICE'S ROW.
     expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
     expect(within(rowFor("unapproved-phone")).getByText("pending")).toBeTruthy();
@@ -255,7 +297,7 @@ describe("Devices — failure path", () => {
       },
       {
         id: "d-active",
-        name: "work-laptop",
+        name: "thinkpad-erin",
         status: "active",
         assigned_ip: "10.99.0.3",
         health_state: "noncompliant",

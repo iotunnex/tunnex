@@ -243,3 +243,40 @@ export const NO_ADDRESS = "none assigned";
 export function addressLabel(assignedIp: string | undefined | null): string {
   return assignedIp && assignedIp.length > 0 ? assignedIp : NO_ADDRESS;
 }
+
+// ── S14.10 ITEM 4 — THREE COLUMNS, EACH FROM A SERVED FIELD ─────────────────────────────────────────────
+
+/**
+ * PROTOCOL. An OpenVPN device is minted with NO WireGuard key ("Creates an OpenVPN-transport device (no
+ * WireGuard key)"), so an empty `public_key` IS the discriminator.
+ *
+ * ⛔ THERE IS NO `protocol` FIELD ON `Device` — measured. This is a derivation from a REQUIRED field, which is
+ * why it is safe: `public_key` cannot go absent without the schema changing.
+ */
+export function deviceProtocol(publicKey: string | undefined): "WireGuard" | "OpenVPN" {
+  return publicKey && publicKey.length > 0 ? "WireGuard" : "OpenVPN";
+}
+
+/**
+ * POSTURE N/A — the platforms that CANNOT report posture, as opposed to devices that simply have not.
+ *
+ * ⛔ THE DISTINCTION IS THE WHOLE POINT: "not reported" is a device that could report and did not; "N/A" is a
+ * platform with no reporting client at all. Rendering an iPad as "posture not reported" invites an admin to
+ * chase a report that will never exist.
+ *
+ * ⚠ AND `darwin` IS macOS. The API serves both spellings — the seeded fixture has `darwin` AND `macos` — while
+ * `REPORTING_PLATFORMS` lists only `macos`. Treating `darwin` as non-reporting would mark real macOS desktops
+ * N/A, and `blocked-device` (platform `darwin`) is exactly such a device: it DOES report. Both spellings map.
+ */
+const REPORTING_ALIASES: Record<string, true> = {
+  macos: true,
+  darwin: true,
+  windows: true,
+};
+
+export function posturePlatformSupported(platform: string | undefined): boolean {
+  // Unknown platform: assume it CAN report. Marking an unrecognised platform N/A would hide a real gap behind
+  // a shrug — fail towards showing the absence, not towards excusing it.
+  if (!platform) return true;
+  return REPORTING_ALIASES[platform.toLowerCase()] ?? true;
+}
