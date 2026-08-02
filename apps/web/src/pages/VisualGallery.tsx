@@ -15,7 +15,7 @@ import {
   Select,
   StatusDot,
 } from "../components/ui";
-import { Donut, Histogram, NodeLink } from "../components/viz";
+import { AreaChart, Donut, Histogram, NodeLink } from "../components/viz";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 import { Icon, ICON_PATHS, type IconName } from "../components/Icon";
 
@@ -366,6 +366,39 @@ export default function VisualGallery() {
               { label: "13", value: 2 },
               { label: "14", value: 0 },
             ]}
+            empty="none"
+          />
+        </Panel>
+        {/* ⛔ THE TIME-SERIES PRIMITIVE, WITH FIXTURES, SO ITS DESIGN CAN BE JUDGED BEFORE ITS DATA EXISTS.
+            On Overview this same component renders `roadmap`, which draws NOTHING — correct there, useless
+            for review. The gallery is where a component gets to be looked at without an endpoint. */}
+        <Panel title="Area chart — site-link throughput (fixture data)">
+          <AreaChart
+            label="Site-link throughput"
+            source={{ endpoint: "/x" }}
+            failed={false}
+            series={[
+              {
+                label: "Inbound",
+                tone: "primary",
+                values: [1.1, 1.4, 1.2, 1.9, 2.4, 2.1, 2.48],
+              },
+              {
+                label: "Outbound",
+                tone: "secondary",
+                values: [0.7, 0.9, 0.8, 1.1, 1.3, 1.2, 1.35],
+              },
+            ]}
+            xLabels={[
+              "Jul 13",
+              "Jul 14",
+              "Jul 15",
+              "Jul 16",
+              "Jul 17",
+              "Jul 18",
+              "Jul 19",
+            ]}
+            formatValue={(v) => `${v.toFixed(1)}G`}
             empty="none"
           />
         </Panel>

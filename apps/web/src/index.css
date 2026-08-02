@@ -92,3 +92,76 @@ body {
     display: none;
   }
 }
+
+/* ⛔ ENTRY ANIMATION FOR EVERY GRAPH — founder-ruled 2026-08-02. Keyframes and timings verbatim from the
+ * handoff (dc.html), not invented:
+ *
+ *     @keyframes tnxDraw  { from { stroke-dashoffset: 1600 } to { stroke-dashoffset: 0 } }   1.4s ease-out .15s
+ *     @keyframes tnxSweep { from { opacity:0; stroke-dasharray: 0 400 } }                    1s   ease-out .2s
+ *     @keyframes tnxRise  { from { transform: scaleY(0) } to { transform: scaleY(1) } }      .55s
+ *     @keyframes tnxPop   { from { transform: scale(0); opacity:0 } }                        .5s
+ *
+ * ⚠ AN ENTRY ANIMATION AND A STATE ANIMATION ARE DIFFERENT CLAIMS, and keeping them apart is what makes both
+ * honest. THESE PLAY ONCE, ON MOUNT, ON EVERY GRAPH REGARDLESS OF STATE — they say "this drawing is
+ * arriving", which is true of a healthy link and a dead one alike. The CONTINUOUS ones (`.tnx-edge` flowing,
+ * `.tnx-pkt` travelling) run ONLY on a `linked` edge, because a permanent motion reads as ongoing activity.
+ *
+ * Both are killed under `prefers-reduced-motion`.
+ */
+@keyframes tnxDraw {
+  from {
+    stroke-dashoffset: 1600;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes tnxSweep {
+  from {
+    opacity: 0;
+    stroke-dasharray: 0 400;
+  }
+}
+@keyframes tnxRise {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes tnxPop {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.tnx-draw {
+  stroke-dasharray: 1600;
+  animation: tnxDraw 1.4s ease-out 0.15s both;
+}
+.tnx-arc {
+  animation: tnxSweep 1s ease-out 0.2s both;
+}
+.tnx-rise {
+  transform-origin: bottom;
+  animation: tnxRise 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.tnx-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tnxPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tnx-draw,
+  .tnx-arc,
+  .tnx-rise,
+  .tnx-pop {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
