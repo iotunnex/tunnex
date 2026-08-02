@@ -37,6 +37,7 @@ only in prose is a cut that will be re-proposed.**
 | **The wireframe's node ROWS under the map** | **CUT** | they are an `sc-for extraSites` — sites added during the prototype session, not a permanent list | S14.5 |
 | **`gallery-wide-390.png`** | **CUT** | at 390 there is no wide column, so a wide specimen is the narrow one again. Symmetry is not a reason | S14.5 |
 | **"Subnet advertisement queue"** (Sites queue title) | **DIFFERENT TERM** | Wireframe titled panel *"Subnet advertisement queue"*; domain model and API call them *"Pending subnet approvals"*. Term updated for domain accuracy | S14.7 |
+| **Address-space heatmap** (256-cell grid on Routed Ranges) | **CUT** | Intended to show contiguous free space for new range placement. However, at `10.0.0.0/8` mapped to 256 `/16` cells, a standard `/24` allocation lights up an entire `/16` cell (or collapses with sibling `/24`s), visually masking free `/24` subnets within that block and falsely signaling block exhaustion. The grid cannot answer contiguous free space at `/24` operational resolution. Replaced by the canonical sorted `DataTable` (`/routed-ranges`) | S14.7 |
 
 ## LIBRARIES
 

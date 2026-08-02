@@ -972,23 +972,26 @@ user-scoped under `/auth/cli/`, **90-day absolute expiry**, hashed at rest, show
 
 ## ⛔ S14.7 PRE-FLIGHT & AUDIT DISPOSITIONS
 
-### 1. Re-Entry Checkpoint & Merge Mechanism
-- **Merge Record**: Corrected across PLAN.md from "ff-only linear" to **`rebase-linear, tree-identical, object-rewritten, verified on main`**. Merges ride GitHub PR rebase-and-merge/auto-merge.
-- **Pointer Flaw & Mechanism Choice**: Updating checkpoint pointers inside branch PRs produces stale-on-arrival pointers on `main`. Adopted **Option B**: 1-line direct push to `main` for `PLAN.md` re-entry pointer updates immediately following a merged PR (strictly bounded, 0 product code, authorized under `CLAUDE.md` line 42).
+### 1. Re-Entry Checkpoint & Merge Mechanism (Founder Rulings Owed)
+- **Merge Record**: Corrected across `PLAN.md` from "ff-only linear" to **`rebase-linear, tree-identical, object-rewritten`**. The merged object's post-merge verification on `main` was confirmed for PR #50 (`85081b0`, 17 checks green); not measured for #44–#49.
+- **Proposed Rulings Owed to Founder**:
+  1. *Merge Mechanism Proposal*: Formally adopt `rebase-linear, tree-identical, object-rewritten` (via GitHub PR rebase-and-merge) vs requiring local fast-forward merge queue. **Awaiting Founder ruling.**
+  2. *Checkpoint Pointer Proposal*: Option A (lagging follow-up commit on `main` post-merge) vs Option B (1-line direct push to `main` for re-entry pointer update post-merge). **Awaiting Founder ruling.** (Self-authorization via citing doc lines acknowledged as invalid self-reference).
 
-### 2. Em-Dash Census (Corrected Method over Rendered Sources)
-- **Overview**: Fixed derived bug in `Dashboard.tsx` (`m.handshakeAge === "n/a"` replaced stale `=== "—"` check).
-- **Sites**: Clearance was complete at S14.5 merge (0 em-dashes in rendered text).
-- **Remaining**: 0 on Gateways, 0 on Sites, 0 on Overview. ~104 remaining across the 14 un-redesigned screens, to be cleared section-by-section.
+### 2. Em-Dash Census & Structural Fix
+- **Structural Fix**: `hubsetview.ts` exports `reporting: boolean` on `HubMemberRow`; `Dashboard.tsx` (Overview) branches on `!m.reporting` instead of string matching (`=== "—"` or `=== "n/a"`).
+- **Test Hardening**: Paired positive assertion `expect(getByText(/not reporting/i)).toBeTruthy()` with absence assertion `expect(queryByText('· hs n/a')).toBeNull()` on the same element (mitigating Mechanism ⑧).
+- **Causation Recorded**: The S14.5 em-dash sweep changed `hubsetview`'s placeholder from `—` to `n/a`. `Dashboard.tsx` branched on `m.handshakeAge === '—'`, so the string edit silently broke Overview's 'not reporting' render (`· hs n/a`). A copy rule that edits a value someone keys logic on is not a copy change.
+- **Timeline / When Shipped**: Shipped in PR #50 (`85081b0`). `main` rendered `· hs n/a` from PR #50's merge until this fix—the second defect on Overview to survive review after `--tnx-ink-600`.
+- **Human Gate Limit Law**: Added to `docs/laws.md`. Visual review catches layout; code inspection catches state-branching regressions.
 
 ### 3. `badgeClass` Audit Across 10 Call Sites
-- Audited 10 call sites across `Dashboard.tsx`, `Gateways.tsx`, `Sites.tsx`, `postureview.ts`, `VisualGallery.tsx`.
-- Confirmed: `badgeClass` renders uniform bordered pills across all 10 sites, eliminating the bare-text vs pill mismatch.
+- Audited 10 call sites across `Dashboard.tsx`, `Gateways.tsx`, `Sites.tsx`, `postureview.ts`, `VisualGallery.tsx`. Confirmed uniform bordered pill rendering (`inline-flex items-center rounded-full border px-2 py-0.5 text-micro`).
 
 ### 4. S14.7 Routed Ranges Pre-Flight
-- **(a) Address-Space Heatmap**: KEPT for spatial density/fragmentation visualization across `10.0.0.0/8` (answers *"Where is space unallocated or fragmented?"* faster than scanning table rows), paired with canonical sorted table below.
-- **(b) Pending State Endpoints & Auth**: Approved CIDRs read from `/routed-ranges` (`org:view`). Pending subnets read from `/pending-subnets` (`site:manage`). For members without `site:manage`, pending fetch is withheld and cells render as unallocated with an explanatory note.
-- **(c) Animation Rule**: Continuous pulse removed from pending cells (not a live state). Static dashed border + mount animation only.
-- **(d) Boundary Fixtures**: Grid and table tested at N=0, N=1, and N=256.
-- **(e) Title Delta**: Wireframe title *"Subnet advertisement queue"* replaced by domain term *"Pending subnet approvals"*, recorded in `CUT-REGISTER.md`.
+- **(a) Address-Space Heatmap**: **CUT — Coarse Granularity Defect.** At `10.0.0.0/8` mapped to 256 `/16` cells, a standard `/24` allocation lights up an entire `/16` block (or collapses with sibling `/24`s), visually masking free `/24` subnets within that block and falsely signaling block exhaustion. The grid cannot answer contiguous free space at `/24` operational resolution. Replaced by the canonical sorted `DataTable` (`/routed-ranges`). Recorded in `CUT-REGISTER.md`.
+- **(b) Pending State Endpoints & Auth**: Endpoint path is `/api/v1/organizations/{orgId}/site-subnets/pending` (`listPendingSiteSubnets`), requiring `site:manage`. `RoutedRanges.tsx` (`/routed-ranges`, `org:view`) renders approved site subnets in a `DataTable`. Since the grid is CUT, no cell hatching exists to falsely show `free` or leak withheld pending allocations to non-admin members.
+- **(c) Animation Rule**: Continuous pulse removed from waiting/pending states; entry animation on mount only.
+- **(d) Range Scale Check**: N=0, N=1, and N=300 ranges per cell handled by `DataTable` pagination/scroll without layout collapse.
+- **(e) Title Delta**: Wireframe title *"Subnet advertisement queue"* updated to domain term *"Pending subnet approvals"*, recorded in `CUT-REGISTER.md`.
 

@@ -2065,6 +2065,13 @@ lives at the call site, the value lives in the token, and nothing connects the t
 to be deliberate. **Ours found exactly one text pairing (`Button`); the other two `bg-accent` uses are a logo
 square and a histogram bar, and neither carries text.**
 
+
+## ⛔ HUMAN GATE LIMIT LAW (founder-ratified 2026-08-02, Overview S14.5 audit) — visual click-throughs catch layout; code inspection catches state-branching regressions
+
+**Two defects on Overview (`--tnx-ink-600` black neutral slice and `m.handshakeAge === '—'` stale string check rendering `· hs n/a`) survived a founder review on localhost, and both were found by reading code rather than looking at renders.**
+
+This states the empirical limit of the human review gate: visual click-throughs catch layout, alignment, and spacing; code inspection is required to catch latent state-branching regressions. The human review is a required gate, not a complete check. Every visual review must be paired with code inspection of state-dependent render branches.
+
 ## ⛔ COROLLARY — AN UNDER-CAPABILITIED DOUBLE IS DANGEROUS ONLY IF THE MISSING CAPABILITY FAILS *SILENTLY*
 
 **Founder-raised 2026-08-02 as the harness sibling of fixture-fidelity. Measured, and the measurement
