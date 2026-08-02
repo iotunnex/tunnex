@@ -877,3 +877,25 @@ component before.**
 **NOT FIXED MID-STORY** — it is a shared primitive touching 20 call sites and it needs its own slice with its
 own tests (Escape, trap, initial focus, return focus, each proven to reject). **TRIGGER: the next slice that
 touches `Modal`, or S14.7, whichever is first.** It does not wait for a screen to ask for it.
+
+### ⛔ HOW TO READ THE ADVISORY JOB — the conclusion is meaningless, only the STEPS are evidence
+
+**With `continue-on-error` on both steps, the JOB reports `success` WHETHER OR NOT THE STEPS PASSED.**
+
+**On `3772ac6` the notification said `visual: success` and that was worth nothing on its own.** The evidence
+is one level down:
+
+```
+success   Geometric invariants + census (advisory)
+success   Pixel diff (advisory)
+```
+
+**A green advisory job and a completely broken one are indistinguishable at the check-list level.** That is
+the price of the ruling, in its most concrete form — not "the class is uncovered" in the abstract, but
+**"the signal you will actually glance at has been disconnected from the thing it names."**
+
+> ## **WHEN REPORTING THIS JOB, CITE THE STEP CONCLUSIONS, NEVER THE CHECK.**
+> ## `gh api repos/OWNER/REPO/actions/jobs/<id> --jq '.steps[]|"\(.conclusion)\t\(.name)"'`
+
+**The `gates` job's `E2E specs — typecheck` step is the one part of this that still blocks**, and it is what
+keeps "the spec did not compile" out of the four indistinguishable meanings of an advisory red.
