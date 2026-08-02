@@ -21,7 +21,15 @@ import {
   StatusDot,
 } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
-import { addressLabel, postureBadge } from "../lib/postureview";
+import {
+  addressLabel,
+  applyDeviceFilter,
+  deviceFilterCounts,
+  deviceProtocol,
+  postureBadge,
+  posturePlatformSupported,
+  type DeviceFilter,
+} from "../lib/postureview";
 import {
   exportCeremony,
   shouldRenderQR,
@@ -48,6 +56,14 @@ export default function Devices() {
   const [org, setOrg] = useState<Org | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  // OWNER sub-line. A SECOND-CLASS read: `Device` serves `user_id` and no email, so the roster supplies the
+  // label. An empty map means the sub-line is simply absent — never an id, never "unknown owner".
+  const [ownerEmail, setOwnerEmail] = useState<Map<string, string>>(new Map());
+  // ⛔ CLIENT-SIDE FILTER over rows ALREADY LOADED — no new request, no server round-trip, and the counts come
+  // from the SAME array the table renders so the chip and the table can never disagree.
+  const [filter, setFilter] = useState<DeviceFilter>("all");
+  const counts = deviceFilterCounts(devices);
+  const shown = applyDeviceFilter(devices, filter);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [fullTunnel, setFullTunnel] = useState(false);
@@ -75,6 +91,19 @@ export default function Devices() {
       return;
     }
     setDevices(data ?? []);
+    // Fired after the devices land, awaited separately: a failed roster read degrades the OWNER sub-line and
+    // nothing else. The device list is this screen's subject; the owner's email is a courtesy.
+    const m = await api.GET("/api/v1/organizations/{orgId}/members", {
+      params: { path: { orgId } },
+    });
+    if (!m.error && m.data)
+      setOwnerEmail(
+        new Map(
+          (m.data as Array<{ user_id: string; email?: string }>)
+            .filter((x) => x.email)
+            .map((x) => [x.user_id, x.email as string]),
+        ),
+      );
   }
 
   useEffect(() => {
@@ -345,10 +374,42 @@ export default function Devices() {
           state, posture are the same four facts per row — and rendering them as <li> blocks meant the tier
           could only find a device by matching its name as free text. Now: getByRole("row") / ("cell").
           Every badge keeps its TEXT: the status was never carried by colour alone and must not start now. */}
-      <div className="mt-6">
+      {/* The chips. Counts derive from the SAME function the table filters with, so the two cannot disagree. */}
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["all", "All", counts.all],
+            ["attention", "Needs attention", counts.attention],
+            ["revoked", "Revoked", counts.revoked],
+          ] as Array<[DeviceFilter, string, number]>
+        ).map(([key, label, n]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={filter === key}
+            onClick={() => setFilter(key)}
+            className={`rounded-full border px-3 py-1 text-xs ${
+              filter === key
+                ? "border-white/40 bg-white/[.16] text-white"
+                : "border-white/10 text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {label} ({n})
+          </button>
+        ))}
+        {counts.revoked > 0 && filter === "all" && (
+          // Stated rather than left to arithmetic: `All` includes revoked and the other two do not, so
+          // attention + revoked < all, which reads as a bug unless the screen says why.
+          <span className="text-[11px] text-slate-500">
+            {counts.revoked} revoked, shown under All
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3">
         <DataTable
           caption="Devices"
-          rows={devices}
+          rows={shown}
           rowKey={(d) => d.id}
           empty="No devices yet."
           failed={error != null}
@@ -356,7 +417,32 @@ export default function Devices() {
             {
               key: "name",
               header: "Device",
-              cell: (d) => <span className="text-sm text-white">{d.name}</span>,
+              cell: (d) => (
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-sm text-white">{d.name}</span>
+                  {/* ⛔ OWNER. `Device` serves `user_id`, never an email, so this is a client-side join over the
+                      members roster. NON-FATAL: a failed members read leaves the sub-line ABSENT rather than
+                      rendering an id — an opaque uuid is worse than no line, and worse still is "unknown owner",
+                      which would claim the device is unowned. */}
+                  {ownerEmail.get(d.user_id) !== undefined && (
+                    <span className="text-[11px] text-slate-500">
+                      {ownerEmail.get(d.user_id)}
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              key: "protocol",
+              header: "Protocol",
+              cell: (d) => (
+                // ⛔ DERIVED FROM `public_key`, because there is NO `protocol` FIELD ON Device — measured. An
+                // OpenVPN device is minted with "no WireGuard key", so an empty key IS the discriminator, and
+                // `public_key` is REQUIRED so it cannot go absent without a schema change.
+                <span className="font-mono text-xs text-slate-500">
+                  {deviceProtocol(d.public_key)}
+                </span>
+              ),
             },
             {
               key: "address",
@@ -394,6 +480,16 @@ export default function Devices() {
                 // S7.5.3: present only when the org has posture checks configured. "not reported"/"stale"
                 // render distinctly from ok — an admin must never read unknown as a pass, because absence is
                 // not compliance.
+                // ⛔ N/A IS NOT "NOT REPORTED", AND THE DIFFERENCE IS ACTIONABLE. "not reported" is a device
+                // that COULD report and has not — an admin should chase it. N/A is a platform with no reporting
+                // client at all, so there is nothing to chase. Rendering an iPad as "not reported" invites a
+                // hunt for a report that will never exist.
+                if (!posturePlatformSupported(d.platform))
+                  return (
+                    <span className="text-xs text-slate-600 italic">
+                      n/a on this platform
+                    </span>
+                  );
                 const pb = postureBadge(d);
                 return (
                   <>

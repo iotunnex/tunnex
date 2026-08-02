@@ -10,6 +10,11 @@ import {
   postureBadgeClass,
   wouldFailCopy,
   addressLabel,
+  applyDeviceFilter,
+  deviceFilterCounts,
+  deviceProtocol,
+  needsAttention,
+  posturePlatformSupported,
   NO_ADDRESS,
   unknownPostureLabel,
 } from "../src/lib/postureview";
@@ -240,5 +245,85 @@ describe("addressLabel", () => {
     // revoked (swept) · rejected (RejectDevice NULLs it) · pending · never assigned. "released" would be
     // wrong for a device that never had one; "revoked" would be wrong for three of the four.
     expect(NO_ADDRESS).not.toMatch(/revoked|released|freed|expired/i);
+  });
+});
+
+// ── S14.10 ITEMS 4 & 5 ──────────────────────────────────────────────────────────────────────────────────
+describe("deviceProtocol", () => {
+  it("⛔ derives OpenVPN from an ABSENT WireGuard key — there is no protocol field on Device", () => {
+    // An OpenVPN device is minted with "no WireGuard key". `public_key` is REQUIRED, so it cannot go absent
+    // without a schema change — which is what makes this derivation safe rather than a guess.
+    expect(deviceProtocol("Zm9vYmFy")).toBe("WireGuard");
+    expect(deviceProtocol("")).toBe("OpenVPN");
+    expect(deviceProtocol(undefined)).toBe("OpenVPN");
+  });
+});
+
+describe("posturePlatformSupported", () => {
+  it("⛔ darwin AND macos both report — the API serves both spellings", () => {
+    // REPORTING_PLATFORMS lists only `macos`, and the seeded `blocked-device` is `darwin` and DOES report.
+    // Treating darwin as non-reporting would mark real macOS desktops "n/a" and hide a live posture state.
+    expect(posturePlatformSupported("darwin")).toBe(true);
+    expect(posturePlatformSupported("macos")).toBe(true);
+    expect(posturePlatformSupported("windows")).toBe(true);
+  });
+
+  it("platforms with no reporting client are N/A", () => {
+    for (const p of ["ios", "android", "linux"])
+      expect(posturePlatformSupported(p), p).toBe(false);
+  });
+
+  it("an UNKNOWN platform is assumed to report — fail towards showing the absence", () => {
+    // Marking an unrecognised platform N/A would excuse a real gap instead of surfacing it.
+    expect(posturePlatformSupported("freebsd")).toBe(true);
+    expect(posturePlatformSupported(undefined)).toBe(true);
+  });
+});
+
+describe("needsAttention / applyDeviceFilter", () => {
+  const d = (o: Record<string, unknown> = {}) =>
+    ({ status: "active", ...o }) as Parameters<typeof needsAttention>[0];
+
+  it("⛔ REVOKED IS NOT ATTENTION, even carrying every other trigger", () => {
+    // A revoked device is DONE. Surfacing it as actionable is an instruction to act on a device that cannot
+    // come back — the same defect as showing it a re-export badge.
+    expect(
+      needsAttention(
+        d({ status: "revoked", health_blocked: true, health_state: "noncompliant", needs_reexport: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("each trigger alone is enough, and a clean device is not attention", () => {
+    // Both sides: a function returning true unconditionally passes the four positives.
+    expect(needsAttention(d({ status: "pending" }))).toBe(true);
+    expect(needsAttention(d({ health_blocked: true }))).toBe(true);
+    expect(needsAttention(d({ health_state: "noncompliant" }))).toBe(true);
+    expect(needsAttention(d({ needs_reexport: true }))).toBe(true);
+    expect(needsAttention(d({ health_state: "compliant" }))).toBe(false);
+    expect(needsAttention(d({ health_state: "unknown" }))).toBe(false);
+  });
+
+  it("⛔ the counts come from the SAME function the table filters with", () => {
+    // Two separate derivations of "how many need attention" is how a badge starts lying. This asserts the
+    // identity, not two numbers that happen to agree today.
+    const rows = [
+      d({ health_blocked: true }),
+      d({ status: "revoked" }),
+      d({ health_state: "compliant" }),
+      d({ status: "pending" }),
+    ];
+    const c = deviceFilterCounts(rows);
+    expect(c.attention).toBe(applyDeviceFilter(rows, "attention").length);
+    expect(c.revoked).toBe(applyDeviceFilter(rows, "revoked").length);
+    expect(c.all).toBe(rows.length);
+    // `all` INCLUDES revoked while the others do not, so the three never sum to `all` — which is why the
+    // screen states it rather than leaving a reader to arithmetic.
+    expect(c.attention + c.revoked).not.toBe(c.all);
+  });
+
+  it("`all` is the identity, not a filter", () => {
+    const rows = [d(), d({ status: "revoked" })];
+    expect(applyDeviceFilter(rows, "all")).toHaveLength(2);
   });
 });

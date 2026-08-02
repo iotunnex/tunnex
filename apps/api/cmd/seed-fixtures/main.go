@@ -216,10 +216,12 @@ func main() {
 	// THREE SIGNALS, because a warning alone is a line in a log nobody greps:
 	//   1. `posture_blocked` is a COUNTED CENSUS FIELD below — it reads `false`, it is not merely absent.
 	//   2. The warning above names the CONSEQUENCE, not just the error.
-	//   3. TUNNEX_SEED_STRICT=true makes it a NON-ZERO EXIT — for anyone automating the review stack, where a
-	//      silent partial seed is worse than a failed one. Default stays lenient: the SQL half succeeded, and
-	//      a hard failure would leave a half-seeded database over a review aid.
-	if !postureBlocked && os.Getenv("TUNNEX_SEED_STRICT") == "true" {
+	//   3. STRICT IS THE DEFAULT and a missing state is a NON-ZERO EXIT. Founder-ruled S14.10, inverted from
+	//      the original lenient default: this seeder has ZERO CI consumers (0 references in either workflow) and
+	//      its ONLY consumer is the founder review. A lenient default therefore preserves exactly the failure
+	//      mode it exists to eliminate — a review of a screen whose severest state is silently absent.
+	//      `TUNNEX_SEED_STRICT=false` is the escape hatch for anyone who wants the SQL half regardless.
+	if !postureBlocked && os.Getenv("TUNNEX_SEED_STRICT") != "false" {
 		logger.Error("seed_fixtures_incomplete",
 			slog.String("missing", "posture_blocked"),
 			slog.String("hint", "the API must be reachable at seed time; unset TUNNEX_SEED_STRICT to seed anyway"))
