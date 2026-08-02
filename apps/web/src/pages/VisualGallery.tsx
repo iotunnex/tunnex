@@ -89,7 +89,13 @@ const COLS = [
 
 export default function VisualGallery() {
   // Open by default: the snapshot must contain the overlay, not a button that would reveal it.
-  const [showModal] = useState(true);
+  //
+  // ⛔ BUT IT MUST BE CLOSEABLE, and it was not — `onDismiss` was a no-op, so the overlay was permanent.
+  // That mattered the moment a SECOND screenshot wanted a different section: the overlay is `fixed inset-0`,
+  // so it sits over every element shot on the page. The first attempt to work around it masked
+  // `[role="dialog"]` — which IS the full-viewport overlay — and produced a baseline that was ENTIRELY
+  // magenta. A solid rectangle would have passed forever with no subject inside it.
+  const [showModal, setShowModal] = useState(true);
 
   return (
     <div className="tnx-page flex flex-col gap-3.5 p-6" data-visual-gallery>
@@ -313,7 +319,7 @@ export default function VisualGallery() {
           {showModal && (
             <Modal
               title="Revoke device"
-              onDismiss={() => {}}
+              onDismiss={() => setShowModal(false)}
               actions={<Button variant="danger">Revoke</Button>}
             >
               This removes the peer, releases its address, and cannot be undone.
