@@ -121,15 +121,37 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
           output: codeql-results
+      # ⛔ THIS STEP MUST CARRY THE SAME CONDITION AS THE ANALYSIS THAT PRODUCES ITS INPUT.
+      #
+      # It did not, and S14.11's follow-up PR (#59) — THE FIRST DIFF SINCE THE SPLIT WITH NO GO FILES —
+      # failed here with `jq: error: Could not open file codeql-results/*.sarif`. The go leg's init /
+      # autobuild / analyze all skipped correctly, no SARIF was written, and this step read it anyway.
+      #
+      #   A GATE CONDITIONED DIFFERENTLY FROM ITS OWN INPUT IS A GATE THAT FAILS ON ABSENCE RATHER THAN
+      #   ON FINDINGS — and it reported as `CodeQL (blocking on high/critical) (go): failure`, which reads
+      #   exactly like a real security finding. That is the worst possible disguise for a plumbing bug.
+      #
+      # It stayed invisible because every PR between the split and #59 touched Go. The filter was never
+      # exercised on the branch it now takes.
       - name: Fail on high/critical findings (blocking threshold)
+        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
         run: |
           set -euo pipefail
+          # ⛔ AND A GUARD ON THE INPUT ITSELF: if the analysis DID run, a missing SARIF is a real failure
+          # (the scan silently did nothing) and must not be swallowed. Absence is only acceptable when the
+          # step is skipped outright, which the `if:` above now handles.
+          shopt -s nullglob
+          files=(codeql-results/*.sarif)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::CodeQL ran but produced NO SARIF — the scan did not analyse anything"
+            exit 1
+          fi
           # CodeQL marks high/critical security alerts as SARIF level "error" (medium/low are "warning"/
           # "note"). Counting error-level results is the documented, stable signal — more robust than
           # re-deriving security-severity from the rule table, which lives in different SARIF locations
           # depending on whether a query pack contributed it.
           total=0
-          for f in codeql-results/*.sarif; do
+          for f in "${files[@]}"; do
             n=$(jq '[.runs[].results[]? | select(.level == "error")] | length' "$f")
             echo "  $(basename "$f"): $n error-level result(s)"
             total=$((total + n))

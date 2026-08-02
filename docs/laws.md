@@ -2589,3 +2589,32 @@ regression with a written exemption.
 
 **This is a sibling of the prose-versus-behaviour class:** there the prose asserted a fact the code did not
 implement; here the prose asserted a *process* nobody performed. Same failure, one level up.
+
+---
+
+## A GATE CONDITIONED DIFFERENTLY FROM ITS OWN INPUT FAILS ON ABSENCE, NOT ON FINDINGS
+
+**S14.11 follow-up (PR #59).** The CodeQL `go` leg is filtered per-leg: on a diff with no Go files,
+`init` / `autobuild` / `analyze` skip. **The step that COUNTS the findings carried no condition at all**, so it
+ran anyway and died on `jq: error: Could not open file codeql-results/*.sarif`.
+
+It reported as **`CodeQL (blocking on high/critical) (go): failure`** — which reads exactly like a real
+security finding. **That is the worst possible disguise for a plumbing bug**: the one check whose red nobody
+argues with.
+
+> ### **IT STAYED INVISIBLE BECAUSE EVERY PR BETWEEN THE SPLIT AND #59 TOUCHED GO. The filter was never**
+> ### **exercised on the branch it now takes — the same shape as the audit log's `"system"` fallback, one**
+> ### **layer down: a conditional whose other side no run had ever taken.**
+
+**THE CHECK, and it is mechanical:** for every step gated by an `if:`, list the steps that consume its output
+and confirm they carry **the same** condition. A producer skipped without its consumer is a guaranteed failure
+on the first diff that takes that branch.
+
+**AND DO NOT FIX IT BY MAKING ABSENCE PASS.** The repair adds the condition **and** a real guard: when the
+analysis DID run, a missing SARIF now fails loudly (*"CodeQL ran but produced NO SARIF"*). Otherwise the fix
+converts a false red into a silent green, which is the trade this project refuses everywhere else — a skip
+that reports success is worse than a failure that reports honestly.
+
+**THE COST OF FINDING IT LATE:** this was the FIRST non-Go diff since the `gates` split. Arm 2 of the split
+proof was still uncollected — and the moment a genuinely non-Go diff finally arrived, it did not prove the
+split worked; **it found a defect the split introduced.** A proof deferred is a defect deferred with it.
