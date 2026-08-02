@@ -208,7 +208,16 @@ export default function RoutedRangesPage() {
     const primary = spaceMap.blocks[0];
     const at24 = nextFreeRange(allocations, primary.block, 24);
     const at16 = nextFreeRange(allocations, primary.block, 16);
-    return at24 === null && at16 === null ? null : { at24, at16, block: primary.block };
+    if (at24 === null && at16 === null) return null;
+    // ⛔ THE /16 IS SHOWN ONLY WHEN IT IS A DIFFERENT ANSWER. When the first free /24 and the first free /16
+    // start at the same address — the common case on a fresh block — printing both rendered
+    // "10.0.0.0/24 · 10.0.0.0/16", which reads as a duplicate or a bug rather than as two options.
+    const base = (c: string | null) => (c === null ? null : c.split("/")[0]);
+    return {
+      at24,
+      at16: base(at16) === base(at24) ? null : at16,
+      block: primary.block,
+    };
   }, [spaceComplete, spaceMap, allocations]);
   const failedSites = useMemo(
     () => (fanOut ?? []).filter((f) => !f.ok).length,
@@ -323,20 +332,21 @@ export default function RoutedRangesPage() {
                     WITHHELD entirely when any class failed to load, because a confident wrong range is worse
                     than no suggestion. */}
                 {suggestion !== null && (
-                  <p className="text-cell text-ink-body">
+                  <p className="mt-1 border-t border-line pt-2.5 text-cell text-ink-body">
                     Next free in {suggestion.block.label}:{" "}
                     {suggestion.at24 !== null && (
                       <span className="font-mono text-ink-heading">
                         {suggestion.at24}
                       </span>
                     )}
-                    {suggestion.at24 !== null && suggestion.at16 !== null
-                      ? " · "
-                      : ""}
                     {suggestion.at16 !== null && (
-                      <span className="font-mono text-ink-heading">
-                        {suggestion.at16}
-                      </span>
+                      <>
+                        {suggestion.at24 !== null ? ", or " : ""}
+                        <span className="font-mono text-ink-heading">
+                          {suggestion.at16}
+                        </span>
+                        {" for a whole block"}
+                      </>
                     )}
                     <span className="text-ink-faint">
                       {" "}
