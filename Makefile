@@ -241,6 +241,13 @@ seed-enterprise: ## Seed the ENTERPRISE fixtures (SSO config + strandable device
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed-enterprise
 
+.PHONY: seed-fixtures
+seed-fixtures: ## Seed the DEMO FIXTURES (populated network for UI review) ON TOP of `seed` (S14.5)
+	@echo '>> demo fixtures: 5 gateways, 4 sites, 6 subnets, 5 devices, 12 audit entries (run after: make seed)'
+	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  $(GO_IMAGE) go run ./cmd/seed-fixtures
+
 .PHONY: visual
 visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN THE SAME CONTAINER CI USES.
 	# The playwright image is pinned to CI's. A baseline rendered on the host would NEVER match CI: font
