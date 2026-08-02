@@ -285,13 +285,82 @@ export function deviceProtocol(publicKey: string | undefined): "WireGuard" | "Op
  */
 const REPORTING_ALIASES: Record<string, true> = {
   macos: true,
-  darwin: true,
+  darwin: true, // the API serves BOTH spellings; `blocked-device` is `darwin` and reports
   windows: true,
 };
 
+// ⛔ KNOWN NON-REPORTING, LISTED EXPLICITLY — three-way, not two. My first version was two-way with
+// "unknown ⇒ can report", which made `ios`/`android`/`linux` report as capable and would have rendered
+// "posture not reported" on an iPad: an invitation to chase a report that will never exist.
+//
+// The distinction between "we know this platform has no client" and "we have never seen this platform" is
+// real, and they need OPPOSITE defaults.
+const NON_REPORTING: Record<string, true> = {
+  ios: true,
+  android: true,
+  linux: true, // the CLI and the node agent run here; no posture-reporting desktop client does
+};
+
 export function posturePlatformSupported(platform: string | undefined): boolean {
-  // Unknown platform: assume it CAN report. Marking an unrecognised platform N/A would hide a real gap behind
-  // a shrug — fail towards showing the absence, not towards excusing it.
   if (!platform) return true;
-  return REPORTING_ALIASES[platform.toLowerCase()] ?? true;
+  const p = platform.toLowerCase();
+  if (REPORTING_ALIASES[p]) return true;
+  if (NON_REPORTING[p]) return false;
+  // ⛔ AN UNRECOGNISED PLATFORM IS ASSUMED TO REPORT. Marking it N/A would excuse a real gap behind a shrug —
+  // fail towards SHOWING the absence, not towards explaining it away.
+  return true;
+}
+
+// ── S14.10 ITEM 5 — THE FILTER CHIPS ────────────────────────────────────────────────────────────────────
+//
+// ⛔ CLIENT-SIDE, OVER ROWS ALREADY LOADED. No new endpoint and no round-trip: `listDevices` returns the whole
+// set, so a server filter would be a request to re-fetch data the browser is holding. The Gateways precedent.
+//
+// ⛔ AND THE COUNTS COME FROM THE SAME FUNCTION THE TABLE FILTERS WITH, so a chip and its table can never
+// disagree. Two separate derivations of "how many need attention" is how a badge starts lying.
+
+export type DeviceFilter = "all" | "attention" | "revoked";
+
+/**
+ * NEEDS ATTENTION — the union of every state an operator must act on:
+ *   · posture-blocked (excluded from every gateway right now)
+ *   · noncompliant (a warn-mode failure that access survives, but someone should look)
+ *   · pending approval
+ *   · needs_reexport (a static profile whose baked routes are stale)
+ *
+ * ⛔ REVOKED IS NOT ATTENTION. A revoked device is DONE — surfacing it as actionable is an instruction to act
+ * on a device that cannot come back, which is the same defect as showing it a re-export badge.
+ */
+export function needsAttention(
+  d: Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+): boolean {
+  if (d.status === "revoked") return false;
+  return (
+    d.status === "pending" ||
+    d.health_blocked === true ||
+    d.health_state === "noncompliant" ||
+    d.needs_reexport === true
+  );
+}
+
+export function applyDeviceFilter<
+  T extends Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+>(devices: T[], f: DeviceFilter): T[] {
+  if (f === "attention") return devices.filter(needsAttention);
+  if (f === "revoked") return devices.filter((d) => d.status === "revoked");
+  return devices;
+}
+
+/**
+ * The chip counts. `all` INCLUDES revoked while the other two do not, so
+ * `attention + revoked < all` — arithmetic that reads as a bug unless the screen says why.
+ */
+export function deviceFilterCounts<
+  T extends Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+>(devices: T[]): { all: number; attention: number; revoked: number } {
+  return {
+    all: devices.length,
+    attention: applyDeviceFilter(devices, "attention").length,
+    revoked: applyDeviceFilter(devices, "revoked").length,
+  };
 }
