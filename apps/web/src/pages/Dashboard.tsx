@@ -4,8 +4,8 @@ import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
 import { HealthStatus } from "../components/HealthStatus";
 import { formatBytes, hubSetView } from "../lib/hubsetview";
-import { assembleTopology } from "../lib/sitesview";
-import { Donut, NodeLink } from "../components/viz";
+import { assembleTopology, meshFrom } from "../lib/sitesview";
+import { Donut, Histogram, NodeLink } from "../components/viz";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -222,6 +222,9 @@ export default function Dashboard() {
             // Edition is UNKNOWN until /meta answers; treat unknown as not-enterprise so a slow load never
             // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
             const enterprise = isEnterprise(edition);
+            // Five core cards, plus Access Rules and Pending approvals on enterprise. ONE definition, read by
+            // both the gating below and the grid's column count.
+            const STAT_CARDS = enterprise ? 7 : 5;
 
             // NEEDS ATTENTION is COMPOSED, not fetched — every item names the source that produced it, and an
             // item appears only when its source has been READ. A source still loading contributes nothing;
@@ -301,8 +304,26 @@ export default function Dashboard() {
                     Six (or five) fixed columns at 390px gives ~60px per card and the page scrolls sideways —
                     which the viewport leg caught on its FIRST baseline (390px viewport, 455px capture).
                     The edition-dependent count only applies once there is room for it. */}
+                {/* ⛔ THE COLUMN COUNT IS DERIVED FROM THE CARD COUNT, IN ONE PLACE.
+                    It was hard-coded `lg:grid-cols-6` while SEVEN cards were rendered — enterprise adds both
+                    Access Rules and Pending approvals — so the seventh wrapped to a second row and sat alone
+                    beneath five empty columns. It read as a card that failed to render rather than as a row
+                    that did not fit.
+
+                    THE COUNT WAS WRITTEN TWICE, IN TWO LANGUAGES: once as JSX elements and once as a Tailwind
+                    class, with nothing to make them agree. Now the class reads a CSS variable set from the
+                    same constant the cards are gated on, so adding a card cannot silently orphan it.
+
+                    ⚠ THE VARIABLE IS `--stat-cols`, NOT `--tnx-stat-cols`. The first name I used borrowed the
+                    `--tnx-` prefix, which in this codebase means "a GENERATED DESIGN TOKEN" — and the
+                    tokenrefs census failed on it within seconds of being written, on its own author. A local
+                    layout variable is not a design token and must not wear the namespace that promises it is
+                    held to the generated set. */}
                 <div
-                  className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${enterprise ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}
+                  className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--stat-cols),minmax(0,1fr))]"
+                  style={
+                    { "--stat-cols": STAT_CARDS } as React.CSSProperties
+                  }
                 >
                   <Stat
                     label="Members"
@@ -529,6 +550,32 @@ export default function Dashboard() {
                         const t = linkTraffic(hubSetRes.data.members);
                         return (
                           <>
+                            {/* ⛔ A GRAPH OF A SNAPSHOT, NOT A GRAPH OVER TIME — and the distinction is the
+                                whole reason this panel was numbers.
+
+                                `rx_bytes` is "a raw gauge since the last handshake (display only, never
+                                summed as monotonic)". It RESETS at every handshake, so ANY time axis drawn
+                                from it is a lie at any data volume, forever. That has not changed and no
+                                time series appears here.
+
+                                What IS honest is a COMPARISON AT ONE INSTANT: two bars, inbound against
+                                outbound, right now. A bar chart of two current gauges makes no claim about
+                                rate, direction of travel over time, or sampling — it just shows which is
+                                larger, which is the question a glance actually asks. The numbers stay
+                                beneath it, because the bar is the accelerant and the figure is the fact. */}
+                            <Histogram
+                              label="Link bytes since last handshake"
+                              source={{
+                                endpoint:
+                                  "/api/v1/organizations/{orgId}/hub-set",
+                              }}
+                              failed={false}
+                              bins={[
+                                { label: "in", value: t.rxBytes },
+                                { label: "out", value: t.txBytes },
+                              ]}
+                              empty="No counters reported yet."
+                            />
                             <div className="flex gap-6">
                               <div>
                                 <p className="text-[11px] font-medium text-ink-secondary">
@@ -710,18 +757,26 @@ export default function Dashboard() {
                           endpoint: "/api/v1/organizations/{orgId}/sites",
                         }}
                         failed={false}
-                        nodes={assembleTopology(
-                          sitesRes.data,
-                          {},
-                          nodesRes.data,
-                        ).map((c) => ({
-                          id: c.id,
-                          label: c.name,
-                          kind: c.gateways.some((g) => g.isHub)
-                            ? ("hub" as const)
-                            : ("spoke" as const),
-                        }))}
-                        links={[]}
+                        {...(() => {
+                          // ⛔ THE SAME FUNCTION THE SITES SCREEN USES. This panel built its own node list
+                          // inline with `links={[]}` — so Overview drew rings and NO EDGES while Sites drew
+                          // the mesh, from the same data, and the two screens disagreed about what the
+                          // network looks like.
+                          //
+                          // TWO RENDERINGS OF ONE FACT IS TWO PLACES TO BE WRONG. `meshFrom` is now the only
+                          // thing that turns sites + nodes into a topology.
+                          //
+                          // `subnetsKnown: false` because Overview does not fetch per-site subnets: without
+                          // it every node would claim "no approved subnet", which is a measurement this
+                          // screen never took.
+                          const m = meshFrom(
+                            assembleTopology(sitesRes.data, {}, nodesRes.data),
+                            nodesRes.data,
+                            hubSetRes?.ok ? hubSetRes.data?.generation : undefined,
+                            false,
+                          );
+                          return { nodes: m.nodes, links: m.links };
+                        })()}
                         empty="No sites configured yet. Bind a gateway to a site to build the mesh."
                       />
                     )}
