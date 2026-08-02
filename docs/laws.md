@@ -2162,3 +2162,36 @@ than a finding — but it is the **third time this engagement that the PROOF was
 
 > ### **WHEN A CHECK COMES BACK CLEANER THAN EXPECTED, SUSPECT THE MATCHER BEFORE THE SUBJECT.**
 > ### **A silent filter and a passing subject are the same output.**
+
+---
+
+## A GLOBAL WITH THE SAME NAME MAKES A MISSING IMPORT LOOK LIKE A WRONG FIELD
+
+**S14.8.** `Kubernetes.tsx` used `Node` as a type without importing it, so TypeScript resolved it to **the DOM's
+global `Node`** and reported:
+
+```
+Property 'site_id' does not exist on type 'Node'
+Property 'policy_degraded_kind' does not exist on type 'Node'
+```
+
+**Both errors are TRUE, about a REAL type, and completely misleading.** Nothing in the message says a
+*different* `Node` was found. The natural reading is *"our Node schema is missing those fields"* — which sends
+you to the spec, the generated types and the API, all of which are correct.
+
+> ### **THE CHECK RAN, IT MATCHED SOMETHING, AND THE SOMETHING WAS WRONG.**
+
+Same family as the ANSI-swallowed `^FAIL` grep and the magenta baseline: **evidence collected, not compared.**
+Distinct enough to name because the collision is with a GLOBAL, so there is no import to be missing from a
+diff and no red anywhere — the code compiles the moment the field access is removed.
+
+**THE COLLIDING NAMES IN THIS CODEBASE:** `Node` (schema vs DOM), `Event`, `Response`, `Request`, `Location`,
+`Screen` — `Event` is the one to watch, since `AccessEvent` and audit entries live beside it.
+
+**⚠ MEASURED, AND THE GUARD DOES NOT EXIST TO BE ADDED:** the repo has **no ESLint** (`grep -c eslint
+package.json` → 0), so `no-restricted-globals` has nowhere to live. **A censused sweep of `apps/web/src` found
+ZERO other instances** — every other use of these names imports its type. So this was a single occurrence, not
+a pattern, and the finding is recorded rather than tooled.
+
+**IF ESLINT IS EVER ADOPTED, THIS RULE IS THE FIRST ENTRY.** Until then the check is the sweep above, which is
+cheap to re-run and is what proved the instance was isolated.
