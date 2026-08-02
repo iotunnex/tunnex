@@ -269,14 +269,18 @@ describe("⛔ EDITION IS A FOURTH STATE — an enterprise-only card is ABSENT, n
 });
 
 describe("HA Hub Set un-reporting member rendering", () => {
-  it("renders 'not reporting' for a member without metrics (Query Rule One + exact count + paired absence)", async () => {
+  it("renders 'not reporting' for a member without metrics (Query Rule One listitem role + exact count)", async () => {
     show();
     await waitFor(() => expect(screen.getByText("HA Hub Set")).toBeTruthy());
-    // Query Rule One: Query by role="status" and accessible name
-    const statuses = screen.getAllByRole("status", { name: /not reporting/i });
-    expect(statuses.length).toEqual(1);
-    expect(screen.getByRole("status", { name: /primary · not reporting/i })).toBeTruthy();
-    // Absence assertion: paired with positive role query above (mitigating Mechanism ⑧)
-    expect(screen.queryByRole("status", { name: /· hs n\/a/i })).toBeNull();
+    // Query Rule One: Query listitem by role and single-truth accessible name
+    const listItems = screen.getAllByRole("listitem", { name: /not reporting/i });
+    expect(listItems.length).toEqual(1);
+    expect(
+      screen.getByRole("listitem", { name: /gw-a \(primary\): not reporting/i })
+    ).toBeTruthy();
+    // Absence assertion: paired with positive role query above
+    expect(
+      screen.queryByRole("listitem", { name: /gw-a \(primary\): hs n\/a/i })
+    ).toBeNull();
   });
 });

@@ -708,24 +708,22 @@ export default function Dashboard() {
                                 const node = nodesRes?.ok
                                   ? nodesRes.data.find((n) => n.id === m.nodeId)
                                   : undefined;
+                                const memberName = node?.name ?? m.nodeId.slice(0, 8);
+                                const memberRole = m.demoted ? "demoted" : m.role;
+                                const memberStatus = !m.reporting ? "not reporting" : `hs ${m.handshakeAge}`;
+                                const memberLabel = `${memberName} (${memberRole}): ${memberStatus}`;
+
                                 return (
-                                  <ListItem
-                                    key={m.nodeId}
-                                    aria-label={`${node?.name ?? m.nodeId.slice(0, 8)} (${m.demoted ? "demoted" : m.role}): ${!m.reporting ? "not reporting" : `handshake ${m.handshakeAge}`}`}
-                                  >
+                                  <ListItem key={m.nodeId} aria-label={memberLabel}>
                                     <span className="flex items-center justify-between gap-2">
                                       <span className="truncate font-mono text-mono text-ink-primary">
-                                        {node?.name ?? m.nodeId.slice(0, 8)}
+                                        {memberName}
                                       </span>
                                       <span
                                         className="shrink-0 text-micro text-ink-tertiary"
                                         role="status"
-                                        aria-label={`${m.demoted ? "demoted" : m.role} · ${!m.reporting ? "not reporting" : `hs ${m.handshakeAge}`}`}
                                       >
-                                        {m.demoted ? "demoted" : m.role}
-                                        {!m.reporting
-                                          ? " · not reporting"
-                                          : ` · hs ${m.handshakeAge}`}
+                                        {memberRole} · {memberStatus}
                                       </span>
                                     </span>
                                   </ListItem>
