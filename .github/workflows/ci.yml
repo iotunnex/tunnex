@@ -161,8 +161,22 @@ jobs:
   # artifacts (expected/actual/diff) and its failures MEAN something different: e2e red = broken behaviour,
   # visual red = something moved, possibly on purpose.
   #
-  # ⛔ SPLIT: THE GEOMETRIC HALF BLOCKS, THE PIXEL HALF IS ADVISORY. Founder-ruled 2026-08-02, correcting an
-  # earlier wholesale demotion that surrendered the half that pays along with the half that does not.
+  # ⛔ SPLIT: THE GEOMETRIC HALF FAILS THE JOB, THE PIXEL HALF DOES NOT. Founder-ruled 2026-08-02, correcting
+  # an earlier wholesale demotion that surrendered the half that pays along with the half that does not.
+  #
+  # ⚠⚠ AND "BLOCKING" HAS TWO MEANINGS HERE. BE PRECISE ABOUT WHICH ONE:
+  #
+  #   FAILS THE JOB    the step is not continue-on-error, so a red step reddens this check in the PR list
+  #   REQUIRED         branch protection REFUSES THE MERGE without it
+  #
+  # `main`'s required contexts are exactly: gates · client (macos-latest) · client (windows-latest).
+  # THIS JOB IS NOT AMONG THEM. So step 1 is RED-IN-THE-LIST, NOT MERGE-PREVENTING — and calling it "blocking"
+  # (as an earlier revision of this comment did) overstated it in the direction that matters, while the job's
+  # NAME said "advisory" and understated it in the other. Both are fixed above.
+  #
+  # PROMOTING STEP 1 TO A REQUIRED CHECK IS A BRANCH-PROTECTION CHANGE, which is itself the registered trigger
+  # for dispositioning the PLAN-pointer bypass (docs/EPIC-14-ui-redesign.md). The two land together or neither
+  # does; a protection edit made in passing is how the last one went unnoticed.
   #
   # A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN. This job compares against a committed image, and
   # every slice of EPIC 14 deliberately changes the shared surface — a palette, a primitive, an animation, a
@@ -180,7 +194,7 @@ jobs:
   # Unblocked by COMMITTING A BASELINE, never by re-running with --update-snapshots, which this job can never
   # do because it only ever compares.
   visual:
-    name: visual regression (geometric BLOCKING; pixel diff advisory during EPIC 14)
+    name: visual — geometric+census FAIL THE JOB; pixel advisory; NOT a required check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

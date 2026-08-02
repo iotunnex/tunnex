@@ -819,3 +819,35 @@ S14.3 with **Access Events** named as its consumer. The nav audit moved Access E
 (throughput, ABSENT-PENDING-ENDPOINTS).** Both are real components with no shipping consumer. **Re-state both
 at EPIC 14 close**, and if either still has none, that is the moment to ask whether it should have been built
 yet — not to quietly carry it into EPIC 15.
+
+## ⛔ REGISTERED — `Modal` DECLARES `aria-modal` AND IMPLEMENTS NONE OF IT. FOUR FACTS, MEASURED.
+
+**The first report of this said only *"no Escape handler"*. That was ONE ENCODING of the question, and the
+founder was right to refuse it. Measured properly, `components/ui.tsx`:**
+
+| behaviour | present? | evidence |
+|---|---|---|
+| **Escape dismisses** | ❌ | no `onKeyDown`, no `keydown` listener anywhere in the file |
+| **focus trap** | ❌ | no `useEffect`, no focus containment, no sentinel nodes |
+| **initial focus moves into the dialog** | ❌ | no `autoFocus`, no `ref().focus()` |
+| **focus returns to the opener on dismiss** | ❌ | nothing captures `document.activeElement` before opening |
+
+**AND IT DECLARES `role="dialog" aria-modal="true"`.**
+
+> ## **`aria-modal="true"` TELLS ASSISTIVE TECH THE REST OF THE PAGE IS INERT. KEYBOARD FOCUS CAN STILL WALK
+> ## STRAIGHT OUT OF THE DIALOG INTO IT. THAT IS WORSE THAN NOT DECLARING IT** — the AT has been told to
+> ## ignore content the user is now standing in, with no Escape to get back.
+
+**A KEYBOARD USER WHO OPENS ANY MODAL IN THIS PRODUCT CANNOT CLOSE IT FROM THE KEYBOARD** and can tab into a
+region their screen reader has been instructed to skip.
+
+**IT IS EVERY MODAL ON EVERY SCREEN** — 20 call sites — and the epic's own consequence 1 makes semantic,
+accessible markup a **hard requirement**, not a polish item.
+
+**⚠ AND THE PRECEDENT IS EXACT: `backdrop-filter` already broke five modals across four screens once**, and a
+commissioned click-through reported *"nothing is broken"*. **This class has merged behind a green gate in this
+component before.**
+
+**NOT FIXED MID-STORY** — it is a shared primitive touching 20 call sites and it needs its own slice with its
+own tests (Escape, trap, initial focus, return focus, each proven to reject). **TRIGGER: the next slice that
+touches `Modal`, or S14.7, whichever is first.** It does not wait for a screen to ask for it.

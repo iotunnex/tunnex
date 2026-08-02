@@ -79,6 +79,28 @@ test.describe("no page scrolls sideways", () => {
 //
 // A DEMOTED CHECK MUST HAVE ITS FINDINGS RE-HOMED, NOT JUST ITS RED SUPPRESSED. Otherwise "advisory" quietly
 // means "the class it caught is now uncovered".
+//
+// ⚠⚠ STATUS: THIS GUARD IS **UNPROVEN**. It has not been shown to REJECT.
+//
+// The census beside it was proven — a fourth expected name produced a demonstrated red — and this one got
+// the same commit without the same treatment. Proving it needs the gallery COMPILED (`VITE_VISUAL_GALLERY=1`
+// is baked at build time, not read at runtime), and the only stack currently running was built without it
+// and is the founder's live review environment on port 80. Rebuilding would take it down.
+//
+// SO IT IS MARKED, NOT ASSUMED. An unproven guard is a claim, and this file's own history is the argument:
+// the previous "proof" of a baseline was a solid magenta rectangle that satisfied every count.
+//
+// TO DISCHARGE: reintroduce the width-derived height on `AreaChart` (delete its `style={{height}}`), run this
+// spec, confirm the failure names the measured height, restore. One CI cycle, or one local rebuild when the
+// founder's stack is free.
+// The gallery's labelled charts, counted. `VizFrame` emits `<figure aria-label>` only when it actually draws:
+// a `roadmap` source renders a <p role="note"> and a failed/empty one renders nothing, so those specimens are
+// deliberately NOT in this number.
+//
+// ⚠ UNVERIFIED AT THE TIME OF WRITING — see the height bound's note below. If CI reports a different count,
+// the number here is wrong, not the page.
+const EXPECTED_CHARTS = 8;
+
 test.describe("chart primitives are bounded in height", () => {
   test("no chart renders taller than its design allows @ 1440", async ({
     page,
@@ -90,17 +112,36 @@ test.describe("chart primitives are bounded in height", () => {
 
     // Every viz primitive renders through `VizFrame`, which emits a labelled <figure>. One query reaches all
     // of them, including any added later — an enumeration rather than a list of the three that exist today.
+    // ⛔ AN EXACT COUNT, NOT A FLOOR — the magenta trap in a different costume.
+    //
+    // `figure[aria-label]` is ONE ENCODING. A chart that loses its label stops matching, the loop runs over
+    // a shorter list, and the guard passes having measured nothing — subject and check vanishing together
+    // (mechanism ⑧), which is exactly how a masked baseline compared equal forever.
+    //
+    // A floor (`> 2`) does not close it: drop three of eight labels and it still passes. So the number is
+    // EXACT and moves only in a reviewed edit to this line.
     const figures = page.locator("figure[aria-label]");
     const n = await figures.count();
-    expect(n, "no charts found — the query is wrong, not the page").toBeGreaterThan(2);
+    expect(
+      n,
+      "the gallery's chart count changed. If you added or removed a viz specimen, update this number; if you did not, a chart has LOST ITS aria-label and this guard was about to measure a shorter list than it thinks",
+    ).toBe(EXPECTED_CHARTS);
 
     for (let i = 0; i < n; i++) {
       const fig = figures.nth(i);
       const label = await fig.getAttribute("aria-label");
       const box = await fig.boundingBox();
       expect(box, `${label} has no box`).not.toBeNull();
-      // 420px: the tallest legitimate chart here is the 320px node-link plus its legend row. A width-derived
-      // height lands at 500-750px, so the bound separates the two cases without being fussy about layout.
+      // ⛔ WHERE 420 COMES FROM — DERIVED, NOT PICKED.
+      //
+      // The tallest legitimate chart is `NodeLink` at 3+ spokes: its viewBox height is
+      // PAD_TOP(48) + vertical spread(2 × ry = 210) + PAD_BOTTOM(68) = 326px, rendered 1:1 by contract.
+      // Its <figure> adds the legend row (~24) and the selected-node readout (~34) plus margins (~16) ≈ 400px.
+      // 420 is that, with ~5% headroom for font metrics.
+      //
+      // A WIDTH-DERIVED HEIGHT AT 1440 LANDS AT 500-750px, so the bound separates the two cases by a wide
+      // margin in the direction that matters. It is a defect detector, not a layout opinion — it will not
+      // fire on a chart that grows slightly and will fire on one whose height is coming from its width.
       expect(
         box!.height,
         `chart "${label}" is ${Math.round(box!.height)}px tall — a viewBox with w-full and no height derives its height from its WIDTH`,
