@@ -281,11 +281,13 @@ export function Panel({
  *
  * `ok` REMAINS LIVENESS-ONLY (S4.4 decision f). The reservation scan in tokens.test.ts reads these use-sites.
  */
+export type BadgeTone = "ok" | "warn" | "danger" | "neutral" | "unknown";
+
 export function Badge({
   tone = "neutral",
   children,
 }: {
-  tone?: "ok" | "warn" | "danger" | "neutral";
+  tone?: BadgeTone;
   children: ReactNode;
 }) {
   const cls = {
@@ -293,6 +295,7 @@ export function Badge({
     warn: "border-warn/40 text-warn",
     danger: "border-danger/40 text-danger",
     neutral: "border-white/10 text-slate-400",
+    unknown: "border-amber-500/40 text-amber-300",
   }[tone];
   return (
     <span

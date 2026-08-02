@@ -21,7 +21,7 @@ import {
   StatusDot,
 } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
-import { postureBadge, postureBadgeClass } from "../lib/postureview";
+import { postureBadge } from "../lib/postureview";
 import {
   exportCeremony,
   shouldRenderQR,
@@ -282,7 +282,7 @@ export default function Devices() {
           </div>
           {nodes.length === 0 && (
             <p className="mt-3 text-xs text-amber-400">
-              No gateway node is enrolled yet — enroll one to create devices.
+              No gateway node is enrolled yet - enroll one to create devices.
             </p>
           )}
         </Card>
@@ -300,7 +300,7 @@ export default function Devices() {
               This file contains your device&rsquo;s{" "}
               <span className="text-warn">private key</span>. It is shown{" "}
               <span className="font-semibold">exactly once</span> and cannot be
-              retrieved again — save it now.{" "}
+              retrieved again - save it now.{" "}
               {/* The honesty line (Part-2): a static profile bakes the CURRENT site routes; a subnet
                   added later won&rsquo;t appear until the profile is re-exported. Stated at issuance. */}
               <span className="text-slate-300">
@@ -325,7 +325,7 @@ export default function Devices() {
           {pendingExport && (
             <div className="mt-3 rounded-md border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
               This device is{" "}
-              <span className="font-semibold">pending approval</span> — the
+              <span className="font-semibold">pending approval</span> - the
               profile is valid but won&rsquo;t connect until an admin approves
               the device.
             </div>
@@ -394,16 +394,14 @@ export default function Devices() {
                 return (
                   <>
                     {pb && (
-                      <span className={`text-xs ${postureBadgeClass(pb.tone)}`}>
-                        {pb.label}
-                      </span>
+                      <Badge tone={pb.tone}>{pb.label}</Badge>
                     )}
                     {/* S9.1 Part-2: a static profile whose baked site routes no longer match the org's current
                         ranges — the never-silently-broken law, made visible. */}
                     {d.needs_reexport && (
                       <span
                         className="ml-2 text-xs text-amber-400"
-                        title="This device's exported profile predates a site-range change — re-export and re-import it."
+                        title="This device's exported profile predates a site-range change - re-export and re-import it."
                       >
                         re-export needed
                       </span>
