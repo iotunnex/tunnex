@@ -20,7 +20,9 @@ import {
   fanOutExceedsTripwire,
   forwardsEmptyCopy,
   mapAddressSpace,
+  nextFreeRange,
   sortForwards,
+  type Allocation,
   type RangeRow,
   type SubnetFetch,
 } from "../lib/routedrangesview";
@@ -57,6 +59,15 @@ import {
 // org forever, which is not information — it is a column that teaches the reader the wrong thing, namely
 // that some other value is possible on this screen.
 
+// Legend rows, in the same order the eye meets them on the grid.
+const LEGEND = [
+  { text: "routed, pushed to devices", tone: "var(--tnx-ok)", small: false, dashed: false },
+  { text: "part of a cell (finer than the grid)", tone: "var(--tnx-ok)", small: true, dashed: false },
+  { text: "pending, withheld until approved on Sites", tone: "var(--tnx-warn)", small: false, dashed: true },
+  { text: "device pool", tone: "var(--tnx-accent)", small: false, dashed: false },
+  { text: "cluster VIP range", tone: "var(--tnx-neutral)", small: false, dashed: false },
+];
+
 export default function RoutedRangesPage() {
   const [org, setOrg] = useState<Org | null>(null);
   const [ranges, setRanges] = useState<string[] | null>(null);
@@ -65,6 +76,11 @@ export default function RoutedRangesPage() {
   // `null` = the fan-out has not resolved. NOT `[]` — see the four-armed union in the view model. This is the
   // state that keeps an in-flight SITE cell from reading as "no site owns this".
   const [fanOut, setFanOut] = useState<SubnetFetch[] | null>(null);
+  // ⛔ THE OTHER ALLOCATION CLASSES. `subnetguard` refuses a collision with site subnets, the DEVICE POOL and
+  // K8s VIP RANGES (its fourth class, `reserved`, is measured DEAD — `WithReserved` has no callers). A map
+  // that draws only site subnets renders the pool's cell DARK, i.e. "yours to take", and the server refuses
+  // it. `null` = not yet known, which is why "free" is qualified until every class has answered.
+  const [vipRanges, setVipRanges] = useState<Array<{ cidr: string; label: string }> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -123,6 +139,20 @@ export default function RoutedRangesPage() {
       }),
     );
     setFanOut(results);
+
+    // Cluster VIP ranges. `listK8sClusters` is org:view (verified at the handler, not inferred from the nav's
+    // ENT badge). NON-FATAL: a failure leaves `vipRanges` null, which downgrades the free-space claim rather
+    // than silently drawing space as available.
+    const kRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/k8s/clusters", {
+        params: { path: { orgId: first.id } },
+      }),
+    )) as Loaded<Array<{ name: string; vip_range: string }>>;
+    setVipRanges(
+      kRes.ok
+        ? kRes.data.map((c) => ({ cidr: c.vip_range, label: `${c.name} cluster VIPs` }))
+        : null,
+    );
   }, []);
 
   useEffect(() => {
@@ -133,20 +163,53 @@ export default function RoutedRangesPage() {
     () => attributeRanges(ranges ?? [], sites, fanOut),
     [ranges, sites, fanOut],
   );
-  // Pending subnets come from the SAME fan-out attribution already needs — no extra request. They are drawn
-  // as withheld cells, never as approved ones.
-  const pendingCidrs = useMemo(
-    () =>
-      (fanOut ?? [])
-        .flatMap((f) => (f.ok ? f.subnets : []))
-        .filter((s) => s.status === "pending")
-        .map((s) => s.cidr),
-    [fanOut],
+  // EVERY CLASS THE VALIDATOR ENFORCES, in one list. Pending subnets ride the fan-out attribution already
+  // needs, so they cost no extra request.
+  const siteName = useMemo(
+    () => new Map(sites.map((s) => [s.id, s.name])),
+    [sites],
   );
-  const spaceMap = useMemo(
-    () => mapAddressSpace(ranges ?? [], pendingCidrs),
-    [ranges, pendingCidrs],
-  );
+  const allocations = useMemo<Allocation[]>(() => {
+    const out: Allocation[] = [];
+    for (const row of rows)
+      out.push({
+        cidr: row.range,
+        kind: "approved",
+        label:
+          row.attribution.kind === "site"
+            ? row.attribution.siteName
+            : attributionLabel(row.attribution),
+      });
+    for (const f of fanOut ?? [])
+      if (f.ok)
+        for (const sub of f.subnets)
+          if (sub.status === "pending")
+            out.push({
+              cidr: sub.cidr,
+              kind: "pending",
+              label: `${siteName.get(sub.site_id) ?? "a site"}, awaiting approval`,
+            });
+    if (org?.pool_cidr)
+      out.push({ cidr: org.pool_cidr, kind: "pool", label: "device pool" });
+    for (const v of vipRanges ?? [])
+      out.push({ cidr: v.cidr, kind: "vip", label: v.label });
+    return out;
+  }, [rows, fanOut, siteName, org, vipRanges]);
+
+  const spaceMap = useMemo(() => mapAddressSpace(allocations), [allocations]);
+
+  // ⛔ "FREE" IS ONLY KNOWABLE WHEN EVERY CLASS HAS ANSWERED. A failed fan-out or an unread cluster list means
+  // some space we would draw dark might be taken — so the suggestion is WITHHELD rather than guessed. The
+  // same census discipline as the SITE column, applied to a number an admin would act on.
+  const spaceComplete =
+    fanOut !== null && fanOut.every((f) => f.ok) && vipRanges !== null;
+  const suggestion = useMemo(() => {
+    if (!spaceComplete || spaceMap.blocks.length === 0) return null;
+    const primary = spaceMap.blocks[0];
+    const at24 = nextFreeRange(allocations, primary.block, 24);
+    const at16 = nextFreeRange(allocations, primary.block, 16);
+    return at24 === null && at16 === null ? null : { at24, at16, block: primary.block };
+  }, [spaceComplete, spaceMap, allocations]);
   const failedSites = useMemo(
     () => (fanOut ?? []).filter((f) => !f.ok).length,
     [fanOut],
@@ -212,8 +275,10 @@ export default function RoutedRangesPage() {
             {spaceMap.blocks.length > 0 && (
               <Panel title="Address space map">
                 <p className="text-micro text-ink-faint">
-                  Approved CIDRs pushed into split-tunnel AllowedIPs. One grid
-                  per private block that has ranges in it.
+                  Everything that occupies address space, not only what is
+                  routed. A new LAN must avoid all of it, so the map draws all
+                  of it: approved subnets, pending ones, the device pool and
+                  cluster VIP ranges.
                 </p>
                 {spaceMap.blocks.map((m) => (
                   <AddressSpaceMap
@@ -224,32 +289,68 @@ export default function RoutedRangesPage() {
                 ))}
                 {/* Legend, in text. The grid encodes three states by fill and inset; none of that reaches a
                     screen reader, and colour alone would fail the same reader twice. */}
-                <ul className="flex flex-wrap items-center gap-4 text-micro text-ink-tertiary">
+                <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro text-ink-tertiary">
+                  {LEGEND.map((l) => (
+                    <li key={l.text} className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className={`rounded-[2px] ${l.small ? "h-[5px] w-[5px]" : "h-[9px] w-[9px]"} ${l.dashed ? "border border-dashed" : ""}`}
+                        style={
+                          l.dashed
+                            ? { borderColor: l.tone }
+                            : { background: l.tone, opacity: 0.55 }
+                        }
+                      />
+                      {l.text}
+                    </li>
+                  ))}
                   <li className="flex items-center gap-1.5">
                     <span
                       aria-hidden
-                      className="h-[9px] w-[9px] rounded-[2px]"
-                      style={{ background: "var(--tnx-neutral)" }}
+                      className="h-[9px] w-[9px] rounded-[2px] border"
+                      style={{
+                        background: "var(--tnx-surface-inset)",
+                        borderColor: "var(--tnx-divider)",
+                      }}
                     />
-                    fills its cell, approved and pushed
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="h-[5px] w-[5px] rounded-[1px]"
-                      style={{ background: "var(--tnx-neutral)" }}
-                    />
-                    part of a cell (a range finer than the grid)
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="h-[9px] w-[9px] rounded-[2px] border border-dashed"
-                      style={{ borderColor: "var(--tnx-warn)" }}
-                    />
-                    pending, withheld until approved on Sites
+                    free
                   </li>
                 </ul>
+
+                {/* ⛔ THE ANSWER, NOT JUST THE PICTURE. An address map is read to decide what to use next, and
+                    a /16 cell cannot say which /24s inside it are free. This line is interval arithmetic over
+                    EVERY allocation class, so it stays exact where the grid is too coarse — and it is
+                    WITHHELD entirely when any class failed to load, because a confident wrong range is worse
+                    than no suggestion. */}
+                {suggestion !== null && (
+                  <p className="text-cell text-ink-body">
+                    Next free in {suggestion.block.label}:{" "}
+                    {suggestion.at24 !== null && (
+                      <span className="font-mono text-ink-heading">
+                        {suggestion.at24}
+                      </span>
+                    )}
+                    {suggestion.at24 !== null && suggestion.at16 !== null
+                      ? " · "
+                      : ""}
+                    {suggestion.at16 !== null && (
+                      <span className="font-mono text-ink-heading">
+                        {suggestion.at16}
+                      </span>
+                    )}
+                    <span className="text-ink-faint">
+                      {" "}
+                      — clear of every routed subnet, the device pool and
+                      cluster VIPs, so the disjointness check will accept it.
+                    </span>
+                  </p>
+                )}
+                {!spaceComplete && spaceMap.blocks.length > 0 && (
+                  <p className="text-micro text-warn">
+                    Not every allocation class could be read, so empty cells are
+                    not proof that space is free and no range is suggested.
+                  </p>
+                )}
                 {spaceMap.blocks.some((m) => m.lit.length > MAP_LIST_MAX) && (
                   // A SILENT CAP IS A LIE ABOUT COVERAGE. Past six lit cells the connector fan is unreadable,
                   // so the labelled list is dropped — and said so, with the complete list named.
@@ -265,7 +366,7 @@ export default function RoutedRangesPage() {
                   <p className="text-micro text-warn">
                     Outside the private blocks and therefore not drawn:{" "}
                     <span className="font-mono">
-                      {spaceMap.offMap.join(", ")}
+                      {spaceMap.offMap.map((x) => x.cidr).join(", ")}
                     </span>
                     . They are routed exactly the same; only the map cannot
                     place them.
@@ -275,7 +376,7 @@ export default function RoutedRangesPage() {
                   <p className="text-micro text-danger">
                     Not a parseable IPv4 CIDR, so not drawn:{" "}
                     <span className="font-mono">
-                      {spaceMap.unparseable.join(", ")}
+                      {spaceMap.unparseable.map((x) => x.cidr).join(", ")}
                     </span>
                     .
                   </p>

@@ -191,27 +191,40 @@ export function sortForwards(forwards: DNSForward[]): DNSForward[] {
 
 // ── THE ADDRESS-SPACE MAP ───────────────────────────────────────────────────────────────────────────────
 //
-// FOUNDER-OVERRIDDEN: this panel was CUT in the S14.7 commit-one and is now ruled back in. The cut had two
-// reasons and BOTH ARE REAL DEFECTS IN THE WIREFRAME, so the panel is built with both closed rather than
-// reproduced:
+// FOUNDER-OVERRIDDEN: cut in the S14.7 commit-one, ruled back in. The cut had two reasons and BOTH ARE REAL
+// DEFECTS IN THE WIREFRAME, so the panel is built with them closed rather than reproduced:
 //
-//   ① A /24 LIT A WHOLE /16 CELL. `alloc = { 20: 'pending' }` in the handoff marks 10.20.0.0/24 by its
-//     SECOND OCTET, so a 256-address LAN paints a 65,536-address block. Our own data has three /24s. CLOSED
-//     by a third cell state: `partial` renders INSET, so "some of this /16" cannot be read as "all of it".
+//   ① A /24 LIT A WHOLE /16 CELL (`alloc = { 20: 'pending' }` keys 10.20.0.0/24 by its second octet), so a
+//     256-address LAN painted a 65,536-address block. CLOSED: `partial` cells render INSET.
 //
-//   ② THE GRID DOMAIN WAS HARD-CODED 10.0.0.0/8. A customer on 172.16/12 or 192.168/16 would get a map with
-//     their ranges INVISIBLE — reassuring-empty on the panel whose entire job is showing what is routed. Our
-//     seeded data is all 10.x, so this would have looked perfect and been wrong for someone else. CLOSED by
-//     mapping each RFC1918 block that actually contains ranges, plus an explicit OFF-MAP list so a range can
-//     never vanish by being outside the drawing.
+//   ② THE GRID DOMAIN WAS HARD-CODED 10.0.0.0/8, so a customer on 172.16/12 or 192.168/16 saw their ranges
+//     VANISH. Our seed is all 10.x, so it would have looked perfect. CLOSED: one grid per RFC1918 block that
+//     has content, plus an explicit OFF-MAP list.
 //
-// Everything here is pure arithmetic on the served `ranges` array. Nothing is invented.
+// ⛔ AND A THIRD DEFECT, FOUND BY ASKING WHAT THE PANEL IS FOR. A map of allocated space is read to answer
+// "what can I use next" — so a DARK CELL IS A CLAIM THAT THE SPACE IS FREE. The server refuses an
+// overlapping range by checking FOUR classes (`subnetguard`: site_subnet, pool, vip_range, reserved) and the
+// first build drew ONE of them. The live device pool is 10.99.0.0/24; cell 99 rendered dark, i.e. "yours to
+// take", and the server would refuse it.
+//
+//   `reserved` is measured as DEAD — `WithReserved` has no callers outside its own definition — so the
+//   reachable set is THREE: site subnets, the device pool, and K8s VIP ranges. That is what is drawn.
+//
+// THE PRINCIPLE: THE MAP MUST DRAW EVERYTHING THE VALIDATOR ENFORCES, OR ITS EMPTY SPACE IS A LIE.
 
-/** A drawable address block. `cellPrefix` is what ONE cell represents. */
+/** What occupies address space. Every kind here is a class `subnetguard` refuses a collision with. */
+export type AllocKind = "approved" | "pending" | "pool" | "vip";
+
+export type Allocation = {
+  cidr: string;
+  kind: AllocKind;
+  /** Who owns it — a site name, "device pool", a cluster name. The map's most useful label. */
+  label: string;
+};
+
 export type Block = {
   key: string;
   label: string;
-  /** Network address, uint32. */
   base: number;
   prefix: number;
   cellPrefix: number;
@@ -219,36 +232,41 @@ export type Block = {
   cols: number;
 };
 
-// The three RFC1918 blocks, each with a cell size that keeps the grid readable: /8 and /12 divide into /16s,
-// and 192.168/16 — which is only ONE /16 — divides into /24s or it would be a single cell.
 export const BLOCKS: Block[] = [
   { key: "10", label: "10.0.0.0/8", base: 0x0a000000, prefix: 8, cellPrefix: 16, cells: 256, cols: 32 },
   { key: "172", label: "172.16.0.0/12", base: 0xac100000, prefix: 12, cellPrefix: 16, cells: 16, cols: 16 },
   { key: "192", label: "192.168.0.0/16", base: 0xc0a80000, prefix: 16, cellPrefix: 24, cells: 256, cols: 32 },
 ];
 
-export type CellState = "free" | "partial" | "full";
-export type CellStatus = "approved" | "pending";
+export type CellState = "partial" | "full";
 
 export type Cell = {
   index: number;
   state: CellState;
-  status: CellStatus;
-  /** The CIDRs that lit this cell — the tooltip/label source, so a cell can always say why it is on. */
-  cidrs: string[];
+  /** The kind shown when a cell holds more than one. See KIND_RANK. */
+  kind: AllocKind;
+  allocs: Allocation[];
 };
 
 export type BlockMap = {
   block: Block;
-  /** LIT cells only. The free ones are drawn from `block.cells`, not carried per-cell. */
   lit: Cell[];
-  /** Exact fraction of the block's addresses covered by APPROVED ranges. Not a cell count. */
+  /** Fraction of the block's addresses occupied by ROUTED traffic (approved subnets only). */
   utilised: number;
-  approvedCount: number;
-  pendingCount: number;
+  /** Fraction occupied by ANYTHING — the number that matters when picking a new range. */
+  claimed: number;
+  counts: Record<AllocKind, number>;
 };
 
-/** Parses a CIDR into a uint32 network address and prefix, or null. Reuses canonicalCidr's validation. */
+// Precedence when one cell holds several kinds. Highest wins the cell's colour: a cell that is partly the
+// device pool must not read as merely pending, because the pool is the harder constraint to discover.
+const KIND_RANK: Record<AllocKind, number> = {
+  approved: 4,
+  pool: 3,
+  vip: 2,
+  pending: 1,
+};
+
 export function parseCidr(raw: string): { addr: number; prefix: number } | null {
   const canonical = canonicalCidr(raw);
   if (canonical === null) return null;
@@ -260,63 +278,62 @@ export function parseCidr(raw: string): { addr: number; prefix: number } | null 
   };
 }
 
+const size = (prefix: number) => Math.pow(2, 32 - prefix);
+
 function inBlock(addr: number, prefix: number, block: Block): boolean {
   if (prefix < block.prefix) return false;
   const mask = block.prefix === 0 ? 0 : (0xffffffff << (32 - block.prefix)) >>> 0;
   return ((addr & mask) >>> 0) === block.base;
 }
 
-/**
- * mapAddressSpace lays approved and pending CIDRs onto the RFC1918 blocks they fall in.
- *
- * Only blocks that CONTAIN something are returned — an empty 172.16/12 grid on an org that has never used it
- * is 16 dark squares saying nothing. Anything outside all three comes back in `offMap`, which is the whole
- * point: a range must never disappear by being un-drawable.
- */
-export function mapAddressSpace(
-  approved: string[],
-  pending: string[] = [],
-): { blocks: BlockMap[]; offMap: string[]; unparseable: string[] } {
-  const offMap: string[] = [];
-  const unparseable: string[] = [];
-  const acc = new Map<string, { cells: Map<number, Cell>; approvedAddrs: number; approvedCount: number; pendingCount: number }>();
+export function mapAddressSpace(allocations: Allocation[]): {
+  blocks: BlockMap[];
+  offMap: Allocation[];
+  unparseable: Allocation[];
+} {
+  const offMap: Allocation[] = [];
+  const unparseable: Allocation[] = [];
+  const acc = new Map<
+    string,
+    { cells: Map<number, Cell>; routedAddrs: number; claimedAddrs: number; counts: Record<AllocKind, number> }
+  >();
 
-  const place = (cidr: string, status: CellStatus) => {
-    const parsed = parseCidr(cidr);
+  for (const alloc of allocations) {
+    const parsed = parseCidr(alloc.cidr);
     if (parsed === null) {
-      // NOT silently skipped. An unrenderable string is a fact about the data, and the panel says so.
-      unparseable.push(cidr);
-      return;
+      unparseable.push(alloc);
+      continue;
     }
     const block = BLOCKS.find((b) => inBlock(parsed.addr, parsed.prefix, b));
     if (block === undefined) {
-      offMap.push(cidr);
-      return;
+      offMap.push(alloc);
+      continue;
     }
     let entry = acc.get(block.key);
     if (entry === undefined) {
-      entry = { cells: new Map(), approvedAddrs: 0, approvedCount: 0, pendingCount: 0 };
+      entry = {
+        cells: new Map(),
+        routedAddrs: 0,
+        claimedAddrs: 0,
+        counts: { approved: 0, pending: 0, pool: 0, vip: 0 },
+      };
       acc.set(block.key, entry);
     }
-    if (status === "approved") {
-      entry.approvedCount += 1;
-      entry.approvedAddrs += Math.pow(2, 32 - parsed.prefix);
-    } else entry.pendingCount += 1;
+    entry.counts[alloc.kind] += 1;
+    entry.claimedAddrs += size(parsed.prefix);
+    // ⛔ ONLY APPROVED SUBNETS ARE "UTILISED". A pending range is withheld and a pool is not routed LAN
+    // traffic, so folding them in would overstate what actually goes down the tunnel.
+    if (alloc.kind === "approved") entry.routedAddrs += size(parsed.prefix);
 
-    const firstCell = Math.floor((parsed.addr - block.base) / Math.pow(2, 32 - block.cellPrefix));
+    const first = Math.floor((parsed.addr - block.base) / size(block.cellPrefix));
     if (parsed.prefix > block.cellPrefix) {
-      // ⛔ FINER THAN ONE CELL. This is defect ① — the case the handoff drew as a full cell.
-      upsert(entry.cells, firstCell, "partial", status, cidr);
-      return;
+      upsert(entry.cells, first, "partial", alloc);
+      continue;
     }
-    // Coarser than or equal to a cell: it fills several, wholly.
-    const span = Math.pow(2, block.cellPrefix - parsed.prefix);
-    for (let i = 0; i < span && firstCell + i < block.cells; i++)
-      upsert(entry.cells, firstCell + i, "full", status, cidr);
-  };
-
-  approved.forEach((c) => place(c, "approved"));
-  pending.forEach((c) => place(c, "pending"));
+    const span = size(parsed.prefix) / size(block.cellPrefix);
+    for (let i = 0; i < span && first + i < block.cells; i++)
+      upsert(entry.cells, first + i, "full", alloc);
+  }
 
   const blocks: BlockMap[] = [];
   for (const block of BLOCKS) {
@@ -325,9 +342,9 @@ export function mapAddressSpace(
     blocks.push({
       block,
       lit: [...entry.cells.values()].sort((a, b) => a.index - b.index),
-      utilised: entry.approvedAddrs / Math.pow(2, 32 - block.prefix),
-      approvedCount: entry.approvedCount,
-      pendingCount: entry.pendingCount,
+      utilised: entry.routedAddrs / size(block.prefix),
+      claimed: entry.claimedAddrs / size(block.prefix),
+      counts: entry.counts,
     });
   }
   return { blocks, offMap, unparseable };
@@ -337,33 +354,106 @@ function upsert(
   cells: Map<number, Cell>,
   index: number,
   state: CellState,
-  status: CellStatus,
-  cidr: string,
+  alloc: Allocation,
 ) {
   const existing = cells.get(index);
   if (existing === undefined) {
-    cells.set(index, { index, state, status, cidrs: [cidr] });
+    cells.set(index, { index, state, kind: alloc.kind, allocs: [alloc] });
     return;
   }
-  existing.cidrs.push(cidr);
-  // FULL beats PARTIAL, and APPROVED beats PENDING. Both for the same reason: the stronger claim is the one
-  // a reader must not miss. Disjointness is server-enforced so this is defensive, but a cell that is both
-  // must not render as the weaker of the two.
+  existing.allocs.push(alloc);
   if (state === "full") existing.state = "full";
-  if (status === "approved") existing.status = "approved";
+  if (KIND_RANK[alloc.kind] > KIND_RANK[existing.kind]) existing.kind = alloc.kind;
 }
 
-/** "0.8% of /8" — the handoff's phrasing, computed rather than fixed. */
+// ── "WHAT DO I USE NEXT" ────────────────────────────────────────────────────────────────────────────────
+//
+// ⛔ THE ANSWER IS COMPUTED BY INTERVAL ARITHMETIC, NOT FROM THE GRID, and that difference is the point.
+//
+// A /16 cell cannot say which /24s inside it are free — the grid is one zoom level too coarse for the size
+// most customers actually deploy. Arithmetic has no resolution limit, so this stays exact where the picture
+// cannot: it will happily suggest a /24 inside a half-used /16 and be right.
+//
+// AND IT IS COMPUTED AGAINST EVERY ALLOCATION CLASS. A suggestion derived from site subnets alone would
+// confidently name ranges the server rejects — worse than no feature, because it comes with a number.
+
+/**
+ * The first free, correctly-aligned block of the requested prefix, or null if the block is full.
+ *
+ * `null` is also returned for a request the block cannot satisfy (a /8 inside a /12), rather than a
+ * plausible-looking wrong answer.
+ */
+export function nextFreeRange(
+  allocations: Allocation[],
+  block: Block,
+  prefix: number,
+): string | null {
+  if (prefix < block.prefix || prefix > 32) return null;
+  const want = size(prefix);
+  const blockEnd = block.base + size(block.prefix);
+
+  // Merge every claim in this block into disjoint occupied intervals. Disjointness is server-enforced
+  // between real allocations, but merging is what makes the walk below correct regardless.
+  const taken: Array<[number, number]> = [];
+  for (const a of allocations) {
+    const p = parseCidr(a.cidr);
+    if (p === null || !inBlock(p.addr, p.prefix, block)) continue;
+    taken.push([p.addr, p.addr + size(p.prefix)]);
+  }
+  taken.sort((x, y) => x[0] - y[0]);
+  const merged: Array<[number, number]> = [];
+  for (const [lo, hi] of taken) {
+    const last = merged[merged.length - 1];
+    if (last !== undefined && lo <= last[1]) last[1] = Math.max(last[1], hi);
+    else merged.push([lo, hi]);
+  }
+
+  // Walk the gaps, snapping each candidate UP to its own alignment — a CIDR must start on a multiple of its
+  // own size, so the first free address is usually not a legal network address.
+  let cursor = block.base;
+  for (const [lo, hi] of [...merged, [blockEnd, blockEnd] as [number, number]]) {
+    const candidate = Math.ceil(cursor / want) * want;
+    if (candidate + want <= lo && candidate + want <= blockEnd)
+      return `${toDotted(candidate)}/${prefix}`;
+    cursor = Math.max(cursor, hi);
+  }
+  return null;
+}
+
+function toDotted(addr: number): string {
+  return [
+    Math.floor(addr / 16777216) % 256,
+    Math.floor(addr / 65536) % 256,
+    Math.floor(addr / 256) % 256,
+    addr % 256,
+  ].join(".");
+}
+
+/** "0.4% of /8" — computed, and never a bare "0.0%" for a real allocation. */
 export function utilisationLabel(m: BlockMap): string {
   const pct = m.utilised * 100;
   const shown = pct === 0 ? "0" : pct < 0.1 ? "<0.1" : pct.toFixed(1);
   return `${shown}% of /${m.block.prefix}`;
 }
 
-/** "4 approved · 1 pending" — the counting line under the bar. Singular/plural, and pending omitted at zero. */
+/** "6 routed · 2 pending · 1 pool" — only the kinds actually present. */
 export function allocationLabel(m: BlockMap): string {
-  const approved = `${m.approvedCount} approved`;
-  return m.pendingCount === 0
-    ? approved
-    : `${approved} · ${m.pendingCount} pending`;
+  const NAMES: Array<[AllocKind, string]> = [
+    ["approved", "routed"],
+    ["pending", "pending"],
+    ["pool", "pool"],
+    ["vip", "cluster VIP"],
+  ];
+  const parts = NAMES.filter(([k]) => m.counts[k] > 0).map(
+    ([k, name]) => `${m.counts[k]} ${name}`,
+  );
+  return parts.length === 0 ? "nothing allocated" : parts.join(" · ");
 }
+
+/** The per-kind short word shown on a call-out row. */
+export const KIND_LABEL: Record<AllocKind, string> = {
+  approved: "ROUTED",
+  pending: "PENDING",
+  pool: "POOL",
+  vip: "VIP",
+};

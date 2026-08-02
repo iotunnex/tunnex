@@ -134,8 +134,8 @@ describe("RoutedRanges — the attribution join", () => {
     // rather than asserting against a page that has not rendered at all (which would pass vacuously).
     await screen.findByRole("table", { name: /approved routed ranges/i });
     expect(inTable().getByText("10.20.0.0/24")).toBeTruthy();
-    expect(screen.queryByText(/no site advertises this/i)).toBeNull();
-    expect(screen.getByText(/loading/i)).toBeTruthy();
+    expect(inTable().queryByText(/no site advertises this/i)).toBeNull();
+    expect(inTable().getByText(/loading/i)).toBeTruthy();
 
     // AND THE OTHER SIDE OF THE SAME TWO-VALUED THING (mechanism ⑨): release the gate and the very same cell
     // must resolve. A screen permanently stuck on "Loading…" would pass the assertions above.
@@ -150,9 +150,12 @@ describe("RoutedRanges — the attribution join", () => {
       subnets: { s1: [], s2: "fail" },
     });
     render(<RoutedRanges />);
-    expect(await screen.findByText(/could not load/i)).toBeTruthy();
+    await screen.findByRole("table", { name: /approved routed ranges/i });
+    await waitFor(() =>
+      expect(inTable().getByText(/could not load/i)).toBeTruthy(),
+    );
     // The unmatched claim requires a COMPLETE census. s2 might own this range; we cannot say it does not.
-    expect(screen.queryByText(/no site advertises this/i)).toBeNull();
+    expect(inTable().queryByText(/no site advertises this/i)).toBeNull();
   });
 
   it("states the degraded read at panel level, so partial attribution is not read as partial coverage", async () => {
@@ -173,8 +176,11 @@ describe("RoutedRanges — the attribution join", () => {
     // complete census the screen is ALLOWED to make the negative claim, and must.
     handler = backend({ ranges: ["10.99.0.0/24"], subnets: { s1: [], s2: [] } });
     render(<RoutedRanges />);
-    expect(await screen.findByText(/no site advertises this/i)).toBeTruthy();
-    expect(screen.queryByText(/could not load/i)).toBeNull();
+    await screen.findByRole("table", { name: /approved routed ranges/i });
+    await waitFor(() =>
+      expect(inTable().getByText(/no site advertises this/i)).toBeTruthy(),
+    );
+    expect(inTable().queryByText(/could not load/i)).toBeNull();
     expect(screen.queryByText(/could not be read/i)).toBeNull();
   });
 
@@ -188,8 +194,11 @@ describe("RoutedRanges — the attribution join", () => {
       },
     });
     render(<RoutedRanges />);
-    expect(await screen.findByText(/no site advertises this/i)).toBeTruthy();
-    expect(screen.queryByText("Sydney")).toBeNull();
+    await screen.findByRole("table", { name: /approved routed ranges/i });
+    await waitFor(() =>
+      expect(inTable().getByText(/no site advertises this/i)).toBeTruthy(),
+    );
+    expect(inTable().queryByText("Sydney")).toBeNull();
   });
 });
 
@@ -225,7 +234,7 @@ describe("RoutedRanges — failure and emptiness", () => {
     render(<RoutedRanges />);
     await screen.findByRole("table", { name: /approved routed ranges/i });
     expect(inTable().getByText("10.20.0.0/24")).toBeTruthy();
-    expect(screen.getByText(/could not load/i)).toBeTruthy();
+    expect(inTable().getByText(/could not load/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
   });
 });
@@ -277,8 +286,8 @@ describe("RoutedRanges — the address-space map", () => {
     expect(
       await screen.findByText(/pending, withheld until approved on Sites/i),
     ).toBeTruthy();
-    // 1 approved · 1 pending, counted from the two different sources.
-    expect(await screen.findByText(/1 approved · 1 pending/)).toBeTruthy();
+    // 1 routed · 1 pending, counted from the two different sources.
+    expect(await screen.findByText(/1 routed · 1 pending/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
   });
 
@@ -311,9 +320,9 @@ describe("RoutedRanges — the address-space map", () => {
     // Donut avoids. Every number the drawing carries is asserted here through its accessible name.
     handler = backend({ ranges: ["10.10.0.0/16"] });
     render(<RoutedRanges />);
-    const svg = await screen.findByRole("img", { name: /10\.0\.0\.0\/8/ });
+    const svg = await screen.findByRole("img", { name: /^10\.0\.0\.0\/8/ });
     const name = svg.getAttribute("aria-label") ?? "";
-    expect(name).toContain("1 approved");
+    expect(name).toContain("1 routed");
     // A /16 in a /8 is 1/256 = 0.39%.
     expect(name).toMatch(/0\.4% of \/8/);
   });
