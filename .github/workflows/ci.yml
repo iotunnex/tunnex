@@ -173,7 +173,10 @@ jobs:
       - uses: actions/setup-go@v5
         if: matrix.os == 'windows-latest'
         with:
-          go-version: '1.25'
+          # ⛔ DERIVED, NOT HARDCODED. security.yml already uses go-version-file and therefore cannot drift
+          # from what the module declares; this side asserted '1.25' by hand, so the agreement between the
+          # thing we BUILD and the thing we SCAN held by coincidence. Both now ask the module.
+          go-version-file: apps/api/go.mod
           cache-dependency-path: apps/helper/go.sum
       - name: Helper — native Windows build + vet + test (WFP deps)
         if: matrix.os == 'windows-latest'

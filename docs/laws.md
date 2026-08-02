@@ -2811,3 +2811,30 @@ guard extended by hand acquires the same drift it exists to prevent.
 notice says it (`false = the Go steps below are SKIPPED, not passed`); CodeQL's counting step said it; and now
 a whole job set. **Every time, the thing that made it invisible was that skipping is also the correct
 behaviour most of the time.**
+
+---
+
+## A COMPOSITE RESULT REPORTED BY ITS MOST FAVOURABLE COMPONENT
+
+**S14.12 (founder-ruled). TWO INSTANCES IN ONE SESSION, one in each direction.**
+
+**A GATE READ SELECTIVELY IS NOT A GATE.** I ran the web gate, read *"597 tests passed"*, and pushed. Two
+lines above it sat **`typecheck: 2`**. The gate is typecheck + tests + build; I reported the leg that agreed
+with me.
+
+**THE SIBLING, same session, same shape:** CI's board showed every badge green while `govulncheck` ×5,
+`gofmt + vet parity` and `Trivy` **never ran** — a green *badge* hiding absent jobs, where the other was a
+green *test count* hiding a failing leg.
+
+> ### **BOTH TIMES THE UNFAVOURABLE PART WAS VISIBLE, ADJACENT, AND UNREAD. Nothing was hidden; the**
+> ### **aggregate was simply allowed to speak for its parts, and an aggregate always speaks in the voice of**
+> ### **whichever part you looked at.**
+
+**THE CHECK:** for any composite gate, report **every leg by name and value** — never the aggregate, never the
+one leg you happened to read.
+
+> ### **"make web-gate green" IS NOT A REPORT. "typecheck 0, 597 tests, build clean" IS.**
+
+Same for CI: not *"CI green"* but **`gates: success` (14/14 steps), `client (macos)`: success, `client
+(windows)`: success, `govulncheck` ×5: RAN and passed** — because *ran* and *passed* are different claims and
+a skip reports as neither.
