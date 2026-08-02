@@ -9,9 +9,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"time"
 
@@ -19,6 +24,78 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/seeddata"
 )
+
+// ⛔ ONE POSTURE STATE IS UNREACHABLE FROM SQL, AND IT IS THE MOST SEVERE ONE.
+//
+// `devices.health_blocked` is written by exactly one code path — `ReportHealth` — and the stale-block sweep can
+// only ever set it to FALSE (`SweepStaleHealthBlocks`). So no INSERT or UPDATE in fixtures.sql can produce a
+// blocked device: THE INPUT IS AN HTTP REQUEST, NOT A ROW. Seeding the flag directly is the
+// controller-owned-field mistake (the sweep silently undoes it and the row reads as applied).
+//
+// The Human Gate Limit Law requires the review stack to exercise every state the screen can render, and
+// `posture blocked` is the DANGER tone on the Devices screen. Before this, it had never rendered on localhost
+// and the device named `blocked-device` was not blocked.
+//
+// SO THE SEEDER REGISTERS IT THROUGH THE PRODUCT — the same pattern as the k3s cluster in scripts/k3s-demo.sh:
+// log in as the demo owner and POST a failing posture report for ONE device. That exercises the real
+// evaluation path (require-mode check + `disk_encrypted: false`) instead of asserting its conclusion.
+//
+// ⚠ IT REPORTS FOR EXACTLY ONE DEVICE, DELIBERATELY. A loop over the owner's devices destroys the fixture's
+// posture SPREAD (compliant / unknown / not-reported), and that spread is the only thing that makes the
+// POSTURE column reviewable. This is a fixed device id, not a query.
+const blockedDeviceID = "01900000-0000-7000-8000-0000000c0009"
+
+// reportBlockedPosture logs in as the demo owner and posts a failing report for the one device.
+// Returns whether the state was produced — NEVER fatal: the SQL half has already succeeded, and a seeder that
+// dies here would leave a half-seeded database over a review aid.
+func reportBlockedPosture(ctx context.Context, base string) (bool, error) {
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+
+	post := func(path string, body any) (*http.Response, error) {
+		b, _ := json.Marshal(body)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		// The CSRF header is presence-checked for cookie-auth requests; any value satisfies it.
+		req.Header.Set("X-Tunnex-CSRF", "seed")
+		return c.Do(req)
+	}
+
+	// Prime the cookie jar so the CSRF cookie exists, then authenticate.
+	if r, err := c.Get(base + "/api/v1/meta"); err == nil {
+		r.Body.Close()
+	}
+	lr, err := post("/api/v1/auth/login", map[string]string{
+		"email": seeddata.DemoOwnerEmail, "password": seeddata.DemoOwnerPassword,
+	})
+	if err != nil {
+		return false, err
+	}
+	lr.Body.Close()
+	if lr.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("login returned %d", lr.StatusCode)
+	}
+
+	rr, err := post(fmt.Sprintf("/api/v1/organizations/%s/devices/%s/health", seeddata.DemoOrgID, blockedDeviceID),
+		map[string]any{"platform": "macos", "os_version": "14.4.0", "disk_encrypted": false})
+	if err != nil {
+		return false, err
+	}
+	defer rr.Body.Close()
+	if rr.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("report returned %d", rr.StatusCode)
+	}
+	var out struct{ Blocked bool }
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		return false, err
+	}
+	// ⛔ THE SERVER'S OWN VERDICT IS THE CHECK. Asserting we posted is not asserting it blocked: if the org's
+	// require-mode check were ever removed, this would post happily and produce nothing.
+	return out.Blocked, nil
+}
 
 //go:embed fixtures.sql
 var fixturesSQL string
@@ -113,12 +190,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ⛔ THE ONE STATE SQL CANNOT PRODUCE, registered through the product. Non-fatal by design, and its outcome
+	// is COUNTED below rather than assumed — a seeder that says "ok" while the severest state is missing is the
+	// reassuring-green shape at fixture level.
+	apiBase := os.Getenv("TUNNEX_API_URL")
+	if apiBase == "" {
+		apiBase = "http://nginx:8080" // the compose service the seeder shares a network with
+	}
+	postureBlocked, perr := reportBlockedPosture(ctx, apiBase)
+	if perr != nil {
+		logger.Warn("seed_fixtures_posture_block_unreached",
+			slog.String("error", perr.Error()),
+			slog.String("api", apiBase),
+			slog.String("consequence", "`posture blocked` (the DANGER tone) will NOT render — it is reachable only through ReportHealth, never from SQL. Set TUNNEX_API_URL if the API is elsewhere."),
+		)
+	}
+
 	logger.Info("seed_fixtures_ok",
 		slog.String("org", seeddata.DemoOrgID),
 		slog.Int("gateways", gateways), slog.Int("sites", sites), slog.Int("subnets", subnets),
 		slog.Int("devices", devices), slog.Int("audit_entries", audits),
 		slog.Int("k8s_clusters", clusters), slog.Int("k8s_services", services),
-		slog.Int("policy_rules", rules), slog.Int("user_groups", groups), slog.Int("group_members", members),
+		slog.Int("policy_rules", rules),
+		// TRUE = the severest posture state exists and the screen can be reviewed against it.
+		slog.Bool("posture_blocked", postureBlocked), slog.Int("user_groups", groups), slog.Int("group_members", members),
 		slog.Int("resources", resources), slog.Int("access_events", accessEvents),
 		slog.Int("cli_credentials", cliCreds), slog.Int("machine_credentials", machineCreds),
 		slog.String("note", "totals as they now EXIST (fixture + make seed), counted after the write; health kinds are DERIVED, not seeded"),

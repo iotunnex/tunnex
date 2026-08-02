@@ -252,8 +252,12 @@ seed-enterprise: ## Seed the ENTERPRISE fixtures (SSO config + strandable device
 .PHONY: seed-fixtures
 seed-fixtures: ## Seed the DEMO FIXTURES (populated network for UI review) ON TOP of `seed` (S14.5)
 	@echo '>> demo fixtures: 5 gateways, 4 sites, 6 subnets, 5 devices, 12 audit entries (run after: make seed)'
+	@# ⛔ TUNNEX_SEED_FORCE IS PASSED THROUGH. The seeder refuses on any non-demo org and its own hint names
+	@# this variable as the override — but the Makefile did not forward it, so the DOCUMENTED escape hatch did
+	@# not work through the documented entry point. TUNNEX_API_URL rides along for the posture-block report.
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  -e TUNNEX_SEED_FORCE="$(TUNNEX_SEED_FORCE)" -e TUNNEX_API_URL="$(TUNNEX_API_URL)" \
 	  $(GO_IMAGE) go run ./cmd/seed-fixtures
 
 .PHONY: k3s-demo k3s-demo-verify k3s-demo-down

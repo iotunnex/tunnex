@@ -21,7 +21,7 @@ import {
   StatusDot,
 } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
-import { postureBadge } from "../lib/postureview";
+import { addressLabel, postureBadge } from "../lib/postureview";
 import {
   exportCeremony,
   shouldRenderQR,
@@ -362,8 +362,12 @@ export default function Devices() {
               key: "address",
               header: "Address",
               cell: (d) => (
-                <span className="font-mono text-xs text-slate-500">
-                  {d.assigned_ip ?? "\u2014"}
+                <span
+                  className={`font-mono text-xs ${
+                    d.assigned_ip ? "text-slate-500" : "text-slate-600 italic"
+                  }`}
+                >
+                  {addressLabel(d.assigned_ip)}
                 </span>
               ),
             },

@@ -9,6 +9,9 @@ import {
   postureBadge,
   postureBadgeClass,
   wouldFailCopy,
+  addressLabel,
+  NO_ADDRESS,
+  unknownPostureLabel,
 } from "../src/lib/postureview";
 import type { HealthCheck } from "../src/lib/api";
 
@@ -23,12 +26,28 @@ describe("postureBadge — the three-way legibility rider", () => {
       health_blocked: false,
     });
     expect(never).toEqual({ label: "posture not reported", tone: "unknown" });
+    // ⛔ THIS ASSERTION ENCODED THE DEFECT (corrected S14.10). It gave a device with a present
+    // `health_reported_at` and NO FACTS AT ALL the label "posture stale" — the tri-state case, where the
+    // device reported and simply could not determine the fact. It is current and incomplete, not silent.
+    //
+    // A test can pin a defect as firmly as it pins a behaviour, and this one did: it is why the mislabel
+    // survived a green suite. FACTS ARE NOW PRESENT, which is what actually makes a report stale.
     const stale = postureBadge({
       health_state: "unknown",
       health_blocked: false,
       health_reported_at: "2026-07-16T00:00:00Z",
+      health_os_version: "14.5",
     });
     expect(stale).toEqual({ label: "posture stale", tone: "unknown" });
+
+    // And the third arm, which had no coverage at all: reported, fact unavailable.
+    expect(
+      postureBadge({
+        health_state: "unknown",
+        health_blocked: false,
+        health_reported_at: "2026-07-16T00:00:00Z",
+      }),
+    ).toEqual({ label: "posture reported, fact unavailable", tone: "unknown" });
     // The load-bearing distinction: unknown must never share compliant's tone/label.
     const ok = postureBadge({
       health_state: "compliant",
@@ -156,5 +175,89 @@ describe("the verbatim honesty line (D6 — locked copy)", () => {
       "client-reported, not hardware-attested",
     );
     expect(POSTURE_HONESTY_LINE).toContain("defense-in-depth, not a guarantee");
+  });
+});
+
+// ── S14.10 ITEM 1 — THREE CAUSES, THREE LABELS ──────────────────────────────────────────────────────────
+//
+// The old arm emitted TWO labels on a presence check of `health_reported_at`, so the tri-state case — a
+// device that reported seconds ago but could not determine a fact — rendered "posture stale". THE
+// REASSURING-INVERSE: it told an operator the device was silent while it was talking.
+describe("unknownPostureLabel — one red per cause", () => {
+  const base = {
+    health_reported_at: undefined,
+    health_os_version: undefined,
+    health_disk_encrypted: undefined,
+  };
+
+  it("⛔ CAUSE 1 — never reported", () => {
+    expect(unknownPostureLabel(base)).toBe("posture not reported");
+  });
+
+  it("⛔ CAUSE 2 — reported, facts present: the server judged it past the TTL", () => {
+    // Sound WITHOUT A CLIENT CLOCK: `healthInfoFor` only sets a state when the report is inside
+    // HealthStaleTTL, so `unknown` WITH facts can only be a report the server called stale. A fresh report
+    // carrying facts would have evaluated to compliant/noncompliant and never reached this arm.
+    expect(
+      unknownPostureLabel({
+        ...base,
+        health_reported_at: "2026-08-02T09:00:00Z",
+        health_os_version: "14.5",
+      }),
+    ).toBe("posture stale");
+  });
+
+  it("⛔ CAUSE 3 — reported, no facts: current and INCOMPLETE, not stale", () => {
+    // THE DEFECT THIS FIXES. This device is talking. Calling it stale is the inverse of the truth.
+    const label = unknownPostureLabel({
+      ...base,
+      health_reported_at: "2026-08-02T09:00:00Z",
+    });
+    expect(label).toBe("posture reported, fact unavailable");
+    expect(label).not.toMatch(/stale|not reported/);
+  });
+
+  it("ANY fact counts, not EVERY fact — a partial answer is still a report that arrived", () => {
+    // `every` instead of `some` would send a partially-answering device to the stale label: the same
+    // mislabel, one notch narrower, and far harder to notice.
+    expect(
+      unknownPostureLabel({
+        ...base,
+        health_reported_at: "2026-08-02T09:00:00Z",
+        health_disk_encrypted: true,
+      }),
+    ).toBe("posture stale");
+  });
+
+  it("the three causes produce THREE DISTINCT labels", () => {
+    // Mechanism ⑨ at set level: two arms collapsing to one string is exactly the defect being fixed, and it
+    // would pass every individual assertion above if the collapse were between two untested pairs.
+    const labels = new Set([
+      unknownPostureLabel(base),
+      unknownPostureLabel({ ...base, health_reported_at: "x", health_os_version: "14.5" }),
+      unknownPostureLabel({ ...base, health_reported_at: "x" }),
+    ]);
+    expect(labels.size).toBe(3);
+  });
+});
+
+// ── S14.10 ITEM 2 — THE ADDRESS PLACEHOLDER ─────────────────────────────────────────────────────────────
+describe("addressLabel", () => {
+  it("⛔ NEVER returns an empty string — blank pixels cannot say 'no address'", () => {
+    // The regression this pins: `?? ""` made "has no address" and "the cell failed to render" identical.
+    for (const absent of [undefined, null, ""])
+      expect(addressLabel(absent).length).toBeGreaterThan(0);
+  });
+
+  it("returns the address verbatim when there is one", () => {
+    // Both sides in one test: a function returning the placeholder unconditionally passes the assertion above.
+    expect(addressLabel("10.99.0.7")).toBe("10.99.0.7");
+    expect(addressLabel(undefined)).toBe(NO_ADDRESS);
+  });
+
+  it("names the STATE, not a CAUSE — it is absent on four different paths", () => {
+    // revoked (swept) · rejected (RejectDevice NULLs it) · pending · never assigned. "released" would be
+    // wrong for a device that never had one; "revoked" would be wrong for three of the four.
+    expect(NO_ADDRESS).not.toMatch(/revoked|released|freed|expired/i);
   });
 });
