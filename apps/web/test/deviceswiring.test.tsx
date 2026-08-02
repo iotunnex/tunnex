@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import {
   render,
   screen,
@@ -110,7 +111,11 @@ function rowFor(name: string): HTMLElement {
 
 describe("Devices — wiring", () => {
   it("a REVOKED device carries no posture badge and no re-export instruction; an active one carries both", async () => {
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
     await waitFor(() =>
       expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
     );
@@ -136,7 +141,11 @@ describe("Devices — wiring", () => {
   });
 
   it("both devices are listed — suppression hides BADGES, never the row itself", async () => {
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
     const table = await waitFor(() =>
       screen.getByRole("table", { name: "Devices" }),
     );
@@ -155,7 +164,11 @@ describe("Devices — wiring", () => {
   });
 
   it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
     await waitFor(() =>
       expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
     );
@@ -171,7 +184,11 @@ describe("Devices — failure path", () => {
   // shows both the error and "No devices yet." — the error is what must never go missing.
   it("a failed device load is SURFACED, never swallowed into 'no devices'", async () => {
     devicesFail = true;
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
 
     await waitFor(() =>
       expect(screen.getByText("Could not load devices.")).toBeTruthy(),
@@ -181,7 +198,11 @@ describe("Devices — failure path", () => {
   it("an empty-but-successful load says so in words", async () => {
     devicesFail = false;
     DEVICES.length = 0; // an org with no devices — a FACT, not a failure
-    render(<Devices />);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
     await waitFor(() =>
       expect(screen.getByText("No devices yet.")).toBeTruthy(),
     );
