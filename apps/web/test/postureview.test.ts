@@ -32,22 +32,15 @@ describe("postureBadge — the three-way legibility rider", () => {
     //
     // A test can pin a defect as firmly as it pins a behaviour, and this one did: it is why the mislabel
     // survived a green suite. FACTS ARE NOW PRESENT, which is what actually makes a report stale.
+    // STALE is marked by the NULLABLE fact being present — os_version is NOT NULL and so cannot discriminate.
     const stale = postureBadge({
       health_state: "unknown",
       health_blocked: false,
       health_reported_at: "2026-07-16T00:00:00Z",
-      health_os_version: "14.5",
     });
     expect(stale).toEqual({ label: "posture stale", tone: "unknown" });
 
-    // And the third arm, which had no coverage at all: reported, fact unavailable.
-    expect(
-      postureBadge({
-        health_state: "unknown",
-        health_blocked: false,
-        health_reported_at: "2026-07-16T00:00:00Z",
-      }),
-    ).toEqual({ label: "posture reported, fact unavailable", tone: "unknown" });
+
     // The load-bearing distinction: unknown must never share compliant's tone/label.
     const ok = postureBadge({
       health_state: "compliant",
@@ -183,7 +176,7 @@ describe("the verbatim honesty line (D6 — locked copy)", () => {
 // The old arm emitted TWO labels on a presence check of `health_reported_at`, so the tri-state case — a
 // device that reported seconds ago but could not determine a fact — rendered "posture stale". THE
 // REASSURING-INVERSE: it told an operator the device was silent while it was talking.
-describe("unknownPostureLabel — one red per cause", () => {
+describe("unknownPostureLabel — TWO reachable causes, and the third is unreachable BY SCHEMA", () => {
   const base = {
     health_reported_at: undefined,
     health_os_version: undefined,
@@ -194,50 +187,38 @@ describe("unknownPostureLabel — one red per cause", () => {
     expect(unknownPostureLabel(base)).toBe("posture not reported");
   });
 
-  it("⛔ CAUSE 2 — reported, facts present: the server judged it past the TTL", () => {
-    // Sound WITHOUT A CLIENT CLOCK: `healthInfoFor` only sets a state when the report is inside
-    // HealthStaleTTL, so `unknown` WITH facts can only be a report the server called stale. A fresh report
-    // carrying facts would have evaluated to compliant/noncompliant and never reached this arm.
+  it("⛔ CAUSE 2 — reported: the server judged it past the TTL", () => {
+    // With a row present, `evaluated_state` is NOT NULL and CHECK-constrained to compliant|noncompliant, so
+    // `healthInfoFor` can only reach `unknown` via staleness. No client clock is used or needed.
+    expect(
+      unknownPostureLabel({ ...base, health_reported_at: "2026-08-02T09:00:00Z" }),
+    ).toBe("posture stale");
+  });
+
+  it("⛔ THE THIRD CAUSE THE SPEC CLAIMS IS UNREACHABLE — a fact-absent report is COMPLIANT, not unknown", () => {
+    // The spec says unknown = "no report, stale report, or the fact was reported absent". Measured: the
+    // evaluator does `if f.DiskEncrypted == nil { continue }` — "absence never blocks" — so the check is
+    // SKIPPED and the device evaluates COMPLIANT. It never becomes unknown.
+    //
+    // This test exists so the next reader does not rebuild the third label from the spec's prose, as I did.
+    // A device with a report and no disk answer still lands on the STALE arm, and that arm is correct because
+    // the only way it reaches `unknown` at all is staleness.
     expect(
       unknownPostureLabel({
         ...base,
         health_reported_at: "2026-08-02T09:00:00Z",
-        health_os_version: "14.5",
+        health_os_version: "6.8.0",
       }),
     ).toBe("posture stale");
   });
 
-  it("⛔ CAUSE 3 — reported, no facts: current and INCOMPLETE, not stale", () => {
-    // THE DEFECT THIS FIXES. This device is talking. Calling it stale is the inverse of the truth.
-    const label = unknownPostureLabel({
-      ...base,
-      health_reported_at: "2026-08-02T09:00:00Z",
-    });
-    expect(label).toBe("posture reported, fact unavailable");
-    expect(label).not.toMatch(/stale|not reported/);
-  });
-
-  it("ANY fact counts, not EVERY fact — a partial answer is still a report that arrived", () => {
-    // `every` instead of `some` would send a partially-answering device to the stale label: the same
-    // mislabel, one notch narrower, and far harder to notice.
+  it("the two causes produce TWO DISTINCT labels", () => {
     expect(
-      unknownPostureLabel({
-        ...base,
-        health_reported_at: "2026-08-02T09:00:00Z",
-        health_disk_encrypted: true,
-      }),
-    ).toBe("posture stale");
-  });
-
-  it("the three causes produce THREE DISTINCT labels", () => {
-    // Mechanism ⑨ at set level: two arms collapsing to one string is exactly the defect being fixed, and it
-    // would pass every individual assertion above if the collapse were between two untested pairs.
-    const labels = new Set([
-      unknownPostureLabel(base),
-      unknownPostureLabel({ ...base, health_reported_at: "x", health_os_version: "14.5" }),
-      unknownPostureLabel({ ...base, health_reported_at: "x" }),
-    ]);
-    expect(labels.size).toBe(3);
+      new Set([
+        unknownPostureLabel(base),
+        unknownPostureLabel({ ...base, health_reported_at: "x" }),
+      ]).size,
+    ).toBe(2);
   });
 });
 

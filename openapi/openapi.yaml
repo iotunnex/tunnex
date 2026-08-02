@@ -3235,8 +3235,15 @@ components:
         # Device health / posture (S7.5.3). Present ONLY when the org has >= 1
         # posture check configured (enterprise) — otherwise omitted, so an org
         # that never opted in sees no posture noise. health_state 'unknown' =
-        # no report, stale report, or the fact was reported absent: ABSENCE IS
-        # NOT COMPLIANCE — never render unknown as a pass. health_blocked is the
+        # NO REPORT, or a STALE report. ⛔ CORRECTED S14.10: this line also said
+        # "or the fact was reported absent", and that third cause CANNOT OCCUR —
+        # measured in the schema and the evaluator. `device_health.evaluated_state`
+        # is NOT NULL with CHECK (compliant|noncompliant), and the evaluator does
+        # `if f.DiskEncrypted == nil { continue }` ("absence never blocks"), so a
+        # device that reports WITHOUT a fact is evaluated COMPLIANT, never unknown.
+        # The wrong disjunct cost a full build-and-revert of a third UI label.
+        # ABSENCE IS STILL NOT COMPLIANCE for the two real causes: never render
+        # unknown as a pass. health_blocked is the
         # enforcement fact (the device is excluded from every gateway while true).
         health_state: { type: string, enum: [compliant, noncompliant, unknown] }
         health_blocked: { type: boolean }

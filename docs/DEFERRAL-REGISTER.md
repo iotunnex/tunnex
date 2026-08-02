@@ -106,3 +106,52 @@ or any slice that needs a SECOND faulting OpenVPN gateway.**
 | **Device Approval panel** → **S14.10b** | its own commit-one | `rejectDevice` is destructive and irreversible: `pending → revoked, assigned_ip = NULL`, freeing the tunnel address. **A mutation surface with a confirm step, not a column** — folding it into a layout pass is how a confirm dialog gets reviewed as a div. **AND it makes the Modal a11y deferral LIVE** (Escape / focus trap / initial focus / focus return — paper-only, never reviewed) | S14.10 scope question | founder-approved split |
 | **Served `health_stale` discriminator** | next posture-touching slice, or EPIC 14 close | The three `unknown` causes are now derived client-side from two server fields with no client clock — **sound, but it RECONSTRUCTS a decision the server already made.** `HealthStaleTTL` is server-side and neither it nor a staleness flag is served. **One-truth says the server should say it** | S14.10 item 1 | derivation built + 5 reds; the discriminator is not |
 | **S7.4c shared-DB leakage** ⚠ **UPDATED** | ⛔ **now** — it has moved an order of magnitude | Registered at `real_orgs=29`, **never revisited. MEASURED TODAY: 298.** All created 2026-08-02, all Go integration-test debris — single-letter names (`O` ×153, `S` ×51, `K` ×44), `MFA Org` ×33, and slug prefixes `wd-` (21 — my own wedge test), `gf-`, `k8s`, `mfa`, `pos`. **CAUSE: runs that PANIC skip `t.Cleanup`**, and this session produced several (the nil-map false red). **CONSEQUENCE: `seed-fixtures` refuses on `realOrgs > 0`, so the review stack now needs `TUNNEX_SEED_FORCE=true` — the guard has been turned into a formality by debris** | S14.10, seeding for review | measured, not cleaned |
+
+---
+
+## ⛔ THE S14.6 FIXTURE DEBT IS STRUCTURAL, NOT AN OVERSIGHT — two of its three states are CONTROLLER-OWNED
+
+**Founder-connected, and it explains why the debt survived two sections.** The S14.6 debt names three states:
+
+| state | field | owner |
+|---|---|---|
+| `ovpn_enabled: true` | `organizations.ovpn_enabled` | **admin** — seedable, and seeded |
+| one OpenVPN fault kind | `nodes.capabilities → ovpn_health` | ⛔ **the agent's report.** Instance 3 of the controller-owned class — LATENT-FRAGILE, surviving only because no agent reports as `gw-eu-west` |
+| a demoted hub note | `org_hub_set.demoted` | ⛔ **the failover controller.** Instance 1 |
+
+> ### **TWO OF THREE SIT ON FIELDS A RECONCILE LOOP OWNS. THE DEBT WAS NOT FORGOTTEN — IT WAS UNSEEDABLE**
+> ### **BY THE MEANS BEING USED, AND EVERY ATTEMPT LOOKED APPLIED.**
+
+**WHAT ACTUALLY DISCHARGES IT — one of two patterns, per state:**
+
+1. **SEED THE INPUTS THE CONTROLLER CONSUMES.** Done for the demoted note: give the members the capability the
+   elector requires, leave one stale, and the controller demotes it ITSELF. Derived, not declared.
+2. **REGISTER THROUGH THE PRODUCT.** Done for `posture_blocked`, which is unreachable from SQL at all — the
+   seeder logs in and POSTs a real report, then counts the server's own verdict.
+
+**`ovpn_health` HAS NEITHER YET.** Pattern 1 needs the agent to report it (no seam today); pattern 2 needs an
+agent-authenticated status POST. **TRIGGER: the next change to which node the compose agent enrols as, or any
+slice needing a second faulting OpenVPN gateway.**
+
+---
+
+## ⛔ SPEC DEFECT — `health_state: unknown` claimed a third cause that CANNOT OCCUR
+
+`openapi.yaml` said `unknown = no report, stale report, **or the fact was reported absent**`. **The third
+disjunct is impossible**, measured three ways:
+
+```
+device_health.evaluated_state   NOT NULL, CHECK (evaluated_state IN ('compliant','noncompliant'))
+healthInfoFor                   reaches `unknown` only when evaluatedState is nil / reportedAt is nil / stale
+the evaluator                   if f.DiskEncrypted == nil { continue }   // "absence never blocks"
+```
+
+A device that reports and cannot determine the fact has the check **SKIPPED**, evaluates **`compliant`**, and is
+stored as `compliant`. It never becomes `unknown`. With a row present, `evaluatedState` is never nil.
+
+**COST: a full build-and-revert of a third UI label**, plus five reds that were green against a state production
+cannot produce. **CORRECTED IN PLACE** in `openapi.yaml`, same treatment as the `listSiteSubnets` summary and
+the `policy_degraded_kind` paragraph.
+
+**HOW IT WAS CAUGHT:** a reachability assertion on the RENDERED PAGE returned 0 matches. Unit tests passed and
+the payload looked right. **A test can pin a label production can never produce; only the screen says otherwise.**
