@@ -70,6 +70,36 @@ searches noisier. This file stayed one-line-per-entry precisely so a grep is che
 - **`126 devices` on `PUSHED TO` — CUT, not served.** Same class as the gateway `PEERS` count. Counting
   devices locally would count ones that never fetched this list.
 
+## ⛔ THE "STRENGTHENED ONE GUARD, BLINDED ANOTHER" CLASS — three instances in ONE session (S14.8)
+
+> ### **STRENGTHENING A GUARD IS A CHANGE TO GUARD COVERAGE.**
+> ### **AFTER CHANGING ONE, RE-MEASURE WHAT ELSE WAS WATCHING THE SAME FAILURE.**
+
+Every instance below is a change made to make a check STRONGER that reduced coverage somewhere else. **All
+three were caught by the author mid-change. None by a gate.** They are not three anecdotes; the shape repeats
+because a guard's *subject* and a guard's *detection mechanism* are different things, and improving the first
+can silently break the second.
+
+| # | the strengthening | what went blind | how it was caught |
+|---|---|---|---|
+| 1 | `switch` + `default` → `Record<NonHealthyPolicyDegradedKind, HealthBadge>` (compile-time exhaustiveness) | **the RUNTIME fallback.** A kind the SERVER has and our generated union lacks now yielded `undefined` — **no badge at all while `policy_degraded` is true**, i.e. LESS ALARMED THAN THE BOOL | a component test asserting forward-compat |
+| 2 | the SAME edit | **`TestEveryHealthKindReachesItsMirrorSurfaces`.** It detects a rendered kind by the literal `case "<kind>":`; the `Record` removed that string, so **all thirteen kinds read as unrendered** and the cross-surface census went red-then-nearly-dismissed | running the Go suite, then NOT accepting "pre-existing" |
+| 3 | adding the wedge regression test | **the test itself.** A hand-built `&Service{}` left `failovers` nil, so it panicked and failed **identically with and without the fix** — a red that proved nothing | re-running the proof both ways instead of stopping at the first red |
+
+**AND THE TWO GUARDS IN #1 AND #2 ARE BOTH NECESSARY** — the reason the class is subtle is that the
+replacement really is stronger, just not at the same seam:
+
+| guard | catches |
+|---|---|
+| the `Record` | a kind IN the spec with no badge — at **TS compile** time |
+| the runtime `??` | a kind the **server** has that our generated union does not |
+| the mirror census | a kind in the **GO ENUM** that never reached the spec at all — the compiler cannot see across that gap |
+
+**THE CHECK, AND IT IS CHEAP:** after changing a guard, **run the other guards that name the same subject and
+confirm they still REJECT — not merely that they pass.** The census passed green while reading every kind as
+unrendered; **a passing guard and a blind guard are indistinguishable without a rejection probe.** This is
+`PROVE-A-GUARD-REJECTS` applied to the guards you did **not** edit.
+
 ## ⛔ THE "SILENTLY DIDN'T APPLY" CLASS — three instances, registered as a CLASS because the fourth will look different again
 
 > ### **A THING CONFIGURED TO RUN, NOT RUNNING, AND REPORTING NOTHING.**
