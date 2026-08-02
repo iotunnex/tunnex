@@ -677,3 +677,37 @@ with migrations, retention and a reconciler.
 **NOT DECIDED HERE.** Registered as the blocking dependency for this panel, with the fork named.
 **S11.1 was the previously-named home for the rate/time-series version; this is the same debt, now with a
 founder mandate and a finished chart waiting on it.**
+
+## ⚠ REGISTERED — THE VISUAL JOB IS ADVISORY UNTIL EPIC 14 CLOSES, THEN IT RE-ARMS
+
+**Founder-ruled 2026-08-02: it was costing more than it returned during the redesign itself.**
+
+> ## **A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN.**
+
+The job compares against a committed image, and **every slice of this epic deliberately changes the shared
+surface** — a palette, a primitive, an animation, a button recipe. So on almost every commit of EPIC 14 the
+check's honest answer is *"yes it moved, you moved it"*, and saying that cost **a full CI round-trip plus a
+harvest**. In S14.5 it went red on **five consecutive pushes**, none of them a regression.
+
+**IT IS `continue-on-error`, NOT DELETED, and the artifact and diff still upload.** What it found while
+"failing" is the argument:
+
+| found | how |
+|---|---|
+| a 65px header overflow on every screen at 390 | geometric assertion |
+| the drawer `Menu` button over the page `<h1>` | reading a harvested image |
+| the control-plane health indicator rendered twice | strict-mode locator violation |
+| `AreaChart` rendering ~500px tall at column width | the wide specimen, on its first render |
+| **a baseline that was a solid magenta rectangle** | **reading the harvest before committing it** |
+
+**THE LAST ONE IS THE SHARPEST AND IT IS NOT A DIFF AT ALL.** A mask selector matched the modal's
+full-viewport overlay, so the harvested image was entirely magenta. Every count agreed — three baselines,
+three expected names, census satisfied — and the check would have gone **green forever with no subject in
+it.** *Mechanism ⑧, and only a human looking caught it.*
+
+**TRIGGER TO RE-ARM: EPIC 14 close**, when the surface stops moving on purpose. At that point a red means
+what it is supposed to mean — **something moved that nobody asked to move** — and it blocks again.
+
+**⛔ THIS IS A DEMOTION WITH A NAMED TRIGGER, NOT A QUIET ONE.** The CI file says so at the job, the job's
+`name:` says so in the checks list, and this entry says so here. A check that is advisory and does not
+announce it is a check nobody knows they are ignoring.
