@@ -3,6 +3,8 @@ import { EmptyState } from "./ui";
 import {
   allocationLabel,
   utilisationLabel,
+  KIND_LABEL,
+  type AllocKind,
   type Block,
   type BlockMap,
   type Cell,
@@ -971,23 +973,30 @@ export function AreaChart({
 
 // ── PRIMITIVE 5 — ADDRESS SPACE ─────────────────────────────────────────────────────────────────────────
 //
-// The handoff's `buildRangeMap`, generalised. Its geometry is kept verbatim (x0 44, top 50, cell 8.4×11.4 on
-// a 10.4×13.5 pitch, divider at 356, list at 392) because that is the drawing that was designed; what is NOT
-// kept is its two hard-coded assumptions, both of which are defects and both of which our own data or a
-// customer's would hit. See `mapAddressSpace` for the full statement.
+// The handoff's `buildRangeMap`, read from its source and kept where it was right: x0 44, top 50, 8.4x11.4
+// cells on a 10.4x13.5 pitch, divider at 356, call-out list at 392, utilisation under the list.
 //
-// ⛔ THE GRID IS NOT THE ONLY OUTPUT. An SVG is unreadable to a screen reader and unqueryable by the test
-// tier — the same three-failures-one-cause the `Donut` avoids — so every fact the picture carries is also
-// rendered as text beneath it. The picture is the fast path, never the only path.
+// FOUR THINGS THE FIRST BUILD GOT WRONG AGAINST IT, all caught by putting the two side by side:
+//   · the free-cell grid was invisible — the drawing's frame of reference simply was not there
+//   · `fontFamily="JetBrains Mono"` has NO FALLBACK and the real family is "JetBrains Mono Variable", so
+//     every number rendered in SERIF. Now the `font-mono` class, which resolves through the token stack.
+//   · the call-out rows said "fills its /16" instead of WHO OWNS IT — the single most useful label, dropped
+//   · the utilisation block sat under the grid instead of under the list, and the panel grew a dead column
+//
+// ⛔ AN SVG IS UNREADABLE TO A SCREEN READER AND UNQUERYABLE BY THE TEST TIER — the same three-failures-one-
+// cause the `Donut` avoids. Every fact the picture carries is also in its accessible name and in the text
+// beneath it. The picture is the fast path, never the only path.
 
 const GRID = { x0: 44, top: 50, cw: 10.4, ch: 13.5, cellW: 8.4, cellH: 11.4 };
-// Beyond this many lit cells the connector fan becomes spaghetti and the table below is the better read.
-//
-// ⛔ SET FROM MEASURED DATA, NOT FROM THE WIREFRAME. The handoff drew THREE call-outs, so any cap above three
-// looked safe on paper. Our own seeded org has SEVEN lit cells — a cap of 6 would have shown the founder the
-// "omitted as unreadable" note instead of the design, on the very first look. A layout derived from a
-// populated example must be checked at the sizes that actually occur, and 3 was not one of them.
 export const MAP_LIST_MAX = 8;
+
+/** Per-kind stroke. Deliberately four distinguishable tones: the cell's colour IS its constraint class. */
+export const KIND_TONE: Record<AllocKind, string> = {
+  approved: "var(--tnx-ok)",
+  pending: "var(--tnx-warn)",
+  pool: "var(--tnx-accent)",
+  vip: "var(--tnx-neutral)",
+};
 
 /** "10.64" / "172.16" / "192.168.64" — the first address of a grid row, at the block's own resolution. */
 export function mapRowLabel(block: Block, row: number): string {
@@ -1001,57 +1010,41 @@ export function mapRowLabel(block: Block, row: number): string {
   return block.cellPrefix >= 24 ? `${o[0]}.${o[1]}.${o[2]}` : `${o[0]}.${o[1]}`;
 }
 
-function CellRect({
+function LitCell({
   cell,
   block,
   animate,
   order,
 }: {
-  cell: Cell | null;
+  cell: Cell;
   block: Block;
   animate: boolean;
   order: number;
 }) {
-  const index = cell?.index ?? order;
-  const col = index % block.cols;
-  const row = Math.floor(index / block.cols);
+  const col = cell.index % block.cols;
+  const row = Math.floor(cell.index / block.cols);
   const cx = GRID.x0 + col * GRID.cw + GRID.cellW / 2;
   const cy = GRID.top + row * GRID.ch + GRID.cellH / 2;
-
-  if (cell === null)
-    return (
-      <rect
-        x={GRID.x0 + col * GRID.cw}
-        y={GRID.top + row * GRID.ch}
-        width={GRID.cellW}
-        height={GRID.cellH}
-        rx={2.4}
-        fill="#121212"
-        stroke="#212121"
-        strokeWidth={0.7}
-      />
-    );
-
-  const pending = cell.status === "pending";
-  // ⛔ PARTIAL IS DRAWN INSET, and this is defect ① closed in one line. A /24 inside a /16 cell occupies a
-  // visibly smaller square, so "some of this block" cannot be misread as "all of it" — which is exactly what
-  // the handoff's version said about 10.20.0.0/24.
-  const inset = cell.state === "partial" ? 2.2 : 0;
+  const tone = KIND_TONE[cell.kind];
+  const pending = cell.kind === "pending";
+  // ⛔ PARTIAL IS DRAWN INSET — defect ① closed in one line. A /24 inside a /16 cell occupies a visibly
+  // smaller square, so "some of this block" cannot be misread as "all of it".
+  const inset = cell.state === "partial" ? 2.3 : 0;
   const w = GRID.cellW - inset * 2;
   const h = GRID.cellH - inset * 2;
+  const begin = 0.15 + order * 0.09;
 
-  // Scale-from-centre needs a transform origin, so the rect is drawn about (0,0) inside a translated group.
   return (
     <g transform={`translate(${cx} ${cy})`}>
-      {cell.state === "full" && !pending && (
+      {cell.state === "full" && (
         <rect
-          x={-(w + 2) / 2}
-          y={-(h + 2) / 2}
-          width={w + 2}
-          height={h + 2}
+          x={-(w + 3) / 2}
+          y={-(h + 3) / 2}
+          width={w + 3}
+          height={h + 3}
           rx={3}
-          fill="var(--tnx-text-heading)"
-          opacity={0.22}
+          fill={tone}
+          opacity={0.18}
         />
       )}
       <rect
@@ -1059,44 +1052,44 @@ function CellRect({
         y={-h / 2}
         width={w}
         height={h}
-        rx={2.4}
-        fill={pending ? "rgba(195,154,78,.14)" : "var(--tnx-neutral)"}
-        stroke={pending ? "var(--tnx-warn)" : "var(--tnx-text-heading)"}
-        strokeWidth={pending ? 1.1 : 0.8}
+        rx={2.2}
+        fill={pending ? "transparent" : tone}
+        fillOpacity={pending ? 0 : 0.55}
+        stroke={tone}
+        strokeWidth={pending ? 1.1 : 0.9}
         strokeDasharray={pending ? "2 2" : undefined}
         opacity={animate ? 0 : 1}
       >
-        {/* The pending PULSE. It is the handoff's, and it earns its place: pending means WITHHELD — a state
-            that needs an admin to act — so it is the one thing on this panel that should not sit still. */}
-        {animate && pending && (
-          <animate
-            attributeName="opacity"
-            values="1;0.35;1"
-            dur="1.8s"
-            begin={`${0.15 + order * 0.12 + 0.55}s`}
-            repeatCount="indefinite"
-          />
-        )}
         {animate && (
           <animate
             attributeName="opacity"
             from="0"
             to="1"
-            dur="0.55s"
-            begin={`${0.15 + order * 0.12}s`}
+            dur="0.5s"
+            begin={`${begin}s`}
             fill="freeze"
+          />
+        )}
+        {/* Only PENDING pulses. It is the one state on this panel that needs a human to act — withheld
+            until approved — so it is the one thing that should not sit still. */}
+        {animate && pending && (
+          <animate
+            attributeName="stroke-opacity"
+            values="1;0.3;1"
+            dur="1.8s"
+            begin={`${begin + 0.5}s`}
+            repeatCount="indefinite"
           />
         )}
       </rect>
       {animate && (
-        // `back.out(2)` in the handoff's GSAP; keySplines is the SMIL equivalent overshoot.
         <animateTransform
           attributeName="transform"
           type="scale"
           from="0"
           to="1"
-          dur="0.55s"
-          begin={`${0.15 + order * 0.12}s`}
+          dur="0.5s"
+          begin={`${begin}s`}
           calcMode="spline"
           keyTimes="0;1"
           keySplines="0.34 1.56 0.64 1"
@@ -1108,12 +1101,6 @@ function CellRect({
   );
 }
 
-/**
- * The address-space map for ONE RFC1918 block.
- *
- * `animate` is passed in rather than read here: `matchMedia` is touched in exactly one place in this product
- * (`readsReducedMotionPreference`), so a component asking the platform itself would be the second.
- */
 export function AddressSpaceMap({
   map,
   animate,
@@ -1123,51 +1110,34 @@ export function AddressSpaceMap({
 }) {
   const { block, lit } = map;
   const rows = Math.ceil(block.cells / block.cols);
-  const litByIndex = new Map(lit.map((c) => [c.index, c]));
-  const order = new Map(lit.map((c, i) => [c.index, i]));
-
   const showList = lit.length > 0 && lit.length <= MAP_LIST_MAX;
-  const listRows = showList ? lit : [];
   const gridBottom = GRID.top + rows * GRID.ch;
-  const height = Math.max(gridBottom + 58, 60 + listRows.length * 42 + 46);
+  const listBottom = 60 + (showList ? lit.length : 0) * 40;
+  const height = Math.max(gridBottom + 20, listBottom + 66);
   const panelL = 372;
   const listX = 392;
+  const utY = Math.max(listBottom + 22, gridBottom - 20);
 
   const centre = (index: number) => ({
     x: GRID.x0 + (index % block.cols) * GRID.cw + GRID.cellW / 2,
     y: GRID.top + Math.floor(index / block.cols) * GRID.ch + GRID.cellH / 2,
   });
-
-  const utY = gridBottom + 22;
-  const utW = 120;
-  const barW = Math.max(utW * map.utilised, map.utilised > 0 ? 4 : 0);
+  const barW = 120;
+  const filled = Math.max(barW * map.utilised, map.utilised > 0 ? 4 : 0);
 
   return (
     <svg
       viewBox={`0 0 600 ${height}`}
-      // ⛔ PIXEL HEIGHT MATCHED TO THE viewBox HEIGHT. A `w-full` SVG with a viewBox and no height derives
-      // its height from its WIDTH — the defect that shipped a 750px-tall diagram in the gallery.
+      // Pixel height matched to the viewBox height. A `w-full` SVG with a viewBox and no height derives its
+      // height from its WIDTH — the defect that shipped a 750px-tall diagram in the gallery.
       style={{ width: "100%", height: `${height}px`, display: "block" }}
       role="img"
-      aria-label={`${block.label} address space: ${allocationLabel(map)}, ${utilisationLabel(map)}`}
+      aria-label={`${block.label} address space: ${allocationLabel(map)}, ${utilisationLabel(map)} routed`}
     >
-      <text
-        x={GRID.x0}
-        y={30}
-        fill="var(--tnx-neutral)"
-        fontFamily="JetBrains Mono"
-        fontSize={8.5}
-        fontWeight={700}
-      >
+      <text x={GRID.x0} y={30} className="font-mono" fill="var(--tnx-neutral)" fontSize={8.5} fontWeight={700}>
         {block.label}
       </text>
-      <text
-        x={GRID.x0 + 66}
-        y={30}
-        fill="var(--tnx-text-faint)"
-        fontFamily="JetBrains Mono"
-        fontSize={7.5}
-      >
+      <text x={GRID.x0 + 66} y={30} className="font-mono" fill="var(--tnx-text-faint)" fontSize={7.5}>
         {`each cell = one /${block.cellPrefix} · ${block.cells} blocks`}
       </text>
 
@@ -1179,41 +1149,46 @@ export function AddressSpaceMap({
             x={GRID.x0 - 9}
             y={GRID.top + r * GRID.ch + 9}
             textAnchor="end"
+            className="font-mono"
             fill="var(--tnx-text-faint)"
-            fontFamily="JetBrains Mono"
             fontSize={7.5}
           >
             {mapRowLabel(block, r)}
           </text>
         ))}
 
+      {/* ⛔ THE FREE GRID, AND IT IS LOAD-BEARING. Without it the lit cells float with nothing to be
+          positioned AGAINST — which is exactly how the first build rendered, and the reason a reader could
+          not tell 10.10 from 10.40. It is also the only thing that makes "how much is left" visible at all. */}
       {Array.from({ length: block.cells }, (_, i) => (
-        <CellRect
-          key={i}
-          cell={litByIndex.get(i) ?? null}
-          block={block}
-          animate={animate}
-          order={order.get(i) ?? 0}
+        <rect
+          key={`f${i}`}
+          x={GRID.x0 + (i % block.cols) * GRID.cw}
+          y={GRID.top + Math.floor(i / block.cols) * GRID.ch}
+          width={GRID.cellW}
+          height={GRID.cellH}
+          rx={2.2}
+          fill="var(--tnx-surface-inset)"
+          stroke="var(--tnx-divider)"
+          strokeWidth={0.6}
         />
+      ))}
+
+      {lit.map((cell, i) => (
+        <LitCell key={cell.index} cell={cell} block={block} animate={animate} order={i} />
       ))}
 
       {showList && (
         <>
-          <line
-            x1={356}
-            y1={26}
-            x2={356}
-            y2={height - 20}
-            stroke="var(--tnx-divider)"
-            strokeWidth={1}
-          />
-          {listRows.map((cell, i) => {
-            const y = 60 + i * 42;
+          <line x1={356} y1={26} x2={356} y2={height - 16} stroke="var(--tnx-divider)" strokeWidth={1} />
+          {lit.map((cell, i) => {
+            const y = 60 + i * 40;
             const c = centre(cell.index);
-            const tone =
-              cell.status === "pending" ? "var(--tnx-warn)" : "var(--tnx-ok)";
-            const label = cell.cidrs[0];
-            const extra = cell.cidrs.length - 1;
+            const tone = KIND_TONE[cell.kind];
+            const primary = cell.allocs[0];
+            const extra = cell.allocs.length - 1;
+            const pill = KIND_LABEL[cell.kind];
+            const pw = pill.length * 5.6 + 14;
             return (
               <g key={cell.index}>
                 <path
@@ -1221,43 +1196,55 @@ export function AddressSpaceMap({
                   fill="none"
                   stroke={tone}
                   strokeWidth={1}
-                  strokeOpacity={0.32}
-                  strokeDasharray={animate ? 400 : undefined}
-                  strokeDashoffset={animate ? 400 : undefined}
+                  strokeOpacity={0.3}
+                  strokeDasharray={animate ? 500 : undefined}
+                  strokeDashoffset={animate ? 500 : undefined}
                 >
                   {animate && (
                     <animate
                       attributeName="stroke-dashoffset"
-                      from="400"
+                      from="500"
                       to="0"
                       dur="0.9s"
-                      begin={`${0.5 + i * 0.18}s`}
+                      begin={`${0.45 + i * 0.14}s`}
                       fill="freeze"
                     />
                   )}
                 </path>
                 <circle cx={c.x} cy={c.y} r={1.6} fill="var(--tnx-text-heading)" opacity={0.9} />
-                <rect x={panelL} y={y - 15} width={3} height={30} rx={1.5} fill={tone} />
+                <rect x={panelL} y={y - 14} width={3} height={28} rx={1.5} fill={tone} />
+                <text x={listX} y={y - 2} className="font-mono" fill="var(--tnx-text-heading)" fontSize={11.5} fontWeight={700}>
+                  {primary.cidr}
+                </text>
+                {/* ⛔ WHO OWNS IT. The first build printed "fills its /16" here — a restatement of the
+                    geometry the reader can already see, in the one slot that could have carried the fact
+                    they came for. */}
+                <text x={listX} y={y + 11} fill="var(--tnx-neutral)" fontSize={9.5}>
+                  {primary.label}
+                  {cell.state === "partial" ? ` · part of one /${block.cellPrefix}` : ""}
+                  {extra > 0 ? ` · +${extra} more here` : ""}
+                </text>
+                <rect
+                  x={584 - pw}
+                  y={y - 11}
+                  width={pw}
+                  height={15}
+                  rx={7.5}
+                  fill="rgba(255,255,255,0.06)"
+                  stroke={tone}
+                  strokeWidth={1}
+                  strokeOpacity={0.5}
+                />
                 <text
-                  x={listX}
-                  y={y - 2}
-                  fill="var(--tnx-text-heading)"
-                  fontFamily="JetBrains Mono"
-                  fontSize={12}
+                  x={584 - pw / 2}
+                  y={y - 0.5}
+                  textAnchor="middle"
+                  className="font-mono"
+                  fill={tone}
+                  fontSize={7.5}
                   fontWeight={700}
                 >
-                  {label}
-                </text>
-                <text
-                  x={listX}
-                  y={y + 12}
-                  fill="var(--tnx-neutral)"
-                  fontSize={9.5}
-                >
-                  {cell.state === "partial"
-                    ? `part of one /${block.cellPrefix}`
-                    : `fills its /${block.cellPrefix}`}
-                  {extra > 0 ? ` · +${extra} more here` : ""}
+                  {pill}
                 </text>
               </g>
             );
@@ -1265,52 +1252,21 @@ export function AddressSpaceMap({
         </>
       )}
 
-      <text
-        x={GRID.x0}
-        y={utY - 8}
-        fill="var(--tnx-neutral)"
-        fontFamily="JetBrains Mono"
-        fontSize={8}
-        fontWeight={600}
-      >
-        ADDRESS SPACE UTILISED
+      {/* Utilisation lives under the CALL-OUT LIST, as the handoff has it — the right column is the reading
+          column, and putting it under the grid left a dead gutter and split the eye's path in two. */}
+      <text x={listX} y={utY - 8} className="font-mono" fill="var(--tnx-neutral)" fontSize={8} fontWeight={600}>
+        ADDRESS SPACE ROUTED
       </text>
-      <rect x={GRID.x0} y={utY} width={utW} height={6} rx={3} fill="var(--tnx-surface-inset)" />
-      <rect
-        x={GRID.x0}
-        y={utY}
-        width={animate ? 0 : barW}
-        height={6}
-        rx={3}
-        fill="var(--tnx-text-heading)"
-      >
+      <rect x={listX} y={utY} width={barW} height={6} rx={3} fill="var(--tnx-surface-inset)" />
+      <rect x={listX} y={utY} width={animate ? 0 : filled} height={6} rx={3} fill="var(--tnx-ok)">
         {animate && (
-          <animate
-            attributeName="width"
-            from="0"
-            to={barW}
-            dur="1s"
-            begin="0.9s"
-            fill="freeze"
-          />
+          <animate attributeName="width" from="0" to={filled} dur="1s" begin="0.85s" fill="freeze" />
         )}
       </rect>
-      <text
-        x={GRID.x0 + utW + 10}
-        y={utY + 6}
-        fill="var(--tnx-text-body)"
-        fontFamily="JetBrains Mono"
-        fontSize={8.5}
-      >
+      <text x={listX + barW + 10} y={utY + 6} className="font-mono" fill="var(--tnx-text-body)" fontSize={8.5}>
         {utilisationLabel(map)}
       </text>
-      <text
-        x={GRID.x0}
-        y={utY + 22}
-        fill="var(--tnx-text-faint)"
-        fontFamily="JetBrains Mono"
-        fontSize={8}
-      >
+      <text x={listX} y={utY + 21} className="font-mono" fill="var(--tnx-text-faint)" fontSize={8}>
         {allocationLabel(map)}
       </text>
     </svg>
