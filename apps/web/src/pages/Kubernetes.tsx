@@ -25,11 +25,17 @@ import { LoadRetry } from "../components/LoadRetry";
 import { roleFromMembers } from "../lib/policyview";
 import {
   assembleClusters,
+  clusterReachability,
   k8sGate,
   managedEditWarning,
   objectControls,
+  serviceRowClass,
+  statTiles,
   type ClusterCard,
 } from "../lib/k8sview";
+// ⛔ EXPLICIT IMPORT, and it is load-bearing: without it `Node` resolves to the DOM's global `Node`, so
+// `site_id` and `policy_degraded_kind` "do not exist" with no hint that a different type was found.
+import type { Node } from "../lib/api";
 import { ManagedBadge } from "../components/ManagedBadge";
 
 // Kubernetes (S10.3): the in-cluster connectivity surface — register a cluster (a synthetic VIP range fronted
@@ -42,6 +48,11 @@ interface Raw {
   clusters: K8sCluster[];
   services: K8sService[];
   sites: Site[]; // the register-cluster site picker (one gateway = one site)
+  // D9: gateways, for the reachability qualification. A cluster's Services must not read as reachable when a
+  // gateway fronting its site has no endpoint view.
+  nodes: Node[];
+  // NULL = the read failed. Distinct from 0, which means "we looked and there are none".
+  machineCreds: number | null;
 }
 
 export default function Kubernetes() {
@@ -86,10 +97,25 @@ export default function Kubernetes() {
         params: { path: { orgId: first.id } },
       }),
     )) as Loaded<Site[]>;
+    // ⛔ TWO SECOND-CLASS READS. Both enrich a screen that is already correct, so a failure degrades a cell
+    // rather than blanking the page — and `null` is carried through rather than collapsed to 0/[].
+    const nRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/nodes", {
+        params: { path: { orgId: first.id } },
+      }),
+    )) as Loaded<Node[]>;
+    const mcRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/machine-credentials", {
+        params: { path: { orgId: first.id } },
+      }),
+    )) as Loaded<unknown[]>;
     setRaw({
       clusters: cRes.data,
       services: svcRes.data,
       sites: sRes.ok ? sRes.data : [],
+      nodes: nRes.ok ? nRes.data : [],
+      // NULL, not 0 — "we could not look" is a different fact from "there are none", and the tile says which.
+      machineCreds: mcRes.ok ? mcRes.data.length : null,
     });
   }, [myId]);
   useEffect(() => {
@@ -101,6 +127,24 @@ export default function Kubernetes() {
     () => (raw ? assembleClusters(raw.clusters, raw.services) : []),
     [raw],
   );
+  const siteName = useMemo(
+    () => new Map((raw?.sites ?? []).map((x) => [x.id, x.name])),
+    [raw],
+  );
+  // D9 inputs: which gateways front which site, and whether each has an endpoint view.
+  const gateways = useMemo(
+    () =>
+      (raw?.nodes ?? []).map((n: Node) => ({
+        siteId: n.site_id ?? null,
+        endpointsUnavailable:
+          n.policy_degraded_kind === "k8s_endpoints_unavailable",
+      })),
+    [raw],
+  );
+  const tiles = useMemo(
+    () => statTiles(cards, raw?.machineCreds ?? null),
+    [cards, raw],
+  );
 
   return (
     <div>
@@ -108,8 +152,8 @@ export default function Kubernetes() {
         <div>
           <h1 className="text-xl font-semibold text-white">Kubernetes</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Expose in-cluster Services to the fabric — clients reach them by a
-            stable name over the tunnel.
+            Clusters, exposed Services and the VIPs clients reach them at. A
+            Service is reached by name over the tunnel, never by its ClusterIP.
           </p>
         </div>
         {raw && gate.canManage && raw.sites.length > 0 && (
@@ -132,6 +176,29 @@ export default function Kubernetes() {
               No clusters yet. Register one to start exposing Services.
             </p>
           )}
+          {cards.length > 0 && (
+            <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {tiles.map((t: { label: string; value: number | null; hint: string }) => (
+                <li
+                  key={t.label}
+                  className="rounded-card border border-line bg-surface px-3.5 py-3"
+                >
+                  <p className="text-micro uppercase tracking-wide text-ink-tertiary">
+                    {t.label}
+                  </p>
+                  <p className="mt-1 text-[22px] font-semibold text-ink-heading">
+                    {/* ⛔ A NULL VALUE RENDERS AS A DASH, NEVER AS 0. A zero standing in for "we could not
+                        look" is the reassuring-empty defect in numeric form. */}
+                    {/* A LONE DASH IS A NULL MARKER, NOT PROSE, so the em-dash sweep leaves it: it is the
+                        clearest "no value" glyph in a numeric slot, and the hint beneath says WHY. */}
+                    {t.value === null ? "—" : t.value}
+                  </p>
+                  <p className="text-micro text-ink-faint">{t.hint}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <div className="mt-4 space-y-4">
             {cards.map((c) => (
               <ClusterCardView
@@ -140,9 +207,120 @@ export default function Kubernetes() {
                 card={c}
                 canManage={gate.canManage}
                 onDone={reload}
+                siteName={siteName.get(c.siteId) ?? null}
+                reach={clusterReachability({ siteId: c.siteId, gateways })}
               />
             ))}
           </div>
+
+          {cards.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+              <Card>
+                <h2 className="text-sm font-semibold text-ink-heading">
+                  How a client reaches a Service
+                </h2>
+                {/* STATIC COPY, and its content is verified against the code rather than copied from the
+                    wireframe: the DNAT target is a READY POD (dnat_linux.go), and the grant matches
+                    `ct original ip daddr` so enforcement keys the PRE-DNAT VIP. */}
+                <ol className="mt-2 space-y-1.5 text-cell text-ink-body">
+                  <li>1. The client resolves the FQDN at the cluster&rsquo;s reserved DNS VIP.</li>
+                  <li>2. It connects to the Service&rsquo;s synthetic VIP.</li>
+                  <li>3. The gateway DNATs that VIP to a ready pod endpoint.</li>
+                </ol>
+                <p className="mt-2 text-micro text-ink-tertiary">
+                  Not a ClusterIP DNAT. netfilter applies one destination NAT per
+                  prerouting pass, so kube-proxy&rsquo;s ClusterIP rule would be a
+                  no-op after ours and the packet would die addressed to the
+                  ClusterIP. The gateway targets a ready pod directly, fed by an
+                  EndpointSlice watch, and fails closed on every fault.
+                </p>
+                <p className="text-micro text-ink-faint">
+                  Enforcement keys the pre-DNAT VIP: the grant matches the
+                  original destination, so a broad rule cannot slip past and a
+                  bare destination match cannot miss the post-DNAT pod IP.
+                </p>
+              </Card>
+
+              <Card>
+                <h2 className="text-sm font-semibold text-ink-heading">
+                  Refusals this surface reports verbatim
+                </h2>
+                <dl className="mt-2 space-y-2 text-micro">
+                  <div>
+                    <dt className="font-mono text-ink-body">409 vip_range_overlap</dt>
+                    <dd className="text-ink-tertiary">
+                      A VIP range must be disjoint from the device pool, every
+                      site subnet, and other clusters&rsquo; ranges. Disjointness
+                      is an org-wide fact, so the control plane owns it.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-ink-body">409 vip_range_exhausted</dt>
+                    <dd className="text-ink-tertiary">
+                      No address left to allocate. Unexposing frees a VIP for
+                      immediate reuse.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-ink-body">409 service_exists</dt>
+                    <dd className="text-ink-tertiary">
+                      That namespace and name pair is already exposed: one stable
+                      identity per Service.
+                    </dd>
+                  </div>
+                </dl>
+              </Card>
+
+              <Card>
+                <h2 className="text-sm font-semibold text-ink-heading">
+                  Installing the operator
+                </h2>
+                {/* ⛔ NAMED AS COPY, NOT A CAPABILITY. This screen installs nothing; these are commands a human
+                    runs elsewhere, and implying otherwise would be a control that does not exist. */}
+                <p className="mt-1 text-micro text-ink-tertiary">
+                  Reference only. Run these yourself; this screen does not
+                  install anything.
+                </p>
+                <pre className="mt-2 overflow-x-auto rounded-input border border-line bg-surface-inset p-2.5 text-micro text-ink-body">
+{`helm install gw tunnex/tunnex-gateway \
+  --set joinToken.secretRef=tunnex-join
+helm install op tunnex/operator \
+  --set machineToken.secretRef=tunnex-machine`}
+                </pre>
+                <p className="mt-1 text-micro text-ink-faint">
+                  Both secrets are one-time ceremonies you create, never chart
+                  values. The gateway pod runs with a read-only role on services
+                  and endpointslices: it cannot read Secrets, write, or escalate.
+                </p>
+              </Card>
+
+              <Card>
+                <h2 className="text-sm font-semibold text-ink-heading">
+                  Not shown, and why
+                </h2>
+                {/* Absence recorded is a decision; absence unrecorded gets re-proposed at the next review. */}
+                <ul className="mt-2 space-y-1.5 text-micro text-ink-tertiary">
+                  <li>
+                    <strong>The GitOps CR panel.</strong> Reconcile time,
+                    per-kind ready counts and refused grants are not fields we
+                    serve, and neither is the operator&rsquo;s version. Every
+                    value on it would be invented.
+                  </li>
+                  <li>
+                    <strong>A per-Service ready state.</strong> The agent does
+                    watch endpoints, so readiness is observed, but it is not
+                    reported per Service. The node-level view is on Gateways.
+                  </li>
+                  <li>
+                    <strong>A state column.</strong> The API returns live
+                    Services only, so the column would carry one value forever. A
+                    grant pointing at a removed Service is flagged on Access
+                    Policies, which is where that fact is served.
+                  </li>
+                </ul>
+              </Card>
+            </div>
+          )}
         </>
       )}
 
@@ -163,11 +341,16 @@ function ClusterCardView({
   card,
   canManage,
   onDone,
+  siteName,
+  reach,
 }: {
   orgId: string;
   card: ClusterCard;
   canManage: boolean;
   onDone: () => void;
+  /** FRONTED BY. Null when the sites read failed — a courtesy, never a reason to blank the card. */
+  siteName: string | null;
+  reach: { reachable: boolean; why: string | null };
 }) {
   const [exposing, setExposing] = useState(false);
   const [deregistering, setDeregistering] = useState(false);
@@ -188,6 +371,13 @@ function ClusterCardView({
 
   return (
     <Card>
+      {/* ⛔ D9 — REACHABILITY STATED, NOT INFERRED FROM STYLING ALONE. Without this line a reader sees dimmed
+          rows and concludes something about the SERVICES; the fact is about the gateway that serves them. The
+          copy never says "the cluster is down": the kind is also true for an RBAC denial and an unsynced
+          watch, and naming a cause we cannot know would be the reassuring-comment defect in user copy. */}
+      {!reach.reachable && reach.why !== null && (
+        <p className="mb-2 text-micro text-warn">{reach.why}</p>
+      )}
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-200">
@@ -195,11 +385,26 @@ function ClusterCardView({
             {card.managedByOperator && <ManagedBadge />}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
+            {/* FRONTED BY — the column the handoff leads the cluster table with, and the link between this
+                screen and Sites. Absent (not "unknown") when the sites read failed. */}
+            {siteName !== null && (
+              <>
+                site <span className="text-slate-400">{siteName}</span> ·{" "}
+              </>
+            )}
+            {card.dnsVip !== null && (
+              <>
+                DNS VIP{" "}
+                <span className="font-mono text-slate-400">{card.dnsVip}</span>{" "}
+                (reserved, never handed to a Service) ·{" "}
+              </>
+            )}
             zone <span className="text-slate-400">{card.dnsZone}</span> · VIP
             range <span className="text-slate-400">{card.vipRange}</span> ·
             Service CIDR{" "}
             <span className="text-slate-400">{card.serviceCidr}</span>
-            {card.dnsVip && <> · DNS {card.dnsVip}</>}
+            {/* The DNS VIP is printed ONCE, at the head of this line, WITH its reservation reason. The
+                second copy that used to sit here said the same address with less meaning. */}
           </p>
         </div>
         {canManage && (
@@ -227,15 +432,21 @@ function ClusterCardView({
       <ErrorText>{err}</ErrorText>
 
       {card.services.length === 0 ? (
+        /* ⛔ N=1 CLUSTER WITH ZERO SERVICES IS ITS OWN STATE, AND IT IS NOT A FAULT. A registered cluster with
+           nothing exposed is a working cluster, so the copy names the next action rather than reading as
+           something being broken. */
         <p className="mt-3 text-xs text-slate-500">
-          No Services exposed in this cluster yet.
+          No Services exposed yet. Exposing one allocates a VIP from{" "}
+          {card.vipRange} and gives it a name clients can reach.
         </p>
       ) : (
         <ul className="mt-3 space-y-1">
           {card.services.map((s) => (
             <li
               key={s.id}
-              className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm"
+              /* Recession is the honest encoding for a degraded state: an unreachable cluster's rows recede
+                 rather than disappearing, because the Services DO exist — they just cannot be reached. */
+              className={`flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm ${serviceRowClass(reach.reachable)}`}
             >
               <span className="text-slate-200">
                 <span className="font-mono text-xs text-slate-300">
@@ -360,7 +571,7 @@ function RegisterClusterModal({
           ))}
         </Select>
       </Field>
-      <Field label="Cluster name (a DNS label — part of every Service hostname)">
+      <Field label="Cluster name (a DNS label: it becomes part of every Service hostname)">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -368,7 +579,7 @@ function RegisterClusterModal({
           autoFocus
         />
       </Field>
-      <Field label="Synthetic VIP range (CIDR — disjoint from your pool, sites, and other clusters)">
+      <Field label="Synthetic VIP range (CIDR, disjoint from your pool, your sites, and other clusters)">
         <Input
           value={vipRange}
           onChange={(e) => setVipRange(e.target.value)}
