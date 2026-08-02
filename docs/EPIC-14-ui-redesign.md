@@ -815,10 +815,18 @@ S14.3 with **Access Events** named as its consumer. The nav audit moved Access E
 
 > **A DEFERRAL WHOSE TRIGGER MOVES FURTHER AWAY IS HOW A DEFERRAL BECOMES PERMANENT.**
 
-**The producer-without-consumer count for this epic is now: `Histogram` (Access Events, BUILD), `AreaChart`
-(throughput, ABSENT-PENDING-ENDPOINTS).** Both are real components with no shipping consumer. **Re-state both
-at EPIC 14 close**, and if either still has none, that is the moment to ask whether it should have been built
-yet — not to quietly carry it into EPIC 15.
+**⛔ AND THEY ARE NOT THE SAME STATE. Registering the distinction, because at epic close they would otherwise
+both read as "merely unwired":**
+
+| component | state | precisely |
+|---|---|---|
+| **`Histogram`** | **PRODUCER WITHOUT CONSUMER** | built S14.3, named Access Events as its consumer, and that screen is now **BUILD** — it does not exist. Nothing renders it outside the gallery. |
+| **`AreaChart`** | **CONSUMED BY A PANEL THAT DRAWS NOTHING** | it IS wired — Overview's Site-Link Throughput renders it with `source={{ roadmap: true }}`, and `VizFrame` correctly refuses to draw. **A consumer exists and is honest; the DATA does not exist.** Pending an EPIC 11 story with a founder mandate and **no commit-one ruling yet.** |
+
+**THE DIFFERENCE MATTERS AT CLOSE.** `Histogram` raises *"should this have been built before its screen?"*
+**`AreaChart` raises nothing of the kind** — it is correctly wired to a correctly honest empty state, and the
+only open question is a backend story that is already scoped in `docs/S11.1-throughput-commit-one.md` and
+awaiting a ruling. **Collapsing the two would misfile a scoping question as a discipline failure.**
 
 ## ⛔ REGISTERED — `Modal` DECLARES `aria-modal` AND IMPLEMENTS NONE OF IT. FOUR FACTS, MEASURED.
 

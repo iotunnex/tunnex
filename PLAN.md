@@ -63,6 +63,36 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**IN FLIGHT (PR #50, branch `story/S14.5-sites`): S14.5 SITES + the S14.6 paper.** ⛔ **THIS CHECKPOINT IS
+BEING UPDATED INSIDE THE PR, NOT AFTER THE MERGE — disposition (a) of the registered PLAN-pointer bypass.**
+The previous two pointer updates went straight to `main` and bypassed all three required checks; the founder's
+worry about (a) was that the pointer would lag, and it does not: **the merge is what makes it current.**
+**SHIPPED IN S14.5:** the 8fr/4fr Sites layout from the handoff · `NodeLink` with three link tones, keyboard
+selection, entry animation, a flowing linked edge and travelling packets (CSS `offset-path`, the handoff's
+timings, **not GSAP** — ruled out on redistribution licence) · org-wide cross-site DNS with conflict detection
+· selection-scoped site actions · **a site LIST that scales** (table + one detail panel; a card per row made
+10 sites 3,200px of scroll with the same paragraph ten times) · **`make seed-fixtures`**, a populated demo
+network so screens are reviewed against data instead of empty states · the `AreaChart` primitive.
+**FIXED ALONG THE WAY, NONE OF IT SITES-SPECIFIC:** the open edition shown an **UPSELL for an all-editions
+capability** (client-invented boundary; the server says all-editions core in three places) · **three dead CSS
+token references**, one (`--tnx-ink-600`) rendering every Donut neutral slice BLACK since S14.3 on a screen
+already approved · **the primary button unreadable PRODUCT-WIDE** after the mono palette swap (a semantic name
+survives a palette swap; the contrast it assumed does not) · **`ENTERPRISE_PATHS` missing three genuinely-gated
+endpoints** because the census matched `(enterprise)` alone · the Overview stat row orphaning its 7th card ·
+**two different network maps** rendering the same data. **NEW INSTRUMENTS:** `tokenrefs` (every `var(--tnx-*)`
+held to the generated set, proven to reject) · a **CUT REGISTER** (`docs/CUT-REGISTER.md`, one line per cut —
+"grep the epic doc" was the right rule with a 400-line target, and both misses happened to a reader of it) ·
+**the six-check PRE-FLIGHT** at the head of the section protocol. **THE NAV AUDIT RE-SCOPED THE EPIC:** not
+eleven screens to redesign but **CONNECT 2 · REDESIGN 6 · BUILD 5** — Gateways and CLI Credentials are BUILT
+AND MERELY UNROUTED, and **Operations needs API endpoints that do not exist** for behaviour EPIC 11 already
+ships (a fifth panel-test category: **absent-pending-endpoints**, not roadmap). **OPEN AND UNRULED:** the
+`Modal` primitive declares `aria-modal` and implements **none** of Escape / focus-trap / initial-focus /
+focus-return, on 20 call sites · `site_link_down` is an ORG-LEVEL headline so the map's three tones are not
+independently reachable · the peer/device count is its own slice (`devices WHERE node_id` counts DEVICES, but
+a hub's wg peers include SITE LINKS) · throughput needs an EPIC 11 backend story
+(`docs/S11.1-throughput-commit-one.md`; the Prometheus path is ruled out because **we expose `/metrics` and do
+not run Prometheus** — a self-hosted product cannot read from a database the customer might not have).
+
 **MERGED (2026-08-02): EPIC 14 viewport leg — PR #49, ff-only linear, main `556cfaf`.** A **blocking Playwright `visual` CI job** over a **primitives gallery** at 1440/390, plus **geometric overflow assertions** on Overview at both widths, plus an **exact-count baseline census** (`toEqual`, not a floor — a floor is satisfied by deleting all but one, which is the move it exists to prevent). **IT PAID FOR ITSELF IN PRE-EXISTING `main` DEFECTS, all live since S14.2, on EVERY screen, invisible to `tsc` + 424 component tests + the drift guard + `e2e`:** a **65px horizontal overflow at 390** (shell header flex children defaulting to `min-width:auto`) — FIXED · the drawer **`Menu` button rendering on top of the page `<h1>`** (`absolute left-4 top-4`) — REGISTERED, trigger = the next shell-touching section · the **control-plane health indicator rendering TWICE on Overview** (shell footer since S4.x + S14.4's System Health panel) — REGISTERED as a product decision, founder-ruled *"a visual suite must never be the place a product decision gets made quietly"*, trigger = the next shell-touching section. **SCOPED DOWN ON THE FOUNDER'S RULING after seven rounds:** both Overview **pixel baselines DROPPED** (census 4 → 2) because the surface differed by **621px across runs of BYTE-IDENTICAL app code**, twice defeating a diagnosis. **LAWS MINTED (`docs/laws.md`):** *A VISUAL SUITE'S SUBJECT SHOULD BE THE SURFACE WHOSE OUTPUT IS DETERMINED BY CODE, NOT BY DATA* (the gallery renders fixtures and was stable all 7 rounds; a screen renders a live control plane) · *SCOPE THE SUITE TO WHAT HAS PAID, NOT TO WHAT LOOKS COMPREHENSIVE* — **geometric assertions 1 defect, a human reading an image 1, a strict-mode violation 1, the full-page pixel diff 0 in six rounds** · *A LAW MINTED FROM A FIX THAT WAS NEVER RE-MEASURED IS A HYPOTHESIS WEARING A LAW'S TYPOGRAPHY* (the standing mask-vs-wait law was CORRECTED, not appended past: it claimed WAIT fixed the 621; it did not) · *baselines are generated where they will be compared* (harvest from the CI artifact; a locally-rendered baseline diffs on font rasterisation alone) · *a baseline commit carries `.png` and nothing else* (a commit where the image and the code it measures move together cannot answer "did the picture change because the code did?"). **COST STATED, NOT GLOSSED:** the `Menu` overlap **had been frozen inside the `overview-390` baseline**; dropping it leaves that defect held in **prose only, with no artifact behind it** — the reduction removed real coverage. That sentence sits in `e2e/visual/visual.spec.ts-snapshots/README.md`, beside the surviving baselines, not only in a paper. **NEXT: S14.5 = Sites, IN PROGRESS on `story/S14.5-sites`** (commit-one RULED: D1 org-wide DNS fan-out DO IT / D2 wire-truth chip scoped to the map / D3 mesh above the cards / D4 clear the 21 em-dashes; slice 1 landed = the `policy_degraded_kind` edition description corrected in the spec, comment-only). **✅ S14.5'S HALT IS CLOSED (was: the open edition shown an UPSELL for the site model).** `Sites.tsx:89` +
 `sitesview.ts:55` gated the whole screen on `edition === "enterprise"` while `site_handlers.go:19/95/280` say
 **all-editions core (D11)**, `ListSites` authorizes on `org:view` alone, and no site endpoint returns
