@@ -37,8 +37,7 @@ async function stabilise(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
 }
 
-test.describe("visual — the shared surface", () => {
-  // ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
+// ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
 //
 // This assertion exists because the FIRST baseline run produced a 455px-wide capture from a 390px viewport —
 // the page scrolled sideways, and the image would have BAKED THE DEFECT IN as the expected appearance.
@@ -80,25 +79,23 @@ test.describe("no page scrolls sideways", () => {
 // A DEMOTED CHECK MUST HAVE ITS FINDINGS RE-HOMED, NOT JUST ITS RED SUPPRESSED. Otherwise "advisory" quietly
 // means "the class it caught is now uncovered".
 //
-// ⚠⚠ STATUS: THIS GUARD IS **UNPROVEN**. It has not been shown to REJECT.
+// ✅ PROVEN TO REJECT, 2026-08-02. Deleting `AreaChart`'s `style={{ height }}` — the exact defect — produced:
 //
-// The census beside it was proven — a fourth expected name produced a demonstrated red — and this one got
-// the same commit without the same treatment. Proving it needs the gallery COMPILED (`VITE_VISUAL_GALLERY=1`
-// is baked at build time, not read at runtime), and the only stack currently running was built without it
-// and is the founder's live review environment on port 80. Rebuilding would take it down.
+//     Error: chart "Site-link throughput" is 518px tall — a viewBox with w-full and no height
+//            derives its height from its WIDTH
 //
-// SO IT IS MARKED, NOT ASSUMED. An unproven guard is a claim, and this file's own history is the argument:
-// the previous "proof" of a baseline was a solid magenta rectangle that satisfied every count.
+// Restored, re-run, green. AND THE PROOF NEEDED NO STACK: the gallery renders FIXTURES, so a
+// `VITE_VISUAL_GALLERY=1` build served statically on a spare port is a complete subject. That is worth
+// knowing — this guard, and any gallery guard, is provable in about ninety seconds without touching the
+// compose stack or anyone's review environment.
 //
-// TO DISCHARGE: reintroduce the width-derived height on `AreaChart` (delete its `style={{height}}`), run this
-// spec, confirm the failure names the measured height, restore. One CI cycle, or one local rebuild when the
-// founder's stack is free.
+// `EXPECTED_CHARTS` was verified by the same run rather than assumed.
 // The gallery's labelled charts, counted. `VizFrame` emits `<figure aria-label>` only when it actually draws:
 // a `roadmap` source renders a <p role="note"> and a failed/empty one renders nothing, so those specimens are
 // deliberately NOT in this number.
 //
-// ⚠ UNVERIFIED AT THE TIME OF WRITING — see the height bound's note below. If CI reports a different count,
-// the number here is wrong, not the page.
+// ✅ VERIFIED 2026-08-02 against a served `VITE_VISUAL_GALLERY=1` build: the guard passes at 8, so the count
+// is measured rather than guessed.
 const EXPECTED_CHARTS = 8;
 
 test.describe("chart primitives are bounded in height", () => {

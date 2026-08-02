@@ -48,6 +48,7 @@ only in prose is a cut that will be re-proposed.**
 
 | name | verdict | reason | ruled |
 |---|---|---|---|
+| **The visual CI job as a merge gate** | **ADVISORY, ALL OF EPIC 14** | red by design during a redesign; 5 consecutive red pushes in S14.5, no regressions. NOT to be added to required checks. ⚠ COST: the geometric + strict-mode assertions need a real browser, cannot move to `make web-gate` (jsdom has no layout engine), so the class that found the 65px overflow is advisory too. **RE-ARM: EPIC 14 close** | founder rule, 2026-08-02 |
 | **Sites edition gate / upsell** | **DELETED** | the site model is all-editions core (D11); the client invented a boundary the server does not have | S14.5 |
 | **Failed-load triad panel** (Gateways/Sites right column) | **CUT** | a wireframe DOCUMENTATION device showing three states side by side, not a product panel | S14.5 |
 | **`PEERS` column** (Gateways) | **ABSENT — its own slice** | `devices WHERE node_id` counts DEVICES, and a hub's WireGuard peers include SITE LINKS, so on a hub it under-reports exactly where an operator looks hardest. Either count wg peers or label it `DEVICES`. Spec+codegen change, so it is a slice, not a rider | S14.6 |
