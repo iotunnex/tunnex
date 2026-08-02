@@ -466,4 +466,43 @@ VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000
         'member', now() - interval '20 days')
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role;
 
+-- ⛔ RULES 7-9 LIVE HERE, NOT WITH RULES 1-6, AND THE REASON IS A REAL BUG THIS ORDERING FIXES.
+--
+-- They reference `grace@` and `member@` via `src_user_id`, and those user rows are inserted FURTHER DOWN
+-- this file. The `policy_rules` block above runs FIRST, so on a FRESH database the FK
+-- `policy_rules_src_user_fk` fails:
+--     insert or update on table "policy_rules" violates foreign key constraint (SQLSTATE 23503)
+--
+-- ⛔ IT PASSED ON THE PRIMARY STACK BECAUSE THOSE USERS ALREADY EXISTED FROM EARLIER SEEDS. The ordering was
+-- wrong the whole time and invisible, because that database is months old and never re-created. The
+-- OPEN-EDITION REVIEW STACK — a fresh DB — found it on its FIRST RUN, which is the argument for the second
+-- stack restated as evidence: a long-lived database hides every ordering defect in the file that seeds it.
+INSERT INTO policy_rules (id, org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, disabled, expires_at, managed_by_machine, created_at)
+VALUES
+  -- ⛔ RULES 7-9 (S14.12 D3): THE THREE DISCRIMINATED-UNION ARMS THE FIXTURE NEVER PRODUCED.
+  --
+  -- `policy_rules` carries FOUR CHECK constraints, two of them discriminated unions:
+  --     src_kind IN (group, user, site, cidr)      dst_kind IN (resource, group, site, k8s_service)
+  -- Rules 1-6 covered 5 of those 8 arms. `src_kind='user'` (S7.5.4 per-user grants), `src_kind='site'` and
+  -- `dst_kind='site'` (S8.2 site-to-site transit) had NO ROW — three SHIPPED features, CHECK-backed, that
+  -- no screen has ever rendered.
+  --
+  --   A SCREEN RENDERING A DISCRIMINATED UNION CAN ONLY BE REVIEWED ON THE ARMS THE FIXTURE PRODUCES.
+  --   The unrendered arms are exactly the ones that ship broken (S14.10: `posture blocked` had never
+  --   rendered on localhost because the fixture aged out of the state it described).
+
+  -- Rule 7: src_kind='user' — a PER-USER grant (S7.5.4). Grace is DEACTIVATED, so this row also asks the
+  -- screen a second question: does a grant naming an account that cannot sign in render any differently?
+  ('01900000-0000-7000-8000-000000080007', '01900000-0000-7000-8000-000000000001', 'user', NULL, '01900000-0000-7000-8000-0000000b0004', NULL, NULL, 'resource', '01900000-0000-7000-8000-000000090002', NULL, NULL, NULL, false, NULL, NULL, now() - interval '8 days'),
+
+  -- Rule 8: src_kind='site' -> dst_kind='site' — SITE-TO-SITE TRANSIT (S8.2). Covers BOTH missing site arms
+  -- in one row, which is deliberate: the two are the same feature and splitting them would seed a
+  -- combination the product does not actually produce.
+  ('01900000-0000-7000-8000-000000080008', '01900000-0000-7000-8000-000000000001', 'site', NULL, NULL, '01900000-0000-7000-8000-0000000e0002', NULL, 'site', NULL, NULL, '01900000-0000-7000-8000-0000000e0003', NULL, false, NULL, NULL, now() - interval '6 days'),
+
+  -- Rule 9: src_kind='user' with an EXPIRY — the S7.5.4 TEMPORARY grant. `expires_at` is served and has no
+  -- fixture row anywhere else, so the screen's expiry rendering is currently unreviewable.
+  ('01900000-0000-7000-8000-000000080009', '01900000-0000-7000-8000-000000000001', 'user', NULL, '01900000-0000-7000-8000-000000000003', NULL, NULL, 'group', NULL, '01900000-0000-7000-8000-0000000a0001', NULL, NULL, false, now() + interval '3 days', NULL, now() - interval '1 day')
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;

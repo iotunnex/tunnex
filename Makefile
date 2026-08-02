@@ -22,6 +22,52 @@ up-enterprise: ## Start the full stack with the ENTERPRISE api image (Zero Trust
 	@echo "Tunnex (ENTERPRISE) starting → http://localhost"
 	@echo "Verify: curl -s localhost/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> enterprise"
 
+# ── ⛔ THE OPEN-EDITION REVIEW STACK (S14.12) ───────────────────────────────────────────────────────────
+#
+# WHY IT EXISTS: EVERY edition-gated render in EPIC 14 has been reviewed on an ENTERPRISE stack, where the
+# open-edition path never executes. S14.11 found TWO edition-before-permission bugs in the web app, BOTH
+# invisible on that stack. Access Policies is 100% edition-gated — the whole screen collapses to ONE state on
+# the open build — so reviewing it on enterprise would sign off a render nobody has ever seen.
+#
+# SHAPE, and every choice is about NOT disturbing the primary stack:
+#   project   COMPOSE_PROJECT_NAME=tunnex-open  -> its OWN network, volumes and postgres. No shared state.
+#   edition   NO TUNNEX_BUILD_TAGS              -> the open api image. That is the entire difference.
+#   ports     every host port overridden (+1 / +1000). The primary stack's defaults are UNCHANGED, so a
+#             plain `make up-enterprise` still binds :80 exactly as before.
+#   fixtures  the SAME embedded fixtures.sql, run by the SAME seeder binary, against this project's DB.
+#             ⛔ ZERO DRIFT BY CONSTRUCTION: one source, two databases. The tables exist in both (migrations
+#             are edition-independent); only the API binary differs, which is the point.
+#
+#   ⛔ ONE LEGITIMATE DIFFERENCE, NAMED SO IT IS NOT MISTAKEN FOR DRIFT: the seeder registers `posture_blocked`
+#   THROUGH THE PRODUCT, and device-health reporting is edition-gated. On the open stack that POST answers
+#   403 edition_required, so posture_blocked is ABSENT — correctly, because posture is an enterprise feature.
+#   `seed-open` therefore runs with TUNNEX_SEED_STRICT=false. That is an EDITION difference, not a fixture gap.
+OPEN_ENV = COMPOSE_PROJECT_NAME=tunnex-open HOST_HTTP_PORT=8081 HOST_API_MTLS_PORT=8444 \
+           HOST_WG_PORT=51821 HOST_MAILPIT_UI=8026 HOST_MAILPIT_SMTP=1026
+
+.PHONY: up-open-review
+up-open-review: ## Start the OPEN-edition review stack alongside the primary one (http://localhost:8081)
+	@test -f .env || cp .env.example .env
+	$(OPEN_ENV) docker compose up -d --build
+	@echo ""
+	@echo "OPEN-edition review stack -> http://localhost:8081   (Mailpit -> http://localhost:8026)"
+	@echo "Verify:  curl -s localhost:8081/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> open"
+	@echo "The ENTERPRISE stack is untouched on http://localhost"
+
+.PHONY: seed-open
+seed-open: ## Seed the open-edition review stack (migrate + base seed + fixtures, in that order)
+	@# ⛔ THREE STEPS, IN ORDER, because `fixtures.sql` LAYERS ON TOP of the base seed and refuses without it
+	@# ("the demo org does not exist"). The primary stack was seeded months ago so the ordering was invisible;
+	@# a fresh database is what surfaced it. A one-command switch has to carry the whole chain or it is not one.
+	$(OPEN_ENV) $(MAKE) migrate COMPOSE_PROJECT_NAME=tunnex-open
+	$(OPEN_ENV) $(MAKE) seed COMPOSE_PROJECT_NAME=tunnex-open
+	$(OPEN_ENV) TUNNEX_SEED_FORCE=true TUNNEX_SEED_STRICT=false $(MAKE) seed-fixtures \
+	  COMPOSE_PROJECT_NAME=tunnex-open
+
+.PHONY: down-open-review
+down-open-review: ## Stop the open-edition review stack (leaves the primary stack running)
+	$(OPEN_ENV) docker compose down
+
 .PHONY: down
 down: ## Stop the stack (keep volumes)
 	$(COMPOSE) down

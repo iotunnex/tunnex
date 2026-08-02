@@ -2667,3 +2667,59 @@ pass — would have removed the noise by removing the check. The fix applied ins
 
 **Skipped and passed must never render alike** — the classifier's own notice says it (`false = the Go steps
 below are SKIPPED, not passed`), and this is that rule applied to the check's own internals.
+
+---
+
+## ANY SCRIPT VALIDATED ONLY AGAINST ACCUMULATED STATE IS VALIDATED AGAINST SOMETHING NO NEW CUSTOMER HAS
+
+**S14.12 (founder-ruled; the open-edition stack's strongest justification, and it was NOT predicted).**
+
+Building the open-edition review stack produced a **fresh database** for the first time in months. `make
+seed-open` failed immediately:
+
+```
+insert or update on table "policy_rules" violates foreign key constraint
+"policy_rules_src_user_fk" (SQLSTATE 23503)
+```
+
+`policy_rules` is inserted at line 341 of `fixtures.sql`; the users those rules reference are inserted at line
+384. **The ordering has been wrong for as long as those rules have existed.** It never failed because the
+primary database is months old and the referenced users were already there from earlier seeds.
+
+> ### **THE PRIMARY STACK VALIDATED THE SEED AGAINST STATE THE SEED ITSELF DID NOT CREATE. A FIRST-RUN**
+> ### **CUSTOMER GETS THE FRESH PATH — AND THE FRESH PATH WAS BROKEN.**
+
+**GENERALISE PAST FIXTURES.** Migrations are covered: CI runs them forward from empty every time, so an
+ordering defect there fails immediately. **Nothing else in this repo has that property by default** — seeds,
+backfills, and any ordering-sensitive script may only ever have run against a database that already contains
+what they assume.
+
+**THE DIAGNOSTIC:** for any script that writes, ask *when did this last run against an EMPTY target?* If the
+answer is "never" or "not since it was written", it has been tested against its own side effects.
+
+**REGISTERED, NOT CHASED:** *what else here has only ever run against an accumulated database?*
+Trigger — **the next data-path story** (`docs/DEFERRAL-REGISTER.md`).
+
+**AND NOTE WHICH FINDING THIS OUTRANKS.** The same stack also confirmed the predicted `accessView` gate-order
+bug. **That one was a code reading first and a measurement second; this one nobody predicted at all.** A tool
+that only confirms what you already suspected has not yet earned its cost.
+
+---
+
+## TWO DATABASES THAT DIFFER ARE DRIFTED OR CORRECTLY DIFFERENT, AND ONLY A WRITTEN NOTE DECIDES WHICH
+
+**S14.12 (founder-ruled).** The enterprise and open review stacks seed from one `fixtures.sql` through one
+seeder binary, and they still differ: `health_blocked` is **1** on enterprise and **0** on open, because the
+seeder registers posture **through the product** and device-health reporting is edition-gated.
+
+**That difference is correct.** But *correct* and *drifted* look identical in a diff — a number that does not
+match, with no property of the data itself saying which it is.
+
+> ### **THE ONLY THING THAT DISTINGUISHES A LEGITIMATE DIFFERENCE FROM DRIFT IS THAT SOMEONE WROTE DOWN**
+> ### **WHICH ONE IT IS, BEFORE ANYONE HAD TO ASK.**
+
+**THE PRACTICE:** when standing up a second environment, enumerate the expected differences **at creation**
+and put them where the comparison happens — here, in the `seed-open` target itself. An unexplained difference
+found later is investigated from zero; an explained one is checked against its explanation in seconds. And a
+difference nobody wrote down eventually gets "fixed" by someone making the two match, which is how an edition
+gate quietly stops being tested.

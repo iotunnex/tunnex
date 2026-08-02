@@ -73,7 +73,9 @@ services:
       - tunnex_secrets:/var/lib/tunnex/secrets
     ports:
       # mTLS agent control channel (agents connect directly, bypassing nginx TLS).
-      - "8443:8443"
+      # ⛔ HOST side parameterised so a SECOND stack (the open-edition review stack) can run alongside.
+      # Default is unchanged, so the primary stack is byte-identical to before.
+      - "${HOST_API_MTLS_PORT:-8443}:8443"
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,7 +124,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     ports:
       # WireGuard data-plane UDP port, published for later stories.
-      - "51820:51820/udp"
+      - "${HOST_WG_PORT:-51820}:51820/udp"
     depends_on:
       - api
 
@@ -143,7 +145,7 @@ services:
     restart: unless-stopped
     ports:
       # Host :80 -> container :8080 (non-root nginx-unprivileged image).
-      - "80:8080"
+      - "${HOST_HTTP_PORT:-80}:8080"
     depends_on:
       api:
         condition: service_healthy
@@ -167,8 +169,8 @@ services:
     image: axllent/mailpit:latest
     restart: unless-stopped
     ports:
-      - "8025:8025" # web UI
-      - "1025:1025" # SMTP
+      - "${HOST_MAILPIT_UI:-8025}:8025" # web UI
+      - "${HOST_MAILPIT_SMTP:-1025}:1025" # SMTP
     environment:
       MP_MAX_MESSAGES: 500
 
