@@ -505,4 +505,34 @@ VALUES
   ('01900000-0000-7000-8000-000000080009', '01900000-0000-7000-8000-000000000001', 'user', NULL, '01900000-0000-7000-8000-000000000003', NULL, NULL, 'group', NULL, '01900000-0000-7000-8000-0000000a0001', NULL, NULL, false, now() + interval '3 days', NULL, now() - interval '1 day')
 ON CONFLICT (id) DO NOTHING;
 
+-- ⛔ AN EMPTY GROUP, AND A RULE THAT USES IT — the src_group_empty subject (S14.12).
+--
+-- All three seeded groups have members, so the fourth warn kind had NO SUBJECT and could only be seen by a
+-- reviewer who remembered to create one by hand.
+--
+--   A STATE REACHABLE ONLY WHEN SOMEONE REMEMBERS TO CREATE IT IS NOT PERMANENTLY REVIEWABLE.
+--
+-- Same discipline as S14.10's `posture blocked`: the states that do not render are the ones that ship broken.
+--
+-- WHAT THIS SLICE ACTUALLY FIXED, and it is not the badge: UNTIL NOW, A NEW CUSTOMER'S FIRST TEN MINUTES
+-- PRODUCED A RULE THAT SILENTLY GRANTED NOTHING. Create a group, write a rule against it, and the rule
+-- compiled to nothing while rendering ACTIVE — because `matched = owner[r.SrcGroupID]` (compiler.go:399)
+-- matches no device when the group has no members, and no surface existed to put anyone in it.
+--
+-- DO NOT "FIX" THIS BY ADDING A MEMBER. The emptiness is the fixture's purpose.
+INSERT INTO user_groups (id, org_id, name, description, origin, created_at, updated_at)
+VALUES ('01900000-0000-7000-8000-0000000a0004', '01900000-0000-7000-8000-000000000001',
+        'Interns', 'Seeded EMPTY on purpose: the src_group_empty subject. Do not add members.',
+        'manual', now() - interval '4 days', now() - interval '4 days')
+ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description;
+
+-- The rule that consumes it. It renders ACTIVE and compiles to nothing — which is exactly what the badge
+-- exists to say out loud.
+INSERT INTO policy_rules (id, org_id, src_kind, src_group_id, src_user_id, src_site_id, src_cidr, dst_kind, dst_resource_id, dst_group_id, dst_site_id, dst_k8s_service_id, disabled, expires_at, managed_by_machine, created_at)
+VALUES ('01900000-0000-7000-8000-00000008000a', '01900000-0000-7000-8000-000000000001',
+        'group', '01900000-0000-7000-8000-0000000a0004', NULL, NULL, NULL,
+        'resource', '01900000-0000-7000-8000-000000090001', NULL, NULL, NULL,
+        false, NULL, NULL, now() - interval '3 days')
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;
