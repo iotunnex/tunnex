@@ -2492,3 +2492,45 @@ the same as ability.
 guards with no status filter, one is a display count that documents why it includes deactivated. The display
 count being correct-by-intent is exactly why the census must read each one's PURPOSE — the same SQL shape is a
 bug in a guard and correct in a tally.
+
+---
+
+## WRITING A RULE CREATES THE FEELING OF HAVING COMPLIED WITH IT
+
+**S14.11.** §2.6 of this story's own decisions doc reads: *"ADDITIONS GET THE SAME DISCIPLINE AS CUTS — a
+silent addition is as hard to audit later as a silent removal."* I wrote that sentence, registered
+`email_verified` under it as a deliberate addition — **and then added a `Groups` stat tile that is nowhere in
+the wireframe, with no register row, in the same document, in the same story.**
+
+This is the fourth PROSE-VERSUS-BEHAVIOUR instance of the slice and **the sharpest**, because the other three
+are a stale summary of someone else's artifact. This one is my own rule about my own code.
+
+> ### **THE RULE IS SALIENT, SO THE MIND SUPPLIES THE COMPLIANCE. Having just articulated the principle**
+> ### **feels like having applied it — and the author is the ONE PERSON who cannot read their own rule fresh.**
+> ### **A reviewer reading §2.6 cold would have asked "which additions?" and found the tile in one pass.**
+
+**THIS IS WHY THE STANDING QUESTION IS A QUESTION.** *"What in this change is asserted only in prose?"* can be
+asked of yourself and returns an answer. *"Follow your own rules"* cannot — **it is already believed**, and a
+belief cannot be used as a check on itself.
+
+**THE PRACTICAL FORM:** after writing a rule, apply it to the change containing the rule — the diff that
+introduces a discipline is the first place the discipline is unenforced, because it did not exist when the
+rest of the diff was written.
+
+---
+
+## AN INFLATED FINDING COSTS THE NEXT ONE ITS CREDIBILITY
+
+**S14.11.** The `CountOwners` probe had two branches. Branch 1 (deactivate one owner, then DEMOTE the other)
+ends with zero owners who can sign in — and reads like a lockout. It is not: the demoted owner is now an admin
+who still holds `member:manage` and can reactivate the first. **A capability outage with a path back.**
+
+Only branch 2 (deactivate BOTH) is unrecoverable: two owner rows satisfy the invariant on paper, zero accounts
+can sign in and act, and recovery requires direct database access.
+
+> ### **REPORTING BRANCH 1 AS A LOCKOUT WOULD HAVE MADE THE FINDING BIGGER AND THE REPORT WORSE. The reader**
+> ### **who checks branch 1 and finds a path back now discounts branch 2 — and branch 2 is the real one.**
+
+**THE CHECK:** when a proof has several routes to the same headline, run each to the end and ask *is there a
+path back?* Report the narrowest claim the evidence supports, and say explicitly which routes did NOT qualify —
+the exclusions are what make the remaining claim load-bearing.
