@@ -899,3 +899,40 @@ the price of the ruling, in its most concrete form — not "the class is uncover
 
 **The `gates` job's `E2E specs — typecheck` step is the one part of this that still blocks**, and it is what
 keeps "the spec did not compile" out of the four indistinguishable meanings of an advisory red.
+
+
+## ⛔ REGISTERED (EVIDENCE UPGRADED) — `site_link_down` IS ONE ORG-LEVEL FACT PRINTED N TIMES
+
+**The registration opened on a ONE-GATEWAY stack, where the string was merely meaningless. The Gateways
+screen at N=6 is the stronger evidence, and it is a different and worse claim.**
+
+**Founder's 2026-08-02 screenshot, `localhost/gateways`, enterprise, 6 gateways:**
+
+```
+Needs attention (4)
+  gw-local-1   HUB    site link down
+  gw-ap-south         site link down
+  gw-us-east          site link down
+  gw-eu-west          site link down
+```
+
+**FOUR ROWS. ONE FACT.** `siteLinkVerdictFrom` (`service.go:1786`) derives a single **org-level** verdict from
+the **active primary's** staleness, and `siteLinkDown := n.SiteID.Valid && b.siteLinkHeadlineDown` hands that
+same boolean to **every site-bound gateway**. When the hub goes stale, they all inherit it at once —
+**including the hub itself.**
+
+> ## **THE SCREEN OFFERS NO WAY TO TELL ONE SHARED FACT FROM FOUR INDEPENDENT FAULTS.**
+> ## **AN OPERATOR READS FOUR BROKEN GATEWAYS. THERE IS ONE STALE HUB.**
+
+**AND IT IS WORSE ON A FLEET SCREEN THAN ON A MAP.** The map draws no edge, so the absence is at least
+visible as absence. A grouped list counts it: **`Needs attention (4)`** is a number an operator triages by,
+and it is wrong by a factor of four.
+
+**THE MAP'S THREE TONES ARE ALSO UNREACHABLE FROM THIS FIELD** — every edge carries the same org-wide verdict,
+so `linked`/`degraded`/`down` can never differ between spokes.
+
+**STILL UNRULED. Options when a control-plane story touches site-link health:** serve a per-spoke liveness
+fact · render the org-level verdict ONCE at page level rather than per row · or name the kind differently on
+inheriting rows (`transit down (hub)` vs `link down`). **Not chosen here — it is a control-plane semantics
+decision, and suppressing a server-owned verdict client-side is the one-truth violation already swept off
+Sites.**
