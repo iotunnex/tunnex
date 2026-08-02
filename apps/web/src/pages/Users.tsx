@@ -28,6 +28,7 @@ import {
   LAST_OWNER_NOTE,
   roleDistribution,
   roleTallyLabel,
+  rosterSubtitle,
   rosterShape,
 } from "../lib/usersview";
 
@@ -63,6 +64,20 @@ export default function Users() {
     [members, myId],
   );
   // Owner count drives the last-owner disable (mirrors the server's CountOwners).
+  //
+  // ⛔ AND IT MIRRORS THE SERVER'S FLAW, DELIBERATELY. `CountOwners` is
+  //   SELECT count(*) FROM memberships WHERE org_id=$1 AND role='owner'
+  // with NO join to `users`, so a DEACTIVATED owner counts as an owner. Proven reachable (S14.11 probe,
+  // docs/probes/lockout_probe_test.go.txt): deactivate owner A, then deactivate owner B — the guard permits
+  // both because two owner ROWS exist, and the org ends with 2 owner rows and 0 accounts that can sign in
+  // and act. Recovery needs direct database access.
+  //
+  // ⛔ DO NOT ADD `&& m.status === "active"` HERE. It would make the client a SECOND AUTHORITY that disagrees
+  // with the server about who the last owner is — the control would grey out while the server still permits
+  // the change, or the reverse. The S4.7 precedent is that the server owns the refusal.
+  //
+  // THIS LINE FOLLOWS THE SERVER FIX. When CountOwners learns to join `users.status`, this changes with it,
+  // in the same change, not before.
   const ownerCount = useMemo(
     () => members.filter((m) => m.role === "owner").length,
     [members],
@@ -209,10 +224,10 @@ export default function Users() {
       <div className="mt-6">
         <Card>
           <h2 className="text-sm font-semibold text-white">Access posture</h2>
-          <p className="mt-1 text-xs text-slate-400">
-            Role hierarchy across {members.length}{" "}
-            {members.length === 1 ? "member" : "members"}.
-          </p>
+          {/* ⛔ STATES WHAT IS COUNTED. The first version read "Role hierarchy across N members", which claims
+              WHO CAN ACT — and the tally counts accounts on the roster, deactivated included. A roster of 7
+              with 1 deactivated is TWO FACTS, NOT ONE NUMBER. */}
+          <p className="mt-1 text-xs text-slate-400">{rosterSubtitle(members)}</p>
           <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
             {roleDistribution(members).map((t) => (
               <div key={t.role}>
@@ -222,35 +237,42 @@ export default function Users() {
                   {t.n === 1 ? "" : "s"}
                 </dt>
                 <dd className="text-lg font-semibold text-white">{t.n}</dd>
+                {/* The split, per role, only where it exists — so "1 owner" cannot hide a deactivated one. */}
+                {t.deactivated > 0 && (
+                  <dd className="text-xs text-warn">{t.deactivated} deactivated</dd>
+                )}
                 <span className="sr-only">{roleTallyLabel(t)}</span>
               </div>
             ))}
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-slate-500">
-                Groups
-              </dt>
-              {/* Five arms, five distinct readings — a count, "none yet", "not yours to see", "not this
-                  edition", and "the read failed". A single "no groups" would be wrong in four of them. */}
-              <dd
-                className={
-                  groupAccess.kind === "edges"
-                    ? "text-lg font-semibold text-white"
-                    : "pt-1 text-xs text-slate-400"
-                }
-              >
-                {groupAccess.kind === "edges"
-                  ? groupAccess.n
-                  : groupAccessLabel(groupAccess)}
-              </dd>
-              {groupAccess.kind === "edges" && (
-                <span className="sr-only">{groupAccessLabel(groupAccess)}</span>
-              )}
-            </div>
           </dl>
           {/* ⛔ THE TWO MISSING FACTS ARE NAMED, NOT OMITTED. Silence here would read as "this org has no MFA
               story", which is false — MFA is enforced and enrollable, it is the per-member PROJECTION that
               does not exist (D1), as with authentication sources (D1b). */}
-          <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-500">
+          {/* ── Groups: OUT OF THE STAT ROW, and registered as a DELIBERATE ADDITION ─────────────────────
+              ⛔ THE WIREFRAME HAS NO GROUPS STAT. Its Access posture panel is:
+                   title · "role hierarchy · MFA coverage · authentication sources" · {{ teamMap }}
+                   · legend (role tiers, MFA enrolled 5/7) · the last-owner copy
+              Groups appear ONLY as one axis inside `{{ teamMap }}` — the tripartite role↔user↔group graph,
+              which is D2, held, cut on the permission boundary.
+
+              I had put a `Groups 3` tile in the stat row beside owner/admin/member, where a group count reads
+              as A FOURTH ROLE TIER — and I did it WITHOUT REGISTERING IT, breaking my own §2.6 rule
+              ("additions get the same discipline as cuts") in the story that states the rule.
+
+              THE REASON IT STAYS AT ALL: it is the honest placeholder for the held graph, and it is the only
+              thing on this screen that renders the edition/permission seam — the four-gate shape the section
+              exists to demonstrate. So it keeps its own line, named as standing in for teamMap.
+              Registered: docs/DEFERRAL-REGISTER.md. */}
+          <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-400">
+            <span className="text-slate-500">Group membership</span>{" "}
+            {groupAccess.kind === "edges"
+              ? `— ${groupAccessLabel(groupAccess)} in this organization.`
+              : `— ${groupAccessLabel(groupAccess)}.`}{" "}
+            <span className="text-slate-500">
+              The role-and-group map is not built yet; this stands in for it.
+            </span>
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
             MFA coverage and authentication sources are not shown per member yet:
             both are enforced by the server but not carried on the roster
             response. Two-factor can still be reset per member from the row

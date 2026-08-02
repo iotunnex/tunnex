@@ -217,9 +217,24 @@ self-detected** — two were caught by the founder, one by a mutation sweep.
 | 1 | *"the product doesn't know"* for five roster columns | the **`Member` DTO** | **four of five wrong** — a projection, a permission, an edition, a missing read. `docs/laws.md` → *BEFORE RECORDING AN ABSENCE, NAME THE TABLE* |
 | 2 | *"edition first, because a permission message would misdirect an owner"* | **my own reasoning** | `ListGroups` authorizes **`PermPolicyView` FIRST**, then checks the edition. An open-edition member's real answer is `forbidden`, and my order **sold them Enterprise** |
 | 3 | *"NO client-side owner count"* (§2.5) | **the wireframe copy** | `Users.tsx` **already had one**, with its rationale written beside it. Reconciled, not overwritten |
+| 4 | **my own §2.6 rule**: *"additions get the same discipline as cuts"* | **nothing** | I added a `Groups 3` stat tile that **is not in the wireframe** and registered nothing — breaking the rule **in the story that states it** |
 
 > ## **THE COMMON SHAPE: I read a SUMMARY OF THE ARTIFACT (a DTO, my own prose, a wireframe) and reported on**
 > ## **THE ARTIFACT. Each summary was accurate about itself and wrong about the thing it stood for.**
+
+### ⛔ INSTANCE 4 IS THE SHARPEST FORM: THE PROSE WAS MY OWN RULE ABOUT MY OWN CODE
+
+Instances 1–3 are a stale summary of someone else's artifact. **Instance 4 is different in kind:** §2.6 of this
+story's own decisions doc says *"ADDITIONS GET THE SAME DISCIPLINE AS CUTS — a silent addition is as hard to
+audit later as a silent removal."* I wrote that sentence, registered `email_verified` under it, and then added
+a `Groups` stat tile with no register row **in the same document, in the same story.**
+
+> ## **THE AUTHOR IS THE ONE PERSON WHO CANNOT READ THEIR OWN RULE FRESH. Writing a rule creates the feeling**
+> ## **of having complied with it — the rule is salient, so the mind supplies the compliance. A reviewer**
+> ## **reading §2.6 cold would have asked "which additions?" and found the tile in one pass.**
+
+**This is why the standing question is phrased as a question and not an instruction.** *"What in this change is
+asserted only in prose?"* can be asked of yourself. *"Follow your own rules"* cannot — it is already believed.
 
 **AND THE DIRECTION IS NOT RANDOM: all three under-built or mis-served the caller with the LEAST access.** #1
 removed columns, #2 upsold a member who could never use the feature, #3 would have removed a working guard.

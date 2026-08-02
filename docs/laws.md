@@ -2460,3 +2460,35 @@ naive harness counts a never-run mutation as *no failure*, i.e. **as a survivor 
 **THE CHECK:** restore in `finally`; refuse to start if a stale backup exists; and report a stale anchor as
 **NEVER APPLIED**, never as a result. *A mutation whose anchor no longer matches is not a mutation that passed.*
 Print `applied: N of M` so the count and the list cannot disagree.
+
+---
+
+## A COUNT USED AS A GUARD MUST COUNT WHAT IT GUARDS AGAINST
+
+**S14.11.** `guardLastOwner` protects an org from losing its last owner. Its input:
+
+```sql
+SELECT count(*) FROM memberships WHERE org_id = $1 AND role = 'owner';   -- no join to users
+```
+
+It counts **owner ROWS**. What it guards against is **an org with nobody who can sign in and administer it** —
+and a deactivated user is refused at login (`403 account_deactivated`). The two are not the same set, so the
+guard permits exactly the outcome it exists to prevent.
+
+**PROVEN REACHABLE, not read off the code** (`docs/probes/lockout_probe_test.go.txt`): deactivate owner A
+(allowed — two owner rows), then deactivate owner B (allowed — still two owner rows). **Two owner rows satisfy
+the invariant on paper; zero accounts can sign in and act. Recovery requires direct database access.**
+
+> ### **THIS IS THE DORMANT-MACHINERY LAW INVERTED. That law removes code that is CORRECT AND UNREACHABLE.**
+> ### **This is a guard that is REACHABLE AND PERMISSIVE — worse, because it reports success while doing**
+> ### **nothing, and every review that sees `guardLastOwner` in the call path reads the invariant as held.**
+
+**THE CHECK:** for every count that gates a decision, write the sentence *"this protects against X"* and then
+ask whether the query's row set is X. A guard counting rows while protecting against a capability is the
+signature. Ask it of `WHERE role = …` especially: a role is an entitlement on paper, and entitlement is not
+the same as ability.
+
+**AND CENSUS THE SHAPE, NOT THE INSTANCE.** Three queries here count over a privilege-bearing role; two are
+guards with no status filter, one is a display count that documents why it includes deactivated. The display
+count being correct-by-intent is exactly why the census must read each one's PURPOSE — the same SQL shape is a
+bug in a guard and correct in a tally.

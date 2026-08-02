@@ -9,6 +9,7 @@ import {
   roleDistribution,
   roleTallyLabel,
   rosterShape,
+  rosterSubtitle,
 } from "../src/lib/usersview";
 import type { Device, Member } from "../src/lib/api";
 
@@ -229,17 +230,34 @@ describe("groupAccessState — three causes, three answers", () => {
 });
 
 describe("roleDistribution — the one of the panel's three promised facts that is served", () => {
-  const m = (role: Member["role"]): Member => ({ role }) as Member;
+  const m = (role: Member["role"], status: Member["status"] = "active"): Member =>
+    ({ role, status }) as Member;
 
   it("⛔ INCLUDES ZEROS — an omitted row reads as a role that does not exist", () => {
     const d = roleDistribution([m("owner"), m("member"), m("member")]);
     expect(d).toEqual([
-      { role: "owner", n: 1 },
-      { role: "admin", n: 0 },
-      { role: "member", n: 2 },
+      { role: "owner", n: 1, deactivated: 0 },
+      { role: "admin", n: 0, deactivated: 0 },
+      { role: "member", n: 2, deactivated: 0 },
     ]);
     // Hierarchy order, not insertion order and not alphabetical (which would put admin first).
     expect(d.map((t) => t.role)).toEqual(["owner", "admin", "member"]);
+  });
+
+  it("⛔ COUNTS DEACTIVATED IN `n`, AND REPORTS THEM SEPARATELY — two facts, not one number", () => {
+    // The tally counts ACCOUNTS ON THE ROSTER (ruled). `ListOrgMembersWithUser` keeps deactivated rows on
+    // purpose, and a deactivated account is refused at login (403 account_deactivated). So `n` must include
+    // them — the roster IS 7 — and the split must be visible, or "1 owner" hides an owner who cannot sign in.
+    const d = roleDistribution([m("owner"), m("member"), m("member", "deactivated")]);
+    expect(d[2]).toEqual({ role: "member", n: 2, deactivated: 1 });
+    expect(d[0]).toEqual({ role: "owner", n: 1, deactivated: 0 });
+  });
+
+  it("a DEACTIVATED OWNER is visible in the tally — the case behind the server lockout", () => {
+    // An org showing "1 owner" whose only owner cannot sign in is the display half of the CountOwners defect
+    // (docs/probes/lockout_probe_test.go.txt). The number stays 1; the split is what tells the truth.
+    const d = roleDistribution([m("owner", "deactivated")]);
+    expect(d[0]).toEqual({ role: "owner", n: 1, deactivated: 1 });
   });
 
   it("an empty roster gives three zeros, not an empty list", () => {
@@ -249,9 +267,36 @@ describe("roleDistribution — the one of the panel's three promised facts that 
 
   it("pluralises, including the zero case", () => {
     // "0 owner" and "1 owners" both read as bugs; the zero takes the plural.
-    expect(roleTallyLabel({ role: "owner", n: 0 })).toBe("0 owners");
-    expect(roleTallyLabel({ role: "owner", n: 1 })).toBe("1 owner");
-    expect(roleTallyLabel({ role: "admin", n: 2 })).toBe("2 admins");
+    expect(roleTallyLabel({ role: "owner", n: 0, deactivated: 0 })).toBe("0 owners");
+    expect(roleTallyLabel({ role: "owner", n: 1, deactivated: 0 })).toBe("1 owner");
+    expect(roleTallyLabel({ role: "admin", n: 2, deactivated: 0 })).toBe("2 admins");
+  });
+});
+
+describe("rosterSubtitle — states WHAT IS COUNTED, never who can act", () => {
+  const m = (status: Member["status"]): Member => ({ role: "member", status }) as Member;
+
+  it("⛔ never claims 'members' who can act — it says accounts on the roster", () => {
+    // The first subtitle read "Role hierarchy across N members", which claims WHO CAN ACT while counting
+    // something else. This is the whole correction.
+    const s = rosterSubtitle([m("active"), m("active")]);
+    expect(s).toMatch(/accounts on the roster/);
+    expect(s).not.toMatch(/hierarchy|can act/i);
+  });
+
+  it("surfaces the deactivated split when it exists, and stays quiet when it does not", () => {
+    // Both values of the same condition. "0 deactivated" on the common path is noise that trains people to
+    // stop reading the line.
+    expect(rosterSubtitle([m("active"), m("deactivated")])).toMatch(
+      /2 accounts on the roster, 1 deactivated and unable to sign in/,
+    );
+    expect(rosterSubtitle([m("active")])).toBe("1 account on the roster");
+    expect(rosterSubtitle([m("active")])).not.toMatch(/deactivated/);
+  });
+
+  it("singularises the account count", () => {
+    expect(rosterSubtitle([m("active")])).toMatch(/^1 account /);
+    expect(rosterSubtitle([m("active"), m("active")])).toMatch(/^2 accounts /);
   });
 });
 

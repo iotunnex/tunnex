@@ -48,7 +48,7 @@ let roster = [
     name: "Olive Owner",
     role: "owner",
     email_verified: true,
-    active: true,
+    status: "active",
   },
   {
     user_id: "u2",
@@ -56,7 +56,7 @@ let roster = [
     name: "Adam Admin",
     role: "admin",
     email_verified: true,
-    active: true,
+    status: "active",
   },
 ];
 
@@ -144,7 +144,7 @@ beforeEach(() => {
       name: "Olive Owner",
       role: "owner",
       email_verified: true,
-      active: true,
+      status: "active",
     },
     {
       user_id: "u2",
@@ -152,7 +152,7 @@ beforeEach(() => {
       name: "Adam Admin",
       role: "admin",
       email_verified: true,
-      active: true,
+      status: "active",
     },
   ];
 });
@@ -179,7 +179,7 @@ describe("Users — wiring: the last owner cannot be demoted", () => {
         name: "Olive Owner",
         role: "owner",
         email_verified: true,
-        active: true,
+        status: "active",
       },
       {
         user_id: "u2",
@@ -187,7 +187,7 @@ describe("Users — wiring: the last owner cannot be demoted", () => {
         name: "Sam Second",
         role: "owner",
         email_verified: true,
-        active: true,
+        status: "active",
       },
     ];
     withAuth(<Users />);
@@ -278,8 +278,8 @@ describe("Users — the devices column and the false zero", () => {
     // device. A client-side group-by over it prints `0` against every colleague — a POSITIVE CLAIM about
     // another person's fleet, drawn from a response that was never about them.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, active: true },
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
+      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
@@ -324,11 +324,50 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
   it("an ENTERPRISE owner sees the group count and NO gate note", async () => {
     withAuth(<Users />);
     await waitFor(() => screen.getByText("Access posture"));
-    await waitFor(() => expect(screen.getByText("1 group")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/1 group in this organization/)).toBeTruthy());
     // Nothing is withheld from this caller, so no note may appear — a note that always renders explains
     // nothing.
     expect(screen.queryByText(/Enterprise feature/)).toBeNull();
     expect(screen.queryByText(/only shown to admins/)).toBeNull();
+  });
+
+  it("⛔ GROUPS IS NOT A STAT TILE — it is not a role tier, and the wireframe has no such tile", async () => {
+    // THE RULING. A `Groups 3` tile sitting beside owner/admin/member reads as A FOURTH ROLE TIER. The
+    // wireframe's Access posture panel has no Groups stat at all — groups appear only as one axis inside
+    // `{{ teamMap }}`, which is D2/held. So the count keeps its own line, named as standing in for the graph.
+    withAuth(<Users />);
+    await waitFor(() => screen.getByText("Access posture"));
+    await waitFor(() => screen.getByText(/1 group in this organization/));
+
+    // The stat row is the <dl>. Its terms are the three role tiers and nothing else.
+    const dl = document.querySelector("dl")!;
+    // Terms pluralise with their own count ("1 owner" -> `owner`, 0 -> `members`), so match the stem — a
+    // literal list would pin one roster's plurals and fail for an unrelated reason.
+    const terms = Array.from(dl.querySelectorAll("dt")).map((d) => d.textContent?.toLowerCase() ?? "");
+    expect(terms).toHaveLength(3);
+    expect(terms.map((t) => t.replace(/s$/, ""))).toEqual(["owner", "admin", "member"]);
+    expect(terms.some((t) => t.includes("group"))).toBe(false);
+
+    // And it says what it stands in for, so a reader does not take it for the finished feature.
+    expect(screen.getByText(/stands in for it/)).toBeTruthy();
+  });
+
+  it("the roster subtitle states WHAT IS COUNTED and shows the deactivated split", async () => {
+    // "Role hierarchy across N members" claimed who can act while counting accounts on the roster. Grace is
+    // deactivated and cannot sign in, so the roster count and the who-can-act count are different numbers.
+    roster = [
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
+      { user_id: "u9", email: "gone@acme.test", name: "Gone Away", role: "member", status: "deactivated", email_verified: true },
+    ];
+    withAuth(<Users />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/2 accounts on the roster, 1 deactivated and unable to sign in/),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(/Role hierarchy across/)).toBeNull();
+    // And the per-role split renders where it exists.
+    expect(screen.getByText("1 deactivated")).toBeTruthy();
   });
 
   it("⛔ an OPEN-EDITION OWNER is told EDITION — the upsell reaches whoever can act on it", async () => {
@@ -349,8 +388,8 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // this caller's real response is `forbidden`.
     edition = "open";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, active: true },
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
+      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
@@ -368,8 +407,8 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // roster: every colleague, their role, and the role tallies.
     edition = "open";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, active: true },
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
+      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
@@ -417,8 +456,8 @@ describe("Users — a member with no name", () => {
     // Found because a MOCK omitted `name` while every seeded fixture member had one. The fixture was LESS
     // representative than the double — the inverse of S14.10's trap, same lesson from the other side.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
-      { user_id: "u4", email: "nameless@acme.test", name: "", role: "member", email_verified: true, active: true },
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
+      { user_id: "u4", email: "nameless@acme.test", name: "", role: "member", email_verified: true, status: "active" },
     ];
     withAuth(<Users />);
     const table = await waitFor(() =>
@@ -445,8 +484,8 @@ describe("Users — an empty name AND a long email (the interaction)", () => {
     // `truncate` later would not fail it, but adding a second unconditional email span would.
     const long = "nadia.okonkwo-contractor.external@a-very-long-subdomain.example-company.co.uk";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, active: true },
-      { user_id: "u5", email: long, name: "", role: "member", email_verified: true, active: true },
+      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
+      { user_id: "u5", email: long, name: "", role: "member", email_verified: true, status: "active" },
     ];
     withAuth(<Users />);
     const table = await waitFor(() =>

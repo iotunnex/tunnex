@@ -222,16 +222,45 @@ export function groupAccessLabel(s: GroupAccessState): string {
 // which a reader trusts more than prose.
 export interface RoleTally {
   role: Role;
+  /** Accounts on the roster holding this role — DEACTIVATED INCLUDED. See roleDistribution. */
   n: number;
+  /** How many of `n` cannot sign in. Rendered only when non-zero. */
+  deactivated: number;
 }
 
 /**
  * Counts per role, always in hierarchy order and ALWAYS INCLUDING ZEROS — an org with no admins should read
  * `0 admins`, not omit the row. An omitted row is indistinguishable from a role that does not exist.
+ *
+ * ⛔ THIS COUNTS ACCOUNTS ON THE ROSTER, DEACTIVATED INCLUDED — ruled, and the SUBTITLE MUST SAY SO.
+ *
+ * The first version was labelled "Role hierarchy across N members", which claims WHO CAN ACT. It counts
+ * something else: `ListOrgMembersWithUser` excludes soft-deleted users but keeps deactivated ones on purpose
+ * (its own comment: "deactivated members stay on the roster (status carries that)"), and a deactivated account
+ * is refused at login with 403 account_deactivated. So the label promised one fact and the number was another.
+ *
+ * A roster of 7 with 1 deactivated is TWO FACTS, NOT ONE NUMBER — hence `deactivated` below, rendered only
+ * where it is non-zero.
  */
 export function roleDistribution(members: Member[]): RoleTally[] {
   const order: Role[] = ["owner", "admin", "member"];
-  return order.map((role) => ({ role, n: members.filter((m) => m.role === role).length }));
+  return order.map((role) => ({
+    role,
+    n: members.filter((m) => m.role === role).length,
+    deactivated: members.filter((m) => m.role === role && m.status === "deactivated").length,
+  }));
+}
+
+/**
+ * The panel's subtitle. States WHAT IS COUNTED rather than implying who can act, and surfaces the split at
+ * panel level so the two facts arrive together.
+ */
+export function rosterSubtitle(members: Member[]): string {
+  const off = members.filter((m) => m.status === "deactivated").length;
+  const n = members.length;
+  const head = `${n} ${n === 1 ? "account" : "accounts"} on the roster`;
+  // The zero case says nothing extra — "0 deactivated" is noise on the common path.
+  return off === 0 ? head : `${head}, ${off} deactivated and unable to sign in`;
 }
 
 /** `2 owners` / `1 owner` / `0 owners` — the zero is stated, never dropped. */

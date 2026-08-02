@@ -53,6 +53,32 @@ jobs:
       # generated and the Codegen drift guard — which always runs — catches a hand-edit there.
       #
       # Decision table proven 18/18 including every fail-closed arm (docs/S14.10-handoff.md).
+      #
+      # ── ⛔ AND `\.sql$` IS HERE BECAUSE OF `//go:embed`, WHICH IS THE SEAM THIS LIST CANNOT SEE ───────────
+      #
+      # S14.11 found a FAIL-OPEN in a classifier whose header says it fails closed:
+      # `apps/api/cmd/seed-fixtures/fixtures.sql` is a **compile input** to a Go package (`//go:embed
+      # fixtures.sql` in that package's main.go), and it matched NONE of the patterns. A fixtures-only diff
+      # therefore set `go=false` and SKIPPED `build-editions` — the step that would fail if that embed target
+      # were renamed or deleted, because a missing embed target is a COMPILE ERROR.
+      #
+      #   ⛔ THE CLASSIFIER REASONS ABOUT FILE EXTENSIONS. THE COMPILER REASONS ABOUT COMPILE INPUTS.
+      #   ⛔ `//go:embed` IS THE SEAM WHERE THOSE TWO DISAGREE — it makes a file of ANY extension a build
+      #   ⛔ input to a Go package, and no amount of care with a suffix list can anticipate which extension.
+      #
+      # This is the epic's PROSE-VERSUS-BEHAVIOUR class (docs/CUT-REGISTER.md): the comment above asserted
+      # fail-closed, the behaviour was fail-open, and nothing compared the two.
+      #
+      # CENSUSED, not patched at the one instance — every `//go:embed` in the tree (all modules, `grep -rn
+      # "go:embed" --include="*.go"`), both now covered:
+      #   apps/api/db/embed.go            -> migrations/*.sql   COVERED by `apps/api/db/`
+      #   apps/api/cmd/seed-fixtures/     -> fixtures.sql        COVERED by `\.sql$`   <- was the hole
+      # (No cgo C/H/S sources exist — apps/helper's cgo is inline — so embeds are the whole class today.)
+      #
+      # ⛔ AND A SUFFIX IS STILL A GUESS ABOUT THE FUTURE, so the list alone is not the fix. `TestGoEmbed
+      # TargetsAreGoRelevantToCI` (apps/api/cmd/) re-derives the embed set from source on every run and fails
+      # if any target is not matched by THIS regex — so an embed of a `.json`, `.txt` or `.tmpl` breaks the
+      # build with an instruction rather than silently skipping the Go steps.
       - name: Classify the diff (fails closed — anything uncertain runs everything)
         id: scope
         run: |
@@ -63,7 +89,7 @@ jobs:
             if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
               CHANGED=$(git diff --name-only "${BASE}...HEAD" || true)
               if [ -n "$(printf '%s' "$CHANGED" | tr -d '[:space:]')" ]; then
-                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|Dockerfile|\.github/|openapi/|apps/api/db/)'; then
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|\.github/|openapi/|apps/api/db/)'; then
                   RUN_GO=false
                 fi
               fi
