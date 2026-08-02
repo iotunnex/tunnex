@@ -161,10 +161,26 @@ jobs:
   # artifacts (expected/actual/diff) and its failures MEAN something different: e2e red = broken behaviour,
   # visual red = something moved, possibly on purpose.
   #
-  # ⛔ BLOCKING, and unblocked by COMMITTING A BASELINE — never by re-running with --update-snapshots, which
-  # this job can never do because it only ever compares.
+  # ⛔ ADVISORY DURING EPIC 14, BLOCKING AGAIN AT ITS CLOSE. Founder-ruled 2026-08-02.
+  #
+  # A PIXEL BASELINE IS RED BY DESIGN DURING A REDESIGN. This job compares against a committed image, and
+  # every slice of EPIC 14 deliberately changes the shared surface — a palette, a primitive, an animation, a
+  # button recipe. So the honest state of the check on almost every commit of this epic is "yes, it moved,
+  # you moved it", and it charged a full CI round-trip plus a harvest to say so.
+  #
+  # ⚠ THAT IS NOT THE SAME AS THE CHECK BEING WORTHLESS, and it is why this is `continue-on-error` rather than
+  # deleted. In S14.5 alone it caught an AreaChart rendering 500px tall at column width, and the harvest step
+  # caught a masked baseline that was a solid magenta rectangle — a check that would have compared equal
+  # forever with no subject in it. THE ARTIFACT AND THE DIFF STILL UPLOAD; only the BLOCK is lifted.
+  #
+  # TRIGGER TO RE-ARM: EPIC 14 close, when the surface stops moving on purpose. At that point a red here means
+  # what it is supposed to mean — something moved that nobody asked to move — and it should block again.
+  #
+  # Unblocked by COMMITTING A BASELINE, never by re-running with --update-snapshots, which this job can never
+  # do because it only ever compares.
   visual:
-    name: visual regression (blocking; unblock by committing a baseline)
+    name: visual regression (advisory during EPIC 14; re-arms at epic close)
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
