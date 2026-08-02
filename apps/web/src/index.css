@@ -176,5 +176,11 @@ body {
    flowing link, because that link IS live. Same mechanism, opposite ruling, and the discriminator is
    whether the thing depicted is happening now. */
 @keyframes tnxDraw { from { stroke-dashoffset: 1600 } to { stroke-dashoffset: 0 } }
+/* ⛔ MOUNT-ONLY, MEASURED — not a hope. A CSS animation restarts only when the element is ADDED or the
+   class re-applied. Each edge is <path key={rule.id}>, so React reconciles it across re-renders and the
+   path PERSISTS: changing  (a reorder) does not re-trigger it, and a rule edit animates ONLY the newly
+   added edge. That is what an entry animation should do — it announces ARRIVAL, and a panel that is still
+   on screen has not arrived again. At 900 rules the table is the working surface and a 1.4s redraw on
+   every toggle would be friction, not polish. */
 .tnx-flow-edge { stroke-dasharray: 1600; animation: tnxDraw 1.4s ease-out 0.15s both; }
 @media (prefers-reduced-motion: reduce) { .tnx-flow-edge { animation: none; stroke-dasharray: none } }

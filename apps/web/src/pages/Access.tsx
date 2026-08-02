@@ -613,7 +613,10 @@ function RulesSection({
                 dstKind: r.dst_kind as FlowKind,
               };
             });
-            const g = flowGraphState(rows.length);
+            // Coverage is judged on what the layout ACTUALLY drew, so the gate sees the same number the
+            // reader would. Two thresholds on one panel: the count cap (24) and the coverage floor (0.5).
+            const probe = flowLayout(rows);
+            const g = flowGraphState(rows.length, probe.shown.length);
             if (g.kind !== "draw")
               return (
                 <p className="mt-3 text-xs text-slate-500" data-testid="flow-withheld">

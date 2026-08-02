@@ -781,13 +781,20 @@ export const FLOW_GRAPH_MAX_RULES = 24;
 export type FlowGraphState =
   | { kind: "draw"; rules: number }
   | { kind: "withheld_too_many"; rules: number; max: number }
+  | { kind: "withheld_unrepresentative"; rules: number; drawn: number }
   | { kind: "withheld_empty" };
 
-export function flowGraphState(ruleCount: number): FlowGraphState {
+export function flowGraphState(
+  ruleCount: number,
+  drawnCount?: number,
+): FlowGraphState {
   if (ruleCount === 0) return { kind: "withheld_empty" };
-  return ruleCount > FLOW_GRAPH_MAX_RULES
-    ? { kind: "withheld_too_many", rules: ruleCount, max: FLOW_GRAPH_MAX_RULES }
-    : { kind: "draw", rules: ruleCount };
+  if (ruleCount > FLOW_GRAPH_MAX_RULES)
+    return { kind: "withheld_too_many", rules: ruleCount, max: FLOW_GRAPH_MAX_RULES };
+  // The coverage gate runs only when a caller supplies what the layout actually drew.
+  if (drawnCount !== undefined && drawnCount / ruleCount < FLOW_MIN_COVERAGE)
+    return { kind: "withheld_unrepresentative", rules: ruleCount, drawn: drawnCount };
+  return { kind: "draw", rules: ruleCount };
 }
 
 /**
@@ -802,7 +809,10 @@ export function flowGraphNote(s: FlowGraphState): string | null {
     case "withheld_empty":
       return "No rules to draw yet.";
     case "withheld_too_many":
-      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}). the table below is authoritative.`;
+      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}). The table below is authoritative.`;
+    case "withheld_unrepresentative":
+      // Says WHY, and the number that makes it true — it never simply disappears.
+      return `Only ${s.drawn} of ${s.rules} flows would be drawn, too few to represent the rest. The table below is authoritative.`;
   }
 }
 
@@ -811,6 +821,21 @@ export function flowGraphNote(s: FlowGraphState): string | null {
 // The handoff's `polFlow` is a HARDCODED LITERAL that never reads the rule table — it demonstrates a result
 // without specifying the rule that produces it. So this is a DECISION, not an implementation of the design.
 export const FLOW_COLUMN_CAP = 4; // the design's own four slots per column
+
+// ⛔ THE SECOND THRESHOLD IS ON COVERAGE, NOT ON COUNT — and that choice is the answer to "at what rule count
+// does the panel stop saying anything?"
+//
+// It is the WRONG QUESTION, because degree-ranking's meaningfulness does not depend on N. It depends on the
+// DEGREE DISTRIBUTION:
+//   · 900 rules hub-and-spoke through 4 gateways -> top-4 covers nearly everything. Perfectly summarised.
+//   · 900 rules across 900 distinct pairs        -> top-4 covers ~2%. Decoration.
+// A fixed second COUNT would withhold from the first org for a property it does not have, and keep drawing
+// for the second until someone noticed.
+//
+// So: withhold when the DRAWN SHARE falls below half. "6 of 9" is a summary; "16 of 900" is a panel whose
+// subset no longer represents its set. 0.5 is the point at which the drawn edges stop being the majority of
+// what exists — below it the reader is looking at a minority and cannot know it.
+export const FLOW_MIN_COVERAGE = 0.5;
 
 // ⛔ THE KIND COMES FROM THE RULE'S OWN DISCRIMINATED UNION, NEVER FROM MATCHING THE LABEL.
 // A label-matching heuristic rendered every resource as USER: `members.some(m => label.startsWith(m.name))`

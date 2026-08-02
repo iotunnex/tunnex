@@ -23,6 +23,7 @@ import {
   flowGlyph,
   flowTag,
   FLOW_COLUMN_CAP,
+  FLOW_MIN_COVERAGE,
   FLOW_GRAPH_MAX_RULES,
   ruleBody,
   grantControls,
@@ -1157,5 +1158,50 @@ describe("flowGlyph / flowTag — every arm of BOTH unions, exhaustively", () =>
     ]);
     expect(l.srcs.map((n) => n.kind).sort()).toEqual(["cidr", "group"]);
     expect(l.dsts.map((n) => n.kind).sort()).toEqual(["resource", "site"]);
+  });
+});
+
+describe("the SECOND threshold is COVERAGE, not count", () => {
+  // ⛔ "At what rule count does the panel stop saying anything?" is the WRONG QUESTION. Degree-ranking's
+  // meaningfulness depends on the DEGREE DISTRIBUTION, not on N: 900 rules hub-and-spoke through 4 gateways
+  // are perfectly summarised by top-4; 900 distinct pairs are not summarised by anything. A fixed second
+  // COUNT would withhold from the first org for a property it does not have.
+  it("⛔ BOTH SIDES OF THE COVERAGE BOUNDARY, in one test", () => {
+    expect(FLOW_MIN_COVERAGE).toBe(0.5); // pinned: a bump is a deliberate edit
+    // exactly half is still drawn; below half is withheld.
+    expect(flowGraphState(10, 5).kind).toBe("draw");
+    expect(flowGraphState(10, 4).kind).toBe("withheld_unrepresentative");
+  });
+
+  it("a HUB-AND-SPOKE set stays drawn no matter how many rules — the whole argument", () => {
+    // 20 rules, all through one source: top-4 covers everything, so nothing is withheld.
+    const edges = Array.from({ length: 20 }, (_, i) => ({
+      id: String(i), src: "hub", dst: "d" + (i % 3), temp: false,
+      srcKind: "group" as const, dstKind: "resource" as const,
+    }));
+    const l = flowLayout(edges);
+    expect(flowGraphState(edges.length, l.shown.length).kind).toBe("draw");
+  });
+
+  it("a FULLY-DISTINCT set of the same size is withheld — same N, opposite verdict", () => {
+    // Same 20 rules, every pair distinct: top-4 x top-4 covers a minority.
+    const edges = Array.from({ length: 20 }, (_, i) => ({
+      id: String(i), src: "s" + i, dst: "d" + i, temp: false,
+      srcKind: "group" as const, dstKind: "resource" as const,
+    }));
+    const l = flowLayout(edges);
+    expect(flowGraphState(edges.length, l.shown.length).kind).toBe("withheld_unrepresentative");
+  });
+
+  it("the withheld note names the drawn count AND the total — never just disappears", () => {
+    const n = flowGraphNote(flowGraphState(20, 8))!;
+    expect(n).toContain("8");
+    expect(n).toContain("20");
+    expect(n).toMatch(/table below is authoritative/);
+  });
+
+  it("coverage is only judged when the caller supplies what was drawn", () => {
+    // One-arg calls keep the old behaviour, so no existing caller changes meaning.
+    expect(flowGraphState(9).kind).toBe("draw");
   });
 });
