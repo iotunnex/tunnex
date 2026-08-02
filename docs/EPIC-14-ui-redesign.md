@@ -287,6 +287,68 @@ and accessible name, never by narrowing to a test-id (docs/laws.md).
 
 ---
 
+# ⛔⛔ THE PRE-FLIGHT — SIX CHECKS BEFORE A LINE OF A SCREEN IS WRITTEN
+
+**FOUNDER-RULED 2026-08-02, at the close of S14.5. EVERY ONE OF THESE WAS PAID FOR IN THAT SLICE, AND EVERY
+ONE IS ABOUT THE ELEVEN SCREENS STILL AHEAD.** Run them BEFORE the section protocol's step 3, not after a
+screenshot.
+
+## 1 · SCALE — what does this look like at 10× the data? At 100×?
+
+**EVERY REMAINING SCREEN IS A LIST SCREEN.** A card per row is a page whose height grows with the customer's
+success. **Table for scanning · ONE detail panel for the selected row · teaching text rendered ONCE.**
+
+> **PLACEMENT TEST: IS IT IDENTICAL ON EVERY ROW? THEN IT RENDERS ONCE.**
+
+*Cost when skipped: the site list, ~320px per card — 10 sites was 3,200px of scroll with the same paragraph
+repeated ten times.*
+
+## 2 · N=1 **AND** N=MANY, BOTH
+
+**THE DESIGN HANDS YOU A FLATTERING MIDDLE SAMPLE AND YOU CHECK NEITHER END.** Zero, one, two, and far more
+than the mock.
+
+*Cost when skipped: six rounds on the network map at N=1; one more on the card list at N=5.*
+
+## 3 · ANIMATION IS A FOUNDER REQUIREMENT, NOT A POLISH ITEM
+
+**Every graph gets its entry animation, timings taken from the handoff VERBATIM.**
+
+- **ENTRY animations play ONCE on mount, regardless of state** — *"this drawing is arriving"* is true of a
+  healthy link and a dead one alike
+- **CONTINUOUS motion ONLY on states that are genuinely live** — permanent movement reads as ongoing activity
+- **all of it dies under `prefers-reduced-motion`**
+- **the library is Motion (MIT). GSAP is NOT adopted** — ruled on redistribution/licence grounds, above
+
+## 4 · READ THE HANDOFF BEFORE WRITING, AND BEFORE EVERY CORRECTION — AND CHECK THIS DOC FOR EXISTING RULINGS
+
+**Not after a screenshot.** *A screenshot shows what is wrong; only the source says what is right.*
+
+**AND CHECK FOR A RULING BEFORE ANSWERING A QUESTION.** I argued GSAP on bundle size while the founder had
+already ruled it out on **licence** grounds, recorded in this file, days earlier.
+
+> **BEING RIGHT BY ACCIDENT IS NOT BEING RIGHT.** A correct answer reached without the recorded reason will
+> be re-argued the next time, and the next arguer may reach the other conclusion.
+
+## 5 · THE LIVE SCHEMA IS THE AUTHORITY, NOT THE MIGRATIONS
+
+**Migrations describe HISTORY. `information_schema` describes STATE.** Grep a `CREATE TABLE` and you get the
+column as it was born, not as it is.
+
+*Cost when skipped: three column errors in one fixture file — a renamed column, a table split, and a boolean
+that was actually text under a CHECK constraint.*
+
+## 6 · WHEN A TOKEN'S VALUE MOVES, ENUMERATE EVERY FOREGROUND PAIRED WITH IT
+
+**A SEMANTIC NAME SURVIVES A PALETTE SWAP; THE CONTRAST IT ASSUMED DOES NOT.** The pairing lives at the call
+site, the value lives in the token, and **nothing connects the two** — so the enumeration must be deliberate.
+
+*Cost when skipped: the primary button was white-on-light-grey PRODUCT-WIDE, surviving a palette migration, a
+primitives story and three founder reviews — because a low-contrast button reads as a DISABLED button, which
+is a plausible design choice rather than an obvious fault.*
+
+---
+
 # ⛔ THE SECTION PROTOCOL — FOUNDER-RULED 2026-08-01. BINDING ON EVERY REMAINING SLICE. NO EXCEPTIONS.
 
 > ## **1. READ THE WIREFRAME FIRST** — `docs/design/TUNNEX-wireframe-v2.html.txt`, for that specific section,
