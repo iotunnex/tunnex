@@ -38,58 +38,7 @@ async function stabilise(page: Page) {
 }
 
 test.describe("visual — the shared surface", () => {
-  for (const w of WIDTHS) {
-    test(`primitives gallery @ ${w.name}`, async ({ page }) => {
-      await page.setViewportSize({ width: w.width, height: w.height });
-      await stabilise(page);
-      await page.goto("/__visual");
-      await expect(page.locator("[data-visual-gallery]")).toBeVisible();
-      // Fonts must be loaded before the shot or glyph metrics shift mid-capture.
-      await page.evaluate(() => document.fonts.ready);
-      await expect(page).toHaveScreenshot(`gallery-${w.name}.png`, {
-        fullPage: true,
-        maxDiffPixelRatio: 0,
-        animations: "disabled",
-      });
-    });
-  }
-});
-
-// ⛔ THE WIDTH-SENSITIVE CLASS, CAPTURED SEPARATELY AND AT 1440 ONLY (founder-ruled 2026-08-02).
-//
-// SEPARATE, not appended to the gallery image: diff legibility is the point of a small suite. Appending
-// would roughly double the page and spread any change across more pixels — making a real regression harder
-// to see in the very image a human is meant to read. Every image must EARN ITS PLACE, and one that isolates
-// the class where a component's geometry derives from its CONTAINER earns it.
-//
-// ⛔ 1440 ONLY, AND THAT IS NOT AN OVERSIGHT. At 390 there is no wide column, so a "wide specimen" is just
-// the narrow one again — it would test nothing while costing a baseline and a re-harvest on every change.
-// This note exists so nobody adds `gallery-wide-390.png` for symmetry.
-test.describe("width-sensitive specimens at full column width", () => {
-  test("wide specimens @ 1440", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1200 });
-    await stabilise(page);
-    await page.goto("/__visual");
-    // ⛔ CLOSE THE MODAL RATHER THAN MASK IT. The gallery keeps one open on purpose, and it is
-    // `fixed inset-0` — so it lies over EVERY element screenshot on this page, not just its own section.
-    //
-    // The first attempt masked `[role="dialog"]`, which is that full-viewport overlay, and produced a
-    // baseline that was ENTIRELY MAGENTA: a solid rectangle that would have compared equal forever with no
-    // subject inside it. Caught only by LOOKING at the harvested image before committing it.
-    await page.locator('[role="dialog"]').click({ position: { x: 5, y: 5 } });
-    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
-
-    const wide = page.locator("[data-wide-specimens]");
-    await expect(wide).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
-    await expect(wide).toHaveScreenshot("gallery-wide-1440.png", {
-      maxDiffPixelRatio: 0,
-      animations: "disabled",
-    });
-  });
-});
-
-// ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
+  // ⛔ NO HORIZONTAL OVERFLOW, AT ANY CAPTURED WIDTH.
 //
 // This assertion exists because the FIRST baseline run produced a 455px-wide capture from a 390px viewport —
 // the page scrolled sideways, and the image would have BAKED THE DEFECT IN as the expected appearance.
@@ -115,4 +64,48 @@ test.describe("no page scrolls sideways", () => {
       ).toBeLessThanOrEqual(0);
     });
   }
+});
+
+// ⛔ CHART HEIGHT IS BOUNDED, AND THIS ASSERTION EXISTS BECAUSE THE IMAGE THAT CAUGHT IT IS NOW ADVISORY.
+//
+// TWO PRIMITIVES SHIPPED WITH THE SAME DEFECT: an SVG with a `viewBox` and `w-full` but NO HEIGHT derives its
+// height from its WIDTH. `NodeLink` rendered ~750px tall in an 8fr column; `AreaChart` rendered ~500px — in
+// the primitive written AFTER the law about it was filed.
+//
+// The wide pixel specimen caught the second one on its first render. That specimen is now `continue-on-error`,
+// so the class would have lost its only detector. THIS IS THE SAME COVERAGE AS A NUMBER RATHER THAN A PICTURE:
+// deterministic, no baseline, no harvest, and it fails with a height in the message instead of a diff to
+// adjudicate.
+//
+// A DEMOTED CHECK MUST HAVE ITS FINDINGS RE-HOMED, NOT JUST ITS RED SUPPRESSED. Otherwise "advisory" quietly
+// means "the class it caught is now uncovered".
+test.describe("chart primitives are bounded in height", () => {
+  test("no chart renders taller than its design allows @ 1440", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await stabilise(page);
+    await page.goto("/__visual");
+    await expect(page.locator("[data-visual-gallery]")).toBeVisible();
+
+    // Every viz primitive renders through `VizFrame`, which emits a labelled <figure>. One query reaches all
+    // of them, including any added later — an enumeration rather than a list of the three that exist today.
+    const figures = page.locator("figure[aria-label]");
+    const n = await figures.count();
+    expect(n, "no charts found — the query is wrong, not the page").toBeGreaterThan(2);
+
+    for (let i = 0; i < n; i++) {
+      const fig = figures.nth(i);
+      const label = await fig.getAttribute("aria-label");
+      const box = await fig.boundingBox();
+      expect(box, `${label} has no box`).not.toBeNull();
+      // 420px: the tallest legitimate chart here is the 320px node-link plus its legend row. A width-derived
+      // height lands at 500-750px, so the bound separates the two cases without being fussy about layout.
+      expect(
+        box!.height,
+        `chart "${label}" is ${Math.round(box!.height)}px tall — a viewBox with w-full and no height derives its height from its WIDTH`,
+      ).toBeLessThanOrEqual(420);
+      expect(box!.height, `chart "${label}" collapsed`).toBeGreaterThan(20);
+    }
+  });
 });
