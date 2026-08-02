@@ -91,18 +91,24 @@ func main() {
 	//
 	// A fixture that reports its own INTENT rather than the resulting STATE is a census of the wrong thing.
 	// These numbers now come from the database after the write, so the line cannot drift from what is there.
-	var gateways, sites, subnets, devices, audits, clusters, services, rules int
+	var gateways, sites, subnets, devices, audits, clusters, services, rules, groups, members, resources, accessEvents, cliCreds, machineCreds int
 	if err := pool.QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM nodes        WHERE org_id = $1),
-		       (SELECT count(*) FROM sites        WHERE org_id = $1),
-		       (SELECT count(*) FROM site_subnets ss WHERE EXISTS (SELECT 1 FROM sites s WHERE s.id = ss.site_id AND s.org_id = $1)),
-		       (SELECT count(*) FROM devices      WHERE org_id = $1),
-		       (SELECT count(*) FROM audit_logs   WHERE org_id = $1),
-		       (SELECT count(*) FROM k8s_clusters WHERE org_id = $1),
-		       (SELECT count(*) FROM k8s_services WHERE org_id = $1),
-		       (SELECT count(*) FROM policy_rules WHERE org_id = $1)`,
+		SELECT (SELECT count(*) FROM nodes               WHERE org_id = $1),
+		       (SELECT count(*) FROM sites               WHERE org_id = $1),
+		       (SELECT count(*) FROM site_subnets ss     WHERE EXISTS (SELECT 1 FROM sites s WHERE s.id = ss.site_id AND s.org_id = $1)),
+		       (SELECT count(*) FROM devices             WHERE org_id = $1),
+		       (SELECT count(*) FROM audit_logs          WHERE org_id = $1),
+		       (SELECT count(*) FROM k8s_clusters        WHERE org_id = $1),
+		       (SELECT count(*) FROM k8s_services        WHERE org_id = $1),
+		       (SELECT count(*) FROM policy_rules        WHERE org_id = $1),
+		       (SELECT count(*) FROM user_groups         WHERE org_id = $1),
+		       (SELECT count(*) FROM group_members       WHERE org_id = $1),
+		       (SELECT count(*) FROM resources           WHERE org_id = $1),
+		       (SELECT count(*) FROM access_events       WHERE org_id = $1),
+		       (SELECT count(*) FROM cli_credentials c   WHERE EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = c.user_id AND m.org_id = $1)),
+		       (SELECT count(*) FROM machine_credentials WHERE org_id = $1)`,
 		seeddata.DemoOrgID,
-	).Scan(&gateways, &sites, &subnets, &devices, &audits, &clusters, &services, &rules); err != nil {
+	).Scan(&gateways, &sites, &subnets, &devices, &audits, &clusters, &services, &rules, &groups, &members, &resources, &accessEvents, &cliCreds, &machineCreds); err != nil {
 		logger.Error("seed_fixtures_count_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
@@ -111,11 +117,11 @@ func main() {
 		slog.String("org", seeddata.DemoOrgID),
 		slog.Int("gateways", gateways), slog.Int("sites", sites), slog.Int("subnets", subnets),
 		slog.Int("devices", devices), slog.Int("audit_entries", audits),
-		// ⛔ THESE THREE ARE THE POINT OF PRINTING THEM. A zero here means a whole SCREEN can render nothing
-		// but its empty state, which is not visible from the seeder succeeding. S14.8 pre-flight found
-		// clusters=0 AND policy_rules=0 — the second is the Zero Trust product's own screen.
 		slog.Int("k8s_clusters", clusters), slog.Int("k8s_services", services),
-		slog.Int("policy_rules", rules),
+		slog.Int("policy_rules", rules), slog.Int("user_groups", groups), slog.Int("group_members", members),
+		slog.Int("resources", resources), slog.Int("access_events", accessEvents),
+		slog.Int("cli_credentials", cliCreds), slog.Int("machine_credentials", machineCreds),
 		slog.String("note", "totals as they now EXIST (fixture + make seed), counted after the write; health kinds are DERIVED, not seeded"),
 	)
 }
+
