@@ -51,6 +51,7 @@ import {
   rulesEmptyCopy,
   flowGraphState,
   flowGraphNote,
+  flowLayout,
   ruleBody,
   defaultSrcKind,
   defaultDstKind,
@@ -579,66 +580,101 @@ function RulesSection({
               to add a rule.
             </p>
           )}
-          {/* ── ACCESS FLOW ({{ polFlow }}) — D5 ─────────────────────────────────────────────────────────
-              ⛔ WITHHELD SAYS WHY. Above FLOW_GRAPH_MAX_RULES the graph is not drawn and the panel states
-              the count, the limit, and that the table below is authoritative. A panel that simply
-              disappears above N reads as a rendering bug on exactly the orgs with the most policy — the
-              ones least able to tell. Same rule the epic already applies to withheld destructive controls,
-              applied to a visualisation. */}
+          {/* ── ACCESS FLOW ({{ polFlow }}) — built from the handoff's buildPolicyFlow(), not from a screenshot.
+              GEOMETRY VERBATIM: canvas 600x312 rx14 over a 16px dot field; node boxes 152x36 rx10 at cx±76,
+              columns at LX=95 / RX=505 so the paths own the middle 260px; vertical pitch 68 from cy=54;
+              glyph circle r8 at cx-60. EDGES are cubic beziers with HORIZONTAL control points ±130 —
+              `M170,sy C300,sy 300,dy 430,dy` — so they leave and arrive flat and read as flows, not chords.
+              Temporary grants are DASHED (5 6), allow is solid: the design distinguishes them by dash, not
+              by colour. Legend bottom-left, readout bottom-right, both INSIDE the panel.
+
+              ⛔ ORDERING IS THE FIX, NOT THE CURVE. The handoff's own data crosses ZERO times because a human
+              ordered the destination column so each source's edge is level or one slot away. Ours was
+              insertion order and crossed six times out of nine. Destinations are now placed by the MEAN slot
+              of their sources (one barycentric pass), which reproduces the handoff's hand-chosen order on its
+              own data. A prettier line over the same tangle would have been worse — it would look deliberate.
+
+              ⛔ AND THE COLUMN IS CAPPED AT THE DESIGN'S OWN FOUR SLOTS. The handoff draws 5 edges over 8
+              nodes while its rule table shows 9 rows — it renders a SUBSET, by hand. Above the cap the
+              remainder is stated, never silently dropped, and the table below stays authoritative. */}
           {(() => {
-            // Derived from the SAME ruleRow() the table below uses, so the graph and the table can never
-            // disagree about what a rule says.
-            const rows = rules.map((r) => ({
-              id: r.id,
-              src: ruleRow(r, groups, resources, members, sites, loaded, services).src,
-              dst: ruleRow(r, groups, resources, members, sites, loaded, services).dst,
-              expiry: r.expires_at != null,
-            }));
+            const rows = rules.map((r) => {
+              const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+              return { id: r.id, src: rr.src.label, dst: rr.dst.label, temp: r.expires_at != null };
+            });
             const g = flowGraphState(rows.length);
-            const note = flowGraphNote(g);
             if (g.kind !== "draw")
               return (
                 <p className="mt-3 text-xs text-slate-500" data-testid="flow-withheld">
-                  {note}
+                  {flowGraphNote(g)}
                 </p>
               );
-            // A bipartite source -> destination flow: every rule IS one edge, and both node sets come from
-            // reads this screen already makes. No new endpoint, no fan-out.
-            const srcs = [...new Set(rows.map((r) => r.src.label))];
-            const dsts = [...new Set(rows.map((r) => r.dst.label))];
-            const H = Math.max(srcs.length, dsts.length) * 22 + 12;
-            const y = (i: number, n: number) => (H / (n + 1)) * (i + 1);
+            const PITCH = 68, TOP = 54, W = 600, H = 312;
+            // ⛔ THE CAP AND THE ORDERING LIVE IN policyview.ts, PURE AND TESTED. They are OUR design
+            // decision (the handoff's polFlow is a hardcoded literal that never reads the rule table), so
+            // they get asserted like one: the cap at both sides, and a known-crossing input proven to come
+            // out with zero crossings.
+            const { srcs, dsts, shown, hidden } = flowLayout(rows);
+            const si = (l: string) => srcs.indexOf(l);
+            const cy = (i: number) => TOP + i * PITCH;
+            const box = (label: string, i: number, isSrc: boolean, sub: string) => {
+              const cx = isSrc ? 95 : 505;
+              return (
+                <g key={(isSrc ? "s" : "d") + label}>
+                  <rect x={cx - 76} y={cy(i) - 18} width="152" height="36" rx="10"
+                        fill="var(--tnx-surface-inset)" stroke="var(--tnx-divider)" strokeWidth="1.4" />
+                  <circle cx={cx - 60} cy={cy(i)} r="8" fill="var(--tnx-surface)" stroke="var(--tnx-divider)" />
+                  <text x={cx - 60} y={cy(i) + 3} textAnchor="middle" className="fill-slate-400 text-[8px]">
+                    {sub.charAt(0)}
+                  </text>
+                  <text x={cx - 46} y={cy(i) - 2} className="fill-slate-200 text-[11px]">{label.slice(0, 22)}</text>
+                  <text x={cx - 46} y={cy(i) + 10} className="fill-slate-500 text-[8px] uppercase tracking-wider">{sub}</text>
+                </g>
+              );
+            };
+            const kindOf = (label: string) =>
+              groups.some((x) => x.name === label) ? "group"
+              : sites.some((x) => x.name === label) ? "site"
+              : members.some((m) => (m.name || m.email) === label || label.startsWith(m.name)) ? "user"
+              : "resource";
             return (
-              <svg
-                className="mt-3 w-full"
-                height={H}
-                role="img"
-                aria-label={`Access flow: ${srcs.length} sources to ${dsts.length} destinations across ${rows.length} rules`}
-              >
-                {rows.map((r) => (
-                  <line
-                    key={r.id}
-                    x1="30%"
-                    x2="70%"
-                    y1={y(srcs.indexOf(r.src.label), srcs.length)}
-                    y2={y(dsts.indexOf(r.dst.label), dsts.length)}
-                    stroke={r.expiry ? "var(--tnx-accent)" : "var(--tnx-neutral)"}
-                    strokeWidth="1"
-                  />
-                ))}
-                {srcs.map((l, i) => (
-                  <text key={l} x="28%" y={y(i, srcs.length)} textAnchor="end" className="fill-slate-400 text-[10px]">
-                    {l}
-                  </text>
-                ))}
-                {dsts.map((l, i) => (
-                  <text key={l} x="72%" y={y(i, dsts.length)} className="fill-slate-400 text-[10px]">
-                    {l}
-                  </text>
-                ))}
-              </svg>
+              <div className="mt-3">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
+                     aria-label={`Access flow: ${shown.length} of ${rows.length} rules drawn, ${srcs.length} sources to ${dsts.length} destinations`}>
+                  <defs>
+                    <pattern id="tnxPolDots" width="16" height="16" patternUnits="userSpaceOnUse">
+                      <circle cx="1.5" cy="1.5" r="1" fill="var(--tnx-divider)" />
+                    </pattern>
+                  </defs>
+                  <rect x="0" y="0" width={W} height={H} rx="14" fill="url(#tnxPolDots)" />
+                  {shown.map((r) => {
+                    const sy = cy(si(r.src)), dy = cy(dsts.indexOf(r.dst));
+                    return (
+                      <path key={r.id} fill="none" strokeWidth="2"
+                            stroke={r.temp ? "var(--tnx-neutral)" : "var(--tnx-accent)"}
+                            strokeDasharray={r.temp ? "5 6" : undefined}
+                            className="tnx-flow-edge"
+                            d={`M170,${sy} C300,${sy} 300,${dy} 430,${dy}`} />
+                    );
+                  })}
+                  {srcs.map((l, i) => box(l, i, true, kindOf(l)))}
+                  {dsts.map((l, i) => box(l, i, false, kindOf(l)))}
+                </svg>
+                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                  <span>
+                    <span className="text-slate-300">——</span> allow&nbsp;&nbsp;
+                    <span className="text-slate-300">- - -</span> temporary
+                  </span>
+                  <span>
+                    {hidden > 0
+                      ? `${shown.length} of ${rows.length} flows drawn. ${hidden} more in the table below.`
+                      : "All access flows"}
+                  </span>
+                </div>
+              </div>
             );
           })()}
+
           <ul className="mt-3 space-y-1">
             {rules.map((r) => {
               const row = ruleRow(

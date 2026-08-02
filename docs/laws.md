@@ -2912,3 +2912,25 @@ consumer can produce.**
 **AND WHY WIRING IT IMMEDIATELY MATTERS:** an unwired view-model *between slices* is how dormant machinery
 becomes permanent. **It passes its tests, so nothing ever complains** — the debt has no failing signal and no
 deadline. The catch is only worth having if the wiring follows in the same slice.
+
+### ⛔ THIRD INSTANCE (S14.12) — GSAP, AGAIN, AND I ARGUED THE WRONG REASON
+
+Asked to "use gsap animation", I answered with **bundle size, motion-gate coverage, and reduced-motion
+ergonomics** — all correct, and **none of them the reason.** GSAP was ruled out on **2026-08-01 on LICENCE**:
+`docs/EPIC-14-ui-redesign.md:96` — a custom *"no charge"* licence, **neither SPDX nor OSI**, and Tunnex
+**redistributes a built bundle to self-hosters**, so embedding a non-OSI dependency inside an Apache-2.0
+artifact denies the recipient, for that portion, the freedoms the surrounding licence advertises. The ruled
+alternative is **Motion (MIT)**.
+
+**The heading literally says `GSAP IS NOT ADOPTED`. One grep.**
+
+**INSTANCE COUNT THIS EPIC: THREE** — Fleet risk, GSAP, and GSAP again.
+
+> ### **BEING RIGHT FOR A WEAKER REASON IS HOW A RULING GETS RE-OPENED A FOURTH TIME. A licence finding**
+> ### **closes the question permanently; a bundle-size argument invites "but it's only 70kB" — and the**
+> ### **next person to ask will get my weaker answer, not the founder's stronger one, because mine is the**
+> ### **one now written in the conversation.**
+
+**AND NOTE WHAT MADE IT FEEL UNNECESSARY:** I *had* the correct conclusion (don't add it) and a confident
+argument for it. **The grep feels redundant precisely when you already agree with the ruling** — which is
+exactly when it is load-bearing, because agreeing is not the same as knowing why.

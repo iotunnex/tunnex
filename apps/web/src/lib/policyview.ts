@@ -805,3 +805,55 @@ export function flowGraphNote(s: FlowGraphState): string | null {
       return `Too many rules to draw legibly (${s.rules}, limit ${s.max}). the table below is authoritative.`;
   }
 }
+
+// ── D5 LAYOUT: THE CAP AND THE ORDERING ARE OURS TO DESIGN, SO THEY ARE PURE AND TESTED ─────────────────
+//
+// The handoff's `polFlow` is a HARDCODED LITERAL that never reads the rule table — it demonstrates a result
+// without specifying the rule that produces it. So this is a DECISION, not an implementation of the design.
+export const FLOW_COLUMN_CAP = 4; // the design's own four slots per column
+
+export interface FlowEdge { id: string; src: string; dst: string; temp: boolean }
+export interface FlowLayout {
+  srcs: string[];
+  dsts: string[];
+  shown: FlowEdge[];
+  hidden: number;
+}
+
+/**
+ * Columns capped by EDGE DEGREE (the nodes carrying the most policy are what a reader came for), then
+ * destinations ordered BARYCENTRICALLY — each sits at the mean slot of the sources reaching it.
+ *
+ * ⛔ A CAP WITHOUT ORDERING STILL TANGLES AT 4x4. The design's zero crossings are not incidental: `d_eng` is
+ * in slot 3 precisely so `oncall-grp` fans up one row instead of across. Ordering is the fix, not the curve —
+ * a bezier over an unordered set would look deliberate.
+ */
+export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout {
+  const deg = (l: string, k: "src" | "dst") => edges.filter((e) => e[k] === l).length;
+  const srcs = [...new Set(edges.map((e) => e.src))]
+    .sort((a, b) => deg(b, "src") - deg(a, "src"))
+    .slice(0, cap);
+  const si = (l: string) => srcs.indexOf(l);
+  const bary = (d: string) => {
+    const ss = edges.filter((e) => e.dst === d && si(e.src) >= 0).map((e) => si(e.src));
+    return ss.length ? ss.reduce((a, b) => a + b, 0) / ss.length : Number.MAX_SAFE_INTEGER;
+  };
+  const dsts = [...new Set(edges.map((e) => e.dst))]
+    .sort((a, b) => deg(b, "dst") - deg(a, "dst"))
+    .slice(0, cap)
+    .sort((a, b) => bary(a) - bary(b));
+  const shown = edges.filter((e) => si(e.src) >= 0 && dsts.indexOf(e.dst) >= 0);
+  return { srcs, dsts, shown, hidden: edges.length - shown.length };
+}
+
+/** How many edge pairs cross, given a layout. Used by the test to prove ordering does work. */
+export function flowCrossings(l: FlowLayout): number {
+  const si = (x: string) => l.srcs.indexOf(x), di = (x: string) => l.dsts.indexOf(x);
+  let n = 0;
+  for (let i = 0; i < l.shown.length; i++)
+    for (let j = i + 1; j < l.shown.length; j++) {
+      const a = l.shown[i], b = l.shown[j];
+      if ((si(a.src) - si(b.src)) * (di(a.dst) - di(b.dst)) < 0) n++;
+    }
+  return n;
+}

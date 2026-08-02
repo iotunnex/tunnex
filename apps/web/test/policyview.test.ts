@@ -18,6 +18,9 @@ import {
   rulesEmptyCopy,
   flowGraphState,
   flowGraphNote,
+  flowLayout,
+  flowCrossings,
+  FLOW_COLUMN_CAP,
   FLOW_GRAPH_MAX_RULES,
   ruleBody,
   grantControls,
@@ -1064,5 +1067,49 @@ describe("a deactivated per-user subject is a FACT, never a warning", () => {
     const j = JSON.stringify(refs("active"));
     expect(j).toContain("Grace Okafor");
     expect(j).not.toContain("deactivated");
+  });
+});
+
+describe("flowLayout — the cap and the ordering, both ours to design", () => {
+  const e = (id: string, src: string, dst: string, temp = false) => ({ id, src, dst, temp });
+
+  it("⛔ THE CAP AT BOTH SIDES — 4 fits whole, 5 is capped and the remainder is COUNTED", () => {
+    const four = flowLayout(["a", "b", "c", "d"].map((x) => e(x, "s" + x, "d" + x)));
+    expect(four.srcs).toHaveLength(4);
+    expect(four.hidden).toBe(0);
+    const five = flowLayout(["a", "b", "c", "d", "z"].map((x) => e(x, "s" + x, "d" + x)));
+    expect(five.srcs).toHaveLength(FLOW_COLUMN_CAP);
+    expect(five.hidden).toBe(1); // never silently dropped
+  });
+
+  it("⛔ chosen by EDGE DEGREE, not insertion order", () => {
+    // `hub` appears last but carries 3 edges; a degree cap must keep it and drop a 1-edge source.
+    const l = flowLayout(
+      [e("1", "a", "x"), e("2", "b", "x"), e("3", "c", "x"), e("4", "d", "x"), e("5", "hub", "x"),
+       e("6", "hub", "y"), e("7", "hub", "z")],
+      2,
+    );
+    expect(l.srcs[0]).toBe("hub");
+  });
+
+  it("⛔ A KNOWN-CROSSING INPUT COMES OUT ORDERED — the cap alone does not fix the tangle", () => {
+    // Deliberately reversed: insertion order puts every destination opposite its source.
+    const edges = [e("1", "s1", "d4"), e("2", "s2", "d3"), e("3", "s3", "d2"), e("4", "s4", "d1")];
+    const ordered = flowLayout(edges);
+    expect(flowCrossings(ordered)).toBe(0);
+    // And prove the metric is not vacuous: the UNORDERED arrangement really does cross.
+    const unordered = { ...ordered, dsts: ["d1", "d2", "d3", "d4"] };
+    expect(flowCrossings(unordered)).toBeGreaterThan(0);
+  });
+
+  it("the handoff's own five edges lay out with ZERO crossings, as the design shows", () => {
+    const l = flowLayout([
+      e("1", "engineering", "gitlab.internal"),
+      e("2", "dana@acme.io", "eu-lan", true),
+      e("3", "us-lan", "eu-lan"),
+      e("4", "oncall-grp", "engineering"),
+      e("5", "oncall-grp", "db-prod.internal", true),
+    ]);
+    expect(flowCrossings(l)).toBe(0);
   });
 });

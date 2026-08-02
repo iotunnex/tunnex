@@ -165,3 +165,16 @@ body {
     stroke-dasharray: none;
   }
 }
+
+/* ⛔ ENTRY-ONCE, AND THE DIVERGENCE FROM THE HANDOFF IS DELIBERATE — DO NOT "FIX" IT BACK.
+   The wireframe's `.tnx-edge` uses `animation: tnxFlow 2.4s linear infinite` — marching ants that never
+   stop. Our motion rule is CONTINUOUS ONLY ON GENUINELY LIVE STATES, and a policy graph depicts
+   CONFIGURATION, not traffic: nothing on it is happening now.
+   So we take the SIBLING entry animation from the same stylesheet — `tnxDraw 1.4s ease-out .15s both` —
+   which draws each edge once and stops.
+   SECOND TIME the design's motion contradicts our rule, and the rulings differ: on Sites we KEPT the
+   flowing link, because that link IS live. Same mechanism, opposite ruling, and the discriminator is
+   whether the thing depicted is happening now. */
+@keyframes tnxDraw { from { stroke-dashoffset: 1600 } to { stroke-dashoffset: 0 } }
+.tnx-flow-edge { stroke-dasharray: 1600; animation: tnxDraw 1.4s ease-out 0.15s both; }
+@media (prefers-reduced-motion: reduce) { .tnx-flow-edge { animation: none; stroke-dasharray: none } }
