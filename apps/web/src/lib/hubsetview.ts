@@ -30,6 +30,7 @@ export function formatBytes(n: number): string {
 export interface HubMemberRow {
   nodeId: string;
   role: "primary" | "standby";
+  reporting: boolean; // true if metrics are reporting; false if absent
   handshakeAge: string; // relativeAge(last_handshake_at) or "n/a" (not reporting)
   rx: string; // formatBytes(rx_bytes) or "n/a"
   tx: string;
@@ -70,6 +71,7 @@ export function hubSetView(
     return {
       nodeId: m.node_id,
       role: m.role,
+      reporting,
       handshakeAge: reporting ? relativeAge(met!.last_handshake_at) : "n/a",
       rx: reporting ? formatBytes(met!.rx_bytes) : "n/a",
       tx: reporting ? formatBytes(met!.tx_bytes) : "n/a",

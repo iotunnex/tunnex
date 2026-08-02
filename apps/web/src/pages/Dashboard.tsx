@@ -720,7 +720,7 @@ export default function Dashboard() {
                                             that would be both an em-dash and a silence where the honest word
                                             exists — and "absent metrics is not an idle link" is this panel's
                                             own rule. */}
-                                        {m.handshakeAge === "—"
+                                        {!m.reporting
                                           ? " · not reporting"
                                           : ` · hs ${m.handshakeAge}`}
                                       </span>
