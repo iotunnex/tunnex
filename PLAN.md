@@ -63,6 +63,14 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-02): EPIC 14 S14.6 Gateways — PR #51, rebase-linear, tree-identical, object-rewritten, main `544baa5` (stale-on-arrival by one sha until Ruling 2 pointer disposition lands).**
+**FOUNDER RULING 1 (MERGE MECHANISM ADOPTED):** Merges to `main` via GitHub PR auto-merge/rebase-merge are formally adopted as **`rebase-linear, tree-identical, object-rewritten, re-verified by main's own run`**. The claim of "ff-only linear" is stopped across the codebase.
+**HUMAN GATE LIMIT LAW FIRST APPLICATION & EXPLICIT ACCEPTANCE:** The Human Gate Limit Law fired on its own first case. Four un-rendered states on localhost (`loadOne: failed-load` top-level red error card, `org.ovpn_enabled: true`, OpenVPN fault kinds, `site_link_note_demoted`) were declared. The Founder explicitly accepted all four states, noting `failed-load` is the only consequential state and its complete alert replacement behavior is described and verified.
+**FIXTURE DEBT REGISTERED WITH TRIGGER:** `make seed-fixtures` must reach `ovpn_enabled: true`, at least one OpenVPN fault kind, and a demoted hub note. Trigger: S14.7 Routed Ranges visual review.
+**CARRY-OVER DISPOSITIONS:** (1) `max_policy_version` cut trigger: S15 protocol version bump (predictive un-upgradeable warning). (2) `policyHealthBadge` exhaustiveness map typed as `Record<NonHealthyPolicyDegradedKind, HealthBadge>` (compiler-enforced guard) trigger: next health-kind addition or S14.7 pre-flight.
+
+**SHIPPED IN S14.6:** Gateways promoted to dedicated top-level screen (`/gateways`, route `gateways:view`) · grouped table (Degraded → Healthy → Revoked) · 3 filter chips (All / Healthy / Degraded) · single-truth boundary mapping (`healthview.ts` / `gatewaysview.ts`) · 7 `ListItem` primitive invocation call sites hardened under explicit `ListItemProps` (`children`, `aria-label`, `className`) · `isHub` server topology projection preserved (`electSiteHub` filters revoked in API backend).
+
 **MERGED (2026-08-02): EPIC 14 S14.5 Sites — PR #50, rebase-linear, tree-identical, object-rewritten, main `a253e5e`.**
 **CHECKPOINT POINTER LESSON & MECHANISM DECISION:**
 (1) **Pointer Flaw**: Disposition (a) — writing the re-entry pointer inside the PR branch — produces a checkpoint that is stale on arrival because the PR merge creates a new commit object on `main`. We adopt **Option B**: a 1-line direct push to `main` for `PLAN.md` re-entry pointer updates immediately following a merged PR (strictly bounded: 1 line pointer update in `PLAN.md` only, 0 product code, authorized under `CLAUDE.md` line 42 for immediate process documentation).
