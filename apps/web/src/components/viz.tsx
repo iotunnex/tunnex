@@ -497,7 +497,11 @@ export function NodeLink({
           const b = pos.get(l.to);
           if (!a || !b) return null;
           const touches = selectedId === l.from || selectedId === l.to;
-          const w = touches ? 2.5 : 1.5;
+          // Stroke width from the handoff: `1.5 + count/12`, where count is the busier endpoint's value.
+          // Selection thickens it.
+          const endpoint = nodes.find((n) => n.id === l.to);
+          const c = typeof endpoint?.value === "number" ? endpoint.value : 0;
+          const w = (touches ? 1.0 : 0) + 1.5 + c / 12;
           const dim = selectedId && !touches ? 0.18 : 1;
           return (
             <g key={`${l.from}-${l.to}`} opacity={dim}>
@@ -532,7 +536,16 @@ export function NodeLink({
           const p = pos.get(n.id)!;
           const isSel = n.id === selectedId;
           const isHub = n.kind === "hub";
-          const r = isHub ? 34 : 26;
+          // ⛔ RADIUS FROM THE HANDOFF'S FORMULA, not a constant I chose: `r = 16 + sqrt(count) * 3.2`
+          // (dc.html meshData). The hub is a fixed 34, as it is there.
+          //
+          // ⚠ IT BARELY VARIES ON OUR DATA AND THAT IS HONEST. The wireframe's counts are SITES PER REGION
+          // (40, 28, 22, 12, 6) so its rings differ visibly. Ours is GATEWAYS PER SITE — 0 or 1 today — so
+          // the rings are nearly uniform. The encoding is the design's; the flatness is our network's, and
+          // faking a spread would be drawing a distribution we do not have.
+          const count =
+            typeof n.value === "number" ? Math.max(0, n.value) : 0;
+          const r = isHub ? 34 : 16 + Math.sqrt(count) * 3.2;
           const dim = selectedId && !isSel ? 0.3 : 1;
           const state = n.tone ?? n.note ?? "no link";
           return (

@@ -193,7 +193,10 @@ export default function Sites() {
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const selectedCard = cards.find((c) => c.id === selectedSiteId) ?? null;
 
-  const mesh = useMemo(() => meshFrom(cards, raw?.nodes ?? []), [cards, raw]);
+  const mesh = useMemo(
+    () => meshFrom(cards, raw?.nodes ?? [], raw?.hubSet?.generation),
+    [cards, raw],
+  );
 
   return (
     <div className="flex flex-col gap-3.5">

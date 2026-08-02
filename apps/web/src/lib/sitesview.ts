@@ -287,7 +287,11 @@ export interface Mesh {
  * anything else degraded is DEGRADED; no badge is LINKED. A site with no gateway bound has no link at all —
  * which is different from a link that is down, and is drawn as an absent edge rather than a red one.
  */
-export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
+export function meshFrom(
+  cards: SiteCard[],
+  nodes: Node[],
+  hubGeneration?: number,
+): Mesh {
   const hubNode = nodes.find((n) => n.is_site_hub && n.status === "active");
   const out: Mesh = { nodes: [], links: [] };
   if (hubNode) {
@@ -295,7 +299,12 @@ export function meshFrom(cards: SiteCard[], nodes: Node[]): Mesh {
       id: "__hub",
       label: hubNode.name,
       kind: "hub",
-      sub: "· transit hub",
+      // The handoff's hub sub-line is `HA set gen 7 · pri +1` — the SET's identity, not the node's role.
+      // We serve that generation, so it goes here rather than the constant "transit hub" I had invented.
+      sub:
+        hubGeneration != null
+          ? `HA set gen ${hubGeneration}`
+          : "· transit hub",
     });
   }
   for (const c of cards) {
