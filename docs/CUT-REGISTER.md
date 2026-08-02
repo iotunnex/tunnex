@@ -88,3 +88,38 @@ object.
 `--rebase`. A local ff is possible whenever `main` is an ancestor of the branch head, which it was here.
 **Not changed unilaterally — the linear-history requirement interacts with it and that is a
 branch-protection decision.**
+
+## DEFERRALS WITH NAMED TRIGGERS — not prose, so they cannot quietly expire
+
+| deferral | trigger | why it is deferred rather than done |
+|---|---|---|
+| **`site_id` on `RoutedRange`** | **an org crosses ~50 sites**, OR any story that revisits what `/routed-ranges` may carry | `/routed-ranges` is a **device-facing projection** — *ranges only, no keys, endpoints, pool or policy*. Adding an org-structure field needs a decision about whether a DEVICE should learn site topology, which is not a screen's call. Until then attribution is a per-visit fan-out |
+| **The ~50-site fan-out tripwire** (Routed Ranges `SITE` column) | **51 requests / ~9 waves at 6-per-origin.** Fires when an org's site count approaches 50 | The fan-out is correct and cheap at realistic N. It is recorded as a **THRESHOLD, not a limit**, so the next reader inherits the number instead of rediscovering it at a customer |
+| **`Modal` has no Escape / focus-trap / initial-focus / focus-return** | the next slice that touches `Modal`, or S14.8 | shared primitive, 20 call sites, and it DECLARES `aria-modal="true"` while implementing none of it |
+| **`site_link_down` is an org-level headline printed per row** | the next control-plane story touching site-link health | suppressing a server-owned verdict client-side is the one-truth violation already swept off Sites |
+| **The peer/device count column** (Gateways) | its own slice | spec + codegen ×3 + drift guard + both editions + query-lint + sqlc |
+| **`Histogram` has no shipping consumer** | EPIC 14 close | Access Events moved REDESIGN → BUILD, so the clock got LONGER — which is how a deferral becomes permanent |
+| **Access screen's em-dashes** | the Access section pass | **MEASURED S14.7:** `policyview.ts:436` *"Rule status unavailable — refresh."* and `:442` *"Policy not enforced — open mesh."*, both asserted in `accesswiring.test.tsx:103,144`. **Those two assertions WILL break when that section clears its em-dashes — known in advance rather than discovered** |
+
+## ⛔ "CONFIGURED NOT TO MATTER" — THE THIRD INSTANCE, AND THE CENSUS THAT FOUND IT
+
+**After S11-1 (a promoted-then-ignored e2e job) and O-1, this is the third time a check existed and was
+configured into irrelevance.**
+
+**CENSUS RUN 2026-08-02 over `e2e/` and the component tier** — every `test.skip` / `describe.skip` /
+`.only` / `fixme` / env gate:
+
+| spec | gate | runs in CI? |
+|---|---|---|
+| `e2e/tests/settings.enterprise.spec.ts:24` | `test.skip(edition !== "enterprise")` | **YES** — the `e2e-enterprise` job runs it against an enterprise stack, so the gate is a correct guard |
+| **`e2e/tests/round2-walk.spec.ts:18`** | **`test.skip(!process.env.ROUND2)`** | ⛔ **NO. `ROUND2` is set NOWHERE in `.github/workflows/` or the `Makefile`. THIS SPEC HAS NEVER RUN IN CI.** |
+| component tier (`apps/web/test`) | — | **zero skips.** The one grep hit is a comment |
+
+**THE ROUND2 SPEC IS A WHOLE WALK SPEC THAT NOTHING EXECUTES.** It is how two stale assertions on a string
+deleted in S14.6 survived undetected — they cannot fail, because nothing runs them.
+
+> ## **AN ENV-GATED SPEC IS ADVISORY BY DEFAULT AND NOTHING ANNOUNCES IT.** The visual job at least says
+> ## "ADVISORY" in its name. A `test.skip(!process.env.X)` says nothing at all, and reads as coverage.
+
+**NOT DISPOSITIONED HERE** — either `ROUND2` gets set in a job, or the spec is deleted, or it is renamed to
+declare itself. **Three options, founder's call. TRIGGER: EPIC 14 close, with the visual job's re-arm.**
