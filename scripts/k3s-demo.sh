@@ -133,15 +133,27 @@ verify() {
   [ "$got" -eq "$want" ] || die "expected $want Services in Kubernetes, found $got"
 
   login
-  api GET "/organizations/$ORG/k8s/services" | python3 -c '
+  # ⛔ ARM 4 — THE CP LIST MUST MATCH THE LIVE CLUSTER, NAME BY NAME.
+  #
+  # "the CP lists some Services" and "the CP lists the Services that exist" are different claims, and only the
+  # second is worth a reviewer's trust. This arm catches ABSENCE #2 from the findings — a Service deleted in
+  # Kubernetes while still exposed in the control plane — which the D9 rendering rule explicitly does NOT
+  # cover. The verifier catching it is the only place that gap is visible today.
+  local live cp
+  live=$(kube get svc -A --no-headers | awk '{print $2}' | grep -E '^(ledger|metabase|gateway-api)$' | sort | tr '\n' ' ')
+  cp=$(api GET "/organizations/$ORG/k8s/services" | python3 -c '
 import sys, json
 svcs = json.load(sys.stdin)
 if not isinstance(svcs, list) or not svcs:
-    raise SystemExit("control plane lists NO exposed Services")
+    raise SystemExit(1)
 for s in sorted(svcs, key=lambda x: x["fqdn"]):
-    print("   %-12s %s" % (s["vip"], s["fqdn"]))
-print("   %d exposed Services served by the control plane" % len(svcs))
-' || die "control-plane verification failed"
+    print("   %-12s %s" % (s["vip"], s["fqdn"]), file=sys.stderr)
+print(" ".join(sorted(s["name"] for s in svcs)) + " ")
+' ) || die "the control plane lists NO exposed Services (arm 4: CP is empty)"
+  [ "$live" = "$cp" ] || die "arm 4: the CP list and the live cluster DISAGREE
+     live cluster : $live
+     control plane: $cp
+   A Service in one and not the other is finding 'absence #2' — the screen would show it as LIVE."
 
   printf '\033[32mOK\033[0m the review cluster is up and the control plane agrees with it\n'
   # ⛔ THE ONE THING THIS CANNOT VERIFY, STATED RATHER THAN OMITTED: no gateway in this stack WATCHES the
