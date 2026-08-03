@@ -2737,6 +2737,7 @@ export interface components {
             target_id?: string;
             /** Format: uuid */
             actor_id?: string;
+            actor_system?: string;
             /** Format: date-time */
             created_at: string;
         };

@@ -3628,6 +3628,12 @@ components:
         target_type: { type: string }
         target_id: { type: string }
         actor_id: { type: string, format: uuid }
+        # ⛔ THE NAMED SYSTEM ACTOR, ADDED S14.16. This schema carried `actor_id` and NOT
+        # `actor_system`, so every machine-initiated event on the Overview feed arrived
+        # indistinguishable from an event nobody recorded — the same vocabulary collision the Audit
+        # Log screen was just fixed for, one endpoint over. The column has existed since S7.5.2 and
+        # three writers populate it (`idp-sync`, `device-health`, `domain-capture`).
+        actor_system: { type: string }
         created_at: { type: string, format: date-time }
 
     # A single audit event for the viewer. `id` + `created_at` form the keyset

@@ -43,7 +43,22 @@ export type ResolvedActor = {
   gap: boolean;
 };
 
-export function resolveActor(row: AuditRow, members: Member[]): ResolvedActor {
+/**
+ * ⛔ `rosterKnown` EXISTS BECAUSE "NOT ON THE ROSTER" AND "NO ROSTER" ARE DIFFERENT FACTS.
+ *
+ * With an empty roster every human actor resolved to *"former member 019fc421"* — a FALSE
+ * STATEMENT ABOUT A PERSON, asserted confidently, about someone who may be a current member
+ * sitting in the next room. The Overview feed hits this exactly: `/overview` serves `members` as a
+ * COUNT, so the roster is a separate second-class read that can be slow or fail.
+ *
+ * A missing lookup table is OUR ignorance, not a fact about the actor. When the roster is not
+ * known, a human reads as an unnamed human and nothing is claimed about their membership.
+ */
+export function resolveActor(
+  row: AuditRow,
+  members: Member[],
+  rosterKnown = true,
+): ResolvedActor {
   // ⛔ NAMED SYSTEM ACTOR FIRST. A row carrying `actor_system` is fully attributed — it is not a
   // fallback and must never render as the generic word.
   if (row.actor_system && row.actor_system.trim() !== "") {
@@ -54,13 +69,16 @@ export function resolveActor(row: AuditRow, members: Member[]): ResolvedActor {
     // A human who has left the roster is still ATTRIBUTED — we know who, we just cannot name
     // them. That is a different state from "nobody recorded it", so it keeps its own kind and
     // does NOT set `gap`.
-    return m
-      ? { kind: "human", label: m.name || m.email, gap: false }
-      : {
-          kind: "unknown_human",
-          label: `former member ${row.actor_id.slice(0, 8)}`,
-          gap: false,
-        };
+    if (m) return { kind: "human", label: m.name || m.email, gap: false };
+    return {
+      kind: "unknown_human",
+      // Says only what is true in each case. "former member" is a CLAIM — it is made only when we
+      // actually looked at the roster and they were not on it.
+      label: rosterKnown
+        ? `former member ${row.actor_id.slice(0, 8)}`
+        : `member ${row.actor_id.slice(0, 8)}`,
+      gap: false,
+    };
   }
   // ⛔ THE HONEST ANSWER, AND THE ONE THE OLD CODE HID.
   return { kind: "unattributed", label: "not recorded", gap: true };

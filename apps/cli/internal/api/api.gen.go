@@ -376,11 +376,12 @@ type AccessLogHealth struct {
 
 // ActivityEntry defines model for ActivityEntry.
 type ActivityEntry struct {
-	Action     string              `json:"action"`
-	ActorId    *openapi_types.UUID `json:"actor_id,omitempty"`
-	CreatedAt  time.Time           `json:"created_at"`
-	TargetId   *string             `json:"target_id,omitempty"`
-	TargetType *string             `json:"target_type,omitempty"`
+	Action      string              `json:"action"`
+	ActorId     *openapi_types.UUID `json:"actor_id,omitempty"`
+	ActorSystem *string             `json:"actor_system,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
+	TargetId    *string             `json:"target_id,omitempty"`
+	TargetType  *string             `json:"target_type,omitempty"`
 }
 
 // AddGroupMemberRequest defines model for AddGroupMemberRequest.

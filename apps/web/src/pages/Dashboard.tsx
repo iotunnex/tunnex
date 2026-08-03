@@ -25,8 +25,10 @@ import {
   type ZeroTrustMode,
   type K8sCluster,
   type K8sService,
+  type Member,
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
+import { resolveActor } from "../lib/auditview";
 import {
   Badge,
   EmptyState,
@@ -65,6 +67,12 @@ export default function Dashboard() {
   // independent failures into one blast radius — one failure would blank six cards instead of two. Screens
   // compose endpoints; endpoints do not compose themselves for screens.
   const [sitesRes, setSitesRes] = useState<Loaded<Site[]> | null>(null);
+  // ⛔ THE ROSTER, NOT THE COUNT. `/overview` serves `members` as a NUMBER, so the activity feed had
+  // nothing to resolve an actor id against. Passing an empty roster to `resolveActor` would label a
+  // CURRENT member "former member 019fc421" — a false statement about a person, which is worse than
+  // showing no actor at all. Second-class read: if it fails, the feed degrades to un-named humans and
+  // every other card is untouched.
+  const [rosterRes, setRosterRes] = useState<Loaded<Member[]> | null>(null);
   const [pendingRes, setPendingRes] = useState<Loaded<Device[]> | null>(null);
   const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
@@ -148,6 +156,11 @@ export default function Dashboard() {
           }),
         ).then((r) => !cancelled && setSitesRes(r as Loaded<Site[]>));
         void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/members", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setRosterRes(r as Loaded<Member[]>));
+        void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/nodes", {
             params: { path: { orgId: org.id } },
           }),
@@ -199,6 +212,12 @@ export default function Dashboard() {
       prev = s.state;
     });
   }, []);
+
+
+  // Empty until the roster arrives (or if it failed). The third argument tells resolveActor that
+  // the roster is NOT KNOWN, so a human actor reads as an unnamed member instead of being asserted
+  // to be a FORMER one — a false name is worse than no name.
+  const roster: Member[] = rosterRes?.ok ? rosterRes.data : [];
 
   return (
     // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
@@ -529,8 +548,35 @@ export default function Dashboard() {
                         {data.recent_activity.slice(0, 6).map((a, i) => (
                           <ListItem key={i}>
                             <span className="flex items-baseline justify-between gap-2">
-                              <span className="truncate font-mono text-mono text-ink-primary">
-                                {a.action}
+                              <span className="min-w-0 truncate">
+                                <span className="font-mono text-mono text-ink-primary">
+                                  {a.action}
+                                </span>
+                                {/* ⛔ THE FEED SHOWED *WHAT* HAPPENED AND NEVER *WHO*. The payload
+                                    carried `actor_id` all along and this card dropped it — and it did
+                                    not carry `actor_system` at all until S14.16 added it, so a
+                                    machine-initiated event was indistinguishable from an unattributed
+                                    one. Same resolver as the Audit Log, so the two screens cannot
+                                    drift: a named subsystem reads by NAME, an unrecorded actor reads
+                                    as a gap and is styled as a warning rather than as metadata. */}
+                                {(() => {
+                                  const who = resolveActor(a, roster, rosterRes?.ok === true);
+                                  return (
+                                    <span
+                                      data-actor-kind={who.kind}
+                                      className={
+                                        "ml-2 text-micro " +
+                                        (who.gap
+                                          ? "text-warn"
+                                          : who.kind === "system"
+                                            ? "font-mono text-ink-emphasis"
+                                            : "text-ink-tertiary")
+                                      }
+                                    >
+                                      {who.label}
+                                    </span>
+                                  );
+                                })()}
                               </span>
                               {/* `data-volatile` marks content DERIVED FROM WALL-CLOCK TIME, so the visual
                                   suite can mask it. Freezing the browser clock is not enough: the seed writes

@@ -106,3 +106,31 @@ describe("UNATTRIBUTED_NOTE", () => {
     expect(UNATTRIBUTED_NOTE).toMatch(/not evidence that nobody acted/i);
   });
 });
+
+// ⛔ "NOT ON THE ROSTER" AND "NO ROSTER" ARE DIFFERENT FACTS.
+//
+// With an empty roster every human actor resolved to "former member 019fc421" — a false statement
+// about a person, asserted confidently, about someone who may be a current member. The Overview
+// feed hits this exactly: /overview serves `members` as a COUNT, so the roster is a separate
+// second-class read that can be slow or fail.
+describe("resolveActor — rosterKnown", () => {
+  it("⛔ never asserts FORMER when the roster was never loaded", () => {
+    const a = resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, [], false);
+    expect(a.kind).toBe("unknown_human");
+    expect(a.label).not.toMatch(/former/i);
+    expect(a.label).toMatch(/^member 019fc421/);
+    expect(a.gap).toBe(false); // still attributed — we know WHO, not WHETHER they left
+  });
+
+  it("does assert FORMER when we actually looked and they were absent", () => {
+    // The claim is allowed only when it was checked.
+    const a = resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, members, true);
+    expect(a.label).toMatch(/former member/i);
+  });
+
+  it("defaults to rosterKnown so existing callers keep the checked meaning", () => {
+    expect(resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, members).label).toMatch(
+      /former member/i,
+    );
+  });
+});

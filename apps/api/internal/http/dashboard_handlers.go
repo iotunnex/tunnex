@@ -44,5 +44,10 @@ func toActivityEntry(a sqlc.AuditLog) api.ActivityEntry {
 		id := openapi_types.UUID(uuid.UUID(a.ActorUserID.Bytes))
 		e.ActorId = &id
 	}
+	// The NAMED system actor. Without it the feed cannot tell a machine-initiated event from an
+	// unattributed one — `actor_id` is absent in both cases, so both rendered the same way.
+	if a.ActorSystem != nil && *a.ActorSystem != "" {
+		e.ActorSystem = a.ActorSystem
+	}
 	return e
 }
