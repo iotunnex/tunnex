@@ -63,6 +63,38 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.14 Directory sync (IdP) — PR #62, ff-only, content tip `cc46d69`.**
+⛔ **THIRD USE OF THE POINTER RULE — checkpoint landed inside the PR again, bypass count stays at 8.**
+
+**The slice:** the consuming layer for FIVE endpoints that had ZERO call sites (`putIdpSyncConfig`,
+`getIdpSyncHealth`, `triggerIdpSync`, `mapIdpGroup`, `unmapIdpGroup`) — four config arms, two-tier health with
+the 30-minute ceiling named, sync-now, group mapping, and a typed-confirm un-map. Plus the fixture (Entra
+configured + degraded, Google absent, one mapped group with two real members).
+
+**The finding:** the spec enumerates `provider: [microsoft, google]` on every idp-sync path and the SERVER
+refuses Google with `400 provider_not_supported`, deliberately, at config time. **Spec, handler and schema all
+read as though Google works — only the served payload disagreed.** Filed in `laws.md`: *the spec describes the
+shape of a request, not the existence of a capability.*
+
+**Also:** `AddGroupMember` answers `409 idp_managed_group` and the web read `origin` NOWHERE, so S14.12's
+Access screen offered member edits on directory-owned groups that were **guaranteed to fail** — now badged,
+withheld, and told where membership CAN be changed.
+
+**⛔ THE VERB CENSUS: ELEVEN BECOMES THREE.** 80 mutating operations, 7 with no call site, 4 of those
+correctly absent (CLI auth, agent enrol, device-health report). The three left are TWO workflows —
+invitations (`resendInvitation`, `revokeInvitation`) and CLI credentials (`revokeCliCredential`).
+
+⛔⛔ **RANKED #1 IN THE REGISTER — THE INVITATION WORKFLOW IS THE ONLY WRITE-ONLY STATE THAT IS ITSELF AN
+ACCESS GRANT.** There is no `GET …/invitations`, and both mutations are keyed by EMAIL rather than an id, so
+an invitation cannot be listed and can only be revoked by someone who already knows the address they typed.
+The other three write-only items are CONFIGURATION whose effect is visible elsewhere; a pending invitation has
+no observable effect until it becomes a member — and by then the grant has happened. **Next server story, all
+three verbs together.**
+
+**NEXT: the three candidates are researched in `docs/S14.15-candidates.md` — founder rules the order.**
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.13 Org Settings — PR #61, ff-only, content tip `e6e23c2`.**
 ⛔ **SECOND USE OF THE POINTER RULE, and it landed inside the PR again — the direct-to-`main` bypass count
 stays at 8.**
