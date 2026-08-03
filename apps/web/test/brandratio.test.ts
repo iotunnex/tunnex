@@ -60,3 +60,23 @@ describe("brand assets", () => {
     expect(src).not.toMatch(/className="[^"]*\bh-(\d+)\b[^"]*\bw-\1\b/);
   });
 });
+
+describe("⛔ the mark is never cropped to fit its box", () => {
+  it("carries no corner-radius class — it was clipping the identity at every size", () => {
+    // `rounded-lg` took an 8px radius off a 22px image in the desktop client's header. The mark's
+    // shape reaches its own corners, so the crop was visible as a trimmed logo — worst at the
+    // smallest size, which is where it is used most.
+    //
+    // > **A LOGO IS THE ONE ASSET THAT MUST NOT BE CROPPED TO FIT.** Scale it or give it room; a
+    // > radius applied to a brand mark is a silent edit to someone else's artwork.
+    const src = stripJsComments(
+      readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8"),
+    );
+    const img = /<img[\s\S]*?\/>/.exec(src)?.[0] ?? "";
+    expect(img, "the mark <img> was not found — this census is measuring nothing").toContain("logoUrl");
+    expect(img).not.toMatch(/rounded-/);
+    expect(img).not.toMatch(/overflow-hidden/);
+    // object-contain is the opposite of a crop and must stay: it fits the whole mark inside the box.
+    expect(img).toContain("object-contain");
+  });
+});

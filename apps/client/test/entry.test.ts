@@ -50,3 +50,56 @@ test("the entry is an app:// URL — the navigation lock rejects anything else",
   // would be blocked by the client's own security guard and render as a dead window.
   assert.ok(CLIENT_ENTRY.startsWith("app://"), CLIENT_ENTRY);
 });
+
+// ── updates ──────────────────────────────────────────────────────────────────────────────────────
+import { canCheckForUpdates, updateStatus } from "../src/main/updateview";
+import { AUTOUPDATE_ENABLED } from "../src/main/flags";
+
+test("⛔ this build cannot check for updates, and the reason is the SIGNING one", () => {
+  // Squirrel.Mac cannot verify an unsigned app, so an unsigned auto-updater is a remote-code
+  // channel with no signature check on the far end. security.test.ts pins the flag false.
+  const s = updateStatus(AUTOUPDATE_ENABLED, false);
+  assert.equal(s.kind, "disabled");
+  assert.equal(canCheckForUpdates(s), false);
+  assert.match(s.kind === "disabled" ? s.detail : "", /signed|notariz/i);
+});
+
+test("⛔ signing alone is NOT enough — build.publish is null, so there is no feed", () => {
+  // The second missing piece, and the one that would still be missing on the day the certs land.
+  const s = updateStatus(true, false);
+  assert.equal(s.kind, "no_feed");
+  assert.equal(canCheckForUpdates(s), false);
+});
+
+test("both present is the only state that permits a check", () => {
+  assert.equal(canCheckForUpdates(updateStatus(true, true)), true);
+});
+
+// ── the setup screen ─────────────────────────────────────────────────────────────────────────────
+import { setupPageDataUrl } from "../src/main/setup";
+
+test("⛔ the first-run screen uses the DEFAULT theme, not the violet one", () => {
+  // It hardcoded #7c5cff (the `violet` theme's accent) and #0b0b12 — neither is the default, where
+  // --tnx-accent is #C9C9C4 and --tnx-bg is #0A0A0A. The first screen a user ever saw was painted
+  // from a palette the rest of the product never uses.
+  const page = decodeURIComponent(setupPageDataUrl(true, false));
+  assert.ok(!/#7c5cff/i.test(page), "the violet accent is still hardcoded on the setup screen");
+  assert.ok(!/#0b0b12/i.test(page), "the old page background is still hardcoded");
+  assert.match(page, /#0A0A0A/i); // --tnx-bg
+  assert.match(page, /max-width:440px/); // the client's card
+  assert.match(page, /border-radius:18px/);
+});
+
+test("the first-run screen carries the brand and the tagline", () => {
+  const page = decodeURIComponent(setupPageDataUrl(true, false));
+  assert.match(page, /<svg/, "the mark is missing from the first screen");
+  assert.match(page, /Connect Everything\./);
+  assert.match(page, /Trust Nothing\./);
+});
+
+test("⛔ the insecure-storage warning still reaches the screen it warns about", () => {
+  // The restyle must not drop the one thing this page says that is not cosmetic.
+  const page = decodeURIComponent(setupPageDataUrl(false, false));
+  assert.match(page, /No OS keychain is available/);
+  assert.match(page, /allow-insecure-credential-storage/);
+});
