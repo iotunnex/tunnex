@@ -102,3 +102,21 @@ additionally waits on legal-entity formation.
 
 **NOT fixed in S14.20** (founder-directed). Registered so it is impossible to reach a beta date without
 meeting it.
+
+## ⛔ AND IT BLOCKS DEVELOPMENT, NOT ONLY DISTRIBUTION
+
+**Found the hard way: `pnpm --filter @tunnex/client start` exits with SIGKILL on a clean macOS machine**, with
+no stack trace and nothing wrong with the code. Gatekeeper kills the **ad-hoc-signed** Electron binary that
+pnpm unpacked into `node_modules`, before the main process is entered.
+
+> ### **THE SAME ABSENCE THAT BLOCKS SHIPPING ALSO BLOCKS A NEW DEVELOPER FROM RUNNING IT AT ALL — and the
+> ### workaround was undocumented.** The register said "we cannot ship". It should have said "and nobody new
+> ### can start".
+
+**Why it hid:** whether the unpacked binary carries the quarantine attribute depends on how the tarball
+reached the disk, so **it fails on some machines and not others**. My own copy has no quarantine and runs
+fine — I could not reproduce the founder's SIGKILL, which is exactly how a dev path ships broken.
+
+**Documented in `apps/client/README.md`** with the two commands (`xattr -cr` + ad-hoc re-sign), the
+verification steps, and the trap that `spctl` reports **rejected even on a working install** — because it
+asks a distribution question, not a will-it-run question.
