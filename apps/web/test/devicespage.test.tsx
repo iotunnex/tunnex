@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 // THE FIRST COMPONENT TEST IN THIS REPO, and it exists for a gap the pure tier cannot close.
 //
@@ -51,7 +52,14 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
   });
 
   it("posts the active gateway's id even when a revoked gateway sorts first", async () => {
-    render(<Devices />);
+    // ⛔ WRAPPED AT THE EPIC 14 MERGE, NOT BECAUSE THE FIX CHANGED. The rewritten Devices page renders
+    // a <Link>, which throws without a Router context — so this test began failing on the merge for a
+    // reason that has nothing to do with what it asserts. The assertion below is untouched.
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
 
     // Wait for the fleet to load, then create a device through the real form.
     const nameInput = await waitFor(() => screen.getByPlaceholderText("my-laptop"));
