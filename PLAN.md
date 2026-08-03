@@ -63,7 +63,7 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
-**MERGED (2026-08-03): EPIC 14 S14.17–S14.19 + the wireframe census — PR #66, ff-only, content tip `031c967`.**
+**MERGED (2026-08-03): EPIC 14 S14.17–S14.19 + the wireframe census — PR #67, ff-only, content tip `943d7b4`.**
 ⛔ **EPIC 14 IS RE-OPENED. It was declared closed with FIVE wireframe blocks unaccounted for** — the closing
 entry counted screens we HAD, not screens the design SPECIFIES. Three were unbuilt (Auth screens, Flow Logs,
 Desktop client), one was a shell component no screen census could see (the collapsible sidebar), and two were
