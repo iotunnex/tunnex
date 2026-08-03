@@ -63,6 +63,34 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.17–S14.19 + the wireframe census — PR #66, ff-only, content tip `031c967`.**
+⛔ **EPIC 14 IS RE-OPENED. It was declared closed with FIVE wireframe blocks unaccounted for** — the closing
+entry counted screens we HAD, not screens the design SPECIFIES. Three were unbuilt (Auth screens, Flow Logs,
+Desktop client), one was a shell component no screen census could see (the collapsible sidebar), and two were
+cut with reasons (Operations, License).
+
+**⛔ THE FIX IS MECHANICAL, NOT A PROMISE:** `apps/web/test/wireframecensus.test.ts` enumerates the DESIGN's 17
+banners and requires each to be **built / absorbed-with-a-destination / cut-with-a-reason** — a `built`
+disposition must name a route that EXISTS in `App.tsx`, so it cannot be aspirational. **The epic cannot merge
+while it is red.** A second ledger covers shell components, because the sidebar is neither a page nor a banner.
+
+**This slice:** S14.17 auth screens (the hero transcribed from the design's own SVG + keyframes; **SOC 2 and
+SCIM CUT as unevidenced claims**, gated on what would make them true) · S14.18 the user-controlled sidebar
+collapse (`tnx-nav`, the designer's key) · S14.19 **Access Events — the FOURTH unreachable surface**
+(`/access-events` + `/access-log/health` shipped in S7.5.1 with no consumer) · the real brand kit · and the
+desktop client's own entry, **shipped INERT** — `client.html` exists and nothing loads it.
+
+**⛔ DESKTOP CLIENT is `built_unadopted`, a state that FLIPS ITSELF.** "In progress" was rejected because
+intent is unfalsifiable; this asserts a fact about the code instead — the surface exists, the consumer does
+not reference it — and **the census FAILS the moment `apps/client/src/main/index.ts` points at `client.html`.**
+Step 3 is a one-line PR and turning it green requires changing the disposition to `built`.
+
+**NEXT: step 3 (the one-line Electron flip) → founder tests against a REAL server → remove the `isDesktop()`
+branches from seven web files → narrow packaging.** ⛔ **And the client is UNSIGNED and UN-NOTARIZED — a hard
+DISTRIBUTION gate, registered above the UI work.**
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.15/S14.16 + EPIC-14 CLOSE — PR #64, ff-only, content tip `4898198`.**
 ⛔ **THIRD USE OF THE POINTER RULE, AND THE RULE IS NOW CLOSED — the count held at 8 across all three merges.**
 
