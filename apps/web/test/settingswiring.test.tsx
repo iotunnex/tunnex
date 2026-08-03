@@ -145,12 +145,23 @@ describe("Settings — wiring: edition gating (destination: `license`)", () => {
     //
     // What the decide-item actually rules is that no enterprise CONFIGURATION SURFACE exists in
     // the open edition. So assert that: no credential inputs, and no Configure control.
+    // ⛔ THE POSITIVE HALF IS AWAITED; THE NEGATIVE HALVES ARE NOT — AND THAT ORDER MATTERS.
+    //
+    // This assertion was written with `queryAllByText`, which is SYNCHRONOUS, against a card that
+    // arrives after `/meta` and `/organizations` resolve. It passed on every local run and FAILED
+    // ON CI at the same sha — a timing race, not an ordering leak: the enterprise sentence had not
+    // rendered yet when the sync query ran. A `waitFor` on a DIFFERENT element (`/Organization/i`)
+    // is not a barrier for this one.
+    //
+    // So: await the thing that must APPEAR, and only then assert the things that must be ABSENT.
+    // Asserting absence first would pass trivially before anything had rendered at all.
+    expect(
+      (await screen.findAllByText(/Tunnex Enterprise|Enterprise feature/i)).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByLabelText(/client ID/i)).toBeNull();
     expect(screen.queryByLabelText(/client secret/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^Configure$/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Sync now/i })).toBeNull();
-    // And the degradation is still an Enterprise sentence, not a dead form.
-    expect(screen.queryAllByText(/Tunnex Enterprise|Enterprise feature/i).length).toBeGreaterThan(0);
   });
 
   it("SSO configuration is present in ENTERPRISE — the gate must not be a blanket hide", async () => {
