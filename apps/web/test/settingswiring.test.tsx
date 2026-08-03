@@ -19,7 +19,9 @@ import { render, screen, waitFor, cleanup } from "@testing-library/react";
 // QUERY RULES 1-4 BIND: role + accessible name; NETWORK-boundary mocks; decisions not rendering; no viewport
 // assumptions.
 
-afterEach(cleanup); // docs/laws.md — no globals/setup file, so auto-cleanup never registers
+afterEach(cleanup);
+// ⛔ a NON-sso_not_configured failure — the arm the collapse could not distinguish.
+let ssoFail = false; // docs/laws.md — no globals/setup file, so auto-cleanup never registers
 
 let edition: "open" | "enterprise" = "enterprise";
 let ovpnEnabled = false;
@@ -52,10 +54,12 @@ vi.mock("../src/lib/api", async () => {
             data: [{ user_id: "u1", role: "owner", email_verified: true }],
           };
         if (path.includes("/sso/"))
-          return {
-            data: undefined,
-            error: { error: { code: "sso_not_configured" } },
-          };
+          return ssoFail
+            ? { data: undefined, error: { error: { code: "boom", message: "nope" } } }
+            : {
+                data: undefined,
+                error: { error: { code: "sso_not_configured" } },
+              };
         return { data: [] };
       }),
       PUT: vi.fn(async () => ({ data: { enabled: true } })),

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   api,
+  apiErrorCode,
   apiErrorMessage,
   type Meta,
   type Org,
@@ -530,6 +531,8 @@ function SsoProvider({
 }) {
   const [view, setView] = useState<SsoView | null>(null);
   const [configured, setConfigured] = useState(false);
+  // Third arm: the read failed, so neither "configured" nor "not configured" is known.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [tenantId, setTenantId] = useState("");
@@ -549,10 +552,34 @@ function SsoProvider({
       },
     );
     if (isCancelled()) return;
-    if (error || !data) {
-      setConfigured(false);
+    // ⛔ NOT CONFIGURED IS A STATE. A FAILED READ IS NOT.
+    //
+    // This branch was `if (error || !data) { setConfigured(false) }` — it collapsed BOTH into "no config
+    // yet", so a transient failure rendered the CONFIGURE form on an org that HAS SSO, and an admin could
+    // reconfigure from scratch against a live IdP. Ranked destructive in S14.11 and registered unfixed; this
+    // screen is its home.
+    //
+    // The server already distinguishes them and the comment above already SAID SO twelve lines up:
+    //   404 + code "sso_not_configured"  -> genuinely not set up
+    //   anything else                    -> we could not read it, and we do not know
+    //
+    // The code was DOCUMENTED at line 541 and DISCARDED at line 553 — prose-versus-behaviour, twelve lines
+    // apart, in the file that held the destructive finding.
+    if (error) {
+      if (apiErrorCode(error) === "sso_not_configured") {
+        setConfigured(false); // a real, knowable state
+        setLoadFailed(false);
+        return;
+      }
+      // ⛔ WE DO NOT KNOW. Never offer Configure here — offering it invites the destructive path.
+      setLoadFailed(true);
       return;
     }
+    if (!data) {
+      setLoadFailed(true);
+      return;
+    }
+    setLoadFailed(false);
     setView(data);
     setConfigured(true);
     setClientId(data.client_id);
@@ -595,6 +622,28 @@ function SsoProvider({
 
   // Display name for the provider — also the label prefix that keeps each provider's fields uniquely named.
   const providerName = provider === "microsoft" ? "Microsoft" : "Google";
+
+  // ⛔ THE THIRD ARM RENDERS INSTEAD OF THE FORM. Offering "Configure" over an unknown state is the
+  // destructive path itself: an admin fills it in and overwrites a live IdP config that was there all along.
+  // A retry is the only honest control here.
+  if (loadFailed)
+    return (
+      <Card>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-white capitalize">{provider}</h3>
+          <span className="text-xs text-warn">status unknown</span>
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          The current {providerName} SSO settings could not be read, so this shows neither “configured” nor
+          “not configured”. Refresh to try again — reconfiguring from here could overwrite a live setup.
+        </p>
+        <div className="mt-3">
+          <Button variant="ghost" onClick={() => void load(() => false)}>
+            Retry
+          </Button>
+        </div>
+      </Card>
+    );
 
   return (
     <form onSubmit={submit}>
