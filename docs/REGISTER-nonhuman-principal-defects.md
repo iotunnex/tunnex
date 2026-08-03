@@ -59,3 +59,18 @@ Each is a **server behaviour the UI does not describe**, and in each case the mi
 
 **All three are server changes with generated mirrors or proven reds already written. They belong to one
 server story, not to three screens.**
+
+---
+
+# CLAIMS CUT FROM THE LOGIN PAGE — GATED, NOT DELETED
+
+Both were rendered to every visitor before authentication. **A cut claim with no return condition is a claim
+someone re-adds later with no argument to defeat**, so each carries the thing that would make it true.
+
+| claim | why it was cut | RETURNS WHEN |
+|---|---|---|
+| ⛔ **"SOC 2 Type II certified"** | **MEASURED: zero mentions of SOC 2 anywhere in this repository outside the wireframe.** No audit, no report, no auditor. A false compliance claim shown to a stranger who cannot check it. | **there is a named auditor and a report to point at.** Not "when we start the process" — when the report exists. |
+| **"SSO + SCIM enterprise ready"** | SSO ships; **SCIM is explicitly OUT of v1, deferred to S7.5.2b** (D4, `S7.5.2-decisions.md:131`). The false half is the specific standard named. | **S7.5.2b ships** (SCIM 2.0 inbound provisioning). SSO alone is already claimed, truthfully, in the current badge set. |
+
+**Guarded mechanically:** `authhero.test.ts` refuses SOC 2 · SCIM · ISO 27001 · HIPAA · FedRAMP · PCI in any
+rendered source, comments stripped and no file exempted. **Proven to fail** on a real rendered claim.

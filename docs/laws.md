@@ -3420,3 +3420,55 @@ it is a shell component.
 **Same discipline as reading the whole error rather than the last line, and the same failure mode as a
 first-match `grep` standing in for a census.** A first hit answers *does this exist*; it never answers *where
 does this belong*.
+
+---
+
+# ⛔ THE RENDER FLOOR REACHES A LEGAL CLAIM MADE TO A STRANGER
+
+**S14.17, and this is the furthest the rule has travelled.** It began as *a chart must name the endpoint it
+draws from*. It now governs **"SOC 2 Type II certified"** on the login page — a **compliance claim with zero
+backing anywhere in the repository**, shown to every visitor **before they authenticate**.
+
+> ## **SAME MECHANISM, DIFFERENT BLAST RADIUS. The chart misleads an OPERATOR, who can check. The badge**
+> ## **misleads a BUYER, who cannot — and who is being asked to rely on it.**
+
+Alongside it, **"SSO + SCIM enterprise ready"**: SSO ships, SCIM is explicitly OUT of v1 and deferred to
+S7.5.2b. **The badge is half true and the false half is the specific standard named** — the half a buyer
+checks.
+
+**NEITHER IS DELETED. BOTH ARE GATED ON THE THING THAT WOULD MAKE THEM TRUE** — see the register. A cut claim
+with no return condition is just a claim someone re-adds later with no argument to defeat.
+
+## ⛔ THE CENSUS WORKED ON ITS AUTHOR, ONE STORY AFTER HE WROTE IT
+
+`wireframecensus` requires a `built` disposition to name a route that exists — written specifically so a
+disposition could not be aspirational. **One story later it refused MY OWN claim** that AUTH SCREENS was done:
+the block also specifies a forced-enrollment modal that cannot be dismissed by click-away or Esc, and
+`MfaSettings` has no such handling.
+
+**That is the strongest evidence the mechanism has teeth** — a guard that has only ever caught other people's
+work is untested.
+
+## ⛔ AN EXEMPTION LIST IS HOW A CENSUS QUIETLY BECOMES THE CODEBASE
+
+The forbidden-claim census first caught the comment **explaining the cut**. The instinct was a second file
+exemption. **Refused:** it strips comments and keeps every file in scope instead — a claim in a comment is not
+rendered and is not a claim; a claim in a string is.
+
+**Every exemption is a place the census stops looking, and the reason is always good at the time.**
+
+## ⛔ AND THE VACUITY FAMILY HAS A TIME AXIS
+
+`main` went red on a **sync assertion against async content**: `queryAllByText` ran before the card it looked
+for had rendered, and the `waitFor` above it waited on a **different element**. It passed locally twice and in
+isolation — **the same sha that failed on CI.**
+
+**Reproduced rather than theorised:** a 25ms delay on every mocked GET fails the old form with CI's exact
+message and passes the new one, same file, one line apart.
+
+> ## **THE EARLIER INSTANCES REPORTED ON A STATE THEY NEVER REACHED. THIS ONE REPORTED ON A STATE THAT HAD**
+> ## **NOT ARRIVED YET.**
+
+**AND THE ASSERTION ORDER IS HALF THE FIX:** await what must APPEAR, then assert what must be ABSENT.
+**Absence-first passes trivially before anything renders at all** — a green that means *too early to tell*,
+which is indistinguishable from a green that means *correct*.
