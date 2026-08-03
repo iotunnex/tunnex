@@ -4,6 +4,11 @@ import { api, apiErrorMessage, type Meta } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { desktop } from "../lib/desktop";
 import { AuthLayout } from "../components/AuthLayout";
+import {
+  GENERIC_202_NOTE,
+  recoveryCountLabel,
+  recoveryWarning,
+} from "../lib/authhero";
 import { Button, ErrorText, Field, Input } from "../components/ui";
 
 // Human-readable text for SSO callback reject codes (watch-item d) — the server
@@ -74,6 +79,9 @@ function BrowserLogin() {
   // S7.5.5: an MFA-pending login carries a challenge token (NOT a session) — the code step
   // completes at /auth/mfa/verify. (Slice 3 polishes this UI; slice 1 keeps the flow working.)
   const [challenge, setChallenge] = useState<string | null>(null);
+  // Cardinality only, and only if the server sent it — undefined means "not told", which must not
+  // render as a number. Populated from the login response's challenge payload where present.
+  const [remaining, setRemaining] = useState<number | undefined>(undefined);
   const [code, setCode] = useState("");
 
   useEffect(() => {
@@ -107,6 +115,9 @@ function BrowserLogin() {
     }
     if (data.mfa_required) {
       setChallenge(data.challenge ?? null);
+      setRemaining(
+        (data as { recovery_codes_remaining?: number }).recovery_codes_remaining,
+      );
       return; // NO session yet — the second step mints it
     }
     if (data.user) {
@@ -171,9 +182,12 @@ function BrowserLogin() {
         <h1 className="text-xl font-semibold text-white">
           Two-factor authentication
         </h1>
+        {/* ⛔ THE PENDING STATE IS A CHALLENGE TOKEN, NOT A SESSION (D6). Saying so stops a reader
+            concluding the password alone got them in — the wireframe's "Password accepted — no
+            session yet" is a correct description of the server's state machine, not flavour. */}
         <p className="mt-1 text-sm text-slate-400">
-          Enter the 6-digit code from your authenticator app, or a recovery
-          code.
+          Password accepted — no session yet. Enter the 6-digit code from your
+          authenticator app, or a recovery code.
         </p>
         <form onSubmit={verify} className="mt-5 space-y-4">
           <Field label="Code">
@@ -185,6 +199,28 @@ function BrowserLogin() {
               autoComplete="one-time-code"
             />
           </Field>
+          {/* ⛔ CARDINALITY ONLY. `recovery_codes_remaining` is documented in the schema as
+              "never the codes (nothing recoverable)", so the count renders and the codes never do.
+              Rendered ONLY when the server sent a number — a 0 nobody was told is not a zero. */}
+          {typeof remaining === "number" && (
+            <>
+              <p className="text-xs text-slate-600">
+                {recoveryCountLabel(remaining)}
+              </p>
+              {recoveryWarning(remaining) && (
+                <p
+                  className={
+                    "text-xs " +
+                    (recoveryWarning(remaining)!.loud
+                      ? "text-danger"
+                      : "text-warn")
+                  }
+                >
+                  {recoveryWarning(remaining)!.text}
+                </p>
+              )}
+            </>
+          )}
           <ErrorText>{error}</ErrorText>
           <Button type="submit" disabled={busy} className="w-full">
             {busy ? "Verifying…" : "Verify"}
@@ -196,9 +232,9 @@ function BrowserLogin() {
 
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Sign in</h1>
+      <h1 className="text-xl font-semibold text-white">Welcome back</h1>
       <p className="mt-1 text-sm text-slate-400">
-        Access your devices and WireGuard configs.
+        Sign in to {window.location.host}
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Email">
@@ -231,6 +267,11 @@ function BrowserLogin() {
       {meta && meta.sso_providers.length > 0 && (
         <SsoSection providers={meta.sso_providers} onError={setError} />
       )}
+
+      {/* ⛔ A SECURITY PROPERTY, NOT REASSURANCE. Sign-up and reset answer the same 202 whether or
+          not the address exists, so "check your email" must not be read as "that address was
+          recognised". Same no-oracle rule the 401s follow. */}
+      <p className="mt-4 text-xs text-slate-600">{GENERIC_202_NOTE}</p>
 
       <div className="mt-5 flex justify-between text-xs text-slate-400">
         <Link to="/signup" className="hover:text-slate-200">
