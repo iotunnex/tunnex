@@ -3357,3 +3357,41 @@ the meaningful one is ever seen.**
 fallback needs its own word — and usually its own visual weight, because a genuine gap is not metadata.
 **Related, and the reason this one survived so long:** the same defect made the count wrong too, so even a
 tally of "system rows" would have agreed with itself.
+
+---
+
+# ⛔ A VALUE THE CLIENT INVENTED, SITTING WHERE A SERVER FACT BELONGS
+
+**Two instances, same class, OPPOSITE DIRECTIONS — which is why the second one was not recognised as the
+first.**
+
+| | what happened | direction |
+|---|---|---|
+| **S14.11** | a **failed read** rendered as **NOT CONFIGURED** | invents absence |
+| **S14.16** | a **form default** (`useState(true)` + an unconditional `••••••••`) rendered as **CONFIGURED** | invents presence |
+
+> ## **THE SHARED DEFECT IS NOT "WRONG DEFAULT" — IT IS THAT A CLIENT-SIDE VALUE OCCUPIED THE POSITION WHERE**
+> ## **A READER EXPECTS A SERVER FACT.** Looking for the first shape does not find the second, because the
+> ## symptom is inverted while the mechanism is identical.
+
+**MECHANICAL:** for every control rendered before or without a successful read, ask *what does a reader
+conclude from this, and did the server say it?* A checkbox, a placeholder and an empty string all make claims.
+
+## ⛔ AND PIN BOTH ARMS — A TEST THAT ONLY PINS THE FIX PASSES A WRONG IMPLEMENTATION
+
+Of the five mutations on this fix, **two were OVER-CORRECTIONS** — always-intent, never-dots — not the
+original bug. Both are wrong in the *other* direction, and **both look careful.**
+
+> ## **A CHECKBOX THAT IS ALWAYS CHECKED CANNOT BE TOLD FROM ONE THAT IS CORRECTLY CHECKED — and neither**
+> ## **can one that is never checked. A test asserting only the arm you just fixed certifies the direction**
+> ## **of your last edit, not the behaviour.**
+
+Assert the positive AND the negative arm, and assert that **the two differ** — that third assertion is the one
+that survives both over-corrections.
+
+## SAME GLYPH, DIFFERENT CLAIM — AND THE COPY IS WHAT DECIDES
+
+The directory-sync credential form shows the **same `••••••••`** and was correctly left alone: its own copy
+says *"the fields below always start empty even when a credential is stored"*, so the dots assert nothing
+there. **The glyph is not the claim; the glyph PLUS the surrounding text is.** A sweep for the character would
+have "fixed" a correct panel.
