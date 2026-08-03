@@ -63,6 +63,46 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.12 Access Policies — PR #60, ff-only, content tip `7e5a5a1`.**
+⛔ **FIRST MERGE UNDER THE NEW POINTER RULE: this names the CONTENT TIP — the last non-pointer commit — NOT
+`main`'s head.** A commit cannot contain its own hash, so the post-merge head is unknowable before the merge;
+naming the content tip makes the checkpoint knowable while the PR is open, so it lands INSIDE the PR and the
+direct-to-`main` bypass does not increment. Count stays at **8**.
+
+⛔⛔ **S14.12's SECTION IS OPEN. THIS MERGE COVERS THE SLICE AS REVIEWED, NOT THE SECTION.** Three items were
+extracted at commit-one, never built, and do NOT lapse — see `docs/S14.12-decisions.md` §"STAYS OPEN":
+**(1)** the mode toggle as a real switch with the blast-radius confirm (`SetMode` already returns
+`[]AffectedDevice`, so unlike the cascade confirm this one CAN name server-owned counts) · **(2)** the
+two-column panel layout · **(3)** the `SOURCE · DESTINATION · STATE` table headers.
+
+**Built:** the OPEN-EDITION REVIEW STACK (`make up-open-review` / `seed-open`, :8081, one fixtures.sql two
+databases) — it confirmed the predicted gate-order bug AND found an **unpredicted FK ordering defect** a
+months-old database had hidden. `accessView` is now **permission-before-edition** (an open-edition MEMBER was
+being sold Enterprise for a capability their role forbids — the S14.5 halt, second screen, second instance in
+one story). The rule list's **three empty states** (failed / 0-while-enforcing / 0-while-off, the third
+asserting a consequence without its precondition). The **access-flow graph** rebuilt from the handoff geometry
+with two thresholds — a 24-rule cap and a **coverage floor**, because degree-ranking's usefulness depends on
+the degree DISTRIBUTION, not N (same N, opposite verdict). **Group membership** — three endpoints shipped in
+S7.5.2 with one consumer. **`src_group_empty`**, admitted by the same test that refused the deactivated-user
+badge. **Typed confirms** on both cascading deletes.
+
+> ## **WHAT THIS SLICE ACTUALLY FIXED, AND IT IS NOT THE BADGE: UNTIL NOW, A NEW CUSTOMER'S FIRST TEN MINUTES**
+> ## **PRODUCED A RULE THAT SILENTLY GRANTED NOTHING.** Create a group, write a rule against it — it compiled
+> ## to nothing while rendering ACTIVE, because `matched = owner[r.SrcGroupID]` matches no device when the
+> ## group is empty, **and no surface existed to put anyone in it.**
+
+⛔ **THE MOST DESTRUCTIVE UNGUARDED VERB FOUND IN THIS EPIC:** `src_group_id`, `dst_group_id` AND
+`dst_resource_id` are all `ON DELETE CASCADE` — deleting a group or resource **silently deletes every rule
+referencing it**; the rows vanish, and the 204 says nothing. Typed confirm ships; a server cascade-preview
+endpoint is registered, because a client-computed count would be a second source of truth.
+
+**CARRIED, UNFIXED, EACH REGISTERED:** `CountOwners` counts owner ROWS not owners who can sign in (**a proven,
+unrecoverable lockout**) · the Audit Log discards every named `actor_system` · `Kubernetes.tsx:403`'s
+placeholder-glyph regression · 51 omitted-and-read mocks · **11 of 12 unreachable mutations** (IdP-sync is five
+endpoints with no surface at all) · D1/D1b/D2.
+
+---
+
 **MERGED (2026-08-02): EPIC 14 S14.11 Users & Roles — PR #58, ff-only, main `622f30b`.** Both identifiers carried: the PR number survives rebasing, the sha is what a fresh session needs to know `main` by. **This merge was a TRUE FAST-FORWARD** (`origin/main 832e6b0` was an ancestor of the branch head `9de9406`), so no rebase and **no object rewrite** — the in-PR sha and the post-merge sha are the same for once, and that is a property of this merge, not a new rule.
 
 Section pass on Users & Roles. **The classification was wrong in FOUR of five verdicts, all under-building**, because I grepped the `Member` DTO and reported on the PRODUCT. Not one column was "the product doesn't know" — each was a projection, a permission, an edition, or a missing read. **The DEVICES COLUMN IS ABSENT for anyone without `member:manage`**, never zeroed: `/devices` is audience-scoped at the handler (owner sees 13/2 owners, member sees 6/1), so a client-side group-by would print `0 devices` against a colleague — a positive claim drawn from a response that was never about them. **ACTIONS follows the same rule** (founder review): a header over empty cells is a claim the column has content.
