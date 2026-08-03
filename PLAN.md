@@ -63,6 +63,50 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.20 step 4 — the client becomes a product. PR #71, content tip
+`fb4a147` pre-merge.** Founder-driven review ON THE RUNNING APP, one item at a time. Everything below
+was found by USING it; none of it was visible in the code.
+
+⛔ **THE SESSION'S RESULT IS THAT A REVIEW OF THE RUNNING THING FOUND WHAT EVERY OTHER INSTRUMENT
+MISSED.** Panel tests, censuses, typechecks and CI were all green across a client that had an
+inverted security toggle, permanently-fake statistics, a log file with no logging, and three
+capabilities with no caller.
+
+**The inverted control.** Routing was a checkbox LABELLED "Split tunnel" and BOUND to `fullTunnel`.
+Unchecked read as *"split is off"* — a user concludes all traffic is protected — while meaning
+`fullTunnel === false`, which IS split. **The label pointed the error at the dangerous side.**
+
+**The fabricated plot.** Stats were hard-wired `null` with a comment saying they would arrive "in
+step 3"; step 3 came and went. The graph beside them was fed by `Math.random`. *A plot of invented
+data next to an honest `n/a` is worse than either alone* — the `n/a` says "not measured", the curve
+says "measured", and the one that looks like evidence is lying.
+
+**The log that was not a log.** 30 lines over weeks, all from the auto-updater; `not_authenticated`
+appeared **zero** times. *A log file that exists is not logging* — "check the logs" reads as a real
+instruction, the file opens with content and timestamps, and the incident is simply absent.
+
+**Three stranded verbs.** Sign-out, change-server and import were on the preload allowlist with no
+caller after the step-3 flip — the S14.12 class, inside our own client.
+
+**Laws minted:** a design's container is not always part of the design (the 440px card needed a page
+only because a wireframe IS a page) · a formatting rule with an exception is broken by whichever
+value takes the exception (the rate, recomputed every second) · a cosmetic option on one platform is
+a functional one on another (`hiddenInset` removes CLOSE on Windows) · an instruction that names a
+feature is not an enumeration of its parts (I deleted the animation along with the fabrication) ·
+asserting an absence proves nothing when the failure also produces that absence · **a drift check
+must compare the thing that can drift** (byte-identity failed on Windows for calling CRLF a change
+in artwork).
+
+⛔ **AND `.gitignore`'s UNANCHORED `build/` WAS SWALLOWING PACKAGING SOURCE AGAIN** — the four files
+under `apps/client/build` are in git only via `git add -f`, and the app icon would have been the
+fifth: correct locally, absent on every fresh clone, packaged app back to Electron's atom with
+nothing failing. **This repo already paid for this exact pattern with an unanchored `secrets/`.**
+
+**Registered, unbuilt:** the mark asset needs a margin and no baked plate before it can return to
+headers · no org-level policy pins the routing mode, so an enforced full-tunnel can be flipped by
+any user · signing + a publish feed both remain before any update can be checked · imported profiles
+have no revocation monitoring by construction.
+
 **MERGED (2026-08-03): EPIC 14 S14.20 step 3 — PR #68. Content tip `51fc056` on `main` (`9cca701` pre-merge).**
 ⛔ **AND THE FIRST MERGE UNDER THE CORRECTED SEQUENCING EXPOSED THE REMAINING HALF OF THE RULE.** The checkpoint
 was written LAST, inside the PR, naming the content tip `9cca701` — and **GitHub's rebase-merge rewrote every
