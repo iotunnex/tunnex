@@ -63,7 +63,7 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
-**MERGED (2026-08-03): EPIC 14 S14.14 Directory sync (IdP) — PR #62, ff-only, content tip `cc46d69`.**
+**MERGED (2026-08-03): EPIC 14 S14.14 Directory sync (IdP) — PR #62, ff-only, content tip `21537de`.**
 ⛔ **THIRD USE OF THE POINTER RULE — checkpoint landed inside the PR again, bypass count stays at 8.**
 
 **The slice:** the consuming layer for FIVE endpoints that had ZERO call sites (`putIdpSyncConfig`,
