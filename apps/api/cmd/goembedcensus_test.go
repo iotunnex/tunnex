@@ -33,8 +33,32 @@ var (
 	reEmbed = regexp.MustCompile(`(?m)^\s*//go:embed\s+(.+)$`)
 	// The classifier's own regex, transcribed. Kept as a literal on purpose: if someone edits ci.yml and not
 	// this line, `TestClassifierPatternMatchesTheWorkflow` below fails and names the drift.
-	classifierPattern = `(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|\.github/|openapi/|apps/api/db/)`
+	classifierPattern = `(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/)`
 )
+
+// ⛔ THE ONE EXEMPTION, AND WHY IT IS NARROWER THAN IT LOOKS.
+//
+// S14.15 MEASURED that this file's own rule had made the classifier useless in practice: because CI diffs
+// BASE...HEAD, ONE edit to `fixtures.sql` early in a branch pinned `go=true` for EVERY later push. Across 18
+// runs on two PRs, 17 were go=true and 16 of those were triggered by `fixtures.sql` ALONE — including 10
+// commits that were docs-only. A guard that is always on is not a guard; it is a constant.
+//
+// The exemption is safe for exactly one reason, and it is a CENSUS claim, not an opinion: `fixtures.sql` is a
+// compile input ONLY to `cmd/seed-fixtures`, which `shipcensus_test.go` declares DELIBERATELY NOT SHIPPED.
+// Its CONTENT therefore cannot break any shipped build.
+//
+//	BUT ITS ABSENCE STILL CAN — `//go:embed` fails to COMPILE when its target is missing, which is the
+//	original S14.11 finding and it has NOT been repealed.
+//
+// So the exemption is conditional on CI tracking DELETIONS separately, and the test below REFUSES THE
+// EXEMPTION unless that mechanism is present in the workflow. An exemption that trusted a comment would be
+// the prose-versus-behaviour class this file was written to catch.
+var embedExemptContentOnly = map[string]string{
+	"apps/api/cmd/seed-fixtures/fixtures.sql": "cmd/seed-fixtures is declared not-shipped in shipcensus_test.go; only its DELETION can break a build, and CI tracks deletions with --diff-filter=D",
+}
+
+// deletionGuard is the literal CI must contain for the exemption above to hold.
+const deletionGuard = `--diff-filter=D`
 
 // repoRoot is three levels up from apps/api/cmd — the same hop shipcensus_test.go makes.
 const repoRoot = "../../.."
@@ -89,6 +113,34 @@ func TestGoEmbedTargetsAreGoRelevantToCI(t *testing.T) {
 	}
 
 	for _, e := range found {
+		if why, exempt := embedExemptContentOnly[e.path]; exempt {
+			// ⛔ THE EXEMPTION IS NOT SELF-CERTIFYING. It holds only while CI still forces the Go legs on a
+			// DELETION, so verify that mechanism EXISTS rather than trusting the map entry.
+			// Checked PER WORKFLOW, and only where the exclusion actually exists: a workflow that does
+			// NOT exclude this path is already conservative and needs no deletion guard. Requiring it
+			// everywhere would force an edit to a file that was never unsafe — a guard should demand the
+			// mechanism where the risk is, not everywhere the name appears.
+			for _, wf := range []string{"ci.yml", "security.yml"} {
+				b, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", wf))
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := string(b)
+				if !strings.Contains(body, "grep -vxF '"+e.path+"'") {
+					t.Logf("not exempt in %s (still Go-relevant there) — no deletion guard needed", wf)
+					continue
+				}
+				if !strings.Contains(body, deletionGuard) {
+					t.Errorf("%s is EXCLUDED from the Go-relevance patterns in %s (%s) — but that file no\n"+
+						"  longer contains %q.\n"+
+						"  The exclusion covers CONTENT edits ONLY. A missing embed target is a COMPILE ERROR,\n"+
+						"  so a DELETION must still force the Go legs. Either restore the deletion guard or\n"+
+						"  remove the exclusion.", e.path, wf, why, deletionGuard)
+				}
+			}
+			t.Logf("exempt (content-only): %-38s — %s", e.path, why)
+			continue
+		}
 		if !pat.MatchString(e.path) {
 			t.Errorf("//go:embed target is INVISIBLE to CI's diff classifier: %s\n"+
 				"  (embedded by a Go package in %s, so it is a COMPILE INPUT — a diff touching only this\n"+
