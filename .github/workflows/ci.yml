@@ -135,10 +135,12 @@ jobs:
               fi
             fi
           fi
-          echo "go=$RUN_GO" >> "$GITHUB_OUTPUT"
-          echo "codegen=$RUN_CODEGEN" >> "$GITHUB_OUTPUT"
-          echo "web=$RUN_WEB" >> "$GITHUB_OUTPUT"
-          echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+          {
+            echo "go=$RUN_GO"
+            echo "codegen=$RUN_CODEGEN"
+            echo "web=$RUN_WEB"
+            echo "docs_only=$DOCS_ONLY"
+          } >> "$GITHUB_OUTPUT"
           echo "::notice title=gates scope::go=$RUN_GO codegen=$RUN_CODEGEN web=$RUN_WEB docs_only=$DOCS_ONLY (false = SKIPPED, not passed)"
           printf '%s\n' "${CHANGED:-<no diff computed>}" | head -40
 
