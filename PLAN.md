@@ -63,6 +63,33 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.15/S14.16 + EPIC-14 CLOSE — PR #64, ff-only, content tip `4898198`.**
+⛔ **THIRD USE OF THE POINTER RULE, AND THE RULE IS NOW CLOSED — the count held at 8 across all three merges.**
+
+**⛔⛔ EPIC 14 IS COMPLETE. Closing entry: `docs/EPIC-14-CLOSE.md`.** Twelve screens · the S14.1–S14.3
+primitives · a test tier at ~730 web tests (from ~400) · the CI classifier split.
+
+**This slice:** the INVITATION read — `resendInvitation`/`revokeInvitation` were keyed by EMAIL and nothing
+served the addresses, so an invitation could be created and never seen, resent or revoked while staying
+redeemable into a membership (**the only write-only state that IS an access grant**) · the AUDIT-WRITE fix for
+`UnmapGroup` + `SuspendDomainClaim` (one class, two call shapes: the second is not a human action and needed
+the system actor with a cause, filed against the CAPTURING org) · AUDIT LOG's four actor arms — `"system"` had
+meant BOTH *a named subsystem did this* AND *nobody recorded who did this*, so an attribution gap was invisible
+· DASHBOARD's feed now names an actor for the first time · and a SSO form default that read as a fact (Google
+showed "Enabled" + a dotted secret on a provider the server 404s for).
+
+**OPEN, each with a register row (see the closing entry §2):** the missing-audit-write class (**four writers
+still unattributed**) · ⛔ the three-site non-human-principal register with **`operator` + `PermPolicyManage`
+RANKED FIRST and live today** · `Kubernetes.tsx:403` · 51 mocks · one remaining unreachable verb
+(`revokeCliCredential`) · D1/D1b/D2 · the cascade-preview endpoint · **S14.12's three items (section OPEN)** ·
+Org Settings' items · the error-string register sweep.
+**The harness is ACCEPTED-PROVISIONAL, NOT OWED** (founder-ruled S14.15) — artifact grep is a complete claim.
+
+**NEXT: the founder sets the order.** EPIC 15 is registered ahead of the beta bundle; server stories are also
+queued. **Do not start either unprompted.**
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.14 Directory sync (IdP) — PR #62, ff-only, content tip `21537de`.**
 ⛔ **THIRD USE OF THE POINTER RULE — checkpoint landed inside the PR again, bypass count stays at 8.**
 
