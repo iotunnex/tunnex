@@ -60,6 +60,21 @@ when it was a standing mechanism: **8 pushes, one per merge, every one of them f
 Before taking the direct-to-`main` path for anything, ask whether it is genuinely unknowable inside the PR —
 if it is knowable, the bypass is a choice, not a necessity.
 
+## The absence questions (a UI section pass asks these, not only "does it match the design")
+
+⛔ **A DESIGN CAN ONLY BE WRONG ABOUT WHAT IT DEPICTS; IT CANNOT BE WRONG ABOUT WHAT IT OMITS.** A wireframe
+diff and a panel-by-panel test both ask *does this match the source* — so anything the source is silent about
+is invisible to both. Two questions, answered from the **spec and schema**, never from the design:
+
+1. **What can an operator NOT do on this screen that the API allows?** For every mutating endpoint, name its
+   call site; one with no caller is either dead or missing a surface. (S14.12: 80 mutating operations, 19
+   with no web call site, 12 genuinely unreachable — a capability the product has and nobody can reach.)
+2. **What happens after each destructive verb, and is the operator told?** Read the FK actions and the
+   handler's response body. (S14.12: `ON DELETE CASCADE` on three columns — deleting a group silently deleted
+   every rule referencing it, and the 204 said nothing.)
+
+Both findings were the best of that section and neither appeared in the wireframe.
+
 ## Gates (run before declaring a slice/story done)
 
 The CI `gates` job is the composite; locally that means:
