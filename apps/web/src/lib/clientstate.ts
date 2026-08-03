@@ -16,6 +16,7 @@
 // implements exactly this and this module must not disagree with it.
 
 export type ClientState =
+  | "signed_out"
   | "connected"
   | "connecting"
   | "disconnected"
@@ -30,6 +31,7 @@ export type ClientState =
 
 /** Every state, in the block's order, with ours appended. Drives the preview and the tests. */
 export const CLIENT_STATES: readonly ClientState[] = [
+  "signed_out",
   "connected",
   "connecting",
   "disconnected",
@@ -44,6 +46,13 @@ export const CLIENT_STATES: readonly ClientState[] = [
 ] as const;
 
 export type Severity = "ok" | "busy" | "idle" | "warn" | "loud";
+
+// ⛔ THE VERB IS ONE WORD — founder-directed, and it removes a real ambiguity as well as noise.
+//
+// The labels used to be "Connect · link the mesh" / "Disconnect · tear down the mesh". The suffix
+// read as a SECOND clause of the action, so "Disconnect · restore normal routing" on the
+// kill-switch state looked like a button that does two things — and on a 440px column it wrapped.
+// The explanation belongs in `detail`, which every state already has; a button says what it does.
 
 export type StateView = {
   /** The big status word. */
@@ -63,12 +72,31 @@ export type StateView = {
 
 export function stateView(s: ClientState): StateView {
   switch (s) {
+    // ⛔ OURS, AND THE DESIGN HAS NO EQUIVALENT — which is exactly the gap this epic keeps finding.
+    //
+    // The block draws EXPIRED CREDS (a credential that WAS valid) and never the state before any
+    // credential exists. So a fresh install landed on "Disconnected" with a Connect button, and
+    // pressing it threw `not_authenticated` out of the main process into a log nobody reads. The
+    // button was not broken; it was offered in a state where it cannot work.
+    //
+    // > **A DESIGNER DRAWING A HEALTHY PRODUCT HAS NOTHING TO LOOK AT WHEN DRAWING THE EMPTY ONE.**
+    // > Same reason `failed` is ours: the states a design omits are the ones nobody was in while
+    // > designing it.
+    case "signed_out":
+      return {
+        label: "Not signed in",
+        detail:
+          "This device has no credential for the configured server. Sign in with your browser — the app never collects a password itself.",
+        severity: "idle",
+        action: "Sign in with your browser",
+        notify: false,
+      };
     case "connected":
       return {
         label: "Connected",
         detail: "Handshake fresh — traffic is flowing through the mesh.",
         severity: "ok",
-        action: "Disconnect · tear down the mesh",
+        action: "Disconnect",
         notify: false,
       };
     case "connecting":
@@ -76,7 +104,7 @@ export function stateView(s: ClientState): StateView {
         label: "Connecting",
         detail: "Linking peers — the icon stays amber until a handshake lands.",
         severity: "busy",
-        action: "Cancel · linking peers…",
+        action: "Cancel",
         notify: false,
       };
     case "disconnected":
@@ -84,7 +112,7 @@ export function stateView(s: ClientState): StateView {
         label: "Disconnected",
         detail: "No tunnel. Your traffic is taking its normal route.",
         severity: "idle",
-        action: "Connect · link the mesh",
+        action: "Connect",
         notify: false,
       };
     case "failed":
@@ -92,7 +120,7 @@ export function stateView(s: ClientState): StateView {
         label: "Connection failed",
         detail: "The tunnel could not be established. Retrying will re-request a config.",
         severity: "warn",
-        action: "Connect · link the mesh",
+        action: "Connect",
         notify: false,
       };
     // ── the two the block marks LOUD ────────────────────────────────────────────────────────────
@@ -109,9 +137,9 @@ export function stateView(s: ClientState): StateView {
       return {
         label: "Kill-switch engaged",
         detail:
-          "The tunnel dropped while full-tunnel was on, so all traffic is BLOCKED rather than leaking to your normal route. This is the safe state, not a fault.",
+          "The tunnel dropped while full-tunnel was on, so all traffic is BLOCKED rather than leaking to your normal route. This is the safe state, not a fault. Disconnect to restore normal routing.",
         severity: "loud",
-        action: "Disconnect · restore normal routing",
+        action: "Disconnect",
         notify: true,
       };
     // ── states that need someone or something else ──────────────────────────────────────────────
@@ -137,7 +165,7 @@ export function stateView(s: ClientState): StateView {
         label: "Migration failed",
         detail: "The replacement config did not complete. Reconnect to retry.",
         severity: "warn",
-        action: "Connect · link the mesh",
+        action: "Connect",
         notify: false,
       };
     case "helper_outdated":
@@ -183,7 +211,9 @@ export function trayAppearance(s: ClientState): TrayAppearance {
 /** Formatting for the stats block — bytes and duration, both of which read badly raw. */
 export function formatBytes(n: number | null | undefined): string {
   if (n == null) return "n/a";
-  if (n < 1024) return `${n} B`;
+  // ⛔ THIS WAS THE HOLE. Raw bytes returned the NUMBER verbatim — fine for an integer counter,
+  // ruinous for a rate, which is a division and therefore almost never integral.
+  if (n < 1024) return `${n.toFixed(2)} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = n / 1024;
   let i = 0;
@@ -191,7 +221,12 @@ export function formatBytes(n: number | null | undefined): string {
     v /= 1024;
     i++;
   }
-  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+  // ⛔ TWO DECIMALS, ALWAYS — founder-directed, and the magnitude-scaled rule that preceded it was
+  // still leaving one hole: values UNDER 1024 never reached this branch at all, so a rate of
+  // 256.2562562562563 B/s printed in full, sixteen significant figures wide, and pushed the row off
+  // the card. A rule with an exception is a rule that will be broken by whichever value takes the
+  // exception.
+  return `${v.toFixed(2)} ${units[i]}`;
 }
 
 export function formatRate(bytesPerSec: number | null | undefined): string {

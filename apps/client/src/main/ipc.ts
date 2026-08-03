@@ -1,9 +1,11 @@
-import { ipcMain, BrowserWindow } from "electron";
+import * as fs from "node:fs";
+import { ipcMain, BrowserWindow, dialog } from "electron";
+import { parseWgConf } from "./wgconf";
 import { Config } from "./config";
 import { CredentialStore } from "./credential";
 import { runLogin, runLogout } from "./login";
 import { TunnelController, helperSocketPath } from "./tunnel";
-import { TunnelConfigStore } from "./tunnelstore";
+import { TunnelConfigStore, IMPORTED_ORIGIN } from "./tunnelstore";
 import { HttpDeviceApi } from "./httpdeviceapi";
 import { resolveTunnelConfig, clearTunnelConfigForOrigin, migrateLegacyConfig, PendingApprovalError } from "./deviceconfig";
 import { RevocationMonitor } from "./revocation";
@@ -202,6 +204,14 @@ export function registerIpc(
   const tunnel = new TunnelController(
     helperSocketPath(),
     async () => {
+      // ⛔ AN IMPORTED PROFILE SHORT-CIRCUITS THE MINT PATH — AND ONLY THAT PATH.
+      //
+      // It has no credential, so the check below would reject it; it has no deviceId, so
+      // resolveTunnelConfig would drop it as a legacy config and try to create a fresh device.
+      // Both are correct for a minted config and wrong for this one. Returned as-is: the file is
+      // the whole truth about this tunnel, which is exactly why the mode is degraded.
+      const imported = tunnelStore.get(IMPORTED_ORIGIN);
+      if (imported?.imported) return imported.config;
       const cred = store.load();
       if (!cred) throw new Error("not_authenticated");
       return resolveTunnelConfig(cred.server, requestedFullTunnel, deviceApiFor(cred.server), tunnelStore);
@@ -402,6 +412,54 @@ export function registerIpc(
 
   // --- config ------------------------------------------------------------------
   ipcMain.handle("config:getServerUrl", () => config.getServerUrl());
+
+  /**
+   * ⛔ IMPORT A `.conf` — parsed in MAIN, never in the renderer.
+   *
+   * The file contains a WireGuard PRIVATE KEY. `parseWgConf` already runs in main for exactly this
+   * reason, and the same rule holds here: the renderer asks for a file to be imported and is told
+   * whether it worked. It never sees the bytes.
+   *
+   * ⚠ `full_tunnel` IS INFERRED FROM THE FILE, NOT FROM THE UI TOGGLE. A minted config carries the
+   * intent that produced it; an imported one carries only AllowedIPs, so a default route in the
+   * file IS the full-tunnel declaration. Taking it from the toggle would let the UI claim a routing
+   * mode the file does not implement.
+   */
+  ipcMain.handle("tunnel:importConfig", async () => {
+    const res = await dialog.showOpenDialog({
+      title: "Import a WireGuard configuration",
+      filters: [{ name: "WireGuard", extensions: ["conf"] }],
+      properties: ["openFile"],
+    });
+    if (res.canceled || res.filePaths.length === 0) return null;
+    const text = fs.readFileSync(res.filePaths[0], "utf8");
+    const parsed = parseWgConf(text); // strict — throws rather than half-parsing
+    const fullTunnel = (parsed.allowed_ips ?? []).some(
+      (a) => a === "0.0.0.0/0" || a === "::/0",
+    );
+    tunnelStore.put({
+      origin: IMPORTED_ORIGIN,
+      deviceId: "",
+      orgId: "",
+      config: { ...parsed, full_tunnel: fullTunnel },
+      imported: true,
+    });
+    return { address: parsed.address, fullTunnel };
+  });
+
+  /** Remove the imported profile so the account-minted path takes over again. */
+  ipcMain.handle("tunnel:forgetImported", async () => {
+    await tunnel.down().catch(() => {});
+    tunnelStore.remove(IMPORTED_ORIGIN);
+    emitTray("disconnected");
+  });
+
+  ipcMain.handle("tunnel:importedInfo", () => {
+    const sc = tunnelStore.get(IMPORTED_ORIGIN);
+    return sc?.imported
+      ? { address: sc.config.address, fullTunnel: sc.config.full_tunnel }
+      : null;
+  });
 
   ipcMain.handle("config:setServerUrl", async (_e, url: unknown) => {
     if (typeof url !== "string" || url.length === 0 || url.length > 2000) {

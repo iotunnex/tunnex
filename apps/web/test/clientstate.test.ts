@@ -22,7 +22,8 @@ describe("CLIENT_STATES", () => {
     // Ours. A design's missing state is usually the FAILURE state — a designer drawing a healthy
     // product has nothing to look at when drawing it.
     expect(CLIENT_STATES).toContain("failed");
-    expect(CLIENT_STATES).toHaveLength(11);
+    expect(CLIENT_STATES).toContain("signed_out");
+    expect(CLIENT_STATES).toHaveLength(12);
   });
 
   it("every state has a view — the switch is exhaustive", () => {
@@ -91,10 +92,15 @@ describe("the primary verb", () => {
     expect(a).not.toMatch(/password/i);
   });
 
-  it("⛔ the kill-switch verb RESTORES ROUTING rather than pretending to reconnect", () => {
+  it("⛔ the kill-switch verb RESTORES ROUTING, and the surface must still SAY so", () => {
+    // The label is now one word by founder rule, so the fact cannot live there — but it is not
+    // optional. On this state "Disconnect" does NOT mean "drop the tunnel": the tunnel is already
+    // down and the button lifts a BLOCK. A user who reads the button alone would think pressing it
+    // makes things worse. The explanation moved into `detail`; it did not disappear.
     const v = stateView("kill_switch");
-    expect(v.action).toMatch(/restore/i);
-    expect(v.detail).toMatch(/safe state, not a fault/i);
+    expect(v.action).toBe("Disconnect");
+    expect(v.detail).toMatch(/restore normal routing/i);
+    expect(v.detail).toMatch(/blocked/i);
   });
 });
 
@@ -107,8 +113,8 @@ describe("formatting", () => {
   });
 
   it("scales bytes and keeps duration readable", () => {
-    expect(formatBytes(0)).toBe("0 B");
-    expect(formatBytes(2252)).toBe("2.2 KB");
+    expect(formatBytes(0)).toBe("0.00 B");
+    expect(formatBytes(2252)).toBe("2.20 KB");
     expect(formatDuration(65)).toBe("1:05");
     expect(formatDuration(3725)).toBe("1:02:05");
   });
@@ -126,98 +132,83 @@ describe("parsePreviewState", () => {
   });
 });
 
-// ⛔ THE HYPERDRIVE — the two canvases I missed by reading a TEXT extraction of the design.
-import {
-  createHyperState,
-  pushSample,
-  stepLink,
-} from "../src/client/hyperdrive";
+// ⛔ THE MESH IS CUT (founder-directed); THE PLOT STAYED AND ITS SAMPLES ARE NOW REAL.
+//
+// The old graph was fed by `pushSample`, which invented values from `Math.random` — a 14% chance of
+// a burst, otherwise a low idle band. Beside it every stat field read `n/a`. A plot of invented data
+// next to an honest `n/a` is worse than either alone: the `n/a` says "not measured", the curve says
+// "measured", and the one that looks like evidence is the one that is lying.
+import { drawGraph, pushRate, rateBetween, THROUGHPUT_WINDOW } from "../src/client/throughput";
 
-describe("hyperdrive state", () => {
-  it("⛔ is SEEDED, not random — the one deliberate departure from the handoff", () => {
-    // The handoff seeds node phases with Math.random(), which makes the animation unsnapshottable
-    // and every visual diff noisy forever. Two states built with the same seed must match.
-    const a = createHyperState(7);
-    const b = createHyperState(7);
-    expect(a.nodes.map((n) => n.tw)).toEqual(b.nodes.map((n) => n.tw));
-    // ...and the VARIETY survives: nodes must not all share a phase.
-    expect(new Set(a.nodes.map((n) => n.tw)).size).toBeGreaterThan(1);
+describe("throughput samples are measured, not generated", () => {
+  it("⛔ a rate is a DELTA between two counter readings — no source reports bytes/sec", () => {
+    const r = rateBetween({ bytes: 1000, at: 1_000 }, { bytes: 3000, at: 3_000 });
+    expect(r).toBe(1000); // 2000 bytes over 2 seconds
   });
 
-  it("carries the designer's seven nodes and their stagger", () => {
-    const st = createHyperState();
-    expect(st.nodes).toHaveLength(7);
-    expect(st.nodes[0].stagger).toBe(0);
-    expect(st.nodes[6].stagger).toBeCloseTo((6 / 7) * 0.6, 5);
+  it("⛔ a counter that went BACKWARDS is a rebuilt interface, not negative traffic", () => {
+    // `wg show` counters reset when the tunnel is torn down and brought back. A naive delta would
+    // draw a large negative spike at exactly the moment a reconnect succeeds.
+    expect(rateBetween({ bytes: 9_000, at: 1_000 }, { bytes: 12, at: 2_000 })).toBe(0);
   });
 
-  it("⛔ connecting eases SLOWLY and connected snaps — the rates are the design's", () => {
-    const slow = createHyperState();
-    slow.mode = "connecting";
-    stepLink(slow);
-    const fast = createHyperState();
-    fast.mode = "connected";
-    stepLink(fast);
-    expect(fast.link).toBeGreaterThan(slow.link);
-    expect(slow.link).toBeCloseTo(0.018, 4);
-    expect(fast.link).toBeCloseTo(0.06, 4);
+  it("the first reading has no baseline, so it reports 0 rather than guessing", () => {
+    expect(rateBetween(null, { bytes: 5_000, at: 1_000 })).toBe(0);
   });
 
-  it("⛔ the graph DRAINS when the tunnel drops rather than snapping to zero", () => {
-    const st = createHyperState();
-    st.mode = "connected";
-    st.graph = [0.8];
-    st.mode = "idle";
-    pushSample(st, () => 0.5);
-    expect(st.graph[st.graph.length - 1]).toBeCloseTo(0.71, 5); // 0.8 - 0.09
+  it("a zero or backwards clock cannot produce an infinite rate", () => {
+    expect(rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 2_000 })).toBe(0);
+    expect(rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 1_000 })).toBe(0);
   });
 
-  it("never lets a drained graph go negative", () => {
-    const st = createHyperState();
-    st.graph = [0.05];
-    pushSample(st, () => 0.5);
-    expect(st.graph[st.graph.length - 1]).toBe(0);
+  it("caps the window at 64 samples so the plot scrolls rather than rescaling", () => {
+    let h: number[] = [];
+    for (let i = 0; i < 200; i++) h = pushRate(h, i);
+    expect(h).toHaveLength(THROUGHPUT_WINDOW);
+    expect(h[h.length - 1]).toBe(199); // newest last
   });
 
-  it("caps the window at 64 samples so the plot scrolls", () => {
-    const st = createHyperState();
-    st.mode = "connected";
-    for (let i = 0; i < 200; i++) pushSample(st, () => 0.5);
-    expect(st.graph).toHaveLength(64);
+  it("never stores a negative sample", () => {
+    expect(pushRate([], -5)[0]).toBe(0);
   });
 
-  it("clears the connected-at clock when the tunnel drops", () => {
-    const st = createHyperState();
-    st.mode = "connected";
-    pushSample(st, () => 0.5);
-    expect(st.connAt).not.toBeNull();
-    st.mode = "idle";
-    pushSample(st, () => 0.5);
-    expect(st.connAt).toBeNull();
+  it("⛔ an all-idle session does not divide by zero", () => {
+    // Normalisation is against the session peak; a flat zero series must draw a flat line, not NaN.
+    const calls: number[] = [];
+    const ctx = {
+      clearRect() {}, beginPath() {}, moveTo() {}, closePath() {}, fill() {}, stroke() {},
+      lineTo(_x: number, y: number) { calls.push(y); },
+      createLinearGradient: () => ({ addColorStop() {} }),
+      strokeStyle: "", fillStyle: "", lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    drawGraph(ctx, 100, 50, [0, 0, 0, 0]);
+    expect(calls.every((y) => Number.isFinite(y))).toBe(true);
   });
 });
 
-// ⛔ THE VERB'S TARGET — which action a state's button performs.
-//
-// The button shipped with NO onClick at all: it rendered, it looked right, and clicking it did
-// nothing. Pinned here as data so the mapping cannot silently invert (Disconnect wired to up()
-// is a click that turns the tunnel ON while saying it is tearing it down).
-describe("what the primary verb does", () => {
-  it("⛔ tears DOWN from connected and kill-switch, never up", () => {
-    // kill_switch is the trap: its verb reads "restore normal routing", which is a DOWN.
-    for (const s of ["connected", "kill_switch"] as const) {
-      expect(stateView(s).action).toMatch(/disconnect|restore/i);
+describe("⛔ every byte value carries exactly two decimals", () => {
+  it("no unit and no magnitude is an exception", () => {
+    // The first attempt scaled precision to magnitude (2 decimals under 10, 1 under 100, none
+    // above) and left raw BYTES returning the number verbatim. A rate is a division, so it is
+    // almost never integral, and 256 B/s rendered as `256.2562562562563 B/s` — sixteen significant
+    // figures, wide enough to push the row off a 440px card.
+    //
+    // > **A FORMATTING RULE WITH AN EXCEPTION WILL BE BROKEN BY WHICHEVER VALUE TAKES THE
+    // > EXCEPTION**, and the value that took this one was the only one recomputed every second.
+    expect(formatBytes(256.2562562562563)).toBe("256.26 B");
+    expect(formatBytes(Math.round(45.3 * 1024 * 1024))).toBe("45.30 MB");
+    expect(formatBytes(1536)).toBe("1.50 KB");
+    expect(formatBytes(Math.round(512.7 * 1024))).toBe("512.70 KB");
+    expect(formatBytes(999)).toBe("999.00 B");
+    expect(formatRate(300.46948356807513)).toBe("300.47 B/s");
+    // The invariant behind all of the above, stated once.
+    for (const n of [0, 1, 999, 1024, 1536, 1048576, 12345678901]) {
+      expect(formatBytes(n)).toMatch(/^\d+\.\d{2} (B|KB|MB|GB|TB)$/);
     }
   });
 
-  it("brings UP from every state that offers a connect", () => {
-    for (const s of ["disconnected", "failed", "migrate_failed"] as const) {
-      expect(stateView(s).action).toMatch(/connect · link the mesh/i);
-    }
-  });
-
-  it("⛔ cancels — not disconnects — while connecting", () => {
-    // "Disconnect" mid-handshake would describe tearing down something not yet up.
-    expect(stateView("connecting").action).toMatch(/^cancel/i);
+  it("absent is still n/a, never 0 — a zero nobody measured is a claim", () => {
+    expect(formatBytes(null)).toBe("n/a");
+    expect(formatRate(undefined)).toBe("n/a");
   });
 });

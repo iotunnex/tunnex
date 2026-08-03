@@ -55,7 +55,11 @@ export function Logo({
         draggable={false}
         width={Math.round(size * MARK_RATIO)}
         height={size}
-        className="shrink-0 rounded-lg object-contain"
+        // ⛔ NO CORNER CROP ON THE MARK. `rounded-lg` clipped an 8px radius off a 22px image, and
+        // the mark's shape reaches its own corners — so the identity was being trimmed at every
+        // size, most visibly the smallest. A logo is the one asset that must never be cropped to
+        // fit its box; scale it or give it room.
+        className="shrink-0 object-contain"
       />
       )}
       {!markOnly && (
@@ -72,3 +76,26 @@ export function Logo({
   );
 }
 
+/**
+ * The tagline, once.
+ *
+ * ⛔ THE DESIGN'S OWN TYPOGRAPHY: 8.5px / 1.6 line-height / .04em tracking, set directly under the
+ * wordmark, broken across two lines. Those numbers are the handoff's, not a guess.
+ *
+ * ⚠ ONE DEFINITION BECAUSE THE SECOND COPY WAS ABOUT TO BE TYPED. It lived inline in `AppShell`;
+ * adding it to the desktop client meant either importing it or retyping it, and a slogan retyped is
+ * a slogan that will eventually differ from itself in one place nobody checks.
+ */
+export const TAGLINE = ["Connect Everything.", "Trust Nothing."] as const;
+
+export function Tagline({ className = "" }: { className?: string }) {
+  return (
+    <span
+      className={`block text-[8.5px] leading-[1.6] tracking-[.04em] text-ink-secondary ${className}`}
+    >
+      {TAGLINE[0]}
+      <br />
+      {TAGLINE[1]}
+    </span>
+  );
+}

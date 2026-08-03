@@ -10,8 +10,16 @@
 // > and calling that "reading the block" is how a canvas animation becomes a static card and
 // > nobody notices until it is on screen.
 //
+// ⛔ RESTORED AFTER BEING CUT, AND THE CUT WAS MINE READING THE INSTRUCTION TOO WIDELY. "Remove that
+// hyperdrive thing" was one sentence covering a NAME, a fabricated plot and a mesh animation; I took
+// all three. Only two deserved it — the section's naming and the invented samples. **The motion was
+// never the problem: the dishonest numbers beside it were.**
+//
+// So the mesh is back, unchanged, and its GRAPH half is not: that moved to throughput.ts and now
+// draws measured bytes. This file animates; it no longer claims to measure.
+//
 // Everything below is the designer's arithmetic: 7 nodes, the ellipse radii, the stagger, the
-// easing rates, the pulse periods, the graph's 64-sample window and its 63-step spacing.
+// easing rates and the pulse periods.
 
 export type HyperMode = "connected" | "connecting" | "idle";
 
@@ -28,11 +36,8 @@ export type HyperState = {
   nodes: Node[];
   /** Eased 0..1 link extension. Rises slowly while connecting, fast once connected. */
   link: number;
-  /** Rolling throughput samples, newest last, capped at 64. */
-  graph: number[];
   mode: HyperMode;
   connAt: number | null;
-  _last: number;
 };
 
 const NP = 7;
@@ -67,31 +72,13 @@ export function createHyperState(seed = 1): HyperState {
       col: "232,232,228",
     });
   }
-  return { nodes, link: 0, graph: [], mode: "idle", connAt: null, _last: 0 };
+  return { nodes, link: 0, mode: "idle", connAt: null };
 }
 
 /** Advance the eased link toward its target. Connecting crawls (0.018); connected snaps (0.06). */
 export function stepLink(st: HyperState): void {
   const target = st.mode === "connected" || st.mode === "connecting" ? 1 : 0;
   st.link += (target - st.link) * (st.mode === "connecting" ? 0.018 : 0.06);
-}
-
-/**
- * Push one throughput sample. The handoff's own shape: while connected, a 14% chance of a burst
- * (0.55–1.0) and otherwise a low idle band; while down, decay by 0.09 a tick rather than snapping
- * to zero — so the graph drains instead of cutting.
- */
-export function pushSample(st: HyperState, rand: () => number): void {
-  const on = st.mode === "connected";
-  const v = on
-    ? rand() < 0.14
-      ? 0.55 + rand() * 0.45
-      : rand() * 0.2
-    : Math.max(0, (st.graph[st.graph.length - 1] ?? 0) - 0.09);
-  st.graph.push(v);
-  while (st.graph.length > 64) st.graph.shift();
-  if (!on) st.connAt = null;
-  else if (!st.connAt) st.connAt = Date.now();
 }
 
 /** The hyperdrive draw, on a 2D context. Pure of React; the component owns the rAF loop. */
@@ -197,48 +184,4 @@ export function drawHyper(
     ctx.arc(cx, cy, coreR + pt * 30, 0, Math.PI * 2);
     ctx.stroke();
   }
-}
-
-/** The throughput plot: a filled area under a 1.6px line, over a 64-sample window. */
-export function drawGraph(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  graph: number[],
-): void {
-  ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, h * 0.5);
-  ctx.lineTo(w, h * 0.5);
-  ctx.stroke();
-
-  const n = graph.length;
-  if (n <= 1) return;
-  // 63, not n-1: the window is fixed at 64 samples so the plot SCROLLS rather than rescaling.
-  const step = w / 63;
-  const base = h - 6;
-
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, "rgba(255,255,255,0.14)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.beginPath();
-  ctx.moveTo(0, base);
-  graph.forEach((v, i) => ctx.lineTo(i * step, base - v * (h - 12)));
-  ctx.lineTo((n - 1) * step, base);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  ctx.beginPath();
-  graph.forEach((v, i) => {
-    const x = i * step;
-    const y = base - v * (h - 12);
-    if (i) ctx.lineTo(x, y);
-    else ctx.moveTo(x, y);
-  });
-  ctx.strokeStyle = "#D6D6D2";
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
 }

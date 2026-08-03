@@ -9,7 +9,7 @@ import {
   type NavCollapse,
 } from "../lib/navcollapse";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Logo, PRODUCT_TAGLINE } from "../brand";
+import { Logo, PRODUCT_TAGLINE, Tagline } from "../brand";
 import { useAuth } from "../lib/auth";
 import { desktop } from "../lib/desktop";
 import { useResendVerification } from "../lib/useResendVerification";
@@ -276,12 +276,9 @@ function SidebarNav() {
             aria-label="Tunnex home"
           >
             <Logo size={26} wordmarkOnly />
-            {/* The design sets the tagline directly under the wordmark, 8.5px/1.6. */}
-            <span className="mt-1 block text-[8.5px] leading-[1.6] tracking-[.04em] text-ink-secondary">
-              Connect Everything.
-              <br />
-              Trust Nothing.
-            </span>
+            {/* The design sets the tagline directly under the wordmark, 8.5px/1.6. Shared with the
+                desktop client through brand.tsx — one definition, so it cannot drift. */}
+            <Tagline className="mt-1" />
           </NavLink>
         )}
       </div>

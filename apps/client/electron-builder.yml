@@ -11,6 +11,19 @@ directories:
   output: release
   buildResources: build
 
+# ⛔ THE APP ICON. Without this the packaged app ships ELECTRON'S OWN icon — which is what the Dock
+# was showing, and which is the single most obvious "this is somebody's side project" tell.
+#
+# electron-builder would find build/icon.png via buildResources anyway; naming it is the difference
+# between an icon that is configured and an icon that happens to be found. It generates the .icns
+# and .ico from this single PNG.
+#
+# Regenerate with `pnpm --filter @tunnex/client icon` — scripts/make-icon.mjs renders the brand mark
+# through Chromium (nothing else on the box can rasterise this SVG) onto a rounded plate with 21%
+# padding on each side, because macOS applies NO mask: whatever the file contains is what the Dock
+# shows, and the raw asset is a full-bleed square.
+icon: build/icon.png
+
 # The compiled main/preload (tsc → dist) + the manifest. The SPA bundle and the
 # privilege helper ride along as extraResources (read via process.resourcesPath).
 files:

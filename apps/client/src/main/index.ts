@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { app, BrowserWindow, shell, protocol, session } from "electron";
+import { app, BrowserWindow, shell, protocol, session, ipcMain, dialog, nativeImage } from "electron";
 import { resolveBundlePath, looksLikeAsset, contained } from "./bundle";
 import { contentTypeFor } from "./mime";
 import { cspFor } from "./csp";
@@ -12,6 +12,10 @@ import { gracefulQuit } from "./quitguard";
 import { TunnelTray } from "./tray";
 import { initUpdater } from "./updater";
 import { setupPageDataUrl } from "./setup";
+import { initLogging, logFilePath, readLogTail } from "./logging";
+import { updateStatus } from "./updateview";
+import { windowChrome } from "./windowchrome";
+import { AUTOUPDATE_ENABLED } from "./flags";
 import { CLIENT_ENTRY } from "./entry";
 
 // The SPA bundle (apps/web build). Overridable for dev; falls back to the
@@ -37,9 +41,25 @@ let mainWindow: BrowserWindow | null = null;
 let allowInsecureStorage = false; // captured from the store at setup for the setup page
 
 function createWindow(config: Config): BrowserWindow {
+  // ⛔ SIZED TO THE DESIGN'S CARD, NOT TO A DASHBOARD. 1100x760 was inherited from the days this
+  // window loaded the web SPA; the client is a 440px column, so that width was all margin.
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    // The window IS the card now (see ClientApp): 440 is the design's content width, and there is
+    // no outer margin to add to it because there is no page for the card to sit on.
+    width: 440,
+    height: 820,
+    // ⛔ SEAMLESS TITLE BAR ON macOS ONLY — see windowchrome.ts. The default draws a grey chrome
+    // strip above the content, so a window whose whole point is to be ONE surface arrived with a
+    // second one bolted to the top. Hidden-inset keeps the traffic lights and lets the page paint
+    // underneath them, and the title text goes because the WORDMARK already says the name.
+    //
+    // ⛔ On Windows the same option removes the caption entirely — including CLOSE. Decided by a
+    // pure function so that arm is tested rather than trusted.
+    ...windowChrome(process.platform),
+    // ⛔ NOT RESIZABLE. The card is a fixed 440px column; a resize only ever added dead margin, and
+    // dragging it narrow clipped the stats grid. A window whose content cannot use the extra space
+    // should not offer it.
+    resizable: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -95,6 +115,28 @@ function showWindow(config: Config): void {
 }
 
 app.whenReady().then(() => {
+  // ⛔ FIRST, BEFORE ANYTHING CAN FAIL. A logger initialised after the code that crashes records
+  // everything except the crash.
+  initLogging();
+
+  // ⛔ THE DOCK ICON IN DEVELOPMENT. A PACKAGED app takes its icon from the bundle, so
+  // electron-builder's `icon:` covers that — but `electron .` runs inside Electron's OWN bundle and
+  // shows Electron's atom, which is what every dev screenshot has been showing. Setting it here
+  // costs nothing and makes the dev app look like the product it is.
+  //
+  // ⚠ BEST-EFFORT AND SILENT ON FAILURE: an icon is not a reason to fail a launch, and the file is
+  // absent in the packaged tree by design (it is a build resource, not an app resource).
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      const iconPath = path.join(__dirname, "..", "..", "build", "icon.png");
+      if (fs.existsSync(iconPath)) {
+        const img = nativeImage.createFromPath(iconPath);
+        if (!img.isEmpty()) app.dock.setIcon(img);
+      }
+    } catch {
+      /* cosmetic only */
+    }
+  }
   const config = new Config();
   // App-lifetime singletons — built ONCE, not per-window.
   const store = buildCredentialStore(allowInsecure);
@@ -147,6 +189,35 @@ app.whenReady().then(() => {
 
   // IPC handlers + tunnel controls: registered ONCE. They resolve the live window via
   // the getter (null-safe) so a closed window never breaks the tunnel, and vice versa.
+  // Troubleshooting verbs. Verb-specific like the rest of the allowlist — `openLogs` reveals the
+  // file in the OS file manager rather than reading it into the renderer, so the log never crosses
+  // into a page and cannot be exfiltrated by one.
+  ipcMain.handle("diag:logPath", () => logFilePath());
+  ipcMain.handle("diag:openLogs", () => {
+    shell.showItemInFolder(logFilePath());
+  });
+  ipcMain.handle("diag:readLog", () => readLogTail());
+  // ⛔ THE VERSION IS THE ONE UPDATE FACT THAT IS REAL TODAY. It is also the first thing any support
+  // conversation asks for, and until now the client could not tell you its own.
+  ipcMain.handle("diag:appInfo", () => ({
+    version: app.getVersion(),
+    // `build.publish` is null in package.json — there is no release channel to query — so the
+    // feed is reported as absent rather than assumed present.
+    update: updateStatus(AUTOUPDATE_ENABLED, false),
+  }));
+  // Export writes a COPY the user chooses the location of. The save dialog is a main-process API on
+  // purpose: the renderer never learns a filesystem path it did not already have.
+  ipcMain.handle("diag:exportLog", async () => {
+    const res = await dialog.showSaveDialog({
+      title: "Export Tunnex client log",
+      defaultPath: `tunnex-client-log.txt`,
+      filters: [{ name: "Text", extensions: ["txt", "log"] }],
+    });
+    if (res.canceled || !res.filePath) return null;
+    fs.writeFileSync(res.filePath, readLogTail(Number.MAX_SAFE_INTEGER), "utf8");
+    return res.filePath;
+  });
+
   const controls = registerIpc(() => mainWindow, config, store, tunnelStore);
 
   // Tray: one instance for the app lifetime, subscribed to tunnel state. Its actions
