@@ -3226,3 +3226,12 @@ a single assertion is blamed.
 
 **Corollary for the harness:** report survivors as a RATE, not a list. `5 of 5 survived` is a different
 diagnosis from `2 of 5 survived`, and only the first one means *go check that the test executes*.
+
+---
+
+# ⛔ THE SPEC DESCRIBES THE SHAPE OF A REQUEST, NOT THE EXISTENCE OF A CAPABILITY
+
+**S14.14.** Every idp-sync path enumerates `provider: [microsoft, google]`; the server answers Google with
+`400 provider_not_supported`, deliberately, at config time. **The spec, the handler signature and the
+generated schema all read as though Google works — only the served payload disagreed.** Build the arm for
+what the server ANSWERS, not for what the contract permits you to ask.
