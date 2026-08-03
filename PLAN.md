@@ -63,6 +63,45 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.20 step 3 — PR #68, ff-only, content tip `9cca701`.**
+⛔ **FIRST MERGE UNDER THE CORRECTED SEQUENCING: the checkpoint is the FINAL commit before the merge.** The
+pointer had twice named a commit with content behind it because work landed after it — a procedure gap, not a
+rule gap. Count stays at **8**.
+
+**THE ONE-LINE FLIP.** `app://tunnex/index.html` → `app://tunnex/client.html`. The desktop client stops
+loading the web SPA — router, sidebar, top bar and every dashboard screen, most of it hidden behind
+`isDesktop()` branches — and loads its own four-region surface. **That line is the whole migration.**
+
+**The census forced the disposition change, which is what it was built for:** `built_unadopted` asserts the
+loader does NOT reference `client.html`; the flip made that false, so the census went red and the only way to
+green was `built`. ⛔ **It then refused the first `built`** — that kind requires a route in `App.tsx`, and
+`/client.html` is a separate vite entry with no router, so `built` now takes EITHER a route OR an entry.
+⛔⛔ **And the new entry check was VACUOUS on its first run** — reverting the flip left it green because the
+COMMENT explaining the flip contains "client.html". **Third instance this epic.** Now strips comments, proven
+both ways.
+
+**The client README** rewritten around real failures: one-clone rule · the THREE Electron states (the middle
+one — `dist` present at ~9MB with no binary — passes every naive check) · `npx electron --version` from the
+repo root is NOT a valid check (it resolves a foreign package and downloads electron@43.2.0) · `rm -rf` the
+`.pnpm` entry, because `pnpm rebuild` does nothing and "resolution step is skipped" means a NO-OP · the app
+data dir is `~/Library/Application Support/@tunnex/client` — the npm SCOPE, and `rm -rf` on the wrong path
+succeeds silently · no dev flag exists to skip the setup screen.
+
+⛔ **AND THE MERGE TURN'S OWN RULING PRODUCED THE BETTER FINDING.** *Any census over source strips comments
+first — as the starting shape, not as a fix each time it bites.* Seven of ten censuses read source raw. All ten
+stayed GREEN after the retrofit, so none was being ACTIVELY lied to — the exposure was latent. **One was
+pointed:** `visualgallery.test.ts` asserts *"the route is guarded by an env flag, NOT BY A COMMENT"* and read
+`App.tsx` raw. Mutation — guard replaced by `true /* was: …VITE_VISUAL_GALLERY === "1" */` — **passed
+pre-retrofit, failed post-retrofit. The visual gallery could have shipped ALWAYS-ON with its guard green.**
+Shared strippers, one per LANGUAGE; `censuscensus.test.ts` enforces the shape and checks the register against
+the STRIPPED body of the test itself. **825 tests (+14).** Law filed.
+
+**NEXT: founder tests the client against a REAL server** (real helper, real WireGuard, real handshake) → then
+remove the `isDesktop()` branches from the seven web files → narrow packaging. ⛔ **The client remains
+UNSIGNED and UN-NOTARIZED — a hard DISTRIBUTION gate, registered.**
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.17–S14.19 + the wireframe census — PR #67, ff-only, content tip `943d7b4`.**
 ⛔ **EPIC 14 IS RE-OPENED. It was declared closed with FIVE wireframe blocks unaccounted for** — the closing
 entry counted screens we HAD, not screens the design SPECIFIES. Three were unbuilt (Auth screens, Flow Logs,
