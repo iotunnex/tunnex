@@ -74,6 +74,8 @@ export default function Signup() {
         <Field label="Password">
           <Input
             type="password"
+            name="new-password"
+            autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

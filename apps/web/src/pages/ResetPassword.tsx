@@ -77,6 +77,8 @@ export default function ResetPassword() {
         <Field label="New password">
           <Input
             type="password"
+            name="new-password"
+            autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

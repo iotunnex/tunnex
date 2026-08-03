@@ -95,6 +95,44 @@ export function domainGate(i: {
 /** The wireframe's pill chain, as an index. `unknown` sits BEFORE the chain, at -1. */
 export const DOMAIN_STEPS = ["CLAIMED", "DNS-TXT PENDING", "VERIFIED"] as const;
 
+/**
+ * ⛔ THREE EQUAL CHIPS ARE A LEGEND, NOT A STATE — found on the review stack.
+ *
+ * All three pills rendered beside the heading with nothing marking which one the org is in.
+ * MEASURED from the wireframe rather than guessed: its three chips carry DESCENDING
+ * BRIGHTNESS — `#A9A9A6`, `#858582`, `#5E5E5B` — on one shared border and background. So the
+ * design always renders all three and distinguishes them by TONE ALONE. The first build
+ * collapsed that to two tiers (`i <= step`), which at `unknown` made all three identical.
+ *
+ * Three tones, so exactly one chip is ever "current":
+ *   done    — passed, behind us
+ *   current — where this org is now
+ *   todo    — not yet reached
+ *
+ * ⚠ AND TONE IS NOT ENOUGH ON ITS OWN. The wireframe encodes the whole distinction in colour;
+ * a colour-blind operator, or anyone on a washed-out display, gets the legend back. The
+ * renderer pairs each tone with a non-colour cue (a mark on `done`, a ring plus
+ * `aria-current="step"` on `current`) — the design's tones are honoured, not obeyed literally.
+ */
+export type ChipTone = "done" | "current" | "todo";
+
+export function chipTone(i: number, step: number): ChipTone {
+  if (i < step) return "done";
+  if (i === step) return "current";
+  return "todo";
+}
+
+/**
+ * ⛔ AND `unknown` STILL HAS NO SUBJECT, because -1 is not one of the three.
+ *
+ * With no GET, "we have not been told" is the DEFAULT state of this panel, not an edge case —
+ * so the most common render was the one with no current chip at all. Rather than leave the
+ * chain unanchored, `unknown` gets its own leading chip and becomes the current step. **There
+ * is now always exactly one current chip**, which is the property that stops it reading as a
+ * legend.
+ */
+export const NO_CLAIM_CHIP = "NO CLAIM THIS SESSION";
+
 export function domainStepIndex(s: DomainClaimState): number {
   switch (s.kind) {
     case "unknown":

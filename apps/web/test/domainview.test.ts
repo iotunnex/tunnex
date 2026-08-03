@@ -6,8 +6,10 @@ import {
   WRITE_ONLY_NOTE,
   domainErrorCopy,
   domainGate,
+  chipTone,
   domainStepIndex,
   normalizeDomain,
+  NO_CLAIM_CHIP,
   txtInstruction,
 } from "../src/lib/domainview";
 
@@ -162,5 +164,44 @@ describe("the notes that carry what the design omits", () => {
 
   it("states the effect of capture where it is turned on", () => {
     expect(CAPTURE_EFFECT).toMatch(/auto-join/i);
+  });
+});
+
+// ⛔ THREE EQUAL CHIPS ARE A LEGEND, NOT A STATE — the review-stack finding.
+//
+// The first build used two tiers (`i <= step`), so at `unknown` — the DEFAULT here, because
+// there is no GET — every chip landed in the same tier and nothing said which state the org
+// was in. MEASURED from the wireframe: its chips carry DESCENDING BRIGHTNESS (#A9A9A6,
+// #858582, #5E5E5B) on one shared border and background, so the design always renders all
+// three and separates them by tone alone.
+describe("chipTone — exactly one current chip, always", () => {
+  it("gives three distinct tones, not two", () => {
+    // step 1 = DNS-TXT PENDING: CLAIMED is behind, VERIFIED is ahead.
+    expect(chipTone(0, 1)).toBe("done");
+    expect(chipTone(1, 1)).toBe("current");
+    expect(chipTone(2, 1)).toBe("todo");
+    // The regression in one line: `done` and `current` must not collapse together.
+    expect(chipTone(0, 1)).not.toBe(chipTone(1, 1));
+  });
+
+  it("marks exactly one chip current for every reachable state", () => {
+    // Including -1: the leading NO CLAIM chip sits at index -1 and takes the current slot,
+    // which is what stops the unknown render from being an unanchored legend.
+    for (const step of [-1, 0, 1, 2]) {
+      const tones = [-1, 0, 1, 2].map((i) => chipTone(i, step));
+      expect(tones.filter((t) => t === "current")).toHaveLength(1);
+    }
+  });
+
+  it("anchors the unknown state on its own chip rather than dimming everything", () => {
+    expect(chipTone(-1, -1)).toBe("current");
+    expect(chipTone(0, -1)).toBe("todo");
+    expect(chipTone(2, -1)).toBe("todo");
+    expect(NO_CLAIM_CHIP).toMatch(/no claim/i);
+  });
+
+  it("never marks a later step done because an earlier one is", () => {
+    expect(chipTone(2, 0)).toBe("todo");
+    expect(chipTone(1, 0)).toBe("todo");
   });
 });

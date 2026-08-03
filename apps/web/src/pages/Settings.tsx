@@ -16,7 +16,9 @@ import {
   CAPTURE_EFFECT,
   DOMAIN_STEPS,
   KEEP_RECORD_NOTE,
+  NO_CLAIM_CHIP,
   WRITE_ONLY_NOTE,
+  chipTone,
   domainErrorCopy,
   domainGate,
   domainStepIndex,
@@ -554,24 +556,42 @@ function DomainSection({
     <Card className="mt-4">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-semibold text-slate-300">Domain capture</h2>
+        {/* ⛔ EXACTLY ONE CHIP IS EVER "CURRENT". Three equal chips are a legend with no
+            subject — which is what shipped, because `i <= step` gave only two tiers and at
+            `unknown` (step -1) every chip fell into the same one. `unknown` is the DEFAULT
+            state here (there is no GET), so that was the common render, not an edge case.
+            It now has its own leading chip and anchors the chain. */}
         <div className="flex items-center gap-1.5">
-          {DOMAIN_STEPS.map((label, i) => (
-            <span key={label} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-slate-700">›</span>}
-              <span
-                data-testid={`domain-step-${i}`}
-                aria-current={i === step ? "step" : undefined}
-                className={
-                  "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
-                  (i <= step
-                    ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
-                    : "border-slate-700 bg-slate-900 text-slate-600")
-                }
-              >
-                {label}
-              </span>
-            </span>
-          ))}
+          {[...(step < 0 ? [NO_CLAIM_CHIP] : []), ...DOMAIN_STEPS].map(
+            (label, idx) => {
+              // The prepended chip occupies the current slot; the real steps shift by one.
+              const i = step < 0 ? idx - 1 : idx;
+              const tone = chipTone(i, step);
+              return (
+                <span key={label} className="flex items-center gap-1.5">
+                  {idx > 0 && <span className="text-slate-700">›</span>}
+                  <span
+                    data-testid={`domain-step-${i}`}
+                    data-tone={tone}
+                    aria-current={tone === "current" ? "step" : undefined}
+                    className={
+                      "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                      (tone === "done"
+                        ? "border-accent-500/30 bg-accent-500/5 text-accent-400/70"
+                        : tone === "current"
+                          ? "border-accent-400 bg-accent-500/20 text-accent-200 ring-1 ring-accent-400/50"
+                          : "border-slate-800 bg-slate-900 text-slate-600")
+                    }
+                  >
+                    {/* Non-colour cue: the design encodes the whole distinction in tone, which
+                        a colour-blind operator cannot read. */}
+                    {tone === "done" ? "✓ " : ""}
+                    {label}
+                  </span>
+                </span>
+              );
+            },
+          )}
         </div>
       </div>
 
@@ -876,8 +896,21 @@ function SsoProvider({
           {/* Labels are PROVIDER-SCOPED (S11-1 class): SsoProvider renders once per provider, so a bare
               "Client ID" would put two controls with the SAME accessible name on the Settings page — a
               screen reader announces them identically and a label-navigating user cannot tell them apart. */}
+          {/* ⛔ AN OAuth CLIENT ID IS NOT A USERNAME, AND A CLIENT SECRET IS NOT A PASSWORD.
+              Chrome fills the FIRST text+password pair on a page as a login form. This component
+              renders once per provider and `google` comes first (PROVIDERS), so Google's pair was
+              being filled with the signed-in admin's EMAIL and a SAVED PASSWORD — in
+              autofill-blue, on a credential surface, one un-noticed Save away from writing them
+              into a live IdP config. The Microsoft pair looked immune only because Chrome fills
+              one pair per page; the markup was byte-identical, so this is ORDER, not markup, and
+              fixing only the visibly-affected provider would have moved the bug rather than
+              removed it. Both are annotated for that reason.
+              `new-password` (not `off`) is what actually suppresses saved-password fill in
+              Chrome — `off` is widely ignored on password inputs. */}
           <Field label={`${providerName} client ID`}>
             <Input
+              name={`${provider}-oauth-client-id`}
+              autoComplete="off"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               required
@@ -897,6 +930,8 @@ function SsoProvider({
           >
             <Input
               type="password"
+              name={`${provider}-oauth-client-secret`}
+              autoComplete="new-password"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
               required
