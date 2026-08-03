@@ -180,6 +180,19 @@ const SHELL_COMPONENTS: Record<string, ComponentDisposition> = {
 //
 // And the epic cannot close while any block sits here — asserted separately and by name, below.
 
+const CLIENT_MAIN = join(__dirname, "..", "..", "client", "src", "main");
+
+/** Every .ts under the client's main process, RECURSIVELY, as paths relative to CLIENT_MAIN. */
+function mainSources(dir = ""): string[] {
+  return readdirSync(join(CLIENT_MAIN, dir), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory()
+      ? mainSources(join(dir, e.name))
+      : e.name.endsWith(".ts")
+        ? [join(dir, e.name)]
+        : [],
+  );
+}
+
 const wireframe = readFileSync(WIREFRAME, "utf8");
 const app = readFileSync(APP, "utf8");
 const BLOCKS = banners(wireframe);
@@ -275,10 +288,11 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
       // `ipc.ts` still loaded `index.html` on the FIRST-RUN branch of config:setServerUrl, so a
       // fresh install reached the web dashboard and only a second launch reached the client.
       // A ledger sees only the shape it is keyed on. This is now keyed on the SET.
-      const MAIN = join(__dirname, "..", "..", "client", "src", "main");
+      // ⚠ RECURSIVE. A load site one directory down is the same defect one level deeper, and a
+      // non-recursive scan would report the same clean set while missing it.
       const loaded = new Map<string, string[]>();
-      for (const f of readdirSync(MAIN).filter((f) => f.endsWith(".ts"))) {
-        const src = stripJsComments(readFileSync(join(MAIN, f), "utf8"));
+      for (const f of mainSources()) {
+        const src = stripJsComments(readFileSync(join(CLIENT_MAIN, f), "utf8"));
         for (const m of src.matchAll(/app:\/\/tunnex\/([A-Za-z0-9._-]+\.html)/g)) {
           loaded.set(m[1]!, [...(loaded.get(m[1]!) ?? []), f]);
         }
@@ -295,11 +309,35 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
   it("⛔ the entry URL has ONE definition — two literals in two files are two constants", () => {
     // The fix for the above, held in place. A second file spelling the URL out again would pass the
     // set check on the day it was written and drift the moment either copy changed.
-    const MAIN = join(__dirname, "..", "..", "client", "src", "main");
-    const spellers = readdirSync(MAIN)
-      .filter((f) => f.endsWith(".ts"))
-      .filter((f) => /app:\/\/tunnex\/[A-Za-z0-9._-]+\.html/.test(stripJsComments(readFileSync(join(MAIN, f), "utf8"))));
+    const spellers = mainSources().filter((f) =>
+      /app:\/\/tunnex\/[A-Za-z0-9._-]+\.html/.test(
+        stripJsComments(readFileSync(join(CLIENT_MAIN, f), "utf8")),
+      ),
+    );
     expect(spellers, "the entry URL is spelled out in more than one file").toEqual(["entry.ts"]);
+  });
+
+  it("⛔ the entry a block claims is a DECLARED VITE INPUT — a reference is not an artifact", () => {
+    // Every other check here proves the loader REFERENCES the entry. None proves the build EMITS
+    // it — and a multi-entry vite build with an undeclared input succeeds and emits index.html
+    // alone. `gates` would be green, this census would be green, and the app would open on a 404.
+    // The same shape as the defect above: a ledger keyed on the reference, not on the artifact.
+    const vite = stripJsComments(
+      readFileSync(join(__dirname, "..", "vite.config.ts"), "utf8"),
+    );
+    for (const b of BLOCKS) {
+      const d = DISPOSITIONS[b];
+      if (d?.kind !== "built" || !d.entry) continue;
+      expect(
+        vite.includes(`"${d.entry}"`),
+        `${b} claims entry ${d.entry}, but vite.config.ts does not declare it as a rollup input — ` +
+          `the build would succeed and never emit it`,
+      ).toBe(true);
+      expect(
+        existsSync(join(__dirname, "..", d.entry)),
+        `${d.entry} is declared as an input but the file does not exist`,
+      ).toBe(true);
+    }
   });
 
   it("⛔ NO SHELL COMPONENT IS UNBUILT — banners cannot see these, so they are counted separately", () => {

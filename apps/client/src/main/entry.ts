@@ -18,3 +18,23 @@
 // ledger sees only the shape it is keyed on. It now scans every file in this directory for any
 // `app://tunnex/*.html` and holds the set to exactly this value.
 export const CLIENT_ENTRY = "app://tunnex/client.html";
+
+/**
+ * What to do with the window after `config:setServerUrl` accepts a URL.
+ *
+ * ⛔ EXTRACTED BECAUSE THE BUG LIVED ON A BRANCH NO TEST COULD REACH. `ipc.ts` imports `electron` at
+ * module scope, and client tests must import no Electron at runtime — so `config:setServerUrl` has
+ * never been executed by a test, and the wrong entry survived a whole merge cycle there. A source
+ * census caught it the second time; a source census is the same instrument class that missed it the
+ * first time. **The decision is a pure function so it can be RUN, not scanned.**
+ *
+ * `wasUnset` is the first-run transition (no server configured → configured). It must LOAD: a plain
+ * `reload()` would re-load the setup `data:` URL, which cannot change origin.
+ */
+export type PostServerUrlAction =
+  | { kind: "load"; url: string }
+  | { kind: "reload" };
+
+export function postServerUrlAction(wasUnset: boolean): PostServerUrlAction {
+  return wasUnset ? { kind: "load", url: CLIENT_ENTRY } : { kind: "reload" };
+}

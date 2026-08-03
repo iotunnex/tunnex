@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 import { resolveBundlePath } from "../src/main/bundle";
 import { normalizeServerUrl, validateServer, serverChangeRequiresRelogin } from "../src/main/serverurl";
@@ -169,4 +171,26 @@ test("exchangeCode returns the credential on 200 and throws the server message o
     })),
     /invalid/,
   );
+});
+
+// ⛔ THE TEST SCRIPT ENUMERATES ITS FILES, SO A NEW TEST FILE IS SILENTLY NEVER RUN.
+//
+// `package.json`'s `test` lists every file by name (node --test does not glob here). A file added to
+// `test/` and left off that list exists, typechecks, passes locally when invoked directly, and
+// contributes NOTHING to CI — and the total test count barely moves, so nobody notices.
+//
+// Found the moment `entry.test.ts` was added: the count stayed at 102. **A test that is not RUN is
+// indistinguishable from a test that does not exist**, which is the same class as the unreachable
+// branch that file was written to cover.
+test("every test file is listed in the test script — an unlisted test never runs", () => {
+  const pkg = JSON.parse(
+    readFileSync(join(__dirname, "..", "package.json"), "utf8"),
+  ) as { scripts: { test: string } };
+  const listed = new Set(
+    [...pkg.scripts.test.matchAll(/test\/([A-Za-z0-9._-]+\.test\.ts)/g)].map((m) => m[1]),
+  );
+  const present = readdirSync(join(__dirname)).filter((f) => f.endsWith(".test.ts"));
+  assert.ok(present.length >= 12, `vacuity floor: found only ${present.length} test files`);
+  const missing = present.filter((f) => !listed.has(f));
+  assert.deepEqual(missing, [], `these test files are never run: ${missing.join(", ")}`);
 });

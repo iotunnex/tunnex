@@ -31,9 +31,27 @@
  * every URL string in the tree and turn real code invisible — trading a false green for a false
  * red. Trailing comments after code survive; they are rare and they sit next to the code that
  * would satisfy the search anyway.
+ *
+ * ⛔ LINE COMMENTS GO FIRST, AND THE ORDER IS NOT COSMETIC — THE OTHER ORDER SILENTLY ATE REAL CODE
+ * ON THIS FILE'S SECOND DAY.
+ *
+ * `entry.ts` documents itself with a line comment containing the glob `app://tunnex/*.html`. Strip
+ * blocks first and that `/*` — inside a `//` comment, where it means nothing — opens a PHANTOM
+ * BLOCK that runs to the next `*&#47;`, swallowing the `export const CLIENT_ENTRY = …` line beneath
+ * it. The census scanning for that constant found ZERO occurrences in a file that plainly contains
+ * one.
+ *
+ * > **A REGEX STRIPPER HAS NO IDEA WHICH COMMENT IT IS INSIDE.** `/*` in a line comment is text;
+ * > `//` in a block comment is text; neither regex knows. Removing line comments first eliminates
+ * > the commoner of the two confusions — prose that quotes block syntax — at the cost of the
+ * > rarer: a line comment inside a block that itself contains `*&#47;`. Both are pathological; only
+ * > one showed up within a day.
+ *
+ * It cost a false RED here, which is the survivable direction. On an absence assertion the same
+ * swallow reads as FALSE GREEN, and nothing would have surfaced it.
  */
 export function stripJsComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  return src.replace(/^\s*\/\/.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
 }
 
 /** CSS has ONLY block comments — `//` in a stylesheet is not a comment and must not be stripped. */
