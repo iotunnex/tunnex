@@ -172,10 +172,18 @@ wrong in our own favour: the claim is not unproven, it is CHECKABLE AND FALSE.**
 > ## **would be checkable and false the day it was published.**
 
 ⛔ **AND TELEPORT IS ALREADY WHERE §3c GOES.** Per-tool granularity is not our unclaimed differentiator; it is
-**the thing a competitor shipped eight months before this paper was written.** The first draft called it *"the
-part nobody else is doing"* — repeating the founder's framing without checking it. **That is the Tier-3 defect
-this epic has spent fourteen stories cutting from other people's copy, committed in our own paper, about our
-own product.**
+**the thing a competitor shipped eight months before this paper was written.**
+
+**PROVENANCE, RECORDED ACCURATELY BECAUSE IT CHANGES THE LESSON:** *"the part nobody else is doing"* was the
+**FOUNDER'S** line, in the instruction that opened this epic. **I inherited it and repeated it in the paper
+without checking**, and applied our own prior-art rule to it one step later than either of us should have.
+
+> ## **NEITHER OF US CHECKED. The claim originated upstream and was laundered into a document by being**
+> ## **restated — which is how an unverified premise acquires the authority of a written one.**
+
+**That is the Tier-3 defect this epic has spent fourteen stories cutting from other people's copy, committed
+in our own paper, about our own product — and it entered by inheritance rather than by invention, which is
+the more common way it gets in.**
 
 ## THE ACTUAL REASON TO BUILD, STATED PLAINLY
 

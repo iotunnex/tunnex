@@ -1746,7 +1746,8 @@ Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump,
 
 ## DECISIONS RESOLVED (user-directed 2026-07-14, PRE-SESSION FINAL — the planning collisions are closed)
 **LOCKED build order (RESTRUCTURED 2026-07-15; EPIC 15 INSERTED 2026-08-03): EPIC 7 (done) → EPIC 7.5 →
-EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11 (FULL) → EPIC 14 (UI redesign) → EPIC 15 (Zero Trust for AI agents) →
+EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11 (FULL) → EPIC 14 (UI redesign — **TWO screens remain: Audit Log, Dashboard**) → EPIC 15 (Zero Trust
+for AI agents) →
 BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
 
 ⛔ **EPIC 15 — ZERO TRUST FOR AI AGENTS. REGISTERED 2026-08-03, sequenced AFTER EPIC 14 and BEFORE the beta

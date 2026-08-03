@@ -3317,3 +3317,23 @@ renders jsonb **with a space after the colon**.
 
 Both were caught only because the surrounding check had a floor or a known-answer case. **A matcher with
 neither would have reported a clean tree and been believed.**
+
+---
+
+# ⛔ A NUMBER QUOTED FROM AN OLD REGISTRATION OUTLIVES THE THING IT COUNTED
+
+**EPIC 14, found 2026-08-03.** "EPIC 14's remaining **eight** screens" was carried in instructions and in
+`PLAN.md` for several stories after it stopped being true. The figure came from the **S14.2 registration** and
+was never decremented as stories shipped. **Ten had shipped; two remained.**
+
+> ## **A COUNT WRITTEN ONCE BECOMES A FACT BY REPETITION. Nobody re-derives a number that is already written**
+> ## **down — it gets quoted, and each quotation makes it look better attested.**
+
+**Neither of us noticed**, and it was caught only because a screen census was run for a different reason.
+
+**MECHANICAL:** a count in a plan is a **derived** value. Either re-derive it at the point of use (`ls` the
+screens, run the census) or write it as *"N as of <story>"* so its age is visible. **A bare number carries no
+expiry date and therefore never appears stale.**
+
+**Same family as the sticky-classifier and stale-artifact laws:** something computed once kept being trusted
+long after the thing it described had moved.
