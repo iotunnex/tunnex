@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -62,6 +63,60 @@ func (s apiServer) ChangeMemberRole(ctx context.Context, req api.ChangeMemberRol
 	}
 	return api.ChangeMemberRole204Response{
 		Headers: api.ChangeMemberRole204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// ListInvitations GET /api/v1/organizations/{orgId}/invitations.
+//
+// ⛔ THE READ THAT MAKES RESEND AND REVOKE REACHABLE. Both are keyed by EMAIL, and nothing served the
+// addresses — so an operator could create an invitation and then never see, resend or revoke it. Gated on
+// PermMemberInvite, the SAME permission as the three verbs it exists to serve: seeing which addresses are
+// outstanding is only actionable to someone who can act on them, so this reuses that permission rather than
+// minting a read-only one whose grant table would have to answer "who may see who was invited, but do
+// nothing about it".
+func (s apiServer) ListInvitations(ctx context.Context, req api.ListInvitationsRequestObject) (api.ListInvitationsResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMemberInvite); err != nil {
+		return nil, err
+	}
+	rows, err := s.invites.List(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.Invitation, 0, len(rows))
+	for _, r := range rows {
+		inv := api.Invitation{
+			Id:        r.ID,
+			Email:     openapi_types.Email(r.Email),
+			Role:      api.InvitationRole(r.Role),
+			ExpiresAt: r.ExpiresAt,
+			CreatedAt: r.CreatedAt,
+		}
+		// Timestamps stay NULLABLE end to end rather than being flattened into a status string: EXPIRED is
+		// DERIVED from expires_at plus the clock, so a stored status would go stale the moment it was written.
+		if r.AcceptedAt.Valid {
+			t := r.AcceptedAt.Time
+			inv.AcceptedAt = &t
+		}
+		if r.RevokedAt.Valid {
+			t := r.RevokedAt.Time
+			inv.RevokedAt = &t
+		}
+		if r.InvitedByUserID.Valid {
+			id := uuid.UUID(r.InvitedByUserID.Bytes)
+			inv.InvitedByUserId = &id
+		}
+		// The inviter can be GONE (ON DELETE SET NULL), and the LEFT JOIN keeps the row rather than
+		// dropping it — hiding an outstanding invitation because its sender left is the exact failure
+		// this endpoint exists to end.
+		if r.InvitedByEmail != "" {
+			e := r.InvitedByEmail
+			inv.InvitedByEmail = &e
+		}
+		out = append(out, inv)
+	}
+	return api.ListInvitations200JSONResponse{
+		Body:    out,
+		Headers: api.ListInvitations200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
 

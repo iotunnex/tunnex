@@ -1307,7 +1307,17 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List the organization's invitations
+         * @description Returns every invitation row for the org, newest first, with its lifecycle timestamps.
+         *     Gated on `member:invite` — the same permission as the three verbs it exists to serve.
+         *     Reading which addresses are outstanding is only actionable to someone who can resend or
+         *     revoke them, so this deliberately reuses that permission rather than minting a read-only
+         *     one whose grant table would have to answer "who may see who was invited, but do nothing".
+         *     The secret token is NEVER returned: it is shown once, by `createInvitation`.
+         *
+         */
+        get: operations["listInvitations"];
         put?: never;
         /** Invite a user to the organization */
         post: operations["createInvitation"];
@@ -1674,7 +1684,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List a site's subnets (S8.1; site:manage) */
+        /**
+         * List a site's subnets (S8.1; org:view — MEMBER-READABLE)
+         * @description ⚠ THIS LINE SAID `site:manage` UNTIL S14.7 AND THE HANDLER NEVER DID. `ListSiteSubnets` authorizes on `rbac.PermOrgView` (`internal/http/site_handlers.go:195`), per S8.3 D5: subnets are part of the read-only topology a MEMBER may see; advertise and approve stay `site:manage`. PLAN.md's S8.3 entry rules the same thing. The wrong annotation caused a real design decision to be taken on a false constraint — Routed Ranges was scoped as "attribution is admin-only" because of it. On an OpenAPI-first codebase a wrong summary is a wrong source of truth, so it is corrected here rather than noted elsewhere. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME.
+         */
         get: operations["listSiteSubnets"];
         put?: never;
         /** Advertise a subnet on a site — pending approval (S8.1; site:manage) */
@@ -2462,6 +2475,25 @@ export interface components {
         GenericMessage: {
             message: string;
         };
+        Invitation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            /** @enum {string} */
+            role: "owner" | "admin" | "member";
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            accepted_at?: string | null;
+            /** Format: date-time */
+            revoked_at?: string | null;
+            /** Format: uuid */
+            invited_by_user_id?: string | null;
+            invited_by_email?: string | null;
+        };
         InviteCreated: {
             message: string;
             /** @description Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later. */
@@ -2562,7 +2594,7 @@ export interface components {
             /** @description S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes. */
             is_site_hub?: boolean;
             /**
-             * @description Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
+             * @description S7.4b: the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). ⚠ EDITION: THE FIELD IS SERVED IN BOTH EDITIONS, and MOST kinds are edition-independent. ENTERPRISE-ONLY is the DESYNC TRIO — `converging`, `silent_desync`, `desync_unknown` — which come from `degradedKind(...)` under the `case enterprise:` arm, because only an enterprise build has a policy engine that can desync. EVERY OTHER KIND has an explicit `!enterprise` branch in `internal/nodes/service.go` (the switch at ~L1955): `cert_expired_cannot_reconnect`, `unsupported_policy_version`, `site_hub_down`, `site_link_down`, `site_subnet_unreachable`, `hub_forwarding_not_reconciling`, `apply_failing`, `stuck_enforcing`, `k8s_endpoints_unavailable`, `conntrack_flush_unavailable`. `healthy` is the default in both. `ListNodes` sets the field unconditionally (`internal/http/node_handlers.go`). THIS PARAGRAPH IS LOAD-BEARING (S14.5): it previously opened "Zero Trust (enterprise, S7.4b)", which reads as enterprise-ONLY. A UI gated on `edition === "enterprise"` on the strength of that line would silently deny the open edition a site-link health signal it is entitled to — the edition-mistaken-for-absence class. Corrected, not annotated: on an OpenAPI-first codebase a wrong description is a wrong source of truth. ⚠ THE CORRECTION'S OWN FIRST DRAFT WAS ALSO WRONG (it put `stuck_enforcing` on the enterprise side and named only 4 of the 10 open-edition kinds) and was caught only by reading the switch rather than reasoning about which kinds "sound like" policy features. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME. `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
              * @enum {string}
              */
             policy_degraded_kind?: "healthy" | "apply_failing" | "stuck_enforcing" | "converging" | "silent_desync" | "desync_unknown" | "unsupported_policy_version" | "site_hub_down" | "site_link_down" | "site_subnet_unreachable" | "conntrack_flush_unavailable" | "hub_forwarding_not_reconciling" | "k8s_endpoints_unavailable" | "cert_expired_cannot_reconnect";
@@ -2816,6 +2848,7 @@ export interface components {
             target_id?: string;
             /** Format: uuid */
             actor_id?: string;
+            actor_system?: string;
             /** Format: date-time */
             created_at: string;
         };
@@ -4998,6 +5031,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitations, newest first. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"][];
                 };
             };
             default: components["responses"]["Error"];

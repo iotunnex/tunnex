@@ -14,7 +14,36 @@ export interface StoredTunnelConfig {
   // gateway won't serve the peer yet, so resolveTunnelConfig refuses to arm the helper and
   // re-signals PendingApprovalError. Cleared by the ApprovalMonitor on approval.
   pending?: boolean;
+  // ⛔ IMPORTED = A CONFIG THIS CLIENT DID NOT MINT, AND IT IS A DEGRADED MODE ON PURPOSE.
+  //
+  // Founder-directed: a user who downloaded a `.conf` from the control plane at device creation
+  // must be able to connect with it. It works — the helper only needs keys and routes — but it
+  // arrives with NO device identity, and everything the client does to keep a tunnel honest is
+  // keyed on one:
+  //
+  //   · `RevocationMonitor` polls `deviceExists(deviceId, orgId)`. Without them there is no poll,
+  //     so an admin revoking this device sees it STAY UP on the client until the peer is dropped
+  //     server-side. The tunnel stops working; the app does not know why.
+  //   · `ApprovalMonitor` and `HealthMonitor` are keyed the same way — no posture reporting, no
+  //     pending-approval transition.
+  //   · The split↔full re-mint cannot run: an imported profile's AllowedIPs are fixed at whatever
+  //     the file says, so the routing toggle has nothing to re-issue.
+  //
+  // > **THE FLAG EXISTS SO THE DEGRADATION IS A FACT IN THE DATA, NOT A COMMENT.** Every surface
+  // > that shows an imported tunnel reads this and says so; a mode that is only degraded in the
+  // > documentation is a mode that looks identical to the safe one.
+  imported?: boolean;
 }
+
+/**
+ * The store key for an imported profile.
+ *
+ * ⚠ NOT AN HTTP ORIGIN, AND DELIBERATELY UNSPELLABLE AS ONE. Every other key in this map is a
+ * server origin, and the whole point of origin-keying is that a config is never used against a
+ * server it was not minted for. An imported profile has no minting server, so it gets a key that
+ * cannot collide with a real one rather than borrowing whichever origin happens to be configured.
+ */
+export const IMPORTED_ORIGIN = "imported:local";
 
 type ConfigMap = Record<string, StoredTunnelConfig>;
 

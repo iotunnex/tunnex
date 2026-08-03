@@ -285,8 +285,20 @@ func (s *Service) UnmapGroup(ctx context.Context, orgID uuid.UUID, provider stri
 			}
 			return e
 		}
-		_, e := q.DeleteGroupMembersByGroup(ctx, sqlc.DeleteGroupMembersByGroupParams{OrgID: orgID, GroupID: groupID})
-		return e
+		removed, e := q.DeleteGroupMembersByGroup(ctx, sqlc.DeleteGroupMembersByGroupParams{OrgID: orgID, GroupID: groupID})
+		if e != nil {
+			return e
+		}
+		// ⛔ DESTRUCTIVE AND, UNTIL NOW, SILENT. This verb removes EVERY member of a group and pushes the
+		// change org-wide, and its sibling operations all audit (`UpsertConfig` at :123, the reconciler's own
+		// membership writes) — this one wrote nothing. An access-affecting deletion with no record that a
+		// human did it, on the surface that decides who can reach what.
+		//
+		// `removed` is the SERVER'S OWN count, taken inside the same transaction as the delete, so the audit
+		// row states a number nobody has to re-derive later. The 204 still carries no body; this is the
+		// record, not the response.
+		return s.humanAudit(ctx, q, orgID, "idp_sync.group_unmapped", "user_group", groupID.String(),
+			map[string]any{"provider": provider, "members_removed": removed})
 	})
 	if err != nil {
 		return err

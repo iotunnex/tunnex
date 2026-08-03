@@ -1,8 +1,55 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Icon, type IconName } from "../components/Icon";
+import { GLASS } from "../components/ui";
+import { isEnterprise, type Edition } from "../lib/edition";
+import { HealthStatus } from "../components/HealthStatus";
+import { formatBytes, hubSetView } from "../lib/hubsetview";
+import { assembleTopology, meshFrom } from "../lib/sitesview";
+import { Donut, Histogram, NodeLink } from "../components/viz";
+import { assembleClusters, serviceSlices } from "../lib/k8sview";
+import { motionAllowed } from "../lib/motion";
+import { useMotionPreference } from "../components/MotionProvider";
 import { Link } from "react-router-dom";
-import { api, apiErrorMessage, type OrgOverview } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  loadOne,
+  type Device,
+  type Loaded,
+  type Node,
+  type OrgOverview,
+  type Site,
+  type Meta,
+  type HubSet,
+  type PolicyRule,
+  type ZeroTrustMode,
+  type K8sCluster,
+  type K8sService,
+  type Member,
+} from "../lib/api";
 import { relativeAge } from "../lib/format";
-import { Card, ErrorText } from "../components/ui";
+import { resolveActor } from "../lib/auditview";
+import {
+  Badge,
+  EmptyState,
+  ErrorText,
+  List,
+  ListItem,
+  Loading,
+  Panel,
+} from "../components/ui";
+import { policyHealthBadge } from "../lib/healthview";
+import {
+  isFreshOrg,
+  sortGateways,
+  linkTraffic,
+  peerSlices,
+  postureSplit,
+  statFrom,
+  statText,
+  type GatewayRow,
+  type StatState,
+} from "../lib/overviewview";
 import { TunnelControl } from "../components/TunnelControl";
 import { desktop } from "../lib/desktop";
 
@@ -13,23 +60,136 @@ export default function Dashboard() {
   // WF-2 (Deck D Leg 10): bump to refetch the overview. The CP count is correct the moment a device is
   // revoked (CountActiveDevicesByOrg excludes it) — the stale number was THIS view's mount-once fetch.
   const [refresh, setRefresh] = useState(0);
+  // S14.4: the six stat cards come from THREE endpoints and RESOLVE INDEPENDENTLY.
+  //
+  // `/overview` supplies four (members, devices, nodes, online). Sites and Pending approvals are not in that
+  // response. An aggregate field was REFUSED deliberately: an API change driven by a layout converts three
+  // independent failures into one blast radius — one failure would blank six cards instead of two. Screens
+  // compose endpoints; endpoints do not compose themselves for screens.
+  const [sitesRes, setSitesRes] = useState<Loaded<Site[]> | null>(null);
+  // ⛔ THE ROSTER, NOT THE COUNT. `/overview` serves `members` as a NUMBER, so the activity feed had
+  // nothing to resolve an actor id against. Passing an empty roster to `resolveActor` would label a
+  // CURRENT member "former member 019fc421" — a false statement about a person, which is worse than
+  // showing no actor at all. Second-class read: if it fails, the feed degrades to un-named humans and
+  // every other card is untouched.
+  const [rosterRes, setRosterRes] = useState<Loaded<Member[]> | null>(null);
+  const [pendingRes, setPendingRes] = useState<Loaded<Device[]> | null>(null);
+  const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
+  const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
+  const [devicesRes, setDevicesRes] = useState<Loaded<Device[]> | null>(null);
+  const [hubSetRes, setHubSetRes] = useState<Loaded<HubSet> | null>(null);
+  // The motion preference is read ONCE at the app edge and passed down; no component asks matchMedia itself.
+  const reducedMotion = useMotionPreference();
+  // `null` = not resolved yet; `{ok:false}` = the read FAILED. Neither is "there are none" — the card says which.
+  const [k8sClustersRes, setK8sClustersRes] = useState<Loaded<K8sCluster[]> | null>(null);
+  const [k8sServicesRes, setK8sServicesRes] = useState<Loaded<K8sService[]> | null>(null);
+  const [ztRes, setZtRes] = useState<Loaded<ZeroTrustMode> | null>(null);
+  // THE ONE GATING SEAM. `/meta`'s edition is the same value that decides whether every other enterprise
+  // surface exists — read here, never re-derived from an error.
+  const [edition, setEdition] = useState<Edition>("unknown");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data: orgs, error: orgErr } = await api.GET("/api/v1/organizations");
+        const { data: orgs, error: orgErr } = await api.GET(
+          "/api/v1/organizations",
+        );
         if (cancelled) return;
-        if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
+        if (orgErr)
+          return setError(
+            apiErrorMessage(orgErr, "Could not load your organizations."),
+          );
         const org = orgs?.[0];
-        if (!org) return setError("You are not a member of any organization yet.");
+        if (!org)
+          return setError("You are not a member of any organization yet.");
         setOrgName(org.name);
-        const { data: ov, error: ovErr } = await api.GET("/api/v1/organizations/{orgId}/overview", {
-          params: { path: { orgId: org.id } },
-        });
+        const { data: ov, error: ovErr } = await api.GET(
+          "/api/v1/organizations/{orgId}/overview",
+          {
+            params: { path: { orgId: org.id } },
+          },
+        );
         if (cancelled) return;
-        if (ovErr || !ov) return setError(apiErrorMessage(ovErr, "Could not load the overview."));
+        if (ovErr || !ov)
+          return setError(
+            apiErrorMessage(ovErr, "Could not load the overview."),
+          );
         setData(ov);
+
+        // ⛔ THE SEAM, AND IT DECIDES BEFORE IT FETCHES. Edition first; gated endpoints are called ONLY when
+        // the edition has them. An open-edition org therefore never issues a request that can 403, so there
+        // is no failure to mis-interpret — the render decision is taken at the seam rather than recovered
+        // from an error at the call site. The interpretation is what drifted, twice.
+        const metaRes = (await loadOne(() =>
+          api.GET("/api/v1/meta"),
+        )) as Loaded<Meta>;
+        if (cancelled) return;
+        const ed: Edition = metaRes.ok
+          ? metaRes.data.edition === "enterprise"
+            ? "enterprise"
+            : "open"
+          : "unknown";
+        setEdition(ed);
+
+        if (isEnterprise(ed)) {
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/devices/pending", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setPendingRes(r as Loaded<Device[]>));
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/policies", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setRulesRes(r as Loaded<PolicyRule[]>));
+          void loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/zero-trust-mode", {
+              params: { path: { orgId: org.id } },
+            }),
+          ).then((r) => !cancelled && setZtRes(r as Loaded<ZeroTrustMode>));
+        }
+        // Fired together, awaited independently: each sets its own state, so one failure degrades one card.
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/sites", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setSitesRes(r as Loaded<Site[]>));
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/members", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setRosterRes(r as Loaded<Member[]>));
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/nodes", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setNodesRes(r as Loaded<Node[]>));
+        // Both OPEN endpoints — no gate needed, and the audit that cut them was wrong about the data.
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/devices", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setDevicesRes(r as Loaded<Device[]>));
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/hub-set", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setHubSetRes(r as Loaded<HubSet>));
+        // ⛔ KUBERNETES HAS NO PLACE IN `OrgOverview`, MEASURED: that schema is
+        // `members, devices, nodes, online, recent_activity` and nothing more. So the counts come from the two
+        // live reads, which are BOTH `org:view` (verified at the handler in S14.7) and both second-class here:
+        // a failure degrades this one card and nothing else, exactly like sites and nodes above.
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/k8s/clusters", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setK8sClustersRes(r as Loaded<K8sCluster[]>));
+        void loadOne(() =>
+          api.GET("/api/v1/organizations/{orgId}/k8s/services", {
+            params: { path: { orgId: org.id } },
+          }),
+        ).then((r) => !cancelled && setK8sServicesRes(r as Loaded<K8sService[]>));
       } catch {
         if (!cancelled) setError("Could not reach the API.");
       }
@@ -53,10 +213,27 @@ export default function Dashboard() {
     });
   }, []);
 
+
+  // Empty until the roster arrives (or if it failed). The third argument tells resolveActor that
+  // the roster is NOT KNOWN, so a human actor reads as an unnamed member instead of being asserted
+  // to be a FORMER one — a false name is worse than no name.
+  const roster: Member[] = rosterRes?.ok ? rosterRes.data : [];
+
   return (
-    <div>
-      <h1 className="text-xl font-semibold text-white">Overview</h1>
-      <p className="text-sm text-slate-400">{orgName || "…"}</p>
+    // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
+    // ZERO spacing — the stat row touched Get started, which touched the panel row.
+    //
+    // The shell's `<main>` already sets `flex flex-col gap-3.5` (the README's page-body rhythm), but a flex gap
+    // reaches only DIRECT children, and the whole page is a single child of main. The gap was correct and
+    // applied to exactly one element. Every screen root must therefore repeat this — see docs/S14.4.
+    <div className="flex flex-col gap-3.5">
+      {/* README: PAGE HEADER = title + subtitle, its own block above the body. */}
+      <div>
+        <h1 className="text-[22px] font-semibold leading-tight text-ink-heading">
+          Overview
+        </h1>
+        <p className="mt-1 text-cell text-ink-secondary">{orgName || "…"}</p>
+      </div>
       <ErrorText>{error}</ErrorText>
 
       {/* Desktop only: the VPN connect surface (no-op/hidden in the browser). */}
@@ -64,59 +241,824 @@ export default function Dashboard() {
 
       {data && (
         <>
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Members" value={data.members} />
-            <Stat label="Devices" value={data.devices} />
-            <Stat label="Gateways" value={data.nodes} />
-            {/* Honest label: online is derived from last-handshake recency (S3.6).
-                This liveness tile is the ONE place the reserved status-green
-                (ok token) appears on the dashboard — and only when >0. */}
-            <Stat label="Seen in last 3 min" value={data.online} tone={data.online > 0 ? "ok" : undefined} />
-          </div>
+          {(() => {
+            // The six cards, each carrying its OWN state. `statFrom(null, …)` = still loading.
+            const members = statFrom<OrgOverview>(
+              { ok: true, data },
+              (d) => d.members,
+            );
+            const devices = statFrom<OrgOverview>(
+              { ok: true, data },
+              (d) => d.devices,
+            );
+            const gateways = statFrom<OrgOverview>(
+              { ok: true, data },
+              (d) => d.nodes,
+            );
+            const seen = statFrom<OrgOverview>(
+              { ok: true, data },
+              (d) => d.online,
+            );
+            const sites = statFrom(sitesRes, (r: Site[]) => r.length);
+            const pending = statFrom(pendingRes, (r: Device[]) => r.length);
+            const rules = statFrom(rulesRes, (r: PolicyRule[]) => r.length);
+            // Edition is UNKNOWN until /meta answers; treat unknown as not-enterprise so a slow load never
+            // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
+            const enterprise = isEnterprise(edition);
+            // Five core cards, plus Access Rules and Pending approvals on enterprise. ONE definition, read by
+            // both the gating below and the grid's column count.
+            const STAT_CARDS = enterprise ? 7 : 5;
 
-          {/* Empty states double as the onboarding funnel for a fresh org. */}
-          {data.nodes === 0 && (
-            <Card className="mt-4">
-              <p className="text-sm text-slate-300">No gateway enrolled yet.</p>
-              <p className="mt-1 text-xs text-slate-500">Enroll a tunnex-node agent to start serving WireGuard peers.</p>
-              <Link to="/devices" className="mt-2 inline-block text-xs text-accent-400 hover:text-accent-500">
-                Enroll a gateway →
-              </Link>
-            </Card>
-          )}
-          {data.devices === 0 && data.nodes > 0 && (
-            <Card className="mt-4">
-              <p className="text-sm text-slate-300">No devices yet.</p>
-              <Link to="/devices" className="mt-1 inline-block text-xs text-accent-400 hover:text-accent-500">
-                Add your first device →
-              </Link>
-            </Card>
-          )}
+            // NEEDS ATTENTION is COMPOSED, not fetched — every item names the source that produced it, and an
+            // item appears only when its source has been READ. A source still loading contributes nothing;
+            // a source that FAILED contributes nothing either, because "nothing needs attention" and "we could
+            // not check" must not render identically. The panel says "loading" until every source has answered.
+            // ⛔ WAIT ONLY ON SOURCES THAT WILL ACTUALLY ARRIVE.
+            //
+            // `pendingRes` is enterprise-gated and is NEVER FETCHED on the open edition, so it stays `null`
+            // forever — and `null` was the "still loading" signal. The panel hung on "Loading…" permanently,
+            // waiting for a request that was deliberately never made.
+            //
+            // A DELIBERATE NON-FETCH AND AN IN-FLIGHT FETCH ARE THE SAME `null`, and that ambiguity was
+            // created by the edition gate two hours after the gate was added. The fix is to ask each source
+            // whether it is EXPECTED, not merely whether it has answered.
+            const sources = enterprise
+              ? ([nodesRes, pendingRes] as const)
+              : ([nodesRes] as const);
+            const attention: Array<{
+              key: string;
+              text: string;
+              to: string;
+            }> | null = sources.some((r) => r === null)
+              ? null
+              : [
+                  ...(nodesRes?.ok
+                    ? nodesRes.data
+                        .filter((n) => n.policy_degraded)
+                        .map((n) => ({
+                          key: `gw-${n.id}`,
+                          text: `${n.name}: ${policyHealthBadge(n)?.label ?? "degraded"}`,
+                          to: "/sites",
+                        }))
+                    : []),
+                  ...(enterprise && pendingRes?.ok && pendingRes.data.length > 0
+                    ? [
+                        {
+                          key: "pending-devices",
+                          text: `${pendingRes.data.length} device${pendingRes.data.length === 1 ? "" : "s"} awaiting approval`,
+                          to: "/devices",
+                        },
+                      ]
+                    : []),
+                ];
 
-          <h2 className="mt-8 text-sm font-semibold text-slate-300">Recent activity</h2>
-          <ul className="mt-3 space-y-2">
-            {data.recent_activity.map((a, i) => (
-              <li key={i} className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-800 px-4 py-2.5">
-                <span className="text-sm text-slate-300">
-                  <span className="font-mono text-xs text-slate-400">{a.action}</span>
-                  {a.target_type && <span className="ml-2 text-xs text-slate-500">{a.target_type}</span>}
-                </span>
-                <span className="text-xs text-slate-500">{relativeAge(a.created_at)}</span>
-              </li>
-            ))}
-            {data.recent_activity.length === 0 && <li className="text-sm text-slate-500">No activity yet.</li>}
-          </ul>
+            // Sub-lines are QUALIFICATIONS, and each is `null` when there is nothing honest to say. A sub-line
+            // is never filler: an unqualified number is a smaller claim than a wrongly-qualified one.
+            const degraded = nodesRes?.ok
+              ? nodesRes.data.filter((n) => n.policy_degraded).length
+              : null;
+            const pendingInvites = null; // no endpoint for pending invites — the slot stays empty, not invented
+            const siteSub = sitesRes?.ok
+              ? sitesRes.data.length === 0
+                ? "none configured"
+                : `${sitesRes.data.length} in the mesh`
+              : null;
+            const zeroTrust = ztRes?.ok
+              ? ztRes.data.mode === "enforcing"
+                ? "enforcing"
+                : "not enforced"
+              : null;
+            const fresh = isFreshOrg(gateways, devices, members);
+
+            return (
+              // The same reason, one level down: these three sections are siblings and need the page rhythm
+              // between them, not zero.
+              <div className="flex flex-col gap-3.5">
+                {/* README: the Overview stat row is `repeat(12,1fr)` gap 12 — SIX cards at span 2.
+                    Settled from the SOURCE prototype, not from the README's generic "4-up" sentence (which
+                    describes the other screens) and not from the screenshot alone. */}
+                {/* ⛔ THE ROW RE-SPANS TO FILL 12. RULED, and the argument matters more than the choice:
+                    a fixed six-slot row leaves the open edition with five cards and a two-column hole, which
+                    is the SAME ragged-row defect already fixed for the panels — and worse here, because a gap
+                    in a stat row reads as a card that failed to render rather than as a capability the org
+                    does not have. Absence should be invisible when the thing absent was never offered.
+                    Six cards -> span 2 each. Five -> the row is a 5-column grid. Either way it fills. */}
+                {/* ⛔ THE ROW RE-SPANS TO FILL, AND IT COLLAPSES BEFORE IT OVERFLOWS.
+                    Six (or five) fixed columns at 390px gives ~60px per card and the page scrolls sideways —
+                    which the viewport leg caught on its FIRST baseline (390px viewport, 455px capture).
+                    The edition-dependent count only applies once there is room for it. */}
+                {/* ⛔ THE COLUMN COUNT IS DERIVED FROM THE CARD COUNT, IN ONE PLACE.
+                    It was hard-coded `lg:grid-cols-6` while SEVEN cards were rendered — enterprise adds both
+                    Access Rules and Pending approvals — so the seventh wrapped to a second row and sat alone
+                    beneath five empty columns. It read as a card that failed to render rather than as a row
+                    that did not fit.
+
+                    THE COUNT WAS WRITTEN TWICE, IN TWO LANGUAGES: once as JSX elements and once as a Tailwind
+                    class, with nothing to make them agree. Now the class reads a CSS variable set from the
+                    same constant the cards are gated on, so adding a card cannot silently orphan it.
+
+                    ⚠ THE VARIABLE IS `--stat-cols`, NOT `--tnx-stat-cols`. The first name I used borrowed the
+                    `--tnx-` prefix, which in this codebase means "a GENERATED DESIGN TOKEN" — and the
+                    tokenrefs census failed on it within seconds of being written, on its own author. A local
+                    layout variable is not a design token and must not wear the namespace that promises it is
+                    held to the generated set. */}
+                <div
+                  className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--stat-cols),minmax(0,1fr))]"
+                  style={
+                    { "--stat-cols": STAT_CARDS } as React.CSSProperties
+                  }
+                >
+                  <Stat
+                    label="Members"
+                    icon="users"
+                    value={members}
+                    sub={
+                      pendingInvites === null
+                        ? null
+                        : `${pendingInvites} pending invite${pendingInvites === 1 ? "" : "s"}`
+                    }
+                  />
+                  <Stat
+                    label="Devices"
+                    icon="laptop"
+                    value={devices}
+                    sub={
+                      pending.state === "ok"
+                        ? `${pending.value} awaiting approval`
+                        : null
+                    }
+                  />
+                  <Stat
+                    label="Gateways"
+                    icon="server"
+                    value={gateways}
+                    sub={
+                      degraded === null
+                        ? null
+                        : `${degraded} reporting degraded kinds`
+                    }
+                  />
+                  {/* ⛔ THE HONEST LABEL, FOUNDER-RULED. `online` is derived from LAST-HANDSHAKE RECENCY
+                      (S3.6), not a live session. The design labels this "Online Peers" and puts the
+                      qualification in the sub-line; the ruling keeps the qualification in the LABEL, which is
+                      the safer of two honest compositions. A render-floor violation in a WORD is still one. */}
+                  <Stat
+                    label="Seen in last 3 min"
+                    icon="waves"
+                    value={seen}
+                    sub="derived from WireGuard handshake liveness"
+                    tone={
+                      seen.state === "ok" && seen.value > 0 ? "ok" : undefined
+                    }
+                  />
+                  <Stat
+                    label="Sites"
+                    icon="network"
+                    value={sites}
+                    sub={siteSub}
+                  />
+                  {/* ⛔ ENTERPRISE. `/policies` and `/zero-trust-mode` are both gated, so on the open edition
+                      this card is ABSENT — not "0", not "could not load" in red. It was the SECOND instance of
+                      the same conflation in this slice, still live after the first was fixed at one call
+                      site: only an enumeration finds the rest (src/lib/edition.ts). */}
+                  {enterprise && (
+                    <Stat
+                      label="Access Rules"
+                      icon="shield"
+                      value={rules}
+                      sub={zeroTrust === null ? null : zeroTrust}
+                    />
+                  )}
+                  {/* Sixth card only where the capability exists. On the open edition the row is five wide —
+                      which is the honest layout, not a gap where a broken card used to be. */}
+                  {enterprise && (
+                    <Stat
+                      label="Pending approvals"
+                      icon="user-plus"
+                      value={pending}
+                      sub="awaiting an admin"
+                    />
+                  )}
+                </div>
+
+                {/* Not in a grid — a sibling in the page column, so a `col-span-*` here would be a dead class. */}
+                {fresh && (
+                  <Panel title="Get started">
+                    {/* The floating "Get started" widget is CUT — it becomes this. Rendered only when we KNOW
+                        the org is empty: showing it because a fetch failed would tell a founder with a working
+                        fleet that they have nothing. */}
+                    <ol className="space-y-1.5 text-explainer leading-[1.55] text-ink-body">
+                      <li>
+                        1. Enroll a tunnex-node agent to serve WireGuard peers.
+                      </li>
+                      <li>2. Add your first device and download its config.</li>
+                      <li>3. Define who may reach what under Access.</li>
+                    </ol>
+                    <Link
+                      to="/devices"
+                      className="mt-2.5 inline-block text-mono text-ink-emphasis hover:text-ink-heading"
+                    >
+                      Enroll a gateway →
+                    </Link>
+                  </Panel>
+                )}
+
+                {/* ⛔ THE BENTO: ONE grid, and EVERY ROW SUMS TO 12. A ragged row is the tell that a panel
+                    was placed rather than composed — the design has no row that does not fill.
+
+                    Row 2: Peer Connection Status 4 · Gateway Health 4 · Recent Activity 4
+                    Row 3: Needs Attention 8 · System Health 4
+
+                    CUT from the design, each with its reason (docs/S14.4-commit-one.md):
+                      Site-Link Throughput — the spec forbids the field's use as a rate series
+                      Device Posture       — deferred to the Devices section, which owns the posture vocabulary
+                      Network map / HA Hub Set — no hub, generation, pin or handshake-age field exists on Site
+                      Alerts               — composed from sources this screen does not own; Access Events' job
+                      Fleet risk           — Tier-3, not built */}
+                {/* README panel spans on the 12-column base: rows 4+4+4, 4+4+4, 8+4. */}
+                {/* One column until there is room for twelve. A `col-span-4` panel on a 12-column grid at
+                    390px is ~100px wide, and a 120px donut inside it pushes the page sideways. */}
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+                  <Panel
+                    title="Peer Connection Status"
+                    className="lg:col-span-4"
+                  >
+                    {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
+                        than the one the panel is named for. A chart can be perfectly honest about the wrong
+                        denominator, and nothing in the render would look wrong. */}
+                    <Donut
+                      label="Peer connection status"
+                      source={{
+                        endpoint: "/api/v1/organizations/{orgId}/devices",
+                      }}
+                      failed={devicesRes !== null && !devicesRes.ok}
+                      slices={devicesRes?.ok ? peerSlices(devicesRes.data) : []}
+                      centreLabel="devices"
+                      empty="No devices enrolled yet."
+                    />
+                    {/* The design's caption, verbatim — it states the product's rule, not a decoration. */}
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                      Status derived from WireGuard handshake liveness. Never
+                      green while dead.
+                    </p>
+                  </Panel>
+
+                  <Panel title="Gateway Health" className="lg:col-span-4">
+                    {nodesRes === null ? (
+                      <Loading />
+                    ) : !nodesRes.ok ? (
+                      <ErrorText>Gateway health is unavailable.</ErrorText>
+                    ) : nodesRes.data.length === 0 ? (
+                      <EmptyState>No gateway enrolled yet.</EmptyState>
+                    ) : (
+                      <List label="Gateway health">
+                        {sortGateways(
+                          nodesRes.data.map((n): GatewayRow => {
+                            const b = policyHealthBadge(n);
+                            return {
+                              id: n.id,
+                              name: n.name,
+                              label: b ? b.label : "healthy",
+                              tone: b
+                                ? b.tone === "unknown"
+                                  ? "neutral"
+                                  : b.tone
+                                : "ok",
+                            };
+                          }),
+                        ).map((g) => (
+                          <ListItem key={g.id}>
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="truncate font-mono text-mono text-ink-primary">
+                                {g.name}
+                              </span>
+                              <Badge tone={g.tone}>{g.label}</Badge>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Panel>
+
+                  <Panel title="Recent Activity" className="lg:col-span-4">
+                    {data.recent_activity.length === 0 ? (
+                      <EmptyState>No activity yet.</EmptyState>
+                    ) : (
+                      <List label="Recent activity">
+                        {data.recent_activity.slice(0, 6).map((a, i) => (
+                          <ListItem key={i}>
+                            <span className="flex items-baseline justify-between gap-2">
+                              <span className="min-w-0 truncate">
+                                <span className="font-mono text-mono text-ink-primary">
+                                  {a.action}
+                                </span>
+                                {/* ⛔ THE FEED SHOWED *WHAT* HAPPENED AND NEVER *WHO*. The payload
+                                    carried `actor_id` all along and this card dropped it — and it did
+                                    not carry `actor_system` at all until S14.16 added it, so a
+                                    machine-initiated event was indistinguishable from an unattributed
+                                    one. Same resolver as the Audit Log, so the two screens cannot
+                                    drift: a named subsystem reads by NAME, an unrecorded actor reads
+                                    as a gap and is styled as a warning rather than as metadata. */}
+                                {(() => {
+                                  const who = resolveActor(a, roster, rosterRes?.ok === true);
+                                  return (
+                                    <span
+                                      data-actor-kind={who.kind}
+                                      className={
+                                        "ml-2 text-micro " +
+                                        (who.gap
+                                          ? "text-warn"
+                                          : who.kind === "system"
+                                            ? "font-mono text-ink-emphasis"
+                                            : "text-ink-tertiary")
+                                      }
+                                    >
+                                      {who.label}
+                                    </span>
+                                  );
+                                })()}
+                              </span>
+                              {/* `data-volatile` marks content DERIVED FROM WALL-CLOCK TIME, so the visual
+                                  suite can mask it. Freezing the browser clock is not enough: the seed writes
+                                  these rows at SEED time, which differs every CI run, so "2m ago" becomes
+                                  "5m ago" and the snapshot diffs by a few hundred pixels forever.
+                                  The value itself is unit-tested (`relativeAge`); the snapshot's job is the
+                                  LAYOUT around it. */}
+                              <span
+                                data-volatile
+                                className="shrink-0 text-micro text-ink-tertiary"
+                              >
+                                {relativeAge(a.created_at)}
+                              </span>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Panel>
+
+                  {/* ⛔ KUBERNETES ON OVERVIEW, AND ITS COUNTS DO NOT COME FROM `OrgOverview`.
+                      Measured: that schema is `members, devices, nodes, online, recent_activity` and carries
+                      nothing about clusters. So this reads the two live endpoints directly (both `org:view`,
+                      verified at the handler) as a SECOND-CLASS read — a failure degrades this card alone.
+
+                      THREE STATES, NOT TWO. `null` = still loading · `{ok:false}` = we could not look ·
+                      `[]` = there are genuinely none. A zero standing in for the middle case would claim an
+                      org has no clusters on the strength of a failed request. */}
+                  <Panel title="Kubernetes" className="lg:col-span-4">
+                    {k8sClustersRes === null || k8sServicesRes === null ? (
+                      <Loading />
+                    ) : !k8sClustersRes.ok ? (
+                      <p className="text-cell text-warn">
+                        Could not read clusters. This card only; the rest of the page is unaffected.
+                      </p>
+                    ) : k8sClustersRes.data.length === 0 ? (
+                      <EmptyState>
+                        No clusters registered. Registering one reserves a VIP range and a DNS zone, and then
+                        in-cluster Services can be reached by name over the tunnel.
+                      </EmptyState>
+                    ) : (
+                      <>
+                        {/* ⛔ THE RING IS "EXPOSED SERVICES BY CLUSTER", not "1 cluster and 3 services".
+                            Two unrelated counts drawn as a ring would be a picture pretending to be a
+                            proportion; this is one total split by who carries it, and the legend states every
+                            number as text so the arc is never the only path to the value. */}
+                        {k8sServicesRes.ok ? (
+                          <Donut
+                            label="Exposed Services by cluster"
+                            // The endpoint the ring is drawn FROM, which is the contract VizSource exists to
+                            // force: a chart names its source or it cannot be audited later.
+                            source={{
+                              endpoint:
+                                "GET /organizations/{orgId}/k8s/clusters + /k8s/services",
+                            }}
+                            failed={false}
+                            slices={serviceSlices(
+                              assembleClusters(
+                                k8sClustersRes.data,
+                                k8sServicesRes.data,
+                              ),
+                            )}
+                            centreLabel="services"
+                            empty="No Services exposed yet. Exposing one allocates a VIP and gives it a name clients can reach."
+                            animate={motionAllowed(reducedMotion)}
+                          />
+                        ) : (
+                          // The services read is INDEPENDENT of the clusters read, so it has its own failure
+                          // arm. A ring drawn from a failed read would be a shape asserting a proportion.
+                          <p className="text-cell text-warn">
+                            {k8sClustersRes.data.length} cluster
+                            {k8sClustersRes.data.length === 1 ? "" : "s"} registered.
+                            The Service count could not be read, so no proportion is drawn.
+                          </p>
+                        )}
+                        <Link
+                          to="/kubernetes"
+                          className="text-micro text-ink-tertiary underline decoration-dotted underline-offset-2 hover:text-ink-body"
+                        >
+                          Open Kubernetes &rarr;
+                        </Link>
+                      </>
+                    )}
+                  </Panel>
+
+                  <Panel title="Site-Link Traffic" className="lg:col-span-4">
+                    {/* ⛔ THE PANEL IS CATEGORY ONE. THE WIREFRAME'S CHART IS CATEGORY TWO.
+                        The counters exist; the TIME SERIES does not. `rx_bytes` is "a raw gauge since the
+                        last handshake (display only, never summed as monotonic)" — it RESETS at every
+                        handshake, so a 7-day line would look like throughput and not be throughput at any
+                        data volume, forever.
+                        S8.3 ruled metrics-L1: cumulative-since-handshake totals, labelled as exactly that,
+                        no rate graphs and no sampling implied. So this renders NUMBERS.
+                        The rate/time-series version is owed to S11.1, where it gets an endpoint. */}
+                    {hubSetRes === null ? (
+                      <Loading />
+                    ) : !hubSetRes.ok ? (
+                      <ErrorText>Link traffic is unavailable.</ErrorText>
+                    ) : !hubSetRes.data?.members?.length ? (
+                      <EmptyState>
+                        No hub set yet. Pin two or more gateways to a site and
+                        their link counters appear here.
+                      </EmptyState>
+                    ) : (
+                      (() => {
+                        const t = linkTraffic(hubSetRes.data.members);
+                        return (
+                          <>
+                            {/* ⛔ A GRAPH OF A SNAPSHOT, NOT A GRAPH OVER TIME — and the distinction is the
+                                whole reason this panel was numbers.
+
+                                `rx_bytes` is "a raw gauge since the last handshake (display only, never
+                                summed as monotonic)". It RESETS at every handshake, so ANY time axis drawn
+                                from it is a lie at any data volume, forever. That has not changed and no
+                                time series appears here.
+
+                                What IS honest is a COMPARISON AT ONE INSTANT: two bars, inbound against
+                                outbound, right now. A bar chart of two current gauges makes no claim about
+                                rate, direction of travel over time, or sampling — it just shows which is
+                                larger, which is the question a glance actually asks. The numbers stay
+                                beneath it, because the bar is the accelerant and the figure is the fact. */}
+                            <Histogram
+                              label="Link bytes since last handshake"
+                              source={{
+                                endpoint:
+                                  "/api/v1/organizations/{orgId}/hub-set",
+                              }}
+                              failed={false}
+                              bins={[
+                                { label: "in", value: t.rxBytes },
+                                { label: "out", value: t.txBytes },
+                              ]}
+                              empty="No counters reported yet."
+                            />
+                            <div className="flex gap-6">
+                              <div>
+                                <p className="text-[11px] font-medium text-ink-secondary">
+                                  Inbound
+                                </p>
+                                <p className="mt-1 font-mono text-[20px] font-bold text-ink-heading">
+                                  {formatBytes(t.rxBytes)}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-medium text-ink-secondary">
+                                  Outbound
+                                </p>
+                                <p className="mt-1 font-mono text-[20px] font-bold text-ink-heading">
+                                  {formatBytes(t.txBytes)}
+                                </p>
+                              </div>
+                            </div>
+                            {t.silent > 0 && (
+                              // Absent metrics are not an idle link, so the silence is STATED rather than
+                              // folded into the totals as zero.
+                              <p className="mt-2 text-[11px] text-warn">
+                                {t.silent} of {t.reporting + t.silent} members
+                                are not reporting. Their traffic is not
+                                included.
+                              </p>
+                            )}
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                              Cumulative since each member&rsquo;s last
+                              handshake, not a rate. These counters reset
+                              whenever a peer re-handshakes, so they are a
+                              running total and never a throughput figure.
+                            </p>
+                          </>
+                        );
+                      })()
+                    )}
+                  </Panel>
+
+                  <Panel title="Device Posture" className="lg:col-span-4">
+                    {devicesRes === null ? (
+                      <Loading />
+                    ) : !devicesRes.ok ? (
+                      <ErrorText>Device posture is unavailable.</ErrorText>
+                    ) : (
+                      (() => {
+                        const ps = postureSplit(devicesRes.data);
+                        const none =
+                          ps.compliant + ps.blocked + ps.unknown === 0;
+                        if (none)
+                          return (
+                            <EmptyState>No devices enrolled yet.</EmptyState>
+                          );
+                        return (
+                          <>
+                            <Donut
+                              label="Device posture"
+                              source={{
+                                endpoint:
+                                  "/api/v1/organizations/{orgId}/devices",
+                              }}
+                              failed={false}
+                              slices={[
+                                {
+                                  label: "Compliant",
+                                  value: ps.compliant,
+                                  tone: "ok",
+                                },
+                                {
+                                  label: "Blocked",
+                                  value: ps.blocked,
+                                  tone: "danger",
+                                },
+                                {
+                                  label: "Unknown",
+                                  value: ps.unknown,
+                                  tone: "neutral",
+                                },
+                              ]}
+                              centreLabel="devices"
+                              empty="No devices enrolled yet."
+                            />
+                            {/* ⛔ THE STATE, IN WORDS — not "n/a".
+                                A big "n/a" is indistinguishable from a failed load at a glance, which is the
+                                exact confusion this screen exists to remove. When nothing has reported there
+                                is no percentage to state (0% would claim total non-compliance, 100% the
+                                opposite, and neither was measured) — so the SENTENCE says what is true. */}
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                              {ps.percent === null
+                                ? `No device has reported posture yet, so there is no compliance rate to show. Unknown is its own state: absence is not compliance.`
+                                : `${ps.percent}% of the ${ps.compliant + ps.blocked} devices that have reported are compliant. The ${ps.unknown} that have not reported are excluded — absence is not compliance.`}
+                            </p>
+                          </>
+                        );
+                      })()
+                    )}
+                  </Panel>
+
+                  <Panel title="HA Hub Set" className="lg:col-span-4">
+                    {/* ⚠ THIS PANEL WAS CUT ON A WRONG MEASUREMENT. The audit checked the `Site` schema for
+                        hub/generation/pin fields, found none, and declared the data absent — but the hub set
+                        is its OWN endpoint and schema, and `hubsetview.ts` already projects it. An absence
+                        found by looking in one place is not an absence (docs/laws.md). */}
+                    {hubSetRes === null ? (
+                      <Loading />
+                    ) : !hubSetRes.ok ? (
+                      <ErrorText>The hub set is unavailable.</ErrorText>
+                    ) : (
+                      (() => {
+                        // Defensive: a served object without `members` must not throw the whole screen. One panel's
+                        // bad shape taking the page down is a blast radius nobody chose.
+                        const hv = hubSetRes.data?.members
+                          ? hubSetView(hubSetRes.data, Date.now())
+                          : null;
+                        if (!hv)
+                          return (
+                            <EmptyState>
+                              No HA hub set. Pin two or more gateways to create
+                              one.
+                            </EmptyState>
+                          );
+                        return (
+                          <>
+                            <Badge tone="neutral">GEN {hv.generation}</Badge>
+                            <List label="Hub set">
+                              {hv.members.map((m) => {
+                                // The row carries a nodeId; the NAME lives on /nodes, so the two are joined
+                                // here. An unjoinable id renders as the id rather than as a blank — an
+                                // unnamed member is still a member, and hiding it would understate the set.
+                                const node = nodesRes?.ok
+                                  ? nodesRes.data.find((n) => n.id === m.nodeId)
+                                  : undefined;
+                                const memberName = node?.name ?? m.nodeId.slice(0, 8);
+                                const memberRole = m.demoted ? "demoted" : m.role;
+                                const memberStatus = !m.reporting ? "not reporting" : `hs ${m.handshakeAge}`;
+                                const memberLabel = `${memberName} (${memberRole}): ${memberStatus}`;
+
+                                return (
+                                  <ListItem key={m.nodeId} aria-label={memberLabel}>
+                                    <span className="flex items-center justify-between gap-2">
+                                      <span className="truncate font-mono text-mono text-ink-primary">
+                                        {memberName}
+                                      </span>
+                                      <span
+                                        className="shrink-0 text-micro text-ink-tertiary"
+                                        role="status"
+                                      >
+                                        {memberRole} · {memberStatus}
+                                      </span>
+                                    </span>
+                                  </ListItem>
+                                );
+                              })}
+                            </List>
+                            <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                              Pinned gateways form the hub set. members[0] is
+                              the acting primary, and the generation bumps on
+                              every promotion. Absent metrics are not an idle
+                              link.
+                            </p>
+                          </>
+                        );
+                      })()
+                    )}
+                  </Panel>
+
+                  <Panel title="Network map" className="lg:col-span-4">
+                    {/* ⚠ ALSO A RETRACTED CUT. Cut as "no SiteLink schema" — true, and beside the point:
+                        `assembleTopology()` already projects sites + their gateways from data this screen
+                        fetches. CATEGORY ONE, not category three: the capability exists and has no data yet,
+                        so it gets an EMPTY STATE rather than absence (docs/EPIC-14, the three-way test). */}
+                    {sitesRes === null || nodesRes === null ? (
+                      <Loading />
+                    ) : !sitesRes.ok || !nodesRes.ok ? (
+                      <ErrorText>The topology is unavailable.</ErrorText>
+                    ) : (
+                      <NodeLink
+                        label="Site topology"
+                        source={{
+                          endpoint: "/api/v1/organizations/{orgId}/sites",
+                        }}
+                        failed={false}
+                        {...(() => {
+                          // ⛔ THE SAME FUNCTION THE SITES SCREEN USES. This panel built its own node list
+                          // inline with `links={[]}` — so Overview drew rings and NO EDGES while Sites drew
+                          // the mesh, from the same data, and the two screens disagreed about what the
+                          // network looks like.
+                          //
+                          // TWO RENDERINGS OF ONE FACT IS TWO PLACES TO BE WRONG. `meshFrom` is now the only
+                          // thing that turns sites + nodes into a topology.
+                          //
+                          // `subnetsKnown: false` because Overview does not fetch per-site subnets: without
+                          // it every node would claim "no approved subnet", which is a measurement this
+                          // screen never took.
+                          const m = meshFrom(
+                            assembleTopology(sitesRes.data, {}, nodesRes.data),
+                            nodesRes.data,
+                            hubSetRes?.ok ? hubSetRes.data?.generation : undefined,
+                            false,
+                          );
+                          return { nodes: m.nodes, links: m.links };
+                        })()}
+                        empty="No sites configured yet. Bind a gateway to a site to build the mesh."
+                      />
+                    )}
+                  </Panel>
+
+                  <Panel title="Needs Attention" className="lg:col-span-4">
+                    {attention === null ? (
+                      <Loading />
+                    ) : attention.length === 0 ? (
+                      <EmptyState>Nothing needs attention.</EmptyState>
+                    ) : (
+                      <List label="Needs attention">
+                        {attention.map((a) => (
+                          <ListItem key={a.key}>
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="text-cell text-ink-body">
+                                {a.text}
+                              </span>
+                              <Link
+                                to={a.to}
+                                className="shrink-0 text-mono text-ink-emphasis hover:text-ink-heading"
+                              >
+                                Review
+                              </Link>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                      Server refusals are shown verbatim. No client-side
+                      re-validation.
+                    </p>
+                  </Panel>
+
+                  <Panel title="System Health" className="lg:col-span-4">
+                    <List label="System health">
+                      <ListItem>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-cell text-ink-body">
+                            Control Plane
+                          </span>
+                          <HealthStatus />
+                        </span>
+                      </ListItem>
+                    </List>
+                    {/* ⛔ ONE ROW, NOT FIVE. The design lists Control Plane · Database · WireGuard Service ·
+                        IdP Sync · Access-log retention. `/healthz` says of itself: "Reports process liveness.
+                        NO EXTERNAL DEPENDENCIES ARE CHECKED." Rendering "Database ● Healthy" from it would
+                        claim a check that never ran — a green light for a thing nobody looked at, which is
+                        the render-floor violation in its most dangerous form. IdP Sync and Access-log
+                        retention are enterprise-only and absent on this edition. */}
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                      Liveness only. The control plane does not probe its
+                      dependencies, so nothing else is claimed here.
+                    </p>
+                  </Panel>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: "ok" }) {
+/**
+ * A stat card — the README's composition, exactly:
+ *
+ *   [30px icon tile]  LABEL 500 11px
+ *   VALUE 700 26px
+ *   SUB-LINE 10px
+ *
+ * ⛔ `value` IS A STATE, NOT A NUMBER. `number` would let a caller write `data?.members ?? 0` — one keystroke,
+ * typechecks, looks reasonable, and renders a confident zero for an org whose fetch failed. The three states
+ * mean different things: loading (not learned yet) · failed (tried, could not learn) · ok (this is the number).
+ *
+ * ⛔ THE SUB-LINE IS STRUCTURAL, NOT DECORATION. In the design every card carries one and it holds the
+ * QUALIFICATION — "seen in last 3 min", "3 awaiting approval". A card with a bare number states more than it
+ * knows; the sub-line is where the number is told what it means.
+ */
+function Stat({
+  label,
+  icon,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  icon: IconName;
+  value: StatState;
+  /** The qualification. `null` when there is nothing honest to say — never filler. */
+  sub?: ReactNode;
+  tone?: "ok";
+}) {
+  const text = statText(value);
   return (
-    <div className="rounded-xl border border-white/5 bg-ink-800 p-4">
-      <div className={`font-mono text-2xl font-semibold ${tone === "ok" ? "text-ok" : "text-white"}`}>{value}</div>
-      <div className="mt-1 text-xs text-slate-500">{label}</div>
+    // Composes GLASS rather than restating it — the divergence between this card and Panel is exactly what
+    // produced a screenshot with glass stat cards above flat panels.
+    // ⛔ role="group" + aria-label MAKES THE CARD ADDRESSABLE BY NAME.
+    //
+    // The e2e specs read a stat's value with `getByText('Members').locator('xpath=preceding-sibling::div[1]')`
+    // — the value happened to be the div BEFORE the label. The design puts the icon+label row first and the
+    // value second, so that xpath now points at nothing, and three specs failed on a layout change that was
+    // asked for.
+    //
+    // Re-pointing the xpath would preserve the coupling. A NAMED GROUP survives any internal rearrangement,
+    // which is the same fix the DataTable conversion needed and the same lesson: when adding semantics breaks
+    // a query, the query was weak (docs/laws.md).
+    <div
+      role="group"
+      aria-label={label}
+      className={`${GLASS} flex flex-col gap-2 p-3.5`}
+    >
+      <div className="flex items-center gap-[9px]">
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-inset border border-white/[.2] bg-white/[.09] text-ink-emphasis">
+          <Icon name={icon} size={15} />
+        </span>
+        <span className="text-cell font-medium text-ink-secondary">
+          {label}
+        </span>
+      </div>
+      {text === null ? (
+        <span
+          className="text-stat font-bold leading-none text-ink-secondary"
+          title={
+            value.state === "failed" ? "Could not load this count." : "Loading…"
+          }
+        >
+          {value.state === "failed" ? "n/a" : "…"}
+        </span>
+      ) : (
+        <span
+          className={`text-stat font-bold leading-none ${tone === "ok" ? "text-ok" : "text-ink-heading"}`}
+        >
+          {text}
+        </span>
+      )}
+      <span className="text-mono font-medium text-ink-tertiary">
+        {value.state === "failed" ? (
+          <span className="text-danger">could not load</span>
+        ) : (
+          sub
+        )}
+      </span>
     </div>
   );
 }

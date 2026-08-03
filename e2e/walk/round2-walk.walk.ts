@@ -1,4 +1,9 @@
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import {
+  test,
+  expect,
+  type Page,
+  type APIRequestContext,
+} from "@playwright/test";
 import * as fs from "fs";
 
 // Round-2 manual walk, Part A — SCRIPTED subset, run against a REAL UNSEEDED open
@@ -10,28 +15,69 @@ import * as fs from "fs";
 // edition slot); w2 = the second signup that must hit the invitation-only cap.
 // Steps A1–A4, A6–A8. A5 (real agent enrollment) runs outside this spec — the
 // minted join token is written to /e2e/.walk-token for the compose agent.
-test.skip(!process.env.ROUND2, "Round-2 walk: run explicitly with ROUND2=1 against an UNSEEDED stack");
+// ⛔ MOVED OUT OF `tests/` AND RENAMED `.walk.ts` — S14.7, founder-dispositioned.
+//
+// This is a BOX-WALK RIG, not a CI test. It needs Mailpit, a real signup flow and round-2 conditions, so it
+// legitimately does not belong in the automated suite.
+//
+// ⚠ BUT IT USED TO LIVE IN `testDir: "./tests"`, so the BLOCKING `e2e` job COLLECTED it and skipped it at
+// runtime on `!process.env.ROUND2` — which is set NOWHERE in `.github/workflows/` or the `Makefile`.
+//
+//   IT HAS NEVER RUN, IN THE JOB S11-1 PROMOTED TO BLOCKING, WHILE READING AS COVERAGE.
+//
+// That is how two assertions on a string DELETED IN S14.6 survived here: they cannot fail, because nothing
+// runs them. A `test.skip(!process.env.X)` inside the suite is indistinguishable from a test that passes.
+//
+// THE FIX IS PLACEMENT, NOT A FLAG. Out of `testDir` it is no longer collected, no longer counted, and no
+// longer claims to be part of the suite. Run it deliberately:
+//
+//     npx playwright test -c playwright.config.ts walk/round2-walk.walk.ts
+//
+// (Kept as a `test.skip` guard as well, so an accidental direct run still refuses without ROUND2 set.)
+test.skip(
+  !process.env.ROUND2,
+  "Round-2 walk: run explicitly with ROUND2=1 against an UNSEEDED stack",
+);
 
 const MAILPIT = process.env.MAILPIT_URL ?? "http://mailpit:8025";
-const W1 = { email: "w1@walk.local", pass: "walk-password-round2", name: "Walk One" };
-const W2 = { email: "w2@walk.local", pass: "walk-password-round2", name: "Walk Two" };
+const W1 = {
+  email: "w1@walk.local",
+  pass: "walk-password-round2",
+  name: "Walk One",
+};
+const W2 = {
+  email: "w2@walk.local",
+  pass: "walk-password-round2",
+  name: "Walk Two",
+};
 
 // ---- Mailpit helpers (real mail, not mocked) --------------------------------
 
-async function latestBodyTo(rq: APIRequestContext, email: string, mustContain: string): Promise<string> {
+async function latestBodyTo(
+  rq: APIRequestContext,
+  email: string,
+  mustContain: string,
+): Promise<string> {
   let body = "";
   await expect
     .poll(
       async () => {
-        const res = await rq.get(`${MAILPIT}/api/v1/search?query=${encodeURIComponent("to:" + email)}`);
-        const { messages } = (await res.json()) as { messages: { ID: string }[] };
+        const res = await rq.get(
+          `${MAILPIT}/api/v1/search?query=${encodeURIComponent("to:" + email)}`,
+        );
+        const { messages } = (await res.json()) as {
+          messages: { ID: string }[];
+        };
         if (!messages?.length) return "";
         const msg = await rq.get(`${MAILPIT}/api/v1/message/${messages[0].ID}`);
         const detail = (await msg.json()) as { Text?: string; HTML?: string };
         body = `${detail.Text ?? ""}\n${detail.HTML ?? ""}`;
         return body.includes(mustContain) ? body : "";
       },
-      { timeout: 15_000, message: `mail to ${email} containing ${mustContain}` },
+      {
+        timeout: 15_000,
+        message: `mail to ${email} containing ${mustContain}`,
+      },
     )
     .not.toBe("");
   return body;
@@ -51,7 +97,9 @@ async function signup(page: Page, who: typeof W1) {
   await page.getByLabel("Email").fill(who.email);
   await page.getByLabel("Password").fill(who.pass);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
 }
 
 async function login(page: Page, who: typeof W1) {
@@ -63,12 +111,16 @@ async function login(page: Page, who: typeof W1) {
 
 // ---- A1: signup → verify-pending, resend success + failure ------------------
 
-test("A1: fresh signup routes to verify-pending; resend claims Sent only on real success", async ({ page }) => {
+test("A1: fresh signup routes to verify-pending; resend claims Sent only on real success", async ({
+  page,
+}) => {
   await signup(page, W1);
   // Signup does NOT auto-login (observed; enumeration-resistant 202 + mail).
   await login(page, W1);
   await expect(page).toHaveURL(/\/verify-pending$/); // 0 membership + unverified
-  await expect(page.getByRole("heading", { name: "Verify your email" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Verify your email" }),
+  ).toBeVisible();
   await expect(page.getByText(W1.email)).toBeVisible();
 
   // Failure path FIRST (deliberate network abort — the walk's "kill the network"):
@@ -88,8 +140,15 @@ test("A1: fresh signup routes to verify-pending; resend claims Sent only on real
 
 // ---- A2: verify link → create-org; session observation -----------------------
 
-test("A2: the verify link works; RECORD: it does NOT establish a session (re-login required)", async ({ page, browser }) => {
-  const body = await latestBodyTo(page.request, W1.email, "/verify-email?token=");
+test("A2: the verify link works; RECORD: it does NOT establish a session (re-login required)", async ({
+  page,
+  browser,
+}) => {
+  const body = await latestBodyTo(
+    page.request,
+    W1.email,
+    "/verify-email?token=",
+  );
   const token = extractToken(body, "/verify-email");
 
   // Fresh anonymous context — the out-of-band email click, as the walk frames it.
@@ -106,12 +165,16 @@ test("A2: the verify link works; RECORD: it does NOT establish a session (re-log
   // After re-login the funnel routes the now-verified 0-org user to create-org.
   await login(page, W1);
   await expect(page).toHaveURL(/\/create-org$/);
-  await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create your organization" }),
+  ).toBeVisible();
 });
 
 // ---- A3: slug derivation edge cases, then the real create --------------------
 
-test("A3: slug edge cases behave; create succeeds → first dashboard", async ({ page }) => {
+test("A3: slug edge cases behave; create succeeds → first dashboard", async ({
+  page,
+}) => {
   await login(page, W1);
   await expect(page).toHaveURL(/\/create-org$/);
   const name = page.getByLabel("Organization name");
@@ -146,7 +209,9 @@ test("A3: slug edge cases behave; create succeeds → first dashboard", async ({
 
 // ---- A4: gateway empty state → one-time join-token ceremony → audit ---------
 
-test("A4: enroll empty state → ceremony (no route back); audit row is raw-token-free", async ({ page }) => {
+test("A4: enroll empty state → ceremony (no route back); audit row is raw-token-free", async ({
+  page,
+}) => {
   await login(page, W1);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   // Fresh-org empty state offers the affordance.
@@ -159,7 +224,9 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
   await page.getByRole("button", { name: "Generate join token" }).click();
 
   // The S4.5-style ceremony: amber, shown-once, explicit ack.
-  await expect(page.getByText("Enroll your gateway — run this once")).toBeVisible();
+  await expect(
+    page.getByText("Enroll your gateway: run this once"),
+  ).toBeVisible();
   // Extract ONLY the token value — since S4.8 the pre line also carries
   // TUNNEX_NODE_NAME for a name-pinned token; a prefix-strip would smuggle the
   // suffix into .walk-token (breaking A5 enrollment) AND make the no-resurrect /
@@ -171,26 +238,37 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
   fs.writeFileSync("/e2e/.walk-token", token);
 
   await page.getByRole("button", { name: /I.?ve saved it/ }).click();
-  await expect(page.getByText("Enroll your gateway — run this once")).toHaveCount(0);
+  await expect(
+    page.getByText("Enroll your gateway: run this once"),
+  ).toHaveCount(0);
   // No route back: a reload must not resurrect the token.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
   await expect(page.getByText(token)).toHaveCount(0);
 
   // Audit: the issuance row exists and is secret-free (raw token nowhere on page).
-  await page.getByRole("link", { name: "Audit log" }).click();
+  await page.getByRole("link", { name: "Audit Log" }).click();
   await expect(page.getByText("node.token_issued")).toBeVisible();
   await expect(page.getByText(token)).toHaveCount(0);
   // RECORD (walk expects a fingerprint in the row): capture what details actually show.
-  const row = page.locator("li", { hasText: "node.token_issued" }).first();
+  const row = page
+    .getByRole("row")
+    .filter({ hasText: "node.token_issued" })
+    .first();
   console.log("A4 AUDIT ROW DETAILS →", (await row.textContent())?.trim());
 });
 
 // ---- A6: second signup hits the real open-edition cap ------------------------
 
-test("A6: second fresh signup ends on the invitation card with no usable create control (real 403)", async ({ page }) => {
+test("A6: second fresh signup ends on the invitation card with no usable create control (real 403)", async ({
+  page,
+}) => {
   await signup(page, W2);
-  const body = await latestBodyTo(page.request, W2.email, "/verify-email?token=");
+  const body = await latestBodyTo(
+    page.request,
+    W2.email,
+    "/verify-email?token=",
+  );
   await page.goto(`/verify-email?token=${extractToken(body, "/verify-email")}`);
   await expect(page.getByText(/verified/i).first()).toBeVisible();
 
@@ -199,15 +277,21 @@ test("A6: second fresh signup ends on the invitation card with no usable create 
   await page.getByLabel("Organization name").fill("Second Walk Org");
   await page.getByRole("button", { name: "Create organization" }).click();
   // REAL org_limit_reached (Walk Org holds the slot) → dead-end, form gone.
-  await expect(page.getByRole("heading", { name: "Invitation required" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create organization" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Invitation required" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create organization" }),
+  ).toHaveCount(0);
   await expect(page.getByLabel("Organization name")).toHaveCount(0);
   await expect(page.getByLabel("Slug")).toHaveCount(0);
 });
 
 // ---- A7: manual /create-org visit while holding an org -----------------------
 
-test("A7: a with-org user visiting /create-org is re-routed to the dashboard at visit time", async ({ page }) => {
+test("A7: a with-org user visiting /create-org is re-routed to the dashboard at visit time", async ({
+  page,
+}) => {
   // The original walk run OBSERVED the form rendering here (friction F4 in
   // ROUND2-REPORT.md); S4.8 added the RequireNoOrg visit-time guard. This now
   // asserts the walk's ORIGINAL expectation.
@@ -215,13 +299,19 @@ test("A7: a with-org user visiting /create-org is re-routed to the dashboard at 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await page.goto("/create-org");
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "Create your organization" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Invitation required" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Create your organization" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Invitation required" }),
+  ).toHaveCount(0);
 });
 
 // ---- A8: logout, reset-revokes-all-sessions, cookie TTL ----------------------
 
-test("A8: logout works; password reset revokes the OTHER session; session cookie TTL recorded", async ({ browser }) => {
+test("A8: logout works; password reset revokes the OTHER session; session cookie TTL recorded", async ({
+  browser,
+}) => {
   // Two independent browsers, both logged in as w1.
   const ctx1 = await browser.newContext();
   const ctx2 = await browser.newContext();
@@ -234,7 +324,9 @@ test("A8: logout works; password reset revokes the OTHER session; session cookie
 
   // Cookie TTL observation (feeds S5.1-D3).
   for (const c of await ctx1.cookies()) {
-    console.log(`A8 COOKIE → ${c.name}: httpOnly=${c.httpOnly} secure=${c.secure} sameSite=${c.sameSite} expires=${c.expires === -1 ? "session" : new Date(c.expires * 1000).toISOString()}`);
+    console.log(
+      `A8 COOKIE → ${c.name}: httpOnly=${c.httpOnly} secure=${c.secure} sameSite=${c.sameSite} expires=${c.expires === -1 ? "session" : new Date(c.expires * 1000).toISOString()}`,
+    );
   }
 
   // Reset from a THIRD, anonymous context (/forgot-password is AnonOnly — a
@@ -244,12 +336,20 @@ test("A8: logout works; password reset revokes the OTHER session; session cookie
   await p3.goto("/forgot-password");
   await p3.getByLabel("Email").fill(W1.email);
   await p3.getByRole("button", { name: /Send|Reset/ }).click();
-  const body = await latestBodyTo(p3.request, W1.email, "/reset-password?token=");
+  const body = await latestBodyTo(
+    p3.request,
+    W1.email,
+    "/reset-password?token=",
+  );
   const newPass = "walk-password-round2-NEW";
-  await p3.goto(`/reset-password?token=${extractToken(body, "/reset-password")}`);
+  await p3.goto(
+    `/reset-password?token=${extractToken(body, "/reset-password")}`,
+  );
   await p3.getByLabel("New password").fill(newPass);
   await p3.getByRole("button", { name: "Update password" }).click();
-  await expect(p3.getByRole("heading", { name: "Password updated" })).toBeVisible();
+  await expect(
+    p3.getByRole("heading", { name: "Password updated" }),
+  ).toBeVisible();
   await ctx3.close();
 
   // Browser 2's session must be REVOKED (S2.2 rule), not merely browser 1's.

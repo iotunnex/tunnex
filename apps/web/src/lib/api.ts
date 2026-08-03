@@ -28,7 +28,8 @@ export type PolicyRule = components["schemas"]["PolicyRule"];
 export type ZeroTrustMode = components["schemas"]["ZeroTrustMode"];
 export type AffectedDevice = components["schemas"]["AffectedDevice"];
 // S7.5.4 — per-user + temporary grants.
-export type CreatePolicyRuleRequest = components["schemas"]["CreatePolicyRuleRequest"];
+export type CreatePolicyRuleRequest =
+  components["schemas"]["CreatePolicyRuleRequest"];
 export type ExtendGrantRequest = components["schemas"]["ExtendGrantRequest"];
 export type DeviceApproval = components["schemas"]["DeviceApproval"];
 // S7.5.3 — device posture config DTO. (HealthCheckInput / DeviceHealthResult are
@@ -39,6 +40,7 @@ export type HealthCheck = components["schemas"]["HealthCheck"];
 export type Site = components["schemas"]["Site"];
 export type SiteSubnet = components["schemas"]["SiteSubnet"];
 export type SiteReferences = components["schemas"]["SiteReferences"];
+export type DNSForward = components["schemas"]["DNSForward"];
 // S10.3 — Kubernetes cluster/Service connectivity.
 export type K8sCluster = components["schemas"]["K8sCluster"];
 export type K8sService = components["schemas"]["K8sService"];
@@ -61,10 +63,13 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 // review-refused — route it through loadOne so a fetch failure can't read as absence.
 export type Loaded<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export async function loadOne<T>(call: () => Promise<{ data?: T; error?: unknown }>): Promise<Loaded<T>> {
+export async function loadOne<T>(
+  call: () => Promise<{ data?: T; error?: unknown }>,
+): Promise<Loaded<T>> {
   try {
     const { data, error } = await call();
-    if (error) return { ok: false, error: apiErrorMessage(error, "Could not load.") };
+    if (error)
+      return { ok: false, error: apiErrorMessage(error, "Could not load.") };
     if (data === undefined) return { ok: false, error: "Could not load." };
     return { ok: true, data };
   } catch {

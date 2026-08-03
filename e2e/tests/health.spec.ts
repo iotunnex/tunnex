@@ -2,7 +2,11 @@ import { test, expect } from "@playwright/test";
 
 test("SPA loads and reports the API operational", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("tunnex", { exact: false }).first()).toBeVisible();
+  // ⛔ THE BRAND IS AN IMAGE NOW, NOT TEXT. S14.17 replaced the placeholder wordmark with the real
+  // SVG, so `getByText("tunnex")` finds nothing — the name lives in `alt`. Asserting the ROLE is
+  // both correct and stronger: it fails if the mark loses its accessible name, which a text query
+  // could never have checked.
+  await expect(page.getByRole("img", { name: /tunnex/i }).first()).toBeVisible();
   // The health pill flips to "operational" once the SPA's /healthz call succeeds.
   await expect(page.getByText("operational")).toBeVisible();
 });

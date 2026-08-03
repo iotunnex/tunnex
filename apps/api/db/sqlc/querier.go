@@ -560,7 +560,21 @@ type Querier interface {
 	// Every Tunnex group bound to an IdP group for this org+provider — the units the reconciler
 	// walks. origin/shape is schema-guaranteed (0026), so idp_provider/idp_group_id are non-null.
 	ListIdpSyncGroups(ctx context.Context, arg ListIdpSyncGroupsParams) ([]ListIdpSyncGroupsRow, error)
-	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error)
+	// ⛔ LEFT JOIN, NOT JOIN. invitations.invited_by_user_id is ON DELETE SET NULL, so the inviter
+	// can be gone — and an inner join would silently DROP those rows, hiding outstanding invitations
+	// precisely because the person who sent them left. That is the failure this endpoint exists to
+	// end, so it must not be reintroduced by the join.
+	// ⛔ COALESCE, NOT A BARE CAST. `u.email::text` makes sqlc type the column NON-NULLABLE (*string),
+	// but a LEFT JOIN against a deleted inviter yields NULL and the scan fails with
+	// "cannot scan NULL into *string" — a 500 on the whole list. Caught on the review stack by the
+	// fixture row seeded for exactly this case; without that row it would have shipped and broken the
+	// first time an inviter was deleted, which is the one moment the list matters most.
+	// ⛔ `deleted_at IS NULL` ON THE JOIN, caught by TestQueriesScopeDeletedAt. A SOFT-deleted inviter
+	// must read the same as a HARD-deleted one: the column is ON DELETE SET NULL, so a hard delete
+	// already yields NULL here and the panel renders "account deleted". Without this filter the two
+	// kinds of deletion would render differently for no reason a user could explain — and the soft
+	// one would keep publishing the address of an account we were asked to remove.
+	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]ListInvitationsRow, error)
 	// ListK8sClusterZonesForOrg feeds (a) cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
 	// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa;
 	// and (b) the client-side resolver push (fork-1): the {<cluster>.<dns_zone> -> reserved DNS VIP} mapping the

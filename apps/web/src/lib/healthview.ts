@@ -5,57 +5,97 @@ import type { Node } from "./api";
 // KIND refines the label + tone, but the badge is NEVER less alarmed than the bool (never an
 // "ok" tone, never null, while degraded). `converging` is a normal push settling → a subtle
 // "syncing", not a loud alarm; `silent_desync` is the stuck, actionable case; `desync_unknown`
-// is the honest can't-determine (never rendered as healthy).
-export type BadgeTone = "warn" | "danger" | "unknown";
+import type { BadgeTone } from "../components/ui";
+
+export type { BadgeTone };
 
 export interface HealthBadge {
   label: string;
   tone: BadgeTone;
 }
 
-export function policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_degraded_kind">): HealthBadge | null {
+// ⛔ THE EXHAUSTIVENESS GUARD — REGISTERED AT S11, TRIGGER "next health-kind addition or S14.7 pre-flight",
+// DISCHARGED HERE. It replaces a `switch` whose `default` was fail-safe in the wrong dimension.
+//
+// The old default returned `{label: "degraded", tone: "warn"}` for any unrecognised kind, so it never
+// under-alarmed — the bool was still honoured. But A NEW KIND ADDED TO THE SPEC FELL THROUGH TO IT SILENTLY,
+// losing the one thing the kind exists to carry: its NAMED REMEDY.
+//
+// THAT IS NOT HYPOTHETICAL. `k8s_endpoints_unavailable` shipped in the Go enum and in the metrics, never
+// reached this renderer, and rendered as the generic "degraded" badge in the product — found only by the S11
+// mirror-surface census (WF-S11-7), a whole story later.
+//
+// A `Record` keyed by the generated union makes the same mistake a COMPILE ERROR NAMING THE MISSING KIND.
+// `make generate` updates the union from the spec; this table then fails to typecheck until someone decides
+// what the new kind should say.
+type PolicyDegradedKind = NonNullable<Node["policy_degraded_kind"]>;
+
+/** Every kind except `healthy` — the ones that must have a badge. */
+export type NonHealthyPolicyDegradedKind = Exclude<PolicyDegradedKind, "healthy">;
+
+const DEGRADED_BADGE: Record<NonHealthyPolicyDegradedKind, HealthBadge> = {
+  // `converging` is a normal push settling — a subtle "syncing", not a loud alarm.
+  converging: { label: "syncing…", tone: "warn" },
+  apply_failing: { label: "apply failing", tone: "warn" },
+  stuck_enforcing: { label: "enforcing a disabled policy", tone: "danger" },
+  silent_desync: { label: "silent desync", tone: "danger" },
+  // The honest can't-determine. Never rendered as healthy.
+  desync_unknown: { label: "health unknown", tone: "unknown" },
+  // Refused the artifact -> deny-all; remedy: upgrade.
+  unsupported_policy_version: { label: "agent too old", tone: "danger" },
+  // S8.2: no carrier for site-to-site traffic.
+  site_hub_down: { label: "site hub unreachable", tone: "danger" },
+  // S8.2: a site-to-site tunnel has no fresh handshake.
+  site_link_down: { label: "site link down", tone: "danger" },
+  // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped).
+  site_subnet_unreachable: { label: "site subnet unreachable", tone: "danger" },
+  // S8.7: can't tear down expired-grant flows (CAP_NET_ADMIN?) — revoked flows may linger.
+  conntrack_flush_unavailable: { label: "expiry-flush degraded", tone: "warn" },
+  // S11 WF-S11-6: the cert expired, so the agent cannot authenticate to the CP — including the renewal
+  // endpoint, which needs the cert that expired. The label carries the REMEDY because no other kind's remedy
+  // applies and waiting is actively wrong: this never self-heals.
+  cert_expired_cannot_reconnect: {
+    label: "certificate expired, re-enroll this gateway",
+    tone: "danger",
+  },
+  // S10.3 WF-K5 — THE KIND THIS GUARD EXISTS BECAUSE OF. Add a kind to the spec and forget this table, and
+  // the compiler now says so by name instead of the product quietly saying "degraded".
+  k8s_endpoints_unavailable: {
+    label: "no Kubernetes endpoint view (check API access + RBAC)",
+    tone: "danger",
+  },
+  // WF-C L2: zombie hub — wire fresh, agent dead. The label names BOTH halves so it lies in neither
+  // direction (not "offline" — it forwards; not "healthy" — it's stale).
+  hub_forwarding_not_reconciling: {
+    label: "agent down, still forwarding (restart agent)",
+    tone: "danger",
+  },
+};
+
+/** Degraded, but we have nothing more specific to say. Never null while the bool is true. */
+const GENERIC_DEGRADED: HealthBadge = { label: "degraded", tone: "warn" };
+
+export function policyHealthBadge(
+  node: Pick<Node, "policy_degraded" | "policy_degraded_kind">,
+): HealthBadge | null {
   if (!node.policy_degraded) return null; // bool primary — not degraded → no badge
-  switch (node.policy_degraded_kind) {
-    case "converging":
-      return { label: "syncing…", tone: "warn" };
-    case "apply_failing":
-      return { label: "apply failing", tone: "warn" };
-    case "stuck_enforcing":
-      return { label: "enforcing a disabled policy", tone: "danger" };
-    case "silent_desync":
-      return { label: "silent desync", tone: "danger" };
-    case "desync_unknown":
-      return { label: "health unknown", tone: "unknown" };
-    case "unsupported_policy_version":
-      return { label: "agent too old", tone: "danger" }; // refused the artifact → deny-all; remedy: upgrade
-    case "site_hub_down":
-      return { label: "site hub unreachable", tone: "danger" }; // S8.2: no carrier for site-to-site traffic
-    case "site_link_down":
-      return { label: "site link down", tone: "danger" }; // S8.2: a site-to-site tunnel has no fresh handshake
-    case "site_subnet_unreachable":
-      return { label: "site subnet unreachable", tone: "danger" }; // S8.2c: advertises a LAN the gateway isn't on (bridge-trapped)
-    case "conntrack_flush_unavailable":
-      return { label: "expiry-flush degraded", tone: "warn" }; // S8.7: can't tear down expired-grant flows (CAP_NET_ADMIN?) — revoked flows may linger
-    case "cert_expired_cannot_reconnect":
-      // S11 WF-S11-6: the agent's cert expired, so it cannot authenticate to the CP — including the renewal
-      // endpoint, which needs the cert that expired. The label carries the REMEDY because no other kind's
-      // remedy applies and waiting is actively wrong: this never self-heals.
-      return { label: "certificate expired — re-enroll this gateway", tone: "danger" };
-    case "k8s_endpoints_unavailable":
-      // S10.3 WF-K5 — added here by the S11 mirror-surface census (WF-S11-7): the kind shipped in the Go enum
-      // and the metrics but never reached the spec or this renderer, so it fell through to the generic
-      // degraded badge and its named remedy was invisible in the product.
-      return { label: "no Kubernetes endpoint view (check API access + RBAC)", tone: "danger" };
-    case "hub_forwarding_not_reconciling":
-      // WF-C L2: zombie hub — wire fresh, agent dead. The label names BOTH halves so it lies in neither
-      // direction (not "offline" — it forwards; not "healthy" — it's stale). Remedy: restart the agent
-      // (the wire is fine, the brain is dead). Danger: it enforces a policy the CP has since changed.
-      return { label: "agent down — still forwarding (restart agent)", tone: "danger" };
-    default:
-      // Degraded per the authoritative bool but the kind is absent/healthy — still show a
-      // badge (never less alarmed than the bool).
-      return { label: "degraded", tone: "warn" };
-  }
+  const kind = node.policy_degraded_kind;
+  // Degraded per the authoritative bool but the kind is absent or says `healthy`. STILL A BADGE: the badge is
+  // never less alarmed than the bool. This arm is for a MISSING kind, not an unknown one — an unknown kind is
+  // now impossible, because the table above would not compile without it.
+  if (kind === undefined || kind === null || kind === "healthy")
+    return GENERIC_DEGRADED;
+  // ⛔ `??` IS NOT BELT-AND-BRACES — IT GUARDS A DIFFERENT FAILURE THAN THE `Record` DOES, and replacing the
+  // switch's default with the table alone silently removed it. The component test caught it immediately.
+  //
+  //   THE RECORD guards COMPILE time: a kind in OUR spec with no badge is a build error.
+  //   THE `??`   guards RUN time: a kind the SERVER has and our generated union does not — a control plane
+  //              ahead of a cached bundle. TypeScript cannot see that value; the lookup yields `undefined`,
+  //              and an undefined badge renders NOTHING while `policy_degraded` is true.
+  //
+  // Losing it would make the client LESS ALARMED THAN THE BOOL for exactly the kind nobody has taught it
+  // about yet, which is the one most likely to matter.
+  return DEGRADED_BADGE[kind] ?? GENERIC_DEGRADED;
 }
 
 // SiteLinkNote — WF-B: the SUBORDINATE site-link line, INDEPENDENT of the headline badge
@@ -69,15 +109,38 @@ export interface SiteLinkNote {
   demoted: boolean;
 }
 
-export function siteLinkNote(node: Pick<Node, "site_link_note_peer" | "site_link_note_demoted">): SiteLinkNote | null {
+export function siteLinkNote(
+  node: Pick<Node, "site_link_note_peer" | "site_link_note_demoted">,
+): SiteLinkNote | null {
   if (!node.site_link_note_peer) return null; // render-floor: the field it consumes, present ⇒ a note
-  return { peer: node.site_link_note_peer, demoted: node.site_link_note_demoted ?? false };
+  return {
+    peer: node.site_link_note_peer,
+    demoted: node.site_link_note_demoted ?? false,
+  };
 }
 
+/**
+ * ⛔ A PILL, NOT BARE TEXT — corrected S14.6, founder-caught, and it was product-wide.
+ *
+ * This returned COLOUR ONLY: `text-amber-400` / `text-rose-400`. So on every surface that renders health
+ * beside other states, a DEGRADED gateway showed as bare coloured text while its `healthy` and `revoked`
+ * siblings showed as bordered pills — one state styled as a different KIND of thing from the others.
+ *
+ * The name said badge and the function returned a colour. Four call sites inherited that, and the wireframe
+ * badges every state uniformly (`HEALTHY`, `APPLY_FAILING`, `DESYNC_UNKNOWN`, `SITE_LINK_DOWN`,
+ * `UNSUPPORTED_VER` are all pills).
+ *
+ * ⚠ FIXED IN THE HELPER RATHER THAN AT THE CALL SITE, deliberately: a fix at one call site does not reach
+ * the call sites beside it — the missing-primitive law, which this repo has now paid for several times.
+ * Matches `Badge`'s recipe so the two cannot drift.
+ */
 export function badgeClass(tone: BadgeTone): string {
-  return {
-    warn: "text-amber-400",
-    danger: "text-rose-400",
-    unknown: "text-slate-400",
-  }[tone];
+  const colour: Record<BadgeTone, string> = {
+    ok: "border-emerald-500/40 text-emerald-400",
+    warn: "border-warn/40 text-warn",
+    danger: "border-danger/40 text-danger",
+    neutral: "border-white/10 text-slate-400",
+    unknown: "border-white/10 text-slate-400",
+  };
+  return `inline-flex items-center rounded-full border px-2 py-0.5 text-micro ${colour[tone]}`;
 }

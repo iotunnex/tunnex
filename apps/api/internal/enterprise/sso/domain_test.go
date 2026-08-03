@@ -143,3 +143,146 @@ func TestDomainCaptureAutoJoinThroughFlow(t *testing.T) {
 		t.Fatalf("captured-org membership missing: %v", err)
 	}
 }
+
+// TestReclaimIsRecoveryNotAFalseCrossTenantAccusation pins the S14.13 finding.
+//
+// ⛔ EVERY `domain_taken` AN OPERATOR COULD SEE ON THE CLAIM PATH WAS FALSE. mapClaimErr
+// mapped any 23505 to "already captured by another organization", but the two unique indexes
+// here mean opposite things and only one of them is reachable from CreateClaim:
+//
+//	domain_claims_org_domain_key       UNIQUE (org_id, domain)                        <- same org
+//	domain_claims_verified_domain_key  UNIQUE (domain) WHERE verified_at IS NOT NULL   <- cross-org
+//
+// A fresh insert has verified_at = NULL and so is not in the partial index at all. This test
+// proves that directly (arm 2), which is why the old message was never true here.
+//
+// The weight of the finding is the INTERACTION: with no GET, re-claiming is the only way back
+// to a lost TXT value, so the write-only-state gap MANUFACTURED the false accusation at the
+// exact moment an admin was recovering. Arm 1 is therefore both the fix and the recovery.
+func TestReclaimIsRecoveryNotAFalseCrossTenantAccusation(t *testing.T) {
+	h := newFlowHarness(t)
+	dns := &fakeDNS{records: map[string][]string{}}
+	svc := &DomainService{q: h.q, dns: dns}
+
+	admin := uuid.New()
+	if _, err := h.tx.Exec(h.ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,$3)", admin, "admin@reclaim.com", "Admin"); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+
+	// ARM 1 — SAME ORG re-claims: returns the EXISTING token, never an error.
+	first, err := svc.CreateClaim(h.ctx, admin, "admin@reclaim.com", true, h.org, "reclaim.com")
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	again, err := svc.CreateClaim(h.ctx, admin, "admin@reclaim.com", true, h.org, "reclaim.com")
+	if err != nil {
+		t.Fatalf("re-claim must be a RECOVERY, not a refusal: %v", err)
+	}
+	if again != first {
+		t.Fatalf("re-claim must return the SAME token (it is the only way back to a lost TXT value):\n first=%q\n again=%q", first, again)
+	}
+	// The exact regression, named: this path must never accuse another tenant.
+	if code(err) == "domain_taken" {
+		t.Fatal("re-claim returned domain_taken — the false cross-tenant accusation is back")
+	}
+
+	// ARM 2 — the measured surprise, pinned: a SECOND ORG can CREATE a claim on a domain that
+	// another org has already VERIFIED, because the partial index only covers verified rows.
+	// This is why the old message could never have been true on the claim path.
+	orgB := uuid.New()
+	if _, err := h.tx.Exec(h.ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)", orgB, "B", "b-"+orgB.String()); err != nil {
+		t.Fatalf("orgB: %v", err)
+	}
+	dns.records["reclaim.com"] = []string{first}
+	if err := svc.Verify(h.ctx, admin, h.org, "reclaim.com"); err != nil {
+		t.Fatalf("org A verify: %v", err)
+	}
+	txtB, err := svc.CreateClaim(h.ctx, admin, "admin@reclaim.com", true, orgB, "reclaim.com")
+	if err != nil {
+		t.Fatalf("a second org must still be able to CREATE a claim (only VERIFY is globally unique): %v", err)
+	}
+
+	// ARM 3 — and the genuinely-taken path STILL says taken, at the seam that owns it.
+	// Org B's OWN token must be published, or Verify refuses at the DNS check and never
+	// reaches the index — which would make this arm pass for the wrong reason.
+	dns.records["reclaim.com"] = []string{first, txtB}
+	if err := svc.Verify(h.ctx, admin, orgB, "reclaim.com"); code(err) != "domain_taken" {
+		t.Fatalf("org B verify: want domain_taken, got %v", err)
+	}
+}
+
+// TestSuspendWritesASystemAuditRowAgainstTheCAPTURINGOrg pins the second of the two
+// destructive-and-silent verbs (S14.15; the first was idpsync.UnmapGroup).
+//
+// ⛔ SUSPENDING A CAPTURE IS NOT A HUMAN ACTION AND IT IS CROSS-ORG. It fires from a SIGNUP, so the
+// principal in context is the person joining — who did not do this. And the row belongs to the
+// CAPTURING org, not to the signup. Both are easy to get wrong in a way no user would ever report:
+// the evidence would simply be filed under the wrong actor, or the wrong tenant.
+func TestSuspendWritesASystemAuditRowAgainstTheCAPTURINGOrg(t *testing.T) {
+	h := newFlowHarness(t)
+	dns := &fakeDNS{records: map[string][]string{}}
+	svc := &DomainService{q: h.q, dns: dns}
+
+	admin := uuid.New()
+	if _, err := h.tx.Exec(h.ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,$3)", admin, "admin@suspend.com", "Admin"); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	txt, err := svc.CreateClaim(h.ctx, admin, "admin@suspend.com", true, h.org, "suspend.com")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	dns.records["suspend.com"] = []string{txt}
+	if err := svc.Verify(h.ctx, admin, h.org, "suspend.com"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	// A SECOND org exists and must NOT receive the audit row — the discriminating case for the
+	// cross-org write. Without it, "an audit row exists somewhere" would pass a wrong implementation.
+	orgB := uuid.New()
+	if _, err := h.tx.Exec(h.ctx, "INSERT INTO organizations (id,name,slug) VALUES ($1,$2,$3)", orgB, "B", "b-"+orgB.String()); err != nil {
+		t.Fatalf("orgB: %v", err)
+	}
+
+	// The record disappears from DNS: the next signup lookup must suspend the capture.
+	delete(dns.records, "suspend.com")
+	if _, ok := svc.CapturingOrgForEmail(h.ctx, "someone@suspend.com"); ok {
+		t.Fatal("capture must be refused once the TXT record is gone")
+	}
+
+	var n int
+	var actorSystem *string
+	var actorUser *uuid.UUID
+	var meta []byte
+	if err := h.tx.QueryRow(h.ctx,
+		`SELECT count(*), max(actor_system), max(actor_user_id::text)::uuid, max(metadata::text)::jsonb
+		   FROM audit_logs WHERE org_id = $1 AND action = 'domain.capture_suspended'`,
+		h.org).Scan(&n, &actorSystem, &actorUser, &meta); err != nil {
+		t.Fatalf("audit read: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("the capturing org must get exactly ONE suspend audit row, got %d", n)
+	}
+	// ⛔ NAMED SYSTEM ACTOR, AND NO HUMAN ACTOR. Recording the signing-up user here would blame a
+	// person for something they did not do.
+	if actorSystem == nil || *actorSystem != "domain-capture" {
+		t.Fatalf("actor_system must NAME the system actor, got %v", actorSystem)
+	}
+	if actorUser != nil {
+		t.Fatalf("actor_user_id must be NULL — nobody did this; got %v", actorUser)
+	}
+	// The CAUSE is the point: "suspended" alone sends an operator hunting for a person.
+	if !strings.Contains(string(meta), "txt_record_missing") {
+		t.Fatalf("metadata must carry the CAUSE, got %s", meta)
+	}
+
+	// ⛔ THE CROSS-ORG HALF. The other org must have nothing.
+	var other int
+	if err := h.tx.QueryRow(h.ctx,
+		`SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'domain.capture_suspended'`,
+		orgB).Scan(&other); err != nil {
+		t.Fatalf("audit read (orgB): %v", err)
+	}
+	if other != 0 {
+		t.Fatalf("the suspend row must be filed against the CAPTURING org only; orgB got %d", other)
+	}
+}

@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useState, type ReactNode } from "react";
 import { Button, StatusDot } from "./ui";
 
@@ -56,6 +57,7 @@ export function OneTimeSecretModal({
   leadingActions,
   children,
   onDismiss,
+  requireAck,
 }: {
   title: string;
   caption: ReactNode;
@@ -70,9 +72,25 @@ export function OneTimeSecretModal({
   // after close, since the secret it encodes is only in the caller's state and never re-fetched).
   children?: ReactNode;
   onDismiss: () => void;
+  /**
+   * ⛔ REQUIRE AN EXPLICIT ACKNOWLEDGEMENT BEFORE THE MODAL CAN CLOSE.
+   *
+   * The wireframe's forced-enrollment ceremony specifies it: *"Modal cannot be dismissed by
+   * click-away or Esc — only by the 'I've saved them' checkbox + button."* Two of those three were
+   * already true HERE BY ABSENCE — there is no backdrop `onClick` and no key handler, so neither
+   * gesture closes it. **But absence is not a guarantee**: nothing stopped a later edit adding
+   * either, and nothing tested it. The checkbox was genuinely missing.
+   *
+   * Recovery codes are shown ONCE. A dismiss that takes one stray click is the difference between
+   * a user who has their codes and a user who needs an administrator.
+   */
+  requireAck?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  // ⛔ THE ACKNOWLEDGEMENT GATE. Undefined `requireAck` keeps every existing caller unchanged; a
+  // caller that opts in cannot be dismissed until the box is ticked.
+  const [acked, setAcked] = useState(false);
 
   async function copy() {
     try {
@@ -94,7 +112,7 @@ export function OneTimeSecretModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/80 p-4">
       <div className="w-full max-w-lg rounded-xl border-2 border-warn/60 bg-ink-800 p-5 shadow-2xl">
         <div className="flex items-center gap-2">
@@ -106,23 +124,47 @@ export function OneTimeSecretModal({
         <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-ink-950 p-3 font-mono text-xs text-slate-300">
           {secret}
         </pre>
+        {requireAck && (
+          <label className="mt-3 flex items-start gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              data-testid="ots-ack"
+              checked={acked}
+              onChange={(e) => setAcked(e.target.checked)}
+              className="mt-0.5"
+            />
+            {requireAck}
+          </label>
+        )}
         <div className="mt-4 flex items-center justify-between">
           <div className="flex gap-2">
             {downloadFilename && (
-              <Button variant="ghost" onClick={() => downloadText(downloadFilename, secret)}>
+              <Button
+                variant="ghost"
+                onClick={() => downloadText(downloadFilename, secret)}
+              >
                 Download
               </Button>
             )}
             {leadingActions}
             <Button variant="ghost" onClick={copy}>
-              {copied ? "Copied" : copyFailed ? "Select + ⌘C to copy" : copyLabel}
+              {copied
+                ? "Copied"
+                : copyFailed
+                  ? "Select + ⌘C to copy"
+                  : copyLabel}
             </Button>
           </div>
-          <Button variant="ghost" onClick={onDismiss}>
+          <Button
+            variant="ghost"
+            onClick={onDismiss}
+            disabled={Boolean(requireAck) && !acked}
+          >
             I&rsquo;ve saved it
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

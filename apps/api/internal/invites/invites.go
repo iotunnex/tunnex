@@ -187,6 +187,24 @@ func (s *Service) Accept(ctx context.Context, token, name, pw string) (uuid.UUID
 
 // Resend invalidates any pending invite for the email and issues a fresh one —
 // the old token stops working; the same live token is never re-mailed.
+// List returns every invitation for the org, newest first.
+//
+// ⛔ THE GAP THIS CLOSES, and it is the only write-only state in the product that IS an access grant.
+// `Resend` and `Revoke` are keyed by EMAIL, and until now nothing could tell an operator WHICH addresses
+// were outstanding — so an invitation could be created and then never seen, resent or revoked unless
+// someone remembered the exact string they typed. A mistyped invite was, in practice, unrevokable, while
+// still being redeemable into a membership.
+//
+// The query already existed (`ListInvitations`, db/queries/invitations.sql) and had no HTTP consumer —
+// the same shape as `ListDomainClaims` at S14.13. This is the endpoint over it, not new machinery.
+//
+// ⚠ THE TOKEN IS NEVER RETURNED. `token_hash` is not selected into the view and the raw token exists only
+// in `Create`'s return value. A list endpoint that leaked it would turn "read who is invited" into "join
+// as any of them".
+func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListInvitationsRow, error) {
+	return s.q.ListInvitations(ctx, orgID)
+}
+
 func (s *Service) Resend(ctx context.Context, actor, orgID uuid.UUID, email string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 	raw, hash, err := newToken()

@@ -11,15 +11,41 @@ export interface AuthStatus {
   secureStorage: boolean;
 }
 
+/** Mirrors the preload's AppInfo. `update` is a build-time verdict, not a network result. */
+export interface AppInfo {
+  version: string;
+  update:
+    | { kind: "disabled"; reason: string; detail: string }
+    | { kind: "no_feed"; reason: string; detail: string }
+    | { kind: "ready" };
+}
+
+/** An imported `.conf` profile, as main reports it — never key material. */
+export interface ImportedProfile {
+  address?: string;
+  fullTunnel: boolean;
+}
+
 export interface TunnexBridge {
   auth: {
     login(): Promise<{ fingerprint: string; expiresAt: string }>;
     logout(): Promise<void>;
     status(): Promise<AuthStatus>;
   };
+  // Troubleshooting. `openLogs` reveals the file in the OS file manager — the log is never read
+  // into the renderer, so a compromised page cannot read it out.
+  diag: {
+    logPath(): Promise<string>;
+    openLogs(): Promise<void>;
+    readLog(): Promise<string>;
+    exportLog(): Promise<string | null>;
+    appInfo(): Promise<AppInfo>;
+  };
   config: {
     getServerUrl(): Promise<string>;
-    setServerUrl(url: string): Promise<{ url: string; reloginRequired: boolean }>;
+    setServerUrl(
+      url: string,
+    ): Promise<{ url: string; reloginRequired: boolean }>;
   };
   tunnel: {
     // fullTunnel = the split-tunnel toggle intent (S6.4); effective only when a
@@ -28,6 +54,9 @@ export interface TunnexBridge {
     down(): Promise<void>;
     status(): Promise<TunnelStatus>;
     onStatusChanged(cb: (s: TunnelStatus) => void): () => void;
+    importConfig(): Promise<ImportedProfile | null>;
+    importedInfo(): Promise<ImportedProfile | null>;
+    forgetImported(): Promise<void>;
   };
 }
 

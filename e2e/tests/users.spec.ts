@@ -5,9 +5,18 @@ import { test, expect, type Page } from "@playwright/test";
 // specs. The seed provides an owner and a plain member in the demo org.
 test.describe.configure({ mode: "serial" });
 
-const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" };
-const MEMBER = { email: "member@demo.tunnex.local", pass: "tunnex-demo-password" };
-const UNVERIFIED_ADMIN = { email: "unverified-admin@demo.tunnex.local", pass: "tunnex-demo-password" };
+const OWNER = {
+  email: "owner@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
+const MEMBER = {
+  email: "member@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
+const UNVERIFIED_ADMIN = {
+  email: "unverified-admin@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
 
 async function loginAs(page: Page, who: { email: string; pass: string }) {
   await page.goto("/login");
@@ -15,18 +24,24 @@ async function loginAs(page: Page, who: { email: string; pass: string }) {
   await page.getByLabel("Password").fill(who.pass);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Users" }).click();
+  await page.getByRole("link", { name: "Users & Roles" }).click();
   await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
 }
 
 // (a) DENY view: a plain member may see the roster but is offered NO management
 // controls — the UI mirrors the RBAC matrix (member lacks member:invite/manage).
-test("a member sees the roster but no management controls", async ({ page }) => {
+test("a member sees the roster but no management controls", async ({
+  page,
+}) => {
   await loginAs(page, MEMBER);
   // Scope to roster rows (<li>) — the logged-in user's email also shows in the
   // header, so a bare getByText would match twice.
-  await expect(page.locator("li", { hasText: OWNER.email })).toBeVisible();
-  await expect(page.locator("li", { hasText: MEMBER.email })).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: OWNER.email }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: MEMBER.email }),
+  ).toBeVisible();
   // No invite form, and no role <select> or Deactivate anywhere.
   await expect(page.getByLabel("Invite by email")).toHaveCount(0);
   await expect(page.locator("select")).toHaveCount(0);
@@ -34,20 +49,28 @@ test("a member sees the roster but no management controls", async ({ page }) => 
 });
 
 // (a) ALLOW view: an owner gets the invite form and per-member controls.
-test("an owner sees the invite form and per-member controls", async ({ page }) => {
+test("an owner sees the invite form and per-member controls", async ({
+  page,
+}) => {
   await loginAs(page, OWNER);
   await expect(page.getByLabel("Invite by email")).toBeVisible();
-  const memberRow = page.locator("li", { hasText: MEMBER.email });
+  const memberRow = page.getByRole("row").filter({ hasText: MEMBER.email });
   await expect(memberRow.locator("select")).toBeVisible();
-  await expect(memberRow.getByRole("button", { name: "Deactivate" })).toBeVisible();
+  await expect(
+    memberRow.getByRole("button", { name: "Deactivate" }),
+  ).toBeVisible();
 });
 
 // (a) Verified-gate: an admin has the ROLE to invite/manage, but with an
 // unverified email the server 403s every such mutation — so the UI must offer
 // none of those controls (role grant is necessary, not sufficient).
-test("an unverified admin is offered no mutating controls despite the role", async ({ page }) => {
+test("an unverified admin is offered no mutating controls despite the role", async ({
+  page,
+}) => {
   await loginAs(page, UNVERIFIED_ADMIN);
-  await expect(page.locator("li", { hasText: MEMBER.email })).toBeVisible(); // can still read the roster
+  await expect(
+    page.getByRole("row").filter({ hasText: MEMBER.email }),
+  ).toBeVisible(); // can still read the roster
   await expect(page.getByLabel("Invite by email")).toHaveCount(0);
   await expect(page.locator("select")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
@@ -57,23 +80,30 @@ test("an unverified admin is offered no mutating controls despite the role", asy
 // call (bypassing the hidden UI) from the unverified admin is refused 403
 // email_not_verified. This proves the UI gate is honest mirroring, not a
 // UI-only security control an attacker could curl around.
-test("the server (not just the UI) refuses a mutation from an unverified admin", async ({ page }) => {
+test("the server (not just the UI) refuses a mutation from an unverified admin", async ({
+  page,
+}) => {
   const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
   const MEMBER_ID = "01900000-0000-7000-8000-000000000003"; // seeddata.DemoMemberUserID
   await loginAs(page, UNVERIFIED_ADMIN);
-  const resp = await page.request.put(`/api/v1/organizations/${ORG}/members/${MEMBER_ID}/role`, {
-    headers: { "X-Tunnex-CSRF": "1" },
-    data: { role: "member" },
-  });
+  const resp = await page.request.put(
+    `/api/v1/organizations/${ORG}/members/${MEMBER_ID}/role`,
+    {
+      headers: { "X-Tunnex-CSRF": "1" },
+      data: { role: "member" },
+    },
+  );
   expect(resp.status()).toBe(403);
   expect(JSON.parse(await resp.text()).error.code).toBe("email_not_verified");
 });
 
 // (b) Last-owner: the sole owner's own role control is disabled-with-explanation
 // (client mirror of the server's last-owner refusal).
-test("the sole owner's own role control is disabled with an explanation", async ({ page }) => {
+test("the sole owner's own role control is disabled with an explanation", async ({
+  page,
+}) => {
   await loginAs(page, OWNER);
-  const ownerRow = page.locator("li", { hasText: OWNER.email });
+  const ownerRow = page.getByRole("row").filter({ hasText: OWNER.email });
   const roleSelect = ownerRow.locator("select");
   await expect(roleSelect).toBeDisabled();
   await expect(roleSelect).toHaveAttribute("title", /at least one owner/i);
@@ -82,7 +112,9 @@ test("the sole owner's own role control is disabled with an explanation", async 
 // (c) Invite enumeration resistance: inviting an address that already has an
 // account renders IDENTICALLY to inviting a brand-new one — no account-existence
 // tell.
-test("invite renders identically for an existing account vs a new email", async ({ page }) => {
+test("invite renders identically for an existing account vs a new email", async ({
+  page,
+}) => {
   await loginAs(page, OWNER);
   const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
 
@@ -96,7 +128,9 @@ test("invite renders identically for an existing account vs a new email", async 
     await page.getByLabel("Invite by email").fill(email);
     await page.getByRole("button", { name: "Send invite" }).click();
     await expect(page.getByText("Invitation link")).toBeVisible();
-    await expect(page.getByText(/could not create the invitation/i)).toHaveCount(0);
+    await expect(
+      page.getByText(/could not create the invitation/i),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: /I.?ve saved it/i }).click();
     await expect(page.getByText("Invitation link")).toHaveCount(0);
   }
@@ -119,15 +153,17 @@ test("invite renders identically for an existing account vs a new email", async 
 // (e) Audit loop: a mutation in the Users UI lands in the audit log and shows up
 // on the dashboard activity feed (the cheapest full-stack proof: UI -> API ->
 // audit -> dashboard read -> render). Reverts the role to leave state clean.
-test("a role change in the UI appears on the dashboard activity feed", async ({ page }) => {
+test("a role change in the UI appears on the dashboard activity feed", async ({
+  page,
+}) => {
   const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
   const MEMBER_ID = "01900000-0000-7000-8000-000000000003"; // seeddata.DemoMemberUserID
   await loginAs(page, OWNER);
   try {
-    const memberRow = page.locator("li", { hasText: MEMBER.email });
+    const memberRow = page.getByRole("row").filter({ hasText: MEMBER.email });
     await memberRow.locator("select").selectOption("admin");
 
-    await page.getByRole("link", { name: "Dashboard" }).click();
+    await page.getByRole("link", { name: "Overview" }).click();
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await expect(page.getByText("member.role_changed").first()).toBeVisible();
   } finally {
@@ -135,9 +171,12 @@ test("a role change in the UI appears on the dashboard activity feed", async ({ 
     // seed dirty and poison the (serial) deny-view test. Uses the API directly
     // (the owner's session is shared with the page context) so the revert does
     // not depend on the UI being in a navigable state.
-    await page.request.put(`/api/v1/organizations/${ORG}/members/${MEMBER_ID}/role`, {
-      headers: { "X-Tunnex-CSRF": "1" },
-      data: { role: "member" },
-    });
+    await page.request.put(
+      `/api/v1/organizations/${ORG}/members/${MEMBER_ID}/role`,
+      {
+        headers: { "X-Tunnex-CSRF": "1" },
+        data: { role: "member" },
+      },
+    );
   }
 });

@@ -220,7 +220,20 @@ func (s *Service) failoverOrg(ctx context.Context, orgID uuid.UUID, now time.Tim
 
 	fc := s.failoverFor(orgID)
 	fc.seedDemoted(current.Demoted) // rehydrate the demotion set (#1) BEFORE the first Step
-	var demoted []uuid.UUID
+	// ⛔ EMPTY, NOT NIL — AND THIS IS A PERMANENT-WEDGE FIX, NOT A STYLE CHOICE.
+	//
+	// `org_hub_set.demoted` is NOT NULL. A nil slice reaches pgx as SQL NULL, so the write below fails with
+	// 23502. The branch that assigns this variable is guarded by `len(configured) >= 2`, which means:
+	//
+	//   AN ORG THAT HAS A DEMOTED MEMBER AND THEN DROPS BELOW TWO CONFIGURED HUBS CAN NEVER CLEAR IT.
+	//   `demotedChanged` is true (nil != {member}), the UPDATE sends NULL, the tick fails, and it fails
+	//   again on EVERY subsequent tick — the failover controller is wedged until a human edits the row.
+	//
+	// Dropping below two hubs is exactly when a fleet is already degraded, so the controller stops working
+	// at the moment it is most needed, and says so only in a log nobody is tailing.
+	//
+	// Found on 2026-08-02 by seeding a demotion and watching the CP log: 42 consecutive failed ticks.
+	demoted := []uuid.UUID{}
 	var freshness map[uuid.UUID]bool
 	var ages map[uuid.UUID]time.Duration
 	if len(configured) >= 2 { // a single/zero-hub set has nothing to demote (configured still heals below)

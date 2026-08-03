@@ -3,7 +3,10 @@ import { policyHealthBadge, siteLinkNote } from "../src/lib/healthview";
 import type { Node } from "../src/lib/api";
 
 const node = (degraded: boolean, kind?: Node["policy_degraded_kind"]) =>
-  ({ policy_degraded: degraded, policy_degraded_kind: kind }) as Pick<Node, "policy_degraded" | "policy_degraded_kind">;
+  ({ policy_degraded: degraded, policy_degraded_kind: kind }) as Pick<
+    Node,
+    "policy_degraded" | "policy_degraded_kind"
+  >;
 
 describe("policyHealthBadge — bool primary, kind refines, never less alarmed", () => {
   it("not degraded → NO badge (healthy)", () => {
@@ -27,8 +30,12 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
   });
 
   it("apply_failing / stuck_enforcing render distinct labels", () => {
-    expect(policyHealthBadge(node(true, "apply_failing"))?.label).toMatch(/apply/i);
-    expect(policyHealthBadge(node(true, "stuck_enforcing"))?.tone).toBe("danger");
+    expect(policyHealthBadge(node(true, "apply_failing"))?.label).toMatch(
+      /apply/i,
+    );
+    expect(policyHealthBadge(node(true, "stuck_enforcing"))?.tone).toBe(
+      "danger",
+    );
   });
 
   it("degraded bool but kind absent/healthy → STILL a badge (never less alarmed than the bool)", () => {
@@ -43,12 +50,18 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
   });
 
   it("S8.2 kinds render distinct danger badges (site hub/link down, agent too old)", () => {
-    expect(policyHealthBadge(node(true, "unsupported_policy_version"))?.tone).toBe("danger");
+    expect(
+      policyHealthBadge(node(true, "unsupported_policy_version"))?.tone,
+    ).toBe("danger");
     const hub = policyHealthBadge(node(true, "site_hub_down"));
     expect(hub?.tone).toBe("danger");
     expect(hub?.label).toMatch(/hub/i);
-    expect(policyHealthBadge(node(true, "site_link_down"))?.label).toMatch(/link/i);
-    expect(policyHealthBadge(node(true, "site_subnet_unreachable"))?.tone).toBe("danger"); // S8.2c D3
+    expect(policyHealthBadge(node(true, "site_link_down"))?.label).toMatch(
+      /link/i,
+    );
+    expect(policyHealthBadge(node(true, "site_subnet_unreachable"))?.tone).toBe(
+      "danger",
+    ); // S8.2c D3
   });
 
   it("WF-C L2 hub_forwarding_not_reconciling → danger, names BOTH halves (forwarding + agent down) + the remedy", () => {
@@ -60,16 +73,18 @@ describe("policyHealthBadge — bool primary, kind refines, never less alarmed",
 
   it("forward-compat: an unknown future kind falls through to the 'degraded' default (never null while degraded)", () => {
     // A kind the switch doesn't enumerate must still badge (the default guards the next kind we add).
-    const b = policyHealthBadge(node(true, "some_future_kind" as Node["policy_degraded_kind"]));
+    const b = policyHealthBadge(
+      node(true, "some_future_kind" as Node["policy_degraded_kind"]),
+    );
     expect(b).toEqual({ label: "degraded", tone: "warn" });
   });
 });
 describe("siteLinkNote — WF-B subordinate line, independent of the headline badge", () => {
   const n = (peer?: string | null, demoted?: boolean) =>
-    ({ site_link_note_peer: peer ?? null, site_link_note_demoted: demoted ?? null }) as Pick<
-      Node,
-      "site_link_note_peer" | "site_link_note_demoted"
-    >;
+    ({
+      site_link_note_peer: peer ?? null,
+      site_link_note_demoted: demoted ?? null,
+    }) as Pick<Node, "site_link_note_peer" | "site_link_note_demoted">;
 
   it("no peer → no note (null)", () => {
     expect(siteLinkNote(n(null))).toBeNull();
@@ -77,12 +92,18 @@ describe("siteLinkNote — WF-B subordinate line, independent of the headline ba
   });
 
   it("a demoted-dead peer → named note carrying the (demoted) qualifier", () => {
-    expect(siteLinkNote(n("aws-gw-1", true))).toEqual({ peer: "aws-gw-1", demoted: true });
+    expect(siteLinkNote(n("aws-gw-1", true))).toEqual({
+      peer: "aws-gw-1",
+      demoted: true,
+    });
   });
 
   it("the note is INDEPENDENT of policy_degraded_kind — a healthy headline can still carry it (the walk's state)", () => {
     // The CP only sets the note when the headline is NOT site_link_down; the render shows both truths distinct.
-    const healthyHeadline = { policy_degraded: false, policy_degraded_kind: "healthy" } as Pick<Node, "policy_degraded" | "policy_degraded_kind">;
+    const healthyHeadline = {
+      policy_degraded: false,
+      policy_degraded_kind: "healthy",
+    } as Pick<Node, "policy_degraded" | "policy_degraded_kind">;
     expect(policyHealthBadge(healthyHeadline)).toBeNull(); // headline healthy
     expect(siteLinkNote(n("aws-gw-1", true))).not.toBeNull(); // + a subordinate named line
   });

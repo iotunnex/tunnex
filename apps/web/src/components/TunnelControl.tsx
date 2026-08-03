@@ -16,7 +16,10 @@ export function TunnelControl() {
   useEffect(() => {
     const d = desktop();
     if (!d) return;
-    d.tunnel.status().then(setStatus).catch(() => {});
+    d.tunnel
+      .status()
+      .then(setStatus)
+      .catch(() => {});
     // Live updates: heartbeat status + the fail-closed / revoked signals from main.
     return d.tunnel.onStatusChanged(setStatus);
   }, []);
@@ -58,8 +61,11 @@ export function TunnelControl() {
   // last_handshake_sec is an ABSOLUTE unix timestamp (0 = never), NOT an age — and
   // wireguard-go runs client-side, so it's on THIS machine's clock. Age = now - it.
   const nowSec = Math.floor(Date.now() / 1000);
-  const handshakeAgeSec = status.last_handshake_sec ? Math.max(0, nowSec - status.last_handshake_sec) : null;
-  const live = isUp && handshakeAgeSec != null && handshakeAgeSec <= HANDSHAKE_STALE_SEC;
+  const handshakeAgeSec = status.last_handshake_sec
+    ? Math.max(0, nowSec - status.last_handshake_sec)
+    : null;
+  const live =
+    isUp && handshakeAgeSec != null && handshakeAgeSec <= HANDSHAKE_STALE_SEC;
   const connecting = isUp && !live; // interface up but no fresh handshake — not "Connected"
   const failed = status.state === "failed";
   const revoked = status.state === "revoked"; // this device was revoked server-side
@@ -76,7 +82,15 @@ export function TunnelControl() {
           : migrateFailed
             ? "Couldn't replace device — reconnect to retry"
             : "Not connected";
-  const statusClass = live ? "text-emerald-400" : connecting ? "text-amber-400" : failed || revoked ? "text-red-400" : migrateFailed ? "text-amber-400" : "text-slate-400";
+  const statusClass = live
+    ? "text-emerald-400"
+    : connecting
+      ? "text-amber-400"
+      : failed || revoked
+        ? "text-red-400"
+        : migrateFailed
+          ? "text-amber-400"
+          : "text-slate-400";
 
   return (
     <Card className="mt-6">
@@ -91,22 +105,27 @@ export function TunnelControl() {
           </Button>
         ) : (
           <Button onClick={connect} disabled={busy}>
-            {busy ? "Connecting…" : failed || revoked || migrateFailed ? "Reconnect" : "Connect"}
+            {busy
+              ? "Connecting…"
+              : failed || revoked || migrateFailed
+                ? "Reconnect"
+                : "Connect"}
           </Button>
         )}
       </div>
 
       {revoked && (
         <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-          Your device was revoked or removed on the server. The local profile has been cleared — reconnecting will
-          enroll a fresh device.
+          Your device was revoked or removed on the server. The local profile
+          has been cleared — reconnecting will enroll a fresh device.
         </div>
       )}
 
       {migrateFailed && (
         <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
-          Couldn&rsquo;t finish replacing this device for a security update. Your profile was kept — reconnect to retry.
-          If it keeps failing, ask an admin to remove the old device.
+          Couldn&rsquo;t finish replacing this device for a security update.
+          Your profile was kept — reconnect to retry. If it keeps failing, ask
+          an admin to remove the old device.
         </div>
       )}
 
@@ -117,21 +136,29 @@ export function TunnelControl() {
       {!isUp && (
         <div className="mt-4 border-t border-white/5 pt-3">
           <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input type="checkbox" checked={fullTunnel} onChange={(e) => setFullTunnel(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={fullTunnel}
+              onChange={(e) => setFullTunnel(e.target.checked)}
+            />
             Route all traffic (full tunnel)
           </label>
           {fullTunnel ? (
             <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
-              Full tunnel sends <strong>all</strong> your traffic through the gateway. This gateway does not provide
-              internet egress yet — with full tunnel on you will have <strong>no internet access</strong> until that
-              ships. Use split tunnel (org network only) for now.
+              Full tunnel sends <strong>all</strong> your traffic through the
+              gateway. This gateway does not provide internet egress yet — with
+              full tunnel on you will have <strong>no internet access</strong>{" "}
+              until that ships. Use split tunnel (org network only) for now.
             </p>
           ) : (
-            <p className="mt-1 text-xs text-slate-500">Split tunnel: only your organization&rsquo;s network is routed through Tunnex.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Split tunnel: only your organization&rsquo;s network is routed
+              through Tunnex.
+            </p>
           )}
           <p className="mt-1 text-[11px] text-slate-600">
-            Changing this replaces your device profile — the current device is revoked and a new one is created on your
-            next connect.
+            Changing this replaces your device profile — the current device is
+            revoked and a new one is created on your next connect.
           </p>
         </div>
       )}
@@ -140,13 +167,20 @@ export function TunnelControl() {
         <div className="mt-3 space-y-1 text-xs text-slate-400">
           {status.address && (
             <div>
-              Your IP: <span className="text-slate-300">{status.address.split("/")[0]}</span>
+              Your IP:{" "}
+              <span className="text-slate-300">
+                {status.address.split("/")[0]}
+              </span>
             </div>
           )}
           <div className="grid grid-cols-3 gap-2">
             <span>↓ {fmtBytes(status.rx_bytes)}</span>
             <span>↑ {fmtBytes(status.tx_bytes)}</span>
-            <span>{handshakeAgeSec != null ? `handshake ${handshakeAgeSec}s ago` : "handshaking…"}</span>
+            <span>
+              {handshakeAgeSec != null
+                ? `handshake ${handshakeAgeSec}s ago`
+                : "handshaking…"}
+            </span>
           </div>
         </div>
       )}
@@ -158,18 +192,30 @@ export function TunnelControl() {
 // friendly maps the known helper/config error codes to something a user can act on.
 function friendly(msg?: string): string {
   const m = msg ?? "Could not connect.";
-  if (m.includes("app_translocated")) return "Move Tunnex to your Applications folder and reopen it from there, then reconnect.";
-  if (m.includes("caller_untrusted")) return "Move Tunnex to Applications and reopen from there (reinstall the helper), then reconnect.";
-  if (m.includes("helper_install_canceled")) return "Helper install was canceled. Reconnect and approve the admin prompt to install the Tunnex helper.";
-  if (m.includes("helper_install_failed") || m.includes("helper_asset_missing")) return "Couldn't install the Tunnex helper. Reinstall the app, then reconnect.";
-  if (m.includes("device_config_unavailable") || m.includes("not_authenticated")) return "Sign in again, then reconnect.";
-  if (m.includes("no_active_gateway")) return "No gateway is enrolled on your organization yet.";
+  if (m.includes("app_translocated"))
+    return "Move Tunnex to your Applications folder and reopen it from there, then reconnect.";
+  if (m.includes("caller_untrusted"))
+    return "Move Tunnex to Applications and reopen from there (reinstall the helper), then reconnect.";
+  if (m.includes("helper_install_canceled"))
+    return "Helper install was canceled. Reconnect and approve the admin prompt to install the Tunnex helper.";
+  if (m.includes("helper_install_failed") || m.includes("helper_asset_missing"))
+    return "Couldn't install the Tunnex helper. Reinstall the app, then reconnect.";
+  if (
+    m.includes("device_config_unavailable") ||
+    m.includes("not_authenticated")
+  )
+    return "Sign in again, then reconnect.";
+  if (m.includes("no_active_gateway"))
+    return "No gateway is enrolled on your organization yet.";
   // Forward-looking: when S3.7 lands the gateway-egress refusal, the server rejects a
   // full-tunnel device with this typed code — the UI mirrors it cleanly rather than
   // showing a raw status. (The refusal itself is S3.7; this is just the mapping.)
-  if (m.includes("gateway_no_egress")) return "This gateway can't route full-tunnel internet traffic yet. Turn off full tunnel and reconnect.";
-  if (m.includes("peer_resolution_needs_cgo") || m.includes("caller-auth")) return "The Tunnex helper is a dev/stub build — reinstall the signed helper.";
-  if (m.includes("ECONNREFUSED") || m.includes("connect")) return "The Tunnex helper isn't running. Install/start it and try again.";
+  if (m.includes("gateway_no_egress"))
+    return "This gateway can't route full-tunnel internet traffic yet. Turn off full tunnel and reconnect.";
+  if (m.includes("peer_resolution_needs_cgo") || m.includes("caller-auth"))
+    return "The Tunnex helper is a dev/stub build — reinstall the signed helper.";
+  if (m.includes("ECONNREFUSED") || m.includes("connect"))
+    return "The Tunnex helper isn't running. Install/start it and try again.";
   return m;
 }
 

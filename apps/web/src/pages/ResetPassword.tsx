@@ -11,7 +11,8 @@ export default function ResetPassword() {
   // later re-renders (typing) don't lose it after the URL is scrubbed.
   const [token] = useState(() => params.get("token") ?? "");
   useEffect(() => {
-    if (params.get("token")) window.history.replaceState(null, "", window.location.pathname);
+    if (params.get("token"))
+      window.history.replaceState(null, "", window.location.pathname);
   }, [params]);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -22,10 +23,14 @@ export default function ResetPassword() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await api.POST("/api/v1/auth/password-reset/confirm", { body: { token, password } });
+    const { error } = await api.POST("/api/v1/auth/password-reset/confirm", {
+      body: { token, password },
+    });
     setBusy(false);
     if (error) {
-      setError(apiErrorMessage(error, "This reset link is invalid or has expired."));
+      setError(
+        apiErrorMessage(error, "This reset link is invalid or has expired."),
+      );
       return;
     }
     setDone(true);
@@ -35,8 +40,13 @@ export default function ResetPassword() {
     return (
       <AuthLayout>
         <h1 className="text-xl font-semibold text-white">Invalid reset link</h1>
-        <p className="mt-2 text-sm text-slate-400">This link is missing its token. Request a new one.</p>
-        <Link to="/forgot-password" className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200">
+        <p className="mt-2 text-sm text-slate-400">
+          This link is missing its token. Request a new one.
+        </p>
+        <Link
+          to="/forgot-password"
+          className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200"
+        >
           Request a reset link
         </Link>
       </AuthLayout>
@@ -47,8 +57,13 @@ export default function ResetPassword() {
     return (
       <AuthLayout>
         <h1 className="text-xl font-semibold text-white">Password updated</h1>
-        <p className="mt-2 text-sm text-slate-400">You can now sign in with your new password.</p>
-        <Link to="/login" className="mt-5 inline-block text-xs text-accent-400 hover:text-accent-500">
+        <p className="mt-2 text-sm text-slate-400">
+          You can now sign in with your new password.
+        </p>
+        <Link
+          to="/login"
+          className="mt-5 inline-block text-xs text-accent-400 hover:text-accent-500"
+        >
           Go to sign in
         </Link>
       </AuthLayout>
@@ -60,7 +75,16 @@ export default function ResetPassword() {
       <h1 className="text-xl font-semibold text-white">Set a new password</h1>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="New password">
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={12} autoFocus />
+          <Input
+            type="password"
+            name="new-password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={12}
+            autoFocus
+          />
         </Field>
         <ErrorText>{error}</ErrorText>
         <Button type="submit" disabled={busy} className="w-full">

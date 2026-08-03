@@ -33,7 +33,9 @@ export default function CliAuth() {
   const loopbackOk =
     target !== null &&
     target.protocol === "http:" &&
-    (target.hostname === "127.0.0.1" || target.hostname === "[::1]" || target.hostname === "::1") &&
+    (target.hostname === "127.0.0.1" ||
+      target.hostname === "[::1]" ||
+      target.hostname === "::1") &&
     target.port !== "" &&
     target.pathname === "/callback";
 
@@ -43,14 +45,20 @@ export default function CliAuth() {
     setBusy(true);
     setError(null);
     const { data, error } = await api.POST("/api/v1/auth/cli/authorize", {
-      body: { redirect_uri: redirectUri, code_challenge: codeChallenge, state: cliState },
+      body: {
+        redirect_uri: redirectUri,
+        code_challenge: codeChallenge,
+        state: cliState,
+      },
     });
     if (error || !data) {
       setBusy(false);
       // Minting requires a verified email (requireVerifiedSessionUser). Spell
       // that out instead of a generic failure — the user can act on it.
       if (apiErrorCode(error) === "email_not_verified") {
-        return setError("Verify your email before authorizing a device — check your inbox, then try again.");
+        return setError(
+          "Verify your email before authorizing a device — check your inbox, then try again.",
+        );
       }
       return setError(apiErrorMessage(error, "Could not authorize the CLI."));
     }
@@ -65,26 +73,32 @@ export default function CliAuth() {
 
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Authorize the Tunnex CLI</h1>
+      <h1 className="text-xl font-semibold text-white">
+        Authorize the Tunnex CLI
+      </h1>
       {missing || !loopbackOk ? (
         <>
           <p className="mt-2 text-sm text-slate-400">
-            This link is missing or has an invalid loopback address, so it can&rsquo;t be trusted. Re-run{" "}
+            This link is missing or has an invalid loopback address, so it
+            can&rsquo;t be trusted. Re-run{" "}
             <span className="font-mono">tunnex login</span> in your terminal.
           </p>
         </>
       ) : (
         <>
           <p className="mt-2 text-sm text-slate-400">
-            Signed in as <span className="text-slate-200">{email}</span>. The Tunnex CLI on this machine is requesting a
-            credential. It will be delivered only to:
+            Signed in as <span className="text-slate-200">{email}</span>. The
+            Tunnex CLI on this machine is requesting a credential. It will be
+            delivered only to:
           </p>
           <p className="mt-3 rounded-md border border-white/10 bg-ink-900 px-3 py-2 font-mono text-sm text-white">
-            {target!.protocol}//{target!.hostname}:<span className="text-accent-400">{target!.port}</span>
+            {target!.protocol}//{target!.hostname}:
+            <span className="text-accent-400">{target!.port}</span>
             {target!.pathname}
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            That is a loopback address on this computer (port {target!.port}). If you didn&rsquo;t just run{" "}
+            That is a loopback address on this computer (port {target!.port}).
+            If you didn&rsquo;t just run{" "}
             <span className="font-mono">tunnex login</span>, close this page.
           </p>
           <ErrorText>{error}</ErrorText>

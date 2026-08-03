@@ -21,7 +21,8 @@ export default function AcceptInvite() {
   // in browser history / leak via the Referer header (same hygiene as ResetPassword).
   const [token] = useState(() => params.get("token") ?? "");
   useEffect(() => {
-    if (params.get("token")) window.history.replaceState(null, "", window.location.pathname);
+    if (params.get("token"))
+      window.history.replaceState(null, "", window.location.pathname);
   }, [params]);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -33,10 +34,14 @@ export default function AcceptInvite() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await api.POST("/api/v1/auth/invitations/accept", { body: { token, name, password } });
+    const { error } = await api.POST("/api/v1/auth/invitations/accept", {
+      body: { token, name, password },
+    });
     setBusy(false);
     if (error) {
-      setError(apiErrorMessage(error, "This invitation is invalid or has expired."));
+      setError(
+        apiErrorMessage(error, "This invitation is invalid or has expired."),
+      );
       return;
     }
     setDone(true);
@@ -45,11 +50,17 @@ export default function AcceptInvite() {
   if (!token) {
     return (
       <AuthLayout>
-        <h1 className="text-xl font-semibold text-white">Invalid invitation link</h1>
+        <h1 className="text-xl font-semibold text-white">
+          Invalid invitation link
+        </h1>
         <p className="mt-2 text-sm text-slate-400">
-          This link is missing its token. Ask your administrator to resend the invitation.
+          This link is missing its token. Ask your administrator to resend the
+          invitation.
         </p>
-        <Link to="/login" className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200">
+        <Link
+          to="/login"
+          className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200"
+        >
           Go to sign in
         </Link>
       </AuthLayout>
@@ -63,7 +74,10 @@ export default function AcceptInvite() {
         <p className="mt-2 text-sm text-slate-400">
           Your account is ready. Sign in to open your organization.
         </p>
-        <Link to="/login" className="mt-5 inline-block text-xs text-accent-400 hover:text-accent-500">
+        <Link
+          to="/login"
+          className="mt-5 inline-block text-xs text-accent-400 hover:text-accent-500"
+        >
           Go to sign in
         </Link>
       </AuthLayout>
@@ -72,14 +86,31 @@ export default function AcceptInvite() {
 
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Accept your invitation</h1>
-      <p className="mt-1 text-sm text-slate-400">Set up your account to join your organization.</p>
+      <h1 className="text-xl font-semibold text-white">
+        Accept your invitation
+      </h1>
+      <p className="mt-1 text-sm text-slate-400">
+        Set up your account to join your organization.
+      </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Your name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus
+          />
         </Field>
         <Field label="Password">
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={12} />
+          <Input
+            type="password"
+            name="new-password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={12}
+          />
         </Field>
         <ErrorText>{error}</ErrorText>
         <Button type="submit" disabled={busy} className="w-full">

@@ -81,6 +81,36 @@ echo "MUTATE: compiles — running the test; it MUST fail"
 set +e
 "$@"; rc=$?
 set -e
+# (3b) THE MISSING ASSERTION, added 2026-08-01 after it cost a false verdict.
+#
+# A RED PROVES NOTHING UNLESS THE TEST WAS GREEN BEFORE THE MUTATION. This script asserted "the test failed"
+# and concluded "the guard bites" — but a test command that is BROKEN fails identically. It happened for real:
+# the command was invoked from the repo root as `vitest run --root apps/web test/x.test.tsx`, which broke the
+# relative path in `vi.mock("../src/lib/api")`, so nothing was mocked and ALL FOUR tests failed — including two
+# the mutation cannot possibly affect. mutate.sh printed "test failed under the mutation, as required".
+#
+# That is the sixth vacuous-check mechanism (ASSERTS-A-DIFFERENT-EVENT-THAN-IT-WAITS-ON, docs/laws.md) applied
+# to the TOOL: it waits on "the command exited non-zero" and asserts "the guard rejected the mutation".
+#
+# prove-fix.sh has always had the mirror of this ("the red must FAIL before the edit"). mutate.sh never did.
+if [ $rc -ne 0 ]; then
+  restore_pre_baseline() { cp "$backup" "$file"; }
+  restore_pre_baseline
+  set +e; "$@" >/dev/null 2>&1; base_rc=$?; set -e
+  # re-apply the mutation for the restore path below to undo symmetrically
+  python3 - "$file" "$anchor_f" "$repl_f" <<'PY' >/dev/null
+import sys
+t,a,r = sys.argv[1], sys.argv[2], sys.argv[3]
+s=open(t).read(); anchor=open(a).read().rstrip('\n'); repl=open(r).read().rstrip('\n')
+open(t,'w').write(s.replace(anchor,repl,1))
+PY
+  if [ $base_rc -ne 0 ]; then
+    echo "MUTATE: *** THE TEST ALSO FAILS WITHOUT THE MUTATION *** — the red says nothing about the guard." >&2
+    echo "        Fix the test command (a wrong cwd, an unresolved mock path, a missing dep) and re-run." >&2
+    exit 6
+  fi
+  echo "MUTATE: baseline confirmed — the test PASSES unmutated, so the failure above is the mutation's."
+fi
 if [ $rc -eq 0 ]; then
   echo "MUTATE: *** THE TEST PASSED UNDER THE MUTATION *** — the guard does not cover this behaviour." >&2
   exit 5

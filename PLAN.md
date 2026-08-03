@@ -64,6 +64,310 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**MERGED (2026-08-03): EPIC 14 S14.20 step 4 — the client becomes a product. PR #71, content tip
+`fb4a147` pre-merge.** Founder-driven review ON THE RUNNING APP, one item at a time. Everything below
+was found by USING it; none of it was visible in the code.
+
+⛔ **THE SESSION'S RESULT IS THAT A REVIEW OF THE RUNNING THING FOUND WHAT EVERY OTHER INSTRUMENT
+MISSED.** Panel tests, censuses, typechecks and CI were all green across a client that had an
+inverted security toggle, permanently-fake statistics, a log file with no logging, and three
+capabilities with no caller.
+
+**The inverted control.** Routing was a checkbox LABELLED "Split tunnel" and BOUND to `fullTunnel`.
+Unchecked read as *"split is off"* — a user concludes all traffic is protected — while meaning
+`fullTunnel === false`, which IS split. **The label pointed the error at the dangerous side.**
+
+**The fabricated plot.** Stats were hard-wired `null` with a comment saying they would arrive "in
+step 3"; step 3 came and went. The graph beside them was fed by `Math.random`. *A plot of invented
+data next to an honest `n/a` is worse than either alone* — the `n/a` says "not measured", the curve
+says "measured", and the one that looks like evidence is lying.
+
+**The log that was not a log.** 30 lines over weeks, all from the auto-updater; `not_authenticated`
+appeared **zero** times. *A log file that exists is not logging* — "check the logs" reads as a real
+instruction, the file opens with content and timestamps, and the incident is simply absent.
+
+**Three stranded verbs.** Sign-out, change-server and import were on the preload allowlist with no
+caller after the step-3 flip — the S14.12 class, inside our own client.
+
+**Laws minted:** a design's container is not always part of the design (the 440px card needed a page
+only because a wireframe IS a page) · a formatting rule with an exception is broken by whichever
+value takes the exception (the rate, recomputed every second) · a cosmetic option on one platform is
+a functional one on another (`hiddenInset` removes CLOSE on Windows) · an instruction that names a
+feature is not an enumeration of its parts (I deleted the animation along with the fabrication) ·
+asserting an absence proves nothing when the failure also produces that absence · **a drift check
+must compare the thing that can drift** (byte-identity failed on Windows for calling CRLF a change
+in artwork).
+
+⛔ **AND `.gitignore`'s UNANCHORED `build/` WAS SWALLOWING PACKAGING SOURCE AGAIN** — the four files
+under `apps/client/build` are in git only via `git add -f`, and the app icon would have been the
+fifth: correct locally, absent on every fresh clone, packaged app back to Electron's atom with
+nothing failing. **This repo already paid for this exact pattern with an unanchored `secrets/`.**
+
+**Registered, unbuilt:** the mark asset needs a margin and no baked plate before it can return to
+headers · no org-level policy pins the routing mode, so an enforced full-tunnel can be flipped by
+any user · signing + a publish feed both remain before any update can be checked · imported profiles
+have no revocation monitoring by construction.
+
+**MERGED (2026-08-03): EPIC 14 S14.20 step 3 — PR #68. Content tip `51fc056` on `main` (`9cca701` pre-merge).**
+⛔ **AND THE FIRST MERGE UNDER THE CORRECTED SEQUENCING EXPOSED THE REMAINING HALF OF THE RULE.** The checkpoint
+was written LAST, inside the PR, naming the content tip `9cca701` — and **GitHub's rebase-merge rewrote every
+sha in the PR** (`9cca701` → `51fc056`, `dd8dc6e` → `0342e81`; trees byte-identical). Merge commits are
+disabled here for linear history, so **rebase is the only method available and it re-parents unconditionally.**
+So the pointer landed on `main` naming a sha that exists only on the backup ref.
+
+> ## **THE CONTENT-TIP SHA IS NOT KNOWABLE INSIDE THE PR. THE PR NUMBER IS.** Rule 6 already said the number
+> ## survives rebase — I recorded the sha as if it were the identifier and the number as the backup, which is
+> ## the wrong way round under the only merge method this repo permits.
+
+**And the check that missed it was correctly run at the wrong subject:** before merging I verified that PR #67,
+#66 and #65's head shas were present on `main` unchanged — true, and irrelevant, because **I never confirmed
+those PRs were merged by the same method.** A preservation result from an unknown method predicts nothing
+about this one. Corrected below; the sequencing fix itself stands and is unaffected.
+⛔ **FIRST MERGE UNDER THE CORRECTED SEQUENCING: the checkpoint is the FINAL commit before the merge.** The
+pointer had twice named a commit with content behind it because work landed after it — a procedure gap, not a
+rule gap. Count stays at **8**.
+
+**THE ONE-LINE FLIP.** `app://tunnex/index.html` → `app://tunnex/client.html`. The desktop client stops
+loading the web SPA — router, sidebar, top bar and every dashboard screen, most of it hidden behind
+`isDesktop()` branches — and loads its own four-region surface. **That line is the whole migration.**
+
+**The census forced the disposition change, which is what it was built for:** `built_unadopted` asserts the
+loader does NOT reference `client.html`; the flip made that false, so the census went red and the only way to
+green was `built`. ⛔ **It then refused the first `built`** — that kind requires a route in `App.tsx`, and
+`/client.html` is a separate vite entry with no router, so `built` now takes EITHER a route OR an entry.
+⛔⛔ **And the new entry check was VACUOUS on its first run** — reverting the flip left it green because the
+COMMENT explaining the flip contains "client.html". **Third instance this epic.** Now strips comments, proven
+both ways.
+
+**The client README** rewritten around real failures: one-clone rule · the THREE Electron states (the middle
+one — `dist` present at ~9MB with no binary — passes every naive check) · `npx electron --version` from the
+repo root is NOT a valid check (it resolves a foreign package and downloads electron@43.2.0) · `rm -rf` the
+`.pnpm` entry, because `pnpm rebuild` does nothing and "resolution step is skipped" means a NO-OP · the app
+data dir is `~/Library/Application Support/@tunnex/client` — the npm SCOPE, and `rm -rf` on the wrong path
+succeeds silently · no dev flag exists to skip the setup screen.
+
+⛔ **AND THE MERGE TURN'S OWN RULING PRODUCED THE BETTER FINDING.** *Any census over source strips comments
+first — as the starting shape, not as a fix each time it bites.* Seven of ten censuses read source raw. All ten
+stayed GREEN after the retrofit, so none was being ACTIVELY lied to — the exposure was latent. **One was
+pointed:** `visualgallery.test.ts` asserts *"the route is guarded by an env flag, NOT BY A COMMENT"* and read
+`App.tsx` raw. Mutation — guard replaced by `true /* was: …VITE_VISUAL_GALLERY === "1" */` — **passed
+pre-retrofit, failed post-retrofit. The visual gallery could have shipped ALWAYS-ON with its guard green.**
+Shared strippers, one per LANGUAGE; `censuscensus.test.ts` enforces the shape and checks the register against
+the STRIPPED body of the test itself. **825 tests (+14).** Law filed.
+
+**NEXT: founder tests the client against a REAL server** (real helper, real WireGuard, real handshake) → then
+remove the `isDesktop()` branches from the seven web files → narrow packaging. ⛔ **The client remains
+UNSIGNED and UN-NOTARIZED — a hard DISTRIBUTION gate, registered.**
+
+---
+
+**MERGED (2026-08-03): EPIC 14 S14.17–S14.19 + the wireframe census — PR #67, ff-only, content tip `943d7b4`.**
+⛔ **EPIC 14 IS RE-OPENED. It was declared closed with FIVE wireframe blocks unaccounted for** — the closing
+entry counted screens we HAD, not screens the design SPECIFIES. Three were unbuilt (Auth screens, Flow Logs,
+Desktop client), one was a shell component no screen census could see (the collapsible sidebar), and two were
+cut with reasons (Operations, License).
+
+**⛔ THE FIX IS MECHANICAL, NOT A PROMISE:** `apps/web/test/wireframecensus.test.ts` enumerates the DESIGN's 17
+banners and requires each to be **built / absorbed-with-a-destination / cut-with-a-reason** — a `built`
+disposition must name a route that EXISTS in `App.tsx`, so it cannot be aspirational. **The epic cannot merge
+while it is red.** A second ledger covers shell components, because the sidebar is neither a page nor a banner.
+
+**This slice:** S14.17 auth screens (the hero transcribed from the design's own SVG + keyframes; **SOC 2 and
+SCIM CUT as unevidenced claims**, gated on what would make them true) · S14.18 the user-controlled sidebar
+collapse (`tnx-nav`, the designer's key) · S14.19 **Access Events — the FOURTH unreachable surface**
+(`/access-events` + `/access-log/health` shipped in S7.5.1 with no consumer) · the real brand kit · and the
+desktop client's own entry, **shipped INERT** — `client.html` exists and nothing loads it.
+
+**⛔ DESKTOP CLIENT is `built_unadopted`, a state that FLIPS ITSELF.** "In progress" was rejected because
+intent is unfalsifiable; this asserts a fact about the code instead — the surface exists, the consumer does
+not reference it — and **the census FAILS the moment `apps/client/src/main/index.ts` points at `client.html`.**
+Step 3 is a one-line PR and turning it green requires changing the disposition to `built`.
+
+**NEXT: step 3 (the one-line Electron flip) → founder tests against a REAL server → remove the `isDesktop()`
+branches from seven web files → narrow packaging.** ⛔ **And the client is UNSIGNED and UN-NOTARIZED — a hard
+DISTRIBUTION gate, registered above the UI work.**
+
+---
+
+**MERGED (2026-08-03): EPIC 14 S14.15/S14.16 + EPIC-14 CLOSE — PR #64, ff-only, content tip `4898198`.**
+⛔ **THIRD USE OF THE POINTER RULE, AND THE RULE IS NOW CLOSED — the count held at 8 across all three merges.**
+
+**⛔⛔ EPIC 14 IS COMPLETE. Closing entry: `docs/EPIC-14-CLOSE.md`.** Twelve screens · the S14.1–S14.3
+primitives · a test tier at ~730 web tests (from ~400) · the CI classifier split.
+
+**This slice:** the INVITATION read — `resendInvitation`/`revokeInvitation` were keyed by EMAIL and nothing
+served the addresses, so an invitation could be created and never seen, resent or revoked while staying
+redeemable into a membership (**the only write-only state that IS an access grant**) · the AUDIT-WRITE fix for
+`UnmapGroup` + `SuspendDomainClaim` (one class, two call shapes: the second is not a human action and needed
+the system actor with a cause, filed against the CAPTURING org) · AUDIT LOG's four actor arms — `"system"` had
+meant BOTH *a named subsystem did this* AND *nobody recorded who did this*, so an attribution gap was invisible
+· DASHBOARD's feed now names an actor for the first time · and a SSO form default that read as a fact (Google
+showed "Enabled" + a dotted secret on a provider the server 404s for).
+
+**OPEN, each with a register row (see the closing entry §2):** the missing-audit-write class (**four writers
+still unattributed**) · ⛔ the three-site non-human-principal register with **`operator` + `PermPolicyManage`
+RANKED FIRST and live today** · `Kubernetes.tsx:403` · 51 mocks · one remaining unreachable verb
+(`revokeCliCredential`) · D1/D1b/D2 · the cascade-preview endpoint · **S14.12's three items (section OPEN)** ·
+Org Settings' items · the error-string register sweep.
+**The harness is ACCEPTED-PROVISIONAL, NOT OWED** (founder-ruled S14.15) — artifact grep is a complete claim.
+
+**NEXT: the founder sets the order.** EPIC 15 is registered ahead of the beta bundle; server stories are also
+queued. **Do not start either unprompted.**
+
+---
+
+**MERGED (2026-08-03): EPIC 14 S14.14 Directory sync (IdP) — PR #62, ff-only, content tip `21537de`.**
+⛔ **THIRD USE OF THE POINTER RULE — checkpoint landed inside the PR again, bypass count stays at 8.**
+
+**The slice:** the consuming layer for FIVE endpoints that had ZERO call sites (`putIdpSyncConfig`,
+`getIdpSyncHealth`, `triggerIdpSync`, `mapIdpGroup`, `unmapIdpGroup`) — four config arms, two-tier health with
+the 30-minute ceiling named, sync-now, group mapping, and a typed-confirm un-map. Plus the fixture (Entra
+configured + degraded, Google absent, one mapped group with two real members).
+
+**The finding:** the spec enumerates `provider: [microsoft, google]` on every idp-sync path and the SERVER
+refuses Google with `400 provider_not_supported`, deliberately, at config time. **Spec, handler and schema all
+read as though Google works — only the served payload disagreed.** Filed in `laws.md`: *the spec describes the
+shape of a request, not the existence of a capability.*
+
+**Also:** `AddGroupMember` answers `409 idp_managed_group` and the web read `origin` NOWHERE, so S14.12's
+Access screen offered member edits on directory-owned groups that were **guaranteed to fail** — now badged,
+withheld, and told where membership CAN be changed.
+
+**⛔ THE VERB CENSUS: ELEVEN BECOMES THREE.** 80 mutating operations, 7 with no call site, 4 of those
+correctly absent (CLI auth, agent enrol, device-health report). The three left are TWO workflows —
+invitations (`resendInvitation`, `revokeInvitation`) and CLI credentials (`revokeCliCredential`).
+
+⛔⛔ **RANKED #1 IN THE REGISTER — THE INVITATION WORKFLOW IS THE ONLY WRITE-ONLY STATE THAT IS ITSELF AN
+ACCESS GRANT.** There is no `GET …/invitations`, and both mutations are keyed by EMAIL rather than an id, so
+an invitation cannot be listed and can only be revoked by someone who already knows the address they typed.
+The other three write-only items are CONFIGURATION whose effect is visible elsewhere; a pending invitation has
+no observable effect until it becomes a member — and by then the grant has happened. **Next server story, all
+three verbs together.**
+
+**NEXT: the three candidates are researched in `docs/S14.15-candidates.md` — founder rules the order.**
+
+---
+
+**MERGED (2026-08-03): EPIC 14 S14.13 Org Settings — PR #61, ff-only, content tip `e6e23c2`.**
+⛔ **SECOND USE OF THE POINTER RULE, and it landed inside the PR again — the direct-to-`main` bypass count
+stays at 8.**
+
+**The slice:** the SSO collapse fix + the fixture that finally gave it a subject (both arms rendering for the
+first time) · domain capture · pool-CIDR honesty. **Three findings, none visible from the design:**
+**(1)** the wireframe's DNS instruction is wrong in BOTH halves — it says publish `_tunnex-verify.acme.io TXT
+"tnx-domain-…"`, the resolver reads the APEX and compares by exact equality to `tunnex-verify=<token>`, so
+following the design fails forever with the record visibly present in the zone. **A wireframe diff would MATCH
+it — the defect is agreement with the design.** **(2)** `domain_taken` was FALSE 100% of the time on the claim
+path (a fresh insert has `verified_at NULL` and so cannot collide with the partial index; only the same-org
+constraint was reachable) — the product accused another tenant, at the exact moment an admin was recovering a
+lost TXT value, because there is no GET. FIXED, both arms proven. **(3)** an OAuth credential form was being
+autofilled with the admin's email and a saved password — **byte-identical markup, caused by POSITION**, so
+fixing the visible provider would have moved the bug rather than removed it.
+
+⛔⛔ **S14.13's SECTION IS OPEN.** IdP Sync is **S14.14** (4 verbs, 5 endpoints, no surface) · the machine-
+credentials shed is BLOCKED ON A DESTINATION · **VERIFIED-is-not-terminal** (suspend clears verification
+org-wide and fires NO audit action) and the **no-delete-verb cross-tenant item** stay registered · the
+write-only-state trio stands. ⛔ **The `DomainSection` DOM proof is OWED AND UNCLAIMED — proven by artifact
+grep, not DOM assertion, blocked on the `settingswiring` harness story. That is not "untested".**
+
+**NEXT: the harness story or S14.14 IdP Sync — founder rules which. Do not start either unprompted.**
+
+---
+
+**MERGED (2026-08-03): EPIC 14 S14.12 Access Policies — PR #60, ff-only, content tip `7e5a5a1`.**
+⛔ **FIRST MERGE UNDER THE NEW POINTER RULE: this names the CONTENT TIP — the last non-pointer commit — NOT
+`main`'s head.** A commit cannot contain its own hash, so the post-merge head is unknowable before the merge;
+naming the content tip makes the checkpoint knowable while the PR is open, so it lands INSIDE the PR and the
+direct-to-`main` bypass does not increment. Count stays at **8**.
+
+⛔⛔ **S14.12's SECTION IS OPEN. THIS MERGE COVERS THE SLICE AS REVIEWED, NOT THE SECTION.** Three items were
+extracted at commit-one, never built, and do NOT lapse — see `docs/S14.12-decisions.md` §"STAYS OPEN":
+**(1)** the mode toggle as a real switch with the blast-radius confirm (`SetMode` already returns
+`[]AffectedDevice`, so unlike the cascade confirm this one CAN name server-owned counts) · **(2)** the
+two-column panel layout · **(3)** the `SOURCE · DESTINATION · STATE` table headers.
+
+**Built:** the OPEN-EDITION REVIEW STACK (`make up-open-review` / `seed-open`, :8081, one fixtures.sql two
+databases) — it confirmed the predicted gate-order bug AND found an **unpredicted FK ordering defect** a
+months-old database had hidden. `accessView` is now **permission-before-edition** (an open-edition MEMBER was
+being sold Enterprise for a capability their role forbids — the S14.5 halt, second screen, second instance in
+one story). The rule list's **three empty states** (failed / 0-while-enforcing / 0-while-off, the third
+asserting a consequence without its precondition). The **access-flow graph** rebuilt from the handoff geometry
+with two thresholds — a 24-rule cap and a **coverage floor**, because degree-ranking's usefulness depends on
+the degree DISTRIBUTION, not N (same N, opposite verdict). **Group membership** — three endpoints shipped in
+S7.5.2 with one consumer. **`src_group_empty`**, admitted by the same test that refused the deactivated-user
+badge. **Typed confirms** on both cascading deletes.
+
+> ## **WHAT THIS SLICE ACTUALLY FIXED, AND IT IS NOT THE BADGE: UNTIL NOW, A NEW CUSTOMER'S FIRST TEN MINUTES**
+> ## **PRODUCED A RULE THAT SILENTLY GRANTED NOTHING.** Create a group, write a rule against it — it compiled
+> ## to nothing while rendering ACTIVE, because `matched = owner[r.SrcGroupID]` matches no device when the
+> ## group is empty, **and no surface existed to put anyone in it.**
+
+⛔ **THE MOST DESTRUCTIVE UNGUARDED VERB FOUND IN THIS EPIC:** `src_group_id`, `dst_group_id` AND
+`dst_resource_id` are all `ON DELETE CASCADE` — deleting a group or resource **silently deletes every rule
+referencing it**; the rows vanish, and the 204 says nothing. Typed confirm ships; a server cascade-preview
+endpoint is registered, because a client-computed count would be a second source of truth.
+
+**CARRIED, UNFIXED, EACH REGISTERED:** `CountOwners` counts owner ROWS not owners who can sign in (**a proven,
+unrecoverable lockout**) · the Audit Log discards every named `actor_system` · `Kubernetes.tsx:403`'s
+placeholder-glyph regression · 51 omitted-and-read mocks · **11 of 12 unreachable mutations** (IdP-sync is five
+endpoints with no surface at all) · D1/D1b/D2.
+
+---
+
+**MERGED (2026-08-02): EPIC 14 S14.11 Users & Roles — PR #58, ff-only, main `622f30b`.** Both identifiers carried: the PR number survives rebasing, the sha is what a fresh session needs to know `main` by. **This merge was a TRUE FAST-FORWARD** (`origin/main 832e6b0` was an ancestor of the branch head `9de9406`), so no rebase and **no object rewrite** — the in-PR sha and the post-merge sha are the same for once, and that is a property of this merge, not a new rule.
+
+Section pass on Users & Roles. **The classification was wrong in FOUR of five verdicts, all under-building**, because I grepped the `Member` DTO and reported on the PRODUCT. Not one column was "the product doesn't know" — each was a projection, a permission, an edition, or a missing read. **The DEVICES COLUMN IS ABSENT for anyone without `member:manage`**, never zeroed: `/devices` is audience-scoped at the handler (owner sees 13/2 owners, member sees 6/1), so a client-side group-by would print `0 devices` against a colleague — a positive claim drawn from a response that was never about them. **ACTIONS follows the same rule** (founder review): a header over empty cells is a claim the column has content.
+
+**TWO ORDERING BUGS THE MUTATION SWEEP FOUND, and the survivor was the finding.** A mutation swapping the edition/permission gates SURVIVED; I read it as a thin test and wrote one PINNING MY ORDER. Measured after: `ListGroups` authorizes `PermPolicyView` **then** checks `s.policy == nil`, so an open-edition MEMBER's real answer is `forbidden` — my edition-first version sold Enterprise to someone whose role forbids groups on any edition. **The S14.5 halt, forward, three lines under a comment warning against its reverse.** Same bug twice in one file. **Census: 43 double-gated handlers, 41 permission-first, 2 pre-session by design, 0 leaks — now guarded by `TestEditionGateNeverPrecedesPermissionGate`, a static assertion over handler source, because there is NO shared seam (the pair is hand-written 41 times).**
+
+**⛔ CARRIED OUT OF THIS STORY, UNFIXED, EACH WITH ITS RED WRITTEN — see `docs/DEFERRAL-REGISTER.md`:**
+**`CountOwners` counts owner ROWS, not owners who can sign in — a PROVEN, UNRECOVERABLE LOCKOUT** (deactivate both owners: 2 owner rows satisfy the invariant on paper, 0 accounts can sign in and act, recovery needs direct DB access; `docs/probes/lockout_probe_test.go.txt`). **The Audit Log discards every NAMED system actor** (`actor_system` is in the spec, served on 19/78 rows, and read NOWHERE in `apps/web`). **`Kubernetes.tsx:403` re-introduced the banned placeholder em-dash** with a written exemption for the case S14.5 already resolved — the law predicted that reflex verbatim.
+
+**"WRITING A RULE CREATES THE FEELING OF HAVING COMPLIED WITH IT"** — the fourth prose-versus-behaviour instance and the sharpest: I broke my own §2.6 rule (*additions get the same discipline as cuts*) in the story that states it. Which is why the standing question is **"what in this change is asserted only in prose?"** and not "follow your own rules": the first can be asked of yourself; the second is already believed.
+
+---
+
+**MERGED (2026-08-02): EPIC 14 S14.10 Devices — PR #56, rebase-linear, object-rewritten, main `331c96f`.** Both identifiers carried, per the S14.6 correction: the PR number survives rebasing, the sha is what a fresh session needs to know `main` by. (The in-PR checkpoint named `dd7ad2b`; rebase-merge rewrote it, which is the stale-by-construction property that made carrying both necessary.)
+
+Section pass on Devices, plus the fixture bug that hid the product's severest posture state. **`ON CONFLICT (device_id) DO NOTHING` on `device_health` AND `device_status`** meant every time-relative fixture value aged forever while each re-seed reported success: reports drifted past `HealthStaleTTL`, states served `unknown`, the sweep correctly cleared `health_blocked`, and **the device named `blocked-device` was not blocked — `posture blocked` had NEVER rendered on localhost.** `node_peer_status` carried this exact fix three sections earlier with the reason written down; the device tables never did. **A law written in one block does not protect the block below it.**
+
+**`health_blocked = true` is unreachable from SQL** (`SetDeviceHealthBlocked` is called only from `ReportHealth`; the sweep can only set it false), so the seeder **registers it through the product** and counts the server's own verdict. **`TUNNEX_SEED_STRICT` defaults ON** — a missing state is a non-zero exit.
+
+**THIRD SPEC DEFECT THIS STRETCH** (after `listSiteSubnets` and the `policy_degraded_kind` paragraph): `health_state`'s description claimed `unknown` could mean "the fact was reported absent". It cannot — `evaluated_state` is NOT NULL with a two-value CHECK and the evaluator SKIPS an absent fact, so such a device evaluates **compliant**. I built a third UI label for it and **five reds passed against a state production cannot produce**; caught only by asserting on the rendered page. Reverted, spec corrected in place, unreachability pinned. **New law: a test can pin a label production can never produce; only the screen says otherwise.**
+
+**CI FINDING, fix ruled and pending:** `gates` is 8.1 min and is the ENTIRE critical path, spending **78% of it on steps a web-only diff cannot affect**. A UI section pushes 3–6 times ⇒ **20–40 min per section, every section.** Ruled: a fail-closed diff classifier making the six Go steps conditional inside the SAME `gates` job (no required-check rename, no companion no-op). `paths-ignore` DROPPED as redundant once the split lands. Classifier decision table proven 18/18 including the fail-closed arms; **the WIRING is unproven until cited from a real run's step conclusions.**
+
+**NEXT: S14.11 Users & Roles** (REDESIGN; data seeded by S14.9). ⛔ **Shedding is RULED NOT AUTOMATIC:** machine credentials → CLI Credentials and edition → Edition are both BUILD and neither exists, so shedding now would remove a working surface with no destination — deliberately recreating the S11 finding. The surface STAYS until its target lands; ruled in commit-one, never by default.
+
+**MERGED (2026-08-02): EPIC 14 S14.9 Fixtures & Access Policies — PR #54, rebase-linear, tree-identical, object-rewritten, main `0cda482`.** Fixture seeding + Access Policies redesign pass. Seeded `user_groups`, `group_members`, `resources`, `machine_credentials`, `cli_credentials`, soft-deleted `k8s_services`, `policy_rules` (covering all 4 warn-not-refuse states), and `access_events`. Upgraded `/access` header typography & status badges while preserving 100% of RBAC, `policyGate`, and test contracts.
+
+**MERGED (2026-08-02): EPIC 14 S14.8 Kubernetes — PR #53, rebase-linear, tree-identical, object-rewritten, main `2e67902`.** Redesign + control plane fixes: `/kubernetes` screen with 3 stat tiles, D9 reachability status, horizontal DNAT flow, and right-rail panels. Included 2 control-plane bugs found by walking customer path (`node_reconcile` idempotency, failover loop deadlock on `nil` metadata). Overview Kubernetes card reflow registered in `DEFERRAL-REGISTER.md`. Donut reduced-motion path tested & proven to reject on `true`.
+
+**MERGED (2026-08-02): EPIC 14 S14.7 Routed Ranges — PR #52, rebase-linear, tree-identical, object-rewritten, main `fa877ba`.** BUILD, not redesign: `/routed-ranges` has been served since S8.5 and nothing rendered it. Client-side attribution join (the endpoint serves no `site_id`) with a four-armed union so in-flight, could-not-ask and nobody-owns-it are three distinct claims. Address-space map founder-ruled back in with both cut reasons CLOSED, plus a third found by asking what the panel is for: **a dark cell claims the space is free, so the map must draw every class `subnetguard` enforces** (site subnets + pool + K8s VIPs; `reserved` measured DEAD — `WithReserved` has no callers). `nextFreeRange` is interval arithmetic over all classes, withheld when any class failed to load.
+
+**⛔ CI DOES NOT RUN ON `story/*` PUSHES.** `.github/workflows/ci.yml` triggers on `push: [main]`, tags, and `pull_request` — nothing else. Four S14.7 commits were pushed with ZERO runs against them, and the branch looked no different from one that had passed. **Opening the PR is what starts CI**; a green claim before that point is a claim about nothing. (Found while trying to verify S14.7 before merge.)
+
+**⛔ TWO TRIGGERS NAMED S14.7 AND FIRED UNDISCHARGED** — carried, not dropped: (1) `policyHealthBadge` still uses a `switch` + `default` rather than the `Record<NonHealthyPolicyDegradedKind, HealthBadge>` compiler guard; the default is fail-safe but a NEW kind falls through to a generic "degraded" and loses its named remedy — which already happened once (`k8s_endpoints_unavailable`, caught only by the S11 mirror census). (2) Fixture debt: `ovpn_enabled` appears 0 times in `fixtures.sql`, so the OpenVPN panel and demoted-hub badge remain unrenderable locally.
+
+**MERGED (2026-08-02): EPIC 14 S14.6 Gateways — PR #51, rebase-linear, tree-identical, object-rewritten, main `70e4642`.** ⚠ **CORRECTED (Ruling 2):** this line said `544baa5`, which is the PRE-REBASE object of `3d74150` — tree-identical but **not an ancestor of `main`**, and 23 commits behind head. **Disposition (a) — write the pointer inside the PR — has a flaw nobody anticipated: rebase-merge rewrites the sha the pointer just named, so the pointer is STALE BY CONSTRUCTION.** The fix is to carry BOTH: the **PR number**, which survives rebasing, and the **post-merge sha**, which is what a fresh session needs to know `main` by. A PR number alone does not tell you what `main` is; a sha alone does not survive the merge that publishes it.
+**FOUNDER RULING 1 (MERGE MECHANISM ADOPTED):** Merges to `main` via GitHub PR auto-merge/rebase-merge are formally adopted as **`rebase-linear, tree-identical, object-rewritten, re-verified by main's own run`**. The claim of "ff-only linear" is stopped across the codebase.
+**HUMAN GATE LIMIT LAW FIRST APPLICATION & EXPLICIT ACCEPTANCE:** The Human Gate Limit Law fired on its own first case. Four un-rendered states on localhost (`loadOne: failed-load` top-level red error card, `org.ovpn_enabled: true`, OpenVPN fault kinds, `site_link_note_demoted`) were declared. The Founder explicitly accepted all four states, noting `failed-load` is the only consequential state and its complete alert replacement behavior is described and verified.
+**FIXTURE DEBT REGISTERED WITH TRIGGER:** `make seed-fixtures` must reach `ovpn_enabled: true`, at least one OpenVPN fault kind, and a demoted hub note. Trigger: S14.7 Routed Ranges visual review.
+**CARRY-OVER DISPOSITIONS:** (1) `max_policy_version` cut trigger: S15 protocol version bump (predictive un-upgradeable warning). (2) `policyHealthBadge` exhaustiveness map typed as `Record<NonHealthyPolicyDegradedKind, HealthBadge>` (compiler-enforced guard) trigger: next health-kind addition or S14.7 pre-flight.
+
+**SHIPPED IN S14.6:** Gateways promoted to dedicated top-level screen (`/gateways`, route `gateways:view`) · grouped table (Degraded → Healthy → Revoked) · 3 filter chips (All / Healthy / Degraded) · single-truth boundary mapping (`healthview.ts` / `gatewaysview.ts`) · 7 `ListItem` primitive invocation call sites hardened under explicit `ListItemProps` (`children`, `aria-label`, `className`) · `isHub` server topology projection preserved (`electSiteHub` filters revoked in API backend).
+
+**MERGED (2026-08-02): EPIC 14 S14.5 Sites — PR #50, rebase-linear, tree-identical, object-rewritten, main `a253e5e`.**
+**CHECKPOINT POINTER LESSON & MECHANISM DECISION:**
+(1) **Pointer Flaw**: Disposition (a) — writing the re-entry pointer inside the PR branch — produces a checkpoint that is stale on arrival because the PR merge creates a new commit object on `main`. We adopt **Option B**: a 1-line direct push to `main` for `PLAN.md` re-entry pointer updates immediately following a merged PR (strictly bounded: 1 line pointer update in `PLAN.md` only, 0 product code, authorized under `CLAUDE.md` line 42 for immediate process documentation).
+(2) **Merge Mechanism**: Merges to `main` via GitHub PR rebase-and-merge/auto-merge are **rebase-linear, tree-identical, object-rewritten, with the merged object verified on `main`**. The claim of "ff-only linear" was inaccurate across PR #44 through #50 and is hereby corrected across all EPIC 14 merge records.
+
+**SHIPPED IN S14.5:** the 8fr/4fr Sites layout from the handoff · `NodeLink` with three link tones, keyboard selection, entry animation, a flowing linked edge and travelling packets (CSS `offset-path`, the handoff's timings, **not GSAP** — ruled out on redistribution licence) · org-wide cross-site DNS with conflict detection · selection-scoped site actions · **a site LIST that scales** (table + one detail panel; a card per row made 10 sites 3,200px of scroll with the same paragraph ten times) · **`make seed-fixtures`**, a populated demo network so screens are reviewed against data instead of empty states · the `AreaChart` primitive.
+**FIXED ALONG THE WAY, NONE OF IT SITES-SPECIFIC:** the open edition shown an **UPSELL for an all-editions capability** (client-invented boundary; the server says all-editions core in three places) · **three dead CSS token references**, one (`--tnx-ink-600`) rendering every Donut neutral slice BLACK since S14.3 on a screen already approved · **the primary button unreadable PRODUCT-WIDE** after the mono palette swap (a semantic name survives a palette swap; the contrast it assumed does not) · **`ENTERPRISE_PATHS` missing three genuinely-gated endpoints** because the census matched `(enterprise)` alone · the Overview stat row orphaning its 7th card · **two different network maps** rendering the same data. **NEW INSTRUMENTS:** `tokenrefs` (every `var(--tnx-*)` held to the generated set, proven to reject) · a **CUT REGISTER** (`docs/CUT-REGISTER.md`, one line per cut) · **the six-check PRE-FLIGHT** at the head of the section protocol. **THE NAV AUDIT RE-SCOPED THE EPIC:** not eleven screens to redesign but **CONNECT 2 · REDESIGN 6 · BUILD 5** (nav audit method was testable on 2 screens, wrong on 1 [CLI Credentials vs Machine Credentials] because it matched on component filename rather than checking endpoint calls; corrected in `docs/EPIC-14-ui-redesign.md`).
+
+**MERGED (2026-08-02): EPIC 14 viewport leg — PR #49, rebase-linear, tree-identical, object-rewritten, main `556cfaf`.** A **blocking Playwright `visual` CI job** over a **primitives gallery** at 1440/390, plus **geometric overflow assertions** on Overview at both widths, plus an **exact-count baseline census** (`toEqual`, not a floor — a floor is satisfied by deleting all but one, which is the move it exists to prevent). **IT PAID FOR ITSELF IN PRE-EXISTING `main` DEFECTS, all live since S14.2, on EVERY screen, invisible to `tsc` + 424 component tests + the drift guard + `e2e`:** a **65px horizontal overflow at 390** (shell header flex children defaulting to `min-width:auto`) — FIXED · the drawer **`Menu` button rendering on top of the page `<h1>`** (`absolute left-4 top-4`) — REGISTERED, trigger = the next shell-touching section · the **control-plane health indicator rendering TWICE on Overview** (shell footer since S4.x + S14.4's System Health panel) — REGISTERED as a product decision, founder-ruled *"a visual suite must never be the place a product decision gets made quietly"*, trigger = the next shell-touching section. **SCOPED DOWN ON THE FOUNDER'S RULING after seven rounds:** both Overview **pixel baselines DROPPED** (census 4 → 2) because the surface differed by **621px across runs of BYTE-IDENTICAL app code**, twice defeating a diagnosis. **LAWS MINTED (`docs/laws.md`):** *A VISUAL SUITE'S SUBJECT SHOULD BE THE SURFACE WHOSE OUTPUT IS DETERMINED BY CODE, NOT BY DATA* · *SCOPE THE SUITE TO WHAT HAS PAID, NOT TO WHAT LOOKS COMPREHENSIVE* · *baselines are generated where they will be compared* · *a baseline commit carries `.png` and nothing else*. **COST STATED, NOT GLOSSED:** the `Menu` overlap **had been frozen inside the `overview-390` baseline**; dropping it leaves that defect held in **prose only, with no artifact behind it**. That sentence sits in `e2e/visual/visual.spec.ts-snapshots/README.md`, beside the surviving baselines.
+
+**MERGED (2026-08-01): EPIC 14 = UI REDESIGN through S14.4, five PRs rebase-linear, tree-identical, object-rewritten, main `39c7cad`.** #44 component-test tier → #45 S14.1 design tokens → #46 S14.2 layout shell → #47 S14.3 primitives → #48 S14.4 Overview. **Zero merge commits across the epic.** **SHIPPED:** a **component test tier** (8 wiring slices + screen census + 5 binding query rules) · **design tokens** as ONE authored form, generated + drift-guarded, re-pointed to the **handoff README's** palette (mono default, violet second at `#7C5CFC`; the app's `#7c5cff` was right *by coincidence*) · **layout shell** (228px grouped sidebar with vendored Lucide icons, 56px top bar, ⌘K palette, capability-driven width — `max-w-3xl` removed) · **primitives** (`DataTable`/`Panel`/`Badge`/`EmptyState`/`Loading` semantic-by-construction; command palette; toasts with a MEASURED undo criterion; the motion gate; three hand-rolled viz primitives with `VizSource` as a REQUIRED prop) · **Overview** rebuilt to the design: 12-col bento, six stat cards with icon+value+sub-line, nine panels in three even rows. **THE FOUNDER RULE, BINDING ON EVERY REMAINING SECTION (`docs/EPIC-14-ui-redesign.md`):** 1 READ THE WIREFRAME FIRST (by extraction; the prohibition was lifted) → 2 REMOVE WHAT IS NOT APPLICABLE, recording the reason → 3 DESIGN → 4 CODE → 5 **FOUNDER REVIEWS ON LOCALHOST** → 6 GO-AHEAD. **A slice is NOT complete until the founder has seen it running and said go** — gate green, CI green and mutation proofs are necessary and NOT sufficient. **THE FOUR-WAY PANEL TEST:** endpoint+no data → build with an empty state · **subject supported but the wireframe's RENDERING unsupported → build it in a different form** (Site-Link Throughput → cumulative NUMBERS, never a rate chart) · spec forbids the use → absent with the reason · no endpoint → absent, roadmap. **WHY THE RULE EXISTS: four slices were built from a SUMMARY of the wireframe** because a session-scoped instruction was never lifted — **388 tests, green CI, mutation-proven, and it did not look like the design. NO TEST IN THIS EPIC CAN CATCH THAT.** **LAWS MINTED (docs/laws.md, which now LEADS with the first):** *A CORRECT CAVEAT DOES NOT MAKE AN INADEQUATE CHECK ADEQUATE* (a commissioned click-through reported "nothing is broken", correctly hedged, while `backdrop-filter` had already broken **5 modals across 4 screens** by making `Card` the containing block for `position:fixed`) · *AN ABSENCE FOUND BY ONE ENCODING IS NOT AN ABSENCE* (scanned `#rrggbb`, the accent lives as `rgba()`; nearly cost a full token rewrite) · *⑦ AN UNCHECKED CLAIM* + *⑧ THE SUBJECT AND ITS CHECK VANISHING TOGETHER* (a cherry-pick dropped 400 lines of product code AND its tests; commit counts and exit codes all agreed) · *VERIFYING IS NOT DELIVERING* (three instances in one session, the worst being 401 green tests never pushed) · *EXTENDING A FRAMEWORK'S SCALE WITH ITS OWN KEY NAMES REDEFINES EVERY EXISTING USE* (px-vs-rem silently re-keyed **128 use sites across 17 screens**; a donut rendered at a quarter size; every gate green) · *DURING VISUAL ITERATION, REPORT CI STATE ON EVERY PUSH* (the branch was **RED for four consecutive pushes** under a green local gate) · *adding semantics broke a passing query THREE times — the tests were coupled to incidental structure because the product had none to couple to*. **OWED BEFORE THE EPIC CLOSES: the Playwright viewport leg** — commit-one proposed in `docs/S14-viewport-leg-commit-one.md` (a primitives gallery + Overview, two widths, its own blocking CI job, baselines updated only by their own commit), **awaiting the founder's ruling; NOT BUILT.** **NEXT: S14.5 — NOT STARTED, and it does not start until the viewport leg's commit-one is ruled and §C is reported.** **The twelve remaining screens, in the README's dependency order:** Gateways → Sites → Routed Ranges → Devices → Access Policies → Users/Groups → Access Events → Audit Log → Kubernetes → Operations → Org Settings → Edition/CLI/Auth/Onboarding/Desktop. **Each takes its own section pass, clears its own em-dashes (163 remain across 16 screens), re-checks its cuts against the four-way test, and takes its viewport snapshot last.** **ALSO OPEN:** §C hour-25 checkpoint on `aws-gw-1` due **2026-08-02 ~09:40Z** (S13.1 gateway-recovery, unmerged, branch `story/S13.1-gateway-recovery`) · three security decide-items landing as ONE hardening slice (Pinned-Dependencies · Token-Permissions · **no JS dependency scanning at all**) + the bundle-graph verification · the Makefile `NET :=` defect (one target addressing two stacks).
 
 **MERGED (2026-07-30): EPIC 11 = Production Hardening COMPLETE — slices 2-6 + the box-walk, PR #42, ff-only linear, main `fb99dc6`.** Acceptance was never a story list: *"what breaks when a stranger runs this in production, unattended, for a month?"* **SHIPPED:** Slice 2 observability floor (ONE `tunnex_gateway_policy_health{kind}` gauge derived from the health-kind enum — one truth two renderings · `/metrics`+`/readyz` on a **loopback-bound** port, D3.2 · the single 500 seam logging cause+request_id · WF-OP-3 drift Event) · Slice 3 **leader election** (Postgres session-scoped advisory lock: N replicas serve, exactly ONE ticks; `/readyz` = `ok leader`/`ok follower`, both 200; Helm resources) · Slice 4 backup/restore (separate dump+manifest, **keyed** fingerprint and NO key material, `backupctl verify` refuses **exit 2** naming both fingerprints + agent CA + *orphaned*) · Slice 5 upgrade (forward-only + restore-as-rollback, migration backward-compat guard after a census found TWO historical violations, N/N-1 red, `preflight` that **refuses rather than warns**) · Slice 6 `self-host.md` with ✅/🔶/⚠️ verification marks + honest-limits table + a 14-kind runbook. **BOX-WALK LEGS 0-6 COMPLETE, BOTH OWED DEBTS DISCHARGED ON THE WIRE** (`walk-artifacts/S11/walk-record.md`): **Leg 3 trust-after-restore** — 4 cert serials byte-identical across `pg_restore --clean`, no re-enrolment, counters advanced, **919 packets zero gaps** (the window pulled explicitly, not inferred from a tail) · **Leg 5 HA under a roll** — takeover 2.5s, **an OBSERVED instant with no leader at all** (the advisory lock failing toward nobody-leads, never two), never two across 15 paired samples, returning replica came back a FOLLOWER · Leg 4 wrong-key restore refused exit 2 fleet unmutated · Leg 6 **an N-1 (v6) agent applied an artifact from a v7 CP refusing nothing** — the N/N-1 contract as mechanism, against a real released image (`v0.3.0-rc4`) never built for the test; Leg 0 metrics port **`000` from the host's own LAN address**. **15 FINDINGS (6 HIGH), 1 WITHDRAWN — nine folded WITH GUARDS:** WF-S11-1 `preflight`/`backupctl` never shipped in the api image + two runbooks naming subcommands that NEVER EXISTED (`TestEveryOperatorToolShipsInTheImage`, red-proven at the built-but-never-COPY'd instance) · WF-S11-6(d) the `cert_expired_cannot_reconnect` kind ranked FIRST + 0054/0055 `cert_not_after` as an **upper BOUND that cannot false-positive** · WF-S11-7 `k8s_endpoints_unavailable` reached NEITHER the spec NOR the UI since S10.3 (`TestEveryHealthKindReachesItsMirrorSurfaces`) · WF-S11-8(a) a revoked gateway now FREES ITS NAME (partial unique index + `TestNoAmbiguousNodeNameLookups`, census run BEFORE the migration) · WF-S11-9 gateway revoke existed in the API and NEVER in the UI · WF-S11-10/10b revoked gateways badged, then still counted in fleet health · WF-S11-2/3/4/5 (preflight wording, stdin guidance, a misstated HA limit, verdict-above-evidence). **THE FINDING UNDERNEATH THE FINDINGS: five of six HIGH are ONE class** — a mechanism that works, a procedure around it that does not, docs asserting the procedure — and THREE are one sentence, *"a lost gateway: re-enrol it (one pasted command)"*, which on the walk cost **four hand-run steps, a wrong host, a volume pinned by a container that exited six days earlier, and an undocumented deletion**, for a machine that had merely been SWITCHED OFF. **LAWS MINTED:** *A WITNESS MUST PROVE IT WAS ALIVE ACROSS THE WINDOW IT CERTIFIES* · **COULD THIS CHECK HAVE FAILED? — the censuses need censusing** (PROVE-A-GUARD-REJECTS generalized from guards to EVIDENCE: three checks in one session could not fail — a witness dead nine minutes before the leg it certified still returning clean · a red asserting a tautology that passed with its own fix removed · a provenance census verifying the COMMIT but not the EDITION, so four rebuilds silently swapped open-for-enterprise mid-walk). **NEXT (ruled): GATEWAY RECOVERY as its OWN EPIC, commit-one first, BETA-BLOCKING** — five walls in front of one question ("how does a gateway come back"): WF-S11-6(c) durable re-enrollment · WF-S11-8(b) replace-in-place identity (with the re-key security guard already drafted: re-key ONLY against a node the CP can verify is gone, NEVER one currently reporting) · WF-S11-11 RULED (a) prefer the token when the stored identity is provably unusable, *unusable* being a DETERMINATION not an assumption, failing toward the stored identity when uncertain · WF-S11-14 RULED (c) filter the compiler input AND unbind on revocation · plus the closing cluster (WF-S11-10c the revoked-badge defect in a SECOND component, the site showing "2 gateways" both dead while the live one is orphaned, same-name picker ambiguity). **LEDGER registered with measurements:** no component-test tier for the web app (**4 of 15 findings lived in the UI**, the surface with zero component coverage — same class as `apps/cli` having had no job at all) · the kind-consumer census gap (the census proves a kind REACHES its surfaces, not that each consumer DECIDES correctly about it).
 
@@ -1594,8 +1898,50 @@ Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump,
     obligations on the trial/issuance funnel).
 
 ## DECISIONS RESOLVED (user-directed 2026-07-14, PRE-SESSION FINAL — the planning collisions are closed)
-**LOCKED build order (RESTRUCTURED 2026-07-15): EPIC 7 (done) → EPIC 7.5 → EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11
-(FULL) → BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
+**LOCKED build order (RESTRUCTURED 2026-07-15; EPIC 15 INSERTED 2026-08-03): EPIC 7 (done) → EPIC 7.5 →
+EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11 (FULL) → EPIC 14 (UI redesign — **TWO screens remain: Audit Log, Dashboard**) → EPIC 15 (Zero Trust
+for AI agents) →
+BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
+
+⛔ **EPIC 15 — ZERO TRUST FOR AI AGENTS. REGISTERED 2026-08-03, sequenced AFTER EPIC 14 and BEFORE the beta
+bundle.** Paper: `docs/EPIC-15-zero-trust-for-ai-agents.md`. **REGISTRATION ONLY — no design, no schema, no
+commit-one.**
+**The thesis:** MCP servers deploy either on localhost (safe, unreachable) or on the public internet behind a
+bearer token and nothing else; there is no network boundary and no device identity between those two. An agent
+is a non-human principal that runs unattended, at machine rate, and **can be prompt-injected into asking for
+the wrong thing while remaining correctly authenticated** — so ZT bounds the BLAST RADIUS of a
+correctly-authenticated principal, and does NOT detect injection.
+**Measured inventory:** audit `actor_system`, `policy_rules.expires_at` and device identity are reusable
+UNCHANGED; `k8s_service` as a named `dst_kind` is the shipped PRECEDENT for an `mcp_server` destination.
+⛔ **And the closest existing thing has a defect: `machine_credentials.role` is FIXED at `operator`, which holds
+`PermPolicyManage` — so today's non-human principal can write its own access rules.** An agent principal needs
+its own role.
+⛔ **Per-tool granularity (`read_file` vs `delete_repo`) is a SECOND ENFORCEMENT PLANE, not an extension:**
+every mechanism we own is L3/L4 and cannot see inside an MCP call. It needs an L7 proxy — the differentiator
+and the risk are the same item, so it is the LAST slice.
+**Protocol-independent (durable):** principal, role, expiring grants, audit attribution, device identity,
+default-deny. **Protocol-coupled (will rot):** per-tool enforcement, tool discovery, MCP-shaped posture.
+⛔⛔ **THE CATEGORY IS NOT EMPTY — MEASURED, AND IT REPLACES THIS PAPER'S FIRST POSITIONING SECTION.**
+**Versa Networks** already markets *"Industry's first Zero Trust MCP Server"* (~May 2026) · ⛔ **Teleport
+shipped protocol-level MCP access control down to INDIVIDUAL TOOL INVOCATIONS in Dec 2025** (deny-new-tools by
+default, JIT for high-risk tools) · **Octelium** is a FOSS architectural twin (WireGuard+QUIC, unified identity
+for humans/workloads/agents, per-request ABAC, L7 policy, names MCP and A2A) · also Pomerium, AccuKnox,
+TrueFoundry. **NO PRIMACY CLAIM — not "not yet", NOT AT ALL: it is checkable and false.** And Teleport is
+already where per-tool granularity goes, so that is a CATCH-UP item, not a differentiator — the first draft
+called it "the part nobody else is doing" without checking, which is the Tier-3 defect this epic exists to cut.
+**THE ACTUAL REASON TO BUILD:** beta is more compelling with agent support than without it, and our model
+already carries most of the shape. Neither reason needs us to be first.
+⛔ **THE BOUNDARY GOES IN THE OPENING, NOT THE CAVEATS:** under prompt injection, authentication AND
+authorization are both intact — only INTENT is corrupted. ZT bounds the blast radius of a correctly-
+authenticated principal; **it does not detect injection, and any copy claiming detection is a RENDER-FLOOR
+VIOLATION AT PRODUCT SCALE** — a promise the product cannot keep, made to people who cannot check it.
+**POSTURE CUT (founder-ruled):** keep only what binds to a real credential — which human account launched it ·
+which host · which enrollment. **Drop model self-reporting** or label it exactly as existing posture is
+(*client-reported, not attestation*) and never let a rule depend on it.
+**SLICE ORDER:** MCP-as-destination FIRST (small–medium; the `k8s_service` precedent already shipped) → agent
+device type SECOND (medium) → **per-tool LAST (large, and a SECOND enforcement plane)**.
+⛔ **THREE LIVE FINDINGS EXTRACTED AND REGISTERED AGAINST THE CURRENT PRODUCT — they do NOT wait for EPIC 15:**
+`docs/REGISTER-nonhuman-principal-defects.md` (operator+`PermPolicyManage` · `CountOwners` · `managed_by_machine`).
 EPIC 12 (licensing) trigger = **first paying-customer INTENT**.
 - **BETA-SCOPE (AMENDED 2026-07-15):** beta ships 7.5 + EPICs 8/9/10/11 + the bundle. **EPIC M is PARKED — beta
   NO LONGER gates on it.** Mobile ships at beta via the official WireGuard apps (S3.3/S3.4 QR export;

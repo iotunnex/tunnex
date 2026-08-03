@@ -1,8 +1,14 @@
 import type { Node, Site, SiteSubnet } from "./api";
 import { can } from "./rbac";
 import type { Role } from "./api";
-import { policyHealthBadge, siteLinkNote, type HealthBadge, type SiteLinkNote } from "./healthview";
+import {
+  policyHealthBadge,
+  siteLinkNote,
+  type HealthBadge,
+  type SiteLinkNote,
+} from "./healthview";
 import { relativeAge } from "./format";
+import type { Node as VizNode, Link as VizLink } from "../components/viz";
 
 // sitesview — PURE, electron-free view-models for the Sites page (S8.3 Slice 2). The page is a thin
 // render over these; the render-floor law binds here — every field a card shows traces to a WIRE value
@@ -11,34 +17,61 @@ import { relativeAge } from "./format";
 // never re-elects), health is READ from policyHealthBadge (the S7.4b/S8.2 kinds), and a site's gateways
 // are a LIST (CH: many nodes → one site; the UI never assumes one-gateway-per-site).
 
-// ── edition + RBAC gate ──────────────────────────────────────────────────────────────
-// The Sites PAGE is enterprise-gated (D1/D5): site-to-site governance is the enterprise value. Within
-// enterprise, ANY member sees the read-only topology (canView); mutating needs site:manage + a verified
+// ── RBAC gate ────────────────────────────────────────────────────────────────────────
+// ⛔ NO EDITION TERM (S14.5, founder-ruled). This comment used to open "The Sites PAGE is enterprise-gated
+// (D1/D5)" and that was never true of the server — see siteGate below. It is corrected rather than deleted
+// because a stale comment asserting a boundary is the same false-record class as the test that asserted it.
+// ANY member sees the read-only topology (canView); mutating needs site:manage + a verified
 // email (mirrors the server). A member (no site:manage) sees topology but NOT the pending queue (D5:
 // the queue is an action surface — visible-but-inert is the B6 cousin).
 export interface SiteGate {
-  isEnterprise: boolean;
-  canView: boolean; // enterprise member+ → read-only topology
+  canView: boolean; // every member → read-only topology, every edition
   canManage: boolean; // owner/admin + verified → mutations + queue
 }
 
-export function siteGate(input: { role: Role | undefined; emailVerified: boolean; edition: string | undefined }): SiteGate {
-  const isEnterprise = input.edition === "enterprise";
+/**
+ * ⛔ NO EDITION TERM. FOUNDER-RULED 2026-08-02 — THE GATE WAS THE BUG.
+ *
+ * This read `edition === "enterprise"` and the page rendered an UPSELL to everyone else. The server
+ * disagrees, in writing, three times:
+ *
+ *   apps/api/internal/http/site_handlers.go:19   "(all editions, D11)"
+ *   :95                                          "site:manage (all-editions core, D11)"
+ *   :280                                         "All-editions core ... (authorize FIRST, no edition gate)"
+ *
+ * `ListSites` authorizes on `org:view` alone, NO site endpoint returns `edition_required`, and `/sites` is
+ * absent from `ENTERPRISE_PATHS`. So an open-edition org could drive the whole site model through the CLI
+ * and the API while this screen asked it to buy enterprise.
+ *
+ * ⛔ THE ONE-TRUTH RULE, STATED SO THE NEXT SCREEN INHERITS IT:
+ *
+ *     THE SERVER OWNS THE EDITION DECISION. THE CLIENT CONSUMES IT.
+ *     A CLIENT-SIDE EDITION BRANCH THAT IS NOT DERIVED FROM THE SEAM IS A SECOND SOURCE OF TRUTH.
+ *
+ * The seam is `ENTERPRISE_PATHS` + `gate()` in `src/lib/edition.ts`, which is held to the spec by a census.
+ * An edition branch written by hand, as this one was, is exactly the drift the census cannot see — because
+ * it never passes through the seam at all.
+ */
+export function siteGate(input: {
+  role: Role | undefined;
+  emailVerified: boolean;
+}): SiteGate {
   return {
-    isEnterprise,
-    canView: isEnterprise, // any enterprise member sees the topology (read-only)
-    canManage: isEnterprise && input.emailVerified && can(input.role, "site:manage"),
+    canView: true, // every member reads the topology their traffic traverses (D5), in every edition
+    canManage: input.emailVerified && can(input.role, "site:manage"),
   };
 }
 
 // sitesView decides the page's top-level render. No "member_gate" — unlike Access, a member SEES the
-// topology (D5 read-only), so the only non-body states are load/retry/upsell.
-export type SitesViewState = "loading" | "load_retry" | "upsell" | "body";
+// topology (D5 read-only). No "upsell" either, as of S14.5: there is nothing to sell.
+export type SitesViewState = "loading" | "load_retry" | "body";
 
-export function sitesView(i: { editionReady: boolean; loadError: boolean; isEnterprise: boolean }): SitesViewState {
+export function sitesView(i: {
+  ready: boolean;
+  loadError: boolean;
+}): SitesViewState {
   if (i.loadError) return "load_retry";
-  if (!i.editionReady) return "loading";
-  if (!i.isEnterprise) return "upsell";
+  if (!i.ready) return "loading";
   return "body";
 }
 
@@ -68,7 +101,10 @@ export const GATEWAY_OFFLINE_MS = 90_000;
 // VERIFY-0's dead-gateway-renders-healthy hole on the site surface. It reads the SAME node.last_seen_at the
 // Devices page already shows; no new signal, no third health vocabulary — the offline flag styles via the
 // existing badge system. PURE.
-export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: number): { lastSeen: string; offline: boolean } {
+export function gatewayLiveness(
+  lastSeenAt: string | null | undefined,
+  nowMs: number,
+): { lastSeen: string; offline: boolean } {
   if (!lastSeenAt) {
     return { lastSeen: "never connected", offline: true };
   }
@@ -76,7 +112,10 @@ export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: nu
   if (Number.isNaN(t)) {
     return { lastSeen: "unknown", offline: true };
   }
-  return { lastSeen: relativeAge(lastSeenAt), offline: nowMs - t > GATEWAY_OFFLINE_MS };
+  return {
+    lastSeen: relativeAge(lastSeenAt),
+    offline: nowMs - t > GATEWAY_OFFLINE_MS,
+  };
 }
 
 // gatewayOnline (S8.5 WF-1 — positive health) is the affirmative liveness signal on the site surface: a
@@ -86,7 +125,11 @@ export function gatewayLiveness(lastSeenAt: string | null | undefined, nowMs: nu
 // discharge with NO third vocabulary and NO new data. (The numeric handshake age + link bytes — L1 — are
 // re-deferred to S8.6's commit-one: "reported" ≢ "stored" for gateway peers, so a fresh/stale signal is
 // what the surface honestly has; numeric age is richer, not required for liveness.) PURE.
-export function gatewayOnline(status: GatewayView["status"], offline: boolean, health: HealthBadge | null): boolean {
+export function gatewayOnline(
+  status: GatewayView["status"],
+  offline: boolean,
+  health: HealthBadge | null,
+): boolean {
   return status === "active" && !offline && health == null;
 }
 
@@ -107,17 +150,27 @@ export interface SiteCard {
 // the artifact bumps to v5). That happens iff THIS site has no approved subnet yet AND exactly ONE OTHER
 // site already does (1 → 2). A first site's first approval (0 others) does not cross; a 3rd-site approval
 // when already multi-site (≥2 others) does not newly cross (v5 already active). PURE.
-export function crossesMultiSiteThreshold(approvingSiteId: string, approvedCountBySite: Record<string, number>): boolean {
+export function crossesMultiSiteThreshold(
+  approvingSiteId: string,
+  approvedCountBySite: Record<string, number>,
+): boolean {
   if ((approvedCountBySite[approvingSiteId] ?? 0) > 0) return false; // site already contributes routes
-  const otherSitesWithApproved = Object.entries(approvedCountBySite).filter(([id, c]) => id !== approvingSiteId && c > 0).length;
+  const otherSitesWithApproved = Object.entries(approvedCountBySite).filter(
+    ([id, c]) => id !== approvingSiteId && c > 0,
+  ).length;
   return otherSitesWithApproved === 1; // was single-site-routable, becomes multi-site — the crossing
 }
 
 // subCeilingGateways — the gateways the CW confirm NAMES: those whose reported max policy version is below
 // the server ceiling. Absence (null — a pre-CW/pre-upgrade agent that never reported) counts as BELOW (the
 // S7.5.3 absence-is-not-compliance rule; those are the very gateways the warning exists for). PURE.
-export function subCeilingGateways(gateways: { id: string; name: string; maxPolicyVersion: number | null }[], ceiling: number): { id: string; name: string }[] {
-  return gateways.filter((g) => (g.maxPolicyVersion ?? 0) < ceiling).map((g) => ({ id: g.id, name: g.name }));
+export function subCeilingGateways(
+  gateways: { id: string; name: string; maxPolicyVersion: number | null }[],
+  ceiling: number,
+): { id: string; name: string }[] {
+  return gateways
+    .filter((g) => (g.maxPolicyVersion ?? 0) < ceiling)
+    .map((g) => ({ id: g.id, name: g.name }));
 }
 
 // nameMatchesExactly — the delete-site name-typed ceremony (D4, the S4.5 one-time grain): the typed value
@@ -132,7 +185,11 @@ export function nameMatchesExactly(typed: string, siteName: string): boolean {
 // validator, never a second copy in JS). PURE.
 export function disjointRefusal(err: unknown): string | null {
   const e = err as { error?: { code?: string; message?: string } } | undefined;
-  if (e?.error?.code === "subnet_not_disjoint") return e.error.message ?? "This subnet overlaps an existing range; approval refused.";
+  if (e?.error?.code === "subnet_not_disjoint")
+    return (
+      e.error.message ??
+      "This subnet overlaps an existing range; approval refused."
+    );
   return null;
 }
 
@@ -155,23 +212,33 @@ export function ipv4ToInt(ip: string): number | null {
 // subnet-removal confirm ("removing this also removes N forwards"). NOT an enforcement check: the server
 // sweeps authoritatively in the same tx (RemoveSubnet); this only tells the admin what that sweep will do.
 // Anything it can't parse as IPv4 is excluded (the server stays the truth). Site subnets are IPv4-only.
-export function forwardsInSubnet(forwards: { domain: string; resolver_ip: string }[], cidr: string): string[] {
+export function forwardsInSubnet(
+  forwards: { domain: string; resolver_ip: string }[],
+  cidr: string,
+): string[] {
   const [base, bitsStr] = cidr.split("/");
   const bits = Number(bitsStr);
   const baseInt = ipv4ToInt(base ?? "");
-  if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return [];
+  if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32)
+    return [];
   const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
   const net = (baseInt & mask) >>> 0;
-  return forwards.filter((f) => {
-    const ipInt = ipv4ToInt(f.resolver_ip);
-    return ipInt !== null && ((ipInt & mask) >>> 0) === net;
-  }).map((f) => f.domain);
+  return forwards
+    .filter((f) => {
+      const ipInt = ipv4ToInt(f.resolver_ip);
+      return ipInt !== null && (ipInt & mask) >>> 0 === net;
+    })
+    .map((f) => f.domain);
 }
 
 // assembleTopology joins sites + their subnets + the nodes list into render-ready cards. PURE. A site's
 // gateways = the nodes whose site_id is this site (the D2/CH join). Everything a card shows is a wire
 // field; the only computation is the join + the health-badge projection (itself pure).
-export function assembleTopology(sites: Site[], subnetsBySite: Record<string, SiteSubnet[]>, nodes: Node[]): SiteCard[] {
+export function assembleTopology(
+  sites: Site[],
+  subnetsBySite: Record<string, SiteSubnet[]>,
+  nodes: Node[],
+): SiteCard[] {
   return sites.map((s) => ({
     id: s.id,
     name: s.name,
@@ -194,6 +261,118 @@ export function assembleTopology(sites: Site[], subnetsBySite: Record<string, Si
         agentVersion: n.agent_version,
         lastSeenAt: n.last_seen_at ?? null,
       })),
-    subnets: (subnetsBySite[s.id] ?? []).map((ss) => ({ id: ss.id, cidr: ss.cidr, status: ss.status })),
+    subnets: (subnetsBySite[s.id] ?? []).map((ss) => ({
+      id: ss.id,
+      cidr: ss.cidr,
+      status: ss.status,
+    })),
   }));
+}
+
+
+// ── the mesh (S14.5) ─────────────────────────────────────────────────────────────────
+//
+// ⛔ ONE NODE PER SITE, NOT PER REGION — the four-way test's case 2.
+//
+// The wireframe's mesh draws five REGIONS, each carrying a site count that drives its radius and its edge
+// width. We serve no region field on `Node` or `Site`, so the drawing's encoding has no data behind it.
+// Deriving a region client-side from gateway names would be a guess wearing a diagram's authority.
+//
+// So: one node per site, uniform size, no count glyph. The hub is READ from `is_site_hub` (the backend
+// election, never recomputed here) and is rendered as its own node when a hub gateway exists.
+
+export interface Mesh {
+  nodes: VizNode[];
+  links: VizLink[];
+}
+
+/**
+ * Build the topology diagram from the same wire facts the cards render.
+ *
+ * ⛔ TONE COMES FROM THE HEALTH KIND, NOT FROM A GUESS. `site_hub_down` / `site_link_down` are DOWN;
+ * anything else degraded is DEGRADED; no badge is LINKED. A site with no gateway bound has no link at all —
+ * which is different from a link that is down, and is drawn as an absent edge rather than a red one.
+ */
+export function meshFrom(
+  cards: SiteCard[],
+  nodes: Node[],
+  hubGeneration?: number,
+  /**
+   * ⛔ DID THE CALLER ACTUALLY LOAD SUBNETS? Overview renders this same mesh but does NOT fetch per-site
+   * subnets, and with them absent the sub-line would read "no approved subnet" for every site — asserting a
+   * fact nobody measured, on a screen whose whole job is to be trusted at a glance.
+   *
+   * Absent-because-unloaded and absent-because-none are different, so the caller says which it has.
+   */
+  subnetsKnown = true,
+): Mesh {
+  const hubNode = nodes.find((n) => n.is_site_hub && n.status === "active");
+  const out: Mesh = { nodes: [], links: [] };
+  if (hubNode) {
+    out.nodes.push({
+      id: "__hub",
+      label: hubNode.name,
+      kind: "hub",
+      // The handoff's hub sub-line is `HA set gen 7 · pri +1` — the SET's identity, not the node's role.
+      // We serve that generation, so it goes here rather than the constant "transit hub" I had invented.
+      sub:
+        hubGeneration != null
+          ? `HA set gen ${hubGeneration}`
+          : "· transit hub",
+    });
+  }
+  for (const c of cards) {
+    const approved = c.subnets.filter((s) => s.status === "approved");
+    const sub = !subnetsKnown
+      ? undefined
+      : approved.length
+        ? "· " + approved.map((s) => s.cidr).join(", ")
+        : "· no approved subnet";
+    // `value` = the site's bound gateway count. The wireframe puts a SITE COUNT inside the ring because its
+    // nodes are regions; ours are sites, so the honest analogue is how many gateways front this one. Zero is
+    // a real fact here (a site with no gateway bound), unlike an absent count.
+    const gwCount = c.gateways.filter((g) => g.status === "active").length;
+
+    // No gateway bound → no site link exists yet. An absent edge, never a red one: "not connected" and
+    // "connection failed" are different facts and only one of them is a fault.
+    const gw = c.gateways.find((g) => g.status === "active");
+    const kind = gw?.health?.label ?? null;
+    const down = kind != null && /hub down|link down/i.test(kind);
+
+    // ⛔ WHETHER A LINK EXISTS AT ALL IS DECIDED *BEFORE* ITS STATE — and getting that order wrong is how the
+    // law this file already states got broken one line later.
+    //
+    // The first version drew no EDGE when there was no link (correct) and then still stamped the NODE with
+    // the failure tone from the gateway's health badge. So a lone gateway that is its own hub rendered with
+    // NO line and a `down` pill: the map silently repeated the same claim — that a link failed — that the
+    // health badge beside it was already making wrongly.
+    //
+    // ABSENCE OF A RELATIONSHIP IS ABSENCE, IN EVERY ENCODING THAT DESCRIBES IT. An edge, a colour, a pill,
+    // a dot: if the thing was never attempted, none of them may say it failed.
+    const linked = hubNode != null && gw != null && gw.id !== hubNode.id;
+    const tone: VizLink["tone"] | undefined = !linked
+      ? undefined // no link exists → no link STATE exists either
+      : down
+        ? "down"
+        : kind
+          ? "degraded"
+          : "linked";
+
+    out.nodes.push({
+      id: c.id,
+      label: c.name,
+      kind: "spoke",
+      sub,
+      value: gwCount,
+      tone,
+      // The honest word for the no-link case, so the row still says something true rather than nothing.
+      note: linked ? undefined : gw ? "no site link" : "no gateway bound",
+    });
+
+    // `linked` is exactly the condition under which `tone` was assigned, so this narrowing is the same fact
+    // stated for the compiler rather than a second decision.
+    if (!linked || !tone) continue;
+    out.links.push({ from: "__hub", to: c.id, tone, note: kind ?? undefined });
+  }
+  return out;
 }

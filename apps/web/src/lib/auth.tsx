@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { api, type AuthUser } from "./api";
 
 type AuthState =
@@ -30,7 +36,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .GET("/api/v1/auth/me")
       .then(({ data, error }) => {
         if (cancelled) return;
-        setState(data && !error ? { status: "authed", user: data } : { status: "anon" });
+        setState(
+          data && !error
+            ? { status: "authed", user: data }
+            : { status: "anon" },
+        );
       })
       .catch(() => {
         if (!cancelled) setState({ status: "anon" });
@@ -47,7 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "anon" });
   };
 
-  return <AuthContext.Provider value={{ state, setUser, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ state, setUser, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {

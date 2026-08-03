@@ -11,15 +11,21 @@ import { login, OWNER, MEMBER, ORG } from "./helpers";
 // (enterprise edition, self-detected via /meta) + the blocking Go httptest
 // TestGetSsoConfigPayloadCarriesNoSecret (make test-editions).
 
-test("owner sees org settings; SSO config is gated to the enterprise edition", async ({ page }) => {
+test("owner sees org settings; SSO config is gated to the enterprise edition", async ({
+  page,
+}) => {
   await login(page, OWNER);
   await expect(page.getByText("Organization", { exact: true })).toBeVisible();
   await expect(page.getByText("slug: demo")).toBeVisible();
   // Open edition: no SSO config form, just the edition-gated notes. S7.5.5 added a SECOND enterprise
   // note (org-wide MFA enforcement) beside SSO, so assert EACH specifically — a bare /Tunnex Enterprise
   // feature/ now matches both and trips Playwright strict mode.
-  await expect(page.getByText(/SSO .*is a Tunnex Enterprise feature/i)).toBeVisible();
-  await expect(page.getByText(/Org-wide MFA enforcement is a Tunnex Enterprise feature/i)).toBeVisible();
+  await expect(
+    page.getByText(/SSO .*is a Tunnex Enterprise feature/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Org-wide MFA enforcement is a Tunnex Enterprise feature/i),
+  ).toBeVisible();
   await expect(page.getByLabel("Client ID")).toHaveCount(0);
 });
 
@@ -29,7 +35,9 @@ test("a plain member cannot manage settings", async ({ page }) => {
   await expect(page.getByLabel("Name")).toHaveCount(0);
 });
 
-test("editing the org name saves (and is reverted to keep the shared seed clean)", async ({ page }) => {
+test("editing the org name saves (and is reverted to keep the shared seed clean)", async ({
+  page,
+}) => {
   await login(page, OWNER);
   // exact: true — getByLabel is case-insensitive SUBSTRING by default, so a bare "Name" also matches the
   // machine-credential panel's "Credential name" (S11-1). The accessible names are now distinct (the product
@@ -62,21 +70,31 @@ test("editing the org name saves (and is reverted to keep the shared seed clean)
 // lives in settings.enterprise.spec.ts (E2E_EDITION=enterprise), where
 // seed-enterprise provides the device holding a pool IP. (The orphan check is a
 // pure DB read — no enrolled agent needed; S7.4c D-c4.)
-test("the address-pool section shows the current CIDR and gates Resize on a change", async ({ page }) => {
+test("the address-pool section shows the current CIDR and gates Resize on a change", async ({
+  page,
+}) => {
   await login(page, OWNER);
   await expect(page.getByText("Address pool")).toBeVisible();
   await expect(page.getByLabel("Pool CIDR")).toHaveValue("10.99.0.0/24");
-  await expect(page.getByRole("button", { name: "Resize pool" })).toBeDisabled(); // unchanged
+  await expect(
+    page.getByRole("button", { name: "Resize pool" }),
+  ).toBeDisabled(); // unchanged
 });
 
-test("a successful resize surfaces the re-issue-configs consequence (accept-and-surface)", async ({ page }) => {
+test("a successful resize surfaces the re-issue-configs consequence (accept-and-surface)", async ({
+  page,
+}) => {
   await page.route("**/api/v1/organizations/*/pool-cidr", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        id: ORG, name: "Demo Organization", slug: "demo", pool_cidr: "10.99.0.0/23",
-        created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(),
+        id: ORG,
+        name: "Demo Organization",
+        slug: "demo",
+        pool_cidr: "10.99.0.0/23",
+        created_at: new Date(0).toISOString(),
+        updated_at: new Date(0).toISOString(),
       }),
     }),
   );
@@ -87,7 +105,9 @@ test("a successful resize surfaces the re-issue-configs consequence (accept-and-
   await expect(page.getByText(/revoke \+ recreate/i)).toBeVisible();
 });
 
-test("a shrink that would strand devices renders the orphan list with names and reasons", async ({ page }) => {
+test("a shrink that would strand devices renders the orphan list with names and reasons", async ({
+  page,
+}) => {
   await page.route("**/api/v1/organizations/*/pool-cidr", (route) =>
     route.fulfill({
       status: 409,
@@ -95,8 +115,18 @@ test("a shrink that would strand devices renders the orphan list with names and 
       body: JSON.stringify({
         orphan_count: 3,
         orphans: [
-          { device_id: "01900000-0000-7000-8000-0000000000a1", name: "laptop-a", assigned_ip: "10.99.0.127", reason: "reserved_collision" },
-          { device_id: "01900000-0000-7000-8000-0000000000a2", name: "laptop-b", assigned_ip: "10.99.0.200", reason: "out_of_range" },
+          {
+            device_id: "01900000-0000-7000-8000-0000000000a1",
+            name: "laptop-a",
+            assigned_ip: "10.99.0.127",
+            reason: "reserved_collision",
+          },
+          {
+            device_id: "01900000-0000-7000-8000-0000000000a2",
+            name: "laptop-b",
+            assigned_ip: "10.99.0.200",
+            reason: "out_of_range",
+          },
         ],
       }),
     }),
@@ -105,10 +135,25 @@ test("a shrink that would strand devices renders the orphan list with names and 
   await page.getByLabel("Pool CIDR").fill("10.99.0.0/25");
   await page.getByRole("button", { name: "Resize pool" }).click();
   // Actionable refusal: count, names, both reason phrasings, and the "N more" note.
-  await expect(page.getByText(/3 devices must be removed or renumbered first/i)).toBeVisible();
+  await expect(
+    page.getByText(/3 devices must be removed or renumbered first/i),
+  ).toBeVisible();
   await expect(page.getByText("laptop-a")).toBeVisible();
   await expect(page.getByText("laptop-b")).toBeVisible();
-  await expect(page.getByText(/collides with a reserved address/i)).toBeVisible();
+  // ⛔ THE SUBTLE REASON, ON THE WIRE. `reserved_collision` is numerically INSIDE the new
+  // range (ipalloc.go:78) — 10.99.0.127 is the broadcast address of 10.99.0.0/25 and looks
+  // fine next to the CIDR. The old copy ("collides with a reserved address") let an operator
+  // conclude the server was wrong; naming the three reserved addresses is what stops that.
+  await expect(
+    page.getByText(
+      /inside the new range, but on its network, gateway or broadcast address/i,
+    ),
+  ).toBeVisible();
   await expect(page.getByText(/outside the new range/i)).toBeVisible();
   await expect(page.getByText(/and 1 more/i)).toBeVisible();
+  // The refusal is atomic — ShrinkOrphansError returns inside withTx (devices/service.go:539)
+  // BEFORE UpdateOrgPoolCidr (:541). Asserted here because this is the only instrument that
+  // sees it rendered: without the sentence an operator cannot tell a clean refusal from a
+  // partial resize.
+  await expect(page.getByText(/nothing was changed/i)).toBeVisible();
 });

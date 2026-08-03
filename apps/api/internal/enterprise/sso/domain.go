@@ -106,16 +106,42 @@ func (s *DomainService) CreateClaim(ctx context.Context, actor uuid.UUID, actorE
 	if err != nil {
 		return "", err
 	}
+	var issued string
 	err = s.withTx(ctx, func(q *sqlc.Queries) error {
+		// ⛔ A SAME-ORG RE-CLAIM IS A RECOVERY, NOT A CONFLICT — and it is the ONLY way back.
+		//
+		// There is no GET for domain claims, so an admin who reloads the page loses the TXT
+		// value and re-claiming is their only route to it. Falling through to the INSERT made
+		// that route return `domain_taken` — "already captured by another organization" — which
+		// was FALSE EVERY TIME IT COULD BE SEEN (see mapClaimErr). So the write-only-state gap
+		// did not merely hide state: it manufactured a false accusation against another tenant
+		// at the exact moment someone was recovering.
+		//
+		// Returning the EXISTING token is both the correct answer and the missing recovery. It
+		// leaks nothing: the caller already holds org:update AND a verified account at this
+		// domain, and the token is only useful to whoever controls the domain's DNS.
+		//
+		// Checked BEFORE the insert deliberately, not after catching 23505: a post-error read
+		// works in production (withTx opens a real inner tx) but not under a harness that shares
+		// one transaction, where the failed statement poisons it. A fix whose correctness depends
+		// on which of those it is running in is a fixture-fidelity trap.
+		if existing, e := q.GetDomainClaim(ctx, sqlc.GetDomainClaimParams{OrgID: orgID, Domain: domain}); e == nil {
+			issued = existing.VerificationToken
+			return audit(ctx, q, orgID, &actor, "domain.claim_token_reissued", "domain", domain,
+				map[string]any{"domain": domain, "verified": existing.VerifiedAt.Valid})
+		} else if !errors.Is(e, pgx.ErrNoRows) {
+			return e
+		}
 		if _, e := q.CreateDomainClaim(ctx, sqlc.CreateDomainClaimParams{OrgID: orgID, Domain: domain, VerificationToken: token}); e != nil {
 			return mapClaimErr(e)
 		}
+		issued = token
 		return audit(ctx, q, orgID, &actor, "domain.claim_created", "domain", domain, map[string]any{"domain": domain})
 	})
 	if err != nil {
 		return "", err
 	}
-	return "tunnex-verify=" + token, nil
+	return "tunnex-verify=" + issued, nil
 }
 
 // Verify checks the domain's TXT records for the claim token and, on success,
@@ -167,6 +193,37 @@ func (s *DomainService) capturingOrgTx(ctx context.Context, q *sqlc.Queries, ema
 	if !s.txtHasToken(ctx, domain, claim.VerificationToken) {
 		// Verification lost (record removed / domain changed hands): suspend.
 		_ = q.SuspendDomainClaim(ctx, sqlc.SuspendDomainClaimParams{OrgID: claim.OrgID, Domain: domain})
+		// ⛔ THE OTHER DESTRUCTIVE-AND-SILENT VERB, AND IT IS NOT A HUMAN ACTION.
+		//
+		// This clears `verified_at`, so domain capture stops ORG-WIDE — and until now it left no record at
+		// all. Its siblings audit normally (`domain.claim_created` / `verified` / `verification_failed`), so
+		// the only state change nobody could see was the one that silently turns a capture off.
+		//
+		// ⚠ THREE THINGS MAKE THIS DIFFERENT FROM THE UnmapGroup ONE-LINER, and each is why it uses a
+		// different primitive:
+		//
+		//  1. NO ACTOR. It fires from a SIGNUP, so `PrincipalFrom(ctx)` holds the person joining — who did
+		//     not do this and must not be recorded as having done it. `InsertSystemAuditLog` names
+		//     `actor_system` instead, which is what that column exists for.
+		//  2. CROSS-ORG. The row belongs to `claim.OrgID` — the CAPTURING org — while the surrounding
+		//     transaction belongs to a signup for whoever is joining. Writing it against the wrong org would
+		//     file the evidence in a tenant that has nothing to do with it, and the test pins the org id.
+		//  3. THE CAUSE IS THE POINT. "Suspended" alone sends an operator hunting for a person; the metadata
+		//     says the TXT record was missing at the apex, which is both the reason and the fix.
+		if b, e := json.Marshal(map[string]any{
+			"cause":       "txt_record_missing",
+			"domain":      domain,
+			"lookup_name": domain, // the APEX — the name the resolver actually queries
+		}); e == nil {
+			_, _ = q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+				OrgID:       pgtype.UUID{Bytes: [16]byte(claim.OrgID), Valid: true},
+				ActorSystem: ptrTo("domain-capture"),
+				Action:      "domain.capture_suspended",
+				TargetType:  ptrTo("domain"),
+				TargetID:    ptrTo(domain),
+				Metadata:    b,
+			})
+		}
 		return uuid.Nil, false
 	}
 	return claim.OrgID, true
@@ -194,12 +251,42 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// mapClaimErr turns a unique-violation into the RIGHT refusal.
+//
+// ⛔ IT USED TO REPORT EVERY 23505 AS ANOTHER TENANT'S DOMAIN, AND ON THE CLAIM PATH THAT WAS
+// FALSE 100% OF THE TIME. Two different unique indexes can fire here and they mean opposite
+// things — MEASURED against the live schema, both arms, in a rolled-back transaction:
+//
+//	domain_claims_org_domain_key       UNIQUE (org_id, domain)
+//	domain_claims_verified_domain_key  UNIQUE (domain) WHERE verified_at IS NOT NULL
+//
+// A fresh insert has verified_at = NULL, so it is NOT IN THE PARTIAL INDEX AT ALL — a second
+// org's CREATE against a domain another org has already verified SUCCEEDS (proven: `INSERT 0 1`).
+// The global index can therefore only fire from MarkDomainVerified. Which means the only 23505
+// reachable from CreateClaim was the SAME-ORG duplicate, and calling that "another organization"
+// told an operator a false thing about another tenant on an auth-adjacent surface.
+//
+// Branching on the constraint NAME rather than the SQLSTATE is what makes the two separable;
+// the code alone cannot distinguish them.
 func mapClaimErr(err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return apierr.Conflict("domain_taken", "this domain is already captured by another organization")
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return err
 	}
-	return err
+	switch pgErr.ConstraintName {
+	case "domain_claims_verified_domain_key":
+		// The genuine cross-tenant conflict, and the only place this sentence is true.
+		return apierr.Conflict("domain_taken", "this domain is already captured by another organization")
+	case "domain_claims_org_domain_key":
+		// Same-org duplicate. CreateClaim now resolves this before inserting, so reaching here
+		// means a CONCURRENT claim in this same org — never another tenant. Say that, and say
+		// what to do, rather than accusing anyone.
+		return apierr.Conflict("claim_in_progress",
+			"this domain was just claimed in this organization — reload to get its TXT record")
+	default:
+		// A new index we do not know about must not inherit either sentence.
+		return err
+	}
 }
 
 // audit writes an audit row in the caller's transaction.
@@ -222,3 +309,6 @@ func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UU
 	})
 	return err
 }
+
+// ptrTo is the pointer-taking helper the generated params need for nullable text columns.
+func ptrTo[T any](v T) *T { return &v }

@@ -167,6 +167,13 @@ const (
 	IdpSyncHealthProviderMicrosoft IdpSyncHealthProvider = "microsoft"
 )
 
+// Defines values for InvitationRole.
+const (
+	InvitationRoleAdmin  InvitationRole = "admin"
+	InvitationRoleMember InvitationRole = "member"
+	InvitationRoleOwner  InvitationRole = "owner"
+)
+
 // Defines values for InviteRequestRole.
 const (
 	InviteRequestRoleAdmin  InviteRequestRole = "admin"
@@ -369,11 +376,12 @@ type AccessLogHealth struct {
 
 // ActivityEntry defines model for ActivityEntry.
 type ActivityEntry struct {
-	Action     string              `json:"action"`
-	ActorId    *openapi_types.UUID `json:"actor_id,omitempty"`
-	CreatedAt  time.Time           `json:"created_at"`
-	TargetId   *string             `json:"target_id,omitempty"`
-	TargetType *string             `json:"target_type,omitempty"`
+	Action      string              `json:"action"`
+	ActorId     *openapi_types.UUID `json:"actor_id,omitempty"`
+	ActorSystem *string             `json:"actor_system,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
+	TargetId    *string             `json:"target_id,omitempty"`
+	TargetType  *string             `json:"target_type,omitempty"`
 }
 
 // AddGroupMemberRequest defines model for AddGroupMemberRequest.
@@ -931,6 +939,22 @@ type IdpSyncHealth struct {
 // IdpSyncHealthProvider defines model for IdpSyncHealth.Provider.
 type IdpSyncHealthProvider string
 
+// Invitation defines model for Invitation.
+type Invitation struct {
+	AcceptedAt      *time.Time          `json:"accepted_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Email           openapi_types.Email `json:"email"`
+	ExpiresAt       time.Time           `json:"expires_at"`
+	Id              openapi_types.UUID  `json:"id"`
+	InvitedByEmail  *string             `json:"invited_by_email"`
+	InvitedByUserId *openapi_types.UUID `json:"invited_by_user_id"`
+	RevokedAt       *time.Time          `json:"revoked_at"`
+	Role            InvitationRole      `json:"role"`
+}
+
+// InvitationRole defines model for Invitation.Role.
+type InvitationRole string
+
 // InviteCreated defines model for InviteCreated.
 type InviteCreated struct {
 	// InviteToken Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later.
@@ -1141,7 +1165,7 @@ type Node struct {
 	// PolicyDegraded Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB.
 	PolicyDegraded *bool `json:"policy_degraded,omitempty"`
 
-	// PolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
+	// PolicyDegradedKind S7.4b: the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). ⚠ EDITION: THE FIELD IS SERVED IN BOTH EDITIONS, and MOST kinds are edition-independent. ENTERPRISE-ONLY is the DESYNC TRIO — `converging`, `silent_desync`, `desync_unknown` — which come from `degradedKind(...)` under the `case enterprise:` arm, because only an enterprise build has a policy engine that can desync. EVERY OTHER KIND has an explicit `!enterprise` branch in `internal/nodes/service.go` (the switch at ~L1955): `cert_expired_cannot_reconnect`, `unsupported_policy_version`, `site_hub_down`, `site_link_down`, `site_subnet_unreachable`, `hub_forwarding_not_reconciling`, `apply_failing`, `stuck_enforcing`, `k8s_endpoints_unavailable`, `conntrack_flush_unavailable`. `healthy` is the default in both. `ListNodes` sets the field unconditionally (`internal/http/node_handlers.go`). THIS PARAGRAPH IS LOAD-BEARING (S14.5): it previously opened "Zero Trust (enterprise, S7.4b)", which reads as enterprise-ONLY. A UI gated on `edition === "enterprise"` on the strength of that line would silently deny the open edition a site-link health signal it is entitled to — the edition-mistaken-for-absence class. Corrected, not annotated: on an OpenAPI-first codebase a wrong description is a wrong source of truth. ⚠ THE CORRECTION'S OWN FIRST DRAFT WAS ALSO WRONG (it put `stuck_enforcing` on the enterprise side and named only 4 of the 10 open-edition kinds) and was caught only by reading the switch rather than reasoning about which kinds "sound like" policy features. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME. `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
 	PolicyDegradedKind *NodePolicyDegradedKind `json:"policy_degraded_kind,omitempty"`
 
 	// SiteId S8.3 (D2/CH): the site this gateway is bound to (null = not a site gateway). The topology view joins nodes to sites by this field — a site's gateways are the nodes with this site_id, rendered as a LIST (many nodes → one site scales to future HA; the UI never assumes one-gateway-per-site).
@@ -1158,7 +1182,7 @@ type Node struct {
 // NodeOvpnHealth S9.1 (4d): the OpenVPN server's refuse-loudly kind, present ONLY when an OVPN-enabled gateway is not serving. ovpn_certs_absent / ovpn_binary_absent = missing material or binary; ovpn_transit_conflict (WF-OVPN-2) = the server tun's transit range overlaps the device pool or a pushed route on this gateway (a local disjointness guard). A DIFFERENT axis from policy health — surfaced so an operator sees WHY. Absent when healthy (resolves on its own once the material/binary/config is corrected).
 type NodeOvpnHealth string
 
-// NodePolicyDegradedKind Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
+// NodePolicyDegradedKind S7.4b: the ADVISORY differentiated health kind — display detail over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on this). ⚠ EDITION: THE FIELD IS SERVED IN BOTH EDITIONS, and MOST kinds are edition-independent. ENTERPRISE-ONLY is the DESYNC TRIO — `converging`, `silent_desync`, `desync_unknown` — which come from `degradedKind(...)` under the `case enterprise:` arm, because only an enterprise build has a policy engine that can desync. EVERY OTHER KIND has an explicit `!enterprise` branch in `internal/nodes/service.go` (the switch at ~L1955): `cert_expired_cannot_reconnect`, `unsupported_policy_version`, `site_hub_down`, `site_link_down`, `site_subnet_unreachable`, `hub_forwarding_not_reconciling`, `apply_failing`, `stuck_enforcing`, `k8s_endpoints_unavailable`, `conntrack_flush_unavailable`. `healthy` is the default in both. `ListNodes` sets the field unconditionally (`internal/http/node_handlers.go`). THIS PARAGRAPH IS LOAD-BEARING (S14.5): it previously opened "Zero Trust (enterprise, S7.4b)", which reads as enterprise-ONLY. A UI gated on `edition === "enterprise"` on the strength of that line would silently deny the open edition a site-link health signal it is entitled to — the edition-mistaken-for-absence class. Corrected, not annotated: on an OpenAPI-first codebase a wrong description is a wrong source of truth. ⚠ THE CORRECTION'S OWN FIRST DRAFT WAS ALSO WRONG (it put `stuck_enforcing` on the enterprise side and named only 4 of the 10 open-edition kinds) and was caught only by reading the switch rather than reasoning about which kinds "sound like" policy features. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME. `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific kind. `converging` is a normal push settling (< the report-cadence debounce) and must not alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports. `unsupported_policy_version` (S8.1 D1): the agent REFUSED the compiled artifact (its Version exceeds what the agent can apply) and went deny-all — the ONE kind whose remedy is edition-independent and operator-side: upgrade the agent. Set for any edition (the version gate lives on the agent, not the policy engine). `site_hub_down` / `site_link_down` (S8.2 H5/B2; site_link_down CP-derived WF-B): a SITE gateway's site-to-site transit is down — no public-endpoint carrier (`site_hub_down`) or the ACTIVE PRIMARY hub is stale (`site_link_down`, the org-level HEADLINE from THE ONE liveness derivation, NOT the retired agent bool). A down site bridge is never green. Hub outranks a single link-down. NOTE: a DEMOTED member's dead link while transit rides the active primary is NOT this headline — it is the subordinate `site_link_note_peer` (below), so a healthy failover reads transit-healthy. `site_subnet_unreachable` (S8.2c D3): the gateway advertises a local site subnet but NO host address is inside it (bridge-trapped wg0 / misconfig) — agent-reported and INDEPENDENT of link state, so it catches the reassuring-green shape where the link handshake is fresh yet forwarded traffic can't be sourced onto the LAN. Ranks below the link-down kinds (a dead link masks it). `hub_forwarding_not_reconciling` (WF-C L2 D-WFC2-1a): a hub-set member whose spoke-observed handshake is FRESH (its wg0 keeps forwarding) while its OWN agent is SILENT (last_seen stale — crashed/OOM, but the host-netns interface it created survives). A "zombie hub": wire warm, brain dead — it can't reconcile, so a since-revoked device / tightened grant it never received is still enforced as the frozen last artifact (stale-enforcement). NEITHER plain "offline" (it forwards) NOR healthy (it's stale) — a distinct honest state, remedy = restart the agent (the wire is fine). A CONJUNCTION of two existing signals (the ONE liveness derivation's wire-freshness ⋂ last_seen staleness), edition-independent. Ranked above the apply/desync kinds so a dead agent's frozen last report can't mask it.
 type NodePolicyDegradedKind string
 
 // NodeStatus defines model for Node.Status.
@@ -2052,6 +2076,9 @@ type ClientInterface interface {
 
 	// TriggerIdpSync request
 	TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListInvitations request
+	ListInvitations(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateInvitationWithBody request with any body
 	CreateInvitationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3349,6 +3376,18 @@ func (c *Client) GetIdpSyncHealth(ctx context.Context, orgId openapi_types.UUID,
 
 func (c *Client) TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewTriggerIdpSyncRequest(c.Server, orgId, provider)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListInvitations(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListInvitationsRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -7040,6 +7079,40 @@ func NewTriggerIdpSyncRequest(server string, orgId openapi_types.UUID, provider 
 	return req, nil
 }
 
+// NewListInvitationsRequest generates requests for ListInvitations
+func NewListInvitationsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/invitations", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewCreateInvitationRequest calls the generic CreateInvitation builder with application/json body
 func NewCreateInvitationRequest(server string, orgId openapi_types.UUID, body CreateInvitationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -9993,6 +10066,9 @@ type ClientWithResponsesInterface interface {
 	// TriggerIdpSyncWithResponse request
 	TriggerIdpSyncWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*TriggerIdpSyncResponse, error)
 
+	// ListInvitationsWithResponse request
+	ListInvitationsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListInvitationsResponse, error)
+
 	// CreateInvitationWithBodyWithResponse request with any body
 	CreateInvitationWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInvitationResponse, error)
 
@@ -11615,6 +11691,29 @@ func (r TriggerIdpSyncResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r TriggerIdpSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListInvitationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Invitation
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListInvitationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListInvitationsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13776,6 +13875,15 @@ func (c *ClientWithResponses) TriggerIdpSyncWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseTriggerIdpSyncResponse(rsp)
+}
+
+// ListInvitationsWithResponse request returning *ListInvitationsResponse
+func (c *ClientWithResponses) ListInvitationsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListInvitationsResponse, error) {
+	rsp, err := c.ListInvitations(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListInvitationsResponse(rsp)
 }
 
 // CreateInvitationWithBodyWithResponse request with arbitrary body returning *CreateInvitationResponse
@@ -16448,6 +16556,39 @@ func ParseTriggerIdpSyncResponse(rsp *http.Response) (*TriggerIdpSyncResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest IdpSyncHealth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListInvitationsResponse parses an HTTP response from a ListInvitationsWithResponse call
+func ParseListInvitationsResponse(rsp *http.Response) (*ListInvitationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListInvitationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Invitation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

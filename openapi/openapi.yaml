@@ -1680,6 +1680,27 @@ paths:
         in: path
         required: true
         schema: { type: string, format: uuid }
+    get:
+      operationId: listInvitations
+      summary: List the organization's invitations
+      description: |
+        Returns every invitation row for the org, newest first, with its lifecycle timestamps.
+        Gated on `member:invite` — the same permission as the three verbs it exists to serve.
+        Reading which addresses are outstanding is only actionable to someone who can resend or
+        revoke them, so this deliberately reuses that permission rather than minting a read-only
+        one whose grant table would have to answer "who may see who was invited, but do nothing".
+        The secret token is NEVER returned: it is shown once, by `createInvitation`.
+      tags: [invitations]
+      responses:
+        "200":
+          description: Invitations, newest first.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Invitation" }
+        default: { $ref: "#/components/responses/Error" }
     post:
       operationId: createInvitation
       summary: Invite a user to the organization
@@ -2175,7 +2196,16 @@ paths:
       - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: listSiteSubnets
-      summary: List a site's subnets (S8.1; site:manage)
+      summary: List a site's subnets (S8.1; org:view — MEMBER-READABLE)
+      description: >-
+        ⚠ THIS LINE SAID `site:manage` UNTIL S14.7 AND THE HANDLER NEVER DID. `ListSiteSubnets`
+        authorizes on `rbac.PermOrgView` (`internal/http/site_handlers.go:195`), per S8.3 D5:
+        subnets are part of the read-only topology a MEMBER may see; advertise and approve stay
+        `site:manage`. PLAN.md's S8.3 entry rules the same thing.
+        The wrong annotation caused a real design decision to be taken on a false constraint —
+        Routed Ranges was scoped as "attribution is admin-only" because of it. On an OpenAPI-first
+        codebase a wrong summary is a wrong source of truth, so it is corrected here rather than
+        noted elsewhere. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME.
       tags: [sites]
       responses:
         "200":
@@ -3114,6 +3144,26 @@ components:
       properties:
         message: { type: string }
 
+    Invitation:
+      type: object
+      required: [id, email, role, expires_at, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [owner, admin, member] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        # ⛔ THE THREE TERMINAL STATES ARE TIMESTAMPS, NOT A STATUS ENUM — the table stores them that way
+        # and the client derives `pending | accepted | revoked | expired` from them plus the clock. EXPIRED
+        # is derived and never stored, so a status field would go stale the moment it was written.
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        # NULLABLE ON PURPOSE: invitations.invited_by_user_id is ON DELETE SET NULL, so the inviter can be
+        # gone. The render needs an arm for that; it is the `managed_by_machine` shape again.
+        invited_by_user_id: { type: string, format: uuid, nullable: true }
+        invited_by_email: { type: string, nullable: true }
+
     InviteCreated:
       type: object
       required: [message, invite_token]
@@ -3303,9 +3353,27 @@ components:
           type: string
           enum: [healthy, apply_failing, stuck_enforcing, converging, silent_desync, desync_unknown, unsupported_policy_version, site_hub_down, site_link_down, site_subnet_unreachable, conntrack_flush_unavailable, hub_forwarding_not_reconciling, k8s_endpoints_unavailable, cert_expired_cannot_reconnect]
           description: >-
-            Zero Trust (enterprise, S7.4b): the ADVISORY differentiated health kind — display detail
+            S7.4b: the ADVISORY differentiated health kind — display detail
             over `policy_degraded`, which stays the sole authoritative signal (nothing keys logic on
-            this). `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the
+            this).
+            ⚠ EDITION: THE FIELD IS SERVED IN BOTH EDITIONS, and MOST kinds are edition-independent.
+            ENTERPRISE-ONLY is the DESYNC TRIO — `converging`, `silent_desync`, `desync_unknown` — which come
+            from `degradedKind(...)` under the `case enterprise:` arm, because only an enterprise build has a
+            policy engine that can desync. EVERY OTHER KIND has an explicit `!enterprise` branch in
+            `internal/nodes/service.go` (the switch at ~L1955): `cert_expired_cannot_reconnect`,
+            `unsupported_policy_version`, `site_hub_down`, `site_link_down`, `site_subnet_unreachable`,
+            `hub_forwarding_not_reconciling`, `apply_failing`, `stuck_enforcing`,
+            `k8s_endpoints_unavailable`, `conntrack_flush_unavailable`. `healthy` is the default in both.
+            `ListNodes` sets the field unconditionally (`internal/http/node_handlers.go`).
+            THIS PARAGRAPH IS LOAD-BEARING (S14.5): it previously opened "Zero Trust (enterprise, S7.4b)",
+            which reads as enterprise-ONLY. A UI gated on `edition === "enterprise"` on the strength of that
+            line would silently deny the open edition a site-link health signal it is entitled to — the
+            edition-mistaken-for-absence class. Corrected, not annotated: on an OpenAPI-first codebase a
+            wrong description is a wrong source of truth. ⚠ THE CORRECTION'S OWN FIRST DRAFT WAS ALSO WRONG
+            (it put `stuck_enforcing` on the enterprise side and named only 4 of the 10 open-edition kinds)
+            and was caught only by reading the switch rather than reasoning about which kinds "sound like"
+            policy features. VERIFY AGAINST THE SWITCH, NOT AGAINST THE NAME.
+            `desync_unknown` is a FIRST-CLASS honest state (compile-hash unavailable, or the
             gateway stopped reporting) — it means "cannot determine", NEVER healthy and NEVER a specific
             kind. `converging` is a normal push settling (< the report-cadence debounce) and must not
             alarm; `silent_desync` is a stuck pushed≠applied past the debounce with fresh reports.
@@ -3395,8 +3463,15 @@ components:
         # Device health / posture (S7.5.3). Present ONLY when the org has >= 1
         # posture check configured (enterprise) — otherwise omitted, so an org
         # that never opted in sees no posture noise. health_state 'unknown' =
-        # no report, stale report, or the fact was reported absent: ABSENCE IS
-        # NOT COMPLIANCE — never render unknown as a pass. health_blocked is the
+        # NO REPORT, or a STALE report. ⛔ CORRECTED S14.10: this line also said
+        # "or the fact was reported absent", and that third cause CANNOT OCCUR —
+        # measured in the schema and the evaluator. `device_health.evaluated_state`
+        # is NOT NULL with CHECK (compliant|noncompliant), and the evaluator does
+        # `if f.DiskEncrypted == nil { continue }` ("absence never blocks"), so a
+        # device that reports WITHOUT a fact is evaluated COMPLIANT, never unknown.
+        # The wrong disjunct cost a full build-and-revert of a third UI label.
+        # ABSENCE IS STILL NOT COMPLIANCE for the two real causes: never render
+        # unknown as a pass. health_blocked is the
         # enforcement fact (the device is excluded from every gateway while true).
         health_state: { type: string, enum: [compliant, noncompliant, unknown] }
         health_blocked: { type: boolean }
@@ -3740,6 +3815,12 @@ components:
         target_type: { type: string }
         target_id: { type: string }
         actor_id: { type: string, format: uuid }
+        # ⛔ THE NAMED SYSTEM ACTOR, ADDED S14.16. This schema carried `actor_id` and NOT
+        # `actor_system`, so every machine-initiated event on the Overview feed arrived
+        # indistinguishable from an event nobody recorded — the same vocabulary collision the Audit
+        # Log screen was just fixed for, one endpoint over. The column has existed since S7.5.2 and
+        # three writers populate it (`idp-sync`, `device-health`, `domain-capture`).
+        actor_system: { type: string }
         created_at: { type: string, format: date-time }
 
     # A single audit event for the viewer. `id` + `created_at` form the keyset

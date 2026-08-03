@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { AuthLayout } from "./components/AuthLayout";
 import { MfaSettings } from "./components/MfaSettings";
 import { AppShell } from "./components/AppShell";
+import VisualGallery from "./pages/VisualGallery";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -19,11 +20,14 @@ import CliAuth from "./pages/CliAuth";
 import CliDevice from "./pages/CliDevice";
 import Dashboard from "./pages/Dashboard";
 import Devices from "./pages/Devices";
+import Gateways from "./pages/Gateways";
 import Sites from "./pages/Sites";
+import RoutedRanges from "./pages/RoutedRanges";
 import Kubernetes from "./pages/Kubernetes";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import AccessEvents from "./pages/AccessEvents";
 import AuditLog from "./pages/AuditLog";
 
 /**
@@ -42,9 +46,39 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/login" element={<AnonOnly><Login /></AnonOnly>} />
-        <Route path="/signup" element={<AnonOnly><Signup /></AnonOnly>} />
-        <Route path="/forgot-password" element={<AnonOnly><ForgotPassword /></AnonOnly>} />
+        {/* The visual gallery is BUILD-FLAGGED OFF. `VITE_VISUAL_GALLERY` is unset in every production build,
+            so Vite's dead-code elimination drops the route and the import. Only the visual-regression job
+            builds with it on, and `test/visualgallery.test.ts` asserts the flag defaults off — an unshipped
+            surface must be PROVEN unshipped, not assumed.
+            Deliberately OUTSIDE RequireAuth: the gallery renders primitives with fixture data and touches no
+            API, so a login would add a dependency the snapshot does not need. */}
+        {import.meta.env.VITE_VISUAL_GALLERY === "1" && (
+          <Route path="/__visual" element={<VisualGallery />} />
+        )}
+        <Route
+          path="/login"
+          element={
+            <AnonOnly>
+              <Login />
+            </AnonOnly>
+          }
+        />
+        <Route
+          path="/signup"
+          element={
+            <AnonOnly>
+              <Signup />
+            </AnonOnly>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <AnonOnly>
+              <ForgotPassword />
+            </AnonOnly>
+          }
+        />
         {/* Reset + verify are reached from emailed links; usable while logged out
             and harmless while logged in, so they are not auth-gated. */}
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -54,7 +88,14 @@ export default function App() {
             the shell: /create-org and /verify-pending are reachable while
             authenticated with no org yet; the shell itself is gated by RequireOrg. */}
         <Route element={<RequireAuth />}>
-          <Route path="/create-org" element={<RequireNoOrg><CreateOrg /></RequireNoOrg>} />
+          <Route
+            path="/create-org"
+            element={
+              <RequireNoOrg>
+                <CreateOrg />
+              </RequireNoOrg>
+            }
+          />
           <Route path="/verify-pending" element={<VerifyPending />} />
           {/* S5.1 CLI auth: the browser consent leg (`tunnex login`) and the
               device-code approval page. Authenticated but org-independent. */}
@@ -63,14 +104,23 @@ export default function App() {
           {/* S7.5.5 D8: a MFA-enforcement-gated user (org requires 2FA, none set up) is routed here
               by RequireAuth — enrollment only, until they confirm a TOTP. Org-independent. */}
           <Route path="/enroll-mfa" element={<ForcedEnroll />} />
-          <Route element={<RequireOrg><AppShell /></RequireOrg>}>
+          <Route
+            element={
+              <RequireOrg>
+                <AppShell />
+              </RequireOrg>
+            }
+          >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
-            <Route path="/sites" element={<Sites />} />
+            <Route path="/gateways" element={<Gateways />} />
+          <Route path="/sites" element={<Sites />} />
+          <Route path="/routed-ranges" element={<RoutedRanges />} />
             <Route path="/kubernetes" element={<Kubernetes />} />
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/access-events" element={<AccessEvents />} />
             <Route path="/audit" element={<AuditLog />} />
           </Route>
         </Route>
@@ -101,7 +151,10 @@ function RequireAuth() {
   // (default-deny middleware, typed mfa_enrollment_required 403); this is the client routing so the
   // user lands on the ceremony rather than hitting dead 403s. Decision is a pure fn (authroute.ts),
   // table-pinned in BOTH directions (resolveMfaGateRoute).
-  const gateRoute = resolveMfaGateRoute(Boolean(state.user.mfa_enrollment_required), location.pathname);
+  const gateRoute = resolveMfaGateRoute(
+    Boolean(state.user.mfa_enrollment_required),
+    location.pathname,
+  );
   if (gateRoute) {
     return <Navigate to={gateRoute} replace />;
   }
@@ -115,12 +168,20 @@ function ForcedEnroll() {
   const { logout } = useAuth();
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Set up two-factor authentication</h1>
-      <p className="mt-1 text-sm text-slate-400">Your organization requires 2FA. Finish setup to continue to Tunnex.</p>
+      <h1 className="text-xl font-semibold text-white">
+        Set up two-factor authentication
+      </h1>
+      <p className="mt-1 text-sm text-slate-400">
+        Your organization requires 2FA. Finish setup to continue to Tunnex.
+      </p>
       <div className="mt-5">
         <MfaSettings />
       </div>
-      <button type="button" className="mt-4 text-xs text-slate-400 underline hover:text-slate-200" onClick={logout}>
+      <button
+        type="button"
+        className="mt-4 text-xs text-slate-400 underline hover:text-slate-200"
+        onClick={logout}
+      >
         Sign out
       </button>
     </AuthLayout>
@@ -202,7 +263,9 @@ function RequireOrg({ children }: { children: React.ReactNode }) {
   if (status === "loading") return <FullScreenLoading />;
   if (status === "none") {
     const unverified = state.status === "authed" && !state.user.email_verified;
-    return <Navigate to={unverified ? "/verify-pending" : "/create-org"} replace />;
+    return (
+      <Navigate to={unverified ? "/verify-pending" : "/create-org"} replace />
+    );
   }
   return <>{children}</>;
 }
@@ -216,5 +279,9 @@ function AnonOnly({ children }: { children: React.ReactNode }) {
 }
 
 function FullScreenLoading() {
-  return <div className="grid min-h-full place-items-center text-sm text-slate-500">Loading…</div>;
+  return (
+    <div className="grid min-h-full place-items-center text-sm text-slate-500">
+      Loading…
+    </div>
+  );
 }

@@ -78,10 +78,13 @@ export default function CreateOrg() {
         // Only a still-0-membership user sees the invitation-only card (branch 3).
         if (apiErrorCode(error) === "org_limit_reached") {
           const { data: orgs } = await api.GET("/api/v1/organizations");
-          if ((orgs?.length ?? 0) > 0) return navigate("/dashboard", { replace: true });
+          if ((orgs?.length ?? 0) > 0)
+            return navigate("/dashboard", { replace: true });
           return setCapped(true);
         }
-        return setError(apiErrorMessage(error, "Could not create the organization."));
+        return setError(
+          apiErrorMessage(error, "Could not create the organization."),
+        );
       }
       navigate("/dashboard", { replace: true });
     } catch {
@@ -96,12 +99,18 @@ export default function CreateOrg() {
   if (capped) {
     return (
       <AuthLayout>
-        <h1 className="text-xl font-semibold text-white">Invitation required</h1>
+        <h1 className="text-xl font-semibold text-white">
+          Invitation required
+        </h1>
         <p className="mt-2 text-sm text-slate-400">
-          This {PRODUCT_NAME} deployment already has an organization and the open edition supports a single one. Ask an
-          administrator to invite you, then sign in to accept.
+          This {PRODUCT_NAME} deployment already has an organization and the
+          open edition supports a single one. Ask an administrator to invite
+          you, then sign in to accept.
         </p>
-        <Link to="/login" className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200">
+        <Link
+          to="/login"
+          className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200"
+        >
           Back to sign in
         </Link>
       </AuthLayout>
@@ -110,19 +119,37 @@ export default function CreateOrg() {
 
   return (
     <AuthLayout>
-      <h1 className="text-xl font-semibold text-white">Create your organization</h1>
+      <h1 className="text-xl font-semibold text-white">
+        Create your organization
+      </h1>
       <p className="mt-1 text-sm text-slate-400">
-        One more step — name the organization that will own your gateways, devices, and members.
+        One more step — name the organization that will own your gateways,
+        devices, and members.
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Organization name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus placeholder="Acme Corp" />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus
+            placeholder="Acme Corp"
+          />
         </Field>
         <Field label="Slug">
-          <Input value={effectiveSlug} onChange={(e) => onSlug(e.target.value)} required placeholder="acme-corp" />
+          <Input
+            value={effectiveSlug}
+            onChange={(e) => onSlug(e.target.value)}
+            required
+            placeholder="acme-corp"
+          />
         </Field>
         <ErrorText>{error}</ErrorText>
-        <Button type="submit" disabled={busy || !name.trim() || !finalSlug} className="w-full">
+        <Button
+          type="submit"
+          disabled={busy || !name.trim() || !finalSlug}
+          className="w-full"
+        >
           {busy ? "Creating…" : "Create organization"}
         </Button>
       </form>

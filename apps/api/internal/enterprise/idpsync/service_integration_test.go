@@ -163,3 +163,62 @@ func hasCode(err error, status int, code string) bool {
 	}
 	return ae.Status == status && ae.Code == code
 }
+
+// TestUnmapWritesAnAuditRow pins the first of the two destructive-and-silent verbs (S14.15).
+//
+// ⛔ UnmapGroup DELETES EVERY MEMBER of a group and pushes org-wide, and it wrote NO audit row —
+// while its siblings (`UpsertConfig`, the reconciler's own membership writes) all audit normally.
+// An access-affecting deletion with no record that a human did it, on the surface that decides who
+// can reach what. The 204 carries no body either, so before this there was no trace anywhere.
+func TestUnmapWritesAnAuditRow(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	org, actor, member := uuid.New(), uuid.New(), uuid.New()
+	exec(t, pool, `INSERT INTO organizations (id,name,slug) VALUES ($1,'o',$2)`, org, "o-"+org.String()[:8])
+	for _, u := range []uuid.UUID{actor, member} {
+		exec(t, pool, `INSERT INTO users (id,email,name) VALUES ($1,$2,'u')`, u, u.String()[:8]+"@t.io")
+		exec(t, pool, `INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')`, org, u)
+	}
+	svc := newService(t, pool)
+	if _, err := svc.UpsertConfig(ctx, org, "microsoft", idpsyncspec.ConfigInput{
+		ClientID: "c", ClientSecret: "s", TenantID: "t", Enabled: true,
+	}); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	g, err := svc.MapGroup(ctx, org, "microsoft", idpsyncspec.MapInput{IdpGroupID: "grp-1", Name: "Eng"})
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	// TWO members, so the recorded count is a real number and not incidentally right at 0 or 1.
+	exec(t, pool, `INSERT INTO group_members (org_id,group_id,user_id,origin) VALUES ($1,$2,$3,'idp_sync')`, org, g.ID, actor)
+	exec(t, pool, `INSERT INTO group_members (org_id,group_id,user_id,origin) VALUES ($1,$2,$3,'idp_sync')`, org, g.ID, member)
+
+	if err := svc.UnmapGroup(ctx, org, "microsoft", g.ID); err != nil {
+		t.Fatalf("unmap: %v", err)
+	}
+
+	var n int
+	var meta string
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*), coalesce(max(metadata::text),'') FROM audit_logs
+		   WHERE org_id = $1 AND action = 'idp_sync.group_unmapped'`, org).Scan(&n, &meta); err != nil {
+		t.Fatalf("audit read: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("un-mapping must leave exactly ONE audit row, got %d", n)
+	}
+	// ⛔ THE SERVER'S OWN COUNT, taken inside the same transaction as the delete. The response body
+	// is empty, so this row is the only place the blast radius is ever stated.
+	// Read the VALUE out of the jsonb rather than substring-matching the rendered text: postgres
+	// prints `"members_removed": 2` WITH a space, so a literal `"members_removed":2` match fails on
+	// a correct row. Second time a matcher of mine has been defeated by the format it scans.
+	var removed int
+	if err := pool.QueryRow(ctx,
+		`SELECT (metadata->>'members_removed')::int FROM audit_logs
+		   WHERE org_id = $1 AND action = 'idp_sync.group_unmapped'`, org).Scan(&removed); err != nil {
+		t.Fatalf("metadata read: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("the audit row must record how many members were removed; want 2, got %d (meta=%s)", removed, meta)
+	}
+}

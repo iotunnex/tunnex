@@ -8,14 +8,27 @@ import { test, expect } from "@playwright/test";
 // expired. The fix attaches the header to every unsafe-method request inside
 // createTunnexClient. This test manufactures the exact failure state — a
 // PRESENT-but-INVALID session cookie — and proves login now succeeds.
-const OWNER = { email: "owner@demo.tunnex.local", pass: "tunnex-demo-password" };
+const OWNER = {
+  email: "owner@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
 
-test("login succeeds with a stale session cookie present, and replaces it", async ({ page, context, baseURL }) => {
+test("login succeeds with a stale session cookie present, and replaces it", async ({
+  page,
+  context,
+  baseURL,
+}) => {
   // The bug's trigger state: a session cookie the server does not recognize
   // (same shape as one whose Redis session was revoked by a password reset).
   const STALE = "stale-revoked-session-id-round2-b1";
   await context.addCookies([
-    { name: "tunnex_session", value: STALE, url: baseURL!, httpOnly: true, sameSite: "Lax" },
+    {
+      name: "tunnex_session",
+      value: STALE,
+      url: baseURL!,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
   ]);
 
   await page.goto("/login");
@@ -29,7 +42,9 @@ test("login succeeds with a stale session cookie present, and replaces it", asyn
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
   // And the login's Set-Cookie REPLACED the stale value (a real session now).
-  const session = (await context.cookies()).find((c) => c.name === "tunnex_session");
+  const session = (await context.cookies()).find(
+    (c) => c.name === "tunnex_session",
+  );
   expect(session).toBeTruthy();
   expect(session!.value).not.toBe(STALE);
 });

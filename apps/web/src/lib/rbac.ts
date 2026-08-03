@@ -11,7 +11,9 @@ import rbacPolicy from "./rbac-policy.json";
 // rbac.go can no longer silently desync this mirror. (canManageMembership's
 // relational rules below are logic, not data, and are still mirrored by hand.)
 const grants: Record<string, Set<string>> = Object.fromEntries(
-  Object.entries(rbacPolicy as Record<string, string[]>).map(([role, perms]) => [role, new Set(perms)]),
+  Object.entries(rbacPolicy as Record<string, string[]>).map(
+    ([role, perms]) => [role, new Set(perms)],
+  ),
 );
 
 export function can(role: Role | undefined, perm: string): boolean {
@@ -27,7 +29,11 @@ export function can(role: Role | undefined, perm: string): boolean {
 // canManageMembership mirrors rbac.CanManageMembership: the actor needs
 // member:manage, only an owner may manage another owner, and only an owner may
 // promote someone TO owner. newRole "" means removal/deactivation (no promotion).
-export function canManageMembership(actorRole: Role | undefined, targetRole: Role, newRole: Role | ""): boolean {
+export function canManageMembership(
+  actorRole: Role | undefined,
+  targetRole: Role,
+  newRole: Role | "",
+): boolean {
   if (!can(actorRole, "member:manage")) return false;
   if (targetRole === "owner" && actorRole !== "owner") return false;
   if (newRole === "owner" && actorRole !== "owner") return false;

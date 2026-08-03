@@ -7,6 +7,10 @@ import type { paths, components } from "./api";
 
 export type { paths, components };
 
+// S14.1 — design tokens. The ONE authored form for colour/typography, shared with the desktop client per
+// Item A ruling A3 (own components, shared tokens). See ./tokens.ts.
+export * from "./tokens";
+
 // Convenience aliases for the schemas used across the apps.
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type ApiError = components["schemas"]["Error"];

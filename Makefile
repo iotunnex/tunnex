@@ -22,6 +22,52 @@ up-enterprise: ## Start the full stack with the ENTERPRISE api image (Zero Trust
 	@echo "Tunnex (ENTERPRISE) starting → http://localhost"
 	@echo "Verify: curl -s localhost/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> enterprise"
 
+# ── ⛔ THE OPEN-EDITION REVIEW STACK (S14.12) ───────────────────────────────────────────────────────────
+#
+# WHY IT EXISTS: EVERY edition-gated render in EPIC 14 has been reviewed on an ENTERPRISE stack, where the
+# open-edition path never executes. S14.11 found TWO edition-before-permission bugs in the web app, BOTH
+# invisible on that stack. Access Policies is 100% edition-gated — the whole screen collapses to ONE state on
+# the open build — so reviewing it on enterprise would sign off a render nobody has ever seen.
+#
+# SHAPE, and every choice is about NOT disturbing the primary stack:
+#   project   COMPOSE_PROJECT_NAME=tunnex-open  -> its OWN network, volumes and postgres. No shared state.
+#   edition   NO TUNNEX_BUILD_TAGS              -> the open api image. That is the entire difference.
+#   ports     every host port overridden (+1 / +1000). The primary stack's defaults are UNCHANGED, so a
+#             plain `make up-enterprise` still binds :80 exactly as before.
+#   fixtures  the SAME embedded fixtures.sql, run by the SAME seeder binary, against this project's DB.
+#             ⛔ ZERO DRIFT BY CONSTRUCTION: one source, two databases. The tables exist in both (migrations
+#             are edition-independent); only the API binary differs, which is the point.
+#
+#   ⛔ ONE LEGITIMATE DIFFERENCE, NAMED SO IT IS NOT MISTAKEN FOR DRIFT: the seeder registers `posture_blocked`
+#   THROUGH THE PRODUCT, and device-health reporting is edition-gated. On the open stack that POST answers
+#   403 edition_required, so posture_blocked is ABSENT — correctly, because posture is an enterprise feature.
+#   `seed-open` therefore runs with TUNNEX_SEED_STRICT=false. That is an EDITION difference, not a fixture gap.
+OPEN_ENV = COMPOSE_PROJECT_NAME=tunnex-open HOST_HTTP_PORT=8081 HOST_API_MTLS_PORT=8444 \
+           HOST_WG_PORT=51821 HOST_MAILPIT_UI=8026 HOST_MAILPIT_SMTP=1026
+
+.PHONY: up-open-review
+up-open-review: ## Start the OPEN-edition review stack alongside the primary one (http://localhost:8081)
+	@test -f .env || cp .env.example .env
+	$(OPEN_ENV) docker compose up -d --build
+	@echo ""
+	@echo "OPEN-edition review stack -> http://localhost:8081   (Mailpit -> http://localhost:8026)"
+	@echo "Verify:  curl -s localhost:8081/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> open"
+	@echo "The ENTERPRISE stack is untouched on http://localhost"
+
+.PHONY: seed-open
+seed-open: ## Seed the open-edition review stack (migrate + base seed + fixtures, in that order)
+	@# ⛔ THREE STEPS, IN ORDER, because `fixtures.sql` LAYERS ON TOP of the base seed and refuses without it
+	@# ("the demo org does not exist"). The primary stack was seeded months ago so the ordering was invisible;
+	@# a fresh database is what surfaced it. A one-command switch has to carry the whole chain or it is not one.
+	$(OPEN_ENV) $(MAKE) migrate COMPOSE_PROJECT_NAME=tunnex-open
+	$(OPEN_ENV) TUNNEX_SEED_FORCE=$(or $(TUNNEX_SEED_FORCE),false) $(MAKE) seed COMPOSE_PROJECT_NAME=tunnex-open
+	$(OPEN_ENV) TUNNEX_SEED_FORCE=true TUNNEX_SEED_STRICT=false $(MAKE) seed-fixtures \
+	  COMPOSE_PROJECT_NAME=tunnex-open
+
+.PHONY: down-open-review
+down-open-review: ## Stop the open-edition review stack (leaves the primary stack running)
+	$(OPEN_ENV) docker compose down
+
 .PHONY: down
 down: ## Stop the stack (keep volumes)
 	$(COMPOSE) down
@@ -77,16 +123,35 @@ OAPI_CODEGEN_VERSION := v2.4.1
 OPENAPI_TS_VERSION := 7.4.4
 
 # Compose network + dev DB creds (defaults match .env.example) used by seed/e2e.
-NET := tunnex_default
+# ⛔ DERIVED FROM COMPOSE_PROJECT_NAME, not hard-coded. Every docker-run target below (`migrate`, `seed`,
+# `seed-fixtures`, `sqlc`) joins a compose network BY NAME. `COMPOSE_PROJECT_NAME=tunnex-s141 make up-enterprise`
+# creates `tunnex-s141_default`, but a hard-coded `tunnex_default` sent all of those at a DIFFERENT STACK'S
+# DATABASE while appearing to succeed. `seed-fixtures` refused (its real-data guard fired on 6690 orgs);
+# `migrate` has no such guard. Found in S14.7 while seeding for review.
+#
+# Unset behaves exactly as before, so no existing invocation changes.
+NET := $(if $(COMPOSE_PROJECT_NAME),$(COMPOSE_PROJECT_NAME)_default,tunnex_default)
 PG_USER ?= tunnex
 PG_PASS ?= tunnex_dev_password
 PG_DB ?= tunnex
-# The compose-managed named volume holding the master key (project `tunnex`, same
-# prefix convention as NET). seed-enterprise mounts it to SEAL with the API's key.
-SECRETS_VOL := tunnex_tunnex_secrets
+# The compose-managed named volume holding the master key. seed-enterprise mounts it to SEAL with the API's
+# key — so the SAME class as NET one line up, and worse in effect: sealing against a different stack's master
+# key produces a secret THAT STACK CANNOT UNSEAL, with no error at seal time.
+SECRETS_VOL := $(if $(COMPOSE_PROJECT_NAME),$(COMPOSE_PROJECT_NAME)_tunnex_secrets,tunnex_tunnex_secrets)
 
 .PHONY: generate
-generate: generate-go generate-ts generate-rbac sqlc ## Regenerate all code from openapi/openapi.yaml
+generate: generate-go generate-ts generate-rbac generate-tokens sqlc ## Regenerate all code from openapi/openapi.yaml
+
+.PHONY: generate-tokens
+generate-tokens: ## S14.1: emit the design-token artifacts from packages/shared/src/tokens.ts (the ONE authored form)
+	# Configs consume the EMITTED css/json, never the TypeScript: a config file loads through Node, which
+	# cannot read a raw .ts entry, and importing the .ts by relative path deadlocks TS project references.
+	# Committing the artifacts and drift-guarding them is this repo's established pattern (api.d.ts,
+	# rbac-policy.json) rather than a new one.
+	docker run --rm -v "$(PWD)":/w -w /w/packages/shared \
+	  -v tunnex-nm:/w/node_modules -v tunnex-shared-nm:/w/packages/shared/node_modules \
+	  node:20-alpine sh -c 'corepack enable && pnpm install --filter @tunnex/shared --no-frozen-lockfile >/dev/null && \
+	    ./node_modules/.bin/tsc -p tsconfig.tokens.json && node scripts/emit-tokens.mjs'
 
 .PHONY: generate-rbac
 generate-rbac: ## Emit the RBAC grant table (rbac.Policy) as JSON for the web client mirror
@@ -112,6 +177,7 @@ generate-ts: ## Generate the TypeScript API types from the spec
 generate-check: generate ## Fail if generated code is out of date (CI drift guard)
 	@git diff --exit-code -- \
 	  apps/api/internal/api apps/cli/internal/api apps/api/db/sqlc packages/shared/src/api.d.ts apps/web/src/lib/rbac-policy.json \
+	  packages/shared/generated \
 	  || { echo ""; echo "ERROR: generated code is stale. Run 'make generate' and commit the result."; exit 1; }
 	@echo "generated code is up to date."
 
@@ -217,7 +283,13 @@ helper-crosscompile: ## Compile-check the helper (incl platform build-tagged fil
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres
+	@# TUNNEX_SEED_FORCE is FORWARDED, not swallowed. `seed` refuses when the database already holds
+	@# real orgs — a good guard — but the variable that overrides it never reached the container, so
+	@# `seed-open` could not re-seed a review database once anything had accumulated in it (71 orgs,
+	@# left by pointing a Go test run at that stack). The chain's own comment says a one-command
+	@# switch has to carry the whole chain; it was not carrying this.
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	  -e TUNNEX_SEED_FORCE="$(TUNNEX_SEED_FORCE)" \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed
 
@@ -228,6 +300,46 @@ seed-enterprise: ## Seed the ENTERPRISE fixtures (SSO config + strandable device
 	  -v $(SECRETS_VOL):/var/lib/tunnex/secrets -e TUNNEX_SECRETS_DIR=/var/lib/tunnex/secrets \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed-enterprise
+
+.PHONY: seed-fixtures
+seed-fixtures: ## Seed the DEMO FIXTURES (populated network for UI review) ON TOP of `seed` (S14.5)
+	@echo '>> demo fixtures: 5 gateways, 4 sites, 6 subnets, 5 devices, 12 audit entries (run after: make seed)'
+	@# ⛔ TUNNEX_SEED_FORCE IS PASSED THROUGH. The seeder refuses on any non-demo org and its own hint names
+	@# this variable as the override — but the Makefile did not forward it, so the DOCUMENTED escape hatch did
+	@# not work through the documented entry point. TUNNEX_API_URL rides along for the posture-block report.
+	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
+	  -e TUNNEX_SEED_FORCE="$(TUNNEX_SEED_FORCE)" -e TUNNEX_API_URL="$(TUNNEX_API_URL)" \
+	  -e TUNNEX_SEED_STRICT="$(TUNNEX_SEED_STRICT)" \
+	  $(GO_IMAGE) go run ./cmd/seed-fixtures
+
+.PHONY: k3s-demo k3s-demo-verify k3s-demo-down
+k3s-demo: ## Bring up + register + expose the review k3s cluster for the Kubernetes screen, then VERIFY it (S14.8)
+	scripts/k3s-demo.sh up
+
+k3s-demo-verify: ## Verify the review cluster is up AND the control plane agrees with it (run before a review)
+	scripts/k3s-demo.sh verify
+
+k3s-demo-down: ## Stop the review cluster (CP rows stay -- that asymmetry is finding D9)
+	scripts/k3s-demo.sh down
+
+.PHONY: visual
+visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN THE SAME CONTAINER CI USES.
+	# The playwright image is pinned to CI's. A baseline rendered on the host would NEVER match CI: font
+	# rasterisation and subpixel AA differ per platform, so the suite would be red on its first run and the
+	# only way out would be to widen the threshold — which is how a visual suite stops meaning anything.
+	# UPDATE a baseline with:  make visual-update
+	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
+	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
+
+.PHONY: visual-update
+visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COMMIT, .png FILES ONLY.
+	# A baseline update mixed into a feature commit is unreviewable — "N images changed" has to be a fact
+	# someone can see, not something buried in a 40-file diff.
+	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
+	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
+	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --update-snapshots"
 
 .PHONY: e2e
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e

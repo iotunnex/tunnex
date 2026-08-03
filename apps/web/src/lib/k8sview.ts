@@ -15,7 +15,10 @@ export interface K8sGate {
   canManage: boolean;
 }
 
-export function k8sGate(input: { role: Role | undefined; emailVerified: boolean }): K8sGate {
+export function k8sGate(input: {
+  role: Role | undefined;
+  emailVerified: boolean;
+}): K8sGate {
   return {
     canView: can(input.role, "org:view"),
     canManage: input.emailVerified && can(input.role, "k8s:manage"),
@@ -59,14 +62,20 @@ export function managedEditWarning(kind: "cluster" | "Service"): string {
 // the dashboard MUST NOT offer the destructive control (Deregister/Unexpose) — edit the CR instead. Extracted
 // out of inline JSX so a refactor that re-exposes the control fails a test, not just review (the D2 ruling's
 // worst case: an admin's dashboard edit silently reverted on the next reconcile).
-export function objectControls(managedByOperator: boolean): { withheld: boolean } {
+export function objectControls(managedByOperator: boolean): {
+  withheld: boolean;
+} {
   return { withheld: managedByOperator };
 }
 
 // portLabel projects the wire port_low/port_high onto a human range. null/absent both = "any".
-export function portLabel(portLow: number | null | undefined, portHigh: number | null | undefined): string {
+export function portLabel(
+  portLow: number | null | undefined,
+  portHigh: number | null | undefined,
+): string {
   if (portLow == null && portHigh == null) return "any";
-  if (portLow != null && (portHigh == null || portHigh === portLow)) return String(portLow);
+  if (portLow != null && (portHigh == null || portHigh === portLow))
+    return String(portLow);
   if (portLow == null) return String(portHigh);
   return `${portLow}–${portHigh}`; // en-dash range
 }
@@ -86,7 +95,10 @@ function serviceRow(s: K8sService): ServiceRow {
 
 // assembleClusters joins the clusters with their org-wide Services (grouped by cluster_id). PURE — the only
 // computation is the group-by + the port projection.
-export function assembleClusters(clusters: K8sCluster[], services: K8sService[]): ClusterCard[] {
+export function assembleClusters(
+  clusters: K8sCluster[],
+  services: K8sService[],
+): ClusterCard[] {
   const byCluster: Record<string, ServiceRow[]> = {};
   for (const s of services) {
     (byCluster[s.cluster_id] ??= []).push(serviceRow(s));
@@ -105,6 +117,142 @@ export function assembleClusters(clusters: K8sCluster[], services: K8sService[])
 }
 
 // serviceFqdnById is the grant-picker's label source: id -> fqdn for a live Service (or null if absent).
-export function serviceFqdnById(services: K8sService[], id: string): string | null {
+export function serviceFqdnById(
+  services: K8sService[],
+  id: string,
+): string | null {
   return services.find((s) => s.id === id)?.fqdn ?? null;
+}
+
+// ── S14.8 SECTION PASS ──────────────────────────────────────────────────────────────────────────────────
+//
+// ⛔ D3's `VANISHED` ROW CANNOT BE BUILT, AND THE REASON IS ONE LINE OF SQL.
+//
+// The design shows a dimmed fourth row: `legacy-api… — "unexposed — VIP already reusable"`. D3 ruled it in.
+// But the only org-wide Service list the API serves is `ListActiveK8sServicesForOrg`:
+//
+//     WHERE s.org_id = $1 AND s.deleted_at IS NULL
+//
+// A soft-deleted Service is EXCLUDED FROM THE RESPONSE. There is no vanished row to dim — the client is never
+// told one existed.
+//
+// SO `STATE` HAS EXACTLY ONE VALUE, AND THAT IS THE ROUTED-RANGES `STATUS` SITUATION VERBATIM: a column with
+// one value in every row of every org is not information, it teaches the reader that another value is
+// reachable here. CUT AS A CONSTANT COLUMN, same disposition, same reason, recorded rather than re-argued.
+//
+// (`dst_k8s_service_vanished` DOES exist — on `PolicyRule`. A grant pointing at a gone Service is visible on
+// ACCESS POLICIES, not here. That is where the vanished concept is actually served.)
+
+/** A stat tile. `absent` tiles render their reason instead of a number — never a zero standing in for unknown. */
+export interface StatTile {
+  label: string;
+  value: number | null;
+  hint: string;
+}
+
+/**
+ * statTiles — three, not the handoff's four.
+ *
+ * ⛔ `Operator v0.5.0` IS CUT: `operator_version` appears NOWHERE in the spec or the Go tree. A tile whose
+ * value would be invented is the render-floor violation, and a version number is the most quietly
+ * authoritative thing a screen can invent.
+ */
+export function statTiles(
+  clusters: ClusterCard[],
+  machineCredentialCount: number | null,
+): StatTile[] {
+  const services = clusters.reduce((n, c) => n + c.services.length, 0);
+  return [
+    {
+      label: "Clusters",
+      value: clusters.length,
+      hint: clusters.map((c) => c.name).join(" · ") || "none registered",
+    },
+    {
+      label: "Exposed Services",
+      value: services,
+      hint: "reached by name at a synthetic VIP",
+    },
+    {
+      // null when the read failed — a zero here would claim "no operator identity exists", which is a
+      // different fact from "we could not look".
+      label: "Machine credentials",
+      value: machineCredentialCount,
+      hint:
+        machineCredentialCount === null
+          ? "could not read"
+          : "the GitOps operator's own org identity",
+    },
+  ];
+}
+
+/**
+ * ⛔ D9 — REACHABILITY, NOT LIVENESS. A Service must not read as reachable when its fronting gateway reports
+ * no endpoint view, because no VIP can be DNAT-programmed in that state.
+ *
+ * The predicate is deliberately NOT called "cluster down": `k8s_endpoints_unavailable` is true for an
+ * unreachable cluster, an RBAC denial AND a watch that has not synced (measured at the producer,
+ * `dnat_linux.go:174`). All three mean unreachable; only one means the cluster is gone. Naming the cause
+ * would assert something we cannot know.
+ *
+ * SCOPED BY A3 AND NOT WAITING ON IT: the site→cluster mapping is 1:1 in the shipped deployment model but not
+ * enforced by the schema, so this reads "a gateway fronting this cluster's site" — the honest claim available
+ * from served fields today. If A3 lands, it narrows to the cluster by construction.
+ *
+ * ⚠ UNVERIFIABLE IN THE REVIEW STACK: no agent here watches the cluster, so the kind never fires. Substitute =
+ * these unit tests; TRIGGER for the wire proof = the first in-cluster agent watching this cluster (S10.3's
+ * hostNetwork helm deploy).
+ */
+export function clusterReachability(input: {
+  siteId: string;
+  gateways: Array<{ siteId: string | null; endpointsUnavailable: boolean }>;
+}): { reachable: boolean; why: string | null } {
+  const fronting = input.gateways.filter((g) => g.siteId === input.siteId);
+  if (fronting.length === 0)
+    return {
+      reachable: false,
+      // NOT "unreachable because the cluster is down" — no gateway is bound to the site at all, so nothing
+      // could program a VIP even if the cluster were perfectly healthy.
+      why: "no gateway fronts this cluster's site, so no VIP can be programmed",
+    };
+  if (fronting.some((g) => g.endpointsUnavailable))
+    return {
+      reachable: false,
+      why: "a gateway fronting this site has no endpoint view, so its VIPs are not programmed",
+    };
+  return { reachable: true, why: null };
+}
+
+/** Recessive styling for an unreachable cluster's rows: recession is the honest encoding for a degraded state. */
+export function serviceRowClass(reachable: boolean): string {
+  return reachable ? "" : "opacity-60";
+}
+
+// ── THE OVERVIEW DONUT ──────────────────────────────────────────────────────────────────────────────────
+//
+// ⛔ WHAT A DONUT NEEDS IS PARTS OF A WHOLE, AND "1 cluster / 3 services" IS NOT THAT. Two unrelated counts
+// drawn as a ring would be a picture pretending to be a proportion.
+//
+// The honest proportion here is EXPOSED SERVICES BY CLUSTER: one total (everything reachable by name), split
+// by which cluster carries it. That answers a real question — where is the exposure concentrated — and it is
+// the split that gets MORE useful as an org grows, which is the opposite of the address-space bar.
+//
+// AT N=1 IT IS ONE FULL RING, AND THAT IS THE FACT, not a degenerate case: one cluster carries everything.
+// The centre total and the legend rows carry the numbers as TEXT regardless, so the ring is never the only
+// path to the value.
+export function serviceSlices(clusters: ClusterCard[]): Array<{
+  label: string;
+  value: number;
+  tone: "ok" | "warn" | "danger" | "neutral";
+}> {
+  // Tones cycle through the neutral-ish set rather than encoding health: a cluster is not "warn" for owning
+  // more Services. Colour here is IDENTITY, not status — using ok/danger would imply a verdict.
+  const TONES = ["ok", "neutral", "warn", "danger"] as const;
+  return clusters
+    .filter((c) => c.services.length > 0)
+    .map((c, i) => ({
+      label: c.name,
+      value: c.services.length,
+      tone: TONES[i % TONES.length],
+    }));
 }

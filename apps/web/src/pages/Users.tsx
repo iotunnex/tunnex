@@ -1,9 +1,56 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, apiErrorMessage, type Member, type Org, type Role } from "../lib/api";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  api,
+  apiErrorCode,
+  apiErrorMessage,
+  type Device,
+  type Member,
+  type Org,
+  type Role,
+} from "../lib/api";
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
-import { Button, Card, ErrorText, Field, Input, Modal } from "../components/ui";
+import {
+  Button,
+  Card,
+  DataTable,
+  ErrorText,
+  Field,
+  Input,
+  Modal,
+} from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
+import {
+  REVOKED_CAUSE_NOTE,
+  canResend,
+  canRevoke,
+  invitationState,
+  inviteErrorCopy,
+  inviteGate,
+  inviterLabel,
+  orderInvitations,
+  outstandingCount,
+  stateLabel,
+  type Invitation,
+} from "../lib/invitationview";
+import {
+  deviceCountFor,
+  deviceCountLabel,
+  filterMembers,
+  groupAccessLabel,
+  groupAccessState,
+  LAST_OWNER_NOTE,
+  roleDistribution,
+  roleTallyLabel,
+  rosterSubtitle,
+  rosterShape,
+} from "../lib/usersview";
 
 const ROLES: Role[] = ["owner", "admin", "member"];
 const selectCls =
@@ -23,15 +70,49 @@ export default function Users() {
   const [resetTarget, setResetTarget] = useState<Member | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  const [invites, setInvites] = useState<Invitation[] | null>(null);
+  const [inviteErr, setInviteErr] = useState<string | null>(null);
+  const [inviteBusy, setInviteBusy] = useState<string | null>(null);
+  // ⛔ `null` MEANS "NOT LOADED", AND IT IS NOT THE SAME AS `[]`. An empty array is a fetched answer; null is
+  // the absence of one, and deviceCountFor / groupAccessState each have a DISTINCT arm for it. Initialising
+  // these to `[]` would make a page that has not finished loading claim every member owns nothing.
+  const [devices, setDevices] = useState<Device[] | null>(null);
+  const [groupCount, setGroupCount] = useState<number | null>(null);
 
   // My role in this org comes from my own row in the roster — no extra endpoint.
-  const myRole = useMemo(() => members.find((m) => m.user_id === myId)?.role, [members, myId]);
+  const myRole = useMemo(
+    () => members.find((m) => m.user_id === myId)?.role,
+    [members, myId],
+  );
   // Owner count drives the last-owner disable (mirrors the server's CountOwners).
-  const ownerCount = useMemo(() => members.filter((m) => m.role === "owner").length, [members]);
+  //
+  // ⛔ AND IT MIRRORS THE SERVER'S FLAW, DELIBERATELY. `CountOwners` is
+  //   SELECT count(*) FROM memberships WHERE org_id=$1 AND role='owner'
+  // with NO join to `users`, so a DEACTIVATED owner counts as an owner. Proven reachable (S14.11 probe,
+  // docs/probes/lockout_probe_test.go.txt): deactivate owner A, then deactivate owner B — the guard permits
+  // both because two owner ROWS exist, and the org ends with 2 owner rows and 0 accounts that can sign in
+  // and act. Recovery needs direct database access.
+  //
+  // ⛔ DO NOT ADD `&& m.status === "active"` HERE. It would make the client a SECOND AUTHORITY that disagrees
+  // with the server about who the last owner is — the control would grey out while the server still permits
+  // the change, or the reverse. The S4.7 precedent is that the server owns the refusal.
+  //
+  // THIS LINE FOLLOWS THE SERVER FIX. When CountOwners learns to join `users.status`, this changes with it,
+  // in the same change, not before.
+  const ownerCount = useMemo(
+    () => members.filter((m) => m.role === "owner").length,
+    [members],
+  );
 
   async function loadMembers(orgId: string) {
-    const { data, error } = await api.GET("/api/v1/organizations/{orgId}/members", { params: { path: { orgId } } });
-    if (error) return setError(apiErrorMessage(error, "Could not load members."));
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/members",
+      { params: { path: { orgId } } },
+    );
+    if (error)
+      return setError(apiErrorMessage(error, "Could not load members."));
     setMembers(data ?? []);
   }
 
@@ -39,11 +120,23 @@ export default function Users() {
     let cancelled = false;
     (async () => {
       try {
-        const { data: orgs, error: orgErr } = await api.GET("/api/v1/organizations");
+        // Edition comes from /meta, the same source Access.tsx uses — never inferred from whether an
+        // enterprise call happened to 403 (which conflates edition with permission, the bug this screen's
+        // view-model was fixed for).
+        const { data: meta } = await api.GET("/api/v1/meta");
         if (cancelled) return;
-        if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
+        setIsEnterprise(meta?.edition === "enterprise");
+        const { data: orgs, error: orgErr } = await api.GET(
+          "/api/v1/organizations",
+        );
+        if (cancelled) return;
+        if (orgErr)
+          return setError(
+            apiErrorMessage(orgErr, "Could not load your organizations."),
+          );
         const first = orgs?.[0];
-        if (!first) return setError("You are not a member of any organization yet.");
+        if (!first)
+          return setError("You are not a member of any organization yet.");
         setOrg(first);
         if (!cancelled) await loadMembers(first.id);
       } catch {
@@ -55,13 +148,46 @@ export default function Users() {
     };
   }, []);
 
+  // ⛔ THE TWO GATED READS ARE NOT ISSUED WHEN THEIR GATE FAILS. Firing them anyway would put a 403 into the
+  // page's single error surface, so a member's ordinary, correct page load would show an error — and the gate
+  // note already says the same thing calmly. Depends on `myRole`, which arrives with the members list, so this
+  // effect runs after it rather than in the load above.
+  useEffect(() => {
+    let cancelled = false;
+    if (!org || !myRole) return;
+    (async () => {
+      if (can(myRole, "member:manage")) {
+        const { data, error } = await api.GET(
+          "/api/v1/organizations/{orgId}/devices",
+          { params: { path: { orgId: org.id } } },
+        );
+        // A failure leaves `devices` NULL on purpose — deviceCountFor renders "could not load", which is
+        // honest, rather than a zero that would read as "this person has no devices".
+        if (!cancelled && !error) setDevices(data ?? []);
+      }
+      if (isEnterprise && can(myRole, "policy:view")) {
+        const { data, error } = await api.GET(
+          "/api/v1/organizations/{orgId}/groups",
+          { params: { path: { orgId: org.id } } },
+        );
+        if (!cancelled && !error) setGroupCount((data ?? []).length);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [org, myRole, isEnterprise]);
+
   // The last-owner invariant is deterministic client-side: disable the control
   // that would demote/deactivate the sole owner. The server refusal (409
   // last_owner) stays the real enforcement — see mutate()'s refetch-on-error,
   // which self-corrects a stale roster after a lost race.
   const isSoleOwner = (m: Member) => m.role === "owner" && ownerCount <= 1;
 
-  async function mutate(fn: () => Promise<{ error?: unknown }>, fallback: string) {
+  async function mutate(
+    fn: () => Promise<{ error?: unknown }>,
+    fallback: string,
+  ) {
     if (!org) return;
     setError(null);
     const { error } = await fn();
@@ -83,15 +209,79 @@ export default function Users() {
     );
 
   const setActive = (m: Member, activate: boolean) => {
-    const path = { params: { path: { orgId: org!.id, userId: m.user_id } } } as const;
+    const path = {
+      params: { path: { orgId: org!.id, userId: m.user_id } },
+    } as const;
     return mutate(
       () =>
         activate
-          ? api.POST("/api/v1/organizations/{orgId}/members/{userId}/reactivate", path)
-          : api.POST("/api/v1/organizations/{orgId}/members/{userId}/deactivate", path),
-      activate ? "Could not reactivate the member." : "Could not deactivate the member.",
+          ? api.POST(
+              "/api/v1/organizations/{orgId}/members/{userId}/reactivate",
+              path,
+            )
+          : api.POST(
+              "/api/v1/organizations/{orgId}/members/{userId}/deactivate",
+              path,
+            ),
+      activate
+        ? "Could not reactivate the member."
+        : "Could not deactivate the member.",
     );
   };
+
+  // ⛔ THE READ THAT MAKES RESEND AND REVOKE REACHABLE. Both are keyed by EMAIL, and until S14.15
+  // nothing served the addresses — so an invitation could be created and then never seen, resent or
+  // revoked. Gated on the same permission as the verbs it serves.
+  const loadInvites = useCallback(async () => {
+    if (!org || !myRole || inviteGate(myRole).kind !== "ready") return;
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/invitations",
+      { params: { path: { orgId: org.id } } },
+    );
+    if (error) return setInviteErr(inviteErrorCopy(apiErrorCode(error)));
+    setInviteErr(null);
+    setInvites((data as Invitation[] | undefined) ?? []);
+  }, [org, myRole]);
+
+  useEffect(() => {
+    void loadInvites();
+  }, [loadInvites]);
+
+  async function inviteAction(kind: "resend" | "revoke", email: string) {
+    setInviteBusy(email + kind);
+    setInviteErr(null);
+    const path =
+      kind === "resend"
+        ? ("/api/v1/organizations/{orgId}/invitations/resend" as const)
+        : ("/api/v1/organizations/{orgId}/invitations/revoke" as const);
+    const { error } = await api.POST(path, {
+      params: { path: { orgId: org!.id } },
+      body: { email },
+    });
+    setInviteBusy(null);
+    if (error) return setInviteErr(inviteErrorCopy(apiErrorCode(error)));
+    await loadInvites();
+  }
+
+  const shape = rosterShape({ role: myRole, isEnterprise });
+  // ⛔ ACTIONS IS ABSENT WHEN NO ROW HAS ONE — the same rule as the Devices column, for the same reason.
+  //
+  // A COLUMN HEADER IS A CLAIM THAT THE COLUMN HAS CONTENT. On the member view every ACTIONS cell was empty,
+  // which tells a member there are actions they cannot see when there are none for them AT ALL. If Devices is
+  // absent for lack of permission, ACTIONS is absent for the same reason; shipping one and not the other
+  // would undercut the rule the screen is built on.
+  //
+  // ⛔ AND THE TEST IS "DOES ANY ROW HAVE AN ACTION", NOT "DOES THE VIEWER HOLD A ROLE". An admin on a roster
+  // of owners can act on nobody — `canManageMembership(admin, owner, …)` is false — and a role-based test
+  // would keep an empty column for them. It mirrors the CELL's own condition exactly, so the two cannot drift.
+  const anyRowHasAction = members.some(
+    (m) =>
+      emailVerified &&
+      canManageMembership(myRole, m.role, "") &&
+      m.user_id !== myId,
+  );
+  const groupAccess = groupAccessState({ isEnterprise, role: myRole, groupCount });
+  const shown = filterMembers(members, query);
 
   return (
     <div>
@@ -99,36 +289,308 @@ export default function Users() {
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
 
-      {can(myRole, "member:invite") && emailVerified && org && <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />}
+      {/* ── Pending invitations ───────────────────────────────────────────────────────────────────────────
+          ⛔ THE ONLY WRITE-ONLY STATE IN THE PRODUCT THAT IS ITSELF AN ACCESS GRANT. `resendInvitation` and
+          `revokeInvitation` are keyed by EMAIL and nothing served the addresses, so an invitation could be
+          created and then never seen, resent or revoked — while remaining redeemable into a membership.
+          The other write-only items are CONFIGURATION whose effect shows up elsewhere; this one has no
+          observable effect until the moment it becomes a member. */}
+      {invites !== null && inviteGate(myRole).kind === "ready" && (
+        <div className="mt-6">
+          <Card>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-sm font-semibold text-white">Invitations</h2>
+              {/* The count names OUTSTANDING rows only — pending plus expired. An accepted invitation is a
+                  member now and is already counted on the roster; counting it here would overstate how many
+                  people have a live path into the org, which is the number this panel exists to show. */}
+              <span className="text-xs text-slate-400">
+                {outstandingCount(invites, new Date())} outstanding
+              </span>
+            </div>
+            {invites.length === 0 ? (
+              <p className="mt-2 text-xs text-slate-500">
+                No invitations have been created for this organization.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-1">
+                {orderInvitations(invites, new Date()).map((inv) => {
+                  const st = invitationState(inv, new Date());
+                  return (
+                    <li
+                      key={inv.id}
+                      data-testid={`invite-${inv.id}`}
+                      data-state={st}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white/5 px-3 py-1.5 text-sm"
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-slate-200">{inv.email}</span>
+                        <span
+                          className={
+                            "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                            (st === "pending"
+                              ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                              : st === "expired"
+                                ? "border-warn/40 bg-warn/10 text-warn"
+                                : "border-slate-700 bg-slate-900 text-slate-500")
+                          }
+                        >
+                          {stateLabel(st)}
+                        </span>
+                        <span className="text-xs text-slate-500">{inv.role}</span>
+                        {/* The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the
+                            LEFT JOIN keeps the row rather than hiding an outstanding invitation because
+                            its sender left. */}
+                        <span className="text-xs text-slate-600">
+                          invited by {inviterLabel(inv)}
+                        </span>
+                      </span>
+                      <span className="flex gap-2">
+                        {/* Controls appear ONLY where the server would act. Revoke matches
+                            `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would
+                            change nothing and report success — worse than absent. */}
+                        {canResend(st) && (
+                          <Button
+                            variant="ghost"
+                            disabled={inviteBusy === inv.email + "resend"}
+                            onClick={() => void inviteAction("resend", inv.email)}
+                          >
+                            {inviteBusy === inv.email + "resend"
+                              ? "Resending…"
+                              : "Resend"}
+                          </Button>
+                        )}
+                        {canRevoke(st) && (
+                          <Button
+                            variant="danger"
+                            disabled={inviteBusy === inv.email + "revoke"}
+                            onClick={() => void inviteAction("revoke", inv.email)}
+                          >
+                            {inviteBusy === inv.email + "revoke"
+                              ? "Revoking…"
+                              : "Revoke"}
+                          </Button>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {/* A revocation the operator may not have performed — SupersedePendingInvites clears pending
+                invites on a domain-capture JIT join, and the table records no cause. Named, not claimed. */}
+            {invites.some((i) => i.revoked_at) && (
+              <p className="mt-3 text-xs text-slate-600">{REVOKED_CAUSE_NOTE}</p>
+            )}
+            <ErrorText>{inviteErr}</ErrorText>
+          </Card>
+        </div>
+      )}
 
-      <ul className="mt-6 space-y-2">
-        {members.map((m) => {
-          const isSelf = m.user_id === myId;
-          // Role is editable on any target the actor may manage — INCLUDING self
-          // (an owner handing off ownership). Deactivate is never offered on self
-          // (it would log you out — a footgun, not a feature). The last-owner
-          // disable therefore surfaces on the sole owner's OWN role control.
-          const canManage = emailVerified && canManageMembership(myRole, m.role, "");
-          const assignable = ROLES.filter((r) => canManageMembership(myRole, m.role, r));
-          return (
-            <li key={m.user_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-800 px-4 py-3">
-              <div className="min-w-0">
-                <span className="text-sm text-white">{m.name || m.email}</span>
-                {isSelf && <span className="ml-2 text-xs text-slate-500">(you)</span>}
-                <span className="ml-2 font-mono text-xs text-slate-500">{m.email}</span>
-                {m.status === "deactivated" && <span className="ml-2 text-xs text-warn">deactivated</span>}
-                {!m.email_verified && m.status === "active" && <span className="ml-2 text-xs text-slate-600">unverified</span>}
+      {/* ── Access posture ────────────────────────────────────────────────────────────────────────────────
+          The wireframe's subtitle promises `role hierarchy · MFA coverage · authentication sources` and the
+          product projects ONE of the three. This panel ships that one and NAMES the two it does not have,
+          rather than printing a subtitle that promises all three. `MFA enrolled 5/7` in particular is a
+          NUMBER, and a reader trusts a number more than prose. */}
+      <div className="mt-6">
+        <Card>
+          <h2 className="text-sm font-semibold text-white">Access posture</h2>
+          {/* ⛔ STATES WHAT IS COUNTED. The first version read "Role hierarchy across N members", which claims
+              WHO CAN ACT — and the tally counts accounts on the roster, deactivated included. A roster of 7
+              with 1 deactivated is TWO FACTS, NOT ONE NUMBER. */}
+          <p className="mt-1 text-xs text-slate-400">{rosterSubtitle(members)}</p>
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+            {roleDistribution(members).map((t) => (
+              <div key={t.role}>
+                {/* The zero is rendered, not dropped: an omitted role reads as a role that does not exist. */}
+                <dt className="text-xs uppercase tracking-wide text-slate-500">
+                  {t.role}
+                  {t.n === 1 ? "" : "s"}
+                </dt>
+                <dd className="text-lg font-semibold text-white">{t.n}</dd>
+                {/* The split, per role, only where it exists — so "1 owner" cannot hide a deactivated one. */}
+                {t.deactivated > 0 && (
+                  <dd className="text-xs text-warn">{t.deactivated} deactivated</dd>
+                )}
+                <span className="sr-only">{roleTallyLabel(t)}</span>
               </div>
-              <div className="flex items-center gap-2">
-                {/* Role: editable only for a manageable target and only among
-                    roles the actor may assign; disabled when it would demote the
-                    sole owner. Otherwise a static label. */}
-                {canManage && assignable.length > 0 ? (
+            ))}
+          </dl>
+          {/* ⛔ THE TWO MISSING FACTS ARE NAMED, NOT OMITTED. Silence here would read as "this org has no MFA
+              story", which is false — MFA is enforced and enrollable, it is the per-member PROJECTION that
+              does not exist (D1), as with authentication sources (D1b). */}
+          {/* ── Groups: OUT OF THE STAT ROW, and registered as a DELIBERATE ADDITION ─────────────────────
+              ⛔ THE WIREFRAME HAS NO GROUPS STAT. Its Access posture panel is:
+                   title · "role hierarchy · MFA coverage · authentication sources" · {{ teamMap }}
+                   · legend (role tiers, MFA enrolled 5/7) · the last-owner copy
+              Groups appear ONLY as one axis inside `{{ teamMap }}` — the tripartite role↔user↔group graph,
+              which is D2, held, cut on the permission boundary.
+
+              I had put a `Groups 3` tile in the stat row beside owner/admin/member, where a group count reads
+              as A FOURTH ROLE TIER — and I did it WITHOUT REGISTERING IT, breaking my own §2.6 rule
+              ("additions get the same discipline as cuts") in the story that states the rule.
+
+              THE REASON IT STAYS AT ALL: it is the honest placeholder for the held graph, and it is the only
+              thing on this screen that renders the edition/permission seam — the four-gate shape the section
+              exists to demonstrate. So it keeps its own line, named as standing in for teamMap.
+              Registered: docs/DEFERRAL-REGISTER.md. */}
+          <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-400">
+            <span className="text-slate-500">Group membership</span>{" "}
+            {groupAccess.kind === "edges"
+              ? `— ${groupAccessLabel(groupAccess)} in this organization.`
+              : `— ${groupAccessLabel(groupAccess)}.`}{" "}
+            <span className="text-slate-500">
+              The role-and-group map is not built yet; this stands in for it.
+            </span>
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            MFA coverage and authentication sources are not shown per member yet:
+            both are enforced by the server but not carried on the roster
+            response. Two-factor can still be reset per member from the row
+            actions.
+          </p>
+          {shape.gateNote && (
+            <p className="mt-2 text-xs text-slate-400">{shape.gateNote}</p>
+          )}
+        </Card>
+      </div>
+
+      {can(myRole, "member:invite") && emailVerified && org && (
+        <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />
+      )}
+
+      <div className="mt-6 max-w-sm">
+        <Field label="Filter members">
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="name, email or role"
+          />
+        </Field>
+      </div>
+
+      {/* S14.3 slice A: a real <table>. The roster is tabular — person, role, state, actions per row — and as
+          <li> blocks the tier could only find a member by matching their email as free text. The role control
+          and the action buttons keep their own accessible names, so they stay queryable INSIDE a cell. */}
+      <div className="mt-6">
+        <DataTable
+          caption="Members"
+          rows={shown}
+          rowKey={(m) => m.user_id}
+          // ⛔ THE FILTER'S EMPTY STATE IS NOT THE ROSTER'S. "No members yet" under an active query would tell
+          // an admin their org is empty when they simply typed a name that does not match.
+          empty={
+            query.trim() !== "" && members.length > 0
+              ? `No members match “${query.trim()}”.`
+              : "No members yet."
+          }
+          failed={error != null}
+          columns={[
+            {
+              key: "person",
+              header: "Member",
+              cell: (m) => {
+                // The primary label falls back to the email; the secondary line then has nothing to add.
+                const primary = m.name || m.email;
+                return (
+                <>
+                  <span className="text-sm text-white">{primary}</span>
+                  {m.user_id === myId && (
+                    <span className="ml-2 text-xs text-slate-500">(you)</span>
+                  )}
+                  {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
+                      it rendered the address TWICE for a nameless member — and that is not a corner case:
+                      `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
+                      241 users in the review database have an empty name.
+                      Found because a MOCK omitted `name` while every seeded member had one — the fixture was
+                      LESS representative than the double. The inverse of S14.10, where the double was more
+                      permissive than the substrate; the lesson is the same one from the other side. */}
+                  {primary !== m.email && (
+                    <span className="ml-2 font-mono text-xs text-slate-500">
+                      {m.email}
+                    </span>
+                  )}
+                </>
+                );
+              },
+            },
+            {
+              key: "state",
+              header: "State",
+              cell: (m) => (
+                <>
+                  {m.status === "deactivated" && (
+                    <span className="text-xs text-warn">deactivated</span>
+                  )}
+                  {!m.email_verified && m.status === "active" && (
+                    <span className="text-xs text-slate-600">unverified</span>
+                  )}
+                </>
+              ),
+            },
+            // ⛔ SPLICED IN, NOT DIMMED. `...(cond ? [col] : [])` means a viewer without member:manage gets
+            // NO <th> and NO cell — nothing in the DOM, nothing announced, nothing keyboard-reachable. An
+            // `opacity-40` column would be "gone only to a sighted mouse user".
+            //
+            // And the reason it is gated at all is the FALSE ZERO: /devices is audience-scoped at the handler
+            // (ListForOrg for member:manage, ListForUser otherwise), so a member's list holds only their own
+            // devices and a group-by over it would print `0 devices` against every colleague. Measured live:
+            // owner@ sees 13 devices / 2 owners, member@ sees 6 / 1.
+            ...(shape.showDeviceCount
+              ? [
+                  {
+                    key: "devices",
+                    header: "Devices",
+                    numeric: true,
+                    cell: (m: Member) => {
+                      const c = deviceCountFor({
+                        role: myRole,
+                        devices,
+                        userId: m.user_id,
+                      });
+                      return (
+                        <span
+                          className={
+                            c.kind === "count"
+                              ? "text-sm text-white"
+                              : "text-xs text-slate-500"
+                          }
+                        >
+                          {c.kind === "count" ? c.n : deviceCountLabel(c)}
+                        </span>
+                      );
+                    },
+                  },
+                ]
+              : []),
+            {
+              key: "role",
+              header: "Role",
+              cell: (m) => {
+                // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
+                // ownership). The last-owner disable therefore surfaces on the sole owner's OWN role control.
+                const canManage =
+                  emailVerified && canManageMembership(myRole, m.role, "");
+                const assignable = ROLES.filter((r) =>
+                  canManageMembership(myRole, m.role, r),
+                );
+                if (!canManage || assignable.length === 0)
+                  return (
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      {m.role}
+                    </span>
+                  );
+                return (
                   <select
                     className={selectCls}
+                    aria-label={`Role for ${m.email}`}
                     value={m.role}
                     disabled={isSoleOwner(m)}
-                    title={isSoleOwner(m) ? "An organization must always have at least one owner." : undefined}
+                    title={
+                      isSoleOwner(m)
+                        ? "An organization must always have at least one owner."
+                        : undefined
+                    }
                     onChange={(e) => changeRole(m, e.target.value as Role)}
                   >
                     {assignable.map((r) => (
@@ -137,39 +599,69 @@ export default function Users() {
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <span className="text-xs uppercase tracking-wide text-slate-400">{m.role}</span>
-                )}
-
-                {canManage && !isSelf &&
-                  (m.status === "active" ? (
-                    <Button
-                      variant="danger"
-                      onClick={() => setActive(m, false)}
-                      disabled={isSoleOwner(m)}
-                      title={isSoleOwner(m) ? "An organization must always have at least one owner." : undefined}
-                    >
-                      Deactivate
+                );
+              },
+            },
+            // Spliced, not dimmed — identical to the Devices column above. See `anyRowHasAction`.
+            ...(anyRowHasAction
+              ? [{
+              key: "actions",
+              header: "Actions",
+              numeric: true,
+              cell: (m: Member) => {
+                const canManage =
+                  emailVerified && canManageMembership(myRole, m.role, "");
+                const isSelf = m.user_id === myId;
+                // Deactivate is never offered on self — it would log you out, which is a footgun, not a feature.
+                if (!canManage || isSelf) return null;
+                return (
+                  <span className="inline-flex items-center gap-2">
+                    {m.status === "active" ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => setActive(m, false)}
+                        disabled={isSoleOwner(m)}
+                        title={
+                          isSoleOwner(m)
+                            ? "An organization must always have at least one owner."
+                            : undefined
+                        }
+                      >
+                        Deactivate
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        onClick={() => setActive(m, true)}
+                      >
+                        Reactivate
+                      </Button>
+                    )}
+                    {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
+                        it clears the member's 2FA, never signs in as them. */}
+                    <Button variant="ghost" onClick={() => setResetTarget(m)}>
+                      Reset 2FA
                     </Button>
-                  ) : (
-                    <Button variant="ghost" onClick={() => setActive(m, true)}>
-                      Reactivate
-                    </Button>
-                  ))}
-
-                {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
-                    it clears the member's 2FA, never signs in as them. */}
-                {canManage && !isSelf && (
-                  <Button variant="ghost" onClick={() => setResetTarget(m)}>
-                    Reset 2FA
-                  </Button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-        {members.length === 0 && !error && <li className="text-sm text-slate-500">No members yet.</li>}
-      </ul>
+                  </span>
+                );
+              },
+            }]
+              : []),
+          ]}
+        />
+        {/* ⛔ §2.5 OF THE COMMIT-ONE SAID "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE, with a
+            written rationale (see isSoleOwner). I ruled on this screen's behaviour without reading the screen
+            — the same method error as grepping `Member` and concluding the product did not know.
+            Reconciled rather than overwritten, because the existing design is right and the ruling's CONCERN
+            is also right, and they are about different things:
+              the DISABLE is client-side  — it stops a pointless round-trip and the tooltip teaches WHY
+              the REFUSAL is the server's — mutate() surfaces apiErrorMessage(error, fallback), server text
+                                            first, and refetches so a lost race self-corrects
+            What §2.5 must forbid is PREDICTING THE REFUSAL TEXT, not disabling a control. */}
+        {can(myRole, "member:manage") && (
+          <p className="mt-2 text-xs text-slate-500">{LAST_OWNER_NOTE}</p>
+        )}
+      </div>
       {resetTarget && (
         <Modal
           title="Reset two-factor authentication"
@@ -187,12 +679,14 @@ export default function Users() {
           }
         >
           <p className="text-sm text-slate-300">
-            Remove two-factor authentication for <span className="font-semibold">{resetTarget.email}</span>?
+            Remove two-factor authentication for{" "}
+            <span className="font-semibold">{resetTarget.email}</span>?
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Their 2FA and recovery codes are cleared and they will be notified by email. If your organization
-            requires MFA, they will be asked to set it up again at their next sign-in. This does not sign you in
-            as them.
+            Their 2FA and recovery codes are cleared and they will be notified
+            by email. If your organization requires MFA, they will be asked to
+            set it up again at their next sign-in. This does not sign you in as
+            them.
           </p>
         </Modal>
       )}
@@ -220,7 +714,13 @@ export default function Users() {
 // account, and we render one fixed confirmation regardless. Reactivating a
 // frozen member is a DIFFERENT verb (the row's Reactivate button) — invite is
 // only ever for bringing in a new address.
-function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void }) {
+function InviteForm({
+  orgId,
+  onInvited,
+}: {
+  orgId: string;
+  onInvited: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [busy, setBusy] = useState(false);
@@ -231,17 +731,23 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
     e.preventDefault();
     setBusy(true);
     setErr(null);
-    const { data, error } = await api.POST("/api/v1/organizations/{orgId}/invitations", {
-      params: { path: { orgId } },
-      body: { email, role },
-    });
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/invitations",
+      {
+        params: { path: { orgId } },
+        body: { email, role },
+      },
+    );
     setBusy(false);
-    if (error || !data) return setErr(apiErrorMessage(error, "Could not create the invitation."));
+    if (error || !data)
+      return setErr(apiErrorMessage(error, "Could not create the invitation."));
     setEmail("");
     // Build the accept link from THIS origin (correct host regardless of the API's
     // APP_BASE_URL) and show it once for the admin to copy + hand to the invitee —
     // the delivery path when email isn't configured. The email is best-effort on top.
-    setInviteLink(`${window.location.origin}/accept-invite?token=${data.invite_token}`);
+    setInviteLink(
+      `${window.location.origin}/accept-invite?token=${data.invite_token}`,
+    );
     onInvited();
   }
 
@@ -260,7 +766,12 @@ function InviteForm({ orgId, onInvited }: { orgId: string; onInvited: () => void
               />
             </Field>
           </div>
-          <select className={selectCls} value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
+          <select
+            className={selectCls}
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+            aria-label="Role"
+          >
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {r}

@@ -21,7 +21,10 @@ import { login, OWNER, ORG } from "./helpers";
 test.beforeEach(async ({ request }) => {
   const meta = await request.get("/api/v1/meta");
   const edition = meta.ok() ? (await meta.json()).edition : "unknown";
-  test.skip(edition !== "enterprise", `requires the enterprise edition (/meta.edition=${edition})`);
+  test.skip(
+    edition !== "enterprise",
+    `requires the enterprise edition (/meta.edition=${edition})`,
+  );
 });
 
 // seed-enterprise fixtures (must match apps/api/internal/seeddata/seeddata.go).
@@ -31,7 +34,9 @@ const STRANDABLE_DEVICE = "demo-strandable-laptop";
 const SHRINK_CIDR = "10.99.0.0/25"; // strands the seeded device at 10.99.0.200
 const BASE_CIDR = "10.99.0.0/24";
 
-test("S4.5 — the SSO config payload surfaces the fingerprint and NO client secret", async ({ page }) => {
+test("S4.5 — the SSO config payload surfaces the fingerprint and NO client secret", async ({
+  page,
+}) => {
   await login(page, OWNER);
 
   // The enterprise edition serves the real SSO config form (not the gate note).
@@ -39,7 +44,9 @@ test("S4.5 — the SSO config payload surfaces the fingerprint and NO client sec
   // The seeded google config renders its client id and the proof-of-storage
   // fingerprint — and NOTHING that is or contains the secret. Providers render in
   // order [google, microsoft], so the first Client ID field is google's.
-  await expect(page.getByLabel("Client ID").first()).toHaveValue(SEEDED_CLIENT_ID);
+  await expect(page.getByLabel("Client ID").first()).toHaveValue(
+    SEEDED_CLIENT_ID,
+  );
   await expect(page.getByText(/stored secret fingerprint:/i)).toBeVisible();
   await expect(page.getByText(SEEDED_SECRET)).toHaveCount(0);
 
@@ -51,10 +58,14 @@ test("S4.5 — the SSO config payload surfaces the fingerprint and NO client sec
   expect(body.secret_fingerprint, "fingerprint present").toBeTruthy();
   expect(body.client_id).toBe(SEEDED_CLIENT_ID);
   expect(body).not.toHaveProperty("client_secret");
-  expect(rawText, "no secret material anywhere in the payload").not.toContain(SEEDED_SECRET);
+  expect(rawText, "no secret material anywhere in the payload").not.toContain(
+    SEEDED_SECRET,
+  );
 });
 
-test("S4.5b — a live shrink strands the seeded device and renders the REAL 409 orphan list", async ({ page }) => {
+test("S4.5b — a live shrink strands the seeded device and renders the REAL 409 orphan list", async ({
+  page,
+}) => {
   await login(page, OWNER);
 
   await expect(page.getByText("Address pool")).toBeVisible();
@@ -76,7 +87,9 @@ test("S4.5b — a live shrink strands the seeded device and renders the REAL 409
     await page.getByLabel("Pool CIDR").fill(SHRINK_CIDR);
     await page.getByRole("button", { name: "Resize pool" }).click();
 
-    await expect(page.getByText(/must be removed or renumbered/i)).toBeVisible();
+    await expect(
+      page.getByText(/must be removed or renumbered/i),
+    ).toBeVisible();
     await expect(page.getByText(STRANDABLE_DEVICE)).toBeVisible();
     await expect(page.getByText(/outside the new range/i)).toBeVisible();
   } finally {

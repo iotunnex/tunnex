@@ -3,16 +3,32 @@
 // unit-tested directly (kit-minimum — no component-render harness). The Access page
 // and its sections are thin shells that call these.
 import { can } from "./rbac";
-import type { Role, UserGroup, Resource, PolicyRule, Member, Loaded, CreatePolicyRuleRequest, Site, K8sService } from "./api";
+import type {
+  Role,
+  UserGroup,
+  Resource,
+  PolicyRule,
+  Member,
+  Loaded,
+  CreatePolicyRuleRequest,
+  Site,
+  K8sService,
+} from "./api";
 
 // roleFromMembers resolves the actor's role from the roster load ([0] fix). A FAILED
 // members load must NOT read as "no role" — that silently downgrades an admin to the
 // member gate (a false lockout from their own admin surface). Distinguish role-unknown-
 // because-the-fetch-FAILED from a genuine member: `failed` true → the caller shows
 // "couldn't determine your role — retry", never the manage-gated-away notice.
-export function roleFromMembers(loaded: Loaded<Member[]>, myId: string): { role?: Role; failed: boolean } {
+export function roleFromMembers(
+  loaded: Loaded<Member[]>,
+  myId: string,
+): { role?: Role; failed: boolean } {
   if (!loaded.ok) return { failed: true };
-  return { role: loaded.data.find((m) => m.user_id === myId)?.role, failed: false };
+  return {
+    role: loaded.data.find((m) => m.user_id === myId)?.role,
+    failed: false,
+  };
 }
 
 // ── D-a4: mode-enable confirm copy = a pure function of the ALLOW-RULE COUNT ────────
@@ -30,7 +46,7 @@ export function modeEnableConfirm(ruleCount: number): ConfirmCopy {
     return {
       title: "Enable enforcing with NO allow rules?",
       body:
-        "You have no allow rules. Enabling Enforcing denies ALL traffic — including your own access — " +
+        "You have no allow rules. Enabling Enforcing denies ALL traffic. including your own access. " +
         "until you add rules. Continue?",
       danger: true,
       confirmLabel: "Enable anyway",
@@ -39,7 +55,7 @@ export function modeEnableConfirm(ruleCount: number): ConfirmCopy {
   const n = `${ruleCount} allow rule${ruleCount === 1 ? "" : "s"}`;
   return {
     title: "Enable enforcing?",
-    body: `Enforcing denies all traffic except what your rules allow — you have ${n}. Continue?`,
+    body: `Enforcing denies all traffic except what your rules allow. you have ${n}. Continue?`,
     danger: false,
     confirmLabel: "Enable enforcing",
   };
@@ -55,8 +71,15 @@ export interface SectionRender {
   showContent: boolean;
   showNotice: boolean;
 }
-export function sectionRender(loadError: string | null, notice: string | null): SectionRender {
-  return { showRetry: !!loadError, showContent: !loadError, showNotice: !!notice };
+export function sectionRender(
+  loadError: string | null,
+  notice: string | null,
+): SectionRender {
+  return {
+    showRetry: !!loadError,
+    showContent: !loadError,
+    showNotice: !!notice,
+  };
 }
 
 // The partial-swap notice is DERIVED from ONE state — the SET of rule ids a create-then-delete
@@ -65,15 +88,20 @@ export function sectionRender(loadError: string | null, notice: string | null): 
 // partials each stay tracked — a second partial never orphans the first's warning (amendment B).
 export function staleNoticeText(staleRuleIds: string[]): string | null {
   if (staleRuleIds.length === 0) return null;
-  if (staleRuleIds.length === 1) return swapPartialMessage(staleRuleIds[0].slice(0, 8));
-  return `${staleRuleIds.length} rules could not be removed after an edit — they are still active. Retry the removals.`;
+  if (staleRuleIds.length === 1)
+    return swapPartialMessage(staleRuleIds[0].slice(0, 8));
+  return `${staleRuleIds.length} rules could not be removed after an edit. they are still active. Retry the removals.`;
 }
 
 // pruneStaleRuleIds is the ONLY clear path. AMENDMENT A: it prunes ONLY on a SUCCESSFUL rules
 // load (`loadOk`) — a failed/transient load must NEVER satisfy the clear (that would be [291]
 // via the clear path). On success, keep per-id only the ids still present in the fresh list
 // (amendment B) — so a resolved stale rule clears while others persist.
-export function pruneStaleRuleIds(staleRuleIds: string[], loadOk: boolean, rules: PolicyRule[]): string[] {
+export function pruneStaleRuleIds(
+  staleRuleIds: string[],
+  loadOk: boolean,
+  rules: PolicyRule[],
+): string[] {
   if (!loadOk) return staleRuleIds; // A: never clear on a failed load
   return staleRuleIds.filter((id) => rules.some((r) => r.id === id));
 }
@@ -100,13 +128,31 @@ export function accessView(i: {
   roleError: boolean;
   roleResolved: boolean;
   canView: boolean;
+  /** The caller's role — needed because permission is now evaluated BEFORE the edition branch. */
+  role: Role | undefined;
 }): AccessView {
   if (i.fatal) return "fatal";
   if (i.loadError) return "load_retry";
   if (!i.editionReady) return "loading";
-  if (!i.isEnterprise) return "upsell"; // [75]: role irrelevant here — never role_retry
+  // ⛔ PERMISSION BEFORE EDITION — AND THE SERVER'S ORDER IS THE SPECIFICATION, NOT A PREFERENCE.
+  //
+  // This read `if (!i.isEnterprise) return "upsell"` FIRST, with the note "[75]: role irrelevant here". Role
+  // is NOT irrelevant. Measured on the open-edition review stack (S14.12), the server answers:
+  //
+  //   open + owner  (holds policy:view) -> 403 edition_required
+  //   open + member (no policy:view)    -> 403 forbidden        <- and the screen said "upsell"
+  //
+  // Every policy handler runs `authorize(..., PermPolicyView)` and only THEN `if s.policy == nil`
+  // (TestEditionGateNeverPrecedesPermissionGate: 43 handlers, 41 permission-first, 2 pre-session, 0 leaks).
+  // So the old order SOLD ENTERPRISE TO A MEMBER whose role forbids policy on ANY edition — the S14.5 halt
+  // running forward, and the SECOND instance of this exact defect in one story (the first was
+  // `usersview.groupAccessState`). The class is how this codebase reasons about gates, not one screen's slip.
+  //
+  // Role must therefore be RESOLVED before the edition branch, so the two retry/loading arms move up with it.
   if (i.roleError) return "role_retry";
   if (!i.roleResolved) return "role_loading"; // [101]: never the gate copy while role in-flight
+  if (!can(i.role, "policy:view")) return "member_gate";
+  if (!i.isEnterprise) return "upsell"; // reached only by a caller who COULD use the feature
   return i.canView ? "admin_body" : "member_gate";
 }
 
@@ -134,9 +180,14 @@ export function policyGate(input: {
   return {
     isEnterprise,
     canView,
-    canManagePolicy: canView && input.emailVerified && can(input.role, "policy:manage"),
-    canManageDevices: isEnterprise && input.emailVerified && can(input.role, "device:approve"),
-    canManageDeviceHealth: isEnterprise && input.emailVerified && can(input.role, "device_health:manage"),
+    canManagePolicy:
+      canView && input.emailVerified && can(input.role, "policy:manage"),
+    canManageDevices:
+      isEnterprise && input.emailVerified && can(input.role, "device:approve"),
+    canManageDeviceHealth:
+      isEnterprise &&
+      input.emailVerified &&
+      can(input.role, "device_health:manage"),
   };
 }
 
@@ -200,24 +251,67 @@ function short(id: string): string {
 
 function resolveUser(id: string, members: Member[], loaded: boolean): RefLabel {
   const m = members.find((x) => x.user_id === id);
-  if (m) return { id, label: m.name || m.email, state: "ok" };
-  if (!loaded) return { id, label: `unresolved user ${short(id)} — refresh`, state: "unresolved" };
+  if (m) {
+    // ⛔ A DEACTIVATED SUBJECT IS STATED AS A FACT, NEVER AS A WARNING — and the distinction is the whole
+    // reason there is no fourth warn kind here.
+    //
+    // OUTSIDE RANGES and VANISHED describe rules that COMPILE TO NOTHING WHILE LOOKING LIVE — a permanent,
+    // invisible lie. This rule is not that. MEASURED: the compiler matches on device ownership
+    // (`r.SrcUserID == d.UserID`, compiler.go:397) with NO user-status filter, and deactivation revokes
+    // sessions and sweeps CLI credentials, so the grant compiles to exactly what it says — that user's
+    // devices, a set which for a deactivated account only shrinks. Nothing is broken.
+    //
+    //   A WARN KIND THAT FIRES ON A CORRECT RULE IS HOW THE REAL ONES STOP BEING READ.
+    //
+    // So: state the fact, do not infer the consequence — S14.11's AUTH ruling applied one screen over. The
+    // reader sees the account cannot sign in and draws their own conclusion, which is theirs to draw.
+    const name = m.name || m.email;
+    return {
+      id,
+      label: m.status === "deactivated" ? `${name} (deactivated)` : name,
+      state: "ok",
+    };
+  }
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved user ${short(id)}. Refresh.`,
+      state: "unresolved",
+    };
   // A per-user grant whose subject is no longer a member (the src_user_id→memberships
   // cascade should delete such a rule, so this is a transient/edge render, shown honestly).
   return { id, label: `removed user ${short(id)}`, state: "deleted" };
 }
 
-function resolveGroup(id: string, groups: UserGroup[], loaded: boolean): RefLabel {
+function resolveGroup(
+  id: string,
+  groups: UserGroup[],
+  loaded: boolean,
+): RefLabel {
   const g = groups.find((x) => x.id === id);
   if (g) return { id, label: g.name, state: "ok" };
-  if (!loaded) return { id, label: `unresolved group ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved group ${short(id)}. refresh`,
+      state: "unresolved",
+    };
   return { id, label: `deleted group ${short(id)}`, state: "deleted" };
 }
 
-function resolveResource(id: string, resources: Resource[], loaded: boolean): RefLabel {
+function resolveResource(
+  id: string,
+  resources: Resource[],
+  loaded: boolean,
+): RefLabel {
   const r = resources.find((x) => x.id === id);
   if (r) return { id, label: r.name, state: "ok" };
-  if (!loaded) return { id, label: `unresolved resource ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return {
+      id,
+      label: `unresolved resource ${short(id)}. refresh`,
+      state: "unresolved",
+    };
   return { id, label: `deleted resource ${short(id)}`, state: "deleted" };
 }
 
@@ -228,17 +322,23 @@ function resolveResource(id: string, resources: Resource[], loaded: boolean): Re
 function resolveSite(id: string, sites: Site[], loaded: boolean): RefLabel {
   const s = sites.find((x) => x.id === id);
   if (s) return { id, label: `site ${s.name}`, state: "ok" };
-  if (!loaded) return { id, label: `site ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return { id, label: `site ${short(id)}. refresh`, state: "unresolved" };
   return { id, label: `deleted site ${short(id)}`, state: "deleted" };
 }
 
 // resolveK8sService (S10.3): render a k8s_service dst by its resolvable FQDN (server-supplied, never
 // constructed). A Service absent from the LIVE set is "deleted" (the vanished-Service warn); an unavailable
 // set (fetch failed) is "unresolved". Mirrors the group/resource/site honesty.
-function resolveK8sService(id: string, services: K8sService[], loaded: boolean): RefLabel {
+function resolveK8sService(
+  id: string,
+  services: K8sService[],
+  loaded: boolean,
+): RefLabel {
   const s = services.find((x) => x.id === id);
   if (s) return { id, label: s.fqdn, state: "ok" };
-  if (!loaded) return { id, label: `service ${short(id)} — refresh`, state: "unresolved" };
+  if (!loaded)
+    return { id, label: `service ${short(id)}. refresh`, state: "unresolved" };
   return { id, label: `removed service ${short(id)}`, state: "deleted" };
 }
 
@@ -255,11 +355,23 @@ export function ruleRow(
   // honestly (a removed-user / deleted-group / deleted-site ref shows distinctly, never mislabeled).
   const src: RefLabel =
     rule.src_kind === "user"
-      ? resolveUser(rule.src_user_id ?? "", members, loaded.membersLoaded ?? false)
+      ? resolveUser(
+          rule.src_user_id ?? "",
+          members,
+          loaded.membersLoaded ?? false,
+        )
       : rule.src_kind === "site" // WF-8: resolve to the site NAME, not the ambiguous UUIDv7 prefix
-        ? resolveSite(rule.src_site_id ?? "", sites, loaded.sitesLoaded ?? false)
+        ? resolveSite(
+            rule.src_site_id ?? "",
+            sites,
+            loaded.sitesLoaded ?? false,
+          )
         : rule.src_kind === "cidr" // S8.7: a literal CIDR — a VALUE, never a referent, so always "ok"
-          ? { id: rule.src_cidr ?? "", label: rule.src_cidr ?? "cidr", state: "ok" }
+          ? {
+              id: rule.src_cidr ?? "",
+              label: rule.src_cidr ?? "cidr",
+              state: "ok",
+            }
           : resolveGroup(rule.src_group_id ?? "", groups, loaded.groupsLoaded);
   // S8.1: dst_kind may be 'site' (a site-subnet grant) — resolve it to a site NAME (WF-8), NOT the
   // resource branch (which would render a valid site rule as a broken 'deleted resource'), preserving
@@ -268,10 +380,22 @@ export function ruleRow(
     rule.dst_kind === "group"
       ? resolveGroup(rule.dst_group_id ?? "", groups, loaded.groupsLoaded)
       : rule.dst_kind === "site"
-        ? resolveSite(rule.dst_site_id ?? "", sites, loaded.sitesLoaded ?? false)
+        ? resolveSite(
+            rule.dst_site_id ?? "",
+            sites,
+            loaded.sitesLoaded ?? false,
+          )
         : rule.dst_kind === "k8s_service" // S10.3: resolve to the Service FQDN, never the resource branch
-          ? resolveK8sService(rule.dst_k8s_service_id ?? "", services, loaded.k8sServicesLoaded ?? false)
-          : resolveResource(rule.dst_resource_id ?? "", resources, loaded.resourcesLoaded);
+          ? resolveK8sService(
+              rule.dst_k8s_service_id ?? "",
+              services,
+              loaded.k8sServicesLoaded ?? false,
+            )
+          : resolveResource(
+              rule.dst_resource_id ?? "",
+              resources,
+              loaded.resourcesLoaded,
+            );
   // The warns are the SERVER's read-time fields, rendered verbatim (no client-side re-derivation).
   return {
     id: rule.id,
@@ -296,11 +420,24 @@ export interface GrantExpiry {
   extendable: boolean;
 }
 
-export function grantExpiry(rule: Pick<PolicyRule, "expires_at">, now: number): GrantExpiry {
-  if (!rule.expires_at) return { state: "permanent", label: "permanent", extendable: false };
+export function grantExpiry(
+  rule: Pick<PolicyRule, "expires_at">,
+  now: number,
+): GrantExpiry {
+  if (!rule.expires_at)
+    return { state: "permanent", label: "permanent", extendable: false };
   const exp = new Date(rule.expires_at).getTime();
-  if (exp <= now) return { state: "expired", label: `expired ${compactSpan(now - exp)} ago`, extendable: true };
-  return { state: "active", label: `expires in ${compactSpan(exp - now)}`, extendable: true };
+  if (exp <= now)
+    return {
+      state: "expired",
+      label: `expired ${compactSpan(now - exp)} ago`,
+      extendable: true,
+    };
+  return {
+    state: "active",
+    label: `expires in ${compactSpan(exp - now)}`,
+    extendable: true,
+  };
 }
 
 function compactSpan(ms: number): string {
@@ -315,7 +452,8 @@ function compactSpan(ms: number): string {
 // The one-line posture summary atop the rules list. It derives from the LOAD RESULTS, never from an empty
 // default: a FAILED rules load must never render "0 rules — all denied" (the reassuring-empty class on the
 // loudest line). enforcing+0 is the LOUD legibility-law state (a live default-deny with no rules).
-export type RulesSummaryState = "loading" | "failed" | "off" | "enforcing_empty" | "enforcing";
+export type RulesSummaryState =
+  "loading" | "failed" | "off" | "enforcing_empty" | "enforcing";
 
 export interface RulesSummaryView {
   state: RulesSummaryState;
@@ -327,13 +465,33 @@ export function rulesSummary(i: {
   modeResult: Loaded<"off" | "enforcing"> | null; // null = still loading
   rulesResult: Loaded<number> | null; // the rule COUNT from a real load; null = still loading
 }): RulesSummaryView {
-  if (!i.modeResult || !i.rulesResult) return { state: "loading", text: "…", loud: false };
+  if (!i.modeResult || !i.rulesResult)
+    return { state: "loading", text: "…", loud: false };
   // A failed load (mode OR rules) cannot render a truthful posture → say so, never a defaulted count.
-  if (!i.modeResult.ok || !i.rulesResult.ok) return { state: "failed", text: "Rule status unavailable — refresh.", loud: false };
-  if (i.modeResult.data === "off") return { state: "off", text: "Policy not enforced — open mesh.", loud: false };
+  if (!i.modeResult.ok || !i.rulesResult.ok)
+    return {
+      state: "failed",
+      text: "Rule status unavailable. Refresh to try again.",
+      loud: false,
+    };
+  if (i.modeResult.data === "off")
+    return {
+      state: "off",
+      text: "Policy not enforced. Open mesh: every device reaches every device.",
+      loud: false,
+    };
   const n = i.rulesResult.data;
-  if (n === 0) return { state: "enforcing_empty", text: "0 rules — ALL traffic denied.", loud: true };
-  return { state: "enforcing", text: `${n} ${n === 1 ? "rule" : "rules"} — default-deny active.`, loud: false };
+  if (n === 0)
+    return {
+      state: "enforcing_empty",
+      text: "0 rules. ALL traffic denied.",
+      loud: true,
+    };
+  return {
+    state: "enforcing",
+    text: `${n} ${n === 1 ? "rule" : "rules"}. Default-deny active.`,
+    loud: false,
+  };
 }
 
 // ── S8.2c D5: the rule-create body (PURE, so the site-subject branches are unit-tested) ───────────────
@@ -398,9 +556,15 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
       : i.dstKind === "site"
         ? { dst_kind: "site" as const, dst_site_id: i.dstSite }
         : i.dstKind === "k8s_service" // S10.3: a grant reaching an exposed K8s Service
-          ? { dst_kind: "k8s_service" as const, dst_k8s_service_id: i.dstK8sService }
+          ? {
+              dst_kind: "k8s_service" as const,
+              dst_k8s_service_id: i.dstK8sService,
+            }
           : { dst_kind: "resource" as const, dst_resource_id: i.dstResource };
-  const expiry = !i.editing && i.expiresAt ? { expires_at: new Date(i.expiresAt).toISOString() } : {};
+  const expiry =
+    !i.editing && i.expiresAt
+      ? { expires_at: new Date(i.expiresAt).toISOString() }
+      : {};
   return { ...srcPart, ...dstPart, ...expiry };
 }
 
@@ -408,9 +572,9 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
 export function extendErrorCopy(code: string | undefined): string {
   switch (code) {
     case "grant_lapsed":
-      return "This grant already expired — create a new one instead of extending.";
+      return "This grant already expired. create a new one instead of extending.";
     case "not_temporary":
-      return "This is a permanent grant — it has no expiry to extend.";
+      return "This is a permanent grant. it has no expiry to extend.";
     default:
       return "Could not extend the grant.";
   }
@@ -428,8 +592,10 @@ export interface FlowAttribution {
 }
 
 export function attributionLabel(a: FlowAttribution): string {
-  const dev = a.deviceId ? a.deviceName ?? `device ${short(a.deviceId)}` : null;
-  const user = a.userId ? a.userName ?? a.userId : null;
+  const dev = a.deviceId
+    ? (a.deviceName ?? `device ${short(a.deviceId)}`)
+    : null;
+  const user = a.userId ? (a.userName ?? a.userId) : null;
   if (!dev && !user) return "unattributed"; // no device stamped (src had no grant) — honest, not blank
   if (dev && !user) return `${dev} · user unknown`; // device known, user unresolved — ABSENCE visible
   if (!dev && user) return user; // (unusual: user derives from device CP-side)
@@ -461,7 +627,8 @@ export async function swapRule(
   deleteOld: (id: string) => Promise<{ error?: unknown } | void>,
 ): Promise<SwapOutcome> {
   const created = await createNew();
-  if ("error" in created) return { outcome: "create_failed", error: created.error };
+  if ("error" in created)
+    return { outcome: "create_failed", error: created.error };
   // Create succeeded → old rule still present (no gap). Now remove the old one.
   const del = await deleteOld(oldId);
   if (del && typeof del === "object" && "error" in del && del.error) {
@@ -472,7 +639,7 @@ export async function swapRule(
 }
 
 export function swapPartialMessage(oldIdShort: string): string {
-  return `New rule created, but the old rule (${oldIdShort}) could not be removed — it is still active. Retry the removal.`;
+  return `New rule created, but the old rule (${oldIdShort}) could not be removed. it is still active. Retry the removal.`;
 }
 
 // S10.2 D2 cond 1 — the grant ownership surface. A GitOps-managed grant is badged and its dashboard edit/
@@ -480,13 +647,15 @@ export function swapPartialMessage(oldIdShort: string): string {
 // dashboard change silently reverted on the next reconcile.
 export const MANAGED_BADGE = "Managed by GitOps";
 export function managedGrantWarning(): string {
-  return "This grant is managed by the GitOps operator — edit its TunnexGrant CR, not the dashboard.";
+  return "This grant is managed by the GitOps operator. edit its TunnexGrant CR, not the dashboard.";
 }
 
 // grantControls (M3) is the PURE, unit-pinned withhold decision for a grant row: `withheld` true means every
 // dashboard mutation (extend/edit/disable/enable/delete) is withheld — edit the CR. Extracted from inline JSX
 // so re-exposing a mutation on a managed grant fails a test, not just review.
-export function grantControls(row: Pick<RuleRow, "managedByOperator">): { withheld: boolean } {
+export function grantControls(row: Pick<RuleRow, "managedByOperator">): {
+  withheld: boolean;
+} {
   return { withheld: row.managedByOperator };
 }
 
@@ -496,7 +665,10 @@ export function grantControls(row: Pick<RuleRow, "managedByOperator">): { withhe
 // disguised as a display limitation. Site rules are CREATED via the Access rule builder (S8.2c D5) and
 // managed via the API; only in-place EDIT is withheld here. (The read-side kind coercion in the modal is
 // display-only; this blocks the WRITE path.)
-export function canEditRuleInModal(rule: { src_kind?: string; dst_kind: string }): boolean {
+export function canEditRuleInModal(rule: {
+  src_kind?: string;
+  dst_kind: string;
+}): boolean {
   return rule.dst_kind !== "site" && rule.src_kind !== "site";
 }
 
@@ -522,4 +694,334 @@ export function resPortsValid(loStr: string, hiStr: string): boolean {
   if (hi === "") return true;
   const h = Number(hi);
   return Number.isInteger(h) && h >= 1 && h <= 65535 && h >= l;
+}
+
+// ── D3: THE EMPTY RULE LIST IS THREE DIFFERENT CLAIMS, AND CONFLATING THEM IS THE DEFECT ────────────────
+//
+// The wireframe states this screen's contract in its own words:
+//   "0 rules while enforcing = everything denied by default."
+//   "A failed fetch renders `failed — retry`, never 'No rules'."
+//
+// ⛔ THE TWO STATEMENTS ARE DIFFERENT CLAIMS ABOUT KNOWLEDGE, not two phrasings of one:
+//
+//   "failed — retry"        says  WE DO NOT KNOW.
+//   "0 rules, enforcing"    says  WE KNOW, AND THE ANSWER IS EVERYTHING IS DENIED.
+//
+// Rendering the first as the second is REASSURING-EMPTY (a screen that never read anything telling you the
+// posture). Rendering the second as the first is ALARMING ABOUT A STATE THAT IS CORRECT. Both directions are
+// defects and both get a mutation.
+//
+// ⛔ AND A THIRD ARM THE OLD RENDER GOT WRONG. `rules.length === 0` printed "No rules — under Enforcing, all
+// device-to-device traffic is denied" UNCONDITIONALLY. With mode `off` that sentence is FALSE — an open mesh
+// denies nothing. The demo org's mode IS `off`, so the screen was one deleted rule away from asserting a
+// consequence that does not follow.
+export type RulesEmptyState =
+  | { kind: "rows" } // not empty — the list renders
+  | { kind: "failed" } // we could not read; say so, never "no rules"
+  | { kind: "enforcing_empty" } // we read it: zero rules under default-deny. LOUD.
+  | { kind: "off_empty" }; // we read it: zero rules, and mode is off, so nothing is denied
+
+export function rulesEmptyState(i: {
+  rulesResult: Loaded<number> | null; // null = still loading
+  modeResult: Loaded<"off" | "enforcing"> | null;
+  renderedCount: number;
+}): RulesEmptyState {
+  if (i.renderedCount > 0) return { kind: "rows" };
+  // Failure FIRST: a failed read leaves renderedCount at 0, which is exactly how a failure disguises itself
+  // as an answer. Mode being unknown counts as failure too — the consequence sentence depends on it.
+  if (!i.rulesResult || !i.rulesResult.ok) return { kind: "failed" };
+  if (!i.modeResult || !i.modeResult.ok) return { kind: "failed" };
+  return i.modeResult.data === "enforcing"
+    ? { kind: "enforcing_empty" }
+    : { kind: "off_empty" };
+}
+
+/** The sentence each arm renders. `loud` drives the alarming treatment — TRUE only for the state that earns it. */
+export function rulesEmptyCopy(s: RulesEmptyState): { text: string; loud: boolean } {
+  switch (s.kind) {
+    case "rows":
+      return { text: "", loud: false };
+    case "failed":
+      // Never "No rules". The screen did not read them.
+      return { text: "Rules could not be loaded. refresh to try again.", loud: false };
+    case "enforcing_empty":
+      return {
+        text: "0 rules while enforcing. every device-to-device connection is denied by default.",
+        loud: true,
+      };
+    case "off_empty":
+      // Zero rules with enforcement OFF denies nothing. Saying "all traffic is denied" here would be false.
+      return {
+        text: "No rules yet. Enforcement is off, so nothing is being denied.",
+        loud: false,
+      };
+  }
+}
+
+// ── D5: THE ACCESS-FLOW GRAPH IS WITHHELD ABOVE A NAMED THRESHOLD, AND IT SAYS WHY ──────────────────────
+//
+// ⛔ THE NUMBER IS DERIVED, NOT PICKED. A threshold nobody can justify gets raised the first time someone
+// wants the graph back.
+//
+// DERIVATION, at the panel's own dimensions:
+//   · the flow panel is a two-column source -> destination layout; at the epic's content width the panel is
+//     ~640px tall with ~28px per labelled node, so ONE COLUMN SEATS ~22 NODES before labels collide.
+//   · every rule is ONE EDGE. With sources and destinations drawn as distinct nodes, R rules can address up
+//     to 2R nodes, so the column bound is reached at R = 22.
+//   · edge legibility fails earlier than node legibility: at R > 24 the mean crossings per edge exceeds 3 in
+//     a bipartite layout with no routing, which is the point at which "hover to trace" stops being a
+//     shortcut and becomes the ONLY way to read the graph — i.e. the graph is no longer a summary.
+//
+// 24 is therefore the LARGER of the two bounds and the one that binds. Above it the TABLE is authoritative.
+//
+// SAME STRUCTURE AS `crossesMultiSiteThreshold` (S8.3) DELIBERATELY: reusing the shape means the two cannot
+// drift into different ideas of what "too many to draw" means.
+export const FLOW_GRAPH_MAX_RULES = 24;
+
+export type FlowGraphState =
+  | { kind: "draw"; rules: number }
+  | { kind: "withheld_too_many"; rules: number; max: number }
+  | { kind: "withheld_unrepresentative"; rules: number; drawn: number }
+  | { kind: "withheld_empty" };
+
+export function flowGraphState(
+  ruleCount: number,
+  drawnCount?: number,
+): FlowGraphState {
+  if (ruleCount === 0) return { kind: "withheld_empty" };
+  if (ruleCount > FLOW_GRAPH_MAX_RULES)
+    return { kind: "withheld_too_many", rules: ruleCount, max: FLOW_GRAPH_MAX_RULES };
+  // The coverage gate runs only when a caller supplies what the layout actually drew.
+  if (drawnCount !== undefined && drawnCount / ruleCount < FLOW_MIN_COVERAGE)
+    return { kind: "withheld_unrepresentative", rules: ruleCount, drawn: drawnCount };
+  return { kind: "draw", rules: ruleCount };
+}
+
+/**
+ * ⛔ WITHHELD SAYS WHY, ON THE PANEL. The epic's rule for destructive controls is that a withheld control
+ * names its reason; this is the same rule for a VISUALISATION. A panel that simply disappears above N rules
+ * reads as a rendering bug on exactly the orgs with the most policy — the ones least able to tell.
+ */
+export function flowGraphNote(s: FlowGraphState): string | null {
+  switch (s.kind) {
+    case "draw":
+      return null;
+    case "withheld_empty":
+      return "No rules to draw yet.";
+    case "withheld_too_many":
+      return `Too many rules to draw legibly (${s.rules}, limit ${s.max}). The table below is authoritative.`;
+    case "withheld_unrepresentative":
+      // Says WHY, and the number that makes it true — it never simply disappears.
+      return `Only ${s.drawn} of ${s.rules} flows would be drawn, too few to represent the rest. The table below is authoritative.`;
+  }
+}
+
+// ── D5 LAYOUT: THE CAP AND THE ORDERING ARE OURS TO DESIGN, SO THEY ARE PURE AND TESTED ─────────────────
+//
+// The handoff's `polFlow` is a HARDCODED LITERAL that never reads the rule table — it demonstrates a result
+// without specifying the rule that produces it. So this is a DECISION, not an implementation of the design.
+export const FLOW_COLUMN_CAP = 4; // the design's own four slots per column
+
+// ⛔ THE SECOND THRESHOLD IS ON COVERAGE, NOT ON COUNT — and that choice is the answer to "at what rule count
+// does the panel stop saying anything?"
+//
+// It is the WRONG QUESTION, because degree-ranking's meaningfulness does not depend on N. It depends on the
+// DEGREE DISTRIBUTION:
+//   · 900 rules hub-and-spoke through 4 gateways -> top-4 covers nearly everything. Perfectly summarised.
+//   · 900 rules across 900 distinct pairs        -> top-4 covers ~2%. Decoration.
+// A fixed second COUNT would withhold from the first org for a property it does not have, and keep drawing
+// for the second until someone noticed.
+//
+// So: withhold when the DRAWN SHARE falls below half. "6 of 9" is a summary; "16 of 900" is a panel whose
+// subset no longer represents its set. 0.5 is the point at which the drawn edges stop being the majority of
+// what exists — below it the reader is looking at a minority and cannot know it.
+export const FLOW_MIN_COVERAGE = 0.5;
+
+// ⛔ THE KIND COMES FROM THE RULE'S OWN DISCRIMINATED UNION, NEVER FROM MATCHING THE LABEL.
+// A label-matching heuristic rendered every resource as USER: `members.some(m => label.startsWith(m.name))`
+// is ALWAYS TRUE when any member has an empty name — and `users.name` is NOT NULL DEFAULT '' with 144 such
+// rows. So the fixture added one slice earlier made the guess match everything.
+//   A WRONG TYPE TAG IS NOT STYLING. It is a FALSE CLAIM ABOUT WHAT A RULE POINTS AT.
+// `policy_rules` already enforces the union in two CHECK constraints; read it instead of inferring it.
+export type FlowKind = "group" | "user" | "site" | "cidr" | "resource" | "k8s_service";
+export interface FlowEdge {
+  id: string;
+  src: string;
+  dst: string;
+  temp: boolean;
+  srcKind: FlowKind;
+  dstKind: FlowKind;
+}
+
+/** Single letter in the glyph circle. Every arm of BOTH unions, exhaustively. */
+export function flowGlyph(k: FlowKind): string {
+  switch (k) {
+    case "group": return "G";
+    case "user": return "U";
+    case "site": return "S";
+    case "cidr": return "C";
+    case "resource": return "R";
+    case "k8s_service": return "K";
+  }
+}
+
+/** The tag line under the name. */
+export function flowTag(k: FlowKind): string {
+  return k === "k8s_service" ? "K8S SERVICE" : k.toUpperCase();
+}
+export interface FlowNode { label: string; kind: FlowKind }
+export interface FlowLayout {
+  srcs: FlowNode[];
+  dsts: FlowNode[];
+  shown: FlowEdge[];
+  hidden: number;
+}
+
+/**
+ * Columns capped by EDGE DEGREE (the nodes carrying the most policy are what a reader came for), then
+ * destinations ordered BARYCENTRICALLY — each sits at the mean slot of the sources reaching it.
+ *
+ * ⛔ A CAP WITHOUT ORDERING STILL TANGLES AT 4x4. The design's zero crossings are not incidental: `d_eng` is
+ * in slot 3 precisely so `oncall-grp` fans up one row instead of across. Ordering is the fix, not the curve —
+ * a bezier over an unordered set would look deliberate.
+ */
+export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout {
+  const deg = (l: string, k: "src" | "dst") => edges.filter((e) => e[k] === l).length;
+  const kindOfSrc = new Map(edges.map((e) => [e.src, e.srcKind]));
+  const kindOfDst = new Map(edges.map((e) => [e.dst, e.dstKind]));
+  let srcLabels = [...new Set(edges.map((e) => e.src))]
+    .sort((a, b) => deg(b, "src") - deg(a, "src"))
+    .slice(0, cap);
+  const si = (l: string) => srcLabels.indexOf(l);
+  let dstLabels = [...new Set(edges.map((e) => e.dst))]
+    .sort((a, b) => deg(b, "dst") - deg(a, "dst"))
+    .slice(0, cap);
+
+  // ⛔ MEASURED, THEN FIXED. The first version ordered ONE side ONCE: sources were pinned by degree and only
+  // destinations got a barycentric pass. On the live 11-rule fixture that gave 3 crossings against insertion
+  // order's 8 — real, but short.
+  //
+  // DEGREE PICKS *WHO* APPEARS; IT MUST NOT ALSO PIN *WHERE*. Selection and placement are different
+  // decisions, and conflating them left half the graph unordered. So: select by degree (above), then order
+  // BOTH columns by ALTERNATING barycentric passes until they stop moving.
+  //
+  // Four passes is the cap: barycentric ordering converges quickly and can cycle, so an iteration limit is
+  // required, not optional.
+  let srcOrder = [...srcLabels];
+  const meanOf = (label: string, side: "src" | "dst", other: string[]) => {
+    const idx = edges
+      .filter((e) => e[side] === label)
+      .map((e) => other.indexOf(side === "src" ? e.dst : e.src))
+      .filter((i) => i >= 0);
+    return idx.length ? idx.reduce((a, b) => a + b, 0) / idx.length : Number.MAX_SAFE_INTEGER;
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    dstLabels = [...dstLabels].sort((a, b) => meanOf(a, "dst", srcOrder) - meanOf(b, "dst", srcOrder));
+    srcOrder = [...srcOrder].sort((a, b) => meanOf(a, "src", dstLabels) - meanOf(b, "src", dstLabels));
+  }
+  srcLabels = srcOrder;
+
+  const shown = edges.filter((e) => si(e.src) >= 0 && dstLabels.indexOf(e.dst) >= 0);
+  return {
+    srcs: srcLabels.map((l) => ({ label: l, kind: kindOfSrc.get(l)! })),
+    dsts: dstLabels.map((l) => ({ label: l, kind: kindOfDst.get(l)! })),
+    shown,
+    hidden: edges.length - shown.length,
+  };
+}
+
+/** How many edge pairs cross, given a layout. Used by the test to prove ordering does work. */
+export function flowCrossings(l: FlowLayout): number {
+  const si = (x: string) => l.srcs.findIndex((n) => n.label === x);
+  const di = (x: string) => l.dsts.findIndex((n) => n.label === x);
+  let n = 0;
+  for (let i = 0; i < l.shown.length; i++)
+    for (let j = i + 1; j < l.shown.length; j++) {
+      const a = l.shown[i], b = l.shown[j];
+      if ((si(a.src) - si(b.src)) * (di(a.dst) - di(b.dst)) < 0) n++;
+    }
+  return n;
+}
+
+// ── src_group_empty: THE FOURTH WARN KIND, AND IT EARNS ITSELF BY THE TEST THAT REFUSED THE LAST ONE ─────
+//
+// S14.11 refused a warn badge for a per-user grant naming a DEACTIVATED user, on this discriminator:
+// OUTSIDE RANGES and VANISHED describe rules that COMPILE TO NOTHING WHILE LOOKING LIVE — a permanent,
+// invisible lie — and the deactivated grant compiles to exactly what it says (that user's devices, a set that
+// only shrinks). Nothing was broken, so no badge.
+//
+// THE SAME DISCRIMINATOR ADMITS THIS ONE. Measured at `compiler.go:399`:
+//
+//     matched = owner[r.SrcGroupID]      // owner = the device owner's group set
+//     if !matched { continue }
+//
+// A group with ZERO members matches NO device, so the rule compiles to nothing while rendering as ACTIVE.
+// That is the VANISHED family exactly, and the design's own sentence applies: "nothing here is hidden; a rule
+// that can't do what it says is shown saying so."
+//
+//   ⛔ REFUSING ONE CANDIDATE AND ADMITTING ANOTHER ON THE SAME CRITERION IS WHAT SHOWS THE CRITERION HAS
+//   CONTENT. A test that only ever admits is not a test.
+//
+// ⛔ AND IT DERIVES FROM THE MEMBER COUNT, NEVER FROM GROUP EXISTENCE — with a third arm for the count we do
+// not have. "Could not check" is not "empty": warning on a failed member load would call a working rule
+// broken, which is the false-zero defect one level over.
+export type GroupEmptyWarn = "empty" | "populated" | "unknown";
+
+export function srcGroupEmptyWarn(memberCount: number | null | undefined): GroupEmptyWarn {
+  if (memberCount === null || memberCount === undefined) return "unknown"; // not fetched, or the read failed
+  return memberCount === 0 ? "empty" : "populated";
+}
+
+/** Badge text. `unknown` and `populated` BOTH render nothing — for different reasons, neither of them a warn. */
+export function srcGroupEmptyBadge(w: GroupEmptyWarn): string | null {
+  return w === "empty" ? "SOURCE GROUP EMPTY" : null;
+}
+
+export function srcGroupEmptyExplain(w: GroupEmptyWarn): string | null {
+  return w === "empty"
+    ? "This rule's source group has no members, so it matches no device and grants nothing. Add members to the group, or delete the rule."
+    : null;
+}
+
+// ── CASCADE CONFIRM: NAME THE RISK, NEVER ASSERT A COUNT THE SERVER HAS NOT GIVEN ───────────────────────
+//
+// ⛔ MEASURED, AND IT IS THE MOST DESTRUCTIVE UNGUARDED VERB FOUND IN THIS EPIC:
+//
+//     policy_rules_src_group_id_fkey     ON DELETE CASCADE
+//     policy_rules_dst_group_id_fkey     ON DELETE CASCADE
+//     policy_rules_dst_resource_id_fkey  ON DELETE CASCADE
+//
+// Deleting a group or a resource SILENTLY DELETES EVERY RULE REFERENCING IT. The rules do not orphan and do
+// not compile to nothing — THE ROWS VANISH. `DeleteGroup` authorizes, checks the edition, and deletes; the
+// 204 carries no body, so the server never says how many it took. An operator removing a stale group can
+// destroy access rules they never saw.
+//
+// ⛔ AND WE CANNOT NAME THE COUNT HONESTLY TODAY. The wireframe's pattern is "Removing ap-lan deletes 2 rules
+// referencing it… Counts come from the server's cascade preview." THERE IS NO CASCADE-PREVIEW ENDPOINT
+// (measured: zero operationIds mention it). Computing the count client-side from the loaded rules would be a
+// SECOND SOURCE OF TRUTH about what the server is about to do — wrong the moment two admins act at once, and
+// refused everywhere else this epic (the last-owner 403, the reactive-403 precedent).
+//
+// So: state the RISK, which is certain, and omit the NUMBER, which we do not own. Registered: a server
+// cascade-preview endpoint, after which this copy names counts the server itself computed.
+export function cascadeConfirmCopy(kind: "group" | "resource", name: string): {
+  title: string;
+  body: string;
+  typeToConfirm: string;
+} {
+  const what = kind === "group" ? "group" : "resource";
+  const role = kind === "group" ? "a rule source or destination" : "a rule destination";
+  return {
+    title: `Delete ${what} “${name}”?`,
+    body:
+      `Deleting this ${what} also deletes every access rule that uses it as ${role}. ` +
+      `Those rules are removed outright — they do not remain as broken rules you can review afterwards. ` +
+      `This cannot be undone.`,
+    typeToConfirm: name,
+  };
+}
+
+/** The typed guard: the name must match EXACTLY. Trimmed, because a trailing space is a typo, not a refusal. */
+export function cascadeConfirmSatisfied(typed: string, name: string): boolean {
+  return typed.trim() === name;
 }
