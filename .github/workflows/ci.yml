@@ -25,6 +25,10 @@ env:
 jobs:
   # Linux: the existing make gates + web typecheck/build. RED BLOCKS MERGE.
   gates:
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      go: ${{ steps.scope.outputs.go }}
+      web: ${{ steps.scope.outputs.web }}
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 so the classifier below can diff against the PR base. A shallow clone would make the
@@ -83,23 +87,63 @@ jobs:
         id: scope
         run: |
           set -euo pipefail
-          RUN_GO=true
+          # ⛔ FAIL-CLOSED DEFAULT: everything runs unless a diff is computed AND proves otherwise.
+          RUN_GO=true; RUN_CODEGEN=true; RUN_WEB=true; DOCS_ONLY=false
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
             if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
               CHANGED=$(git diff --name-only "${BASE}...HEAD" || true)
+              # ⛔ AND SEPARATELY, WHAT WAS *DELETED* — because the exclusion below is safe for a CONTENT
+              # edit and NOT for a removal. `//go:embed` fails to COMPILE when its target is missing, so a
+              # deleted fixtures.sql must still force the Go legs. --diff-filter=D is the only thing that
+              # distinguishes those two, and --name-only alone cannot.
+              DELETED=$(git diff --name-only --diff-filter=D "${BASE}...HEAD" || true)
               if [ -n "$(printf '%s' "$CHANGED" | tr -d '[:space:]')" ]; then
-                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|\.github/|openapi/|apps/api/db/)'; then
+                # ── Go relevance ────────────────────────────────────────────────────────────────────────
+                # MEASURED (S14.15): across 18 runs on two PRs, 17 had go=true and **16 of those were
+                # triggered by `apps/api/cmd/seed-fixtures/fixtures.sql` ALONE**. Because the classifier
+                # diffs BASE...HEAD, one fixture edit early in a branch pinned go=true for every later
+                # push — including 10 of 15 commits that were DOCS-ONLY. The classifier was not firing.
+                #
+                # fixtures.sql is a compile input ONLY to `cmd/seed-fixtures`, which `shipcensus_test.go:20`
+                # declares DELIBERATELY NOT SHIPPED ("seeding a production database is not a supported
+                # operation"). Nothing outside that command references it. So its CONTENT cannot break the
+                # api / cli / node / operator / helper builds — only its ABSENCE can, which DELETED covers.
+                GO_RELEVANT=$(printf '%s\n' "$CHANGED" \
+                  | grep -vxF 'apps/api/cmd/seed-fixtures/fixtures.sql' \
+                  | grep -E '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/)' || true)
+                DELETED_GO=$(printf '%s\n' "$DELETED" | grep -E '.' || true)
+                if [ -z "$(printf '%s' "$GO_RELEVANT$DELETED_GO" | tr -d '[:space:]')" ]; then
                   RUN_GO=false
+                fi
+                # ── Codegen drift ───────────────────────────────────────────────────────────────────────
+                # This step had NO condition at all and cost 59s on every run, including docs-only ones.
+                # It guards OpenAPI -> Go/TS/RBAC/sqlc drift, so it must fire when a SOURCE of generation
+                # changes or when a GENERATED artifact is hand-edited (the drift it exists to catch).
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(openapi/|apps/api/db/|\.go$|go\.(mod|sum)$|\.gen\.|api\.d\.ts$|rbac-policy\.json$|tokens|Makefile|\.github/)'; then
+                  RUN_CODEGEN=false
+                fi
+                # ── Web ─────────────────────────────────────────────────────────────────────────────────
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(apps/web/|apps/client/|packages/|package\.json|pnpm-lock|\.github/)'; then
+                  RUN_WEB=false
+                fi
+                # ── Docs-only ───────────────────────────────────────────────────────────────────────────
+                # 10 of the last 15 commits. Every one ran the full 498s gates plus e2e twice.
+                if [ -z "$(printf '%s\n' "$CHANGED" | grep -vE '(\.md$)' | tr -d '[:space:]')" ]; then
+                  DOCS_ONLY=true; RUN_GO=false; RUN_CODEGEN=false; RUN_WEB=false
                 fi
               fi
             fi
           fi
           echo "go=$RUN_GO" >> "$GITHUB_OUTPUT"
-          echo "::notice title=gates scope::go=$RUN_GO (false = the Go steps below are SKIPPED, not passed)"
+          echo "codegen=$RUN_CODEGEN" >> "$GITHUB_OUTPUT"
+          echo "web=$RUN_WEB" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+          echo "::notice title=gates scope::go=$RUN_GO codegen=$RUN_CODEGEN web=$RUN_WEB docs_only=$DOCS_ONLY (false = SKIPPED, not passed)"
           printf '%s\n' "${CHANGED:-<no diff computed>}" | head -40
 
       - name: Codegen drift guard
+        if: steps.scope.outputs.codegen == 'true'
         run: make generate-check
 
       - name: Both editions — build + test (open + enterprise)
@@ -131,6 +175,7 @@ jobs:
         run: make helper-crosscompile
 
       - name: Web — typecheck + unit tests + build
+        if: steps.scope.outputs.web == 'true'
         run: |
           corepack enable
           pnpm install --frozen-lockfile
@@ -235,6 +280,10 @@ jobs:
   # If e2e proves genuinely FLAKY under blocking status, that flakiness is its own FINDING with a
   # disposition — NOT a quiet demotion back to continue-on-error.
   e2e:
+    needs: gates
+    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a
+    # skip here does not touch branch protection.
+    if: needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +323,8 @@ jobs:
   # RE-ARM TRIGGER: EPIC 14 CLOSE — a named trigger, not a hope. Delete the two `continue-on-error` lines.
   visual:
     name: visual — ADVISORY for all of EPIC 14 (no step gates a merge)
+    needs: gates
+    if: needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -326,6 +377,10 @@ jobs:
   # an advisory job on the ENTERPRISE path has the same blind spot as one on the open path (S11-1
   # condition (b)). The SECURITY half of S4.5 also gates in `gates` via TestGetSsoConfigPayloadCarriesNoSecret.
   e2e-enterprise:
+    needs: gates
+    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a
+    # skip here does not touch branch protection.
+    if: needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
