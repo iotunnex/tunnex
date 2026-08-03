@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { stripJsComments } from "./support/source";
 
 // ⛔ THE BROWSER TREATED AN OAuth CREDENTIAL FORM AS A LOGIN FORM.
 //
@@ -21,6 +22,12 @@ import { describe, expect, it } from "vitest";
 // autocomplete attributes — the OAuth secret was the one being exploited, but none of them
 // were telling the browser anything.
 const SRC = join(__dirname, "..", "src");
+
+/** ⛔ Every read goes through the stripper — a COMMENTED-OUT `<input type="password">` is not a
+ *  password input, and counting one would let a real unlabelled input hide behind the vacuity floor. */
+function read(f: string): string {
+  return stripJsComments(readFileSync(f, "utf8"));
+}
 
 function tsxFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((e) => {
@@ -52,7 +59,7 @@ describe("every password input declares what it is to the browser", () => {
     // If this drops to zero the census is measuring nothing and every assertion below
     // passes for free — the failure mode this repo has filed four times.
     const total = files
-      .flatMap((f) => inputElements(readFileSync(f, "utf8")))
+      .flatMap((f) => inputElements(read(f)))
       .filter((a) => /type=["']password["']/.test(a));
     expect(total.length).toBeGreaterThanOrEqual(5);
   });
@@ -60,7 +67,7 @@ describe("every password input declares what it is to the browser", () => {
   it("⛔ no password input is left without an autoComplete", () => {
     const offenders: string[] = [];
     for (const f of files) {
-      for (const attrs of inputElements(readFileSync(f, "utf8"))) {
+      for (const attrs of inputElements(read(f))) {
         if (!/type=["']password["']/.test(attrs)) continue;
         if (!/autoComplete=/.test(attrs)) {
           offenders.push(f.replace(SRC, "src"));
@@ -74,7 +81,7 @@ describe("every password input declares what it is to the browser", () => {
     // `current-password` on an OAuth client secret is what invites the saved-password fill.
     // `new-password` is the value Chrome actually honours to suppress it — `off` is widely
     // ignored on password inputs, which is why it is not accepted here either.
-    const settings = readFileSync(join(SRC, "pages", "Settings.tsx"), "utf8");
+    const settings = read(join(SRC, "pages", "Settings.tsx"));
     const secrets = inputElements(settings).filter((a) =>
       /type=["']password["']/.test(a),
     );
@@ -87,7 +94,7 @@ describe("every password input declares what it is to the browser", () => {
 
   it("⛔ the OAuth client ID is not offered as a username", () => {
     // This is the field that was being filled with the admin's email address.
-    const settings = readFileSync(join(SRC, "pages", "Settings.tsx"), "utf8");
+    const settings = read(join(SRC, "pages", "Settings.tsx"));
     const clientId = inputElements(settings).filter((a) =>
       /oauth-client-id/.test(a),
     );
@@ -101,7 +108,7 @@ describe("every password input declares what it is to the browser", () => {
     // manager filling the OLD one into a "choose a password" box.
     const current: string[] = [];
     for (const f of files) {
-      for (const attrs of inputElements(readFileSync(f, "utf8"))) {
+      for (const attrs of inputElements(read(f))) {
         if (/autoComplete="current-password"/.test(attrs)) {
           current.push(f.replace(SRC, "src"));
         }

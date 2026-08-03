@@ -14,6 +14,7 @@ import {
   tailwindColors,
   themeCss,
 } from "../../../packages/shared/src/tokens";
+import { stripCssComments } from "./support/source";
 // Imported by RELATIVE path, matching vite.config.ts and tailwind.config.ts. One specifier for the one
 // authored form: the package-name route resolves through @tunnex/shared's raw .ts entry, which Node cannot
 // load at config time and which a cached workspace link can serve staleley. Same file, no ambiguity.
@@ -149,11 +150,13 @@ describe("COVERAGE CENSUS — the CLAIM compared to the ARTIFACT (S14.3 slice 0)
   // It failed loudly here only because the assertions below are lower-bounds (0 < 13). Had any of them been an
   // "and nothing unexpected" check, an empty artifact would have satisfied it VACUOUSLY. The guard three tests
   // down exists for that reason and is what identified the empty.
-  const css = readFileSync(
-    fileURLToPath(
-      new URL("../../../packages/shared/generated/tokens.css", import.meta.url),
+  const css = stripCssComments(
+    readFileSync(
+      fileURLToPath(
+        new URL("../../../packages/shared/generated/tokens.css", import.meta.url),
+      ),
+      "utf8",
     ),
-    "utf8",
   );
 
   for (const c of CLAIMED_COVERAGE) {

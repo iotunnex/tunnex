@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { stripJsComments } from "./support/source";
 
 // ⛔ THE EM-DASH IS BANNED AS A PLACEHOLDER GLYPH, AND THAT RULE WAS ALREADY RESOLVED ONCE.
 //
@@ -45,9 +46,7 @@ describe("the em-dash is never a placeholder value", () => {
   it("⛔ no source file renders an em-dash as a value — use n/a", () => {
     const offenders: string[] = [];
     for (const f of files) {
-      const src = readFileSync(f, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
+      const src = stripJsComments(readFileSync(f, "utf8"));
       src.split("\n").forEach((line, i) => {
         if (AS_A_VALUE.test(line)) offenders.push(`${f.replace(SRC, "src")}:${i + 1}  ${line.trim()}`);
       });

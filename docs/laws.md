@@ -3569,3 +3569,42 @@ remedy.** Stating the doubt is not the same as acting on it. A cause you could n
   clones caused two separate confusions in this epic — a stale served bundle, then this.
 - **A missing artefact and a blocked artefact fail differently.** `NO Electron.app` and `Killed: 9` are not
   the same sentence, and the first was never checked.
+
+---
+
+# ⛔ ANY CENSUS OVER SOURCE STRIPS COMMENTS FIRST — AS THE STARTING SHAPE
+
+**S14.20, ruled by the founder after the THIRD instance in one epic.** A census searches source for a string.
+**A comment is the most likely place in a file for the exact string the census hunts for** — the code does the
+thing once, and the prose ABOUT the thing quotes it, explains it, and names the alternative it rejected. A
+search over raw source is therefore biased toward finding the *explanation* rather than the *implementation*,
+and **the better-documented the file, the more reliably the census lies.**
+
+The three:
+1. `placeholderglyph` banned an em-dash as a rendered value and caught **its own comment about em-dashes**.
+2. A `@ts-expect-error` written inside a comment *to describe one* became a live directive.
+3. The `client.html` entry check passed **with the flip reverted**, because the comment explaining the flip
+   contains `client.html`.
+
+⛔ **The direction of the lie is FALSE GREEN.** The census reports the thing present when only its description
+is present — so unlike a false red, nothing ever surfaces it.
+
+> ## **AND THE SHARPEST CASE WAS FOUND BY THE RETROFIT, NOT BY A FAILURE.** `visualgallery.test.ts` asserts
+> ## `it("the route is guarded by an env flag, NOT BY A COMMENT")` — and read `App.tsx` **raw**. Mutation:
+> ## replace the guard with `true /* was: import.meta.env.VITE_VISUAL_GALLERY === "1" */`. **Pre-retrofit:
+> ## PASSED. Post-retrofit: FAILED.** The visual gallery could have shipped ALWAYS-ON with its guard green.
+
+**A TEST THAT NAMES A HAZARD IN ITS OWN TITLE IS NOT DEFENDED AGAINST IT.** Same shape as writing "I could not
+reproduce this" in the commit that ships the remedy — stating the doubt is not acting on it.
+
+**MECHANICAL:**
+- Strip **before** the search, in `apps/web/test/support/source.ts`. Never re-derive it inline; three copies
+  had already diverged (one stripped `//` mid-line and would have eaten every URL in the tree).
+- **The stripper must match the LANGUAGE.** There is no universal comment syntax, and the JS stripper on a
+  YAML file removes nothing while looking like it worked — a green check that never ran. One function per
+  syntax (`js` · `css` · `xml` · `yaml`), chosen at the call site.
+- `//` and `#` strip at **line start only**. A mid-line strip eats `"https://…"` and trades a false green for
+  a false red.
+- Enforced by `censuscensus.test.ts`: any test calling `readFileSync` imports a stripper or is **registered**
+  with a reason. The register is checked against the stripped body of the test itself — a test that merely
+  *mentions* `support/source` in a comment has not imported it. **The rule applied to its own enforcement.**

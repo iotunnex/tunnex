@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { stripJsComments, stripXmlComments } from "./support/source";
 
 // ⛔ A SIZE EXPRESSED AS ONE DIMENSION IS A HOPE ABOUT THE OTHER.
 //
@@ -13,7 +14,7 @@ import { join } from "node:path";
 const ASSETS = join(__dirname, "..", "src", "assets");
 
 function intrinsic(file: string): { w: number; h: number } {
-  const svg = readFileSync(join(ASSETS, file), "utf8");
+  const svg = stripXmlComments(readFileSync(join(ASSETS, file), "utf8"));
   const w = Number(/width="(\d+)"/.exec(svg)?.[1]);
   const h = Number(/height="(\d+)"/.exec(svg)?.[1]);
   return { w, h };
@@ -35,7 +36,9 @@ describe("brand assets", () => {
   it("⛔ Logo derives BOTH dimensions from the intrinsic ratios", () => {
     // Source-level, because the bug is the ABSENCE of a width — a rendering test would have to
     // guess a container to reproduce the stretch, and the real defect is that nothing pinned it.
-    const src = readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8");
+    const src = stripJsComments(
+      readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8"),
+    );
     const mark = intrinsic("tunnex-logo.svg");
     const word = intrinsic("tunnex-wordmark.svg");
     expect(src).toContain(`${mark.w} / ${mark.h}`);
@@ -51,7 +54,9 @@ describe("brand assets", () => {
 
   it("⛔ no brand img is sized with a square utility class", () => {
     // `h-7 w-7` on a 1.047 ratio is the exact shape of the original defect.
-    const src = readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8");
+    const src = stripJsComments(
+      readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8"),
+    );
     expect(src).not.toMatch(/className="[^"]*\bh-(\d+)\b[^"]*\bw-\1\b/);
   });
 });

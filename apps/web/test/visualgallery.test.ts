@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stripJsComments } from "./support/source";
 
 // ⛔ AN UNSHIPPED SURFACE MUST BE PROVEN UNSHIPPED, NOT ASSUMED.
 //
@@ -8,7 +9,9 @@ import { fileURLToPath } from "node:url";
 // or the guard were removed, a debug surface would ship to every self-hosted install — and nothing else in
 // the build would complain, because the route works perfectly.
 
-const app = readFileSync(fileURLToPath(new URL("../src/App.tsx", import.meta.url)), "utf8");
+const app = stripJsComments(
+  readFileSync(fileURLToPath(new URL("../src/App.tsx", import.meta.url)), "utf8"),
+);
 
 describe("the visual gallery is build-flagged OFF", () => {
   it("the route is guarded by an env flag, not by a comment", () => {

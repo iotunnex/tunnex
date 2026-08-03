@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripCssComments, stripJsComments } from "./support/source";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -38,14 +39,14 @@ const SRC = join(HERE, "../src");
 const TOKENS = join(HERE, "../../../packages/shared/generated/tokens.css");
 
 function definedTokens(): Set<string> {
-  const css = readFileSync(TOKENS, "utf8");
+  const css = stripCssComments(readFileSync(TOKENS, "utf8"));
   return new Set(css.match(/--tnx-[a-z0-9-]+(?=\s*:)/g) ?? []);
 }
 
 function referencedTokens(): Map<string, string[]> {
   const refs = new Map<string, string[]>();
   for (const f of walk(SRC)) {
-    const body = readFileSync(f, "utf8");
+    const body = stripJsComments(readFileSync(f, "utf8"));
     for (const m of body.matchAll(/var\((--tnx-[a-z0-9-]+)\)/g)) {
       const name = m[1]!;
       refs.set(name, [...(refs.get(name) ?? []), f.replace(SRC, "src")]);

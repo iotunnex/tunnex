@@ -10,6 +10,7 @@ import {
   recoveryCountLabel,
   recoveryWarning,
 } from "../src/lib/authhero";
+import { stripJsComments } from "./support/source";
 
 // ⛔ THE WIREFRAME'S TRUST BADGES ASSERTED TWO THINGS WE DO NOT HAVE, ON THE MOST-VIEWED PAGE.
 //
@@ -20,9 +21,6 @@ import {
 // A claim on a login page is a product surface, and the render floor applies to it: do not state
 // more than the system can support. This is the same test the epic applied to its own headline.
 /** Remove // and block comments so the scan judges rendered text, not documentation about it. */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-}
 
 describe("TRUST_BADGES", () => {
   it("⛔ makes no compliance claim we cannot evidence", () => {
@@ -70,7 +68,7 @@ describe("TRUST_BADGES", () => {
       // thing that actually reaches a user.
       // authhero.ts DECLARES the forbidden strings as data — the list cannot scan itself.
       if (f.endsWith("authhero.ts")) continue;
-      const body = stripComments(readFileSync(f, "utf8"));
+      const body = stripJsComments(readFileSync(f, "utf8"));
       for (const c of FORBIDDEN_CLAIMS) {
         if (new RegExp(`\\b${c.replace(/\s/g, "\\s*")}\\b`, "i").test(body)) {
           offenders.push(`${f.replace(SRC, "src")} :: ${c}`);
