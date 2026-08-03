@@ -3095,3 +3095,26 @@ and with the restore removed the census **rejected** — `seed_fixtures_incomple
 **SIBLING:** the S14.11 wedge test that failed identically with and without the fix (a nil map, not the
 defect). Same family — *a red for the wrong reason* and *a green for the wrong reason* are the same error with
 opposite signs, and both are caught by asking what the test's subject was actually in.
+
+### ⛔ AND IT IS THE COMPOSITE-BY-FAVOURABLE-COMPONENT LAW, IN **TIME** RATHER THAN IN SPACE
+
+The typecheck slip put `typecheck: 2` two lines **above** the test count I reported. Here the discriminating
+evidence — the `null value in column "org_id"` error — was one **scroll back**, printed on the line
+immediately before the verdict I read.
+
+> ### **SAME LAW, DIFFERENT AXIS. There the unfavourable part was ADJACENT IN THE OUTPUT; here it was**
+> ### **ADJACENT IN TIME AND ALREADY GONE FROM ATTENTION. Both times nothing was hidden, and both times the**
+> ### **aggregate was allowed to speak for a part it had not checked.**
+
+**THE MECHANICAL CHECK — and it is not "did the command run":**
+
+> ### **BEFORE READING A GUARD'S VERDICT, CONFIRM THE MUTATION CHANGED THE SUBJECT.**
+
+Not that the command exited. Not that it printed. **That the subject is now in the state the guard is supposed
+to catch.** Count the rows, diff the file, re-read the value.
+
+**FOURTH INSTANCE OF A CHECK REPORTING ON A STATE IT NEVER REACHED**, and the family is now worth stating
+whole: *run the command the gate runs* (not one that resembles it) · *output is not effect* (a command that
+prints is not a command that changed something) · *a mutation whose anchor no longer matches never ran* ·
+and now *a mutation that failed to apply proves nothing.* **Every one is a proof about a subject the proof
+never touched.**
