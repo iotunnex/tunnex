@@ -19,7 +19,19 @@ import { render, screen, waitFor, cleanup } from "@testing-library/react";
 // QUERY RULES 1-4 BIND: role + accessible name; NETWORK-boundary mocks; decisions not rendering; no viewport
 // assumptions.
 
-afterEach(cleanup);
+// ── SETTLING EXPERIMENT (S14.13): stale tree, or late promise? ──────────────────────────────────────
+let __cleaned = false;
+let __lateGets: string[] = [];
+afterEach(() => {
+  cleanup();
+  __cleaned = true;
+  // (a) STALE TREE — cleanup should leave the body empty.
+  if (document.body.children.length !== 0)
+    console.log(`  ⛔ (a) STALE TREE: body has ${document.body.children.length} child(ren) after cleanup`);
+  // (b) LATE PROMISE — any mock GET resolving after cleanup lands in the NEXT test's tree.
+  if (__lateGets.length)
+    console.log(`  ⛔ (b) LATE PROMISE: ${__lateGets.length} GET(s) resolved after cleanup: ${[...new Set(__lateGets)].join(", ")}`);
+});
 // ⛔ a NON-sso_not_configured failure — the arm the collapse could not distinguish.
 let ssoFail = false; // docs/laws.md — no globals/setup file, so auto-cleanup never registers
 
@@ -34,6 +46,7 @@ vi.mock("../src/lib/api", async () => {
     apiErrorMessage: (_e: unknown, f: string) => f,
     api: {
       GET: vi.fn(async (path: string) => {
+        if (__cleaned) __lateGets.push(path);
         if (path === "/api/v1/auth/me")
           return { data: { id: "u1", email: "a@b.c", email_verified: true } };
         if (path === "/api/v1/meta") return { data: { edition } };
@@ -77,6 +90,8 @@ const withAuth = (ui: React.ReactElement) =>
   render(<AuthProvider>{ui}</AuthProvider>);
 
 beforeEach(() => {
+  __cleaned = false;
+  __lateGets = [];
   edition = "enterprise";
   ovpnEnabled = false;
   // ⛔ EVERY mock-controlling global must be reset here. `ssoFail` was added without one, so a test that set
