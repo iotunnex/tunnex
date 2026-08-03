@@ -70,7 +70,11 @@ function createWindow(config: Config): BrowserWindow {
   if (!config.getServerUrl()) {
     void win.loadURL(setupPageDataUrl(allowInsecureStorage, allowInsecure));
   } else {
-    void win.loadURL("app://tunnex/index.html");
+    // ⛔ STEP 3 OF THE MIGRATION, AND IT IS THIS LINE. The client used to load the WEB SPA's
+    // index.html — the router, the sidebar, the top bar and every dashboard screen, most of it
+    // then hidden behind `isDesktop()` branches. That is why the desktop app showed a login page
+    // and org settings. `client.html` is the client's own entry: four regions, no router, no page.
+    void win.loadURL("app://tunnex/client.html");
   }
   return win;
 }

@@ -44,6 +44,11 @@ const APP = join(__dirname, "..", "src", "App.tsx");
 const EPIC_CLOSING = false;
 
 /** A screen banner is `<!-- ===== NAME ===== -->`. Parsed, never transcribed. */
+/** Remove comments so a source scan judges CODE, not the prose describing it. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+}
+
 function banners(src: string): string[] {
   return [
     ...src.matchAll(/<!--\s*=+\s*([A-Z][A-Za-z0-9 ./&\-–]{2,60})\s*=+\s*-->/g),
@@ -51,7 +56,12 @@ function banners(src: string): string[] {
 }
 
 type Disposition =
-  | { kind: "built"; route: string }
+  // ⛔ A BLOCK IS EITHER A ROUTE OR AN ENTRY, AND THE CHECK DIFFERS. Most screens are React Router
+  // paths in App.tsx. The desktop client is its OWN vite entry — `client.html` mounts no router at
+  // all — so asserting it against App.tsx would either fail (it did) or have to be weakened. The
+  // census refused the sloppy disposition rather than accepting a route that does not exist.
+  | { kind: "built"; route: string; entry?: never }
+  | { kind: "built"; entry: string; route?: never }
   | { kind: "absorbed"; into: string; why: string }
   | { kind: "cut"; why: string }
   | { kind: "unbuilt"; story: string }
@@ -113,17 +123,12 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // /access-log/health shipped in S7.5.1 with no consumer; neither the page census nor anyone's
   // list found it, only running the census against the DESIGN did.
   "FLOW LOGS": { kind: "built", route: "/access-events" },
-  // S14.20 steps 1-2: the surface is built and reviewable at /client.html; Electron still loads
-  // index.html, so nothing consumes it yet. Step 3 is a one-line PR and flips this to `built` —
-  // and this entry fails the moment it does.
-  "DESKTOP CLIENT": {
-    kind: "built_unadopted",
-    surface: "client.html",
-    consumer: "../client/src/main/index.ts",
-    adoptedWhen: "client.html",
-    story: "S14.20",
-    branch: "story/S14.19-flow-logs",
-  },
+  // ⛔ FLIPPED AT STEP 3, AND THE CENSUS FORCED IT. The disposition was `built_unadopted`, which
+  // asserts that `apps/client/src/main/index.ts` does NOT reference client.html. The one-line flip
+  // in this same PR makes that assertion FALSE, so the census went red and the only way to green
+  // was this edit. The state did exactly what it was designed to do: it could not outlive the
+  // condition that justified it.
+  "DESKTOP CLIENT": { kind: "built", entry: "client.html" },
 };
 
 // ⛔ AND BANNERS ALONE ARE NOT THE WHOLE DESIGN — WHICH IS WHY THIS SECOND LEDGER EXISTS.
@@ -243,13 +248,40 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
     ).toEqual([]);
   });
 
-  it("every BUILT block names a route that actually exists in App.tsx", () => {
-    // Stops a disposition from being aspirational: "built" must be checkable against the router.
+  it("every BUILT block names a route in App.tsx, or an ENTRY file that exists", () => {
+    // Stops a disposition from being aspirational — "built" must be checkable, and each kind of
+    // block is checked against the thing that would actually prove it.
     const missing = BLOCKS.filter((b) => {
       const d = DISPOSITIONS[b];
-      return d?.kind === "built" && !app.includes(`path="${d.route}"`);
+      if (d?.kind !== "built") return false;
+      if (d.route) return !app.includes(`path="${d.route}"`);
+      if (d.entry) return !existsSync(join(__dirname, "..", d.entry));
+      return true; // a `built` with neither is not checkable, so it fails
     });
     expect(missing).toEqual([]);
+  });
+
+  it("⛔ every ENTRY block is actually LOADED by its consumer — built means adopted", () => {
+    // The other half of what `built_unadopted` used to assert. An entry that exists but nothing
+    // loads is `built_unadopted`, not `built` — this stops the flip being done prematurely.
+    for (const b of BLOCKS) {
+      const d = DISPOSITIONS[b];
+      if (d?.kind !== "built" || !d.entry) continue;
+      // ⛔ COMMENTS STRIPPED, AND THE FIRST VERSION WAS VACUOUS WITHOUT IT. Reverting the flip left
+      // this test GREEN, because the COMMENT explaining the flip contains the word "client.html".
+      // A substring search over source counts the prose that describes the code as if it were the
+      // code — the third time this exact shape has bitten in this epic.
+      const loader = stripComments(
+        readFileSync(
+          join(__dirname, "..", "..", "client", "src", "main", "index.ts"),
+          "utf8",
+        ),
+      );
+      expect(
+        loader.includes(`app://tunnex/${d.entry}`),
+        `${b} is marked built with entry ${d.entry}, but the client loader does not LOAD it`,
+      ).toBe(true);
+    }
   });
 
   it("⛔ NO SHELL COMPONENT IS UNBUILT — banners cannot see these, so they are counted separately", () => {
